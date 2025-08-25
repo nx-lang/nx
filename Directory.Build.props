@@ -26,7 +26,7 @@
     <DebugType Condition=" '$(CI)' != 'true' and '$(TF_BUILD)' != 'true' ">embedded</DebugType>
 
     <!-- <PackageProjectUrl>https://github.com/ORG/REPO</PackageProjectUrl> -->
-    <Company>COMPANY-PLACEHOLDER</Company>
+    <Company>Bret Johnson</Company>
     <Authors>Bret Johnson</Authors>
     <Copyright>© Bret Johnson. All rights reserved.</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
