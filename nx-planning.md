@@ -96,6 +96,45 @@ private let WelcomeMessage = <span>Hello World</span>
 
 ### Function Definition Syntax
 
+#### Design Philosophy: Definition Mirrors Invocation
+
+A core principle of NX is that function definitions should mirror their invocation syntax. This creates a consistent, intuitive experience where the way you define a component looks exactly like the way you use it.
+
+In traditional languages, there's often a disconnect between definition and usage:
+```javascript
+// JavaScript: Definition looks nothing like invocation
+function UserCard(props) { ... }  // Definition
+<UserCard user={user}/>           // Invocation (in JSX)
+```
+
+In NX, the definition structure mirrors the invocation structure:
+```nx
+// Definition - looks like an element with type annotations
+let <UserCard user:User className:string = "card"/> =
+  <div>...</div>
+
+// Invocation - identical structure, just with values instead of types
+<UserCard user={currentUser} className="featured"/>
+```
+
+This principle extends to container elements with children:
+```nx
+// Definition - the closing tag shows it accepts children
+let <Layout title:string> content:Element </Layout> =
+  <html>...</html>
+
+// Invocation - visually identical pattern
+<Layout title="Home">
+  <div>My content</div>
+</Layout>
+```
+
+This approach has several benefits:
+1. **Intuitive Learning**: Once you know how to use a component, you know how to define one
+2. **Self-Documenting**: The definition visually shows exactly how the component should be used
+3. **Consistency**: Everything in NX follows XML-like syntax, including function definitions
+4. **Copy-Paste Friendly**: You can often start defining a function by copying its usage and adding types
+
 #### Self-Closing Function Definition
 ```nx
 let <UserCard user:User className:string = "card"/> =
