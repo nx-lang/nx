@@ -2,7 +2,14 @@
 
 ## Vision
 
-NX is a next-generation markup language that unifies markup and programmatic constructs into a single, strongly-typed, functional language. Unlike traditional template languages that awkwardly combine two separate languages (like HTML + JavaScript in JSX), NX provides a clean, cohesive syntax that treats both markup elements and programming logic as first-class citizens.
+NX is a next-generation functional markup language that can be seen as functional XML or JSX without JavaScript.
+It unifies markup and programmatic constructs into a single, strongly-typed language where both markup elements
+and programming logic are first-class citizens. Unlike traditional template languages that awkwardly combine
+two separate languages (like HTML + JavaScript in JSX), NX provides a clean, cohesive syntax throughout.
+
+While NX is a general purpose language, it is especially targeted for UI development (think better JSX and XAML) and configuration (think better JSON, XML, and YAML).
+
+NX is runtime agnostic and can work on top of .NET, JavaScript, and other runtimes.
 
 ## Core Design Goals
 
@@ -26,37 +33,12 @@ NX is a next-generation markup language that unifies markup and programmatic con
 ### 4. **Performance & Tooling**
 - Initial C# implementation with expression tree interpreter (JIT compiled on most platforms)
 - Later support for transpilers, generating C# code or other targets
-- Rich tooling support (IntelliSense, debugging, etc.)
+- Rich tooling support (LSP, debugging, etc.)
 - Cross-platform compatibility
-
-## Implementation Strategy
-
-### Phase 1: Core Interpreter
-- Expression tree-based interpreter in C#
-- Basic syntax support and type checking
-- Core element and function definitions
-- Simple expressions and control flow
-
-### Phase 2: Enhanced Features  
-- Module system and imports
-- Standard library of components
-- Error handling and diagnostics
-
-### Phase 3: Tooling & Development Experience
-- Language server protocol implementation
-- IDE integrations (VS Code, Visual Studio)
-- Syntax highlighting and IntelliSense
-- Debugging support and breakpoints
-
-### Phase 4: Production Ready
-- Build system integration
-- Framework integrations (web, desktop, etc.)
-- Documentation and tutorials
-- Community onboarding
 
 ## Core Syntax Elements
 
-### Module Syntax
+### Source File (Module) Syntax
 
 #### Module Definition Structure
 ```ebnf
@@ -101,7 +83,7 @@ private let WelcomeMessage = <span>Hello World</span>
 A core principle of NX is that function definitions should mirror their invocation syntax. This creates a consistent, intuitive experience where the way you define a component looks exactly like the way you use it.
 
 In traditional languages, there's often a disconnect between definition and usage:
-```javascript
+```jsx
 // JavaScript: Definition looks nothing like invocation
 function UserCard(props) { ... }  // Definition
 <UserCard user={user}/>           // Invocation (in JSX)
@@ -159,9 +141,9 @@ let <Layout title:string> content:Element </Layout> =
 
 #### Advanced Parameter Types
 ```nx
-let <DataGrid 
-  data:object[] 
-  columns:object[] 
+let <DataGrid
+  data:object[]
+  columns:object[]
   onRowClick:(object) => void = _ => {}
   className:string?
 /> =
@@ -172,7 +154,7 @@ let <DataGrid
       </tr>
     </thead>
     <tbody>
-      {for item in data => 
+      {for item in data =>
         <tr onClick={() => onRowClick(item)}>
           {for column in columns => <td>{column.Render(item)}</td>}
         </tr>
@@ -193,14 +175,14 @@ let <UserDisplay user:User/> =
 
 #### Core Expression Types
 ```ebnf
-Expression ::= 
-    Literal 
-    | Identifier 
+Expression ::=
+    Literal
+    | Identifier
     | BraceExpression
-    | Element 
+    | Element
     | ObjectCreation
-    | ConditionalExpression 
-    | IterationExpression 
+    | ConditionalExpression
+    | IterationExpression
     | PatternMatchExpression
     | LambdaExpression
     | ArithmeticExpression
@@ -267,7 +249,7 @@ let <StatusDisplay status:string/> =
 <div className={isActive ? "active" : "inactive"}>Content</div>
 
 // List transformation with index
-{for item, index in items => 
+{for item, index in items =>
   <div key={index} className={index % 2 == 0 ? "even" : "odd"}>
     {item.name}
   </div>
@@ -337,18 +319,18 @@ type <Address street:string city:string state:string zip:string/>
 type <Person name:string email:string address:Address/>
 
 // Object creation using element syntax
-let user = <User 
-  id="123" 
-  name="John Doe" 
+let user = <User
+  id="123"
+  name="John Doe"
   email="john@example.com"
   avatarUrl="/avatars/john.jpg"
 />
 
 let origin = <Point x=0 y=0/>
-let userAddress = <Address 
-  street="123 Main St" 
-  city="Springfield" 
-  state="IL" 
+let userAddress = <Address
+  street="123 Main St"
+  city="Springfield"
+  state="IL"
   zip="62701"
 />
 
@@ -428,9 +410,9 @@ type <Point x:int y:int/>
 type <Color r:int g:int b:int a:float = 1.0/>
 
 // Object creation uses same syntax as component instantiation
-let user = <User 
-  id="123" 
-  name="John Doe" 
+let user = <User
+  id="123"
+  name="John Doe"
   email="john@example.com"
   avatarUrl="/avatars/john.jpg"
 />
@@ -441,12 +423,12 @@ let transparentBlue = <Color r=0 g=0 b=255 a=0.5/>
 
 // Components and objects compose naturally
 let <UserProfile userId:string/> = {
-  let user = <User 
+  let user = <User
     id={userId}
-    name="John Doe" 
+    name="John Doe"
     email="john@example.com"
   />
-  
+
   <div>
     <img src={user.avatarUrl ?? "/default-avatar.jpg"}/>
     <h2>{user.name}</h2>
@@ -467,8 +449,8 @@ let users = [
 // Basic container types
 type <StringContainer value:string metadata:string created:string/>
 
-let stringContainer = <StringContainer 
-  value="hello world" 
+let stringContainer = <StringContainer
+  value="hello world"
   metadata="text data"
   created="2023-01-01"
 />
@@ -578,28 +560,28 @@ let <ResponsiveGrid/> =
 
 #### Lexer (`NX.Lexer`)
 ```csharp
-public class NXLexer 
+public class NXLexer
 {
     public IEnumerable<Token> Tokenize(string source);
     public TokenStream CreateStream(string source);
 }
 
-public enum TokenType 
+public enum TokenType
 {
     // Literals
     StringLiteral, IntegerLiteral, BooleanLiteral,
-    
-    // Identifiers & Keywords  
+
+    // Identifiers & Keywords
     Identifier, Let, If, Else, For, In, Match, Import, From, Type,
-    
+
     // Operators
     Arrow, FatArrow, Question, Colon, Semicolon, Comma, Dot,
     Plus, Minus, Star, Slash, Equals, NotEquals, LessThan, GreaterThan,
-    
+
     // Delimiters
     LeftBrace, RightBrace, LeftParen, RightParen, LeftAngle, RightAngle,
     LeftBracket, RightBracket,
-    
+
     // Special
     EndOfFile, Invalid
 }
@@ -607,7 +589,7 @@ public enum TokenType
 
 #### Parser (`NX.Parser`)
 ```csharp
-public class NXParser 
+public class NXParser
 {
     public ModuleNode ParseModule(TokenStream tokens);
     public ExpressionNode ParseExpression(TokenStream tokens);
@@ -616,12 +598,12 @@ public class NXParser
 }
 
 // AST Node Hierarchy
-public abstract class AstNode 
+public abstract class AstNode
 {
     public SourceLocation Location { get; set; }
 }
 
-public class ModuleNode : AstNode 
+public class ModuleNode : AstNode
 {
     public List<ImportNode> Imports { get; set; }
     public List<TypeDefinitionNode> Types { get; set; }
@@ -644,19 +626,19 @@ public class ObjectTypeDefinitionNode : TypeDefinitionNode
 
 #### Type System (`NX.TypeSystem`)
 ```csharp
-public abstract class NXType 
+public abstract class NXType
 {
     public abstract bool IsAssignableFrom(NXType other);
     public abstract NXType Substitute(Dictionary<TypeVariable, NXType> substitutions);
 }
 
-public class TypeChecker 
+public class TypeChecker
 {
     public TypeCheckResult CheckModule(ModuleNode module);
     public NXType InferType(ExpressionNode expression, TypeEnvironment env);
 }
 
-public class TypeInference 
+public class TypeInference
 {
     public UnificationResult Unify(NXType type1, NXType type2);
     public NXType Instantiate(NXType type, TypeEnvironment env);
@@ -665,13 +647,13 @@ public class TypeInference
 
 #### Runtime (`NX.Runtime`)
 ```csharp
-public class NXInterpreter 
+public class NXInterpreter
 {
     public object Evaluate(ExpressionNode expression, RuntimeEnvironment env);
     public RuntimeResult EvaluateWithErrorHandling(ExpressionNode expression, RuntimeEnvironment env);
 }
 
-public class ExpressionTreeBuilder 
+public class ExpressionTreeBuilder
 {
     public Expression<Func<RuntimeEnvironment, object>> Build(ExpressionNode node);
 }
