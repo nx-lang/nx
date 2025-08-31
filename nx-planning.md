@@ -141,11 +141,11 @@ let <Layout title:string> content:Element </Layout> =
 
 #### Advanced Parameter Types
 ```nx
-let <DataGrid
-  data:object[]
-  columns:object[]
-  onRowClick:(object) => void = _ => {}
-  className:string?
+let <DataGrid 
+data:object... 
+columns:object... 
+onRowClick:(object) => void = _ => {}
+className:string?
 /> =
   <table className={className ?? "data-grid"}>
     <thead>
@@ -207,6 +207,11 @@ IterationExpression ::=
 PatternMatchExpression ::=
     "match" Expression "{" {Pattern "=>" Expression} ["_" "=>" Expression] "}"
 
+ListPattern ::=
+    "[]"  // Empty list
+    | "[" Pattern {"," Pattern} "]"  // Exact match
+    | "[" Pattern "," "..." Identifier "]"  // Head and tail
+
 LambdaExpression ::=
     "(" [ParameterList] ")" "=>" Expression
     | Identifier "=>" Expression  // Single parameter shorthand
@@ -267,6 +272,15 @@ let <StatusDisplay status:string/> =
 <Button onClick={(e) => handleClick(e.target)}>Click Me</Button>
 <List items={data} transform={item => item.displayName}/>
 
+// List literals and operations
+let numbers = [1, 2, 3, 4, 5]  // List literal
+let empty = []  // Empty list
+let strings = ["red", "green", "blue"]
+
+// List comprehensions
+let doubled = [for x in numbers => x * 2]
+let filtered = [for x in numbers if x > 0 => x]
+
 // Object creation expressions
 let user = <User id="123" name="John" email="john@example.com"/>
 let position = <Point x={mouseX} y={mouseY}/>
@@ -284,7 +298,7 @@ TypeDeclaration ::=
     PrimitiveType [TypeModifier]
     | UserDefinedType [TypeModifier]
     | FunctionType
-    | ArrayType
+    | ListType
 
 TypeModifier ::= "?" | "..."
 
@@ -294,13 +308,15 @@ UserDefinedType ::= TypeIdentifier
 
 FunctionType ::= "(" [TypeDeclaration {"," TypeDeclaration}] ")" "=>" TypeDeclaration
 
-ArrayType ::= TypeDeclaration "[]"
+ListType ::= TypeDeclaration "..."
 
 TypeDefinition ::=
     "type" Identifier "=" TypeDeclaration                    // Type alias
     | "type" "<" Identifier {TypeParameter} "/>"             // Object type
 
 TypeParameter ::= Identifier ":" TypeDeclaration ["=" DefaultValue]
+
+ListLiteral ::= "[" [Expression {"," Expression}] "]"
 ```
 
 #### Type Definition Examples
@@ -335,7 +351,7 @@ let userAddress = <Address
 />
 
 // Simple function definitions
-let <SimpleList items:string[] renderer:(string) => Element/> =
+let <SimpleList items:string... renderer:(string) => Element/> =
   <ul>
     {for item in items => <li>{renderer(item)}</li>}
   </ul>
@@ -387,7 +403,7 @@ let commonProps = { className: "btn", disabled: false }
   Dashboard content
 </{user.IsAdmin ? "admin-panel" : "user-panel"}>
 
-// Complex attribute expressions
+// Complex attribute expressions with lists
 <Form
   onSubmit={(data) => validateAndSubmit(data)}
   validationRules={[
@@ -398,9 +414,55 @@ let commonProps = { className: "btn", disabled: false }
 >
   Form content
 </Form>
+
+// List pattern matching
+{match items {
+  [] => <EmptyList/>
+  [single] => <SingleItem item={single}/>
+  [first, ...rest] => <ItemList first={first} rest={rest}/>
+}}
 ```
 
 ## Core Features
+
+### Lists as Primary Collection Type
+
+NX uses lists as its fundamental collection type, with the postfix `...` syntax for type declarations:
+
+```nx
+// List type declarations
+let numbers: int... = [1, 2, 3, 4, 5]
+let names: string... = ["Alice", "Bob", "Carol"]
+let users: User... = [user1, user2, user3]
+
+// Empty list
+let empty: string... = []
+
+// Lists in function parameters
+let <Gallery images:Image.../> =
+  <div class="gallery">
+    {for img in images => <img src={img.url} alt={img.title}/>}
+  </div>
+
+// List comprehensions
+let squares = [for n in numbers => n * n]
+let evens = [for n in numbers if n % 2 == 0 => n]
+
+// Pattern matching on lists
+{match items {
+  [] => <p>No items</p>
+  [single] => <p>One item: {single}</p>
+  [first, second] => <p>Two items: {first} and {second}</p>
+  [first, ...rest] => <p>First: {first}, and {rest.length} more</p>
+}}
+
+// Nested lists
+let matrix: (int...)... = [[1, 2], [3, 4], [5, 6]]  // List of lists
+let grouped: (string, User...)... = [
+  ("admins", [admin1, admin2]),
+  ("users", [user1, user2, user3])
+]
+```
 
 ### Unified Object and Component Syntax
 ```nx
@@ -439,7 +501,7 @@ let <UserProfile userId:string/> = {
 // Objects can be passed inline to components
 <UserCard user={<User id="456" name="Jane" email="jane@example.com"/>}/>
 
-// Arrays of objects use familiar syntax
+// Lists of objects use familiar syntax
 let users = [
   <User id="1" name="Alice" email="alice@example.com"/>,
   <User id="2" name="Bob" email="bob@example.com"/>,
@@ -508,14 +570,14 @@ let <ResponsiveGrid/> =
 ### Phase 2: Type System
 **Type Infrastructure**
 - Implement basic type checking visitor
-- Add support for primitive types and arrays
+- Add support for primitive types and lists
 - Implement function type checking
 - Add nullable type support
 - Create meaningful type error messages
 
 **Type System:**
 - Primitive types: string, int, float, boolean, void, object
-- Array types: T[]
+- List types: T... (lists are the primary collection type)
 - Function types: (T1, T2) => T3
 - Nullable types: T?
 - Object types: type <Name field:Type/>
