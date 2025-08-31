@@ -141,13 +141,12 @@ let <Layout title:string> content:Element </Layout> =
 
 #### Advanced Parameter Types
 ```nx
-let <DataGrid 
-data:object... 
-columns:object... 
-onRowClick:(object) => void = _ => {}
-className:string?
-/> =
-  <table className={className ?? "data-grid"}>
+let <DataGrid
+  data:object...
+  columns:object...
+  onRowClick:(object) => void = _ => {}
+  className:string? /> =
+  <table className={if className => className else "data-grid"}>
     <thead>
       <tr>
         {for column in columns => <th>{column.Header}</th>}
@@ -163,7 +162,7 @@ className:string?
   </table>
 
 // Simple user component
-let <UserDisplay user:User/> =
+let <UserDisplay user:User /> =
   <div>
     <img src={user.avatarUrl}/>
     <h3>{user.name}</h3>
@@ -197,8 +196,7 @@ BraceExpression ::= "{" Expression "}"
 ObjectCreation ::= "<" TypeIdentifier {AttributeAssignment} "/>"
 
 ConditionalExpression ::=
-    "if" Expression BraceExpression ["else" BraceExpression]
-    | Expression "?" Expression ":" Expression  // Ternary operator
+    "if" Expression "=>" Expression ["else" Expression]
 
 IterationExpression ::=
     "for" Identifier "in" Expression "=>" Expression
@@ -398,11 +396,6 @@ let commonProps = { className: "btn", disabled: false }
 // Namespaced components
 <UI.Controls.Button variant="primary">Click</UI.Controls.Button>
 
-// Dynamic element names
-<{user.IsAdmin ? "admin-panel" : "user-panel"} userId={user.Id}>
-  Dashboard content
-</{user.IsAdmin ? "admin-panel" : "user-panel"}>
-
 // Complex attribute expressions with lists
 <Form
   onSubmit={(data) => validateAndSubmit(data)}
@@ -410,7 +403,7 @@ let commonProps = { className: "btn", disabled: false }
     { field: "email", validator: isValidEmail },
     { field: "age", validator: (val) => val >= 18 }
   ]}
-  className={`form ${isLoading ? "loading" : ""} ${hasErrors ? "error" : ""}`}
+  className={`form ${if isLoading => "loading" else ""} ${if hasErrors => "error" else ""}`}
 >
   Form content
 </Form>
@@ -492,7 +485,7 @@ let <UserProfile userId:string/> = {
   />
 
   <div>
-    <img src={user.avatarUrl ?? "/default-avatar.jpg"}/>
+    <img src={if user.avatarUrl => user.avatarUrl else "/default-avatar.jpg"}/>
     <h2>{user.name}</h2>
     <span>{user.email}</span>
   </div>
@@ -523,7 +516,7 @@ let stringContainer = <StringContainer
 // CSS-in-NX with basic styling
 let <StyledButton variant:string = "primary">children:Element</StyledButton> =
   <button style={{
-    backgroundColor: if variant == "primary" then "#007bff" else "#6c757d",
+    backgroundColor: if variant == "primary" => "#007bff" else "#6c757d",
     color: "white",
     border: "none",
     padding: "8px 16px",
@@ -734,11 +727,10 @@ public class ExpressionTreeBuilder
 // Simple error handling pattern
 let <SafeOperation/> = {
   let result = tryRiskyOperation()
-  if result.success {
+  if result.success =>
     <SuccessView data={result.value}/>
-  } else {
+  else
     <ErrorView error={result.error}/>
-  }
 }
 
 // Error boundaries
