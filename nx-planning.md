@@ -203,7 +203,13 @@ IterationExpression ::=
     | "for" Identifier "," Identifier "in" Expression "=>" Expression  // With index
 
 PatternMatchExpression ::=
-    "match" Expression "{" {Pattern "=>" Expression} ["_" "=>" Expression] "}"
+    "switch" Expression "{" {SwitchBranch} [ElseBranch] "}"
+
+SwitchBranch ::=
+    Pattern {"," Pattern} "=>" Expression
+
+ElseBranch ::=
+    "else" Expression  // No arrow, consistent with if/else
 
 ListPattern ::=
     "[]"  // Empty list
@@ -215,32 +221,59 @@ LambdaExpression ::=
     | Identifier "=>" Expression  // Single parameter shorthand
 ```
 
-### Pattern Matching
+### Pattern Matching with Switch
+
+#### Switch Expression Semantics
+
+NX's `switch` expression is designed to be familiar to C#/TypeScript developers while providing modern functional semantics:
+
+1. **Expression-based**: Switch always returns a value and can be used anywhere an expression is valid
+2. **No fall-through**: Each branch is independent; no `break` statements needed
+3. **Exhaustiveness**: The `else` branch is optional. If omitted and no pattern matches at runtime, an error is thrown
+4. **Multiple patterns**: A single branch can match multiple comma-separated patterns
+5. **Consistent with if/else**: Uses `else` for the default case, maintaining consistency with conditional expressions
+
 ```nx
-// Simple pattern matching on primitive values
-{match user.role {
+// Simple switch on primitive values
+switch user.role {
   "admin" => <AdminPanel/>
   "user" => <UserDashboard/>
   "guest" => <PublicContent/>
-  _ => <AccessDenied/>
-}}
+  else <AccessDenied/>
+}
 
-// Pattern matching with strings
-{match status {
-  "loading" => <LoadingSpinner/>
-  "success" => <SuccessMessage/>
-  "error" => <ErrorMessage/>
-  _ => <UnknownStatus/>
-}}
+// Multiple patterns per branch
+switch day {
+  "monday", "tuesday", "wednesday", "thursday", "friday" => <Weekday/>
+  "saturday", "sunday" => <Weekend/>
+  else <InvalidDay/>
+}
 
-// Pattern matching in function definitions
-let <StatusDisplay status:string/> =
-  {match status {
+// Switch without else - will throw if no match
+switch theme {
+  "light" => <LightTheme/>
+  "dark" => <DarkTheme/>
+  "auto" => <AutoTheme/>
+  // No else - these are the only valid themes
+}
+
+// Consistent else syntax with if/else
+if quickCheck => <QuickResult/>
+else
+  switch detailedCheck {
+    "pass" => <PassResult/>
+    "fail" => <FailResult/>
+    else <PendingResult/>
+  }
+
+// Switch in function definitions
+let <StatusDisplay status:string /> =
+  switch status {
     "pending" => <PendingIcon/>
     "complete" => <CheckIcon/>
     "failed" => <XIcon/>
-    _ => <QuestionIcon/>
-  }}
+    else <QuestionIcon/>
+  }
 ```
 
 #### Advanced Expression Examples
@@ -248,23 +281,22 @@ let <StatusDisplay status:string/> =
 // Conditional rendering
 {if user.isAuthenticated => <WelcomeUser user={user}/> else <LoginForm/>}
 
-// Ternary operator
-<div className={isActive ? "active" : "inactive"}>Content</div>
+// Conditional expressions in attributes
+<div className={if isActive => "active" else "inactive"}>Content</div>
 
 // List transformation with index
-{for item, index in items =>
-  <div key={index} className={index % 2 == 0 ? "even" : "odd"}>
+for item, index in items =>
+  <div key={index} className={if index % 2 == 0 => "even" else "odd"}>
     {item.name}
   </div>
-}
 
-// Basic pattern matching (simple values only)
-{match user.role {
+// Basic switch expression (simple values only)
+switch user.role {
   "admin" => <AdminPanel/>
   "user" => <UserDashboard/>
   "guest" => <PublicContent/>
-  _ => <AccessDenied/>
-}}
+  else <AccessDenied/>
+}
 
 // Lambda expressions in attributes
 <Button onClick={(e) => handleClick(e.target)}>Click Me</Button>
@@ -408,12 +440,12 @@ let commonProps = { className: "btn", disabled: false }
   Form content
 </Form>
 
-// List pattern matching
-{match items {
+// List pattern matching with switch
+switch items {
   [] => <EmptyList/>
   [single] => <SingleItem item={single}/>
   [first, ...rest] => <ItemList first={first} rest={rest}/>
-}}
+}
 ```
 
 ## Core Features
@@ -442,12 +474,12 @@ let squares = [for n in numbers => n * n]
 let evens = [for n in numbers if n % 2 == 0 => n]
 
 // Pattern matching on lists
-{match items {
+switch items {
   [] => <p>No items</p>
   [single] => <p>One item: {single}</p>
   [first, second] => <p>Two items: {first} and {second}</p>
   [first, ...rest] => <p>First: {first}, and {rest.length} more</p>
-}}
+}
 
 // Nested lists
 let matrix: (int...)... = [[1, 2], [3, 4], [5, 6]]  // List of lists
@@ -627,7 +659,7 @@ public enum TokenType
     StringLiteral, IntegerLiteral, BooleanLiteral,
 
     // Identifiers & Keywords
-    Identifier, Let, If, Else, For, In, Match, Import, From, Type,
+    Identifier, Let, If, Else, For, In, Switch, Import, From, Type,
 
     // Operators
     Arrow, FatArrow, Question, Colon, Semicolon, Comma, Dot,
