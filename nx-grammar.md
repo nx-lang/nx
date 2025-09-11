@@ -40,13 +40,15 @@ PrimitiveType ::= "string"
                   | "uitext" | "text"
 
 UserDefinedType ::= TypeIdentifier
+
+TypeIdentifier ::= Identifier
 ```
 <a id="function-definition"></a>
 ## Function Definition
 
 ```ebnf
 FunctionDefinition  ::=
-    "let" "<" ElementName {PropertyDefinition} "/>" "=" RhsExpression
+    "let" "<" ElementName {PropertyDefinition} "/>" "=" Expression
 
 PropertyDefinition ::= Identifier ":" TypeDeclaration ["=" Expression]
 ```
@@ -93,7 +95,7 @@ ForExpression ::=
     "for" {Identifier} "in" Expression ":" Expression "/for"
     | "for" Identifier "," Identifier "in" Expression ":" Expression "/for"  (* With index *)
 
-QualifiedName -> Identifier { "." Identifier }
+QualifiedName ::= Identifier { "." Identifier }
 
 ArithmeticExpression ::= Expression ("+" | "-" | "*" | "/") Expression
 ComparisonExpression ::= Expression (">" | "<" | ">=" | "<=" | "==" | "!=") Expression
@@ -113,11 +115,11 @@ ParenthesizedExpression ::= "(" Expression ")"
 ```ebnf
 Element ::=
     "<" ElementName {PropertyArgument} "/>"
-    | "<" ElementName {PropertyArgument} ">" MarkupExpression </" ElementName ">"
+    | "<" ElementName {PropertyArgument} ">" MarkupExpression "</" ElementName ">"
     | TextElement
 
 TextElement ::=
-    | "<" ElementName ":" TextType {PropertyArgument} ">" TextContent </" ElementName ">"
+    "<" ElementName ":" TextType {PropertyArgument} ">" TextContent "</" ElementName ">"
 
 ElementName ::= QualifiedName
 
@@ -131,8 +133,6 @@ TextPart ::=
     TextRun
     | InterpolationExpression
 
-Interpolation ::= "{" Expression "}"
-
 TextRun  ::= { TextChar | Entity | EscapedBrace }
 ```
 
@@ -145,19 +145,19 @@ Digit       ::= "0" ... "9"
 HexDigit    ::= Digit | "A" ... "F" | "a" ... "f"
 Whitespace  ::= " " | "\t" | "\r" | "\n"
 
-Identifier  ::= letter | "_" { letter | digit | "_" }
-MarkupIdentifier  ::= letter | "_" { letter | digit | "_" | "-"}
+Identifier  ::= (Letter | "_") { Letter | Digit | "_" }
+MarkupIdentifier  ::= (Letter | "_") { Letter | Digit | "_" | "-" }
 
 Entity      ::= NamedEntity | NumericEntity
 
-NamedEntity      ::= "&" EntityName
-EntityName       = "lt" | "gt" | "amp" | "quot" | "apos"| "lbrace" | "rbrace" | "nbsp"
+NamedEntity      ::= "&" EntityName ";"
+EntityName       ::= "lt" | "gt" | "amp" | "quot" | "apos" | "lbrace" | "rbrace" | "nbsp"
 
-NumericEntity    ::= "&#" Digits ";" | "&#x" HexDigits
+NumericEntity    ::= "&#" Digits ";" | "&#x" HexDigits ";"
 Digits           ::= Digit { Digit }
 HexDigits        ::= HexDigit { HexDigit }
 
-TextChar         ::= ? (* any character except "<" and "&" and "{"; "{" is reserved to start ExpressionIsland in text *)
+TextChar         ::= ? any character except "<", "&", and "{" ?
 
 EscapedBrace     ::= "{{" | "}}"
 
