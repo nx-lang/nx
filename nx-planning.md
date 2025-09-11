@@ -7,7 +7,8 @@ It unifies markup and programmatic constructs into a single, strongly-typed lang
 and programming logic are first-class citizens. Unlike traditional template languages that awkwardly combine
 two separate languages (like HTML + JavaScript in JSX), NX provides a clean, cohesive syntax throughout.
 
-While NX is a general purpose language, it is especially targeted for UI development (think better JSX and XAML) and configuration (think better JSON, XML, and YAML).
+While NX is a general purpose language, it is especially targeted for UI development (think better JSX and XAML)
+and configuration (think better JSON, XML, and YAML).
 
 NX is runtime agnostic and can work on top of .NET, JavaScript, and other runtimes.
 
@@ -41,25 +42,6 @@ NX is runtime agnostic and can work on top of .NET, JavaScript, and other runtim
 ### Source File (Module) Syntax
 
 #### Module Definition Structure
-```ebnf
-ModuleDefinition ::=
-    {ImportStatement} {TypeDefinition} {FunctionDefinition} [MainElement]
-
-ImportStatement ::=
-    "import" (ImportAll | ImportSpecific) "from" StringLiteral
-
-ImportAll ::= "*" ["as" Identifier]
-
-ImportSpecific ::= "{" ImportItem {"," ImportItem} "}"
-
-ImportItem ::= Identifier ["as" Identifier]
-
-TypeDefinition ::=
-    "type" Identifier "=" TypeDeclaration
-    | "type" "<" Identifier {TypeParameter} "/>"
-
-TypeParameter ::= Identifier ":" TypeDeclaration ["=" DefaultValue]
-```
 
 #### Examples
 ```nx
@@ -76,13 +58,16 @@ private let WelcomeMessage = <span>Hello World</span>
 </MainApp>
 ```
 
+Grammar rules: [Module Definition](nx-grammar.md#module-definition)
+
 ### Function Definition Syntax
 
 #### Design Philosophy: Definition Mirrors Invocation
 
-A core principle of NX is that function definitions should mirror their invocation syntax. This creates a consistent, intuitive experience where the way you define a component looks exactly like the way you use it.
+A core principle of NX is that function definitions should mirror their invocation syntax. This creates a consistent,
+intuitive experience where the way you define a component looks exactly like the way you use it.
 
-In traditional languages, there's often a disconnect between definition and usage:
+In JSX, there's a disconnect between definition and usage:
 ```jsx
 // JavaScript: Definition looks nothing like invocation
 function UserCard(props) { ... }  // Definition
@@ -144,7 +129,6 @@ let <Layout title:string> content:Element </Layout> =
 let <DataGrid
   data:object...
   columns:object...
-  onRowClick:(object) => void = _ => {}
   className:string? /> =
   <table className={if className => className else "data-grid"}>
     <thead>
@@ -154,7 +138,7 @@ let <DataGrid
     </thead>
     <tbody>
       {for item in data =>
-        <tr onClick={() => onRowClick(item)}>
+        <tr>
           {for column in columns => <td>{column.Render(item)}</td>}
         </tr>
       }
@@ -173,53 +157,6 @@ let <UserDisplay user:User /> =
 ### Expression Syntax
 
 #### Core Expression Types
-```ebnf
-Expression ::=
-    Literal
-    | Identifier
-    | BraceExpression
-    | Element
-    | ObjectCreation
-    | ConditionalExpression
-    | IterationExpression
-    | PatternMatchExpression
-    | LambdaExpression
-    | ArithmeticExpression
-    | ComparisonExpression
-    | LogicalExpression
-    | MemberAccess
-    | FunctionCall
-    | "(" Expression ")"
-
-BraceExpression ::= "{" Expression "}"
-
-ObjectCreation ::= "<" TypeIdentifier {AttributeAssignment} "/>"
-
-ConditionalExpression ::=
-    "if" Expression "=>" Expression ["else" Expression]
-
-IterationExpression ::=
-    "for" Identifier "in" Expression "=>" Expression
-    | "for" Identifier "," Identifier "in" Expression "=>" Expression  // With index
-
-PatternMatchExpression ::=
-    "switch" Expression "{" {SwitchBranch} [ElseBranch] "}"
-
-SwitchBranch ::=
-    Pattern {"," Pattern} "=>" Expression
-
-ElseBranch ::=
-    "else" Expression  // No arrow, consistent with if/else
-
-ListPattern ::=
-    "[]"  // Empty list
-    | "[" Pattern {"," Pattern} "]"  // Exact match
-    | "[" Pattern "," "..." Identifier "]"  // Head and tail
-
-LambdaExpression ::=
-    "(" [ParameterList] ")" "=>" Expression
-    | Identifier "=>" Expression  // Single parameter shorthand
-```
 
 ### Pattern Matching with Switch
 
@@ -298,18 +235,10 @@ switch user.role {
   else <AccessDenied/>
 }
 
-// Lambda expressions in attributes
-<Button onClick={(e) => handleClick(e.target)}>Click Me</Button>
-<List items={data} transform={item => item.displayName}/>
-
 // List literals and operations
-let numbers = [1, 2, 3, 4, 5]  // List literal
+let numbers = 1 2 3 4 5  // List literal
 let empty = []  // Empty list
 let strings = ["red", "green", "blue"]
-
-// List comprehensions
-let doubled = [for x in numbers => x * 2]
-let filtered = [for x in numbers if x > 0 => x]
 
 // Object creation expressions
 let user = <User id="123" name="John" email="john@example.com"/>
@@ -320,34 +249,11 @@ let position = <Point x={mouseX} y={mouseY}/>
 <DrawingCanvas points={[<Point x=10 y=20/>, <Point x=30 y=40/>]}/>
 ```
 
+Grammar rules: [Expressions](nx-grammar.md#expressions)
+
 ### Type System
 
 #### Type Declaration Syntax
-```ebnf
-TypeDeclaration ::=
-    PrimitiveType [TypeModifier]
-    | UserDefinedType [TypeModifier]
-    | FunctionType
-    | ListType
-
-TypeModifier ::= "?" | "..."
-
-PrimitiveType ::= "string" | "int" | "float" | "boolean" | "void" | "object"
-
-UserDefinedType ::= TypeIdentifier
-
-FunctionType ::= "(" [TypeDeclaration {"," TypeDeclaration}] ")" "=>" TypeDeclaration
-
-ListType ::= TypeDeclaration "..."
-
-TypeDefinition ::=
-    "type" Identifier "=" TypeDeclaration                    // Type alias
-    | "type" "<" Identifier {TypeParameter} "/>"             // Object type
-
-TypeParameter ::= Identifier ":" TypeDeclaration ["=" DefaultValue]
-
-ListLiteral ::= "[" [Expression {"," Expression}] "]"
-```
 
 #### Type Definition Examples
 ```nx
@@ -387,32 +293,11 @@ let <SimpleList items:string... renderer:(string) => Element/> =
   </ul>
 ```
 
+Grammar rules: [Type System](nx-grammar.md#type-system)
+
 ### Element Syntax
 
 #### Enhanced Element Features
-```ebnf
-Element ::=
-    "<" ElementName {Attribute} "/>"
-    | "<" ElementName {Attribute} ">" {Child} "</" ElementName ">"
-    | "<" ElementName {Attribute} ">" SingleChild "</" ElementName ">"
-
-ElementName ::= Identifier | NamespacedIdentifier
-
-NamespacedIdentifier ::= Identifier "." Identifier {"." Identifier}
-
-Attribute ::=
-    AttributeName "=" AttributeValue
-    | "{..." Expression "}"  // Spread attributes
-
-AttributeName ::= Identifier | "..." Identifier  // Rest attributes
-
-AttributeValue ::=
-    StringLiteral
-    | BraceExpression
-    | Element  // Nested markup in attributes!
-
-Child ::= Element | BraceExpression | StringLiteral
-```
 
 #### Advanced Element Examples
 ```nx
@@ -447,6 +332,8 @@ switch items {
   [first, ...rest] => <ItemList first={first} rest={rest}/>
 }
 ```
+
+Grammar rules: [Elements](nx-grammar.md#elements)
 
 ## Core Features
 
@@ -544,29 +431,23 @@ let stringContainer = <StringContainer
 ```
 
 ### Style Integration
+
+Since properties in NX can have arbitrary markup, not just strings, as their value,
+that allows styles, inline or standalone, to use the same element syntax.
+
 ```nx
 // CSS-in-NX with basic styling
-let <StyledButton variant:string = "primary">children:Element</StyledButton> =
-  <button style={{
-    backgroundColor: if variant == "primary" => "#007bff" else "#6c757d",
-    color: "white",
-    border: "none",
-    padding: "8px 16px",
-    borderRadius: "4px",
-    cursor: "pointer"
-  }}>
-    {children}
+let <StyledButton variant:string = "primary">content:Element</StyledButton> =
+  <button style=<Style
+    backgroundColor={if variant == "primary" => "#007bff" else "#6c757d"}
+    color="white"
+    border="none",
+    padding="8px 16px",
+    borderRadius="4px",
+    cursor="pointer"
+  />
+    {content}
   </button>
-
-// Responsive design with breakpoints
-let <ResponsiveGrid/> =
-  <div style={{
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
-    gap: "1rem"
-  }}>
-    Grid content
-  </div>
 ```
 
 ## Implementation Strategy
