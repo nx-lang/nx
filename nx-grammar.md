@@ -8,22 +8,16 @@ ModuleDefinition ::=
     {ImportStatement} {TypeDefinition} {FunctionDefinition} [MainElement]
 
 ImportStatement ::=
-    "import" (ImportAll | ImportSpecific) "from" StringLiteral
-
-ImportAll ::= "*" ["as" Identifier]
-
-ImportSpecific ::= "{" ImportItem {"," ImportItem} "}"
-
-ImportItem ::= Identifier ["as" Identifier]
-
-TypeDefinition ::=
-    "type" Identifier "=" TypeDeclaration
+    "import" QualifiedName
 ```
 
 <a id="types"></a>
 ## Types
 
 ```ebnf
+TypeDefinition ::=
+    "type" Identifier "=" TypeDeclaration
+
 TypeDeclaration ::=
     PrimitiveType [TypeModifier]
     | UserDefinedType [TypeModifier]
@@ -39,9 +33,7 @@ PrimitiveType ::= "string"
                   | "object"
                   | "uitext" | "text"
 
-UserDefinedType ::= TypeIdentifier
-
-TypeIdentifier ::= Identifier
+UserDefinedType ::= QualifiedName
 ```
 <a id="function-definition"></a>
 ## Function Definition
@@ -50,7 +42,7 @@ TypeIdentifier ::= Identifier
 FunctionDefinition  ::=
     "let" "<" ElementName {PropertyDefinition} "/>" "=" Expression
 
-PropertyDefinition ::= Identifier ":" TypeDeclaration ["=" Expression]
+PropertyDefinition ::= MarkupIdentifier ":" TypeDeclaration ["=" Expression]
 ```
 
 <a id="expressions"></a>
@@ -95,8 +87,6 @@ ForExpression ::=
     "for" {Identifier} "in" Expression ":" Expression "/for"
     | "for" Identifier "," Identifier "in" Expression ":" Expression "/for"  (* With index *)
 
-QualifiedName ::= Identifier { "." Identifier }
-
 ArithmeticExpression ::= Expression ("+" | "-" | "*" | "/") Expression
 ComparisonExpression ::= Expression (">" | "<" | ">=" | "<=" | "==" | "!=") Expression
 LogicalExpression ::= Expression ("&&" | "||") Expression
@@ -106,6 +96,14 @@ FunctionCall ::= Expression "(" {Expression} ")"
 Unit ::= "()"
 
 ParenthesizedExpression ::= "(" Expression ")"
+
+Literal ::=
+    StringLiteral
+    | IntegerLiteral
+    | RealLiteral
+    | HexLiteral
+    | BooleanLiteral
+    | NullLiteral
 
 ```
 
@@ -121,10 +119,10 @@ Element ::=
 TextElement ::=
     "<" ElementName ":" TextType {PropertyArgument} ">" TextContent "</" ElementName ">"
 
-ElementName ::= QualifiedName
+ElementName ::= QualifiedMarkupName
 
 PropertyArgument ::=
-    QualifiedName "=" Expression
+    QualifiedMarkupName "=" Expression
 
 TextContent ::=
     { TextPart }
@@ -132,12 +130,10 @@ TextContent ::=
 TextPart ::=
     TextRun
     | InterpolationExpression
-
-TextRun  ::= { TextChar | Entity | EscapedBrace }
 ```
 
-<a id="core-tokens"></a>
-## Core Tokens
+<a id="lexical-structure"></a>
+## Lexical Structure
 
 ```ebnf
 Letter      ::= "A" ... "Z" | "a" ... "z"
@@ -148,6 +144,9 @@ Whitespace  ::= " " | "\t" | "\r" | "\n"
 Identifier  ::= (Letter | "_") { Letter | Digit | "_" }
 MarkupIdentifier  ::= (Letter | "_") { Letter | Digit | "_" | "-" }
 
+QualifiedName ::= Identifier { "." Identifier }
+QualifiedMarkupName  ::= Identifier { "." MarkupIdentifier }
+
 Entity      ::= NamedEntity | NumericEntity
 
 NamedEntity      ::= "&" EntityName ";"
@@ -155,8 +154,26 @@ EntityName       ::= "lt" | "gt" | "amp" | "quot" | "apos" | "lbrace" | "rbrace"
 
 NumericEntity    ::= "&#" Digits ";" | "&#x" HexDigits ";"
 Digits           ::= Digit { Digit }
+DigitsUnderscore ::= Digit { ["_"] Digit }
 HexDigits        ::= HexDigit { HexDigit }
 
+StringLiteral    ::= '"' { StringChar } '"'
+StringChar       ::= EscapeSequence | StringCharNoQuoteOrBackslash
+StringCharNoQuoteOrBackslash ::= ? any character except '"', "\\", and newline ?
+EscapeSequence   ::= "\\" ( '"' | "\\" | "n" | "r" | "t" | "u" HexDigit HexDigit HexDigit HexDigit )
+
+IntegerLiteral   ::= DigitsUnderscore
+RealLiteral      ::= DigitsUnderscore "." DigitsUnderscore [ExponentPart]
+                    | DigitsUnderscore ExponentPart
+ExponentPart     ::= ("e" | "E") ["+" | "-"] DigitsUnderscore
+
+HexLiteral       ::= ("0x" | "0X") HexDigitsUnderscore
+HexDigitsUnderscore  ::= HexDigit { ["_"] HexDigit }
+
+BooleanLiteral  ::= "true" | "false"
+NullLiteral     ::= "null"
+
+TextRun          ::=  { TextChar | Entity | EscapedBrace }
 TextChar         ::= ? any character except "<", "&", and "{" ?
 
 EscapedBrace     ::= "{{" | "}}"
