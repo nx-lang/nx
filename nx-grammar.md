@@ -156,10 +156,11 @@ Digits           ::= Digit { Digit }
 DigitsUnderscore ::= Digit { ["_"] Digit }
 HexDigits        ::= HexDigit { HexDigit }
 
-StringLiteral    ::= '"' { StringChar } '"'
-StringChar       ::= EscapeSequence | StringCharNoQuoteOrBackslash
-StringCharNoQuoteOrBackslash ::= ? any character except '"', "\\", and newline ?
-EscapeSequence   ::= "\\" ( '"' | "\\" | "n" | "r" | "t" | "u" HexDigit HexDigit HexDigit HexDigit )
+StringLiteral ::=
+    '"' { StringCharDoubleQuoted | Entity } '"'
+    "'" { StringCharSingleQuoted | Entity } "'" ;
+StringCharDoubleQuoted ::= ? any character except '"' and "&" ?
+StringCharSingleQuoted ::= ? any character except "'" and "&" ?
 
 IntegerLiteral   ::= DigitsUnderscore
 RealLiteral      ::= DigitsUnderscore "." DigitsUnderscore [ExponentPart]
