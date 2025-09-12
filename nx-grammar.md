@@ -26,13 +26,15 @@ TypeModifier ::=
     "?"             (* nullable: 0 or 1 *)
     | "..."         (* list: 0 or more *)
 
-PrimitiveType ::= "string"
-                  | "int" | "long" | "float" | "double"
-                  | "boolean"
-                  | "void"
-                  | "object"
+PrimitiveType ::=
+    "string"
+    | "int" | "long" | "float" | "double"
+    | "boolean"
+    | "void"
+    | "object"
 
-UserDefinedType ::= QualifiedName
+UserDefinedType ::=
+    QualifiedName
 ```
 <a id="function-definition"></a>
 ## Function Definition
@@ -41,7 +43,8 @@ UserDefinedType ::= QualifiedName
 FunctionDefinition ::=
     "let" "<" ElementName {PropertyDefinition} "/>" "=" Expression
 
-PropertyDefinition ::= MarkupIdentifier ":" TypeDeclaration ["=" Expression]
+PropertyDefinition ::=
+    MarkupIdentifier ":" TypeDeclaration ["=" Expression]
 ```
 
 <a id="expressions"></a>
@@ -79,22 +82,31 @@ SwitchExpression ::=
     "switch" Expression {SwitchCase} [SwitchDefault] "/switch"
     | "switch" {SwitchCase} [SwitchDefault] "/switch"
 
-SwitchCase ::= "case" Pattern {"," Pattern} ":" Expression
-SwitchDefault ::= "default" ":" Expression
+SwitchCase ::=
+    "case" Pattern {"," Pattern} ":" Expression
+SwitchDefault ::=
+    "default" ":" Expression
 
 ForExpression ::=
     "for" {Identifier} "in" Expression ":" Expression "/for"
     | "for" Identifier "," Identifier "in" Expression ":" Expression "/for"  (* With index *)
 
-ArithmeticExpression ::= Expression ("+" | "-" | "*" | "/") Expression
-ComparisonExpression ::= Expression (">" | "<" | ">=" | "<=" | "==" | "!=") Expression
-LogicalExpression ::= Expression ("&&" | "||") Expression
-MemberAccess ::= Expression "." Identifier
-FunctionCall ::= Expression "(" {Expression} ")"
+ArithmeticExpression ::=
+    Expression ("+" | "-" | "*" | "/") Expression
+ComparisonExpression ::=
+    Expression (">" | "<" | ">=" | "<=" | "==" | "!=") Expression
+LogicalExpression ::=
+    Expression ("&&" | "||") Expression
+MemberAccess ::=
+    Expression "." Identifier
+FunctionCall ::=
+    Expression "(" {Expression} ")"
 
-Unit ::= "()"
+Unit ::=
+    "()"
 
-ParenthesizedExpression ::= "(" Expression ")"
+ParenthesizedExpression ::=
+    "(" Expression ")"
 
 Literal ::=
     StringLiteral
@@ -118,7 +130,8 @@ Element ::=
 TextElement ::=
     "<" ElementName ":" TextType {PropertyArgument} ">" TextContent "</" ElementName ">"
 
-ElementName ::= QualifiedMarkupName
+ElementName ::=
+    QualifiedMarkupName
 
 PropertyArgument ::=
     QualifiedMarkupName "=" Expression
@@ -135,48 +148,75 @@ TextPart ::=
 ## Lexical Structure
 
 ```ebnf
-Letter      ::= "A" ... "Z" | "a" ... "z"
-Digit       ::= "0" ... "9"
-HexDigit    ::= Digit | "A" ... "F" | "a" ... "f"
-Whitespace  ::= " " | "\t" | "\r" | "\n"
+Letter      ::=
+    "A" ... "Z" | "a" ... "z"
+Digit       ::=
+    "0" ... "9"
+HexDigit    ::=
+    Digit | "A" ... "F" | "a" ... "f"
+Whitespace  ::=
+    " " | "\t" | "\r" | "\n"
 
-Identifier  ::= (Letter | "_") { Letter | Digit | "_" }
-MarkupIdentifier  ::= (Letter | "_") { Letter | Digit | "_" | "-" }
+Identifier  ::=
+    (Letter | "_") { Letter | Digit | "_" }
+MarkupIdentifier  ::=
+    (Letter | "_") { Letter | Digit | "_" | "-" }
 
-QualifiedName  ::= Identifier { "." Identifier }
-QualifiedMarkupName  ::= Identifier { "." MarkupIdentifier }
+QualifiedName  ::=
+    Identifier { "." Identifier }
+QualifiedMarkupName  ::=
+    Identifier { "." MarkupIdentifier }
 
-Entity      ::= NamedEntity | NumericEntity
+Entity      ::=
+    NamedEntity | NumericEntity
 
-NamedEntity      ::= "&" EntityName ";"
-EntityName       ::= "lt" | "gt" | "amp" | "quot" | "apos" | "lbrace" | "rbrace" | "nbsp"
+NamedEntity      ::=
+    "&" EntityName ";"
+EntityName       ::=
+    "lt" | "gt" | "amp" | "quot" | "apos" | "lbrace" | "rbrace" | "nbsp"
 
-NumericEntity    ::= "&#" Digits ";" | "&#x" HexDigits ";"
-Digits           ::= Digit { Digit }
-DigitsUnderscore ::= Digit { ["_"] Digit }
-HexDigits        ::= HexDigit { HexDigit }
+NumericEntity    ::=
+    "&#" Digits ";" | "&#x" HexDigits ";"
+Digits           ::=
+    Digit { Digit }
+DigitsUnderscore ::=
+    Digit { ["_"] Digit }
+HexDigits        ::=
+    HexDigit { HexDigit }
 
 StringLiteral ::=
     '"' { StringCharDoubleQuoted | Entity } '"'
-    "'" { StringCharSingleQuoted | Entity } "'" ;
-StringCharDoubleQuoted ::= ? any character except '"' and "&" ?
-StringCharSingleQuoted ::= ? any character except "'" and "&" ?
+    "'" { StringCharSingleQuoted | Entity } "'"
+StringCharDoubleQuoted ::=
+    ? any character except '"' and "&" ?
+StringCharSingleQuoted ::=
+    ? any character except "'" and "&" ?
 
-IntegerLiteral   ::= DigitsUnderscore
-RealLiteral      ::= DigitsUnderscore "." DigitsUnderscore [ExponentPart]
-                    | DigitsUnderscore ExponentPart
-ExponentPart     ::= ("e" | "E") ["+" | "-"] DigitsUnderscore
+IntegerLiteral   ::=
+    DigitsUnderscore
+RealLiteral      ::=
+    DigitsUnderscore "." DigitsUnderscore [ExponentPart]
+    | DigitsUnderscore ExponentPart
+ExponentPart     ::=
+    ("e" | "E") ["+" | "-"] DigitsUnderscore
 
-HexLiteral       ::= ("0x" | "0X") HexDigitsUnderscore
-HexDigitsUnderscore  ::= HexDigit { ["_"] HexDigit }
+HexLiteral       ::=
+    ("0x" | "0X") HexDigitsUnderscore
+HexDigitsUnderscore  ::=
+    HexDigit { ["_"] HexDigit }
 
-BooleanLiteral  ::= "true" | "false"
-NullLiteral     ::= "null"
+BooleanLiteral  ::=
+    "true" | "false"
+NullLiteral     ::=
+    "null"
 
 TextRun          ::= { TextChar | Entity | EscapedBrace }
-TextChar         ::= ? any character except "<", "&", and "{" ?
+TextChar         ::=
+    ? any character except "<", "&", and "{" ?
 
-EscapedBrace     ::= "{{" | "}}"
+EscapedBrace     ::=
+    "{{" | "}}"
 
-InterpolationExpression  ::= "{" Expression "}"
+InterpolationExpression  ::=
+    "{" Expression "}"
 ```
