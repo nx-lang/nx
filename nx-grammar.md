@@ -31,7 +31,6 @@ PrimitiveType ::= "string"
                   | "boolean"
                   | "void"
                   | "object"
-                  | "uitext" | "text"
 
 UserDefinedType ::= QualifiedName
 ```
@@ -39,7 +38,7 @@ UserDefinedType ::= QualifiedName
 ## Function Definition
 
 ```ebnf
-FunctionDefinition  ::=
+FunctionDefinition ::=
     "let" "<" ElementName {PropertyDefinition} "/>" "=" Expression
 
 PropertyDefinition ::= MarkupIdentifier ":" TypeDeclaration ["=" Expression]
@@ -144,7 +143,7 @@ Whitespace  ::= " " | "\t" | "\r" | "\n"
 Identifier  ::= (Letter | "_") { Letter | Digit | "_" }
 MarkupIdentifier  ::= (Letter | "_") { Letter | Digit | "_" | "-" }
 
-QualifiedName ::= Identifier { "." Identifier }
+QualifiedName  ::= Identifier { "." Identifier }
 QualifiedMarkupName  ::= Identifier { "." MarkupIdentifier }
 
 Entity      ::= NamedEntity | NumericEntity
@@ -173,7 +172,7 @@ HexDigitsUnderscore  ::= HexDigit { ["_"] HexDigit }
 BooleanLiteral  ::= "true" | "false"
 NullLiteral     ::= "null"
 
-TextRun          ::=  { TextChar | Entity | EscapedBrace }
+TextRun          ::= { TextChar | Entity | EscapedBrace }
 TextChar         ::= ? any character except "<", "&", and "{" ?
 
 EscapedBrace     ::= "{{" | "}}"
