@@ -29,8 +29,8 @@ Primitive types (keywords)
 - OBJECT ("object")
 
 Identifiers and names
-- IDENT (letters, digits, underscore; starts with letter/underscore)
-- MARKUP_IDENT (letters, digits, underscore, hyphen)
+- IDENTIFIER (letters, digits, underscore; starts with letter/underscore)
+- MARKUP_IDENTIFIER (letters, digits, underscore, hyphen)
 
 Literals
 - STRING_LITERAL
@@ -49,7 +49,7 @@ Literals
  - QMARK (?)
  - ELLIPSIS (...)
  - PLUS (+), MINUS (-), STAR (*), SLASH (/)
- - LTE (<=), GTE (>=), EQ_EQ (==), BANG_EQ (!=)
+ - LT_EQ (<=), GT_EQ (>=), EQ_EQ (==), BANG_EQ (!=)
  - AMP_AMP (&&), PIPE_PIPE (||)
 
 Text content tokens (inside text elements)
@@ -65,20 +65,24 @@ Special
 
 Conventional expressions (non-markup) use a Pratt parser with the following precedence and associativity. Higher number binds tighter.
 
-140: Postfix call, member access
+ 140: Postfix call, member access
 - Postfix call: led token: LPAREN … RPAREN, left-associative
   - form: callee LPAREN [Expr (COMMA Expr)*] RPAREN → Call(callee, args)
-- Member access: led token: DOT IDENT, left-associative
-  - form: left DOT IDENT → Member(left, name)
+- Member access: led token: DOT IDENTIFIER, left-associative
+  - form: left DOT IDENTIFIER → Member(left, name)
 
-120: Multiplicative, left-associative
+ 130: Prefix unary, right-associative
+ - Prefix minus: nud token: MINUS
+   - form: MINUS Expr → PrefixUnaryExpression(op: MINUS, expr)
+
+ 120: Multiplicative, left-associative
 - STAR (*), SLASH (/)
 
 110: Additive, left-associative
 - PLUS (+), MINUS (-)
 
 90: Relational, left-associative
-- LT (<), GT (>), LTE (<=), GTE (>=)
+- LT (<), GT (>), LT_EQ (<=), GT_EQ (>=)
 
 80: Equality, left-associative
 - EQ_EQ (==), BANG_EQ (!=)
@@ -92,9 +96,8 @@ Conventional expressions (non-markup) use a Pratt parser with the following prec
 Grouping
 - LPAREN Expr RPAREN binds as a primary (handled in nud for LPAREN).
 
-Notes
-- There are no prefix unary operators defined yet.
-- Unit literal is distinct: LPAREN RPAREN → Unit.
+ Notes
+ - Unit literal is distinct: LPAREN RPAREN → Unit.
 
 ## Grammar (Left-Factored, Token-Oriented)
 
@@ -109,7 +112,7 @@ ImportStatement (AST: Import)
   - fields: name: QualifiedName
 
 TypeDefinition (AST: TypeDef)
-- TypeDefinition → TYPE IDENT EQ Type
+- TypeDefinition → TYPE IDENTIFIER EQ Type
   - fields: name: string, type: Type
 
 Type (AST: TypeRef)
@@ -135,7 +138,7 @@ FunctionDefinition (AST: FunctionDef)
   - fields: elementName: QualifiedMarkupName, props: PropDef[], body: Expression
 
 PropertyDefinition (AST: PropDef)
-- PropertyDefinition → MARKUP_IDENT COLON Type [EQ Expression]
+- PropertyDefinition → MARKUP_IDENTIFIER COLON Type [EQ Expression]
   - fields: name: string, type: Type, default?: Expression
 
 MainElement (AST: Element)
@@ -146,7 +149,7 @@ Expression (AST: Expression; see mappings below)
 - Expression → Expr      (conventional expression, parsed by Pratt using the operator table)
 
 Expr (parsed by Pratt; not a standalone AST node)
-- Primaries (nud): Literal | IDENT | Unit | ParenthesizedExpression
+- Primaries (nud): Literal | IDENTIFIER | Unit | ParenthesizedExpression
 - Postfix/infix handled via the operator table
 
 Unit (AST: UnitLiteral)
@@ -195,10 +198,10 @@ SwitchDefaultOpt
 - SwitchDefaultOpt → SwitchDefault | ε
 
 ForExpression (AST: ForExpr)
-- ForExpression → FOR IDENT ForIndexOpt IN Expression COLON Expression END_FOR
+- ForExpression → FOR IDENTIFIER ForIndexOpt IN Expression COLON Expression END_FOR
 
 ForIndexOpt
-- ForIndexOpt → COMMA IDENT | ε
+- ForIndexOpt → COMMA IDENTIFIER | ε
   - fields (on ForExpr): itemVar: string, indexVar?: string, iterable: Expression, body: Expression
 
 Element (AST: Element)
@@ -211,7 +214,7 @@ ElementTail
   - fields (on Element): name: QualifiedMarkupName, props: PropArg[], children: MarkupList.items
 
 TextElement (AST: TextElement)
-- TextElement → LT ElementName COLON MARKUP_IDENT PropertyArgument* GT TextContent LT SLASH ElementName GT
+- TextElement → LT ElementName COLON MARKUP_IDENTIFIER PropertyArgument* GT TextContent LT SLASH ElementName GT
   - fields: name: QualifiedMarkupName, textType: string, props: PropArg[], content: TextPart[]
 
 ElementName
@@ -238,11 +241,11 @@ InterpolationExpression (AST: Interpolation)
   - fields: expr: Expression
 
 QualifiedName (AST: QualifiedName)
-- QualifiedName → IDENT (DOT IDENT)*
+- QualifiedName → IDENTIFIER (DOT IDENTIFIER)*
   - fields: parts: string[]
 
 QualifiedMarkupName (AST: QualifiedMarkupName)
-- QualifiedMarkupName → IDENT (DOT MARKUP_IDENT)*
+- QualifiedMarkupName → IDENTIFIER (DOT MARKUP_IDENTIFIER)*
   - fields: parts: string[]
 
 Pattern (AST: Pattern)
@@ -263,10 +266,11 @@ This section lists the AST node types with fields for implementers.
 - FunctionDef: elementName: QualifiedMarkupName, props: PropDef[], body: Expression
 - PropDef: name: string, type: TypeRef, default?: Expression
 - Expression: union of MarkupList | IfExpr | SwitchExpr | ForExpr | PrattExpr results
-- PrattExpr results (from operator table):
+ - PrattExpr results (from operator table):
   - Call: callee: Expression, args: Expression[]
   - Member: target: Expression, name: string
-  - Binary: op: token, left: Expression, right: Expression
+  - BinaryExpression: op: token, left: Expression, right: Expression
+  - PrefixUnaryExpression: op: token, expr: Expression
   - Grouped: expr: Expression (may be elided)
   - UnitLiteral
   - Literal: kind, value

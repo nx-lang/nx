@@ -62,9 +62,8 @@ Expression ::=
     | IfExpression
     | SwitchExpression
     | ForExpression
-    | ArithmeticExpression
-    | ComparisonExpression
-    | LogicalExpression
+    | PrefixUnaryExpression
+    | BinaryExpression
     | MemberAccess
     | FunctionCall
     | Unit
@@ -95,12 +94,10 @@ ForExpression ::=
     "for" {Identifier} "in" Expression ":" Expression "/for"
     | "for" Identifier "," Identifier "in" Expression ":" Expression "/for"  (* With index *)
 
-ArithmeticExpression ::=
-    Expression ("+" | "-" | "*" | "/") Expression
-ComparisonExpression ::=
-    Expression (">" | "<" | ">=" | "<=" | "==" | "!=") Expression
-LogicalExpression ::=
-    Expression ("&&" | "||") Expression
+PrefixUnaryExpression ::= 
+    "-" Expression
+BinaryExpression ::= 
+    Expression ("+" | "-" | "*" | "/" | ">" | "<" | ">=" | "<=" | "==" | "!=" | "&&" | "||") Expression
 MemberAccess ::=
     Expression "." Identifier
 FunctionCall ::=
