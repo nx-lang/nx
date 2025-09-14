@@ -9,7 +9,9 @@ For a machine readable version used for AI code generation, see [nx-grammar-spec
 
 ```ebnf
 ModuleDefinition ::=
-    {ImportStatement} {TypeDefinition} {FunctionDefinition} [MainElement]
+    {ImportStatement}
+        ( {TypeDefinition} {FunctionDefinition} )
+        | Element
 
 ImportStatement ::=
     "import" QualifiedName
@@ -94,9 +96,9 @@ ForExpression ::=
     "for" {Identifier} "in" Expression ":" Expression "/for"
     | "for" Identifier "," Identifier "in" Expression ":" Expression "/for"  (* With index *)
 
-PrefixUnaryExpression ::= 
+PrefixUnaryExpression ::=
     "-" Expression
-BinaryExpression ::= 
+BinaryExpression ::=
     Expression ("+" | "-" | "*" | "/" | ">" | "<" | ">=" | "<=" | "==" | "!=" | "&&" | "||") Expression
 MemberAccess ::=
     Expression "." Identifier

@@ -104,8 +104,9 @@ Grouping
 Nonterminals are CamelCase. Terminals are UPPER_SNAKE tokens.
 
 ModuleDefinition (AST: Module)
-- ModuleDefinition → ImportStatement* TypeDefinition* FunctionDefinition* MainElement? EOF
-  - fields: imports: Import[], types: TypeDef[], functions: FunctionDef[], main?: Element
+- ModuleDefinition → ImportStatement* (TypeDefinition* FunctionDefinition* | Element) EOF
+  - fields: imports: Import[], types: TypeDef[], functions: FunctionDef[], moduleElement?: Element
+    (either types/functions or moduleElement is present, not both)
 
 ImportStatement (AST: Import)
 - ImportStatement → IMPORT QualifiedName
@@ -141,8 +142,7 @@ PropertyDefinition (AST: PropDef)
 - PropertyDefinition → MARKUP_IDENTIFIER COLON Type [EQ Expression]
   - fields: name: string, type: Type, default?: Expression
 
-MainElement (AST: Element)
-- MainElement → Element
+
 
 Expression (AST: Expression; see mappings below)
 - Expression → MarkupExpression
@@ -257,7 +257,7 @@ Pattern (AST: Pattern)
 
 This section lists the AST node types with fields for implementers.
 
-- Module: imports: Import[], types: TypeDef[], functions: FunctionDef[], main?: Element
+- Module: imports: Import[], types: TypeDef[], functions: FunctionDef[], moduleElement?: Element
 - Import: name: QualifiedName
 - TypeDef: name: string, type: TypeRef
 - TypeRef: kind: "primitive"|"user", name: string (qualified), modifier?: "nullable"|"list"
