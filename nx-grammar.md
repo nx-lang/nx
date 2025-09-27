@@ -1,8 +1,8 @@
 # NX Grammar (EBNF)
 
 This document defines the grammar for the NX markup language using Extended Backus-Naur Form (EBNF).
-It's intended to be readable, human friendly.
-For a machine readable version used for AI code generation, see [nx-grammar-spec.md](nx-grammar-spec.md).
+It's intended to be readable, human friendly. For a machine readable version used for AI code
+generation, see [nx-grammar-spec.md](nx-grammar-spec.md).
 
 <a id="module-definition"></a>
 ## Module Definition
