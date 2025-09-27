@@ -61,9 +61,7 @@ Expression ::=
     MarkupExpression            (* list of elements, with if/switch/for allowed *)
     | Literal                   (* conventional expressions below *)
     | Identifier
-    | IfExpression
-    | SwitchExpression
-    | ForExpression
+    | KeywordExpression
     | PrefixUnaryExpression
     | BinaryExpression
     | MemberAccess
@@ -72,11 +70,10 @@ Expression ::=
     | ParenthesizedExpression
 
 MarkupExpression ::=
-    {MarkupExpressionItem}
+    (Element | KeywordExpression)+
 
-MarkupExpressionItem ::=
-    Element
-    | IfExpression
+KeywordExpression ::=
+    IfExpression
     | SwitchExpression
     | ForExpression
 
@@ -127,11 +124,25 @@ Literal ::=
 ```ebnf
 Element ::=
     "<" ElementName {PropertyArgument} "/>"
-    | "<" ElementName {PropertyArgument} ">" MarkupExpression "</" ElementName ">"
-    | TextElement
+    | "<" ElementName {PropertyArgument} ">" Content "</" ElementName ">"
+    | EmbedElement
 
-TextElement ::=
-    "<" ElementName ":" TextType {PropertyArgument} ">" TextContent "</" ElementName ">"
+EmbedElement ::=
+    "<" ElementName ":" EmbedTextType {PropertyArgument} ">" EmbedContent "</" ElementName ">"
+    | "<" ElementName ":" EmbedTextType "raw" {PropertyArgument} ">" RawEmbedContent "</" ElementName ">"
+
+Content ::=
+    ElementsExpression |     (* list of elements, with if/switch/for allowed *)
+    MixedContentExpression   (* text with optional embedded elements and interpolations; no if/switch/for allowed except inside interpolated expressions *)
+
+ElementsExpression ::=
+    {Element | KeywordExpression}
+
+MixedContentExpression ::=
+    { TextPart | Element | InterpolationExpression }
+
+EmbedTextType ::=
+    Identifier
 
 ElementName ::=
     QualifiedMarkupName
@@ -139,12 +150,11 @@ ElementName ::=
 PropertyArgument ::=
     QualifiedMarkupName "=" Expression
 
-TextContent ::=
-    { TextPart }
+EmbedContent ::=
+    { TextRun | InterpolationExpression }
 
-TextPart ::=
+RawEmbedContent ::=
     TextRun
-    | InterpolationExpression
 ```
 
 <a id="lexical-structure"></a>

@@ -19,6 +19,7 @@ Keywords
 - IF ("if"), ELSE ("else"), END_IF ("/if")
 - SWITCH ("switch"), CASE ("case"), DEFAULT ("default"), END_SWITCH ("/switch")
 - FOR ("for"), IN ("in"), END_FOR ("/for")
+- RAW ("raw")
 
 Primitive types (keywords)
 - STRING ("string")
@@ -204,33 +205,68 @@ ForIndexOpt
 - ForIndexOpt → COMMA IDENTIFIER | ε
   - fields (on ForExpr): itemVar: string, indexVar?: string, iterable: Expression, body: Expression
 
-Element (AST: Element)
-- Element → LT ElementName PropertyArgument* ElementTail
+Element (AST: MarkupElement is a sum type)
+- Element → LT ElementName ElementSuffix
 
-ElementTail
-- ElementTail → SLASH GT
-  - fields (on Element): name: QualifiedMarkupName, props: PropArg[], children: []
-- ElementTail → GT MarkupExpression LT SLASH ElementName GT
-  - fields (on Element): name: QualifiedMarkupName, props: PropArg[], children: MarkupList.items
+ElementSuffix (builds either Element or EmbedElement AST)
+- ElementSuffix → PropertyArgument* RegularElementTail
+- ElementSuffix → COLON EmbedTextType EmbedElementTail
 
-TextElement (AST: TextElement)
-- TextElement → LT ElementName COLON MARKUP_IDENTIFIER PropertyArgument* GT TextContent LT SLASH ElementName GT
-  - fields: name: QualifiedMarkupName, textType: string, props: PropArg[], content: TextPart[]
+RegularElementTail (AST: Element)
+- RegularElementTail → SLASH GT
+  - fields: name (from ElementName), props: PropArg[], children: []
+- RegularElementTail → GT Content LT SLASH ElementName GT
+  - fields: name (from ElementName), props: PropArg[], children: ElementContent.items
+
+EmbedElementTail (AST: EmbedElement)
+- EmbedElementTail → PropertyArgument* GT EmbedContent LT SLASH ElementName GT
+  - fields: name (from ElementName), textType (from EmbedTextType), mode: "parsed", props: PropArg[], content: EmbedContent.items
+- EmbedElementTail → RAW PropertyArgument* GT RawEmbedContent LT SLASH ElementName GT
+  - fields: name (from ElementName), textType (from EmbedTextType), mode: "raw", props: PropArg[], content: RawEmbedContent.text
 
 ElementName
 - ElementName → QualifiedMarkupName
+
+EmbedTextType
+- EmbedTextType → IDENTIFIER
+  - fields (on EmbedElement): textType: string
 
 PropertyArgument (AST: PropArg)
 - PropertyArgument → QualifiedMarkupName EQ Expression
   - fields: name: QualifiedMarkupName, value: Expression
 
-TextContent (AST: TextSequence)
-- TextContent → TextPart*
-  - fields: parts: TextPart[]
+Content (AST: ElementContent is a sum type)
+- Content → ElementsExpression
+- Content → MixedContentExpression
 
-TextPart (AST: TextPart is a sum type)
-- TextPart → TextRun            (TextRun)
-- TextPart → InterpolationExpression  (Interpolation)
+ElementsExpression (AST: MarkupList)
+- ElementsExpression → MarkupExpression
+  - fields: items: MarkupItem[]
+
+MixedContentExpression (AST: MixedContent)
+- MixedContentExpression → MixedContentItem*
+  - fields: items: MixedContentItem[]
+
+MixedContentItem (AST: MixedContentItem is a sum type)
+- MixedContentItem → TextPart        (TextRun)
+- MixedContentItem → Element         (MarkupElement)
+- MixedContentItem → InterpolationExpression (Interpolation)
+
+EmbedContent (AST: EmbedContent)
+- EmbedContent → EmbedContentItem*
+  - fields: items: EmbedContentItem[]
+
+EmbedContentItem (AST: EmbedContentItem is a sum type)
+- EmbedContentItem → TextRun         (TextRun)
+- EmbedContentItem → InterpolationExpression (Interpolation)
+
+RawEmbedContent (AST: RawEmbedContent)
+- RawEmbedContent → TextRun
+  - fields: text: string
+
+TextPart (AST: TextRun)
+- TextPart → TextRun
+  - fields: text: string
 
 TextRun (AST: TextRun)
 - TextRun → (TEXT_CHUNK | ENTITY | ESCAPED_LBRACE | ESCAPED_RBRACE)+
@@ -281,10 +317,14 @@ This section lists the AST node types with fields for implementers.
 - SwitchCase: patterns: Pattern[], expr: Expression
 - SwitchDefault: expr: Expression (usually folded into SwitchExpr.default)
 - ForExpr: itemVar: string, indexVar?: string, iterable: Expression, body: Expression
-- Element: name: QualifiedMarkupName, props: PropArg[], children: MarkupItem[]
-- TextElement: name: QualifiedMarkupName, textType: string, props: PropArg[], content: TextPart[]
+- Element: name: QualifiedMarkupName, props: PropArg[], children: ElementContent (MarkupList or MixedContent)
+- EmbedElement: name: QualifiedMarkupName, textType: string, mode: "parsed"|"raw", props: PropArg[], content: EmbedContent|RawEmbedContent
 - PropArg: name: QualifiedMarkupName, value: Expression
-- TextSequence: parts: TextPart[]
+- ElementContent: items: MarkupItem[] | MixedContentItem[]
+- MixedContent: items: MixedContentItem[]
+- MixedContentItem: kind: "text"|"element"|"interpolation", value: TextRun|Element|EmbedElement|Interpolation
+- EmbedContent: items: (TextRun|Interpolation)[]
+- RawEmbedContent: text: string
 - TextRun: text: string
 - Interpolation: expr: Expression
 - QualifiedName: parts: string[]
@@ -299,12 +339,12 @@ This section lists the AST node types with fields for implementers.
 - SwitchExpression scrutinee:
   - After SWITCH, if next token ∈ {CASE, DEFAULT} → no scrutinee
   - Else → parse Expression as scrutinee
-- Element is left-factored: after LT ElementName PropertyArgument*, choose SLASH GT (self-closing) or GT … LT SLASH ElementName GT (with children) by single-token lookahead at SLASH vs GT.
+- Element is left-factored: after LT ElementName, COLON selects the embed branch; otherwise parse PropertyArgument* and choose SLASH GT (self-closing) or GT … LT SLASH ElementName GT using lookahead at SLASH vs GT.
 
 ## Validation Rules (post-parse)
 
 - Element closing tag name must match opening ElementName.
-- TextElement closing tag name must match opening ElementName.
+- EmbedElement closing tag name must match opening ElementName.
 - PropertyDefinition names within a single FunctionDefinition should be unique.
 - Type modifiers: at most one of QMARK or ELLIPSIS.
 - SwitchExpression: at least one SwitchCase; patterns per case must be non-empty.
