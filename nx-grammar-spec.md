@@ -136,20 +136,32 @@ UserDefinedType (AST: UserType)
   - fields: name: QualifiedName
 
 FunctionDefinition (AST: FunctionDef)
-- FunctionDefinition → LET LT ElementName PropertyDefinition* SLASH GT EQ Expression
+- FunctionDefinition → LET LT ElementName PropertyDefinition* SLASH GT EQ RhsExpression
   - fields: elementName: QualifiedMarkupName, props: PropDef[], body: Expression
 
 PropertyDefinition (AST: PropDef)
-- PropertyDefinition → MARKUP_IDENTIFIER COLON Type [EQ Expression]
+- PropertyDefinition → MARKUP_IDENTIFIER COLON Type [EQ RhsExpression]
   - fields: name: string, type: Type, default?: Expression
 
 
 
-Expression (AST: Expression; see mappings below)
-- Expression → MarkupExpression
-- Expression → Expr      (conventional expression, parsed by Pratt using the operator table)
+RhsExpression (AST: Expression; see mappings below)
+- RhsExpression → Element
+- RhsExpression → Literal
+- RhsExpression → InterpolationExpression
 
-Expr (parsed by Pratt; not a standalone AST node)
+InterpolationExpression (AST: Interpolation)
+- InterpolationExpression → LBRACE ValueExpression RBRACE
+  - fields: expr: Expression
+
+ValueExpression (AST: Expression; Pratt-parsed for operators)
+- ValueExpression → Element
+- ValueExpression → ValueIfExpression
+- ValueExpression → ValueSwitchExpression
+- ValueExpression → ValueForExpression
+- ValueExpression → ValueExpr
+
+ValueExpr (parsed by Pratt; not a standalone AST node)
 - Primaries (nud): Literal | IDENTIFIER | Unit | ParenthesizedExpression
 - Postfix/infix handled via the operator table
 
@@ -158,52 +170,77 @@ Unit (AST: UnitLiteral)
   - fields: (none)
 
 ParenthesizedExpression (AST: Grouped)
-- ParenthesizedExpression → LPAREN Expression RPAREN
+- ParenthesizedExpression → LPAREN ValueExpression RPAREN
   - fields: expr: Expression
 
 Literal (AST: Literal)
 - Literal → STRING_LITERAL | INT_LITERAL | REAL_LITERAL | HEX_LITERAL | BOOL_LITERAL | NULL_LITERAL
   - fields: kind: "string"|"int"|"real"|"hex"|"bool"|"null", value: token payload
 
-MarkupExpression (AST: MarkupList)
-- MarkupExpression → MarkupExpressionItem+
-  - fields: items: MarkupItem[]
-
-MarkupExpressionItem (AST: MarkupItem is a sum type)
-- MarkupExpressionItem → Element            (Element)
-- MarkupExpressionItem → IfExpression       (IfExpr)
-- MarkupExpressionItem → SwitchExpression   (SwitchExpr)
-- MarkupExpressionItem → ForExpression      (ForExpr)
-
-IfExpression (AST: IfExpr)
-- IfExpression → IF Expression COLON Expression [ELSE COLON Expression] END_IF
+ValueIfExpression (AST: ValueIfExpr)
+- ValueIfExpression → IF ValueExpression COLON ValueExpression [ELSE COLON ValueExpression] END_IF
   - fields: condition: Expression, thenExpr: Expression, elseExpr?: Expression
 
-SwitchExpression (AST: SwitchExpr)
-- SwitchExpression → SWITCH SwitchScrutineeOpt SwitchCase+ SwitchDefaultOpt END_SWITCH
+ValueSwitchExpression (AST: ValueSwitchExpr)
+- ValueSwitchExpression → SWITCH ValueSwitchScrutineeOpt ValueSwitchCase+ ValueSwitchDefaultOpt END_SWITCH
+  - fields: scrutinee?: Expression, cases: ValueSwitchCase[], default?: Expression
 
-SwitchScrutineeOpt
-- SwitchScrutineeOpt → Expression
-- SwitchScrutineeOpt → ε        (selected when next token is CASE or DEFAULT)
-  - fields (on SwitchExpr): scrutinee?: Expression
+ValueSwitchScrutineeOpt
+- ValueSwitchScrutineeOpt → ValueExpression
+- ValueSwitchScrutineeOpt → ε        (selected when next token is CASE or DEFAULT)
+  - fields (on ValueSwitchExpr): scrutinee?: Expression
 
-SwitchCase (AST: SwitchCase)
-- SwitchCase → CASE Pattern (COMMA Pattern)* COLON Expression
+ValueSwitchCase (AST: ValueSwitchCase)
+- ValueSwitchCase → CASE Pattern (COMMA Pattern)* COLON ValueExpression
   - fields: patterns: Pattern[], expr: Expression
 
-SwitchDefault (AST: SwitchDefault)
-- SwitchDefault → DEFAULT COLON Expression
+ValueSwitchDefault (AST: ValueSwitchDefault)
+- ValueSwitchDefault → DEFAULT COLON ValueExpression
   - fields: expr: Expression
 
-SwitchDefaultOpt
-- SwitchDefaultOpt → SwitchDefault | ε
+ValueSwitchDefaultOpt
+- ValueSwitchDefaultOpt → ValueSwitchDefault | ε
 
-ForExpression (AST: ForExpr)
-- ForExpression → FOR IDENTIFIER ForIndexOpt IN Expression COLON Expression END_FOR
+ValueForExpression (AST: ValueForExpr)
+- ValueForExpression → FOR IDENTIFIER ForIndexOpt IN ValueExpression COLON ValueExpression END_FOR
+  - fields: itemVar: string, indexVar?: string, iterable: Expression, body: Expression
 
 ForIndexOpt
 - ForIndexOpt → COMMA IDENTIFIER | ε
-  - fields (on ForExpr): itemVar: string, indexVar?: string, iterable: Expression, body: Expression
+  - fields (on ValueForExpr/MarkupForExpr): itemVar: string, indexVar?: string
+
+ElementsExpression (AST: MarkupList)
+- ElementsExpression → ElementsExpressionItem+
+  - fields: items: MarkupItem[]
+
+ElementsExpressionItem (AST: MarkupItem is a sum type)
+- ElementsExpressionItem → Element                     (Element)
+- ElementsExpressionItem → ElementsIfExpression        (MarkupIfExpr)
+- ElementsExpressionItem → ElementsSwitchExpression    (MarkupSwitchExpr)
+- ElementsExpressionItem → ElementsForExpression       (MarkupForExpr)
+
+ElementsIfExpression (AST: MarkupIfExpr)
+- ElementsIfExpression → IF ValueExpression COLON ElementsExpression [ELSE COLON ElementsExpression] END_IF
+  - fields: condition: Expression, thenElements: MarkupList, elseElements?: MarkupList
+
+ElementsSwitchExpression (AST: MarkupSwitchExpr)
+- ElementsSwitchExpression → SWITCH ValueSwitchScrutineeOpt ElementsSwitchCase+ ElementsSwitchDefaultOpt END_SWITCH
+  - fields: scrutinee?: Expression, cases: MarkupSwitchCase[], default?: MarkupList
+
+ElementsSwitchCase (AST: MarkupSwitchCase)
+- ElementsSwitchCase → CASE Pattern (COMMA Pattern)* COLON ElementsExpression
+  - fields: patterns: Pattern[], elements: MarkupList
+
+ElementsSwitchDefault (AST: MarkupSwitchDefault)
+- ElementsSwitchDefault → DEFAULT COLON ElementsExpression
+  - fields: elements: MarkupList
+
+ElementsSwitchDefaultOpt
+- ElementsSwitchDefaultOpt → ElementsSwitchDefault | ε
+
+ElementsForExpression (AST: MarkupForExpr)
+- ElementsForExpression → FOR IDENTIFIER ForIndexOpt IN ValueExpression COLON ElementsExpression END_FOR
+  - fields: itemVar: string, indexVar?: string, iterable: Expression, body: MarkupList
 
 Element (AST: MarkupElement is a sum type)
 - Element → LT ElementName ElementSuffix
@@ -232,15 +269,12 @@ EmbedTextType
   - fields (on EmbedElement): textType: string
 
 PropertyArgument (AST: PropArg)
-- PropertyArgument → QualifiedMarkupName EQ Expression
+- PropertyArgument → QualifiedMarkupName EQ RhsExpression
   - fields: name: QualifiedMarkupName, value: Expression
 
 Content (AST: ElementContent is a sum type)
 - Content → ElementsExpression
 - Content → MixedContentExpression
-
-ElementsExpression (AST: MarkupList)
-- ElementsExpression → MarkupExpression
   - fields: items: MarkupItem[]
 
 MixedContentExpression (AST: MixedContent)
@@ -272,10 +306,6 @@ TextRun (AST: TextRun)
 - TextRun → (TEXT_CHUNK | ENTITY | ESCAPED_LBRACE | ESCAPED_RBRACE)+
   - fields: text: string  (concatenated, entities preserved or decoded by later phase)
 
-InterpolationExpression (AST: Interpolation)
-- InterpolationExpression → LBRACE Expression RBRACE
-  - fields: expr: Expression
-
 QualifiedName (AST: QualifiedName)
 - QualifiedName → IDENTIFIER (DOT IDENTIFIER)*
   - fields: parts: string[]
@@ -301,22 +331,27 @@ This section lists the AST node types with fields for implementers.
 - UserType: name: QualifiedName
 - FunctionDef: elementName: QualifiedMarkupName, props: PropDef[], body: Expression
 - PropDef: name: string, type: TypeRef, default?: Expression
-- Expression: union of MarkupList | IfExpr | SwitchExpr | ForExpr | PrattExpr results
- - PrattExpr results (from operator table):
-  - Call: callee: Expression, args: Expression[]
-  - Member: target: Expression, name: string
-  - BinaryExpression: op: token, left: Expression, right: Expression
-  - PrefixUnaryExpression: op: token, expr: Expression
-  - Grouped: expr: Expression (may be elided)
-  - UnitLiteral
-  - Literal: kind, value
-  - Identifier: name: string
+- Expression: union of Element | Literal | Identifier | ValueIfExpr | ValueSwitchExpr | ValueForExpr | Call | Member | BinaryExpression | PrefixUnaryExpression | Grouped | UnitLiteral
+ - Call: callee: Expression, args: Expression[]
+ - Member: target: Expression, name: string
+ - BinaryExpression: op: token, left: Expression, right: Expression
+ - PrefixUnaryExpression: op: token, expr: Expression
+ - Grouped: expr: Expression (may be elided)
+ - UnitLiteral
+ - Literal: kind, value
+ - Identifier: name: string
+- ValueIfExpr: condition: Expression, thenExpr: Expression, elseExpr?: Expression
+- ValueSwitchExpr: scrutinee?: Expression, cases: ValueSwitchCase[], default?: Expression
+- ValueSwitchCase: patterns: Pattern[], expr: Expression
+- ValueSwitchDefault: expr: Expression (usually folded into ValueSwitchExpr.default)
+- ValueForExpr: itemVar: string, indexVar?: string, iterable: Expression, body: Expression
 - MarkupList: items: MarkupItem[]
-- IfExpr: condition: Expression, thenExpr: Expression, elseExpr?: Expression
-- SwitchExpr: scrutinee?: Expression, cases: SwitchCase[], default?: Expression
-- SwitchCase: patterns: Pattern[], expr: Expression
-- SwitchDefault: expr: Expression (usually folded into SwitchExpr.default)
-- ForExpr: itemVar: string, indexVar?: string, iterable: Expression, body: Expression
+- MarkupItem: Element | MarkupIfExpr | MarkupSwitchExpr | MarkupForExpr
+- MarkupIfExpr: condition: Expression, thenElements: MarkupList, elseElements?: MarkupList
+- MarkupSwitchExpr: scrutinee?: Expression, cases: MarkupSwitchCase[], default?: MarkupList
+- MarkupSwitchCase: patterns: Pattern[], elements: MarkupList
+- MarkupSwitchDefault: elements: MarkupList (usually folded into MarkupSwitchExpr.default)
+- MarkupForExpr: itemVar: string, indexVar?: string, iterable: Expression, body: MarkupList
 - Element: name: QualifiedMarkupName, props: PropArg[], children: ElementContent (MarkupList or MixedContent)
 - EmbedElement: name: QualifiedMarkupName, textType: string, mode: "parsed"|"raw", props: PropArg[], content: EmbedContent|RawEmbedContent
 - PropArg: name: QualifiedMarkupName, value: Expression
@@ -333,12 +368,18 @@ This section lists the AST node types with fields for implementers.
 
 ## Disambiguation and Lookahead Notes
 
-- Expression branch selection:
-  - If next token is one of {LT, IF, SWITCH, FOR} → MarkupExpression
-  - Otherwise → Expr (Pratt)
-- SwitchExpression scrutinee:
+- ValueExpression branch selection:
+  - If next token is LT → Element
+  - If next token is IF → ValueIfExpression
+  - If next token is SWITCH → ValueSwitchExpression
+  - If next token is FOR → ValueForExpression
+  - Otherwise → ValueExpr (Pratt)
+- ElementsExpression item selection:
+  - If next token is LT → Element
+  - If next token ∈ {IF, SWITCH, FOR} → the corresponding Elements* form
+- SWITCH scrutinee (value and elements variants):
   - After SWITCH, if next token ∈ {CASE, DEFAULT} → no scrutinee
-  - Else → parse Expression as scrutinee
+  - Else → parse ValueExpression as the scrutinee
 - Element is left-factored: after LT ElementName, COLON selects the embed branch; otherwise parse PropertyArgument* and choose SLASH GT (self-closing) or GT … LT SLASH ElementName GT using lookahead at SLASH vs GT.
 
 ## Validation Rules (post-parse)
@@ -347,7 +388,7 @@ This section lists the AST node types with fields for implementers.
 - EmbedElement closing tag name must match opening ElementName.
 - PropertyDefinition names within a single FunctionDefinition should be unique.
 - Type modifiers: at most one of QMARK or ELLIPSIS.
-- SwitchExpression: at least one SwitchCase; patterns per case must be non-empty.
+- Switch expressions (value or elements variants): at least one case; patterns per case must be non-empty.
 
 ## Notes and Gaps
 

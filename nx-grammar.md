@@ -47,21 +47,32 @@ UserDefinedType ::=
 
 ```ebnf
 FunctionDefinition ::=
-    "let" "<" ElementName {PropertyDefinition} "/>" "=" Expression
+    "let" "<" ElementName {PropertyDefinition} "/>" "=" RhsExpression
 
 PropertyDefinition ::=
-    MarkupIdentifier ":" TypeDeclaration ["=" Expression]
+    MarkupIdentifier ":" TypeDeclaration ["=" RhsExpression]
 ```
 
 <a id="expressions"></a>
 ## Expressions
 
 ```ebnf
-Expression ::=
-    MarkupExpression            (* list of elements, with if/switch/for allowed *)
-    | Literal                   (* conventional expressions below *)
+(* Right-hand side of a property/let definition, after "-" *)
+RhsExpression ::=
+    Element
+    | Literal
+    | InterpolationExpression
+
+InterpolationExpression  ::=
+    "{" ValueExpression "}"
+
+ValueExpression ::=
+    Element
+    | Literal
     | Identifier
-    | KeywordExpression
+    | ValueIfExpression
+    | ValueSwitchExpression
+    | ValueForExpression
     | PrefixUnaryExpression
     | BinaryExpression
     | MemberAccess
@@ -69,44 +80,33 @@ Expression ::=
     | Unit
     | ParenthesizedExpression
 
-MarkupExpression ::=
-    (Element | KeywordExpression)+
+ParenthesizedExpression ::=
+    "(" ValueExpression ")"
 
-KeywordExpression ::=
-    IfExpression
-    | SwitchExpression
-    | ForExpression
+ValueIfExpression ::=
+    "if" ValueExpression ":" ValueExpression["else" ":" ValueExpression] "/if"
 
-IfExpression ::=
-    "if" Expression ":" Expression ["else" ":" Expression] "/if"
+ValueSwitchExpression ::=
+    "switch" [ValueExpression]
+    {"case" Pattern {"," Pattern} ":" ValueExpression}
+    ["default" ":" ValueExpression]
+    "/switch"
 
-SwitchExpression ::=
-    "switch" Expression {SwitchCase} [SwitchDefault] "/switch"
-    | "switch" {SwitchCase} [SwitchDefault] "/switch"
-
-SwitchCase ::=
-    "case" Pattern {"," Pattern} ":" Expression
-SwitchDefault ::=
-    "default" ":" Expression
-
-ForExpression ::=
-    "for" {Identifier} "in" Expression ":" Expression "/for"
-    | "for" Identifier "," Identifier "in" Expression ":" Expression "/for"  (* With index *)
+ValueForExpression ::=
+    "for" {Identifier} "in" ValueExpression ":" ValueExpression "/for"
+    | "for" Identifier "," Identifier "in" ValueExpression ":" ValueExpression "/for"  (* With index *)
 
 PrefixUnaryExpression ::=
-    "-" Expression
+    "-" ValueExpression
 BinaryExpression ::=
-    Expression ("+" | "-" | "*" | "/" | ">" | "<" | ">=" | "<=" | "==" | "!=" | "&&" | "||") Expression
+    ValueExpression ("+" | "-" | "*" | "/" | ">" | "<" | ">=" | "<=" | "==" | "!=" | "&&" | "||") ValueExpression
 MemberAccess ::=
-    Expression "." Identifier
+    ValueExpression "." Identifier
 FunctionCall ::=
-    Expression "(" {Expression} ")"
+    ValueExpression "(" {ValueExpression} ")"
 
 Unit ::=
     "()"
-
-ParenthesizedExpression ::=
-    "(" Expression ")"
 
 Literal ::=
     StringLiteral
@@ -122,6 +122,23 @@ Literal ::=
 ## Elements
 
 ```ebnf
+(* list of elements, with if/switch/for allowed *)
+ElementsExpression ::=
+    (Element | ElementsIfExpression | ElementsSwitchExpression | ElementsForExpression)+
+
+ElementsIfExpression ::=
+    "if" ValueExpression ":" ElementsExpression ["else" ":" ElementsExpression] "/if"
+
+ElementsSwitchExpression ::=
+    "switch" [ValueExpression]
+    {"case" Pattern {"," Pattern} ":" ElementsExpression}
+    ["default" ":" ElementsExpression]
+    "/switch"
+
+ElementsForExpression ::=
+    "for" {Identifier} "in" ValueExpression ":" ElementsExpression "/for"
+    | "for" Identifier "," Identifier "in" ValueExpression ":" ElementsExpression "/for"  (* With index *)
+
 Element ::=
     "<" ElementName {PropertyArgument} "/>"
     | "<" ElementName {PropertyArgument} ">" Content "</" ElementName ">"
@@ -135,9 +152,6 @@ Content ::=
     ElementsExpression |     (* list of elements, with if/switch/for allowed *)
     MixedContentExpression   (* text with optional embedded elements and interpolations; no if/switch/for allowed except inside interpolated expressions *)
 
-ElementsExpression ::=
-    {Element | KeywordExpression}
-
 MixedContentExpression ::=
     { TextPart | Element | InterpolationExpression }
 
@@ -148,7 +162,7 @@ ElementName ::=
     QualifiedMarkupName
 
 PropertyArgument ::=
-    QualifiedMarkupName "=" Expression
+    QualifiedMarkupName "=" RhsExpression
 
 EmbedContent ::=
     { TextRun | InterpolationExpression }
@@ -229,7 +243,4 @@ TextChar         ::=
 
 EscapedBrace     ::=
     "{{" | "}}"
-
-InterpolationExpression  ::=
-    "{" Expression "}"
 ```
