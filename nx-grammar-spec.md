@@ -5,6 +5,7 @@ This is the machine-oriented grammar for NX. It is:
 - Operator-free for conventional expressions; a separate precedence table drives a Pratt parser.
 - Token-oriented: productions expand to token kinds (UPPER_SNAKE) or other nonterminals (CamelCase).
 - AST-oriented: each rule includes its node type and fields.
+- Naming follows Roslyn conventions: AST node types use the `Syntax` suffix (e.g., `FunctionDefinitionSyntax`, `ValueIfExpressionSyntax`).
 
 Source of truth for language shape: nx-grammar.md. This spec re-expresses it in a parser-ready form.
 
@@ -104,20 +105,20 @@ Grouping
 
 Nonterminals are CamelCase. Terminals are UPPER_SNAKE tokens.
 
-ModuleDefinition (AST: Module)
+ModuleDefinition (AST: ModuleDefinitionSyntax)
 - ModuleDefinition → ImportStatement* (TypeDefinition* FunctionDefinition* | Element) EOF
-  - fields: imports: Import[], types: TypeDef[], functions: FunctionDef[], moduleElement?: Element
+  - fields: imports: ImportStatementSyntax[], types: TypeDefinitionSyntax[], functions: FunctionDefinitionSyntax[], moduleElement?: MarkupElementSyntax
     (either types/functions or moduleElement is present, not both)
 
-ImportStatement (AST: Import)
+ImportStatement (AST: ImportStatementSyntax)
 - ImportStatement → IMPORT QualifiedName
-  - fields: name: QualifiedName
+  - fields: name: QualifiedNameSyntax
 
-TypeDefinition (AST: TypeDef)
+TypeDefinition (AST: TypeDefinitionSyntax)
 - TypeDefinition → TYPE IDENTIFIER EQ Type
-  - fields: name: string, type: Type
+  - fields: name: string, type: TypeSyntax
 
-Type (AST: TypeRef)
+Type (AST: TypeSyntax)
 - Type → PrimitiveType TypeOptModifier
 - Type → UserDefinedType TypeOptModifier
   - fields: kind: "primitive"|"user", name: string (qualified), modifier?: "nullable"|"list"
@@ -127,34 +128,34 @@ TypeOptModifier
 - TypeOptModifier → ELLIPSIS
 - TypeOptModifier → ε
 
-PrimitiveType (AST: PrimitiveType)
+PrimitiveType (AST: PrimitiveTypeSyntax)
 - PrimitiveType → STRING | INT | LONG | FLOAT | DOUBLE | BOOLEAN | VOID | OBJECT
   - fields: name: "string"|"int"|"long"|"float"|"double"|"boolean"|"void"|"object"
 
-UserDefinedType (AST: UserType)
+UserDefinedType (AST: UserTypeSyntax)
 - UserDefinedType → QualifiedName
-  - fields: name: QualifiedName
+  - fields: name: QualifiedNameSyntax
 
-FunctionDefinition (AST: FunctionDef)
+FunctionDefinition (AST: FunctionDefinitionSyntax)
 - FunctionDefinition → LET LT ElementName PropertyDefinition* SLASH GT EQ RhsExpression
-  - fields: elementName: QualifiedMarkupName, props: PropDef[], body: Expression
+  - fields: elementName: QualifiedMarkupNameSyntax, props: PropertyDefinitionSyntax[], body: ExpressionSyntax
 
-PropertyDefinition (AST: PropDef)
+PropertyDefinition (AST: PropertyDefinitionSyntax)
 - PropertyDefinition → MARKUP_IDENTIFIER COLON Type [EQ RhsExpression]
-  - fields: name: string, type: Type, default?: Expression
+  - fields: name: string, type: TypeSyntax, default?: ExpressionSyntax
 
 
 
-RhsExpression (AST: Expression; see mappings below)
+RhsExpression (AST: ExpressionSyntax; see mappings below)
 - RhsExpression → Element
 - RhsExpression → Literal
 - RhsExpression → InterpolationExpression
 
-InterpolationExpression (AST: Interpolation)
+InterpolationExpression (AST: InterpolationExpressionSyntax)
 - InterpolationExpression → LBRACE ValueExpression RBRACE
-  - fields: expr: Expression
+  - fields: expr: ExpressionSyntax
 
-ValueExpression (AST: Expression; Pratt-parsed for operators)
+ValueExpression (AST: ExpressionSyntax; Pratt-parsed for operators)
 - ValueExpression → Element
 - ValueExpression → ValueIfExpression
 - ValueExpression → ValueSwitchExpression
@@ -165,101 +166,101 @@ ValueExpr (parsed by Pratt; not a standalone AST node)
 - Primaries (nud): Literal | IDENTIFIER | Unit | ParenthesizedExpression
 - Postfix/infix handled via the operator table
 
-Unit (AST: UnitLiteral)
+Unit (AST: UnitLiteralSyntax)
 - Unit → LPAREN RPAREN
   - fields: (none)
 
-ParenthesizedExpression (AST: Grouped)
+ParenthesizedExpression (AST: ParenthesizedExpressionSyntax)
 - ParenthesizedExpression → LPAREN ValueExpression RPAREN
-  - fields: expr: Expression
+  - fields: expr: ExpressionSyntax
 
-Literal (AST: Literal)
+Literal (AST: LiteralExpressionSyntax)
 - Literal → STRING_LITERAL | INT_LITERAL | REAL_LITERAL | HEX_LITERAL | BOOL_LITERAL | NULL_LITERAL
   - fields: kind: "string"|"int"|"real"|"hex"|"bool"|"null", value: token payload
 
-ValueIfExpression (AST: ValueIfExpr)
+ValueIfExpression (AST: ValueIfExpressionSyntax)
 - ValueIfExpression → IF ValueExpression COLON ValueExpression [ELSE COLON ValueExpression] END_IF
-  - fields: condition: Expression, thenExpr: Expression, elseExpr?: Expression
+  - fields: condition: ExpressionSyntax, thenExpr: ExpressionSyntax, elseExpr?: ExpressionSyntax
 
-ValueSwitchExpression (AST: ValueSwitchExpr)
+ValueSwitchExpression (AST: ValueSwitchExpressionSyntax)
 - ValueSwitchExpression → SWITCH ValueSwitchScrutineeOpt ValueSwitchCase+ ValueSwitchDefaultOpt END_SWITCH
-  - fields: scrutinee?: Expression, cases: ValueSwitchCase[], default?: Expression
+  - fields: scrutinee?: ExpressionSyntax, cases: ValueSwitchCaseSyntax[], default?: ExpressionSyntax
 
 ValueSwitchScrutineeOpt
 - ValueSwitchScrutineeOpt → ValueExpression
 - ValueSwitchScrutineeOpt → ε        (selected when next token is CASE or DEFAULT)
-  - fields (on ValueSwitchExpr): scrutinee?: Expression
+  - fields (on ValueSwitchExpressionSyntax): scrutinee?: ExpressionSyntax
 
-ValueSwitchCase (AST: ValueSwitchCase)
+ValueSwitchCase (AST: ValueSwitchCaseSyntax)
 - ValueSwitchCase → CASE Pattern (COMMA Pattern)* COLON ValueExpression
-  - fields: patterns: Pattern[], expr: Expression
+  - fields: patterns: PatternSyntax[], expr: ExpressionSyntax
 
-ValueSwitchDefault (AST: ValueSwitchDefault)
+ValueSwitchDefault (AST: ValueSwitchDefaultSyntax)
 - ValueSwitchDefault → DEFAULT COLON ValueExpression
-  - fields: expr: Expression
+  - fields: expr: ExpressionSyntax
 
 ValueSwitchDefaultOpt
 - ValueSwitchDefaultOpt → ValueSwitchDefault | ε
 
-ValueForExpression (AST: ValueForExpr)
+ValueForExpression (AST: ValueForExpressionSyntax)
 - ValueForExpression → FOR IDENTIFIER ForIndexOpt IN ValueExpression COLON ValueExpression END_FOR
-  - fields: itemVar: string, indexVar?: string, iterable: Expression, body: Expression
+  - fields: itemVar: string, indexVar?: string, iterable: ExpressionSyntax, body: ExpressionSyntax
 
 ForIndexOpt
 - ForIndexOpt → COMMA IDENTIFIER | ε
-  - fields (on ValueForExpr/MarkupForExpr): itemVar: string, indexVar?: string
+  - fields (on ValueForExpressionSyntax/MarkupForExpressionSyntax): itemVar: string, indexVar?: string
 
-ElementsExpression (AST: MarkupList)
+ElementsExpression (AST: MarkupListSyntax)
 - ElementsExpression → ElementsExpressionItem+
-  - fields: items: MarkupItem[]
+  - fields: items: MarkupItemSyntax[]
 
-ElementsExpressionItem (AST: MarkupItem is a sum type)
-- ElementsExpressionItem → Element                     (Element)
-- ElementsExpressionItem → ElementsIfExpression        (MarkupIfExpr)
-- ElementsExpressionItem → ElementsSwitchExpression    (MarkupSwitchExpr)
-- ElementsExpressionItem → ElementsForExpression       (MarkupForExpr)
+ElementsExpressionItem (AST: MarkupItemSyntax is a sum type)
+- ElementsExpressionItem → Element                     (MarkupElementSyntax)
+- ElementsExpressionItem → ElementsIfExpression        (MarkupIfExpressionSyntax)
+- ElementsExpressionItem → ElementsSwitchExpression    (MarkupSwitchExpressionSyntax)
+- ElementsExpressionItem → ElementsForExpression       (MarkupForExpressionSyntax)
 
-ElementsIfExpression (AST: MarkupIfExpr)
+ElementsIfExpression (AST: MarkupIfExpressionSyntax)
 - ElementsIfExpression → IF ValueExpression COLON ElementsExpression [ELSE COLON ElementsExpression] END_IF
-  - fields: condition: Expression, thenElements: MarkupList, elseElements?: MarkupList
+  - fields: condition: ExpressionSyntax, thenElements: MarkupListSyntax, elseElements?: MarkupListSyntax
 
-ElementsSwitchExpression (AST: MarkupSwitchExpr)
+ElementsSwitchExpression (AST: MarkupSwitchExpressionSyntax)
 - ElementsSwitchExpression → SWITCH ValueSwitchScrutineeOpt ElementsSwitchCase+ ElementsSwitchDefaultOpt END_SWITCH
-  - fields: scrutinee?: Expression, cases: MarkupSwitchCase[], default?: MarkupList
+  - fields: scrutinee?: ExpressionSyntax, cases: MarkupSwitchCaseSyntax[], default?: MarkupListSyntax
 
-ElementsSwitchCase (AST: MarkupSwitchCase)
+ElementsSwitchCase (AST: MarkupSwitchCaseSyntax)
 - ElementsSwitchCase → CASE Pattern (COMMA Pattern)* COLON ElementsExpression
-  - fields: patterns: Pattern[], elements: MarkupList
+  - fields: patterns: PatternSyntax[], elements: MarkupListSyntax
 
-ElementsSwitchDefault (AST: MarkupSwitchDefault)
+ElementsSwitchDefault (AST: MarkupSwitchDefaultSyntax)
 - ElementsSwitchDefault → DEFAULT COLON ElementsExpression
-  - fields: elements: MarkupList
+  - fields: elements: MarkupListSyntax
 
 ElementsSwitchDefaultOpt
 - ElementsSwitchDefaultOpt → ElementsSwitchDefault | ε
 
-ElementsForExpression (AST: MarkupForExpr)
+ElementsForExpression (AST: MarkupForExpressionSyntax)
 - ElementsForExpression → FOR IDENTIFIER ForIndexOpt IN ValueExpression COLON ElementsExpression END_FOR
-  - fields: itemVar: string, indexVar?: string, iterable: Expression, body: MarkupList
+  - fields: itemVar: string, indexVar?: string, iterable: ExpressionSyntax, body: MarkupListSyntax
 
-Element (AST: MarkupElement is a sum type)
+Element (AST: MarkupElementSyntax is a sum type)
 - Element → LT ElementName ElementSuffix
 
 ElementSuffix (builds either Element or EmbedElement AST)
 - ElementSuffix → PropertyArgument* RegularElementTail
 - ElementSuffix → COLON EmbedTextType EmbedElementTail
 
-RegularElementTail (AST: Element)
+RegularElementTail (AST: ElementSyntax)
 - RegularElementTail → SLASH GT
-  - fields: name (from ElementName), props: PropArg[], children: []
+  - fields: name (from ElementName), props: PropertyArgumentSyntax[], children: []
 - RegularElementTail → GT Content LT SLASH ElementName GT
-  - fields: name (from ElementName), props: PropArg[], children: ElementContent.items
+  - fields: name (from ElementName), props: PropertyArgumentSyntax[], children: ElementContentSyntax.items
 
-EmbedElementTail (AST: EmbedElement)
+EmbedElementTail (AST: EmbedElementSyntax)
 - EmbedElementTail → PropertyArgument* GT EmbedContent LT SLASH ElementName GT
-  - fields: name (from ElementName), textType (from EmbedTextType), mode: "parsed", props: PropArg[], content: EmbedContent.items
+  - fields: name (from ElementName), textType (from EmbedTextType), mode: "parsed", props: PropertyArgumentSyntax[], content: EmbedContentSyntax.items
 - EmbedElementTail → RAW PropertyArgument* GT RawEmbedContent LT SLASH ElementName GT
-  - fields: name (from ElementName), textType (from EmbedTextType), mode: "raw", props: PropArg[], content: RawEmbedContent.text
+  - fields: name (from ElementName), textType (from EmbedTextType), mode: "raw", props: PropertyArgumentSyntax[], content: RawEmbedContentSyntax.text
 
 ElementName
 - ElementName → QualifiedMarkupName
@@ -268,103 +269,104 @@ EmbedTextType
 - EmbedTextType → IDENTIFIER
   - fields (on EmbedElement): textType: string
 
-PropertyArgument (AST: PropArg)
+PropertyArgument (AST: PropertyArgumentSyntax)
 - PropertyArgument → QualifiedMarkupName EQ RhsExpression
-  - fields: name: QualifiedMarkupName, value: Expression
+  - fields: name: QualifiedMarkupNameSyntax, value: ExpressionSyntax
 
-Content (AST: ElementContent is a sum type)
+Content (AST: ElementContentSyntax is a sum type)
 - Content → ElementsExpression
 - Content → MixedContentExpression
-  - fields: items: MarkupItem[]
+  - fields: items: MarkupItemSyntax[]
 
-MixedContentExpression (AST: MixedContent)
+MixedContentExpression (AST: MixedContentSyntax)
 - MixedContentExpression → MixedContentItem*
-  - fields: items: MixedContentItem[]
+  - fields: items: MixedContentItemSyntax[]
 
-MixedContentItem (AST: MixedContentItem is a sum type)
-- MixedContentItem → TextPart        (TextRun)
-- MixedContentItem → Element         (MarkupElement)
-- MixedContentItem → InterpolationExpression (Interpolation)
+MixedContentItem (AST: MixedContentItemSyntax is a sum type)
+- MixedContentItem → TextPart        (TextPartSyntax)
+- MixedContentItem → Element         (MarkupElementSyntax)
+- MixedContentItem → InterpolationExpression (InterpolationExpressionSyntax)
 
-EmbedContent (AST: EmbedContent)
+EmbedContent (AST: EmbedContentSyntax)
 - EmbedContent → EmbedContentItem*
-  - fields: items: EmbedContentItem[]
+  - fields: items: EmbedContentItemSyntax[]
 
-EmbedContentItem (AST: EmbedContentItem is a sum type)
-- EmbedContentItem → TextRun         (TextRun)
-- EmbedContentItem → InterpolationExpression (Interpolation)
+EmbedContentItem (AST: EmbedContentItemSyntax is a sum type)
+- EmbedContentItem → TextRun         (TextRunSyntax)
+- EmbedContentItem → InterpolationExpression (InterpolationExpressionSyntax)
 
-RawEmbedContent (AST: RawEmbedContent)
+RawEmbedContent (AST: RawEmbedContentSyntax)
 - RawEmbedContent → TextRun
   - fields: text: string
 
-TextPart (AST: TextRun)
+TextPart (AST: TextPartSyntax)
 - TextPart → TextRun
   - fields: text: string
 
-TextRun (AST: TextRun)
+TextRun (AST: TextRunSyntax)
 - TextRun → (TEXT_CHUNK | ENTITY | ESCAPED_LBRACE | ESCAPED_RBRACE)+
   - fields: text: string  (concatenated, entities preserved or decoded by later phase)
 
-QualifiedName (AST: QualifiedName)
+QualifiedName (AST: QualifiedNameSyntax)
 - QualifiedName → IDENTIFIER (DOT IDENTIFIER)*
   - fields: parts: string[]
 
-QualifiedMarkupName (AST: QualifiedMarkupName)
+QualifiedMarkupName (AST: QualifiedMarkupNameSyntax)
 - QualifiedMarkupName → IDENTIFIER (DOT MARKUP_IDENTIFIER)*
   - fields: parts: string[]
 
-Pattern (AST: Pattern)
+Pattern (AST: PatternSyntax)
 - Pattern → Literal
 - Pattern → QualifiedName
-  - fields: kind: "literal"|"name", value: Literal|QualifiedName
+  - fields: kind: "literal"|"name", value: LiteralExpressionSyntax|QualifiedNameSyntax
 
 ## AST Mapping Summary
 
 This section lists the AST node types with fields for implementers.
 
-- Module: imports: Import[], types: TypeDef[], functions: FunctionDef[], moduleElement?: Element
-- Import: name: QualifiedName
-- TypeDef: name: string, type: TypeRef
-- TypeRef: kind: "primitive"|"user", name: string (qualified), modifier?: "nullable"|"list"
-- PrimitiveType: name: string
-- UserType: name: QualifiedName
-- FunctionDef: elementName: QualifiedMarkupName, props: PropDef[], body: Expression
-- PropDef: name: string, type: TypeRef, default?: Expression
-- Expression: union of Element | Literal | Identifier | ValueIfExpr | ValueSwitchExpr | ValueForExpr | Call | Member | BinaryExpression | PrefixUnaryExpression | Grouped | UnitLiteral
- - Call: callee: Expression, args: Expression[]
- - Member: target: Expression, name: string
- - BinaryExpression: op: token, left: Expression, right: Expression
- - PrefixUnaryExpression: op: token, expr: Expression
- - Grouped: expr: Expression (may be elided)
- - UnitLiteral
- - Literal: kind, value
- - Identifier: name: string
-- ValueIfExpr: condition: Expression, thenExpr: Expression, elseExpr?: Expression
-- ValueSwitchExpr: scrutinee?: Expression, cases: ValueSwitchCase[], default?: Expression
-- ValueSwitchCase: patterns: Pattern[], expr: Expression
-- ValueSwitchDefault: expr: Expression (usually folded into ValueSwitchExpr.default)
-- ValueForExpr: itemVar: string, indexVar?: string, iterable: Expression, body: Expression
-- MarkupList: items: MarkupItem[]
-- MarkupItem: Element | MarkupIfExpr | MarkupSwitchExpr | MarkupForExpr
-- MarkupIfExpr: condition: Expression, thenElements: MarkupList, elseElements?: MarkupList
-- MarkupSwitchExpr: scrutinee?: Expression, cases: MarkupSwitchCase[], default?: MarkupList
-- MarkupSwitchCase: patterns: Pattern[], elements: MarkupList
-- MarkupSwitchDefault: elements: MarkupList (usually folded into MarkupSwitchExpr.default)
-- MarkupForExpr: itemVar: string, indexVar?: string, iterable: Expression, body: MarkupList
-- Element: name: QualifiedMarkupName, props: PropArg[], children: ElementContent (MarkupList or MixedContent)
-- EmbedElement: name: QualifiedMarkupName, textType: string, mode: "parsed"|"raw", props: PropArg[], content: EmbedContent|RawEmbedContent
-- PropArg: name: QualifiedMarkupName, value: Expression
-- ElementContent: items: MarkupItem[] | MixedContentItem[]
-- MixedContent: items: MixedContentItem[]
-- MixedContentItem: kind: "text"|"element"|"interpolation", value: TextRun|Element|EmbedElement|Interpolation
-- EmbedContent: items: (TextRun|Interpolation)[]
-- RawEmbedContent: text: string
-- TextRun: text: string
-- Interpolation: expr: Expression
-- QualifiedName: parts: string[]
-- QualifiedMarkupName: parts: string[]
-- Pattern: kind: "literal"|"name", value: Literal|QualifiedName
+- ModuleDefinitionSyntax: imports: ImportStatementSyntax[], types: TypeDefinitionSyntax[], functions: FunctionDefinitionSyntax[], moduleElement?: MarkupElementSyntax
+- ImportStatementSyntax: name: QualifiedNameSyntax
+- TypeDefinitionSyntax: name: string, type: TypeSyntax
+- TypeSyntax: kind: "primitive"|"user", name: string (qualified), modifier?: "nullable"|"list"
+- PrimitiveTypeSyntax: name: string
+- UserTypeSyntax: name: QualifiedNameSyntax
+- FunctionDefinitionSyntax: elementName: QualifiedMarkupNameSyntax, props: PropertyDefinitionSyntax[], body: ExpressionSyntax
+- PropertyDefinitionSyntax: name: string, type: TypeSyntax, default?: ExpressionSyntax
+- ExpressionSyntax: union of MarkupElementSyntax | LiteralExpressionSyntax | IdentifierNameSyntax | ValueIfExpressionSyntax | ValueSwitchExpressionSyntax | ValueForExpressionSyntax | CallExpressionSyntax | MemberAccessExpressionSyntax | BinaryExpressionSyntax | PrefixUnaryExpressionSyntax | ParenthesizedExpressionSyntax | UnitLiteralSyntax
+ - CallExpressionSyntax: callee: ExpressionSyntax, args: ExpressionSyntax[]
+ - MemberAccessExpressionSyntax: target: ExpressionSyntax, name: string
+ - BinaryExpressionSyntax: op: token, left: ExpressionSyntax, right: ExpressionSyntax
+ - PrefixUnaryExpressionSyntax: op: token, expr: ExpressionSyntax
+ - ParenthesizedExpressionSyntax: expr: ExpressionSyntax (may be elided)
+ - UnitLiteralSyntax
+ - LiteralExpressionSyntax: kind, value
+ - IdentifierNameSyntax: name: string
+- ValueIfExpressionSyntax: condition: ExpressionSyntax, thenExpr: ExpressionSyntax, elseExpr?: ExpressionSyntax
+- ValueSwitchExpressionSyntax: scrutinee?: ExpressionSyntax, cases: ValueSwitchCaseSyntax[], default?: ExpressionSyntax
+- ValueSwitchCaseSyntax: patterns: PatternSyntax[], expr: ExpressionSyntax
+- ValueSwitchDefaultSyntax: expr: ExpressionSyntax (usually folded into ValueSwitchExpressionSyntax.default)
+- ValueForExpressionSyntax: itemVar: string, indexVar?: string, iterable: ExpressionSyntax, body: ExpressionSyntax
+- MarkupListSyntax: items: MarkupItemSyntax[]
+- MarkupItemSyntax: MarkupElementSyntax | MarkupIfExpressionSyntax | MarkupSwitchExpressionSyntax | MarkupForExpressionSyntax
+- MarkupIfExpressionSyntax: condition: ExpressionSyntax, thenElements: MarkupListSyntax, elseElements?: MarkupListSyntax
+- MarkupSwitchExpressionSyntax: scrutinee?: ExpressionSyntax, cases: MarkupSwitchCaseSyntax[], default?: MarkupListSyntax
+- MarkupSwitchCaseSyntax: patterns: PatternSyntax[], elements: MarkupListSyntax
+- MarkupSwitchDefaultSyntax: elements: MarkupListSyntax (usually folded into MarkupSwitchExpressionSyntax.default)
+- MarkupForExpressionSyntax: itemVar: string, indexVar?: string, iterable: ExpressionSyntax, body: MarkupListSyntax
+- MarkupElementSyntax: name: QualifiedMarkupNameSyntax, props: PropertyArgumentSyntax[], children: ElementContentSyntax (MarkupListSyntax or MixedContentSyntax)
+- EmbedElementSyntax: name: QualifiedMarkupNameSyntax, textType: string, mode: "parsed"|"raw", props: PropertyArgumentSyntax[], content: EmbedContentSyntax|RawEmbedContentSyntax
+- PropertyArgumentSyntax: name: QualifiedMarkupNameSyntax, value: ExpressionSyntax
+- ElementContentSyntax: items: MarkupItemSyntax[] | MixedContentItemSyntax[]
+- MixedContentSyntax: items: MixedContentItemSyntax[]
+- MixedContentItemSyntax: kind: "text"|"element"|"interpolation", value: TextRunSyntax|MarkupElementSyntax|EmbedElementSyntax|InterpolationExpressionSyntax
+- EmbedContentSyntax: items: (TextRunSyntax|InterpolationExpressionSyntax)[]
+- RawEmbedContentSyntax: text: string
+- TextPartSyntax: text: string
+- TextRunSyntax: text: string
+- InterpolationExpressionSyntax: expr: ExpressionSyntax
+- QualifiedNameSyntax: parts: string[]
+- QualifiedMarkupNameSyntax: parts: string[]
+- PatternSyntax: kind: "literal"|"name", value: LiteralExpressionSyntax|QualifiedNameSyntax
 
 ## Disambiguation and Lookahead Notes
 
