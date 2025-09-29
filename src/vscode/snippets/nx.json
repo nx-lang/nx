@@ -1,0 +1,96 @@
+{
+  "Let Element Definition": {
+    "prefix": "nxlet",
+    "description": "Define a let binding for an element",
+    "body": [
+      "let <${1:Element} ${2:prop}:${3:type} ${4:props...:${2}.properties} /> = ${0:value}"
+    ]
+  },
+  "Element": {
+    "prefix": "nxel",
+    "description": "Element open/close pair",
+    "body": [
+      "<${1:Element}$2>",
+      "\t$0",
+      "</${1:Element}>"
+    ]
+  },
+  "Self Closing Element": {
+    "prefix": "nxsc",
+    "description": "Self-closing element",
+    "body": [
+      "<${1:Element} $0/>"
+    ]
+  },
+  "Embed Text Element": {
+    "prefix": "nxembed",
+    "description": "Embed typed text content",
+    "body": [
+      "<${1:Element}:${2:text}$3>",
+      "\t$0",
+      "</${1:Element}>"
+    ]
+  },
+  "If (elements)": {
+    "prefix": "nxife",
+    "description": "If expression producing elements",
+    "body": [
+      "if ${1:condition}:",
+      "\t$2",
+      "/if"
+    ]
+  },
+  "If (value)": {
+    "prefix": "nxifv",
+    "description": "If expression producing a value",
+    "body": [
+      "if ${1:condition}: ${2:then} ${3:else ${4:: ${5:else}} }/if"
+    ]
+  },
+  "For (elements)": {
+    "prefix": "nxfere",
+    "description": "For loop producing elements",
+    "body": [
+      "for ${1:item}${2:, ${3:index}} in ${4:iterable}:",
+      "\t$0",
+      "/for"
+    ]
+  },
+  "For (value)": {
+    "prefix": "nxferv",
+    "description": "For loop producing a value",
+    "body": [
+      "for ${1:item}${2:, ${3:index}} in ${4:iterable}: ${0:expr} /for"
+    ]
+  },
+  "Switch (elements)": {
+    "prefix": "nxswe",
+    "description": "Switch producing elements",
+    "body": [
+      "switch ${1:scrutinee}",
+      "case ${2:pattern}:",
+      "\t$3",
+      "default:",
+      "\t$0",
+      "/switch"
+    ]
+  },
+  "Switch (value)": {
+    "prefix": "nxswv",
+    "description": "Switch producing a value",
+    "body": [
+      "switch ${1:scrutinee}",
+      "case ${2:pattern}: ${3:expr}",
+      "default: ${0:expr}",
+      "/switch"
+    ]
+  },
+  "Interpolation": {
+    "prefix": "nxint",
+    "description": "Value interpolation",
+    "body": [
+      "{${0:expr}}"
+    ]
+  }
+}
+

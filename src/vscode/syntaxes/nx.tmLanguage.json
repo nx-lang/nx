@@ -1,0 +1,239 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "NX",
+  "scopeName": "source.nx",
+  "fileTypes": ["nx"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#tags" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#operators" },
+    { "include": "#interpolation" },
+    { "include": "#entities" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.block.html.nx",
+          "begin": "<!--",
+          "end": "-->",
+          "patterns": [ { "include": "#comments" } ]
+        },
+        {
+          "name": "comment.block.nx",
+          "begin": "/\\*",
+          "end": "\\*/",
+          "patterns": [ { "include": "#comments" } ]
+        },
+        {
+          "name": "comment.line.double-slash.nx",
+          "match": "//.*$"
+        }
+      ]
+    },
+    "entities": {
+      "patterns": [
+        {
+          "name": "constant.character.entity.nx",
+          "match": "&(?:lt|gt|amp|quot|apos|lbrace|rbrace|nbsp);|&(?# generic)(?:#\\d+|#x[0-9A-Fa-f]+|[A-Za-z][A-Za-z0-9]+);"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.nx",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            { "include": "#entities" },
+            { "include": "#interpolation" },
+            { "name": "constant.character.escape.nx", "match": "\\\\[\\\\\"nrt]" }
+          ]
+        },
+        {
+          "name": "string.quoted.single.nx",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            { "include": "#entities" },
+            { "include": "#interpolation" },
+            { "name": "constant.character.escape.nx", "match": "\\\\[\\\\'nrt]" }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        { "name": "constant.numeric.hex.nx", "match": "(?:0x|0X)[0-9A-Fa-f](?:_?[0-9A-Fa-f])*" },
+        { "name": "constant.numeric.float.nx", "match": "(?:[0-9](?:_?[0-9])*)(?:\\.(?:[0-9](?:_?[0-9])*)?)(?:[eE][+-]?(?:[0-9](?:_?[0-9])*))?" },
+        { "name": "constant.numeric.float.nx", "match": "(?:[0-9](?:_?[0-9])*)(?:[eE][+-]?(?:[0-9](?:_?[0-9])*))" },
+        { "name": "constant.numeric.integer.nx", "match": "[0-9](?:_?[0-9])*" }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        { "name": "keyword.control.import.nx", "match": "\\bimport\\b" },
+        { "name": "keyword.declaration.type.nx", "match": "\\btype\\b" },
+        { "name": "keyword.declaration.let.nx", "match": "\\blet\\b" },
+        { "name": "keyword.control.conditional.nx", "match": "\\bif\\b|\\belse\\b|/if\\b" },
+        { "name": "keyword.control.switch.nx", "match": "\\bswitch\\b|/switch\\b|\\bcase\\b|\\bdefault\\b" },
+        { "name": "keyword.control.loop.nx", "match": "\\bfor\\b|/for\\b|\\bin\\b" },
+        { "name": "keyword.other.raw.nx", "match": "\\braw\\b" },
+        { "name": "keyword.other.then.nx", "match": "\\bthen\\b" },
+        { "name": "constant.language.boolean.nx", "match": "\\b(?:true|false)\\b" },
+        { "name": "constant.language.null.nx", "match": "\\bnull\\b" }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.primitive.nx",
+          "match": "\\b(?:string|int|long|float|double|boolean|void|object)\\b"
+        },
+        {
+          "name": "keyword.operator.type-modifier.nx",
+          "match": "\\?|\\.\\.\\."
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        { "name": "keyword.operator.arithmetic.nx", "match": "\\+|-|\\*|/" },
+        { "name": "keyword.operator.comparison.nx", "match": "<=|>=|==|!=|<|>" },
+        { "name": "keyword.operator.logical.nx", "match": "&&|\\|\\|" },
+        { "name": "punctuation.separator.dot.nx", "match": "\\." },
+        { "name": "keyword.operator.assignment.nx", "match": "=" }
+      ]
+    },
+    "qualifiers": {
+      "patterns": [
+        {
+          "name": "entity.name.qualifier.nx",
+          "match": "[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*"
+        }
+      ]
+    },
+    "interpolation": {
+      "begin": "\\{",
+      "beginCaptures": { "0": { "name": "punctuation.section.interpolation.begin.nx" } },
+      "end": "\\}",
+      "endCaptures": { "0": { "name": "punctuation.section.interpolation.end.nx" } },
+      "name": "meta.interpolation.nx",
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#strings" },
+        { "include": "#numbers" },
+        { "include": "#keywords" },
+        { "include": "#types" },
+        { "include": "#operators" },
+        { "include": "#qualifiers" }
+      ]
+    },
+    "attr-value": {
+      "patterns": [
+        { "include": "#strings" },
+        { "include": "#interpolation" },
+        { "include": "#tags" },
+        { "include": "#numbers" },
+        { "include": "#keywords" }
+      ]
+    },
+    "attr-name": {
+      "name": "entity.other.attribute-name.nx",
+      "match": "[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*"
+    },
+    "tags": {
+      "patterns": [
+        { "include": "#fragment" },
+        { "include": "#end-tag" },
+        { "include": "#start-tag" }
+      ]
+    },
+    "fragment": {
+      "begin": "<>",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.tag.begin.nx" }
+      },
+      "end": "</>",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.tag.end.nx" }
+      },
+      "name": "meta.tag.fragment.nx",
+      "patterns": [
+        { "include": "#tags" },
+        { "include": "#interpolation" },
+        { "include": "#strings" },
+        { "include": "#entities" }
+      ]
+    },
+    "end-tag": {
+      "begin": "</",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.tag.begin.nx" }
+      },
+      "end": ">",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.tag.end.nx" }
+      },
+      "name": "meta.tag.end.nx",
+      "patterns": [
+        {
+          "name": "entity.name.tag.nx",
+          "match": "[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*"
+        }
+      ]
+    },
+    "start-tag": {
+      "begin": "<(?!/)",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.tag.begin.nx" }
+      },
+      "end": ">",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.tag.end.nx" }
+      },
+      "name": "meta.tag.start.nx",
+      "patterns": [
+        {
+          "name": "entity.name.tag.nx",
+          "match": "[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*"
+        },
+        {
+          "name": "support.type.text.nx",
+          "match": ":[A-Za-z_][A-Za-z0-9_-]*"
+        },
+        {
+          "name": "keyword.other.raw.nx",
+          "match": "\\braw\\b"
+        },
+        { "include": "#attributes" },
+        {
+          "name": "punctuation.definition.tag.self-closing.nx",
+          "match": "/(?=\\s*>$)"
+        }
+      ]
+    },
+    "attributes": {
+      "patterns": [
+        {
+          "name": "meta.attribute.nx",
+          "match": "\\.\\.\\.[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*"
+        },
+        {
+          "begin": "(?=[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*\\s*=)",
+          "end": "(?=\n|[/>])",
+          "patterns": [
+            { "include": "#attr-name" },
+            { "name": "keyword.operator.assignment.nx", "match": "=" },
+            { "include": "#attr-value" }
+          ]
+        }
+      ]
+    }
+  }
+}

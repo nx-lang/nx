@@ -1,0 +1,51 @@
+{
+  "name": "nx-language",
+  "displayName": "NX Language",
+  "publisher": "nx-lang",
+  "version": "0.1.0",
+  "description": "Syntax highlighting and language basics for the NX language (TextMate grammar only).",
+  "license": "MIT",
+  "keywords": [
+    "nx",
+    "nx-language",
+    "syntax",
+    "textmate"
+  ],
+  "categories": [
+    "Programming Languages"
+  ],
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "activationEvents": [
+    "onLanguage:nx"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "nx",
+        "aliases": [
+          "NX",
+          "nx"
+        ],
+        "extensions": [
+          ".nx"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "nx",
+        "scopeName": "source.nx",
+        "path": "./syntaxes/nx.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "nx",
+        "path": "./snippets/nx.json"
+      }
+    ]
+  }
+}
