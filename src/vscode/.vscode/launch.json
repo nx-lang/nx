@@ -5,11 +5,10 @@
       "name": "Run NX Language Extension",
       "type": "extensionHost",
       "request": "launch",
+      "runtimeExecutable": "${execPath}",
       "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}/src/vscode",
-        "${workspaceFolder}"
+        "--extensionDevelopmentPath=${workspaceFolder}/src/vscode"
       ]
     }
   ]
 }
-
