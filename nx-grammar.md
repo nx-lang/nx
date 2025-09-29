@@ -175,16 +175,32 @@ RawEmbedContent ::=
 ## Lexical Structure
 
 ```ebnf
-Letter      ::=
+Letter      ::= 
     "A" ... "Z" | "a" ... "z"
 Digit       ::=
     "0" ... "9"
 HexDigit    ::=
     Digit | "A" ... "F" | "a" ... "f"
-Whitespace  ::=
+Whitespace  ::= 
     " " | "\t" | "\r" | "\n"
 
-Identifier  ::=
+(* Comments are treated as whitespace/trivia and ignored by the parser. *)
+Comment              ::= LineComment | BlockComment
+LineComment          ::= "//" { ? any character except "\r" and "\n" ? } [ "\r" | "\n" ]
+
+(* Block comments support nesting of the same kind. *)
+BlockComment         ::= CBlockComment | HtmlBlockComment
+CBlockComment        ::= "/*" CBlockContent "*/"
+HtmlBlockComment     ::= "<!--" HtmlBlockContent "-->"
+CBlockContent        ::= { CBlockChar | CBlockComment }        (* allows nested /* */ *)
+HtmlBlockContent     ::= { HtmlBlockChar | HtmlBlockComment }  (* allows nested <!-- --> *)
+CBlockChar           ::= ? any character including newline, except "/*" and "*/" ?
+HtmlBlockChar        ::= ? any character including newline, except "<!--" and "-->" ?
+
+(* Notes: Comments may appear anywhere whitespace is allowed, but are not recognized inside
+   string literals or textual content (e.g., TextRun/Embed text). *)
+
+Identifier  ::= 
     (Letter | "_") { Letter | Digit | "_" }
 MarkupIdentifier  ::=
     (Letter | "_") { Letter | Digit | "_" | "-" }

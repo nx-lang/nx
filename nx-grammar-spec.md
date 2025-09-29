@@ -63,6 +63,18 @@ Text content tokens (inside text elements)
 Special
 - EOF (end of file)
 
+Trivia (whitespace/comments; skipped by lexer)
+- WHITESPACE (spaces, tabs, newlines)
+- LINE_COMMENT ("//" to end of line)
+- BLOCK_COMMENT ("/*" … "*/"; nests with same-kind openers)
+- HTML_BLOCK_COMMENT ("<!--" … "-->"; nests with same-kind openers)
+
+Notes
+- The lexer does not produce tokens for trivia; they are attached as trivia or discarded.
+- Comments and whitespace may appear between any tokens.
+- Block comments are nestable with same-kind openers only. The lexer maintains a depth counter: increment on opener, decrement on closer, emit one token at depth 0. Unterminated blocks are lexing errors.
+- Comments are not recognized inside string literals or text content tokens (TEXT_CHUNK/ENTITY/ESCAPED_*).
+
 ## Operator Precedence (Pratt)
 
 Conventional expressions (non-markup) use a Pratt parser with the following precedence and associativity. Higher number binds tighter.
