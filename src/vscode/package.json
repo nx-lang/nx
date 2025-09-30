@@ -17,9 +17,7 @@
   "engines": {
     "vscode": "^1.90.0"
   },
-  "activationEvents": [
-    "onLanguage:nx"
-  ],
+  
   "contributes": {
     "languages": [
       {
