@@ -214,7 +214,7 @@
         { "include": "#attributes" },
         {
           "name": "punctuation.definition.tag.self-closing.nx",
-          "match": "/(?=\\s*>$)"
+          "match": "/(?=\\s*>)"
         }
       ]
     },

@@ -96,4 +96,18 @@ describe('NX TextMate grammar', function () {
     // Closing fragment tag is recognized
     expect(scopesForSubstring(line, tokens, '</>')).to.include('meta.tag.end.nx');
   });
+
+  it('highlights self-closing slash inside attribute value', function () {
+    const line = '<Button prop=<Start/> />';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    // The slash in the inner self-closing tag should be highlighted
+    expect(scopesForSubstring(line, tokens, '/')).to.include('punctuation.definition.tag.self-closing.nx');
+  });
+
+  it('highlights self-closing slash not at end-of-line', function () {
+    const line = '<Start/> <Next/>';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    // The first self-closing slash should still be highlighted despite trailing content on the line
+    expect(scopesForSubstring(line, tokens, '/')).to.include('punctuation.definition.tag.self-closing.nx');
+  });
 });
