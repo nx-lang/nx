@@ -55,14 +55,14 @@ describe('NX TextMate grammar', function () {
 
   it('highlights control keywords (if)', function () {
     const line = 'if isLoading:';
-    const { tokens } = grammar.tokenizeLine(line);
+    const { tokens } = grammar.tokenizeLine(line, null);
     const scopes = scopesForSubstring(line, tokens, 'if');
     expect(scopes).to.include('keyword.control.conditional.nx');
   });
 
   it('highlights tags and attributes', function () {
     const line = '<Button x=1 y=2/>';
-    const { tokens } = grammar.tokenizeLine(line);
+    const { tokens } = grammar.tokenizeLine(line, null);
     expect(scopesForSubstring(line, tokens, 'Button')).to.include('entity.name.tag.nx');
     expect(scopesForSubstring(line, tokens, 'x')).to.include('entity.other.attribute-name.nx');
     expect(scopesForSubstring(line, tokens, '1')).to.include('constant.numeric.integer.nx');
@@ -70,7 +70,7 @@ describe('NX TextMate grammar', function () {
 
   it('highlights interpolation regions', function () {
     const line = 'class="card {className}"';
-    const { tokens } = grammar.tokenizeLine(line);
+    const { tokens } = grammar.tokenizeLine(line, null);
     // Opening brace should be marked as interpolation begin
     expect(scopesForSubstring(line, tokens, '{')).to.include('punctuation.section.interpolation.begin.nx');
     // Inner identifier should carry the interpolation meta scope
