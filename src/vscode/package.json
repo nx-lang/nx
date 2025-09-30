@@ -26,6 +26,15 @@
   "engines": {
     "vscode": "^1.90.0"
   },
+  "files": [
+    "package.json",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "language-configuration.json",
+    "syntaxes/**",
+    "snippets/**"
+  ],
   
   "contributes": {
     "languages": [
