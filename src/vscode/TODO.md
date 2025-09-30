@@ -3,7 +3,7 @@
 This tracks near-term enhancements and future work. The LSP server will be implemented in C#.
 
 ## Grammar Coverage
-- [ ] Parse attribute values that can embed inline elements, e.g., `prop=<Start/>` and `content=<:uitext>…</>`.
+- [x] Parse attribute values that can embed inline elements, e.g., `prop=<Start/>` and `content=<:uitext>…</>`.
 - [ ] Improve mixed content highlighting: interleave text, elements, and interpolations more accurately.
 - [ ] Add explicit patterns for elements control forms: `ElementsIfExpression`, `ElementsSwitchExpression`, `ElementsForExpression`.
 - [ ] Recognize `raw` embed mode distinctly and treat inner content as unparsed text.

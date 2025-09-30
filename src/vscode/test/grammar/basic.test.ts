@@ -76,4 +76,24 @@ describe('NX TextMate grammar', function () {
     // Inner identifier should carry the interpolation meta scope
     expect(scopesForSubstring(line, tokens, 'className')).to.include('meta.interpolation.nx');
   });
+
+  it('highlights inline element as attribute value', function () {
+    const line = '<Button prop=<Start/> />';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    // Attribute name
+    expect(scopesForSubstring(line, tokens, 'prop')).to.include('entity.other.attribute-name.nx');
+    // Inline element tag name inside attribute value
+    expect(scopesForSubstring(line, tokens, 'Start')).to.include('entity.name.tag.nx');
+  });
+
+  it('highlights typed inline content in attribute value', function () {
+    const line = '<Button content=<:uitext>Click</> />';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    // Attribute name
+    expect(scopesForSubstring(line, tokens, 'content')).to.include('entity.other.attribute-name.nx');
+    // Typed tag suffix
+    expect(scopesForSubstring(line, tokens, ':uitext')).to.include('support.type.text.nx');
+    // Closing fragment tag is recognized
+    expect(scopesForSubstring(line, tokens, '</>')).to.include('meta.tag.end.nx');
+  });
 });
