@@ -4,18 +4,18 @@ import * as path from 'path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { expect } from 'chai';
-// Use CommonJS require for vscode-oniguruma to avoid ESM interop issues
+import type { IGrammar, IToken } from 'vscode-textmate';
+// Use CommonJS require via createRequire to avoid ESM interop issues
 
-const require = createRequire(import.meta.url);
+const cjsRequire = createRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const onig: any = require('vscode-oniguruma');
+const onig: any = cjsRequire('vscode-oniguruma');
+const vsctm: any = cjsRequire('vscode-textmate');
 
-const vsctm: any = require('vscode-textmate');
-
-async function loadGrammar(): Promise<any> {
-  const wasmPath = require.resolve('vscode-oniguruma/release/onig.wasm');
+async function loadGrammar(): Promise<IGrammar> {
+  const wasmPath = cjsRequire.resolve('vscode-oniguruma/release/onig.wasm');
   const wasmBin = fs.readFileSync(wasmPath).buffer;
   await onig.loadWASM(wasmBin);
 
@@ -37,7 +37,7 @@ async function loadGrammar(): Promise<any> {
   return grammar;
 }
 
-function scopesForSubstring(line: string, tokens: vsctm.IToken[], substring: string): string[] {
+function scopesForSubstring(line: string, tokens: IToken[], substring: string): string[] {
   const idx = line.indexOf(substring);
   if (idx === -1) return [];
   const pos = idx + Math.floor(substring.length / 2);
@@ -46,7 +46,7 @@ function scopesForSubstring(line: string, tokens: vsctm.IToken[], substring: str
 }
 
 describe('NX TextMate grammar', function () {
-  let grammar: vsctm.IGrammar;
+  let grammar: IGrammar;
 
   before(async function () {
     grammar = await loadGrammar();
