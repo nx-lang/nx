@@ -357,3 +357,6 @@ MigrationBackup/
 
 # Claude
 .claude/settings.local.json
+
+# VS Code extension packages
+*.vsix

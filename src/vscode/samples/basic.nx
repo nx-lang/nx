@@ -1,11 +1,8 @@
 import ui.widgets
 import data.models
 
-type User = object
-type Name = string?
-
 let <UserCard user:User className:string content:Element.../> =
-  <section class="card ${className}">
+  <section class="card {className}">
     if isLoading:
       <Spinner/>
     else:
