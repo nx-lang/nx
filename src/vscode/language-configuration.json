@@ -7,7 +7,10 @@
     ["{", "}"],
     ["[", "]"],
     ["(", ")"],
-    ["<", ">"]
+    ["<", ">"],
+    ["if", "/if"],
+    ["for", "/for"],
+    ["switch", "/switch"]
   ],
   "autoClosingPairs": [
     { "open": "{", "close": "}" },
@@ -25,6 +28,12 @@
     { "open": "\"", "close": "\"" },
     { "open": "<", "close": ">" }
   ],
+  "colorizedBracketPairs": [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"],
+    ["<", ">"],
+  ],
   "wordPattern": "(-?\\d*\\.\\d\\w*)|([^\\`\\~!@#%\\^&*()=+[\\]{}\\|;:'\",.\\s<>/]+)",
   "indentationRules": {
     "increaseIndentPattern": "^\\s*(?:if|for|switch)\\b.*:\\s*$|^\\s*<(?!(?:/|!)).*[^/]>(\\s*)$",
@@ -34,4 +43,3 @@
     "offSide": false
   }
 }
-
