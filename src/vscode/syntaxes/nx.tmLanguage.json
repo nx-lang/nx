@@ -201,7 +201,7 @@
       "patterns": [
         {
           "name": "entity.name.tag.nx",
-          "match": "[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*"
+          "match": "\\G[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*"
         },
         {
           "name": "support.type.text.nx",

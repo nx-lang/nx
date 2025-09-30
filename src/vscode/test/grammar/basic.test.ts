@@ -1,11 +1,20 @@
 // Minimal TextMate grammar tokenization tests for NX (TypeScript)
 import * as fs from 'fs';
 import * as path from 'path';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { expect } from 'chai';
-import * as vsctm from 'vscode-textmate';
-import * as onig from 'vscode-oniguruma';
+// Use CommonJS require for vscode-oniguruma to avoid ESM interop issues
 
-async function loadGrammar(): Promise<vsctm.IGrammar> {
+const require = createRequire(import.meta.url);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const onig: any = require('vscode-oniguruma');
+
+const vsctm: any = require('vscode-textmate');
+
+async function loadGrammar(): Promise<any> {
   const wasmPath = require.resolve('vscode-oniguruma/release/onig.wasm');
   const wasmBin = fs.readFileSync(wasmPath).buffer;
   await onig.loadWASM(wasmBin);
@@ -68,4 +77,3 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(line, tokens, 'className')).to.include('meta.interpolation.nx');
   });
 });
-

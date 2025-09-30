@@ -3,5 +3,5 @@
   "spec": ["test/**/*.test.ts"],
   "timeout": 8000,
   "color": true,
-  "require": ["ts-node/register"]
+  "nodeOption": ["--loader", "ts-node/esm"]
 }
