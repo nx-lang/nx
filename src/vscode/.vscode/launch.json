@@ -7,7 +7,6 @@
       "request": "launch",
       "runtimeExecutable": "${execPath}",
       "args": [
-        "--remote=wsl+${env:WSL_DISTRO_NAME}",
         "--extensionDevelopmentPath=${workspaceFolder}/src/vscode"
       ]
     }
