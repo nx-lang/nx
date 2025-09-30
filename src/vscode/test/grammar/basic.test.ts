@@ -1,32 +1,34 @@
-/* Minimal TextMate grammar tokenization tests for NX */
-const fs = require('fs');
-const path = require('path');
-const { expect } = require('chai');
-const vsctm = require('vscode-textmate');
-const onig = require('vscode-oniguruma');
+// Minimal TextMate grammar tokenization tests for NX (TypeScript)
+import * as fs from 'fs';
+import * as path from 'path';
+import { expect } from 'chai';
+import * as vsctm from 'vscode-textmate';
+import * as onig from 'vscode-oniguruma';
 
-async function loadGrammar() {
+async function loadGrammar(): Promise<vsctm.IGrammar> {
   const wasmPath = require.resolve('vscode-oniguruma/release/onig.wasm');
   const wasmBin = fs.readFileSync(wasmPath).buffer;
   await onig.loadWASM(wasmBin);
 
   const registry = new vsctm.Registry({
     onigLib: Promise.resolve({
-      createOnigScanner: (patterns) => new onig.OnigScanner(patterns),
-      createOnigString: (s) => new onig.OnigString(s)
+      createOnigScanner: (patterns: string[]) => new onig.OnigScanner(patterns),
+      createOnigString: (s: string) => new onig.OnigString(s)
     }),
-    loadGrammar: async (scopeName) => {
-      if (scopeName !== 'source.nx') return null;
+    loadGrammar: async (scopeName: string) => {
+      if (scopeName !== 'source.nx') return null as any;
       const grammarPath = path.join(__dirname, '..', '..', 'syntaxes', 'nx.tmLanguage.json');
       const content = fs.readFileSync(grammarPath, 'utf8');
       return vsctm.parseRawGrammar(content, grammarPath);
     }
   });
 
-  return registry.loadGrammar('source.nx');
+  const grammar = await registry.loadGrammar('source.nx');
+  if (!grammar) throw new Error('Failed to load NX grammar');
+  return grammar;
 }
 
-function scopesForSubstring(line, tokens, substring) {
+function scopesForSubstring(line: string, tokens: vsctm.IToken[], substring: string): string[] {
   const idx = line.indexOf(substring);
   if (idx === -1) return [];
   const pos = idx + Math.floor(substring.length / 2);
@@ -35,7 +37,7 @@ function scopesForSubstring(line, tokens, substring) {
 }
 
 describe('NX TextMate grammar', function () {
-  let grammar;
+  let grammar: vsctm.IGrammar;
 
   before(async function () {
     grammar = await loadGrammar();

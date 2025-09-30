@@ -1,6 +1,7 @@
 {
-  "extension": [".js"],
-  "spec": ["test/**/*.test.js"],
-  "timeout": 5000,
-  "color": true
+  "extension": [".ts"],
+  "spec": ["test/**/*.test.ts"],
+  "timeout": 8000,
+  "color": true,
+  "require": ["ts-node/register"]
 }
