@@ -233,6 +233,9 @@
       "patterns": [
         { "include": "#property-list-if" },
         { "include": "#property-list-switch" },
+        { "name": "keyword.control.conditional.nx", "match": "(?:^|\\s)(/if)\\b" },
+        { "name": "keyword.control.switch.nx", "match": "(?:^|\\s)(/switch)\\b" },
+        { "name": "keyword.control.loop.nx", "match": "(?:^|\\s)(/for)\\b" },
         {
           "name": "meta.attribute.nx",
           "match": "\\.\\.\\.[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*"
@@ -242,6 +245,11 @@
           "begin": "(?=[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*\\s*=)",
           "end": "(?=\n|[/>])",
           "patterns": [
+            { "name": "keyword.control.conditional.nx", "match": "(?:^|\\s)(/if)\\b" },
+            { "name": "keyword.control.switch.nx", "match": "(?:^|\\s)(/switch)\\b" },
+            { "name": "keyword.control.loop.nx", "match": "(?:^|\\s)(/for)\\b" },
+            { "name": "keyword.control.switch.nx", "match": "(?:^|\\s)(?:case|default)\\b" },
+            { "name": "keyword.control.conditional.nx", "match": "(?:^|\\s)(?:else(?:\\s+if)?)\\b" },
             { "include": "#attr-name" },
             { "name": "keyword.operator.assignment.nx", "match": "=" },
             { "include": "#attr-value" }
@@ -260,10 +268,10 @@
         { "include": "#comments" },
         { "include": "#strings" },
         { "include": "#numbers" },
-        { "include": "#operators" },
-        { "include": "#types" },
-        { "include": "#interpolation" },
         { "include": "#tags" },
+        { "include": "#interpolation" },
+        { "include": "#types" },
+        { "include": "#operators" },
         {
           "name": "keyword.control.conditional.nx",
           "match": "^\\s*(?:else(?:\\s+if)?)\\b"
@@ -280,10 +288,10 @@
         { "include": "#comments" },
         { "include": "#strings" },
         { "include": "#numbers" },
-        { "include": "#operators" },
-        { "include": "#types" },
-        { "include": "#interpolation" },
         { "include": "#tags" },
+        { "include": "#interpolation" },
+        { "include": "#types" },
+        { "include": "#operators" },
         { "name": "keyword.control.switch.nx", "match": "^\\s*(?:case|default)\\b" }
       ]
     },
@@ -297,10 +305,10 @@
         { "include": "#comments" },
         { "include": "#strings" },
         { "include": "#numbers" },
-        { "include": "#operators" },
-        { "include": "#types" },
-        { "include": "#interpolation" },
         { "include": "#tags" },
+        { "include": "#interpolation" },
+        { "include": "#types" },
+        { "include": "#operators" },
         { "name": "keyword.control.loop.nx", "match": "\\bin\\b" }
       ]
     },
@@ -312,7 +320,7 @@
       "endCaptures": { "1": { "name": "keyword.control.conditional.nx" } },
       "name": "meta.control.if.properties.nx",
       "patterns": [
-        { "name": "keyword.control.conditional.nx", "match": "^\\s*(?:else(?:\\s+if)?)\\b" },
+        { "name": "keyword.control.conditional.nx", "match": "(?:^|\\s)(?:else(?:\\s+if)?)\\b" },
         { "include": "#attributes" }
       ]
     },
@@ -323,7 +331,7 @@
       "endCaptures": { "1": { "name": "keyword.control.switch.nx" } },
       "name": "meta.control.switch.properties.nx",
       "patterns": [
-        { "name": "keyword.control.switch.nx", "match": "^\\s*(?:case|default)\\b" },
+        { "name": "keyword.control.switch.nx", "match": "(?:^|\\s)(?:case|default)\\b" },
         { "include": "#attributes" }
       ]
     }
