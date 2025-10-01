@@ -5,10 +5,13 @@
   "fileTypes": ["nx"],
   "patterns": [
     { "include": "#comments" },
+    { "include": "#elements-if" },
+    { "include": "#elements-switch" },
+    { "include": "#elements-for" },
     { "include": "#tags" },
     { "include": "#strings" },
     { "include": "#numbers" },
-    { "include": "#keywords" },
+    { "include": "#keywords-core" },
     { "include": "#types" },
     { "include": "#operators" },
     { "include": "#interpolation" },
@@ -75,17 +78,21 @@
         { "name": "constant.numeric.integer.nx", "match": "[0-9](?:_?[0-9])*" }
       ]
     },
-    "keywords": {
+    "keywords-core": {
       "patterns": [
         { "name": "keyword.control.import.nx", "match": "\\bimport\\b" },
         { "name": "keyword.declaration.type.nx", "match": "\\btype\\b" },
         { "name": "keyword.declaration.let.nx", "match": "\\blet\\b" },
-        { "name": "keyword.control.conditional.nx", "match": "\\bif\\b|\\belse\\b|/if\\b" },
-        { "name": "keyword.control.switch.nx", "match": "\\bswitch\\b|/switch\\b|\\bcase\\b|\\bdefault\\b" },
-        { "name": "keyword.control.loop.nx", "match": "\\bfor\\b|/for\\b|\\bin\\b" },
         { "name": "keyword.other.raw.nx", "match": "\\braw\\b" },
         { "name": "constant.language.boolean.nx", "match": "\\b(?:true|false)\\b" },
         { "name": "constant.language.null.nx", "match": "\\bnull\\b" }
+      ]
+    },
+    "keywords-control": {
+      "patterns": [
+        { "name": "keyword.control.conditional.nx", "match": "\\bif\\b|\\belse\\b" },
+        { "name": "keyword.control.switch.nx", "match": "\\bswitch\\b|\\bcase\\b|\\bdefault\\b" },
+        { "name": "keyword.control.loop.nx", "match": "\\bfor\\b|\\bin\\b" }
       ]
     },
     "types": {
@@ -127,7 +134,8 @@
         { "include": "#comments" },
         { "include": "#strings" },
         { "include": "#numbers" },
-        { "include": "#keywords" },
+        { "include": "#keywords-core" },
+        { "include": "#keywords-control" },
         { "include": "#types" },
         { "include": "#operators" },
         { "include": "#qualifiers" }
@@ -139,7 +147,8 @@
         { "include": "#interpolation" },
         { "include": "#tags" },
         { "include": "#numbers" },
-        { "include": "#keywords" }
+        { "include": "#keywords-core" },
+        { "include": "#keywords-control" }
       ]
     },
     "attr-name": {
@@ -164,6 +173,9 @@
       },
       "name": "meta.tag.fragment.nx",
       "patterns": [
+        { "include": "#elements-if" },
+        { "include": "#elements-switch" },
+        { "include": "#elements-for" },
         { "include": "#tags" },
         { "include": "#interpolation" },
         { "include": "#strings" },
@@ -219,11 +231,13 @@
     },
     "attributes": {
       "patterns": [
+        { "include": "#property-list-if" },
+        { "include": "#property-list-switch" },
         {
           "name": "meta.attribute.nx",
           "match": "\\.\\.\\.[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*"
         },
-        { "include": "#keywords" },
+        { "include": "#keywords-core" },
         {
           "begin": "(?=[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*\\s*=)",
           "end": "(?=\n|[/>])",
@@ -233,6 +247,84 @@
             { "include": "#attr-value" }
           ]
         }
+      ]
+    },
+
+    "elements-if": {
+      "begin": "^\\s*(if)\\b",
+      "beginCaptures": { "1": { "name": "keyword.control.conditional.nx" } },
+      "end": "^\\s*(/if)\\b",
+      "endCaptures": { "1": { "name": "keyword.control.conditional.nx" } },
+      "name": "meta.control.if.elements.nx",
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#strings" },
+        { "include": "#numbers" },
+        { "include": "#operators" },
+        { "include": "#types" },
+        { "include": "#interpolation" },
+        { "include": "#tags" },
+        {
+          "name": "keyword.control.conditional.nx",
+          "match": "^\\s*(?:else(?:\\s+if)?)\\b"
+        }
+      ]
+    },
+    "elements-switch": {
+      "begin": "^\\s*(switch)\\b",
+      "beginCaptures": { "1": { "name": "keyword.control.switch.nx" } },
+      "end": "^\\s*(/switch)\\b",
+      "endCaptures": { "1": { "name": "keyword.control.switch.nx" } },
+      "name": "meta.control.switch.elements.nx",
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#strings" },
+        { "include": "#numbers" },
+        { "include": "#operators" },
+        { "include": "#types" },
+        { "include": "#interpolation" },
+        { "include": "#tags" },
+        { "name": "keyword.control.switch.nx", "match": "^\\s*(?:case|default)\\b" }
+      ]
+    },
+    "elements-for": {
+      "begin": "^\\s*(for)\\b",
+      "beginCaptures": { "1": { "name": "keyword.control.loop.nx" } },
+      "end": "^\\s*(/for)\\b",
+      "endCaptures": { "1": { "name": "keyword.control.loop.nx" } },
+      "name": "meta.control.loop.elements.nx",
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#strings" },
+        { "include": "#numbers" },
+        { "include": "#operators" },
+        { "include": "#types" },
+        { "include": "#interpolation" },
+        { "include": "#tags" },
+        { "name": "keyword.control.loop.nx", "match": "\\bin\\b" }
+      ]
+    },
+
+    "property-list-if": {
+      "begin": "^\\s*(if)\\b",
+      "beginCaptures": { "1": { "name": "keyword.control.conditional.nx" } },
+      "end": "^\\s*(/if)\\b",
+      "endCaptures": { "1": { "name": "keyword.control.conditional.nx" } },
+      "name": "meta.control.if.properties.nx",
+      "patterns": [
+        { "name": "keyword.control.conditional.nx", "match": "^\\s*(?:else(?:\\s+if)?)\\b" },
+        { "include": "#attributes" }
+      ]
+    },
+    "property-list-switch": {
+      "begin": "^\\s*(switch)\\b",
+      "beginCaptures": { "1": { "name": "keyword.control.switch.nx" } },
+      "end": "^\\s*(/switch)\\b",
+      "endCaptures": { "1": { "name": "keyword.control.switch.nx" } },
+      "name": "meta.control.switch.properties.nx",
+      "patterns": [
+        { "name": "keyword.control.switch.nx", "match": "^\\s*(?:case|default)\\b" },
+        { "include": "#attributes" }
       ]
     }
   }
