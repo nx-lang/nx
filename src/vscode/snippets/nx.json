@@ -44,7 +44,7 @@
     "prefix": "nxifv",
     "description": "If expression producing a value",
     "body": [
-      "if ${1:condition}: ${2:then} ${3:else ${4:: ${5:else}} }/if"
+      "if ${1:condition}: ${2:expr} ${3:else: ${4:expr} }/if"
     ]
   },
   "For (elements)": {
@@ -93,4 +93,3 @@
     ]
   }
 }
-

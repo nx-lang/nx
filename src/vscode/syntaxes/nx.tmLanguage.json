@@ -84,7 +84,6 @@
         { "name": "keyword.control.switch.nx", "match": "\\bswitch\\b|/switch\\b|\\bcase\\b|\\bdefault\\b" },
         { "name": "keyword.control.loop.nx", "match": "\\bfor\\b|/for\\b|\\bin\\b" },
         { "name": "keyword.other.raw.nx", "match": "\\braw\\b" },
-        { "name": "keyword.other.then.nx", "match": "\\bthen\\b" },
         { "name": "constant.language.boolean.nx", "match": "\\b(?:true|false)\\b" },
         { "name": "constant.language.null.nx", "match": "\\bnull\\b" }
       ]
