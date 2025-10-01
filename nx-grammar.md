@@ -140,13 +140,26 @@ ElementsForExpression ::=
     | "for" Identifier "," Identifier "in" ValueExpression ":" ElementsExpression "/for"  (* With index *)
 
 Element ::=
-    "<" ElementName {PropertyArgument} "/>"
-    | "<" ElementName {PropertyArgument} ">" Content "</" ElementName ">"
+    "<" ElementName PropertyList "/>"
+    | "<" ElementName PropertyList ">" Content "</" ElementName ">"
     | EmbedElement
 
 EmbedElement ::=
-    "<" ElementName ":" EmbedTextType {PropertyArgument} ">" EmbedContent "</" ElementName ">"
-    | "<" ElementName ":" EmbedTextType "raw" {PropertyArgument} ">" RawEmbedContent "</" ElementName ">"
+    "<" ElementName ":" EmbedTextType PropertyList ">" EmbedContent "</" ElementName ">"
+    | "<" ElementName ":" EmbedTextType "raw" PropertyList ">" RawEmbedContent "</" ElementName ">"
+
+(* list of properties, with if/switch allowed *)
+PropertyList ::=
+    {PropertyValue | PropertyListIf | PropertyListSwitch}
+
+PropertyListIf ::=
+    "if" ValueExpression ":" PropertyList ["else" ":" PropertyList] "/if"
+
+PropertyListSwitch ::=
+    "switch" [ValueExpression]
+    {"case" Pattern {"," Pattern} ":" PropertyList}
+    ["default" ":" PropertyList]
+    "/switch"
 
 Content ::=
     ElementsExpression |     (* list of elements, with if/switch/for allowed *)
@@ -161,7 +174,7 @@ EmbedTextType ::=
 ElementName ::=
     QualifiedMarkupName
 
-PropertyArgument ::=
+PropertyValue ::=
     QualifiedMarkupName "=" RhsExpression
 
 EmbedContent ::=
@@ -175,13 +188,13 @@ RawEmbedContent ::=
 ## Lexical Structure
 
 ```ebnf
-Letter      ::= 
+Letter      ::=
     "A" ... "Z" | "a" ... "z"
 Digit       ::=
     "0" ... "9"
 HexDigit    ::=
     Digit | "A" ... "F" | "a" ... "f"
-Whitespace  ::= 
+Whitespace  ::=
     " " | "\t" | "\r" | "\n"
 
 (* Comments are treated as whitespace/trivia and ignored by the parser. *)
@@ -200,7 +213,7 @@ HtmlBlockChar        ::= ? any character including newline, except "<!--" and "-
 (* Notes: Comments may appear anywhere whitespace is allowed, but are not recognized inside
    string literals or textual content (e.g., TextRun/Embed text). *)
 
-Identifier  ::= 
+Identifier  ::=
     (Letter | "_") { Letter | Digit | "_" }
 MarkupIdentifier  ::=
     (Letter | "_") { Letter | Digit | "_" | "-" }

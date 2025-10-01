@@ -259,20 +259,20 @@ Element (AST: MarkupElementSyntax is a sum type)
 - Element → LT ElementName ElementSuffix
 
 ElementSuffix (builds either Element or EmbedElement AST)
-- ElementSuffix → PropertyArgument* RegularElementTail
+- ElementSuffix → PropertyList RegularElementTail
 - ElementSuffix → COLON EmbedTextType EmbedElementTail
 
 RegularElementTail (AST: ElementSyntax)
 - RegularElementTail → SLASH GT
-  - fields: name (from ElementName), props: PropertyArgumentSyntax[], children: []
+  - fields: name (from ElementName), props: PropertyListSyntax, children: []
 - RegularElementTail → GT Content LT SLASH ElementName GT
-  - fields: name (from ElementName), props: PropertyArgumentSyntax[], children: ElementContentSyntax.items
+  - fields: name (from ElementName), props: PropertyListSyntax, children: ElementContentSyntax.items
 
 EmbedElementTail (AST: EmbedElementSyntax)
-- EmbedElementTail → PropertyArgument* GT EmbedContent LT SLASH ElementName GT
-  - fields: name (from ElementName), textType (from EmbedTextType), mode: "parsed", props: PropertyArgumentSyntax[], content: EmbedContentSyntax.items
-- EmbedElementTail → RAW PropertyArgument* GT RawEmbedContent LT SLASH ElementName GT
-  - fields: name (from ElementName), textType (from EmbedTextType), mode: "raw", props: PropertyArgumentSyntax[], content: RawEmbedContentSyntax.text
+- EmbedElementTail → PropertyList GT EmbedContent LT SLASH ElementName GT
+  - fields: name (from ElementName), textType (from EmbedTextType), mode: "parsed", props: PropertyListSyntax, content: EmbedContentSyntax.items
+- EmbedElementTail → RAW PropertyList GT RawEmbedContent LT SLASH ElementName GT
+  - fields: name (from ElementName), textType (from EmbedTextType), mode: "raw", props: PropertyListSyntax, content: RawEmbedContentSyntax.text
 
 ElementName
 - ElementName → QualifiedMarkupName
@@ -281,9 +281,37 @@ EmbedTextType
 - EmbedTextType → IDENTIFIER
   - fields (on EmbedElement): textType: string
 
-PropertyArgument (AST: PropertyArgumentSyntax)
-- PropertyArgument → QualifiedMarkupName EQ RhsExpression
+PropertyList (AST: PropertyListSyntax)
+- PropertyList → PropertyListItem*
+  - fields: items: PropertyListItemSyntax[]
+
+PropertyListItem (AST: PropertyListItemSyntax is a sum type)
+- PropertyListItem → PropertyValue                (PropertyValueSyntax)
+- PropertyListItem → PropertyListIf               (PropertyIfSyntax)
+- PropertyListItem → PropertyListSwitch           (PropertySwitchSyntax)
+
+PropertyValue (AST: PropertyValueSyntax)
+- PropertyValue → QualifiedMarkupName EQ RhsExpression
   - fields: name: QualifiedMarkupNameSyntax, value: ExpressionSyntax
+
+PropertyListIf (AST: PropertyIfSyntax)
+- PropertyListIf → IF ValueExpression COLON PropertyList [ELSE COLON PropertyList] END_IF
+  - fields: condition: ExpressionSyntax, thenProps: PropertyListSyntax, elseProps?: PropertyListSyntax
+
+PropertyListSwitch (AST: PropertySwitchSyntax)
+- PropertyListSwitch → SWITCH ValueSwitchScrutineeOpt PropertyListSwitchCase+ PropertyListSwitchDefaultOpt END_SWITCH
+  - fields: scrutinee?: ExpressionSyntax, cases: PropertySwitchCaseSyntax[], default?: PropertyListSyntax
+
+PropertyListSwitchCase (AST: PropertySwitchCaseSyntax)
+- PropertyListSwitchCase → CASE Pattern (COMMA Pattern)* COLON PropertyList
+  - fields: patterns: PatternSyntax[], props: PropertyListSyntax
+
+PropertyListSwitchDefault (AST: PropertySwitchDefaultSyntax)
+- PropertyListSwitchDefault → DEFAULT COLON PropertyList
+  - fields: props: PropertyListSyntax
+
+PropertyListSwitchDefaultOpt
+- PropertyListSwitchDefaultOpt → PropertyListSwitchDefault | ε
 
 Content (AST: ElementContentSyntax is a sum type)
 - Content → ElementsExpression
@@ -342,8 +370,8 @@ This section lists the AST node types with fields for implementers.
 - TypeSyntax: kind: "primitive"|"user", name: string (qualified), modifier?: "nullable"|"list"
 - PrimitiveTypeSyntax: name: string
 - UserTypeSyntax: name: QualifiedNameSyntax
-- FunctionDefinitionSyntax: elementName: QualifiedMarkupNameSyntax, props: PropertyDefinitionSyntax[], body: ExpressionSyntax
-- PropertyDefinitionSyntax: name: string, type: TypeSyntax, default?: ExpressionSyntax
+ - FunctionDefinitionSyntax: elementName: QualifiedMarkupNameSyntax, props: PropertyDefinitionSyntax[], body: ExpressionSyntax
+ - PropertyDefinitionSyntax: name: string, type: TypeSyntax, default?: ExpressionSyntax
 - ExpressionSyntax: union of MarkupElementSyntax | LiteralExpressionSyntax | IdentifierNameSyntax | ValueIfExpressionSyntax | ValueSwitchExpressionSyntax | ValueForExpressionSyntax | CallExpressionSyntax | MemberAccessExpressionSyntax | BinaryExpressionSyntax | PrefixUnaryExpressionSyntax | ParenthesizedExpressionSyntax | UnitLiteralSyntax
  - CallExpressionSyntax: callee: ExpressionSyntax, args: ExpressionSyntax[]
  - MemberAccessExpressionSyntax: target: ExpressionSyntax, name: string
@@ -365,9 +393,15 @@ This section lists the AST node types with fields for implementers.
 - MarkupSwitchCaseSyntax: patterns: PatternSyntax[], elements: MarkupListSyntax
 - MarkupSwitchDefaultSyntax: elements: MarkupListSyntax (usually folded into MarkupSwitchExpressionSyntax.default)
 - MarkupForExpressionSyntax: itemVar: string, indexVar?: string, iterable: ExpressionSyntax, body: MarkupListSyntax
-- MarkupElementSyntax: name: QualifiedMarkupNameSyntax, props: PropertyArgumentSyntax[], children: ElementContentSyntax (MarkupListSyntax or MixedContentSyntax)
-- EmbedElementSyntax: name: QualifiedMarkupNameSyntax, textType: string, mode: "parsed"|"raw", props: PropertyArgumentSyntax[], content: EmbedContentSyntax|RawEmbedContentSyntax
-- PropertyArgumentSyntax: name: QualifiedMarkupNameSyntax, value: ExpressionSyntax
+- MarkupElementSyntax: name: QualifiedMarkupNameSyntax, props: PropertyListSyntax, children: ElementContentSyntax (MarkupListSyntax or MixedContentSyntax)
+- EmbedElementSyntax: name: QualifiedMarkupNameSyntax, textType: string, mode: "parsed"|"raw", props: PropertyListSyntax, content: EmbedContentSyntax|RawEmbedContentSyntax
+- PropertyListSyntax: items: PropertyListItemSyntax[]
+- PropertyListItemSyntax: PropertyValueSyntax | PropertyIfSyntax | PropertySwitchSyntax
+- PropertyValueSyntax: name: QualifiedMarkupNameSyntax, value: ExpressionSyntax
+- PropertyIfSyntax: condition: ExpressionSyntax, thenProps: PropertyListSyntax, elseProps?: PropertyListSyntax
+- PropertySwitchSyntax: scrutinee?: ExpressionSyntax, cases: PropertySwitchCaseSyntax[], default?: PropertyListSyntax
+- PropertySwitchCaseSyntax: patterns: PatternSyntax[], props: PropertyListSyntax
+- PropertySwitchDefaultSyntax: props: PropertyListSyntax (usually folded into PropertySwitchSyntax.default)
 - ElementContentSyntax: items: MarkupItemSyntax[] | MixedContentItemSyntax[]
 - MixedContentSyntax: items: MixedContentItemSyntax[]
 - MixedContentItemSyntax: kind: "text"|"element"|"interpolation", value: TextRunSyntax|MarkupElementSyntax|EmbedElementSyntax|InterpolationExpressionSyntax
@@ -394,7 +428,7 @@ This section lists the AST node types with fields for implementers.
 - SWITCH scrutinee (value and elements variants):
   - After SWITCH, if next token ∈ {CASE, DEFAULT} → no scrutinee
   - Else → parse ValueExpression as the scrutinee
-- Element is left-factored: after LT ElementName, COLON selects the embed branch; otherwise parse PropertyArgument* and choose SLASH GT (self-closing) or GT … LT SLASH ElementName GT using lookahead at SLASH vs GT.
+- Element is left-factored: after LT ElementName, COLON selects the embed branch; otherwise parse PropertyList and choose SLASH GT (self-closing) or GT … LT SLASH ElementName GT using lookahead at SLASH vs GT.
 
 ## Validation Rules (post-parse)
 
