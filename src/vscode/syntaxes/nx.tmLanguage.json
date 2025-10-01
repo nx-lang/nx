@@ -253,7 +253,7 @@
     "elements-if": {
       "begin": "^\\s*(if)\\b",
       "beginCaptures": { "1": { "name": "keyword.control.conditional.nx" } },
-      "end": "^\\s*(/if)\\b",
+      "end": "(?:^|\\s)(/if)\\b",
       "endCaptures": { "1": { "name": "keyword.control.conditional.nx" } },
       "name": "meta.control.if.elements.nx",
       "patterns": [
@@ -273,7 +273,7 @@
     "elements-switch": {
       "begin": "^\\s*(switch)\\b",
       "beginCaptures": { "1": { "name": "keyword.control.switch.nx" } },
-      "end": "^\\s*(/switch)\\b",
+      "end": "(?:^|\\s)(/switch)\\b",
       "endCaptures": { "1": { "name": "keyword.control.switch.nx" } },
       "name": "meta.control.switch.elements.nx",
       "patterns": [
@@ -290,7 +290,7 @@
     "elements-for": {
       "begin": "^\\s*(for)\\b",
       "beginCaptures": { "1": { "name": "keyword.control.loop.nx" } },
-      "end": "^\\s*(/for)\\b",
+      "end": "(?:^|\\s)(/for)\\b",
       "endCaptures": { "1": { "name": "keyword.control.loop.nx" } },
       "name": "meta.control.loop.elements.nx",
       "patterns": [
@@ -306,9 +306,9 @@
     },
 
     "property-list-if": {
-      "begin": "^\\s*(if)\\b",
+      "begin": "(?:^|\\s)(if)\\b",
       "beginCaptures": { "1": { "name": "keyword.control.conditional.nx" } },
-      "end": "^\\s*(/if)\\b",
+      "end": "(?:^|\\s)(/if)\\b",
       "endCaptures": { "1": { "name": "keyword.control.conditional.nx" } },
       "name": "meta.control.if.properties.nx",
       "patterns": [
@@ -317,9 +317,9 @@
       ]
     },
     "property-list-switch": {
-      "begin": "^\\s*(switch)\\b",
+      "begin": "(?:^|\\s)(switch)\\b",
       "beginCaptures": { "1": { "name": "keyword.control.switch.nx" } },
-      "end": "^\\s*(/switch)\\b",
+      "end": "(?:^|\\s)(/switch)\\b",
       "endCaptures": { "1": { "name": "keyword.control.switch.nx" } },
       "name": "meta.control.switch.properties.nx",
       "patterns": [
