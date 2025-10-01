@@ -35,7 +35,7 @@
   ],
   "wordPattern": "(-?\\d*\\.\\d\\w*)|([^\\`\\~!@#%\\^&*()=+[\\]{}\\|;:'\",.\\s<>/]+)",
   "indentationRules": {
-    "increaseIndentPattern": "^\\s*(?:if|for|switch)\\b.*:\\s*$|^\\s*<(?!(?:/|!)).*[^/]>(\\s*)$",
+    "increaseIndentPattern": "^\\s*(?:if|else(?:\\s+if)?|for|switch|case|default)\\b.*:\\s*$|^\\s*<(?!(?:/|!)).*[^/]>(\\s*)$",
     "decreaseIndentPattern": "^\\s*(?:/if|/for|/switch)\\b|^\\s*</|^\\s*.*?/>(\\s*)$"
   },
   "folding": {
