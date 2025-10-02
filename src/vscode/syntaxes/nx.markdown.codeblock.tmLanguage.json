@@ -1,0 +1,16 @@
+{
+  "scopeName": "source.nx.embedded.markdown",
+  "injectionSelector": "L:markup.fenced_code.block.markdown",
+  "patterns": [
+    {
+      "begin": "(?<=`{3,}(?:[ \t]*)(?i:nx)((\\s+|:|,|\\{|\\?)[^`]*)?\\r?\\n)",
+      "while": "(^|\\G)(?!\\s*([`~]{3,})\\s*$)",
+      "contentName": "meta.embedded.block.nx",
+      "patterns": [
+        {
+          "include": "source.nx"
+        }
+      ]
+    }
+  ]
+}

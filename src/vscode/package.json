@@ -75,6 +75,16 @@
         "language": "nx",
         "scopeName": "source.nx",
         "path": "./syntaxes/nx.tmLanguage.json"
+      },
+      {
+        "scopeName": "source.nx.embedded.markdown",
+        "path": "./syntaxes/nx.markdown.codeblock.tmLanguage.json",
+        "injectTo": [
+          "text.html.markdown"
+        ],
+        "embeddedLanguages": {
+          "meta.embedded.block.nx": "nx"
+        }
       }
     ],
     "snippets": [
