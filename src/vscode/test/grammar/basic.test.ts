@@ -4,7 +4,7 @@ import * as path from 'path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { expect } from 'chai';
-import type { IGrammar, IToken } from 'vscode-textmate';
+import type { IGrammar, IToken, IRuleStack } from 'vscode-textmate';
 // Use CommonJS require via createRequire to avoid ESM interop issues
 
 const cjsRequire = createRequire(import.meta.url);
@@ -58,6 +58,36 @@ describe('NX TextMate grammar', function () {
     const { tokens } = grammar.tokenizeLine(line, null);
     const scopes = scopesForSubstring(line, tokens, 'if');
     expect(scopes).to.include('keyword.control.conditional.nx');
+  });
+
+  it('highlights nested control blocks', function () {
+    const lines = [
+      'if outer:',
+      '  for item in items:',
+      '    switch mode',
+      '      if inner:',
+      '      /if',
+      '    /switch',
+      '  /for',
+      '/if'
+    ];
+
+    let ruleStack: IRuleStack | null = null;
+
+    const advance = (line: string) => {
+      const result = grammar.tokenizeLine(line, ruleStack);
+      ruleStack = result.ruleStack;
+      return result.tokens;
+    };
+
+    advance(lines[0]);
+    const forTokens = advance(lines[1]);
+    const switchTokens = advance(lines[2]);
+    const ifTokens = advance(lines[3]);
+
+    expect(scopesForSubstring(lines[1], forTokens, 'for')).to.include('keyword.control.loop.nx');
+    expect(scopesForSubstring(lines[2], switchTokens, 'switch')).to.include('keyword.control.switch.nx');
+    expect(scopesForSubstring(lines[3], ifTokens, 'if')).to.include('keyword.control.conditional.nx');
   });
 
   it('highlights tags and attributes', function () {
