@@ -249,7 +249,7 @@
             { "name": "keyword.control.switch.nx", "match": "(?:^|\\s)(/switch)\\b" },
             { "name": "keyword.control.loop.nx", "match": "(?:^|\\s)(/for)\\b" },
             { "name": "keyword.control.switch.nx", "match": "(?:^|\\s)(?:case|default)\\b" },
-            { "name": "keyword.control.conditional.nx", "match": "(?:^|\\s)(?:else(?:\\s+if)?)\\b" },
+            { "name": "keyword.control.conditional.nx", "match": "(?<!\\S)(else(?:\\s+if)?)\\b" },
             { "include": "#attr-name" },
             { "name": "keyword.operator.assignment.nx", "match": "=" },
             { "include": "#attr-value" }
@@ -277,7 +277,7 @@
         { "include": "#operators" },
         {
           "name": "keyword.control.conditional.nx",
-          "match": "^\\s*(?:else(?:\\s+if)?)\\b"
+          "match": "(?<!\\S)(else(?:\\s+if)?)\\b"
         }
       ]
     },
@@ -329,7 +329,7 @@
       "endCaptures": { "1": { "name": "keyword.control.conditional.nx" } },
       "name": "meta.control.if.properties.nx",
       "patterns": [
-        { "name": "keyword.control.conditional.nx", "match": "(?:^|\\s)(?:else(?:\\s+if)?)\\b" },
+        { "name": "keyword.control.conditional.nx", "match": "(?<!\\S)(else(?:\\s+if)?)\\b" },
         { "include": "#attributes" }
       ]
     },

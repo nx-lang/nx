@@ -60,6 +60,13 @@ describe('NX TextMate grammar', function () {
     expect(scopes).to.include('keyword.control.conditional.nx');
   });
 
+  it('highlights inline else within control block', function () {
+    const line = 'if user.isAuthenticated: 2 else: 2 /if';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    const scopes = scopesForSubstring(line, tokens, 'else');
+    expect(scopes).to.include('keyword.control.conditional.nx');
+  });
+
   it('highlights nested control blocks', function () {
     const lines = [
       'if outer:',
