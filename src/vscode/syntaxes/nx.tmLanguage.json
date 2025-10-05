@@ -103,7 +103,7 @@
         },
         {
           "name": "keyword.operator.type-modifier.nx",
-          "match": "\\?|\\.\\.\\."
+          "match": "\\.\\.\\."
         }
       ]
     },
@@ -112,6 +112,8 @@
         { "name": "keyword.operator.arithmetic.nx", "match": "\\+|-|\\*|/" },
         { "name": "keyword.operator.comparison.nx", "match": "<=|>=|==|!=|<|>" },
         { "name": "keyword.operator.logical.nx", "match": "&&|\\|\\|" },
+        { "name": "keyword.operator.conditional.nx", "match": "\\?" },
+        { "name": "punctuation.separator.conditional.nx", "match": ":" },
         { "name": "punctuation.separator.dot.nx", "match": "\\." },
         { "name": "keyword.operator.assignment.nx", "match": "=" }
       ]

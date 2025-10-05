@@ -73,12 +73,16 @@ ValueExpression ::=
     | ValueIfExpression
     | ValueSwitchExpression
     | ValueForExpression
+    | ConditionalExpression
     | PrefixUnaryExpression
     | BinaryExpression
     | MemberAccess
     | FunctionCall
     | Unit
     | ParenthesizedExpression
+
+ConditionalExpression ::=
+    ValueExpression "?" ValueExpression ":" ValueExpression    (* right-associative *)
 
 ParenthesizedExpression ::=
     "(" ValueExpression ")"

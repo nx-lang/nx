@@ -11,6 +11,7 @@ This tracks near-term enhancements and future work. The LSP server will be imple
 - [ ] Broaden identifier rules for `QualifiedMarkupName` vs `QualifiedName` where hyphens are allowed only in markup identifiers.
 - [ ] Expand numeric literals per spec (underscores, exponents) and guard against ambiguity.
 - [ ] Add scopes for type modifiers (`?`, `...`) and ensure they don’t collide with spread `...` syntax in attributes.
+- [ ] Split type-nullability `?` from conditional operator highlighting once a richer context-sensitive rule (or parser-backed scopes) is available. Also update keyword.operator.type-modifier.nx if needed.
 
 ## Folding / Indentation
 - [ ] Improve indentation rules for `if … /if`, `switch … /switch`, `for … /for` blocks.

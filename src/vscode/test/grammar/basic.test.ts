@@ -120,6 +120,13 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(line, tokens, '/for')).to.include('keyword.control.loop.nx');
   });
 
+  it('highlights the conditional operator', function () {
+    const line = 'let result = isReady ? whenReady() : whenNot();';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    expect(scopesForSubstring(line, tokens, '?')).to.include('keyword.operator.conditional.nx');
+    expect(scopesForSubstring(line, tokens, ':')).to.include('punctuation.separator.conditional.nx');
+  });
+
   it('highlights tags and attributes', function () {
     const line = '<Button x=1 y=2/>';
     const { tokens } = grammar.tokenizeLine(line, null);

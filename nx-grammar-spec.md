@@ -107,6 +107,10 @@ Conventional expressions (non-markup) use a Pratt parser with the following prec
 30: Logical OR, left-associative
 - PIPE_PIPE (||)
 
+20: Conditional, right-associative
+- led token: QMARK … COLON …
+  - form: condition QMARK consequent COLON alternative → Conditional(condition, consequent, alternative)
+
 Grouping
 - LPAREN Expr RPAREN binds as a primary (handled in nud for LPAREN).
 
@@ -176,7 +180,7 @@ ValueExpression (AST: ExpressionSyntax; Pratt-parsed for operators)
 
 ValueExpr (parsed by Pratt; not a standalone AST node)
 - Primaries (nud): Literal | IDENTIFIER | Unit | ParenthesizedExpression
-- Postfix/infix handled via the operator table
+- Postfix/infix handled via the operator table (including the conditional operator `?:` at precedence 20)
 
 Unit (AST: UnitLiteralSyntax)
 - Unit → LPAREN RPAREN
@@ -185,6 +189,10 @@ Unit (AST: UnitLiteralSyntax)
 ParenthesizedExpression (AST: ParenthesizedExpressionSyntax)
 - ParenthesizedExpression → LPAREN ValueExpression RPAREN
   - fields: expr: ExpressionSyntax
+
+ConditionalExpression (AST: ConditionalExpressionSyntax)
+- ConditionalExpression → ValueExpression QMARK ValueExpression COLON ValueExpression  (parsed via Pratt entry at precedence 20; right-associative)
+  - fields: condition: ExpressionSyntax, whenTrue: ExpressionSyntax, whenFalse: ExpressionSyntax
 
 Literal (AST: LiteralExpressionSyntax)
 - Literal → STRING_LITERAL | INT_LITERAL | REAL_LITERAL | HEX_LITERAL | BOOL_LITERAL | NULL_LITERAL
@@ -372,9 +380,10 @@ This section lists the AST node types with fields for implementers.
 - UserTypeSyntax: name: QualifiedNameSyntax
  - FunctionDefinitionSyntax: elementName: QualifiedMarkupNameSyntax, props: PropertyDefinitionSyntax[], body: ExpressionSyntax
  - PropertyDefinitionSyntax: name: string, type: TypeSyntax, default?: ExpressionSyntax
-- ExpressionSyntax: union of MarkupElementSyntax | LiteralExpressionSyntax | IdentifierNameSyntax | ValueIfExpressionSyntax | ValueSwitchExpressionSyntax | ValueForExpressionSyntax | CallExpressionSyntax | MemberAccessExpressionSyntax | BinaryExpressionSyntax | PrefixUnaryExpressionSyntax | ParenthesizedExpressionSyntax | UnitLiteralSyntax
+- ExpressionSyntax: union of MarkupElementSyntax | LiteralExpressionSyntax | IdentifierNameSyntax | ValueIfExpressionSyntax | ValueSwitchExpressionSyntax | ValueForExpressionSyntax | ConditionalExpressionSyntax | CallExpressionSyntax | MemberAccessExpressionSyntax | BinaryExpressionSyntax | PrefixUnaryExpressionSyntax | ParenthesizedExpressionSyntax | UnitLiteralSyntax
  - CallExpressionSyntax: callee: ExpressionSyntax, args: ExpressionSyntax[]
  - MemberAccessExpressionSyntax: target: ExpressionSyntax, name: string
+ - ConditionalExpressionSyntax: condition: ExpressionSyntax, whenTrue: ExpressionSyntax, whenFalse: ExpressionSyntax
  - BinaryExpressionSyntax: op: token, left: ExpressionSyntax, right: ExpressionSyntax
  - PrefixUnaryExpressionSyntax: op: token, expr: ExpressionSyntax
  - ParenthesizedExpressionSyntax: expr: ExpressionSyntax (may be elided)
