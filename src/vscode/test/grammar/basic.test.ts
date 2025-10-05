@@ -123,6 +123,25 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(line, tokens, 'Start')).to.include('entity.name.tag.nx');
   });
 
+  it('highlights control blocks inside interpolations', function () {
+    const line = '{if isActive: "active" else: "inactive" /if}';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    expect(scopesForSubstring(line, tokens, 'if')).to.include('keyword.control.conditional.nx');
+    expect(scopesForSubstring(line, tokens, 'else')).to.include('keyword.control.conditional.nx');
+    expect(scopesForSubstring(line, tokens, '/if')).to.include('keyword.control.conditional.nx');
+  });
+
+  it('highlights switch and for blocks inside interpolations', function () {
+    const line = '{switch state case "active": "A" default: "D" /switch for item in items: item /for}';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    expect(scopesForSubstring(line, tokens, 'switch')).to.include('keyword.control.switch.nx');
+    expect(scopesForSubstring(line, tokens, 'case')).to.include('keyword.control.switch.nx');
+    expect(scopesForSubstring(line, tokens, '/switch')).to.include('keyword.control.switch.nx');
+    expect(scopesForSubstring(line, tokens, 'for')).to.include('keyword.control.loop.nx');
+    expect(scopesForSubstring(line, tokens, 'in')).to.include('keyword.control.loop.nx');
+    expect(scopesForSubstring(line, tokens, '/for')).to.include('keyword.control.loop.nx');
+  });
+
   it('highlights typed inline content in attribute value', function () {
     const line = '<Button content=<:uitext>Click</> />';
     const { tokens } = grammar.tokenizeLine(line, null);
