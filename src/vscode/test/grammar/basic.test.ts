@@ -97,6 +97,29 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(lines[3], ifTokens, 'if')).to.include('keyword.control.conditional.nx');
   });
 
+  it('highlights inline if blocks within element content', function () {
+    const line = 'render prefix if user.isAuthenticated: <Item/> /if suffix';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    expect(scopesForSubstring(line, tokens, 'if')).to.include('keyword.control.conditional.nx');
+    expect(scopesForSubstring(line, tokens, '/if')).to.include('keyword.control.conditional.nx');
+  });
+
+  it('highlights inline switch blocks within element content', function () {
+    const line = 'render switch state case "active": "A" default: "D" /switch done';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    expect(scopesForSubstring(line, tokens, 'switch')).to.include('keyword.control.switch.nx');
+    expect(scopesForSubstring(line, tokens, 'case')).to.include('keyword.control.switch.nx');
+    expect(scopesForSubstring(line, tokens, '/switch')).to.include('keyword.control.switch.nx');
+  });
+
+  it('highlights inline for blocks within element content', function () {
+    const line = 'render for item in items: item /for done';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    expect(scopesForSubstring(line, tokens, 'for')).to.include('keyword.control.loop.nx');
+    expect(scopesForSubstring(line, tokens, 'in')).to.include('keyword.control.loop.nx');
+    expect(scopesForSubstring(line, tokens, '/for')).to.include('keyword.control.loop.nx');
+  });
+
   it('highlights tags and attributes', function () {
     const line = '<Button x=1 y=2/>';
     const { tokens } = grammar.tokenizeLine(line, null);

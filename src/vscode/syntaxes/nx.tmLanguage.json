@@ -236,9 +236,9 @@
       "patterns": [
         { "include": "#property-list-if" },
         { "include": "#property-list-switch" },
-        { "name": "keyword.control.conditional.nx", "match": "(?:^|\\s)(/if)\\b" },
-        { "name": "keyword.control.switch.nx", "match": "(?:^|\\s)(/switch)\\b" },
-        { "name": "keyword.control.loop.nx", "match": "(?:^|\\s)(/for)\\b" },
+        { "name": "keyword.control.conditional.nx", "match": "(?<![A-Za-z0-9_])(/if)\\b" },
+        { "name": "keyword.control.switch.nx", "match": "(?<![A-Za-z0-9_])(/switch)\\b" },
+        { "name": "keyword.control.loop.nx", "match": "(?<![A-Za-z0-9_])(/for)\\b" },
         {
           "name": "meta.attribute.nx",
           "match": "\\.\\.\\.[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*"
@@ -248,10 +248,10 @@
           "begin": "(?=[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*\\s*=)",
           "end": "(?=\n|[/>])",
           "patterns": [
-            { "name": "keyword.control.conditional.nx", "match": "(?:^|\\s)(/if)\\b" },
-            { "name": "keyword.control.switch.nx", "match": "(?:^|\\s)(/switch)\\b" },
-            { "name": "keyword.control.loop.nx", "match": "(?:^|\\s)(/for)\\b" },
-            { "name": "keyword.control.switch.nx", "match": "(?:^|\\s)(?:case|default)\\b" },
+            { "name": "keyword.control.conditional.nx", "match": "(?<![A-Za-z0-9_])(/if)\\b" },
+            { "name": "keyword.control.switch.nx", "match": "(?<![A-Za-z0-9_])(/switch)\\b" },
+            { "name": "keyword.control.loop.nx", "match": "(?<![A-Za-z0-9_])(/for)\\b" },
+            { "name": "keyword.control.switch.nx", "match": "(?<![A-Za-z0-9_])(?:case|default)\\b" },
             { "name": "keyword.control.conditional.nx", "match": "(?<!\\S)(else(?:\\s+if)?)\\b" },
             { "include": "#attr-name" },
             { "name": "keyword.operator.assignment.nx", "match": "=" },
@@ -262,9 +262,9 @@
     },
 
     "elements-if": {
-      "begin": "^\\s*(if)\\b",
+      "begin": "(?<![A-Za-z0-9_])(if)\\b",
       "beginCaptures": { "1": { "name": "keyword.control.conditional.nx" } },
-      "end": "(?:^|\\s)(/if)\\b",
+      "end": "(?<![A-Za-z0-9_])(/if)\\b",
       "endCaptures": { "1": { "name": "keyword.control.conditional.nx" } },
       "name": "meta.control.if.elements.nx",
       "patterns": [
@@ -311,9 +311,9 @@
       ]
     },
     "elements-switch": {
-      "begin": "^\\s*(switch)\\b",
+      "begin": "(?<![A-Za-z0-9_])(switch)\\b",
       "beginCaptures": { "1": { "name": "keyword.control.switch.nx" } },
-      "end": "(?:^|\\s)(/switch)\\b",
+      "end": "(?<![A-Za-z0-9_])(/switch)\\b",
       "endCaptures": { "1": { "name": "keyword.control.switch.nx" } },
       "name": "meta.control.switch.elements.nx",
       "patterns": [
@@ -327,7 +327,7 @@
         { "include": "#interpolation" },
         { "include": "#types" },
         { "include": "#operators" },
-        { "name": "keyword.control.switch.nx", "match": "^\\s*(?:case|default)\\b" }
+        { "name": "keyword.control.switch.nx", "match": "(?<![A-Za-z0-9_])(?:case|default)\\b" }
       ]
     },
     "value-switch": {
@@ -354,9 +354,9 @@
       ]
     },
     "elements-for": {
-      "begin": "^\\s*(for)\\b",
+      "begin": "(?<![A-Za-z0-9_])(for)\\b",
       "beginCaptures": { "1": { "name": "keyword.control.loop.nx" } },
-      "end": "(?:^|\\s)(/for)\\b",
+      "end": "(?<![A-Za-z0-9_])(/for)\\b",
       "endCaptures": { "1": { "name": "keyword.control.loop.nx" } },
       "name": "meta.control.loop.elements.nx",
       "patterns": [
@@ -398,9 +398,9 @@
     },
 
     "property-list-if": {
-      "begin": "(?:^|\\s)(if)\\b",
+      "begin": "(?<![A-Za-z0-9_])(if)\\b",
       "beginCaptures": { "1": { "name": "keyword.control.conditional.nx" } },
-      "end": "(?:^|\\s)(/if)\\b",
+      "end": "(?<![A-Za-z0-9_])(/if)\\b",
       "endCaptures": { "1": { "name": "keyword.control.conditional.nx" } },
       "name": "meta.control.if.properties.nx",
       "patterns": [
@@ -409,13 +409,13 @@
       ]
     },
     "property-list-switch": {
-      "begin": "(?:^|\\s)(switch)\\b",
+      "begin": "(?<![A-Za-z0-9_])(switch)\\b",
       "beginCaptures": { "1": { "name": "keyword.control.switch.nx" } },
-      "end": "(?:^|\\s)(/switch)\\b",
+      "end": "(?<![A-Za-z0-9_])(/switch)\\b",
       "endCaptures": { "1": { "name": "keyword.control.switch.nx" } },
       "name": "meta.control.switch.properties.nx",
       "patterns": [
-        { "name": "keyword.control.switch.nx", "match": "(?:^|\\s)(?:case|default)\\b" },
+        { "name": "keyword.control.switch.nx", "match": "(?<![A-Za-z0-9_])(?:case|default)\\b" },
         { "include": "#attributes" }
       ]
     }
