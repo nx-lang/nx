@@ -131,9 +131,9 @@
       "endCaptures": { "0": { "name": "punctuation.section.interpolation.end.nx" } },
       "name": "meta.interpolation.nx",
       "patterns": [
-        { "include": "#elements-if-inline" },
-        { "include": "#elements-switch-inline" },
-        { "include": "#elements-for-inline" },
+        { "include": "#value-if" },
+        { "include": "#value-switch" },
+        { "include": "#value-for" },
         { "include": "#comments" },
         { "include": "#strings" },
         { "include": "#numbers" },
@@ -284,7 +284,7 @@
         }
       ]
     },
-    "elements-if-inline": {
+    "value-if": {
       "begin": "(?<![A-Za-z0-9_])(if)\\b",
       "beginCaptures": { "1": { "name": "keyword.control.conditional.nx" } },
       "end": "(?<![A-Za-z0-9_])(/if)\\b",
@@ -294,9 +294,9 @@
         { "include": "#comments" },
         { "include": "#strings" },
         { "include": "#numbers" },
-        { "include": "#elements-if-inline" },
-        { "include": "#elements-switch-inline" },
-        { "include": "#elements-for-inline" },
+        { "include": "#value-if" },
+        { "include": "#value-switch" },
+        { "include": "#value-for" },
         { "include": "#elements-if" },
         { "include": "#elements-switch" },
         { "include": "#elements-for" },
@@ -330,7 +330,7 @@
         { "name": "keyword.control.switch.nx", "match": "^\\s*(?:case|default)\\b" }
       ]
     },
-    "elements-switch-inline": {
+    "value-switch": {
       "begin": "(?<![A-Za-z0-9_])(switch)\\b",
       "beginCaptures": { "1": { "name": "keyword.control.switch.nx" } },
       "end": "(?<![A-Za-z0-9_])(/switch)\\b",
@@ -340,9 +340,9 @@
         { "include": "#comments" },
         { "include": "#strings" },
         { "include": "#numbers" },
-        { "include": "#elements-if-inline" },
-        { "include": "#elements-switch-inline" },
-        { "include": "#elements-for-inline" },
+        { "include": "#value-if" },
+        { "include": "#value-switch" },
+        { "include": "#value-for" },
         { "include": "#elements-if" },
         { "include": "#elements-switch" },
         { "include": "#elements-for" },
@@ -373,7 +373,7 @@
         { "name": "keyword.control.loop.nx", "match": "\\bin\\b" }
       ]
     },
-    "elements-for-inline": {
+    "value-for": {
       "begin": "(?<![A-Za-z0-9_])(for)\\b",
       "beginCaptures": { "1": { "name": "keyword.control.loop.nx" } },
       "end": "(?<![A-Za-z0-9_])(/for)\\b",
@@ -383,9 +383,9 @@
         { "include": "#comments" },
         { "include": "#strings" },
         { "include": "#numbers" },
-        { "include": "#elements-if-inline" },
-        { "include": "#elements-switch-inline" },
-        { "include": "#elements-for-inline" },
+        { "include": "#value-if" },
+        { "include": "#value-switch" },
+        { "include": "#value-for" },
         { "include": "#elements-if" },
         { "include": "#elements-switch" },
         { "include": "#elements-for" },
