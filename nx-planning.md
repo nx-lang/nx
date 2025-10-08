@@ -130,16 +130,20 @@ let <DataGrid
   data:object...
   columns:object...
   className:string? /> =
-  <table className={if className => className else "data-grid"}>
+  <table className={if (className) className else "data-grid" /if}>
     <thead>
       <tr>
-        {for column in columns => <th>{column.Header}</th>}
+        for column in columns {
+          <th>{column.Header}</th>
+        }
       </tr>
     </thead>
     <tbody>
-      {for item in data =>
+      for item in data {
         <tr>
-          {for column in columns => <td>{column.Render(item)}</td>}
+          for column in columns {
+            <td>{column.Render(item)}</td>
+          }
         </tr>
       }
     </tbody>
@@ -172,71 +176,67 @@ NX's `switch` expression is designed to be familiar to C#/TypeScript developers 
 
 ```nx
 // Simple switch on primitive values
-switch user.role {
-  "admin" => <AdminPanel/>
-  "user" => <UserDashboard/>
-  "guest" => <PublicContent/>
-  else <AccessDenied/>
-}
+switch user.role
+  case "admin": <AdminPanel/>
+  case "user":  <UserDashboard/>
+  case "guest": <PublicContent/>
+  default:      <AccessDenied/>
+/switch
 
 // Multiple patterns per branch
-switch day {
-  "monday", "tuesday", "wednesday", "thursday", "friday" => <Weekday/>
-  "saturday", "sunday" => <Weekend/>
-  else <InvalidDay/>
-}
+switch day
+  case "monday", "tuesday", "wednesday", "thursday", "friday": <Weekday/>
+  case "saturday", "sunday":                                   <Weekend/>
+  default:                                                     <InvalidDay/>
+/switch
 
-// Switch without else - will throw if no match
-switch theme {
-  "light" => <LightTheme/>
-  "dark" => <DarkTheme/>
-  "auto" => <AutoTheme/>
-  // No else - these are the only valid themes
-}
-
-// Consistent else syntax with if/else
-if quickCheck => <QuickResult/>
-else
-  switch detailedCheck {
-    "pass" => <PassResult/>
-    "fail" => <FailResult/>
-    else <PendingResult/>
-  }
+// Switch without default - will throw if no match
+switch theme
+  case "light": <LightTheme/>
+  case "dark":  <DarkTheme/>
+  case "auto":  <AutoTheme/>
+  // No default - these are the only valid themes
+/switch
 
 // Switch in function definitions
 let <StatusDisplay status:string /> =
-  switch status {
-    "pending" => <PendingIcon/>
-    "complete" => <CheckIcon/>
-    "failed" => <XIcon/>
-    else <QuestionIcon/>
+  if status is {
+    "pending":  <PendingIcon/>
+    "complete": <CheckIcon/>
+    "failed":   <XIcon/>
+    else:       <QuestionIcon/>
   }
 ```
 
 #### Advanced Expression Examples
 ```nx
 // Conditional rendering
-{if user.isAuthenticated => <WelcomeUser user={user}/> else <LoginForm/>}
+if user.isAuthenticated:
+  <WelcomeUser user={user}/>
+else:
+  <LoginForm/>
+/if
 
 // Conditional expressions in attributes
-<div className={if isActive => "active" else "inactive"}>Content</div>
+<div className={if isActive: "active" else: "inactive" /if}>Content</div>
 
 // List transformation with index
-for item, index in items =>
-  <div key={index} className={if index % 2 == 0 => "even" else "odd"}>
+for index, item in items {
+  <div key={index} className={index % 2 == 0 ? "even" : "odd"}>
     {item.name}
   </div>
-
-// Basic switch expression (simple values only)
-switch user.role {
-  "admin" => <AdminPanel/>
-  "user" => <UserDashboard/>
-  "guest" => <PublicContent/>
-  else <AccessDenied/>
 }
 
+// Basic switch expression (simple values only)
+switch user.role
+  case "admin": <AdminPanel/>
+  case "user":  <UserDashboard/>
+  case "guest": <PublicContent/>
+  default:      <AccessDenied/>
+/switch
+
 // List literals and operations
-let numbers = 1 2 3 4 5  // List literal
+let numbers = [1, 2, 3, 4, 5]  // List literal
 let empty = []  // Empty list
 let strings = ["red", "green", "blue"]
 
@@ -245,8 +245,8 @@ let user = <User id="123" name="John" email="john@example.com"/>
 let position = <Point x={mouseX} y={mouseY}/>
 
 // Objects in component attributes
-<UserCard user={<User id="456" name="Jane" email="jane@example.com"/>}/>
-<DrawingCanvas points={[<Point x=10 y=20/>, <Point x=30 y=40/>]}/>
+<UserCard user=<User id="456" name="Jane" email="jane@example.com"/> />
+<DrawingCanvas points=<><Point x=10 y=20/> <Point x=30 y=40/></> />
 ```
 
 Grammar rules: [Expressions](nx-grammar.md#expressions)
@@ -271,25 +271,29 @@ type <Address street:string city:string state:string zip:string/>
 type <Person name:string email:string address:Address/>
 
 // Object creation using element syntax
-let user = <User
-  id="123"
-  name="John Doe"
-  email="john@example.com"
-  avatarUrl="/avatars/john.jpg"
-/>
+let user =
+  <User
+    id="123"
+    name="John Doe"
+    email="john@example.com"
+    avatarUrl="/avatars/john.jpg"
+  />
 
 let origin = <Point x=0 y=0/>
-let userAddress = <Address
-  street="123 Main St"
-  city="Springfield"
-  state="IL"
-  zip="62701"
-/>
+let userAddress =
+  <Address
+    street="123 Main St"
+    city="Springfield"
+    state="IL"
+    zip="62701"
+  />
 
 // Simple function definitions
 let <SimpleList items:string... renderer:(string) => Element/> =
   <ul>
-    {for item in items => <li>{renderer(item)}</li>}
+    for item in items {
+      <li>{renderer(item)}</li>
+    }
   </ul>
 ```
 
@@ -302,13 +306,14 @@ Grammar rules: [Type System](nx-grammar.md#type-system)
 #### Advanced Element Examples
 ```nx
 // Nested markup in attributes
-<Tooltip content={<div><strong>Bold</strong> and <em>italic</em> text</div>}>
-  Hover me
+<Tooltip
+  content=<span:><strong>Bold</strong> and <em>italic</em> text</span> >
+  Hover over me
 </Tooltip>
 
 // Spread attributes
-let commonProps = { className: "btn", disabled: false }
-<Button {...commonProps} onClick={handleClick}>Submit</Button>
+let commonButtonProps = <Button.properties className="btn" disabled=false/>
+<Button ...commonButtonProps onClick={handleClick}>Submit</Button>
 
 // Namespaced components
 <UI.Controls.Button variant="primary">Click</UI.Controls.Button>
@@ -321,16 +326,10 @@ let commonProps = { className: "btn", disabled: false }
     { field: "age", validator: (val) => val >= 18 }
   ]}
   className={`form ${if isLoading => "loading" else ""} ${if hasErrors => "error" else ""}`}
+  className={`form {if isLoading: "loading" else: "" /if} ${if hasErrors: "error" else: ""}`}
 >
   Form content
 </Form>
-
-// List pattern matching with switch
-switch items {
-  [] => <EmptyList/>
-  [single] => <SingleItem item={single}/>
-  [first, ...rest] => <ItemList first={first} rest={rest}/>
-}
 ```
 
 Grammar rules: [Elements](nx-grammar.md#elements)
@@ -353,20 +352,18 @@ let empty: string... = []
 // Lists in function parameters
 let <Gallery images:Image.../> =
   <div class="gallery">
-    {for img in images => <img src={img.url} alt={img.title}/>}
+    for img in images {
+      <img src={img.url} alt={img.title}/>
+    }
   </div>
 
-// List comprehensions
-let squares = [for n in numbers => n * n]
-let evens = [for n in numbers if n % 2 == 0 => n]
+// List comprehension-like behavior with for
+let squares = for n in numbers { n * n }
 
-// Pattern matching on lists
-switch items {
-  [] => <p>No items</p>
-  [single] => <p>One item: {single}</p>
-  [first, second] => <p>Two items: {first} and {second}</p>
-  [first, ...rest] => <p>First: {first}, and {rest.length} more</p>
-}
+// List comprehension-like behavior with for/if.
+// The parentheses are optional but recommended for nested inline conditions.
+let evens = for (n in numbers) { if (n % 2 == 0): n /if }
+let evens = for n in numbers { if n % 2 == 0: n }
 
 // Nested lists
 let matrix: (int...)... = [[1, 2], [3, 4], [5, 6]]  // List of lists
@@ -384,12 +381,13 @@ type <Point x:int y:int/>
 type <Color r:int g:int b:int a:float = 1.0/>
 
 // Object creation uses same syntax as component instantiation
-let user = <User
-  id="123"
-  name="John Doe"
-  email="john@example.com"
-  avatarUrl="/avatars/john.jpg"
-/>
+let user =
+  <User
+    id="123"
+    name="John Doe"
+    email="john@example.com"
+    avatarUrl="/avatars/john.jpg"
+  />
 
 let origin = <Point x=0 y=0/>
 let red = <Color r=255 g=0 b=0/>
@@ -404,7 +402,7 @@ let <UserProfile userId:string/> = {
   />
 
   <div>
-    <img src={if user.avatarUrl => user.avatarUrl else "/default-avatar.jpg"}/>
+    <img src={if user.avatarUrl: user.avatarUrl else: "/default-avatar.jpg" /if}/>
     <h2>{user.name}</h2>
     <span>{user.email}</span>
   </div>
@@ -437,15 +435,16 @@ that allows styles, inline or standalone, to use the same element syntax.
 
 ```nx
 // CSS-in-NX with basic styling
-let <StyledButton variant:string = "primary">content:Element</StyledButton> =
-  <button style=<Style
-    backgroundColor={if variant == "primary" => "#007bff" else "#6c757d"}
-    color="white"
-    border="none",
-    padding="8px 16px",
-    borderRadius="4px",
-    cursor="pointer"
-  />
+let <StyledButton variant:string = "primary" content:Element/> =
+  <button
+    style=<Style
+      backgroundColor={if variant == "primary": "#007bff" else: "#6c757d" /if}
+      color="white"
+      border="none",
+      padding="8px 16px",
+      borderRadius="4px",
+      cursor="pointer"
+    /> >
     {content}
   </button>
 ```

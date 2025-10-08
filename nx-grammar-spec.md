@@ -19,7 +19,7 @@ Keywords
 - LET ("let")
 - IF ("if"), ELSE ("else"), END_IF ("/if")
 - SWITCH ("switch"), CASE ("case"), DEFAULT ("default"), END_SWITCH ("/switch")
-- FOR ("for"), IN ("in"), END_FOR ("/for")
+- FOR ("for"), IN ("in")
 - RAW ("raw")
 
 Primitive types (keywords)
@@ -223,7 +223,7 @@ ValueSwitchDefaultOpt
 - ValueSwitchDefaultOpt → ValueSwitchDefault | ε
 
 ValueForExpression (AST: ValueForExpressionSyntax)
-- ValueForExpression → FOR IDENTIFIER ForIndexOpt IN ValueExpression COLON ValueExpression END_FOR
+- ValueForExpression → FOR IDENTIFIER ForIndexOpt IN ValueExpression LBRACE ValueExpression RBRACE
   - fields: itemVar: string, indexVar?: string, iterable: ExpressionSyntax, body: ExpressionSyntax
 
 ForIndexOpt
@@ -260,7 +260,7 @@ ElementsSwitchDefaultOpt
 - ElementsSwitchDefaultOpt → ElementsSwitchDefault | ε
 
 ElementsForExpression (AST: MarkupForExpressionSyntax)
-- ElementsForExpression → FOR IDENTIFIER ForIndexOpt IN ValueExpression COLON ElementsExpression END_FOR
+- ElementsForExpression → FOR IDENTIFIER ForIndexOpt IN ValueExpression LBRACE ElementsExpression RBRACE
   - fields: itemVar: string, indexVar?: string, iterable: ExpressionSyntax, body: MarkupListSyntax
 
 Element (AST: MarkupElementSyntax is a sum type)

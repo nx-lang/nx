@@ -51,16 +51,16 @@
     "prefix": "nxfere",
     "description": "For loop producing elements",
     "body": [
-      "for ${1:item}${2:, ${3:index}} in ${4:iterable}:",
+      "for ${1:item}${2:, ${3:index}} in ${4:iterable} {",
       "\t$0",
-      "/for"
+      "}"
     ]
   },
   "For (value)": {
     "prefix": "nxferv",
     "description": "For loop producing a value",
     "body": [
-      "for ${1:item}${2:, ${3:index}} in ${4:iterable}: ${0:expr} /for"
+      "for ${1:item}${2:, ${3:index}} in ${4:iterable} { ${0:expr} }"
     ]
   },
   "Switch (elements)": {

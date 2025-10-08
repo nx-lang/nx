@@ -97,8 +97,8 @@ ValueSwitchExpression ::=
     "/switch"
 
 ValueForExpression ::=
-    "for" {Identifier} "in" ValueExpression ":" ValueExpression "/for"
-    | "for" Identifier "," Identifier "in" ValueExpression ":" ValueExpression "/for"  (* With index *)
+    "for" {Identifier} "in" ValueExpression "{" ValueExpression "}"
+    | "for" Identifier "," Identifier "in" ValueExpression "{" ValueExpression "}"  (* With index *)
 
 PrefixUnaryExpression ::=
     "-" ValueExpression
@@ -140,8 +140,8 @@ ElementsSwitchExpression ::=
     "/switch"
 
 ElementsForExpression ::=
-    "for" {Identifier} "in" ValueExpression ":" ElementsExpression "/for"
-    | "for" Identifier "," Identifier "in" ValueExpression ":" ElementsExpression "/for"  (* With index *)
+    "for" {Identifier} "in" ValueExpression "{" ElementsExpression "}"
+    | "for" Identifier "," Identifier "in" ValueExpression "{" ElementsExpression "}"  (* With index *)
 
 Element ::=
     "<" ElementName PropertyList "/>"

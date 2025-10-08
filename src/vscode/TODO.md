@@ -14,8 +14,8 @@ This tracks near-term enhancements and future work. The LSP server will be imple
 - [ ] Split type-nullability `?` from conditional operator highlighting once a richer context-sensitive rule (or parser-backed scopes) is available. Also update keyword.operator.type-modifier.nx if needed.
 
 ## Folding / Indentation
-- [ ] Improve indentation rules for `if … /if`, `switch … /switch`, `for … /for` blocks.
-- [ ] Add folding markers for block pairs (`if/for/switch` and tag open/close), including nested tags.
+- [ ] Improve indentation rules for `if … /if`, `switch … /switch`, `for … }` blocks.
+- [ ] Add folding markers for block pairs (`if`, `for`, `switch` and tag open/close), including nested tags.
 - [ ] Validate behavior with long lines and mixed-content blocks.
 
 ## Snippets

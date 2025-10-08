@@ -70,12 +70,12 @@ describe('NX TextMate grammar', function () {
   it('highlights nested control blocks', function () {
     const lines = [
       'if outer:',
-      '  for item in items:',
+      '  for item in items {',
       '    switch mode',
-      '      if inner:',
-      '      /if',
+        '      if inner:',
+        '      /if',
       '    /switch',
-      '  /for',
+      '  }',
       '/if'
     ];
 
@@ -113,11 +113,12 @@ describe('NX TextMate grammar', function () {
   });
 
   it('highlights inline for blocks within element content', function () {
-    const line = 'render for item in items: item /for done';
+    const line = 'render for item in items { item } done';
     const { tokens } = grammar.tokenizeLine(line, null);
     expect(scopesForSubstring(line, tokens, 'for')).to.include('keyword.control.loop.nx');
     expect(scopesForSubstring(line, tokens, 'in')).to.include('keyword.control.loop.nx');
-    expect(scopesForSubstring(line, tokens, '/for')).to.include('keyword.control.loop.nx');
+    expect(scopesForSubstring(line, tokens, '{')).to.include('punctuation.section.block.begin.nx');
+    expect(scopesForSubstring(line, tokens, '}')).to.include('punctuation.section.block.end.nx');
   });
 
   it('highlights the conditional operator', function () {
@@ -162,14 +163,15 @@ describe('NX TextMate grammar', function () {
   });
 
   it('highlights switch and for blocks inside interpolations', function () {
-    const line = '{switch state case "active": "A" default: "D" /switch for item in items: item /for}';
+    const line = '{switch state case "active": "A" default: "D" /switch for item in items { item }}';
     const { tokens } = grammar.tokenizeLine(line, null);
     expect(scopesForSubstring(line, tokens, 'switch')).to.include('keyword.control.switch.nx');
     expect(scopesForSubstring(line, tokens, 'case')).to.include('keyword.control.switch.nx');
     expect(scopesForSubstring(line, tokens, '/switch')).to.include('keyword.control.switch.nx');
     expect(scopesForSubstring(line, tokens, 'for')).to.include('keyword.control.loop.nx');
     expect(scopesForSubstring(line, tokens, 'in')).to.include('keyword.control.loop.nx');
-    expect(scopesForSubstring(line, tokens, '/for')).to.include('keyword.control.loop.nx');
+    expect(scopesForSubstring(line, tokens, ' { ')).to.include('punctuation.section.block.begin.nx');
+    expect(scopesForSubstring(line, tokens, ' }')).to.include('punctuation.section.block.end.nx');
   });
 
   it('highlights typed inline content in attribute value', function () {

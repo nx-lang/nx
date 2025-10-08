@@ -240,7 +240,6 @@
         { "include": "#property-list-switch" },
         { "name": "keyword.control.conditional.nx", "match": "(?<![A-Za-z0-9_])(/if)\\b" },
         { "name": "keyword.control.switch.nx", "match": "(?<![A-Za-z0-9_])(/switch)\\b" },
-        { "name": "keyword.control.loop.nx", "match": "(?<![A-Za-z0-9_])(/for)\\b" },
         {
           "name": "meta.attribute.nx",
           "match": "\\.\\.\\.[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*"
@@ -252,7 +251,6 @@
           "patterns": [
             { "name": "keyword.control.conditional.nx", "match": "(?<![A-Za-z0-9_])(/if)\\b" },
             { "name": "keyword.control.switch.nx", "match": "(?<![A-Za-z0-9_])(/switch)\\b" },
-            { "name": "keyword.control.loop.nx", "match": "(?<![A-Za-z0-9_])(/for)\\b" },
             { "name": "keyword.control.switch.nx", "match": "(?<![A-Za-z0-9_])(?:case|default)\\b" },
             { "name": "keyword.control.conditional.nx", "match": "(?<!\\S)(else(?:\\s+if)?)\\b" },
             { "include": "#attr-name" },
@@ -358,8 +356,8 @@
     "elements-for": {
       "begin": "(?<![A-Za-z0-9_])(for)\\b",
       "beginCaptures": { "1": { "name": "keyword.control.loop.nx" } },
-      "end": "(?<![A-Za-z0-9_])(/for)\\b",
-      "endCaptures": { "1": { "name": "keyword.control.loop.nx" } },
+      "end": "\\}",
+      "endCaptures": { "0": { "name": "punctuation.section.block.end.nx" } },
       "name": "meta.control.loop.elements.nx",
       "patterns": [
         { "include": "#comments" },
@@ -369,6 +367,23 @@
         { "include": "#elements-switch" },
         { "include": "#elements-for" },
         { "include": "#tags" },
+        {
+          "begin": "\\{",
+          "beginCaptures": { "0": { "name": "punctuation.section.block.begin.nx" } },
+          "end": "(?=\\})",
+          "patterns": [
+            { "include": "#comments" },
+            { "include": "#strings" },
+            { "include": "#numbers" },
+            { "include": "#elements-if" },
+            { "include": "#elements-switch" },
+            { "include": "#elements-for" },
+            { "include": "#tags" },
+            { "include": "#interpolation" },
+            { "include": "#types" },
+            { "include": "#operators" }
+          ]
+        },
         { "include": "#interpolation" },
         { "include": "#types" },
         { "include": "#operators" },
@@ -378,8 +393,8 @@
     "value-for": {
       "begin": "(?<![A-Za-z0-9_])(for)\\b",
       "beginCaptures": { "1": { "name": "keyword.control.loop.nx" } },
-      "end": "(?<![A-Za-z0-9_])(/for)\\b",
-      "endCaptures": { "1": { "name": "keyword.control.loop.nx" } },
+      "end": "\\}",
+      "endCaptures": { "0": { "name": "punctuation.section.block.end.nx" } },
       "name": "meta.control.loop.elements.nx",
       "patterns": [
         { "include": "#comments" },
@@ -392,6 +407,26 @@
         { "include": "#elements-switch" },
         { "include": "#elements-for" },
         { "include": "#tags" },
+        {
+          "begin": "\\{",
+          "beginCaptures": { "0": { "name": "punctuation.section.block.begin.nx" } },
+          "end": "(?=\\})",
+          "patterns": [
+            { "include": "#comments" },
+            { "include": "#strings" },
+            { "include": "#numbers" },
+            { "include": "#value-if" },
+            { "include": "#value-switch" },
+            { "include": "#value-for" },
+            { "include": "#elements-if" },
+            { "include": "#elements-switch" },
+            { "include": "#elements-for" },
+            { "include": "#tags" },
+            { "include": "#interpolation" },
+            { "include": "#types" },
+            { "include": "#operators" }
+          ]
+        },
         { "include": "#interpolation" },
         { "include": "#types" },
         { "include": "#operators" },
