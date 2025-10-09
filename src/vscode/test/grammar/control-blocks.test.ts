@@ -44,6 +44,15 @@ function hasScopeAt(line: string, substr: string, scopes: string[], grammar: IGr
   return !!t && scopes.every((s) => t.scopes.includes(s));
 }
 
+function scopesForSubstring(line: string, substr: string, grammar: IGrammar): string[] {
+  const { tokens } = grammar.tokenizeLine(line, null);
+  const i = line.indexOf(substr);
+  if (i < 0) return [];
+  const mid = i + Math.floor(substr.length / 2);
+  const t = tokens.find((t) => t.startIndex <= mid && mid < t.endIndex);
+  return t ? t.scopes : [];
+}
+
 describe('NX control blocks', () => {
   let grammar: IGrammar;
 
@@ -59,17 +68,38 @@ describe('NX control blocks', () => {
     expect(hasScopeAt(line, 'Spinner', ['entity.name.tag.nx'], grammar)).to.equal(true);
   });
 
-  it('highlights property-list if within a start tag and mid-line /if', () => {
-    const line = '<UserCard if isLoading: user={user} /if>';
-    expect(hasScopeAt(line, 'if', ['keyword.control.conditional.nx'], grammar)).to.equal(true);
-    expect(hasScopeAt(line, '/if', ['keyword.control.conditional.nx'], grammar)).to.equal(true);
+  it('highlights property-list if blocks with braces and else', () => {
+    const line = '<UserCard if isLoading { user=loading } else { user=loaded }>';
+    const ifScopes = scopesForSubstring(line, 'if', grammar);
+    expect(ifScopes).to.include('keyword.control.conditional.nx');
+    expect(ifScopes).to.include('meta.control.if.properties.nx');
+    expect(scopesForSubstring(line, '{', grammar)).to.include('punctuation.section.block.begin.nx');
+    const elseScopes = scopesForSubstring(line, 'else', grammar);
+    expect(elseScopes).to.include('keyword.control.conditional.nx');
+    expect(elseScopes).to.include('meta.control.if.properties.nx');
   });
 
-  it('highlights property-list switch with mid-line case/default and /switch', () => {
-    const line = '<UserCard switch x case 1: a=1 default: b=2 /switch>';
-    expect(hasScopeAt(line, 'switch', ['keyword.control.switch.nx'], grammar)).to.equal(true);
-    expect(hasScopeAt(line, 'case', ['keyword.control.switch.nx'], grammar)).to.equal(true);
-    expect(hasScopeAt(line, 'default', ['keyword.control.switch.nx'], grammar)).to.equal(true);
-    expect(hasScopeAt(line, '/switch', ['keyword.control.switch.nx'], grammar)).to.equal(true);
+  it('highlights property-list match arms', () => {
+    const line = '<UserCard if status is { "active": icon=ActiveIcon "idle": icon=IdleIcon else: icon=DefaultIcon }>';
+    const ifScopes = scopesForSubstring(line, 'if', grammar);
+    expect(ifScopes).to.include('keyword.control.conditional.nx');
+    expect(ifScopes).to.include('meta.control.if.properties.nx');
+    const isScopes = scopesForSubstring(line, 'is', grammar);
+    expect(isScopes).to.include('keyword.control.match.nx');
+    expect(isScopes).to.include('meta.control.if.properties.nx');
+    const elseScopes = scopesForSubstring(line, 'else', grammar);
+    expect(elseScopes).to.include('keyword.control.conditional.nx');
+    expect(elseScopes).to.include('meta.control.if.properties.nx');
+  });
+
+  it('highlights property-list condition list arms', () => {
+    const line = '<UserCard if layout { "compact": gap=4 "full": gap=8 else: gap=2 }>';
+    const ifScopes = scopesForSubstring(line, 'if', grammar);
+    expect(ifScopes).to.include('keyword.control.conditional.nx');
+    expect(ifScopes).to.include('meta.control.if.properties.nx');
+    const elseScopes = scopesForSubstring(line, 'else', grammar);
+    expect(elseScopes).to.include('keyword.control.conditional.nx');
+    expect(elseScopes).to.include('meta.control.if.properties.nx');
+    expect(scopesForSubstring(line, 'gap', grammar)).to.include('entity.other.attribute-name.nx');
   });
 });

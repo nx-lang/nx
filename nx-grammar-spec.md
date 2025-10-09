@@ -17,8 +17,7 @@ Keywords
 - IMPORT ("import")
 - TYPE ("type")
 - LET ("let")
-- IF ("if"), ELSE ("else"), END_IF ("/if")
-- SWITCH ("switch"), CASE ("case"), DEFAULT ("default"), END_SWITCH ("/switch")
+- IF ("if"), ELSE ("else"), IS ("is")
 - FOR ("for"), IN ("in")
 - RAW ("raw")
 
@@ -313,11 +312,6 @@ ElementsIfConditionElseOpt
 - ElementsIfConditionElseOpt → ε
   - fields (on MarkupIfConditionListExpressionSyntax): elseElements?: MarkupListSyntax
 
-ValueSwitchScrutineeOpt
-- ValueSwitchScrutineeOpt → ValueExpression
-- ValueSwitchScrutineeOpt → ε        (selected when next token is CASE or DEFAULT)
-  - fields (on PropertySwitchSyntax): scrutinee?: ExpressionSyntax
-
 ElementsForExpression (AST: MarkupForExpressionSyntax)
 - ElementsForExpression → FOR IDENTIFIER ForIndexOpt IN ValueExpression LBRACE ElementsExpression RBRACE
   - fields: itemVar: string, indexVar?: string, iterable: ExpressionSyntax, body: MarkupListSyntax
@@ -354,31 +348,56 @@ PropertyList (AST: PropertyListSyntax)
 
 PropertyListItem (AST: PropertyListItemSyntax is a sum type)
 - PropertyListItem → PropertyValue                (PropertyValueSyntax)
-- PropertyListItem → PropertyListIf               (PropertyIfSyntax)
-- PropertyListItem → PropertyListSwitch           (PropertySwitchSyntax)
+- PropertyListItem → PropertyListIfExpression     (PropertyIfSimpleSyntax | PropertyIfMatchSyntax | PropertyIfConditionListSyntax)
 
 PropertyValue (AST: PropertyValueSyntax)
 - PropertyValue → QualifiedMarkupName EQ RhsExpression
   - fields: name: QualifiedMarkupNameSyntax, value: ExpressionSyntax
 
-PropertyListIf (AST: PropertyIfSyntax)
-- PropertyListIf → IF ValueExpression COLON PropertyList [ELSE COLON PropertyList] END_IF
+PropertyListIfExpression (AST: PropertyListItemSyntax is a sum type)
+- PropertyListIfExpression → PropertyListIfSimpleExpression        (PropertyIfSimpleSyntax)
+- PropertyListIfExpression → PropertyListIfMatchExpression         (PropertyIfMatchSyntax)
+- PropertyListIfExpression → PropertyListIfConditionListExpression (PropertyIfConditionListSyntax)
+
+PropertyListIfSimpleExpression (AST: PropertyIfSimpleSyntax)
+- PropertyListIfSimpleExpression → IF ValueExpression LBRACE PropertyList RBRACE PropertyListIfElseClauseOpt
   - fields: condition: ExpressionSyntax, thenProps: PropertyListSyntax, elseProps?: PropertyListSyntax
 
-PropertyListSwitch (AST: PropertySwitchSyntax)
-- PropertyListSwitch → SWITCH ValueSwitchScrutineeOpt PropertyListSwitchCase+ PropertyListSwitchDefaultOpt END_SWITCH
-  - fields: scrutinee?: ExpressionSyntax, cases: PropertySwitchCaseSyntax[], default?: PropertyListSyntax
+PropertyListIfElseClauseOpt
+- PropertyListIfElseClauseOpt → ELSE LBRACE PropertyList RBRACE
+- PropertyListIfElseClauseOpt → ε
 
-PropertyListSwitchCase (AST: PropertySwitchCaseSyntax)
-- PropertyListSwitchCase → CASE Pattern (COMMA Pattern)* COLON PropertyList
+PropertyListIfMatchExpression (AST: PropertyIfMatchSyntax)
+- PropertyListIfMatchExpression → IF PropertyListIfMatchScrutineeOpt IS LBRACE PropertyListIfMatchArm+ PropertyListIfMatchElseOpt RBRACE
+  - fields: scrutinee?: ExpressionSyntax, arms: PropertyIfMatchArmSyntax[], elseProps?: PropertyListSyntax
+
+PropertyListIfMatchScrutineeOpt
+- PropertyListIfMatchScrutineeOpt → ValueExpression
+- PropertyListIfMatchScrutineeOpt → ε        (selected when next token is IS)
+
+PropertyListIfMatchArm (AST: PropertyIfMatchArmSyntax)
+- PropertyListIfMatchArm → Pattern (COMMA Pattern)* COLON PropertyList
   - fields: patterns: PatternSyntax[], props: PropertyListSyntax
 
-PropertyListSwitchDefault (AST: PropertySwitchDefaultSyntax)
-- PropertyListSwitchDefault → DEFAULT COLON PropertyList
-  - fields: props: PropertyListSyntax
+PropertyListIfMatchElseOpt
+- PropertyListIfMatchElseOpt → ELSE COLON PropertyList
+- PropertyListIfMatchElseOpt → ε
 
-PropertyListSwitchDefaultOpt
-- PropertyListSwitchDefaultOpt → PropertyListSwitchDefault | ε
+PropertyListIfConditionListExpression (AST: PropertyIfConditionListSyntax)
+- PropertyListIfConditionListExpression → IF PropertyListIfConditionScrutineeOpt LBRACE PropertyListIfConditionArm+ PropertyListIfConditionElseOpt RBRACE
+  - fields: scrutinee?: ExpressionSyntax, arms: PropertyIfConditionArmSyntax[], elseProps?: PropertyListSyntax
+
+PropertyListIfConditionScrutineeOpt
+- PropertyListIfConditionScrutineeOpt → ValueExpression
+- PropertyListIfConditionScrutineeOpt → ε        (selected when next token starts a condition arm)
+
+PropertyListIfConditionArm (AST: PropertyIfConditionArmSyntax)
+- PropertyListIfConditionArm → ValueExpression COLON PropertyList
+  - fields: condition: ExpressionSyntax, props: PropertyListSyntax
+
+PropertyListIfConditionElseOpt
+- PropertyListIfConditionElseOpt → ELSE COLON PropertyList
+- PropertyListIfConditionElseOpt → ε
 
 Content (AST: ElementContentSyntax is a sum type)
 - Content → ElementsExpression
@@ -466,12 +485,13 @@ This section lists the AST node types with fields for implementers.
 - MarkupElementSyntax: name: QualifiedMarkupNameSyntax, props: PropertyListSyntax, children: ElementContentSyntax (MarkupListSyntax or MixedContentSyntax)
 - EmbedElementSyntax: name: QualifiedMarkupNameSyntax, textType: string, mode: "parsed"|"raw", props: PropertyListSyntax, content: EmbedContentSyntax|RawEmbedContentSyntax
 - PropertyListSyntax: items: PropertyListItemSyntax[]
-- PropertyListItemSyntax: PropertyValueSyntax | PropertyIfSyntax | PropertySwitchSyntax
+- PropertyListItemSyntax: PropertyValueSyntax | PropertyIfSimpleSyntax | PropertyIfMatchSyntax | PropertyIfConditionListSyntax
 - PropertyValueSyntax: name: QualifiedMarkupNameSyntax, value: ExpressionSyntax
-- PropertyIfSyntax: condition: ExpressionSyntax, thenProps: PropertyListSyntax, elseProps?: PropertyListSyntax
-- PropertySwitchSyntax: scrutinee?: ExpressionSyntax, cases: PropertySwitchCaseSyntax[], default?: PropertyListSyntax
-- PropertySwitchCaseSyntax: patterns: PatternSyntax[], props: PropertyListSyntax
-- PropertySwitchDefaultSyntax: props: PropertyListSyntax (usually folded into PropertySwitchSyntax.default)
+- PropertyIfSimpleSyntax: condition: ExpressionSyntax, thenProps: PropertyListSyntax, elseProps?: PropertyListSyntax
+- PropertyIfMatchSyntax: scrutinee?: ExpressionSyntax, arms: PropertyIfMatchArmSyntax[], elseProps?: PropertyListSyntax
+- PropertyIfMatchArmSyntax: patterns: PatternSyntax[], props: PropertyListSyntax
+- PropertyIfConditionListSyntax: scrutinee?: ExpressionSyntax, arms: PropertyIfConditionArmSyntax[], elseProps?: PropertyListSyntax
+- PropertyIfConditionArmSyntax: condition: ExpressionSyntax, props: PropertyListSyntax
 - ElementContentSyntax: items: MarkupItemSyntax[] | MixedContentItemSyntax[]
 - MixedContentSyntax: items: MixedContentItemSyntax[]
 - MixedContentItemSyntax: kind: "text"|"element"|"interpolation", value: TextRunSyntax|MarkupElementSyntax|EmbedElementSyntax|InterpolationExpressionSyntax
@@ -494,9 +514,9 @@ This section lists the AST node types with fields for implementers.
 - ElementsExpression item selection:
   - If next token is LT → Element
   - If next token ∈ {IF, FOR} → the corresponding Elements* form
-- SWITCH scrutinee (elements/property variants):
-  - After SWITCH, if next token ∈ {CASE, DEFAULT} → no scrutinee
-  - Else → parse ValueExpression as the scrutinee
+- IfMatch scrutinee (value/elements/property variants):
+  - After IF, if next token is IS → no scrutinee
+  - Else → parse ValueExpression before IS as the scrutinee
 - Element is left-factored: after LT ElementName, COLON selects the embed branch; otherwise parse PropertyList and choose SLASH GT (self-closing) or GT … LT SLASH ElementName GT using lookahead at SLASH vs GT.
 
 ## Validation Rules (post-parse)
@@ -506,8 +526,8 @@ This section lists the AST node types with fields for implementers.
 - PropertyDefinition names within a single FunctionDefinition should be unique.
 - Type modifiers: at most one of QMARK or ELLIPSIS.
 - Switch expressions (property variants): at least one case; patterns per case must be non-empty.
-- ValueIfMatchExpression / ElementsIfMatchExpression: at least one pattern arm; each arm requires ≥1 pattern.
-- ValueIfConditionListExpression / ElementsIfConditionListExpression: at least one condition arm.
+- ValueIfMatchExpression / ElementsIfMatchExpression / PropertyListIfMatchExpression: at least one pattern arm; each arm requires ≥1 pattern.
+- ValueIfConditionListExpression / ElementsIfConditionListExpression / PropertyListIfConditionListExpression: at least one condition arm.
 
 ## Notes and Gaps
 

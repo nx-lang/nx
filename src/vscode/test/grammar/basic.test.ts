@@ -4,7 +4,7 @@ import * as path from 'path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { expect } from 'chai';
-import type { IGrammar, IToken, IRuleStack } from 'vscode-textmate';
+import type { IGrammar, IToken, StateStack } from 'vscode-textmate';
 // Use CommonJS require via createRequire to avoid ESM interop issues
 
 const cjsRequire = createRequire(import.meta.url);
@@ -98,7 +98,7 @@ describe('NX TextMate grammar', function () {
       '}'
     ];
 
-    let ruleStack: IRuleStack | null = null;
+    let ruleStack: StateStack | null = null;
 
     const advance = (line: string) => {
       const result = grammar.tokenizeLine(line, ruleStack);

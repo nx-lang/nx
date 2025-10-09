@@ -173,18 +173,29 @@ EmbedElement ::=
     "<" ElementName ":" EmbedTextType PropertyList ">" EmbedContent "</" ElementName ">"
     | "<" ElementName ":" EmbedTextType "raw" PropertyList ">" RawEmbedContent "</" ElementName ">"
 
-(* list of properties, with if/switch allowed *)
+(* list of properties, with if allowed *)
 PropertyList ::=
-    {PropertyValue | PropertyListIf | PropertyListSwitch}
+    {PropertyValue | PropertyListIf}
 
 PropertyListIf ::=
-    "if" ValueExpression ":" PropertyList ["else" ":" PropertyList] "/if"
+    PropertyListIfSimple
+    | PropertyListIfMatch
+    | PropertyListIfConditionList
 
-PropertyListSwitch ::=
-    "switch" [ValueExpression]
-    {"case" Pattern {"," Pattern} ":" PropertyList}
-    ["default" ":" PropertyList]
-    "/switch"
+PropertyListIfSimple ::=
+    "if" ValueExpression "{" PropertyList "}" ["else" "{" PropertyList "}"]
+
+PropertyListIfMatch ::=
+    "if" [ValueExpression] "is" "{"
+    {Pattern {"," Pattern} ":" PropertyList}
+    ["else" ":" PropertyList]
+    "}"
+
+PropertyListIfConditionList ::=
+    "if" [ValueExpression] "{"
+    {ValueExpression ":" PropertyList}
+    ["else" ":" PropertyList]
+    "}"
 
 Content ::=
     ElementsExpression |     (* list of elements, with if/for allowed *)
