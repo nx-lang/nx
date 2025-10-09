@@ -3,16 +3,15 @@ import data.models
 
 let <UserCard user:User className:string content:Element.../> =
   <section class="card {className}">
-    if isLoading:
+    if isLoading {
       <Spinner/>
-    else:
+    } else {
       <div>
         {content}
       </div>
-    /if
+    }
   </section>
 
 <UserCard user={user} className="primary">
   <:uitext>Hello, {user.name}!</>
 </UserCard>
-

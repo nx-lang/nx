@@ -51,10 +51,11 @@ describe('NX control blocks', () => {
     grammar = await loadGrammar();
   });
 
-  it('highlights mid-line /if in elements-if single-line block', () => {
-    const line = 'if cond: <Spinner/> /if';
+  it('highlights braces in elements-if single-line block', () => {
+    const line = 'if cond { <Spinner/> }';
     expect(hasScopeAt(line, 'if', ['keyword.control.conditional.nx'], grammar)).to.equal(true);
-    expect(hasScopeAt(line, '/if', ['keyword.control.conditional.nx'], grammar)).to.equal(true);
+    expect(hasScopeAt(line, '{', ['punctuation.section.block.begin.nx'], grammar)).to.equal(true);
+    expect(hasScopeAt(line, '}', ['punctuation.section.block.end.nx'], grammar)).to.equal(true);
     expect(hasScopeAt(line, 'Spinner', ['entity.name.tag.nx'], grammar)).to.equal(true);
   });
 
@@ -72,4 +73,3 @@ describe('NX control blocks', () => {
     expect(hasScopeAt(line, '/switch', ['keyword.control.switch.nx'], grammar)).to.equal(true);
   });
 });
-

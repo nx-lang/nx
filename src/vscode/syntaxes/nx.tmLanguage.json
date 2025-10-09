@@ -6,7 +6,6 @@
   "patterns": [
     { "include": "#comments" },
     { "include": "#elements-if" },
-    { "include": "#elements-switch" },
     { "include": "#elements-for" },
     { "include": "#tags" },
     { "include": "#strings" },
@@ -92,6 +91,7 @@
       "patterns": [
         { "name": "keyword.control.conditional.nx", "match": "\\bif\\b|\\belse\\b" },
         { "name": "keyword.control.switch.nx", "match": "\\bswitch\\b|\\bcase\\b|\\bdefault\\b" },
+        { "name": "keyword.control.match.nx", "match": "\\bis\\b" },
         { "name": "keyword.control.loop.nx", "match": "\\bfor\\b|\\bin\\b" }
       ]
     },
@@ -134,7 +134,6 @@
       "name": "meta.interpolation.nx",
       "patterns": [
         { "include": "#value-if" },
-        { "include": "#value-switch" },
         { "include": "#value-for" },
         { "include": "#comments" },
         { "include": "#strings" },
@@ -179,7 +178,6 @@
       "name": "meta.tag.fragment.nx",
       "patterns": [
         { "include": "#elements-if" },
-        { "include": "#elements-switch" },
         { "include": "#elements-for" },
         { "include": "#tags" },
         { "include": "#interpolation" },
@@ -264,93 +262,81 @@
     "elements-if": {
       "begin": "(?<![A-Za-z0-9_])(if)\\b",
       "beginCaptures": { "1": { "name": "keyword.control.conditional.nx" } },
-      "end": "(?<![A-Za-z0-9_])(/if)\\b",
-      "endCaptures": { "1": { "name": "keyword.control.conditional.nx" } },
+      "end": "(?<=\\})(?!\\s*else\\b)",
       "name": "meta.control.if.elements.nx",
       "patterns": [
         { "include": "#comments" },
         { "include": "#strings" },
         { "include": "#numbers" },
         { "include": "#elements-if" },
-        { "include": "#elements-switch" },
         { "include": "#elements-for" },
         { "include": "#tags" },
-        { "include": "#interpolation" },
-        { "include": "#types" },
-        { "include": "#operators" },
+        { "include": "#value-if" },
+        { "include": "#value-for" },
         {
-          "name": "keyword.control.conditional.nx",
-          "match": "(?<!\\S)(else(?:\\s+if)?)\\b"
-        }
+          "begin": "\\{",
+          "beginCaptures": { "0": { "name": "punctuation.section.block.begin.nx" } },
+          "end": "\\}",
+          "endCaptures": { "0": { "name": "punctuation.section.block.end.nx" } },
+          "patterns": [
+            { "include": "#comments" },
+            { "include": "#strings" },
+            { "include": "#numbers" },
+            { "include": "#elements-if" },
+            { "include": "#elements-for" },
+            { "include": "#tags" },
+            { "include": "#value-if" },
+            { "include": "#value-for" },
+            { "include": "#interpolation" },
+            { "include": "#keywords-control" },
+            { "include": "#types" },
+            { "include": "#operators" }
+          ]
+        },
+        { "include": "#interpolation" },
+        { "include": "#keywords-control" },
+        { "include": "#types" },
+        { "include": "#operators" }
       ]
     },
     "value-if": {
       "begin": "(?<![A-Za-z0-9_])(if)\\b",
       "beginCaptures": { "1": { "name": "keyword.control.conditional.nx" } },
-      "end": "(?<![A-Za-z0-9_])(/if)\\b",
-      "endCaptures": { "1": { "name": "keyword.control.conditional.nx" } },
-      "name": "meta.control.if.elements.nx",
+      "end": "(?<=\\})(?!\\s*else\\b)",
+      "name": "meta.control.if.value.nx",
       "patterns": [
         { "include": "#comments" },
         { "include": "#strings" },
         { "include": "#numbers" },
         { "include": "#value-if" },
-        { "include": "#value-switch" },
         { "include": "#value-for" },
         { "include": "#elements-if" },
-        { "include": "#elements-switch" },
         { "include": "#elements-for" },
         { "include": "#tags" },
-        { "include": "#interpolation" },
-        { "include": "#types" },
-        { "include": "#operators" },
         {
-          "name": "keyword.control.conditional.nx",
-          "match": "(?<!\\S)(else(?:\\s+if)?)\\b"
-        }
-      ]
-    },
-    "elements-switch": {
-      "begin": "(?<![A-Za-z0-9_])(switch)\\b",
-      "beginCaptures": { "1": { "name": "keyword.control.switch.nx" } },
-      "end": "(?<![A-Za-z0-9_])(/switch)\\b",
-      "endCaptures": { "1": { "name": "keyword.control.switch.nx" } },
-      "name": "meta.control.switch.elements.nx",
-      "patterns": [
-        { "include": "#comments" },
-        { "include": "#strings" },
-        { "include": "#numbers" },
-        { "include": "#elements-if" },
-        { "include": "#elements-switch" },
-        { "include": "#elements-for" },
-        { "include": "#tags" },
+          "begin": "\\{",
+          "beginCaptures": { "0": { "name": "punctuation.section.block.begin.nx" } },
+          "end": "\\}",
+          "endCaptures": { "0": { "name": "punctuation.section.block.end.nx" } },
+          "patterns": [
+            { "include": "#comments" },
+            { "include": "#strings" },
+            { "include": "#numbers" },
+            { "include": "#value-if" },
+            { "include": "#value-for" },
+            { "include": "#elements-if" },
+            { "include": "#elements-for" },
+            { "include": "#tags" },
+            { "include": "#interpolation" },
+            { "include": "#keywords-control" },
+            { "include": "#types" },
+            { "include": "#operators" }
+          ]
+        },
         { "include": "#interpolation" },
+        { "include": "#keywords-control" },
         { "include": "#types" },
-        { "include": "#operators" },
-        { "name": "keyword.control.switch.nx", "match": "(?<![A-Za-z0-9_])(?:case|default)\\b" }
-      ]
-    },
-    "value-switch": {
-      "begin": "(?<![A-Za-z0-9_])(switch)\\b",
-      "beginCaptures": { "1": { "name": "keyword.control.switch.nx" } },
-      "end": "(?<![A-Za-z0-9_])(/switch)\\b",
-      "endCaptures": { "1": { "name": "keyword.control.switch.nx" } },
-      "name": "meta.control.switch.elements.nx",
-      "patterns": [
-        { "include": "#comments" },
-        { "include": "#strings" },
-        { "include": "#numbers" },
-        { "include": "#value-if" },
-        { "include": "#value-switch" },
-        { "include": "#value-for" },
-        { "include": "#elements-if" },
-        { "include": "#elements-switch" },
-        { "include": "#elements-for" },
-        { "include": "#tags" },
-        { "include": "#interpolation" },
-        { "include": "#types" },
-        { "include": "#operators" },
-        { "name": "keyword.control.switch.nx", "match": "(?<!\\S)(?:case|default)\\b" }
+        { "include": "#operators" }
       ]
     },
     "elements-for": {
@@ -364,7 +350,6 @@
         { "include": "#strings" },
         { "include": "#numbers" },
         { "include": "#elements-if" },
-        { "include": "#elements-switch" },
         { "include": "#elements-for" },
         { "include": "#tags" },
         {
@@ -376,7 +361,6 @@
             { "include": "#strings" },
             { "include": "#numbers" },
             { "include": "#elements-if" },
-            { "include": "#elements-switch" },
             { "include": "#elements-for" },
             { "include": "#tags" },
             { "include": "#interpolation" },
@@ -401,10 +385,8 @@
         { "include": "#strings" },
         { "include": "#numbers" },
         { "include": "#value-if" },
-        { "include": "#value-switch" },
         { "include": "#value-for" },
         { "include": "#elements-if" },
-        { "include": "#elements-switch" },
         { "include": "#elements-for" },
         { "include": "#tags" },
         {
@@ -416,10 +398,8 @@
             { "include": "#strings" },
             { "include": "#numbers" },
             { "include": "#value-if" },
-            { "include": "#value-switch" },
             { "include": "#value-for" },
             { "include": "#elements-if" },
-            { "include": "#elements-switch" },
             { "include": "#elements-for" },
             { "include": "#tags" },
             { "include": "#interpolation" },

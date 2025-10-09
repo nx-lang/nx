@@ -54,29 +54,36 @@ describe('NX TextMate grammar', function () {
   });
 
   it('highlights control keywords (if)', function () {
-    const line = 'if isLoading:';
+    const line = 'if isLoading { result }';
     const { tokens } = grammar.tokenizeLine(line, null);
     const scopes = scopesForSubstring(line, tokens, 'if');
     expect(scopes).to.include('keyword.control.conditional.nx');
   });
 
   it('highlights inline else within control block', function () {
-    const line = 'if user.isAuthenticated: 2 else: 2 /if';
+    const line = 'if user.isAuthenticated { 2 } else { 2 }';
     const { tokens } = grammar.tokenizeLine(line, null);
     const scopes = scopesForSubstring(line, tokens, 'else');
     expect(scopes).to.include('keyword.control.conditional.nx');
   });
 
+  it('highlights match-style value if expressions', function () {
+    const line = 'if status is { "active": 1 "idle": 2 else: 0 }';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    expect(scopesForSubstring(line, tokens, 'if')).to.include('keyword.control.conditional.nx');
+    expect(scopesForSubstring(line, tokens, 'is')).to.include('keyword.control.match.nx');
+    expect(scopesForSubstring(line, tokens, 'else')).to.include('keyword.control.conditional.nx');
+  });
+
   it('highlights nested control blocks', function () {
     const lines = [
-      'if outer:',
+      'if outer {',
       '  for item in items {',
-      '    switch mode',
-        '      if inner:',
-        '      /if',
-      '    /switch',
+      '    if inner {',
+      '      <Item/>',
+      '    }',
       '  }',
-      '/if'
+      '}'
     ];
 
     let ruleStack: IRuleStack | null = null;
@@ -89,27 +96,25 @@ describe('NX TextMate grammar', function () {
 
     advance(lines[0]);
     const forTokens = advance(lines[1]);
-    const switchTokens = advance(lines[2]);
-    const ifTokens = advance(lines[3]);
+    const innerIfTokens = advance(lines[2]);
 
     expect(scopesForSubstring(lines[1], forTokens, 'for')).to.include('keyword.control.loop.nx');
-    expect(scopesForSubstring(lines[2], switchTokens, 'switch')).to.include('keyword.control.switch.nx');
-    expect(scopesForSubstring(lines[3], ifTokens, 'if')).to.include('keyword.control.conditional.nx');
+    expect(scopesForSubstring(lines[2], innerIfTokens, 'if')).to.include('keyword.control.conditional.nx');
   });
 
   it('highlights inline if blocks within element content', function () {
-    const line = 'render prefix if user.isAuthenticated: <Item/> /if suffix';
+    const line = 'render prefix if user.isAuthenticated { <Item/> } else { <Fallback/> } suffix';
     const { tokens } = grammar.tokenizeLine(line, null);
     expect(scopesForSubstring(line, tokens, 'if')).to.include('keyword.control.conditional.nx');
-    expect(scopesForSubstring(line, tokens, '/if')).to.include('keyword.control.conditional.nx');
+    expect(scopesForSubstring(line, tokens, 'else')).to.include('keyword.control.conditional.nx');
   });
 
-  it('highlights inline switch blocks within element content', function () {
-    const line = 'render switch state case "active": "A" default: "D" /switch done';
+  it('highlights match-style elements if expressions', function () {
+    const line = 'render if kind is { "compact": <Compact/> "full": <Full/> else: <Fallback/> }';
     const { tokens } = grammar.tokenizeLine(line, null);
-    expect(scopesForSubstring(line, tokens, 'switch')).to.include('keyword.control.switch.nx');
-    expect(scopesForSubstring(line, tokens, 'case')).to.include('keyword.control.switch.nx');
-    expect(scopesForSubstring(line, tokens, '/switch')).to.include('keyword.control.switch.nx');
+    expect(scopesForSubstring(line, tokens, 'if')).to.include('keyword.control.conditional.nx');
+    expect(scopesForSubstring(line, tokens, 'is')).to.include('keyword.control.match.nx');
+    expect(scopesForSubstring(line, tokens, 'else')).to.include('keyword.control.conditional.nx');
   });
 
   it('highlights inline for blocks within element content', function () {
@@ -155,19 +160,18 @@ describe('NX TextMate grammar', function () {
   });
 
   it('highlights control blocks inside interpolations', function () {
-    const line = '{if isActive: "active" else: "inactive" /if}';
+    const line = '{if isActive { "active" } else { "inactive" }}';
     const { tokens } = grammar.tokenizeLine(line, null);
     expect(scopesForSubstring(line, tokens, 'if')).to.include('keyword.control.conditional.nx');
     expect(scopesForSubstring(line, tokens, 'else')).to.include('keyword.control.conditional.nx');
-    expect(scopesForSubstring(line, tokens, '/if')).to.include('keyword.control.conditional.nx');
   });
 
-  it('highlights switch and for blocks inside interpolations', function () {
-    const line = '{switch state case "active": "A" default: "D" /switch for item in items { item }}';
+  it('highlights match and for blocks inside interpolations', function () {
+    const line = '{if state is { "active": "A" else: "D" } for item in items { item }}';
     const { tokens } = grammar.tokenizeLine(line, null);
-    expect(scopesForSubstring(line, tokens, 'switch')).to.include('keyword.control.switch.nx');
-    expect(scopesForSubstring(line, tokens, 'case')).to.include('keyword.control.switch.nx');
-    expect(scopesForSubstring(line, tokens, '/switch')).to.include('keyword.control.switch.nx');
+    expect(scopesForSubstring(line, tokens, 'if')).to.include('keyword.control.conditional.nx');
+    expect(scopesForSubstring(line, tokens, 'is')).to.include('keyword.control.match.nx');
+    expect(scopesForSubstring(line, tokens, 'else')).to.include('keyword.control.conditional.nx');
     expect(scopesForSubstring(line, tokens, 'for')).to.include('keyword.control.loop.nx');
     expect(scopesForSubstring(line, tokens, 'in')).to.include('keyword.control.loop.nx');
     expect(scopesForSubstring(line, tokens, ' { ')).to.include('punctuation.section.block.begin.nx');

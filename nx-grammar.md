@@ -71,7 +71,6 @@ ValueExpression ::=
     | Literal
     | Identifier
     | ValueIfExpression
-    | ValueSwitchExpression
     | ValueForExpression
     | ConditionalExpression
     | PrefixUnaryExpression
@@ -88,13 +87,24 @@ ParenthesizedExpression ::=
     "(" ValueExpression ")"
 
 ValueIfExpression ::=
-    "if" ValueExpression ":" ValueExpression["else" ":" ValueExpression] "/if"
+    ValueIfSimpleExpression
+    | ValueIfMatchExpression
+    | ValueIfConditionListExpression
 
-ValueSwitchExpression ::=
-    "switch" [ValueExpression]
-    {"case" Pattern {"," Pattern} ":" ValueExpression}
-    ["default" ":" ValueExpression]
-    "/switch"
+ValueIfSimpleExpression ::=
+    "if" ValueExpression "{" ValueExpression "}" ["else" "{" ValueExpression "}"]
+
+ValueIfMatchExpression ::=
+    "if" [ValueExpression] "is" "{"
+    {Pattern {"," Pattern} ":" ValueExpression}
+    ["else" ":" ValueExpression]
+    "}"
+
+ValueIfConditionListExpression ::=
+    "if" [ValueExpression] "{"
+    {ValueExpression ":" ValueExpression}
+    ["else" ":" ValueExpression]
+    "}"
 
 ValueForExpression ::=
     "for" {Identifier} "in" ValueExpression "{" ValueExpression "}"
@@ -126,18 +136,29 @@ Literal ::=
 ## Elements
 
 ```ebnf
-(* list of elements, with if/switch/for allowed *)
+(* list of elements, with if/for allowed *)
 ElementsExpression ::=
-    (Element | ElementsIfExpression | ElementsSwitchExpression | ElementsForExpression)+
+    (Element | ElementsIfExpression | ElementsForExpression)+
 
 ElementsIfExpression ::=
-    "if" ValueExpression ":" ElementsExpression ["else" ":" ElementsExpression] "/if"
+    ElementsIfSimpleExpression
+    | ElementsIfMatchExpression
+    | ElementsIfConditionListExpression
 
-ElementsSwitchExpression ::=
-    "switch" [ValueExpression]
-    {"case" Pattern {"," Pattern} ":" ElementsExpression}
-    ["default" ":" ElementsExpression]
-    "/switch"
+ElementsIfSimpleExpression ::=
+    "if" ValueExpression "{" ElementsExpression "}" ["else" "{" ElementsExpression "}"]
+
+ElementsIfMatchExpression ::=
+    "if" [ValueExpression] "is" "{"
+    {Pattern {"," Pattern} ":" ElementsExpression}
+    ["else" ":" ElementsExpression]
+    "}"
+
+ElementsIfConditionListExpression ::=
+    "if" [ValueExpression] "{"
+    {ValueExpression ":" ElementsExpression}
+    ["else" ":" ElementsExpression]
+    "}"
 
 ElementsForExpression ::=
     "for" {Identifier} "in" ValueExpression "{" ElementsExpression "}"
@@ -166,8 +187,8 @@ PropertyListSwitch ::=
     "/switch"
 
 Content ::=
-    ElementsExpression |     (* list of elements, with if/switch/for allowed *)
-    MixedContentExpression   (* text with optional embedded elements and interpolations; no if/switch/for allowed except inside interpolated expressions *)
+    ElementsExpression |     (* list of elements, with if/for allowed *)
+    MixedContentExpression   (* text with optional embedded elements and interpolations; no if/for allowed except inside interpolated expressions *)
 
 MixedContentExpression ::=
     { TextPart | Element | InterpolationExpression }

@@ -35,16 +35,16 @@
     "prefix": "nxife",
     "description": "If expression producing elements",
     "body": [
-      "if ${1:condition}:",
+      "if ${1:condition} {",
       "\t$2",
-      "/if"
+      "}${3: else {\n\t$4\n}}"
     ]
   },
   "If (value)": {
     "prefix": "nxifv",
     "description": "If expression producing a value",
     "body": [
-      "if ${1:condition}: ${2:expr} ${3:else: ${4:expr} }/if"
+      "if ${1:condition} { ${2:expr} }${3: else { ${4:expr} }}"
     ]
   },
   "For (elements)": {
@@ -63,26 +63,26 @@
       "for ${1:item}${2:, ${3:index}} in ${4:iterable} { ${0:expr} }"
     ]
   },
-  "Switch (elements)": {
+  "Match (elements)": {
     "prefix": "nxswe",
-    "description": "Switch producing elements",
+    "description": "Match expression producing elements",
     "body": [
-      "switch ${1:scrutinee}",
-      "case ${2:pattern}:",
-      "\t$3",
-      "default:",
-      "\t$0",
-      "/switch"
+      "if ${1:scrutinee} is {",
+      "\t${2:pattern}:",
+      "\t\t$3",
+      "\telse:",
+      "\t\t$0",
+      "}"
     ]
   },
-  "Switch (value)": {
+  "Match (value)": {
     "prefix": "nxswv",
-    "description": "Switch producing a value",
+    "description": "Match expression producing a value",
     "body": [
-      "switch ${1:scrutinee}",
-      "case ${2:pattern}: ${3:expr}",
-      "default: ${0:expr}",
-      "/switch"
+      "if ${1:scrutinee} is {",
+      "\t${2:pattern}: ${3:expr}",
+      "\telse: ${0:expr}",
+      "}"
     ]
   },
   "Interpolation": {

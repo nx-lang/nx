@@ -130,7 +130,7 @@ let <DataGrid
   data:object...
   columns:object...
   className:string? /> =
-  <table className={if (className) className else "data-grid" /if}>
+  <table className={if (className) { className } else { "data-grid" }}>
     <thead>
       <tr>
         for column in columns {
@@ -166,39 +166,39 @@ let <UserDisplay user:User /> =
 
 #### Switch Expression Semantics
 
-NX's `switch` expression is designed to be familiar to C#/TypeScript developers while providing modern functional semantics:
+NX's match-style `if` expression keeps pattern matching concise while staying expression-based:
 
-1. **Expression-based**: Switch always returns a value and can be used anywhere an expression is valid
-2. **No fall-through**: Each branch is independent; no `break` statements needed
-3. **Exhaustiveness**: The `else` branch is optional. If omitted and no pattern matches at runtime, an error is thrown
-4. **Multiple patterns**: A single branch can match multiple comma-separated patterns
-5. **Consistent with if/else**: Uses `else` for the default case, maintaining consistency with conditional expressions
+1. **Expression-based**: Every arm yields a value; the expression can appear anywhere
+2. **No fall-through**: Each arm is independent—no `break` statements or implicit fall-through
+3. **Exhaustiveness**: The `else` arm is optional. If omitted and nothing matches, runtime raises an error
+4. **Multiple patterns**: A single arm can match multiple comma-separated patterns
+5. **Consistent syntax**: Reuses `if`/`else` keywords and shares semantics with other conditional forms
 
 ```nx
-// Simple switch on primitive values
-switch user.role
-  case "admin": <AdminPanel/>
-  case "user":  <UserDashboard/>
-  case "guest": <PublicContent/>
-  default:      <AccessDenied/>
-/switch
+// Simple match on primitive values
+if user.role is {
+  "admin": <AdminPanel/>
+  "user":  <UserDashboard/>
+  "guest": <PublicContent/>
+  else:    <AccessDenied/>
+}
 
-// Multiple patterns per branch
-switch day
-  case "monday", "tuesday", "wednesday", "thursday", "friday": <Weekday/>
-  case "saturday", "sunday":                                   <Weekend/>
-  default:                                                     <InvalidDay/>
-/switch
+// Multiple patterns per arm
+if day is {
+  "monday", "tuesday", "wednesday", "thursday", "friday": <Weekday/>
+  "saturday", "sunday":                                   <Weekend/>
+  else:                                                     <InvalidDay/>
+}
 
-// Switch without default - will throw if no match
-switch theme
-  case "light": <LightTheme/>
-  case "dark":  <DarkTheme/>
-  case "auto":  <AutoTheme/>
-  // No default - these are the only valid themes
-/switch
+// Match without else - will throw if no pattern matches
+if theme is {
+  "light": <LightTheme/>
+  "dark":  <DarkTheme/>
+  "auto":  <AutoTheme/>
+  // No else - these are the only valid themes
+}
 
-// Switch in function definitions
+// Match in function definitions
 let <StatusDisplay status:string /> =
   if status is {
     "pending":  <PendingIcon/>
@@ -211,14 +211,14 @@ let <StatusDisplay status:string /> =
 #### Advanced Expression Examples
 ```nx
 // Conditional rendering
-if user.isAuthenticated:
+if user.isAuthenticated {
   <WelcomeUser user={user}/>
-else:
+} else {
   <LoginForm/>
-/if
+}
 
 // Conditional expressions in attributes
-<div className={if isActive: "active" else: "inactive" /if}>Content</div>
+<div className={if isActive { "active" } else { "inactive" }}>Content</div>
 
 // List transformation with index
 for index, item in items {
@@ -227,13 +227,13 @@ for index, item in items {
   </div>
 }
 
-// Basic switch expression (simple values only)
-switch user.role
-  case "admin": <AdminPanel/>
-  case "user":  <UserDashboard/>
-  case "guest": <PublicContent/>
-  default:      <AccessDenied/>
-/switch
+// Basic match expression (simple values only)
+if user.role is {
+  "admin": <AdminPanel/>
+  "user":  <UserDashboard/>
+  "guest": <PublicContent/>
+  else:    <AccessDenied/>
+}
 
 // List literals and operations
 let numbers = [1, 2, 3, 4, 5]  // List literal
@@ -325,8 +325,7 @@ let commonButtonProps = <Button.properties className="btn" disabled=false/>
     { field: "email", validator: isValidEmail },
     { field: "age", validator: (val) => val >= 18 }
   ]}
-  className={`form ${if isLoading => "loading" else ""} ${if hasErrors => "error" else ""}`}
-  className={`form {if isLoading: "loading" else: "" /if} ${if hasErrors: "error" else: ""}`}
+  className={`form ${if isLoading { "loading" } else { "" }} ${if hasErrors { "error" } else { "" }}`}
 >
   Form content
 </Form>
@@ -362,8 +361,8 @@ let squares = for n in numbers { n * n }
 
 // List comprehension-like behavior with for/if.
 // The parentheses are optional but recommended for nested inline conditions.
-let evens = for (n in numbers) { if (n % 2 == 0): n /if }
-let evens = for n in numbers { if n % 2 == 0: n }
+let evens = for (n in numbers) { if (n % 2 == 0) { n } }
+let evens = for n in numbers { if n % 2 == 0 { n } }
 
 // Nested lists
 let matrix: (int...)... = [[1, 2], [3, 4], [5, 6]]  // List of lists
@@ -402,7 +401,7 @@ let <UserProfile userId:string/> = {
   />
 
   <div>
-    <img src={if user.avatarUrl: user.avatarUrl else: "/default-avatar.jpg" /if}/>
+    <img src={if user.avatarUrl { user.avatarUrl } else { "/default-avatar.jpg" }}/>
     <h2>{user.name}</h2>
     <span>{user.email}</span>
   </div>
@@ -438,7 +437,7 @@ that allows styles, inline or standalone, to use the same element syntax.
 let <StyledButton variant:string = "primary" content:Element/> =
   <button
     style=<Style
-      backgroundColor={if variant == "primary": "#007bff" else: "#6c757d" /if}
+      backgroundColor={if variant == "primary" { "#007bff" } else { "#6c757d" }}
       color="white"
       border="none",
       padding="8px 16px",

@@ -5,7 +5,7 @@ This tracks near-term enhancements and future work. The LSP server will be imple
 ## Grammar Coverage
 - [x] Parse attribute values that can embed inline elements, e.g., `prop=<Start/>` and `content=<:uitext>…</>`.
 - [ ] Improve mixed content highlighting: interleave text, elements, and interpolations more accurately.
-- [ ] Add explicit patterns for elements control forms: `ElementsIfExpression`, `ElementsSwitchExpression`, `ElementsForExpression`.
+- [ ] Add explicit patterns for elements control forms: `ElementsIfExpression`, `ElementsForExpression`.
 - [ ] Recognize `raw` embed mode distinctly and treat inner content as unparsed text.
 - [ ] Consider injection of other grammars for typed embeds (e.g., `:markdown`, `:uitext`) via TextMate injections or `contentName` to piggyback existing scopes.
 - [ ] Broaden identifier rules for `QualifiedMarkupName` vs `QualifiedName` where hyphens are allowed only in markup identifiers.
@@ -14,13 +14,13 @@ This tracks near-term enhancements and future work. The LSP server will be imple
 - [ ] Split type-nullability `?` from conditional operator highlighting once a richer context-sensitive rule (or parser-backed scopes) is available. Also update keyword.operator.type-modifier.nx if needed.
 
 ## Folding / Indentation
-- [ ] Improve indentation rules for `if … /if`, `switch … /switch`, `for … }` blocks.
-- [ ] Add folding markers for block pairs (`if`, `for`, `switch` and tag open/close), including nested tags.
+- [ ] Improve indentation rules for `if … }` and `for … }` blocks.
+- [ ] Add folding markers for block pairs (`if`, `for`, and tag open/close), including nested tags.
 - [ ] Validate behavior with long lines and mixed-content blocks.
 
 ## Snippets
 - [ ] Add snippets for common property patterns (typed defaults, spreads `...props`).
-- [ ] Add concise control-flow snippets (inline value `if`, `switch` cases with multiple patterns).
+- [ ] Add concise control-flow snippets (inline value `if`, `if is` cases with multiple patterns).
 
 ## Tests
 - [ ] Introduce tokenization tests (e.g., `vscode-tmgrammar-test` or `vscode-textmate` + `oniguruma`).

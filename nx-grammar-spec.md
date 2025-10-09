@@ -174,7 +174,6 @@ InterpolationExpression (AST: InterpolationExpressionSyntax)
 ValueExpression (AST: ExpressionSyntax; Pratt-parsed for operators)
 - ValueExpression → Element
 - ValueExpression → ValueIfExpression
-- ValueExpression → ValueSwitchExpression
 - ValueExpression → ValueForExpression
 - ValueExpression → ValueExpr
 
@@ -198,29 +197,55 @@ Literal (AST: LiteralExpressionSyntax)
 - Literal → STRING_LITERAL | INT_LITERAL | REAL_LITERAL | HEX_LITERAL | BOOL_LITERAL | NULL_LITERAL
   - fields: kind: "string"|"int"|"real"|"hex"|"bool"|"null", value: token payload
 
-ValueIfExpression (AST: ValueIfExpressionSyntax)
-- ValueIfExpression → IF ValueExpression COLON ValueExpression [ELSE COLON ValueExpression] END_IF
+ValueIfExpression (AST: ExpressionSyntax is a sum type)
+- ValueIfExpression → ValueIfSimpleExpression        (ValueIfSimpleExpressionSyntax)
+- ValueIfExpression → ValueIfMatchExpression         (ValueIfMatchExpressionSyntax)
+- ValueIfExpression → ValueIfConditionListExpression (ValueIfConditionListExpressionSyntax)
+
+ValueIfSimpleExpression (AST: ValueIfSimpleExpressionSyntax)
+- ValueIfSimpleExpression → IF ValueExpression LBRACE ValueExpression RBRACE ValueIfElseClauseOpt
   - fields: condition: ExpressionSyntax, thenExpr: ExpressionSyntax, elseExpr?: ExpressionSyntax
 
-ValueSwitchExpression (AST: ValueSwitchExpressionSyntax)
-- ValueSwitchExpression → SWITCH ValueSwitchScrutineeOpt ValueSwitchCase+ ValueSwitchDefaultOpt END_SWITCH
-  - fields: scrutinee?: ExpressionSyntax, cases: ValueSwitchCaseSyntax[], default?: ExpressionSyntax
+ValueIfElseClauseOpt
+- ValueIfElseClauseOpt → ELSE LBRACE ValueExpression RBRACE
+- ValueIfElseClauseOpt → ε
+  - fields (on ValueIfSimpleExpressionSyntax): elseExpr?: ExpressionSyntax
 
-ValueSwitchScrutineeOpt
-- ValueSwitchScrutineeOpt → ValueExpression
-- ValueSwitchScrutineeOpt → ε        (selected when next token is CASE or DEFAULT)
-  - fields (on ValueSwitchExpressionSyntax): scrutinee?: ExpressionSyntax
+ValueIfMatchExpression (AST: ValueIfMatchExpressionSyntax)
+- ValueIfMatchExpression → IF ValueIfMatchScrutineeOpt IS LBRACE ValueIfMatchArm+ ValueIfMatchElseOpt RBRACE
+  - fields: scrutinee?: ExpressionSyntax, arms: ValueIfMatchArmSyntax[], elseExpr?: ExpressionSyntax
 
-ValueSwitchCase (AST: ValueSwitchCaseSyntax)
-- ValueSwitchCase → CASE Pattern (COMMA Pattern)* COLON ValueExpression
+ValueIfMatchScrutineeOpt
+- ValueIfMatchScrutineeOpt → ValueExpression
+- ValueIfMatchScrutineeOpt → ε        (selected when next token is IS)
+  - fields (on ValueIfMatchExpressionSyntax): scrutinee?: ExpressionSyntax
+
+ValueIfMatchArm (AST: ValueIfMatchArmSyntax)
+- ValueIfMatchArm → Pattern (COMMA Pattern)* COLON ValueExpression
   - fields: patterns: PatternSyntax[], expr: ExpressionSyntax
 
-ValueSwitchDefault (AST: ValueSwitchDefaultSyntax)
-- ValueSwitchDefault → DEFAULT COLON ValueExpression
-  - fields: expr: ExpressionSyntax
+ValueIfMatchElseOpt
+- ValueIfMatchElseOpt → ELSE COLON ValueExpression
+- ValueIfMatchElseOpt → ε
+  - fields (on ValueIfMatchExpressionSyntax): elseExpr?: ExpressionSyntax
 
-ValueSwitchDefaultOpt
-- ValueSwitchDefaultOpt → ValueSwitchDefault | ε
+ValueIfConditionListExpression (AST: ValueIfConditionListExpressionSyntax)
+- ValueIfConditionListExpression → IF ValueIfConditionScrutineeOpt LBRACE ValueIfConditionArm+ ValueIfConditionElseOpt RBRACE
+  - fields: scrutinee?: ExpressionSyntax, arms: ValueIfConditionArmSyntax[], elseExpr?: ExpressionSyntax
+
+ValueIfConditionScrutineeOpt
+- ValueIfConditionScrutineeOpt → ValueExpression
+- ValueIfConditionScrutineeOpt → ε        (selected when next token starts a condition arm)
+  - fields (on ValueIfConditionListExpressionSyntax): scrutinee?: ExpressionSyntax
+
+ValueIfConditionArm (AST: ValueIfConditionArmSyntax)
+- ValueIfConditionArm → ValueExpression COLON ValueExpression
+  - fields: condition: ExpressionSyntax, expr: ExpressionSyntax
+
+ValueIfConditionElseOpt
+- ValueIfConditionElseOpt → ELSE COLON ValueExpression
+- ValueIfConditionElseOpt → ε
+  - fields (on ValueIfConditionListExpressionSyntax): elseExpr?: ExpressionSyntax
 
 ValueForExpression (AST: ValueForExpressionSyntax)
 - ValueForExpression → FOR IDENTIFIER ForIndexOpt IN ValueExpression LBRACE ValueExpression RBRACE
@@ -234,30 +259,64 @@ ElementsExpression (AST: MarkupListSyntax)
 - ElementsExpression → ElementsExpressionItem+
   - fields: items: MarkupItemSyntax[]
 
-ElementsExpressionItem (AST: MarkupItemSyntax is a sum type)
 - ElementsExpressionItem → Element                     (MarkupElementSyntax)
-- ElementsExpressionItem → ElementsIfExpression        (MarkupIfExpressionSyntax)
-- ElementsExpressionItem → ElementsSwitchExpression    (MarkupSwitchExpressionSyntax)
+- ElementsExpressionItem → ElementsIfExpression        (MarkupIfSimpleExpressionSyntax | MarkupIfMatchExpressionSyntax | MarkupIfConditionListExpressionSyntax)
 - ElementsExpressionItem → ElementsForExpression       (MarkupForExpressionSyntax)
 
-ElementsIfExpression (AST: MarkupIfExpressionSyntax)
-- ElementsIfExpression → IF ValueExpression COLON ElementsExpression [ELSE COLON ElementsExpression] END_IF
+ElementsIfExpression (AST: MarkupItemSyntax is a sum type)
+- ElementsIfExpression → ElementsIfSimpleExpression        (MarkupIfSimpleExpressionSyntax)
+- ElementsIfExpression → ElementsIfMatchExpression         (MarkupIfMatchExpressionSyntax)
+- ElementsIfExpression → ElementsIfConditionListExpression (MarkupIfConditionListExpressionSyntax)
+
+ElementsIfSimpleExpression (AST: MarkupIfSimpleExpressionSyntax)
+- ElementsIfSimpleExpression → IF ValueExpression LBRACE ElementsExpression RBRACE ElementsIfElseClauseOpt
   - fields: condition: ExpressionSyntax, thenElements: MarkupListSyntax, elseElements?: MarkupListSyntax
 
-ElementsSwitchExpression (AST: MarkupSwitchExpressionSyntax)
-- ElementsSwitchExpression → SWITCH ValueSwitchScrutineeOpt ElementsSwitchCase+ ElementsSwitchDefaultOpt END_SWITCH
-  - fields: scrutinee?: ExpressionSyntax, cases: MarkupSwitchCaseSyntax[], default?: MarkupListSyntax
+ElementsIfElseClauseOpt
+- ElementsIfElseClauseOpt → ELSE LBRACE ElementsExpression RBRACE
+- ElementsIfElseClauseOpt → ε
+  - fields (on MarkupIfSimpleExpressionSyntax): elseElements?: MarkupListSyntax
 
-ElementsSwitchCase (AST: MarkupSwitchCaseSyntax)
-- ElementsSwitchCase → CASE Pattern (COMMA Pattern)* COLON ElementsExpression
+ElementsIfMatchExpression (AST: MarkupIfMatchExpressionSyntax)
+- ElementsIfMatchExpression → IF ElementsIfMatchScrutineeOpt IS LBRACE ElementsIfMatchArm+ ElementsIfMatchElseOpt RBRACE
+  - fields: scrutinee?: ExpressionSyntax, arms: MarkupIfMatchArmSyntax[], elseElements?: MarkupListSyntax
+
+ElementsIfMatchScrutineeOpt
+- ElementsIfMatchScrutineeOpt → ValueExpression
+- ElementsIfMatchScrutineeOpt → ε        (selected when next token is IS)
+  - fields (on MarkupIfMatchExpressionSyntax): scrutinee?: ExpressionSyntax
+
+ElementsIfMatchArm (AST: MarkupIfMatchArmSyntax)
+- ElementsIfMatchArm → Pattern (COMMA Pattern)* COLON ElementsExpression
   - fields: patterns: PatternSyntax[], elements: MarkupListSyntax
 
-ElementsSwitchDefault (AST: MarkupSwitchDefaultSyntax)
-- ElementsSwitchDefault → DEFAULT COLON ElementsExpression
-  - fields: elements: MarkupListSyntax
+ElementsIfMatchElseOpt
+- ElementsIfMatchElseOpt → ELSE COLON ElementsExpression
+- ElementsIfMatchElseOpt → ε
+  - fields (on MarkupIfMatchExpressionSyntax): elseElements?: MarkupListSyntax
 
-ElementsSwitchDefaultOpt
-- ElementsSwitchDefaultOpt → ElementsSwitchDefault | ε
+ElementsIfConditionListExpression (AST: MarkupIfConditionListExpressionSyntax)
+- ElementsIfConditionListExpression → IF ElementsIfConditionScrutineeOpt LBRACE ElementsIfConditionArm+ ElementsIfConditionElseOpt RBRACE
+  - fields: scrutinee?: ExpressionSyntax, arms: MarkupIfConditionArmSyntax[], elseElements?: MarkupListSyntax
+
+ElementsIfConditionScrutineeOpt
+- ElementsIfConditionScrutineeOpt → ValueExpression
+- ElementsIfConditionScrutineeOpt → ε        (selected when next token starts a condition arm)
+  - fields (on MarkupIfConditionListExpressionSyntax): scrutinee?: ExpressionSyntax
+
+ElementsIfConditionArm (AST: MarkupIfConditionArmSyntax)
+- ElementsIfConditionArm → ValueExpression COLON ElementsExpression
+  - fields: condition: ExpressionSyntax, elements: MarkupListSyntax
+
+ElementsIfConditionElseOpt
+- ElementsIfConditionElseOpt → ELSE COLON ElementsExpression
+- ElementsIfConditionElseOpt → ε
+  - fields (on MarkupIfConditionListExpressionSyntax): elseElements?: MarkupListSyntax
+
+ValueSwitchScrutineeOpt
+- ValueSwitchScrutineeOpt → ValueExpression
+- ValueSwitchScrutineeOpt → ε        (selected when next token is CASE or DEFAULT)
+  - fields (on PropertySwitchSyntax): scrutinee?: ExpressionSyntax
 
 ElementsForExpression (AST: MarkupForExpressionSyntax)
 - ElementsForExpression → FOR IDENTIFIER ForIndexOpt IN ValueExpression LBRACE ElementsExpression RBRACE
@@ -380,7 +439,7 @@ This section lists the AST node types with fields for implementers.
 - UserTypeSyntax: name: QualifiedNameSyntax
  - FunctionDefinitionSyntax: elementName: QualifiedMarkupNameSyntax, props: PropertyDefinitionSyntax[], body: ExpressionSyntax
  - PropertyDefinitionSyntax: name: string, type: TypeSyntax, default?: ExpressionSyntax
-- ExpressionSyntax: union of MarkupElementSyntax | LiteralExpressionSyntax | IdentifierNameSyntax | ValueIfExpressionSyntax | ValueSwitchExpressionSyntax | ValueForExpressionSyntax | ConditionalExpressionSyntax | CallExpressionSyntax | MemberAccessExpressionSyntax | BinaryExpressionSyntax | PrefixUnaryExpressionSyntax | ParenthesizedExpressionSyntax | UnitLiteralSyntax
+- ExpressionSyntax: union of MarkupElementSyntax | LiteralExpressionSyntax | IdentifierNameSyntax | ValueIfSimpleExpressionSyntax | ValueIfMatchExpressionSyntax | ValueIfConditionListExpressionSyntax | ValueForExpressionSyntax | ConditionalExpressionSyntax | CallExpressionSyntax | MemberAccessExpressionSyntax | BinaryExpressionSyntax | PrefixUnaryExpressionSyntax | ParenthesizedExpressionSyntax | UnitLiteralSyntax
  - CallExpressionSyntax: callee: ExpressionSyntax, args: ExpressionSyntax[]
  - MemberAccessExpressionSyntax: target: ExpressionSyntax, name: string
  - ConditionalExpressionSyntax: condition: ExpressionSyntax, whenTrue: ExpressionSyntax, whenFalse: ExpressionSyntax
@@ -390,17 +449,19 @@ This section lists the AST node types with fields for implementers.
  - UnitLiteralSyntax
  - LiteralExpressionSyntax: kind, value
  - IdentifierNameSyntax: name: string
-- ValueIfExpressionSyntax: condition: ExpressionSyntax, thenExpr: ExpressionSyntax, elseExpr?: ExpressionSyntax
-- ValueSwitchExpressionSyntax: scrutinee?: ExpressionSyntax, cases: ValueSwitchCaseSyntax[], default?: ExpressionSyntax
-- ValueSwitchCaseSyntax: patterns: PatternSyntax[], expr: ExpressionSyntax
-- ValueSwitchDefaultSyntax: expr: ExpressionSyntax (usually folded into ValueSwitchExpressionSyntax.default)
+- ValueIfSimpleExpressionSyntax: condition: ExpressionSyntax, thenExpr: ExpressionSyntax, elseExpr?: ExpressionSyntax
+- ValueIfMatchExpressionSyntax: scrutinee?: ExpressionSyntax, arms: ValueIfMatchArmSyntax[], elseExpr?: ExpressionSyntax
+- ValueIfMatchArmSyntax: patterns: PatternSyntax[], expr: ExpressionSyntax
+- ValueIfConditionListExpressionSyntax: scrutinee?: ExpressionSyntax, arms: ValueIfConditionArmSyntax[], elseExpr?: ExpressionSyntax
+- ValueIfConditionArmSyntax: condition: ExpressionSyntax, expr: ExpressionSyntax
 - ValueForExpressionSyntax: itemVar: string, indexVar?: string, iterable: ExpressionSyntax, body: ExpressionSyntax
 - MarkupListSyntax: items: MarkupItemSyntax[]
-- MarkupItemSyntax: MarkupElementSyntax | MarkupIfExpressionSyntax | MarkupSwitchExpressionSyntax | MarkupForExpressionSyntax
-- MarkupIfExpressionSyntax: condition: ExpressionSyntax, thenElements: MarkupListSyntax, elseElements?: MarkupListSyntax
-- MarkupSwitchExpressionSyntax: scrutinee?: ExpressionSyntax, cases: MarkupSwitchCaseSyntax[], default?: MarkupListSyntax
-- MarkupSwitchCaseSyntax: patterns: PatternSyntax[], elements: MarkupListSyntax
-- MarkupSwitchDefaultSyntax: elements: MarkupListSyntax (usually folded into MarkupSwitchExpressionSyntax.default)
+- MarkupItemSyntax: MarkupElementSyntax | MarkupIfSimpleExpressionSyntax | MarkupIfMatchExpressionSyntax | MarkupIfConditionListExpressionSyntax | MarkupForExpressionSyntax
+- MarkupIfSimpleExpressionSyntax: condition: ExpressionSyntax, thenElements: MarkupListSyntax, elseElements?: MarkupListSyntax
+- MarkupIfMatchExpressionSyntax: scrutinee?: ExpressionSyntax, arms: MarkupIfMatchArmSyntax[], elseElements?: MarkupListSyntax
+- MarkupIfMatchArmSyntax: patterns: PatternSyntax[], elements: MarkupListSyntax
+- MarkupIfConditionListExpressionSyntax: scrutinee?: ExpressionSyntax, arms: MarkupIfConditionArmSyntax[], elseElements?: MarkupListSyntax
+- MarkupIfConditionArmSyntax: condition: ExpressionSyntax, elements: MarkupListSyntax
 - MarkupForExpressionSyntax: itemVar: string, indexVar?: string, iterable: ExpressionSyntax, body: MarkupListSyntax
 - MarkupElementSyntax: name: QualifiedMarkupNameSyntax, props: PropertyListSyntax, children: ElementContentSyntax (MarkupListSyntax or MixedContentSyntax)
 - EmbedElementSyntax: name: QualifiedMarkupNameSyntax, textType: string, mode: "parsed"|"raw", props: PropertyListSyntax, content: EmbedContentSyntax|RawEmbedContentSyntax
@@ -428,13 +489,12 @@ This section lists the AST node types with fields for implementers.
 - ValueExpression branch selection:
   - If next token is LT → Element
   - If next token is IF → ValueIfExpression
-  - If next token is SWITCH → ValueSwitchExpression
   - If next token is FOR → ValueForExpression
   - Otherwise → ValueExpr (Pratt)
 - ElementsExpression item selection:
   - If next token is LT → Element
-  - If next token ∈ {IF, SWITCH, FOR} → the corresponding Elements* form
-- SWITCH scrutinee (value and elements variants):
+  - If next token ∈ {IF, FOR} → the corresponding Elements* form
+- SWITCH scrutinee (elements/property variants):
   - After SWITCH, if next token ∈ {CASE, DEFAULT} → no scrutinee
   - Else → parse ValueExpression as the scrutinee
 - Element is left-factored: after LT ElementName, COLON selects the embed branch; otherwise parse PropertyList and choose SLASH GT (self-closing) or GT … LT SLASH ElementName GT using lookahead at SLASH vs GT.
@@ -445,7 +505,9 @@ This section lists the AST node types with fields for implementers.
 - EmbedElement closing tag name must match opening ElementName.
 - PropertyDefinition names within a single FunctionDefinition should be unique.
 - Type modifiers: at most one of QMARK or ELLIPSIS.
-- Switch expressions (value or elements variants): at least one case; patterns per case must be non-empty.
+- Switch expressions (property variants): at least one case; patterns per case must be non-empty.
+- ValueIfMatchExpression / ElementsIfMatchExpression: at least one pattern arm; each arm requires ≥1 pattern.
+- ValueIfConditionListExpression / ElementsIfConditionListExpression: at least one condition arm.
 
 ## Notes and Gaps
 
