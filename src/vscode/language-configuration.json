@@ -8,8 +8,6 @@
     ["[", "]"],
     ["(", ")"],
     ["<", ">"],
-    ["if", "/if"],
-    ["switch", "/switch"]
   ],
   "autoClosingPairs": [
     { "open": "{", "close": "}" },

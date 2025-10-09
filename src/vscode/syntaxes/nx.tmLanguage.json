@@ -7,6 +7,8 @@
     { "include": "#comments" },
     { "include": "#elements-if" },
     { "include": "#elements-for" },
+    { "include": "#value-if" },
+    { "include": "#value-for" },
     { "include": "#tags" },
     { "include": "#strings" },
     { "include": "#numbers" },
@@ -260,7 +262,7 @@
     },
 
     "elements-if": {
-      "begin": "(?<![A-Za-z0-9_])(if)\\b",
+      "begin": "(?:(?<=^|\\n|\\}|>)[ \\t]*|(?<=\\belse\\s+))(if)\\b",
       "beginCaptures": { "1": { "name": "keyword.control.conditional.nx" } },
       "end": "(?<=\\})(?!\\s*else\\b)",
       "name": "meta.control.if.elements.nx",
@@ -340,7 +342,7 @@
       ]
     },
     "elements-for": {
-      "begin": "(?<![A-Za-z0-9_])(for)\\b",
+      "begin": "(?<=^|\\n|\\}|>)[ \\t]*(for)\\b",
       "beginCaptures": { "1": { "name": "keyword.control.loop.nx" } },
       "end": "\\}",
       "endCaptures": { "0": { "name": "punctuation.section.block.end.nx" } },
@@ -379,7 +381,7 @@
       "beginCaptures": { "1": { "name": "keyword.control.loop.nx" } },
       "end": "\\}",
       "endCaptures": { "0": { "name": "punctuation.section.block.end.nx" } },
-      "name": "meta.control.loop.elements.nx",
+      "name": "meta.control.loop.value.nx",
       "patterns": [
         { "include": "#comments" },
         { "include": "#strings" },

@@ -60,6 +60,18 @@ describe('NX TextMate grammar', function () {
     expect(scopes).to.include('keyword.control.conditional.nx');
   });
 
+  it('uses value control scopes for inline expressions', function () {
+    const ifLine = 'let value = if isLoading { 1 } else { 2 }';
+    const ifTokens = grammar.tokenizeLine(ifLine, null).tokens;
+    expect(scopesForSubstring(ifLine, ifTokens, 'if')).to.include('meta.control.if.value.nx');
+    expect(scopesForSubstring(ifLine, ifTokens, 'else')).to.include('meta.control.if.value.nx');
+
+    const forLine = 'let values = for item in items { item }';
+    const forTokens = grammar.tokenizeLine(forLine, null).tokens;
+    expect(scopesForSubstring(forLine, forTokens, 'for')).to.include('meta.control.loop.value.nx');
+    expect(scopesForSubstring(forLine, forTokens, 'in')).to.include('meta.control.loop.value.nx');
+  });
+
   it('highlights inline else within control block', function () {
     const line = 'if user.isAuthenticated { 2 } else { 2 }';
     const { tokens } = grammar.tokenizeLine(line, null);
