@@ -178,6 +178,12 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(line, tokens, 'else')).to.include('keyword.control.conditional.nx');
   });
 
+  it('highlights sequence type modifiers', function () {
+    const line = 'let numbers: int[] = [1, 2]';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    expect(scopesForSubstring(line, tokens, '[]')).to.include('keyword.operator.type-modifier.nx');
+  });
+
   it('highlights match and for blocks inside interpolations', function () {
     const line = '{if state is { "active": "A" else: "D" } for item in items { item }}';
     const { tokens } = grammar.tokenizeLine(line, null);

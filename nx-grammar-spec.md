@@ -42,12 +42,13 @@ Literals
 - NULL_LITERAL (null)
 
  Punctuation and operators
- - LT (<), GT (>)
- - LPAREN (() , RPAREN ())
- - LBRACE ({), RBRACE (})
- - SLASH (/), COLON (:), COMMA (,), DOT (.)
- - EQ (=)
- - QMARK (?)
+- LT (<), GT (>)
+- LPAREN (() , RPAREN ())
+- LBRACE ({), RBRACE (})
+- LBRACK ([), RBRACK (])
+- SLASH (/), COLON (:), COMMA (,), DOT (.)
+- EQ (=)
+- QMARK (?)
  - ELLIPSIS (...)
  - PLUS (+), MINUS (-), STAR (*), SLASH (/)
  - LT_EQ (<=), GT_EQ (>=), EQ_EQ (==), BANG_EQ (!=)
@@ -136,11 +137,11 @@ TypeDefinition (AST: TypeDefinitionSyntax)
 Type (AST: TypeSyntax)
 - Type → PrimitiveType TypeOptModifier
 - Type → UserDefinedType TypeOptModifier
-  - fields: kind: "primitive"|"user", name: string (qualified), modifier?: "nullable"|"list"
+  - fields: kind: "primitive"|"user", name: string (qualified), modifier?: "nullable"|"sequence"
 
 TypeOptModifier
 - TypeOptModifier → QMARK
-- TypeOptModifier → ELLIPSIS
+- TypeOptModifier → LBRACK RBRACK
 - TypeOptModifier → ε
 
 PrimitiveType (AST: PrimitiveTypeSyntax)
@@ -524,7 +525,7 @@ This section lists the AST node types with fields for implementers.
 - Element closing tag name must match opening ElementName.
 - EmbedElement closing tag name must match opening ElementName.
 - PropertyDefinition names within a single FunctionDefinition should be unique.
-- Type modifiers: at most one of QMARK or ELLIPSIS.
+- Type modifiers: at most one of QMARK or LBRACK RBRACK.
 - Switch expressions (property variants): at least one case; patterns per case must be non-empty.
 - ValueIfMatchExpression / ElementsIfMatchExpression / PropertyListIfMatchExpression: at least one pattern arm; each arm requires ≥1 pattern.
 - ValueIfConditionListExpression / ElementsIfConditionListExpression / PropertyListIfConditionListExpression: at least one condition arm.

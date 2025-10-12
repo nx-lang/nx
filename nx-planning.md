@@ -127,8 +127,8 @@ let <Layout title:string> content:Element </Layout> =
 #### Advanced Parameter Types
 ```nx
 let <DataGrid
-  data:object...
-  columns:object...
+  data:object[]
+  columns:object[]
   className:string? /> =
   <table className={if (className) { className } else { "data-grid" }}>
     <thead>
@@ -220,7 +220,7 @@ if user.isAuthenticated {
 // Conditional expressions in attributes
 <div className={if isActive { "active" } else { "inactive" }}>Content</div>
 
-// List transformation with index
+// Sequence transformation with index
 for index, item in items {
   <div key={index} className={index % 2 == 0 ? "even" : "odd"}>
     {item.name}
@@ -235,9 +235,9 @@ if user.role is {
   else:    <AccessDenied/>
 }
 
-// List literals and operations
-let numbers = [1, 2, 3, 4, 5]  // List literal
-let empty = []  // Empty list
+// Sequence literals and operations
+let numbers = [1, 2, 3, 4, 5]  // Sequence literal
+let empty = []  // Empty sequence
 let strings = ["red", "green", "blue"]
 
 // Object creation expressions
@@ -289,7 +289,7 @@ let userAddress =
   />
 
 // Simple function definitions
-let <SimpleList items:string... renderer:(string) => Element/> =
+let <SimpleList items:string[] renderer:(string) => Element/> =
   <ul>
     for item in items {
       <li>{renderer(item)}</li>
@@ -318,7 +318,7 @@ let commonButtonProps = <Button.properties className="btn" disabled=false/>
 // Namespaced components
 <UI.Controls.Button variant="primary">Click</UI.Controls.Button>
 
-// Complex attribute expressions with lists
+// Complex attribute expressions with sequences
 <Form
   onSubmit={(data) => validateAndSubmit(data)}
   validationRules={[
@@ -335,21 +335,21 @@ Grammar rules: [Elements](nx-grammar.md#elements)
 
 ## Core Features
 
-### Lists as Primary Collection Type
+### Sequence as Primary Collection Type
 
-NX uses lists as its fundamental collection type, with the postfix `...` syntax for type declarations:
+NX uses sequences as its fundamental collection type. A sequence is an ordered collection, possibly lazy or streaming. The type `ElementType[]` denotes a sequence of ElementTypes.
 
 ```nx
-// List type declarations
-let numbers: int... = [1, 2, 3, 4, 5]
-let names: string... = ["Alice", "Bob", "Carol"]
-let users: User... = [user1, user2, user3]
+// Sequence type declarations
+let numbers: int[] = [1, 2, 3, 4, 5]
+let names: string[] = ["Alice", "Bob", "Carol"]
+let users: User[] = [user1, user2, user3]
 
-// Empty list
-let empty: string... = []
+// Empty sequence
+let empty: string[] = []
 
-// Lists in function parameters
-let <Gallery images:Image.../> =
+// Sequences in function parameters
+let <Gallery images:Image[]/> =
   <div class="gallery">
     for img in images {
       <img src={img.url} alt={img.title}/>
@@ -359,14 +359,14 @@ let <Gallery images:Image.../> =
 // List comprehension-like behavior with for
 let squares = for n in numbers { n * n }
 
-// List comprehension-like behavior with for/if.
+// Sequence comprehension-like behavior with for/if.
 // The parentheses are optional but recommended for nested inline conditions.
 let evens = for (n in numbers) { if (n % 2 == 0) { n } }
 let evens = for n in numbers { if n % 2 == 0 { n } }
 
-// Nested lists
-let matrix: (int...)... = [[1, 2], [3, 4], [5, 6]]  // List of lists
-let grouped: (string, User...)... = [
+// Nested sequences
+let matrix: int[][] = [[1, 2], [3, 4], [5, 6]]  // Sequence of sequences
+let grouped: (string, User[])[] = [
   ("admins", [admin1, admin2]),
   ("users", [user1, user2, user3])
 ]
@@ -474,14 +474,14 @@ let <StyledButton variant:string = "primary" content:Element/> =
 ### Phase 2: Type System
 **Type Infrastructure**
 - Implement basic type checking visitor
-- Add support for primitive types and lists
+- Add support for primitive types and sequences
 - Implement function type checking
 - Add nullable type support
 - Create meaningful type error messages
 
 **Type System:**
 - Primitive types: string, int, float, boolean, void, object
-- List types: T... (lists are the primary collection type)
+- Sequence types: T[] (sequences are the primary collection type)
 - Function types: (T1, T2) => T3
 - Nullable types: T?
 - Object types: type <Name field:Type/>

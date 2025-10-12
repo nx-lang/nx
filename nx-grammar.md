@@ -30,7 +30,7 @@ TypeDeclaration ::=
 
 TypeModifier ::=
     "?"             (* nullable: 0 or 1 *)
-    | "..."         (* list: 0 or more *)
+    | "[]"          (* sequence: 0 or more *)
 
 PrimitiveType ::=
     "string"

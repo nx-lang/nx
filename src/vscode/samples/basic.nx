@@ -1,7 +1,7 @@
 import ui.widgets
 import data.models
 
-let <UserCard user:User className:string content:Element.../> =
+let <UserCard user:User className:string content:Element[]/> =
   <section class="card {className}">
     if isLoading {
       <Spinner/>
