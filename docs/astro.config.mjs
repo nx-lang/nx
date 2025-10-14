@@ -14,6 +14,7 @@ export default defineConfig({
     starlight(starlightConfig)
   ],
   site: 'https://nx-lang.github.io',
+  base: '/nx',
   markdown: {
     shikiConfig: {
       themes: {
