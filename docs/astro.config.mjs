@@ -13,6 +13,7 @@ export default defineConfig({
   integrations: [
     starlight(starlightConfig)
   ],
+  site: 'https://nx-lang.github.io',
   markdown: {
     shikiConfig: {
       themes: {
