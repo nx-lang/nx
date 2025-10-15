@@ -1,14 +1,14 @@
-# Copied from https://docs.astro.build/en/guides/deploy/github
+# Based off https://docs.astro.build/en/guides/deploy/github
 
 name: Deploy to GitHub Pages
 
 on:
-  # Trigger the workflow every time you push to the `main` branch
-  # Using a different branch name? Replace `main` with your branch’s name
+  # Trigger the workflow every time you push docs updates to the `main` branch
   push:
     branches: [ main ]
     paths:
       - docs/**
+      - .github/workflows/deploy-docs.yml
   # Allows you to run this workflow manually from the Actions tab on GitHub.
   workflow_dispatch:
 
@@ -19,7 +19,7 @@ permissions:
   id-token: write
 
 jobs:
-  build:
+  build-docs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout your repository using git
@@ -33,8 +33,8 @@ jobs:
         # env:
           # PUBLIC_POKEAPI: 'https://pokeapi.co/api/v2' # Use single quotation marks for the variable value. (optional)
 
-  deploy:
-    needs: build
+  deploy-docs:
+    needs: build-docs
     runs-on: ubuntu-latest
     environment:
       name: github-pages
