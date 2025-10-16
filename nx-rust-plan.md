@@ -10,7 +10,7 @@ This document outlines the complete architecture and implementation plan for the
 3. **Pure Rust LSP server** (with TypeScript/C# wrapper as fallback if needed)
 4. **Separate crates** in flat workspace (not combined into nx-core)
 5. **`nx-hir` naming** for AST + semantic layer
-6. **UniFFI + napi-rs** for cross-language FFI bindings
+6. **UniFFI + napi-rs** for cross-language FFI bindings (revisit .NET strategy before shipping)
 
 ---
 
@@ -167,11 +167,13 @@ nx/                                 # Repository root
 ├── bindings/                       # FFI bindings (Phase 4)
 │   ├── nx-ffi/                     # Core FFI layer
 │   │   ├── Cargo.toml
-│   │   ├── cbindgen.toml
-│   │   ├── uniffi.toml
-│   │   └── src/
-│   │       ├── lib.rs
-│   │       └── nx.udl              # UniFFI interface definition
+│   │   ├── cbindgen.toml           # Fallback header generation if UniFFI .NET support slips
+│   │   ├── uniffi.toml             # UniFFI interface definition
+│   │   ├── src/
+│   │   │   ├── lib.rs
+│   │   │   └── handles.rs          # Handle registry + value wrappers exposed via UniFFI
+│   │   └── include/
+│   │       └── nx.h                # Optional manual headers (only if fallback engaged)
 │   │
 │   ├── dotnet/                     # .NET bindings
 │   │   ├── NX.Native/              # C# P/Invoke wrapper
@@ -416,6 +418,7 @@ nx-cli (CLI tools using all layers)
 9. **`uniffi-rs`** (v0.25+)
    - Multi-language bindings generator (.NET, Python, Swift, Kotlin)
    - Auto-generates from `.udl` interface definition
+   - ⚠️ Note: .NET bindings are not yet stable; consider delaying .NET FFI work or using `cbindgen`/PInvoke if timelines demand it.
 
 10. **`napi-rs`** (v2.14+)
     - Node.js N-API bindings with TypeScript type generation
@@ -452,76 +455,80 @@ nx-cli (CLI tools using all layers)
 
 ### Design Principles
 
-1. **Object-Based API** - Opaque handles rather than raw data structures
-2. **Coarse-Grained Operations** - Parse entire files, not individual tokens
-3. **Safe Error Handling** - All fallible operations return `Result<T, Error>`
-4. **Zero-Copy Where Possible** - Use string slices for input
+1. **Opaque Handles for Lifetimes** - Long-lived objects (`ParserHandle`, `SyntaxTreeHandle`, `ModuleHandle`) stay owned by Rust; callers explicitly retain/release them.
+2. **Tiny Value Wrappers for Nodes** - Return POD structs (~16 bytes) containing `(tree_ptr, node_id, generation)` by value, mirroring tree-sitter’s approach and enabling cheap traversal without manual memory management.
+3. **Serde-Friendly Projections** - Expose structured data (`Module`, diagnostics, reports) via JSON/MessagePack helpers so foreign runtimes never observe arena-backed Rust structs directly.
+4. **Coarse-Grained Operations** - Parse/check/format entire files, not individual tokens.
+5. **Safe Error Handling** - All fallible operations return `Result<T, Error>` (mapped to status codes + error buffers in C).
+6. **Zero-Copy Where Possible** - Accept `&[u8]`/`&str` inputs and reuse caller-provided buffers for output.
 
 ### Three Layers of Abstraction
 
 **High-level (Convenience Functions):**
 ```rust
-parse_string(source) -> ParseResult
-check_string(source) -> TypeCheckResult
+parse_string(source) -> SyntaxTreeHandle
+check_string(source) -> TypeCheckReportHandle
 format_string(source, options) -> FormatResult
 ```
 
-**Mid-level (Object-Based):**
+**Mid-level (Object-Based Handles):**
 ```rust
-Parser::parse(source) -> SyntaxTree
-TypeChecker::check(module) -> TypeCheckResult
+ParserHandle::parse(&self, source) -> SyntaxTreeHandle
+SyntaxTreeHandle::to_json(&self, buffer) -> Result<usize, NxError>
+TypeCheckerHandle::check(&self, module_handle) -> DiagnosticsHandle
 ```
 
-**Low-level (CST Traversal):**
+**Low-level (Value Wrappers):**
 ```rust
-SyntaxTree::root() -> SyntaxNode
-SyntaxNode::children() -> Vec<SyntaxNode>
+// POD struct returned by value
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct NxNode {
+    pub tree: *const NxTreeInner,
+    pub id: u32,
+    pub generation: u32,
+}
+
+SyntaxTreeHandle::root(&self) -> NxNode
+NxNode::child(self, index: u32) -> NxNode
+NxNode::is_alive(self) -> bool
 ```
 
-### Core API (UniFFI IDL)
+### Core API (Handle-Based ABI Sketch)
 
-```idl
-// Core parser interface
-interface Parser {
-  constructor();
-  [Throws=NxError]
-  SyntaxTree parse([ByRef] string source, string? file_path);
-};
+```c
+typedef struct {
+    uint64_t raw;
+} NxSyntaxTreeHandle;
 
-// Syntax tree (CST representation)
-interface SyntaxTree {
-  SyntaxNode root();
-  string source_text();
-  string to_json();
-  sequence<Diagnostic> syntax_errors();
-  [Throws=NxError]
-  Module to_ast();
-};
+typedef struct {
+    uint64_t raw;
+} NxModuleHandle;
 
-// Type checker interface
-interface TypeChecker {
-  constructor();
-  [Throws=NxError]
-  TypeCheckResult check(Module module);
-};
+typedef struct {
+    const void* tree;
+    uint32_t id;
+    uint32_t generation;
+} NxNode;
 
-// Formatter interface
-interface Formatter {
-  constructor();
-  [Throws=NxError]
-  string format([ByRef] string source, FormatOptions? options);
-};
+typedef struct {
+    const uint8_t* data;
+    size_t len;
+} NxSlice;
 
-// Diagnostic (error or warning)
-dictionary Diagnostic {
-  DiagnosticSeverity severity;
-  string message;
-  TextRange range;
-  string? code;
-  sequence<DiagnosticRelatedInfo> related_info;
-  sequence<CodeAction> suggested_fixes;
-};
+NxStatus nx_parser_parse(NxParserHandle parser,
+                         NxSlice source,
+                         NxSyntaxTreeHandle* out_tree);
+
+NxStatus nx_tree_to_json(NxSyntaxTreeHandle tree,
+                         NxBuffer* out_buffer); // serde_json serialization
+
+NxNode nx_tree_root(NxSyntaxTreeHandle tree);
+NxNode nx_node_child(NxNode node, uint32_t index);
+bool nx_node_is_alive(NxNode node);
 ```
+
+`NxModuleHandle` never exposes the arena-backed `Module` directly; consumers request projections (`nx_module_to_json`, `nx_module_export_symbols`) or use traversal helpers that operate on `NxNode`. All exported structs remain POD so they can be marshalled by value on both the C# and JavaScript sides. UniFFI bindings will mirror this handle-based surface for the languages it supports; the C header only becomes necessary if we activate the fallback `cbindgen` pathway for .NET.
 
 ### Usage Examples
 
@@ -529,33 +536,37 @@ dictionary Diagnostic {
 ```csharp
 using NX.Native;
 
-var parser = new Parser();
-var tree = parser.Parse(source, "greeting.nx");
+using var parser = Parser.Create();
+using var tree = parser.Parse(source.AsSpan(), "greeting.nx");
 
-foreach (var error in tree.SyntaxErrors())
+foreach (var diagnostic in tree.EnumerateDiagnostics())
 {
-    Console.WriteLine($"{error.Severity}: {error.Message}");
+    Console.WriteLine($"{diagnostic.Severity}: {diagnostic.Message}");
 }
 
-var module = tree.ToAst();
-var checker = new TypeChecker();
-var result = checker.Check(module);
+using var module = tree.ToModule();                // returns handle, not struct
+using var checker = TypeChecker.Create();
+using var report = checker.Check(module);
+
+Console.WriteLine(report.ToJson());                // serde_json projection
 ```
 
 **TypeScript/Node.js:**
 ```typescript
 import { Parser, TypeChecker } from '@nx-lang/parser';
 
-const parser = new Parser();
+const parser = Parser.create();
 const tree = parser.parse(source, 'greeting.nx');
 
-for (const error of tree.syntaxErrors()) {
+for (const error of tree.diagnostics()) {
   console.log(`${error.severity}: ${error.message}`);
 }
 
-const module = tree.toAst();
-const checker = new TypeChecker();
-const result = checker.check(module);
+const module = tree.toModule();                    // opaque handle
+const checker = TypeChecker.create();
+const report = checker.check(module);
+
+console.log(report.toJson());                      // JSON projection
 ```
 
 **Browser/WASM:**
@@ -679,14 +690,14 @@ rustc-hash = "1.1"
 - Web playgrounds (WASM)
 
 **Approach:**
-- UniFFI for .NET/multi-language bindings
-- napi-rs for high-quality Node.js/TypeScript support
-- wasm-bindgen for browser WASM
+- UniFFI for .NET/multi-language bindings (re-evaluate .NET before shipping; fallback to `cbindgen` + P/Invoke if UniFFI remains unstable)
+- `napi-rs` for high-quality Node.js/TypeScript support
+- `wasm-bindgen` for browser WASM
 
 **Tasks:**
-1. Design FFI-safe API (C-compatible types, coarse-grained operations)
-2. Implement `nx-ffi` crate with C exports
-3. Generate .NET bindings via UniFFI
+1. Design FFI-safe API (C-compatible types, opaque handles, value wrappers)
+2. Implement `nx-ffi` crate with UniFFI exports
+3. Validate .NET tooling; if UniFFI lag persists, plan for `cbindgen` + manual bindings
 4. Create `napi-rs` bindings for Node.js
 5. Build WASM package with `wasm-bindgen`
 6. Package as NuGet and npm
@@ -705,17 +716,22 @@ nx-syntax = { path = "../../crates/nx-syntax" }
 nx-hir = { path = "../../crates/nx-hir" }
 nx-types = { path = "../../crates/nx-types" }
 uniffi = "0.25"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 # bindings/node/Cargo.toml
 [dependencies]
 nx-ffi = { path = "../nx-ffi" }
 napi = { version = "2.14", features = ["napi8"] }
 napi-derive = "2.14"
+serde = { version = "1.0", features = ["derive"] }
 
 # bindings/wasm/Cargo.toml
 [dependencies]
 nx-ffi = { path = "../nx-ffi" }
 wasm-bindgen = "0.2"
+
+# (If UniFFI .NET support lags, add `cbindgen` + manual bindings as a parallel track.)
 ```
 
 ---
