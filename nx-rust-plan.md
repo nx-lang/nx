@@ -6,7 +6,7 @@ This document outlines the complete architecture and implementation plan for the
 
 **Key Decisions:**
 1. **Rust + tree-sitter + FFI** for core implementation
-2. **CST (tree-sitter/cstree) + AST (HIR)** dual-layer approach
+2. **Tree-sitter CST + Rust HIR** dual-layer approach (no cstree bridge)
 3. **Pure Rust LSP server** (with TypeScript/C# wrapper as fallback if needed)
 4. **Separate crates** in flat workspace (not combined into nx-core)
 5. **`nx-hir` naming** for AST + semantic layer
@@ -51,6 +51,7 @@ Source Code
 - Perfect for tooling: formatters, LSP (rename, refactor), error recovery
 - Incremental re-parsing via tree-sitter
 - Error resilience: represents incomplete/malformed code
+- In this plan we keep tree-sitter's native CST and layer lightweight Rust wrappers on top—no cstree bridge required.
 
 **AST (Abstract Syntax Tree):**
 - Type checking: simplified structure for semantic analysis
@@ -98,8 +99,8 @@ nx/                                 # Repository root
 │   │   ├── src/
 │   │   │   ├── lib.rs              # Unit tests: #[cfg(test)] mod tests
 │   │   │   ├── syntax_kind.rs      # Token/node types
-│   │   │   ├── syntax_node.rs      # CST nodes (cstree wrapper)
-│   │   │   ├── ast.rs              # AST-like API over CST
+│   │   │   ├── syntax_node.rs      # Typed wrappers over tree-sitter nodes
+│   │   │   ├── ast.rs              # Convenience APIs for navigating CST
 │   │   │   └── validation.rs       # Post-parse validation
 │   │   ├── queries/                # tree-sitter queries (for highlighting)
 │   │   │   ├── highlights.scm
@@ -127,7 +128,7 @@ nx/                                 # Repository root
 │   │   │   │   ├── stmt.rs
 │   │   │   │   └── types.rs
 │   │   │   ├── lower.rs            # CST → AST lowering
-│   │   │   └── db.rs               # Salsa queries (Phase 5+)
+│   │   │   └── db.rs               # Salsa query database (established in Phase 2)
 │   │   └── tests/
 │   │       └── lowering_tests.rs
 │   │
@@ -380,10 +381,9 @@ nx-cli (CLI tools using all layers)
    - Parser generator and incremental parsing
    - Used for: Grammar definition, syntax highlighting, fast re-parsing
 
-2. **`cstree`** (v0.12+)
-   - Lossless syntax tree (improved fork of rowan)
-   - Features: Persistent trees, thread-safe, string interning
-   - Used for: CST representation, preserving formatting
+2. **Typed CST wrappers (custom)** 
+   - Lightweight Rust structs over tree-sitter nodes
+   - Used for: Safe traversal, pattern-specific helpers without re-materializing trees
 
 3. **`text-size`** (v1.1+)
    - Text range types for source positions
@@ -392,8 +392,8 @@ nx-cli (CLI tools using all layers)
 ### Type System & Semantics
 
 4. **`salsa`** (v0.16+)
-   - Incremental computation framework (Phase 5+)
-   - Used for: Query-based caching, on-demand computation, IDE responsiveness
+   - Incremental computation framework (introduced in Phase 2)
+   - Used for: Query-based caching, on-demand computation, IDE responsiveness; HIR/types build atop it so later LSP work reuses the existing database
 
 ### LSP Implementation (Pure Rust)
 
@@ -590,7 +590,7 @@ const checkResult = check_string(source);
 **Tasks:**
 1. Port NX grammar from `nx-grammar-spec.md` to tree-sitter `grammar.js`
 2. Generate parser and test against existing `.nx` samples
-3. Create `cstree` wrapper for CST representation
+3. Build typed Rust wrappers over tree-sitter nodes (safe traversal helpers)
 4. Write tree-sitter queries for syntax highlighting
 5. Integrate into VS Code extension (replace TextMate grammar)
 
@@ -600,12 +600,17 @@ const checkResult = check_string(source);
 - CST API with typed node accessors
 - Test suite: parse all sample `.nx` files without errors
 
+**Why stick with native tree-sitter CST?**
+- Avoids building and maintaining a bespoke tree-sitter → cstree bridge (very little industry precedent).
+- Lets us lean on tree-sitter's proven incremental parsing, error recovery, and editor query ecosystem.
+- Lowering in Phase 2 produces arena-backed Rust HIR nodes, so semantic phases never depend on tree-sitter handles directly.
+- Leaves room to revisit cstree/rowan later if we discover concrete limitations, without paying that cost up front.
+
 **Dependencies:**
 ```toml
 # crates/nx-syntax/Cargo.toml
 [dependencies]
 tree-sitter = "0.20"
-cstree = "0.12"
 text-size = "1.1"
 
 [build-dependencies]
@@ -621,12 +626,14 @@ cc = "1.0"  # Compile tree-sitter C code
 **Tasks:**
 1. Define AST types in `nx-hir` crate (based on `nx-grammar-spec.md`)
 2. Implement CST → AST lowering with error recovery
-3. Add post-parse validation (matching element tags, unique properties)
-4. Create diagnostic infrastructure with `ariadne`
+3. Introduce a `salsa`-powered database (`NxDatabase`) with base queries for syntax trees, modules, and symbol tables
+4. Add post-parse validation (matching element tags, unique properties)
+5. Create diagnostic infrastructure with `ariadne`
 
 **Deliverables:**
 - `nx-hir` crate with complete AST definitions
 - CST → AST converter with error recovery
+- Initial incremental query graph (salsa) backing HIR + validation results
 - Validation error reporting with source snippets
 - CLI tool: `nx parse <file>` (print AST as JSON)
 
@@ -638,6 +645,7 @@ nx-syntax = { path = "../nx-syntax" }
 nx-diagnostics = { path = "../nx-diagnostics" }
 smol_str = "0.2"
 la-arena = "0.3"
+salsa = "0.16"
 
 # crates/nx-diagnostics/Cargo.toml
 [dependencies]
@@ -658,13 +666,15 @@ text-size = "1.1"
    - Nullable: `T?`
    - Functions: `(T1, T2) => T3`
    - User-defined types and type aliases
-2. Build type checker for expressions, elements, functions
-3. Implement type inference
-4. Add nullable type support
-5. Generate helpful type errors with suggestions
+2. Extend the `salsa` database with arenas/queries for symbols, type environments, and memoized inference
+3. Build type checker for expressions, elements, functions
+4. Implement type inference
+5. Add nullable type support
+6. Generate helpful type errors with suggestions
 
 **Deliverables:**
 - `nx-types` crate with complete type system
+- Incremental type-checking queries wired into the existing `NxDatabase`
 - Type checker integrated into CLI
 - CLI tool: `nx check <file>` (type check + formatted errors)
 - Comprehensive type inference tests
@@ -676,6 +686,7 @@ text-size = "1.1"
 nx-hir = { path = "../nx-hir" }
 nx-diagnostics = { path = "../nx-diagnostics" }
 rustc-hash = "1.1"
+salsa = "0.16"
 ```
 
 ---
@@ -760,7 +771,7 @@ wasm-bindgen = "0.2"
    - Find references
    - Rename refactoring
    - Formatting
-4. Add incremental computation with `salsa`
+4. Integrate existing `salsa` queries into request handlers; add session-level caches where necessary
 5. Integrate into VS Code extension (LSP client in TypeScript)
 6. Performance optimization and benchmarking
 
@@ -1026,7 +1037,7 @@ cd docs && pnpm dev
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | **Parser** | tree-sitter | Industry standard, incremental, editor integration |
-| **CST Library** | `cstree` | Lossless, persistent, thread-safe (better than rowan) |
+| **CST Layer** | tree-sitter CST + typed wrappers | Avoids unproven cstree bridge, keeps incremental parser as source of truth |
 | **AST Strategy** | CST + separate AST | CST for tooling, AST for semantics (rust-analyzer pattern) |
 | **LSP Implementation** | **Pure Rust** | Zero overhead, best performance, seamless Salsa integration |
 | **LSP Fallback** | TypeScript wrapper (if needed) | Only if Rust proves blocking; evaluate at end of Phase 5 |
@@ -1071,12 +1082,12 @@ homepage = "https://nx-lang.dev"
 [workspace.dependencies]
 # Shared dependencies
 ariadne = "0.4"
-cstree = "0.12"
 text-size = "1.1"
 tree-sitter = "0.20"
 smol_str = "0.2"
 la-arena = "0.3"
 rustc-hash = "1.1"
+salsa = "0.16"
 
 # Testing
 insta = "1.34"
