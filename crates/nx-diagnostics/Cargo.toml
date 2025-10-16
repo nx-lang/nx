@@ -1,0 +1,15 @@
+[package]
+name = "nx-diagnostics"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ariadne.workspace = true
+text-size.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

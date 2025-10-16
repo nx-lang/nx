@@ -1,0 +1,18 @@
+[package]
+name = "nx-cli"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "nx"
+path = "src/main.rs"
+
+[dependencies]
+nx-syntax = { path = "../nx-syntax" }
+nx-hir = { path = "../nx-hir" }
+nx-types = { path = "../nx-types" }
+nx-diagnostics = { path = "../nx-diagnostics" }

@@ -1,0 +1,18 @@
+[package]
+name = "nx-hir"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+nx-syntax = { path = "../nx-syntax" }
+nx-diagnostics = { path = "../nx-diagnostics" }
+smol_str.workspace = true
+la-arena.workspace = true
+salsa.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

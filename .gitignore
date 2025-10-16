@@ -362,3 +362,11 @@ MigrationBackup/
 
 # VS Code extension packages
 *.vsix
+
+# Rust
+target/
+Cargo.lock
+*.rs.bk
+*.pdb
+.cargo/
+rust-analyzer/

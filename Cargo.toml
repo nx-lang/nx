@@ -1,0 +1,41 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/nx-diagnostics",
+    "crates/nx-syntax",
+    "crates/nx-hir",
+    "crates/nx-types",
+    "crates/nx-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Bret Johnson"]
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+repository = "https://github.com/bret/nx"
+homepage = "https://nx-lang.dev"
+
+[workspace.dependencies]
+# Error reporting
+ariadne = "0.4"
+text-size = "1.1"
+
+# Parsing
+tree-sitter = "0.20"
+
+# Data structures
+smol_str = "0.2"
+la-arena = "0.3"
+rustc-hash = "1.1"
+
+# Incremental computation
+salsa = "0.16"
+
+# Testing
+insta = { version = "1.34", features = ["yaml"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

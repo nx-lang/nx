@@ -1,0 +1,17 @@
+[package]
+name = "nx-types"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+nx-hir = { path = "../nx-hir" }
+nx-diagnostics = { path = "../nx-diagnostics" }
+rustc-hash.workspace = true
+salsa.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
