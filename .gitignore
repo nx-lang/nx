@@ -370,3 +370,4 @@ Cargo.lock
 *.pdb
 .cargo/
 rust-analyzer/
+crates/nx-syntax/bindings/rust/build.rs

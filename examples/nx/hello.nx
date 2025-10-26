@@ -1,0 +1,4 @@
+// Simple hello world example
+<div class="greeting">
+  Hello, World!
+</div>

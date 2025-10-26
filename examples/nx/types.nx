@@ -1,0 +1,23 @@
+// Type definitions
+type UserId = int
+type Username = string
+type MaybeUser = User?
+type UserList = User[]
+
+type User = object
+
+let <UserCard
+  id: UserId
+  name: Username
+  email: string?
+  age: int
+/> =
+  <div class="user-card">
+    <h3>{name}</h3>
+    <p>ID: {id}</p>
+    {if email is {
+      null: <p>No email</p>
+      else: <p>Email: {email}</p>
+    }}
+    <p>Age: {age}</p>
+  </div>

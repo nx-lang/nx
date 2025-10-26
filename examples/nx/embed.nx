@@ -1,0 +1,17 @@
+// Embedded content with different text types
+let <CodeBlock
+  language: string = "javascript"
+  code: string
+/> =
+  <pre class="code-block">
+    <code:text class="language-{language}">
+      {code}
+    </code:text>
+  </pre>
+
+let <StyleBlock
+  css: string
+/> =
+  <style:text raw>
+    {css}
+  </style:text>

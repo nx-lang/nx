@@ -1,0 +1,11 @@
+// Various expression types
+let <MathDemo
+  x: int = 10
+  y: int = 20
+/> =
+  <div>
+    <p>Sum: {x + y}</p>
+    <p>Product: {x * y}</p>
+    <p>Comparison: {x < y ? "x is less" : "x is greater or equal"}</p>
+    <p>Logical: {x > 0 && y > 0}</p>
+  </div>

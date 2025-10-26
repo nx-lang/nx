@@ -10,18 +10,33 @@ The Rust workspace foundation has been established with:
 - Rust toolchain (v1.75) installed and configured
 - Cargo workspace with 5 initial crates
 - `nx-diagnostics` crate fully implemented with beautiful error reporting using Ariadne
-- All tests passing (9 tests)
 - Code formatted and linted
+
+**Phase 1 (tree-sitter Grammar + CST): 🚧 In Progress (~60% Complete)**
+
+tree-sitter grammar and parser infrastructure:
+- ✅ Complete tree-sitter grammar in [grammar.js](nx-syntax/grammar.js) (542 lines)
+- ✅ Parser successfully generated (~525KB parser.c)
+- ✅ External scanner stub for text content tokens
+- ✅ Build infrastructure with cc-rs integration
+- ✅ Basic Rust API: `language()`, `parser()`, `parse()`
+- ✅ 9 passing integration tests
+- ✅ 8 sample .nx files demonstrating language features
+- ⏳ Typed Rust wrappers for CST nodes (pending)
+- ⏳ Syntax highlighting queries (pending)
+- ⏳ VS Code integration (pending)
+
+All workspace tests passing: **18 tests** (9 nx-diagnostics + 9 nx-syntax)
 
 ## Crate Structure
 
 ```
 crates/
-├── nx-diagnostics/   ✅ Complete - Error reporting with Ariadne
-├── nx-syntax/        🚧 Phase 1 - CST + tree-sitter parsing (next)
-├── nx-hir/           🚧 Phase 2 - AST + semantic model
-├── nx-types/         🚧 Phase 3 - Type system
-└── nx-cli/           🚧 Phases 1-6 - Command-line tools
+├── nx-diagnostics/   ✅ Complete - Error reporting with Ariadne (9 tests)
+├── nx-syntax/        🚧 In Progress - CST + tree-sitter parsing (9 tests)
+├── nx-hir/           📝 Phase 2 - AST + semantic model
+├── nx-types/         📝 Phase 3 - Type system
+└── nx-cli/           📝 Phases 1-6 - Command-line tools
 ```
 
 ## Dependency Graph
@@ -100,15 +115,35 @@ cargo run -p nx-cli --release
 
 ## Next Steps
 
-**Phase 1: tree-sitter Grammar + CST (3-4 weeks)**
+**Remaining Phase 1 Tasks:**
 
-1. Port NX grammar to tree-sitter `grammar.js`
-2. Generate parser and test against sample `.nx` files
-3. Build typed Rust wrappers over tree-sitter nodes
-4. Write tree-sitter queries for syntax highlighting
-5. Integrate into VS Code extension
+1. ✅ ~~Port NX grammar to tree-sitter `grammar.js`~~
+2. ✅ ~~Generate parser and test against sample `.nx` files~~
+3. 🚧 Build typed Rust wrappers over tree-sitter nodes
+4. 📝 Write tree-sitter queries for syntax highlighting
+5. 📝 Integrate into VS Code extension
+
+**Phase 2: HIR + Semantic Analysis** (next major phase)
 
 See [../nx-rust-plan.md](../nx-rust-plan.md) for the complete implementation roadmap.
+
+## Sample Files
+
+Example NX files for testing are available in [../examples/nx/](../examples/nx/):
+- `hello.nx` - Basic markup
+- `function.nx` - Function definitions with properties
+- `expressions.nx` - Binary, conditional, and interpolation expressions
+- `conditionals.nx` - If/match/condition list expressions
+- `loops.nx` - For loops with indexing
+- `types.nx` - Type definitions and nullable/list types
+- `embed.nx` - Embedded content with text types
+- `complex.nx` - Real-world todo app example
+
+Test the parser with tree-sitter CLI:
+```bash
+cd crates/nx-syntax
+tree-sitter parse ../../examples/nx/function.nx
+```
 
 ## Documentation
 
