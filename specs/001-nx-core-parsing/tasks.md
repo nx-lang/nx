@@ -29,18 +29,18 @@ description: "Implementation tasks for Core NX Parsing and Validation"
 
 **Purpose**: Workspace initialization and crate scaffolding per plan.md
 
-- [ ] T001 Verify Rust 1.75+ installation and workspace builds with `cargo build --workspace`
-- [ ] T002 Add dependency: ariadne v0.4 to crates/nx-diagnostics/Cargo.toml
-- [ ] T003 [P] Add dependency: text-size v1.1+ to crates/nx-diagnostics/Cargo.toml
-- [ ] T004 [P] Add dependency: tree-sitter v0.20+ to crates/nx-syntax/Cargo.toml
-- [ ] T005 [P] Add dependency: salsa v0.16+ to crates/nx-hir/Cargo.toml
-- [ ] T006 [P] Add dependency: la-arena v0.3+ to crates/nx-hir/Cargo.toml
-- [ ] T007 [P] Add dependency: smol_str v0.2+ to crates/nx-hir/Cargo.toml
-- [ ] T008 [P] Add dependency: rustc-hash v1.1+ to crates/nx-types/Cargo.toml
-- [ ] T009 [P] Add dev dependency: insta v1.34+ to workspace Cargo.toml for snapshot testing
-- [ ] T010 Create directories: crates/nx-syntax/queries/ for tree-sitter queries
-- [ ] T011 Create directories: crates/nx-syntax/tests/fixtures/valid/ and crates/nx-syntax/tests/fixtures/invalid/
-- [ ] T012 Run `cargo build --workspace` and `cargo test --workspace` to verify setup
+- [X] T001 Verify Rust 1.75+ installation and workspace builds with `cargo build --workspace`
+- [X] T002 Add dependency: ariadne v0.4 to crates/nx-diagnostics/Cargo.toml
+- [X] T003 [P] Add dependency: text-size v1.1+ to crates/nx-diagnostics/Cargo.toml
+- [X] T004 [P] Add dependency: tree-sitter v0.20+ to crates/nx-syntax/Cargo.toml
+- [X] T005 [P] Add dependency: salsa v0.16+ to crates/nx-hir/Cargo.toml
+- [X] T006 [P] Add dependency: la-arena v0.3+ to crates/nx-hir/Cargo.toml
+- [X] T007 [P] Add dependency: smol_str v0.2+ to crates/nx-hir/Cargo.toml
+- [X] T008 [P] Add dependency: rustc-hash v1.1+ to crates/nx-types/Cargo.toml
+- [X] T009 [P] Add dev dependency: insta v1.34+ to workspace Cargo.toml for snapshot testing
+- [X] T010 Create directories: crates/nx-syntax/queries/ for tree-sitter queries
+- [X] T011 Create directories: crates/nx-syntax/tests/fixtures/valid/ and crates/nx-syntax/tests/fixtures/invalid/
+- [X] T012 Run `cargo build --workspace` and `cargo test --workspace` to verify setup
 
 ---
 
@@ -50,16 +50,16 @@ description: "Implementation tasks for Core NX Parsing and Validation"
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T013 Implement Severity enum (Error, Warning, Info) in crates/nx-diagnostics/src/lib.rs
-- [ ] T014 Implement TextSpan struct with start, end, len(), contains(), merge() in crates/nx-diagnostics/src/lib.rs
-- [ ] T015 Implement Label struct with span, message, style fields in crates/nx-diagnostics/src/lib.rs
-- [ ] T016 Implement Diagnostic struct with severity, message, span, labels, notes in crates/nx-diagnostics/src/lib.rs
-- [ ] T017 Implement Diagnostic::render() method using Ariadne for beautiful output in crates/nx-diagnostics/src/render.rs
-- [ ] T018 Implement Diagnostic::eprint() method to print to stderr with colors in crates/nx-diagnostics/src/render.rs
-- [ ] T019 Add unit tests for Diagnostic rendering in crates/nx-diagnostics/src/lib.rs
-- [ ] T020 Add integration tests for diagnostic formatting in crates/nx-diagnostics/tests/render_tests.rs
-- [ ] T021 Run `cargo test -p nx-diagnostics` to verify diagnostics crate works
-- [ ] T022 Run `cargo doc -p nx-diagnostics --open` to verify rustdoc builds
+- [X] T013 Implement Severity enum (Error, Warning, Info) in crates/nx-diagnostics/src/lib.rs
+- [X] T014 Implement TextSpan struct with start, end, len(), contains(), merge() in crates/nx-diagnostics/src/lib.rs
+- [X] T015 Implement Label struct with span, message, style fields in crates/nx-diagnostics/src/lib.rs
+- [X] T016 Implement Diagnostic struct with severity, message, span, labels, notes in crates/nx-diagnostics/src/lib.rs
+- [X] T017 Implement Diagnostic::render() method using Ariadne for beautiful output in crates/nx-diagnostics/src/render.rs
+- [X] T018 Implement Diagnostic::eprint() method to print to stderr with colors in crates/nx-diagnostics/src/render.rs
+- [X] T019 Add unit tests for Diagnostic rendering in crates/nx-diagnostics/src/lib.rs
+- [X] T020 Add integration tests for diagnostic formatting in crates/nx-diagnostics/tests/render_tests.rs
+- [X] T021 Run `cargo test -p nx-diagnostics` to verify diagnostics crate works
+- [X] T022 Run `cargo doc -p nx-diagnostics --open` to verify rustdoc builds
 
 **Checkpoint**: Foundation ready - user story implementation can now begin in parallel
 
