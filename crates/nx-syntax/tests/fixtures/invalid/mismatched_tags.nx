@@ -1,0 +1,2 @@
+// Mismatched element tags
+let <Button /> = <button>Click me</input>

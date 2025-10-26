@@ -1,0 +1,12 @@
+// Complex example combining multiple features
+fn renderUser(user: User) {
+    let greeting = "Welcome, " + user.name
+
+    <div class="user-profile">
+        <h1>{greeting}</h1>
+        <p>Email: {user.email}</p>
+        <p>Age: {user.age}</p>
+    </div>
+}
+
+let <UserCard user: User /> = renderUser(user)

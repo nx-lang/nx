@@ -1,0 +1,6 @@
+---
+source: crates/nx-syntax/tests/parser_tests.rs
+assertion_line: 351
+expression: debug_repr
+---
+MODULE_DEFINITION

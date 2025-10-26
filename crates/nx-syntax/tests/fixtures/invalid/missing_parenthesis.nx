@@ -1,0 +1,4 @@
+// Missing closing parenthesis
+fn calculate(x: int {
+    x * 2
+}

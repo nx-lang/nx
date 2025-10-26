@@ -1,0 +1,7 @@
+// Various expressions
+let sum = 1 + 2 + 3
+let product = 4 * 5
+let comparison = x > 10
+let logical = true && false
+let array_access = items[0]
+let function_call = greet("Bob")

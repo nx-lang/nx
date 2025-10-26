@@ -1,0 +1,2 @@
+// Simple element with properties
+let <Button text: string /> = <button>{text}</button>

@@ -6,12 +6,14 @@
 mod ast;
 mod syntax_kind;
 mod syntax_node;
+mod validation;
 
 pub use ast::{AstNode, Element, FunctionDef, SyntaxNodeExt, TypeDef};
 pub use syntax_kind::{syntax_kind_from_str, SyntaxKind};
 pub use syntax_node::SyntaxNode;
+pub use validation::validate;
 
-use nx_diagnostics::{Diagnostic, Label, Severity};
+use nx_diagnostics::{Diagnostic, Severity};
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -182,11 +184,18 @@ pub fn parse_str(source: &str, file_name: &str) -> ParseResult {
 
     match tree {
         Some(tree) => {
-            // Collect parse errors from the tree
-            let errors = collect_parse_errors(&tree, source, file_name);
+            // Collect parse errors from the tree with enhanced messages
+            let mut errors = validation::collect_enhanced_errors(&tree, source, file_name);
+
+            // Create the syntax tree
+            let syntax_tree = SyntaxTree::new(tree, source.to_string(), source_id);
+
+            // Run post-parse validation (e.g., tag matching)
+            let validation_errors = validation::validate(&syntax_tree, file_name);
+            errors.extend(validation_errors);
 
             ParseResult {
-                tree: Some(SyntaxTree::new(tree, source.to_string(), source_id)),
+                tree: Some(syntax_tree),
                 errors,
                 source_id,
             }
@@ -253,49 +262,6 @@ pub fn parse_file(path: impl AsRef<Path>) -> io::Result<ParseResult> {
     Ok(parse_str(&source, file_name))
 }
 
-/// Collects parse errors from a tree-sitter tree.
-fn collect_parse_errors(tree: &Tree, source: &str, file_name: &str) -> Vec<Diagnostic> {
-    let mut errors = Vec::new();
-    let root = tree.root_node();
-
-    fn walk_errors(
-        node: tree_sitter::Node,
-        source: &str,
-        file_name: &str,
-        errors: &mut Vec<Diagnostic>,
-    ) {
-        if node.is_error() || node.is_missing() {
-            let start = node.start_byte() as u32;
-            let end = node.end_byte() as u32;
-            let range = TextRange::new(start.into(), end.into());
-
-            let message = if node.is_missing() {
-                format!("Missing {}", node.kind())
-            } else {
-                "Syntax error".to_string()
-            };
-
-            let diagnostic = Diagnostic::error("parse-error")
-                .with_message(message)
-                .with_label(
-                    Label::primary(file_name, range)
-                        .with_message("unexpected syntax"),
-                )
-                .build();
-
-            errors.push(diagnostic);
-        }
-
-        // Recursively check children
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            walk_errors(child, source, file_name, errors);
-        }
-    }
-
-    walk_errors(root, source, file_name, &mut errors);
-    errors
-}
 
 /// Extension trait for `&str` to check UTF-8 validity.
 trait Utf8Ext {

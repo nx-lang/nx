@@ -1,0 +1,5 @@
+// Multiple syntax errors
+let x = {
+let y = }
+fn broken(
+    let z = 42

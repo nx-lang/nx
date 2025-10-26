@@ -1,0 +1,6 @@
+// Nested elements
+let <Card title: string, content: string /> =
+    <div class="card">
+        <h2>{title}</h2>
+        <p>{content}</p>
+    </div>
