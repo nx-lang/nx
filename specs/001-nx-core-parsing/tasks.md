@@ -75,29 +75,29 @@ description: "Implementation tasks for Core NX Parsing and Validation"
 
 **Step 1: tree-sitter Grammar (CST Layer)**
 
-- [ ] T023 [US1] Review existing crates/nx-syntax/grammar.js tree-sitter grammar for completeness
-- [ ] T024 [US1] Add build.rs script to crates/nx-syntax/ that compiles grammar.js during build
-- [ ] T025 [US1] Verify tree-sitter grammar generates parser with `cargo build -p nx-syntax`
-- [ ] T026 [US1] Create tree-sitter queries in crates/nx-syntax/queries/highlights.scm for syntax highlighting
-- [ ] T027 [P] [US1] Create tree-sitter queries in crates/nx-syntax/queries/locals.scm for scope analysis
+- [X] T023 [US1] Review existing crates/nx-syntax/grammar.js tree-sitter grammar for completeness
+- [X] T024 [US1] Add build.rs script to crates/nx-syntax/ that compiles grammar.js during build
+- [X] T025 [US1] Verify tree-sitter grammar generates parser with `cargo build -p nx-syntax`
+- [X] T026 [US1] Create tree-sitter queries in crates/nx-syntax/queries/highlights.scm for syntax highlighting
+- [X] T027 [P] [US1] Create tree-sitter queries in crates/nx-syntax/queries/locals.scm for scope analysis
 
 **Step 2: CST Wrappers**
 
-- [ ] T028 [US1] Implement SyntaxKind enum with all token and node variants in crates/nx-syntax/src/syntax_kind.rs
-- [ ] T029 [US1] Implement SyntaxTree struct wrapping tree-sitter Tree in crates/nx-syntax/src/lib.rs
-- [ ] T030 [US1] Implement SyntaxTree::root(), text(), source(), node_at() methods in crates/nx-syntax/src/lib.rs
-- [ ] T031 [US1] Implement SyntaxNode wrapper with kind(), text(), span(), children(), child_by_field() in crates/nx-syntax/src/syntax_node.rs
-- [ ] T032 [US1] Implement SyntaxNode::is_error() and error node detection in crates/nx-syntax/src/syntax_node.rs
-- [ ] T033 [US1] Add AstNode trait for typed CST node casting in crates/nx-syntax/src/ast.rs
+- [X] T028 [US1] Implement SyntaxKind enum with all token and node variants in crates/nx-syntax/src/syntax_kind.rs
+- [X] T029 [US1] Implement SyntaxTree struct wrapping tree-sitter Tree in crates/nx-syntax/src/lib.rs
+- [X] T030 [US1] Implement SyntaxTree::root(), text(), source(), node_at() methods in crates/nx-syntax/src/lib.rs
+- [X] T031 [US1] Implement SyntaxNode wrapper with kind(), text(), span(), children(), child_by_field() in crates/nx-syntax/src/syntax_node.rs
+- [X] T032 [US1] Implement SyntaxNode::is_error() and error node detection in crates/nx-syntax/src/syntax_node.rs
+- [X] T033 [US1] Add AstNode trait for typed CST node casting in crates/nx-syntax/src/ast.rs
 
 **Step 3: Parser API**
 
-- [ ] T034 [US1] Implement ParseResult struct with tree, errors, source_id fields in crates/nx-syntax/src/lib.rs
-- [ ] T035 [US1] Implement ParseResult::is_ok(), root() methods in crates/nx-syntax/src/lib.rs
-- [ ] T036 [US1] Implement parse_str(source, file_name) function in crates/nx-syntax/src/lib.rs
-- [ ] T037 [US1] Implement parse_file(path) function with UTF-8 validation in crates/nx-syntax/src/lib.rs
-- [ ] T038 [US1] Add UTF-8 encoding detection and error reporting in crates/nx-syntax/src/lib.rs
-- [ ] T039 [US1] Implement Error enum with Io, InvalidUtf8, FileNotFound, Parse variants in crates/nx-syntax/src/lib.rs
+- [X] T034 [US1] Implement ParseResult struct with tree, errors, source_id fields in crates/nx-syntax/src/lib.rs
+- [X] T035 [US1] Implement ParseResult::is_ok(), root() methods in crates/nx-syntax/src/lib.rs
+- [X] T036 [US1] Implement parse_str(source, file_name) function in crates/nx-syntax/src/lib.rs
+- [X] T037 [US1] Implement parse_file(path) function with UTF-8 validation in crates/nx-syntax/src/lib.rs
+- [X] T038 [US1] Add UTF-8 encoding detection and error reporting in crates/nx-syntax/src/lib.rs
+- [X] T039 [US1] Implement Error enum with Io, InvalidUtf8, FileNotFound, Parse variants in crates/nx-syntax/src/lib.rs
 
 **Step 4: Error Recovery and Validation**
 
@@ -106,12 +106,17 @@ description: "Implementation tasks for Core NX Parsing and Validation"
 - [ ] T042 [US1] Convert tree-sitter ERROR nodes to Diagnostic messages in crates/nx-syntax/src/validation.rs
 - [ ] T043 [US1] Add helpful error messages with suggestions for common syntax errors in crates/nx-syntax/src/validation.rs
 
-**Step 5: Session API**
+**Step 5: Session API** - ⚠️ **DEFERRED TO PHASE 4**
 
-- [ ] T044 [US1] Implement ParserSession struct with Salsa database in crates/nx-syntax/src/lib.rs
-- [ ] T045 [US1] Implement ParserSession::new(), parse_str(), parse_file() methods in crates/nx-syntax/src/lib.rs
-- [ ] T046 [US1] Implement ParserSession::clear_cache() for memory management in crates/nx-syntax/src/lib.rs
-- [ ] T047 [US1] Ensure ParserSession is Send + Sync for thread safety in crates/nx-syntax/src/lib.rs
+> **Rationale**: Tree-sitter has built-in incremental parsing (pass old tree to reuse).
+> Salsa is for coordinating multi-phase pipelines (parse → lower → type-check).
+> Most tree-sitter parsers do NOT use Salsa - it's rust-analyzer specific.
+> Session API with Salsa will be implemented in Phase 4 alongside HIR + type checking.
+
+- [⏭] T044 [US1] **DEFERRED** - Implement ParserSession struct (defer to Phase 4 with Salsa)
+- [⏭] T045 [US1] **DEFERRED** - Implement ParserSession methods (defer to Phase 4 with Salsa)
+- [⏭] T046 [US1] **DEFERRED** - Implement ParserSession::clear_cache() (defer to Phase 4 with Salsa)
+- [⏭] T047 [US1] **DEFERRED** - Ensure ParserSession is Send + Sync (defer to Phase 4 with Salsa)
 
 **Step 6: Testing**
 
@@ -405,15 +410,21 @@ With multiple developers:
 
 ## Summary
 
-- **Total Tasks**: 160 tasks
-- **User Story 1 Tasks**: 39 tasks (T023-T061)
+- **Total Tasks**: 156 tasks (4 deferred to Phase 4)
+- **User Story 1 Tasks**: 35 tasks (T023-T061, excluding T044-T047 deferred)
+  - Completed: 17 tasks (T023-T039) ✓
+  - Remaining: 18 tasks (T040-T043, T048-T061)
 - **User Story 2 Tasks**: 86 tasks (T062-T147)
-- **Setup Tasks**: 12 tasks (T001-T012)
-- **Foundational Tasks**: 10 tasks (T013-T022)
+- **Setup Tasks**: 12 tasks (T001-T012) ✓ COMPLETE
+- **Foundational Tasks**: 10 tasks (T013-T022) ✓ COMPLETE
 - **Polish Tasks**: 13 tasks (T148-T160)
+- **Deferred Tasks**: 4 tasks (T044-T047, Session API → Phase 4)
 - **Parallel Opportunities**: 30+ tasks marked [P]
-- **MVP Scope**: Phases 1-3 (Setup + Foundational + User Story 1) = 61 tasks
-- **Full Feature Scope**: Phases 1-5 (all tasks) = 160 tasks
+- **MVP Scope**: Phases 1-3 (Setup + Foundational + User Story 1) = 57 tasks
+  - Completed: 39 tasks (68.4%)
+  - Remaining: 18 tasks
+- **Full Feature Scope**: Phases 1-5 (all non-deferred tasks) = 156 tasks
+  - Completed: 39 tasks (25.0%)
 
 ---
 

@@ -206,14 +206,20 @@ All technical decisions are informed by the existing `nx-rust-plan.md` document 
 
 ### Decision: Incremental Computation
 
-**Chosen**: Salsa v0.16+
+**Chosen**: Salsa v0.16+ (Phase 4 - Type Checking)
 
 **Rationale**:
 - Powers rust-analyzer's incremental analysis
 - Query-based memoization - only recompute what changed
-- Essential for IDE performance (future LSP server)
+- Essential for coordinating parse → lower → type-check pipeline
 - Integrates naturally with Rust's type system
 - Mature, battle-tested in production
+
+**Note for Phase 3 (Parsing Only)**:
+- Tree-sitter has **built-in incremental parsing** - no Salsa needed
+- Tree-sitter takes old tree, only re-parses changed regions
+- Session API with Salsa deferred to Phase 4 when implementing full analysis pipeline
+- Most tree-sitter parser implementations do NOT use Salsa (it's rust-analyzer specific)
 
 **Alternatives Considered**:
 - **No incremental**: Rejected - poor IDE performance, wastes computation
