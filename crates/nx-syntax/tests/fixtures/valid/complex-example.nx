@@ -6,8 +6,8 @@ type TodoItem = object
 type TodoList = TodoItem[]
 
 let <TodoApp
-  todos: TodoList
-  filter: string = "all"
+  todos:TodoList
+  filter:string="all"
 /> =
   <div class="todo-app">
     <header>
@@ -25,7 +25,7 @@ let <TodoApp
   </div>
 
 let <TodoStats
-  items: TodoList
+  items:TodoList
 /> =
   <div class="stats">
     {if {
@@ -36,8 +36,8 @@ let <TodoStats
   </div>
 
 let <TodoList
-  items: TodoList
-  filter: string
+  items:TodoList
+  filter:string
 /> =
   <ul class="todo-list">
     {for item, index in items {
@@ -54,9 +54,9 @@ let <TodoList
   </ul>
 
 let <TodoItem
-  item: TodoItem
-  index: int
-  visible: boolean = true
+  item:TodoItem
+  index:int
+  visible:boolean=true
 /> =
   <li
     class="todo-item"
@@ -74,7 +74,7 @@ let <TodoItem
   </li>
 
 let <TodoFilters
-  current: string
+  current:string
 /> =
   <div class="filters">
     {for filter in ["all", "active", "completed"] {

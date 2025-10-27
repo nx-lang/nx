@@ -1,7 +1,7 @@
 // Conditional expressions
 let <StatusBadge
-  status: string
-  count: int = 0
+  status:string
+  count:int=0
 /> =
   <div class="badge">
     // Simple if expression

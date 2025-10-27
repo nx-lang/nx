@@ -2,9 +2,9 @@
 import core.html
 
 let <Button
-  text: string
-  onClick: void = ()
-  disabled: boolean = false
+  text:string
+  onClick:void=()
+  disabled:boolean=false
 /> =
   <button
     class="btn"

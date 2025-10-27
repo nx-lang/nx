@@ -7,10 +7,10 @@ type UserList = User[]
 type User = object
 
 let <UserCard
-  id: UserId
-  name: Username
-  email: string?
-  age: int
+  id:UserId
+  name:Username
+  email:string?
+  age:int
 /> =
   <div class="user-card">
     <h3>{name}</h3>
