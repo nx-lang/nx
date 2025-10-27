@@ -24,7 +24,7 @@ fn fixture_path(relative: &str) -> PathBuf {
 
 #[test]
 fn test_parse_simple_element() {
-    let path = fixture_path("valid/simple_element.nx");
+    let path = fixture_path("valid/simple-element.nx");
     let result = parse_file(&path).unwrap();
 
     assert!(result.is_ok(), "Should parse valid simple element without errors");
@@ -36,7 +36,7 @@ fn test_parse_simple_element() {
 
 #[test]
 fn test_parse_function_definition() {
-    let path = fixture_path("valid/function_definition.nx");
+    let path = fixture_path("valid/function.nx");
     let result = parse_file(&path).unwrap();
 
     assert!(result.is_ok(), "Should parse function definition without errors");
@@ -45,7 +45,7 @@ fn test_parse_function_definition() {
 
 #[test]
 fn test_parse_nested_elements() {
-    let path = fixture_path("valid/nested_elements.nx");
+    let path = fixture_path("valid/nested-elements.nx");
     let result = parse_file(&path).unwrap();
 
     assert!(result.is_ok(), "Should parse nested elements without errors");
@@ -54,7 +54,7 @@ fn test_parse_nested_elements() {
 
 #[test]
 fn test_parse_type_annotations() {
-    let path = fixture_path("valid/type_annotations.nx");
+    let path = fixture_path("valid/type-annotations.nx");
     let result = parse_file(&path).unwrap();
 
     assert!(result.is_ok(), "Should parse type annotations without errors");
@@ -81,7 +81,7 @@ fn test_parse_conditionals() {
 
 #[test]
 fn test_parse_complex_example() {
-    let path = fixture_path("valid/complex_example.nx");
+    let path = fixture_path("valid/complex-example.nx");
     let result = parse_file(&path).unwrap();
 
     assert!(result.is_ok(), "Should parse complex example without errors");
@@ -115,7 +115,7 @@ fn test_parse_all_valid_fixtures() {
 
 #[test]
 fn test_parse_incomplete_expression() {
-    let path = fixture_path("invalid/incomplete_expression.nx");
+    let path = fixture_path("invalid/incomplete-expression.nx");
     let result = parse_file(&path).unwrap();
 
     assert!(!result.is_ok(), "Should detect incomplete expression");
@@ -124,7 +124,7 @@ fn test_parse_incomplete_expression() {
 
 #[test]
 fn test_parse_unclosed_brace() {
-    let path = fixture_path("invalid/unclosed_brace.nx");
+    let path = fixture_path("invalid/unclosed-brace.nx");
     let result = parse_file(&path).unwrap();
 
     assert!(!result.is_ok(), "Should detect unclosed brace");
@@ -133,7 +133,7 @@ fn test_parse_unclosed_brace() {
 
 #[test]
 fn test_parse_mismatched_tags() {
-    let path = fixture_path("invalid/mismatched_tags.nx");
+    let path = fixture_path("invalid/mismatched-tags.nx");
     let result = parse_file(&path).unwrap();
 
     // May have parse errors or validation errors depending on grammar
@@ -142,7 +142,7 @@ fn test_parse_mismatched_tags() {
 
 #[test]
 fn test_parse_missing_parenthesis() {
-    let path = fixture_path("invalid/missing_parenthesis.nx");
+    let path = fixture_path("invalid/missing-parenthesis.nx");
     let result = parse_file(&path).unwrap();
 
     assert!(!result.is_ok(), "Should detect missing parenthesis");
@@ -151,7 +151,7 @@ fn test_parse_missing_parenthesis() {
 
 #[test]
 fn test_parse_invalid_element() {
-    let path = fixture_path("invalid/invalid_element.nx");
+    let path = fixture_path("invalid/invalid-element.nx");
     let result = parse_file(&path).unwrap();
 
     assert!(!result.is_ok(), "Should detect invalid element syntax");
@@ -160,7 +160,7 @@ fn test_parse_invalid_element() {
 
 #[test]
 fn test_parse_multiple_errors() {
-    let path = fixture_path("invalid/multiple_errors.nx");
+    let path = fixture_path("invalid/multiple-errors.nx");
     let result = parse_file(&path).unwrap();
 
     assert!(!result.is_ok(), "Should detect multiple errors");
@@ -424,7 +424,7 @@ fn test_performance_many_small_parses() {
 
 #[test]
 fn test_all_expression_types() {
-    let path = fixture_path("valid/all_expressions.nx");
+    let path = fixture_path("valid/all-expressions.nx");
     let result = parse_file(&path).unwrap();
 
     assert!(
