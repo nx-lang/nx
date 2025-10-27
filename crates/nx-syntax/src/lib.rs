@@ -360,4 +360,39 @@ mod tests {
         assert!(!result.is_ok());
         assert!(result.has_errors());
     }
+
+    #[test]
+    fn test_tree_sitter_error_nodes() {
+        // Test if tree-sitter is really producing ERROR nodes ANYWHERE
+        let source = "let <Button text: string /> = <button>{text}</button>";
+        let mut p = parser();
+        let tree = p.parse(source, None).unwrap();
+        let root = tree.root_node();
+
+        // Recursively check for ANY error nodes in the entire tree
+        fn find_errors(node: tree_sitter::Node, path: &str, errors: &mut Vec<String>) {
+            if node.is_error() {
+                errors.push(format!("{} -> {} (error)", path, node.kind()));
+            }
+
+            let mut cursor = node.walk();
+            for (i, child) in node.children(&mut cursor).enumerate() {
+                let child_path = format!("{}/{}", path, child.kind());
+                find_errors(child, &child_path, errors);
+            }
+        }
+
+        let mut errors = Vec::new();
+        find_errors(root, "root", &mut errors);
+
+        if !errors.is_empty() {
+            println!("Found {} ERROR nodes:", errors.len());
+            for err in &errors {
+                println!("  {}", err);
+            }
+        }
+
+        // This will fail if there are ANY error nodes anywhere
+        assert!(errors.is_empty(), "Tree should not contain any ERROR nodes! Found: {:?}", errors);
+    }
 }

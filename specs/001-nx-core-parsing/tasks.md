@@ -437,3 +437,17 @@ With multiple developers:
 - Commit after each task or logical group
 - Stop at checkpoints to validate story independently
 - Format validation: ALL tasks follow `- [ ] [ID] [Labels] Description` format ✅
+
+### Known Limitations
+
+**External Scanner Stub (2025-10-27)**:
+- The tree-sitter external scanner (`scanner.c`) is currently a stub that always returns `false`
+- This prevents TEXT_CHUNK tokens from being emitted
+- As a result, text content within elements (e.g., `<p>Sum: {x + y}</p>`) produces ERROR nodes
+- The grammar structure is correct, but requires a proper external scanner implementation
+- **Impact**: Tests with mixed text/interpolation content fail (e.g., `expressions.nx`, `conditionals.nx`)
+- **Resolution**: Implementing the external scanner is deferred to a future phase
+- **Workaround**: Tests that use element-only content (no text) work correctly
+- **Fixed Issues**:
+  - Corrected `syntax_kind_from_str` to map all grammar node kinds (previously, 40+ node kinds mapped to ERROR)
+  - This fixed false positives where our Rust wrapper incorrectly reported valid nodes as errors
