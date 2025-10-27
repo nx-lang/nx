@@ -142,6 +142,80 @@ description: "Implementation tasks for Core NX Parsing and Validation"
 
 ---
 
+## Phase 3B: External Scanner Implementation (Complete User Story 1)
+
+**Goal**: Implement the tree-sitter external scanner to handle text content tokens (TEXT_CHUNK, ENTITY, ESCAPED_LBRACE, ESCAPED_RBRACE) inside element content
+
+**Background**: The external scanner is a C component that handles context-sensitive lexing for text content inside markup elements. Without it, mixed content like `<p>Sum: {x + y}</p>` produces ERROR nodes because TEXT_CHUNK tokens are never emitted.
+
+**Independent Test**: Parse .nx files with mixed text/interpolation content (e.g., `<p>Hello {name}</p>`) and verify they parse successfully without ERROR nodes
+
+### Implementation for External Scanner
+
+**Step 1: Research and Design**
+
+- [ ] T162 [US1] Research tree-sitter external scanner API and patterns from other grammars (HTML, JSX)
+- [ ] T163 [US1] Document scanner state machine: need to track whether inside element content or not
+- [ ] T164 [US1] Design token recognition strategy: TEXT_CHUNK vs ENTITY vs ESCAPED_LBRACE/RBRACE
+- [ ] T165 [US1] Define which valid_symbols combinations indicate element content context
+
+**Step 2: Core Scanner Implementation**
+
+- [ ] T166 [US1] Implement scanner state struct to track context (inside_element_content flag) in crates/nx-syntax/src/scanner.c
+- [ ] T167 [US1] Implement tree_sitter_nx_external_scanner_create() to allocate state in crates/nx-syntax/src/scanner.c
+- [ ] T168 [US1] Implement tree_sitter_nx_external_scanner_destroy() to free state in crates/nx-syntax/src/scanner.c
+- [ ] T169 [US1] Implement tree_sitter_nx_external_scanner_serialize() to save state in crates/nx-syntax/src/scanner.c
+- [ ] T170 [US1] Implement tree_sitter_nx_external_scanner_deserialize() to restore state in crates/nx-syntax/src/scanner.c
+
+**Step 3: Token Recognition**
+
+- [ ] T171 [US1] Implement TEXT_CHUNK scanning: consume chars until '<', '&', '{', or '}' in crates/nx-syntax/src/scanner.c
+- [ ] T172 [US1] Implement ESCAPED_LBRACE scanning: recognize '{{' and emit token in crates/nx-syntax/src/scanner.c
+- [ ] T173 [US1] Implement ESCAPED_RBRACE scanning: recognize '}}' and emit token in crates/nx-syntax/src/scanner.c
+- [ ] T174 [US1] Implement ENTITY scanning: recognize named entities (&amp; &lt; &gt; &quot; &apos;) in crates/nx-syntax/src/scanner.c
+- [ ] T175 [US1] Implement ENTITY scanning: recognize numeric entities (&#10; &#x0A;) in crates/nx-syntax/src/scanner.c
+- [ ] T176 [US1] Add validation: ensure entity ends with ';' or report as text in crates/nx-syntax/src/scanner.c
+
+**Step 4: Context Management**
+
+- [ ] T177 [US1] Implement context detection: use valid_symbols to determine if in element content in crates/nx-syntax/src/scanner.c
+- [ ] T178 [US1] Handle single '{' properly: don't consume if it starts interpolation expression in crates/nx-syntax/src/scanner.c
+- [ ] T179 [US1] Handle single '}' properly: don't consume if it ends interpolation expression in crates/nx-syntax/src/scanner.c
+- [ ] T180 [US1] Add whitespace handling: preserve whitespace in TEXT_CHUNK in crates/nx-syntax/src/scanner.c
+
+**Step 5: Testing**
+
+- [ ] T181 [P] [US1] Add test fixture: simple text content `<p>Hello world</p>` in crates/nx-syntax/tests/fixtures/valid/text-content.nx
+- [ ] T182 [P] [US1] Add test fixture: mixed text and interpolation `<p>Sum: {x + y}</p>` in crates/nx-syntax/tests/fixtures/valid/text-interpolation.nx
+- [ ] T183 [P] [US1] Add test fixture: entities `<p>&lt;tag&gt; &#10; &#x0A;</p>` in crates/nx-syntax/tests/fixtures/valid/entities.nx
+- [ ] T184 [P] [US1] Add test fixture: escaped braces `<p>Code: {{ example }}</p>` in crates/nx-syntax/tests/fixtures/valid/escaped-braces.nx
+- [ ] T185 [P] [US1] Add test fixture: whitespace preservation `<p>  spaces  </p>` in crates/nx-syntax/tests/fixtures/valid/text-whitespace.nx
+- [ ] T186 [US1] Write unit tests for TEXT_CHUNK recognition in crates/nx-syntax/tests/parser_tests.rs
+- [ ] T187 [US1] Write unit tests for ENTITY recognition in crates/nx-syntax/tests/parser_tests.rs
+- [ ] T188 [US1] Write unit tests for ESCAPED_LBRACE/RBRACE recognition in crates/nx-syntax/tests/parser_tests.rs
+- [ ] T189 [US1] Verify existing test fixtures now parse correctly (expressions.nx, conditionals.nx) in crates/nx-syntax/tests/parser_tests.rs
+- [ ] T190 [US1] Run `cargo test -p nx-syntax` and verify all previously failing tests now pass
+- [ ] T191 [US1] Run snapshot tests and update baselines with `cargo insta review`
+
+**Step 6: Edge Cases and Robustness**
+
+- [ ] T192 [US1] Test edge case: empty text between elements `<div><p></p></div>` in crates/nx-syntax/tests/parser_tests.rs
+- [ ] T193 [US1] Test edge case: text at start of element `<p>Start</p>` in crates/nx-syntax/tests/parser_tests.rs
+- [ ] T194 [US1] Test edge case: text at end of element `<p>End</p>` in crates/nx-syntax/tests/parser_tests.rs
+- [ ] T195 [US1] Test edge case: multiple consecutive text chunks in crates/nx-syntax/tests/parser_tests.rs
+- [ ] T196 [US1] Test edge case: malformed entities `<p>&invalid</p>` should parse as text in crates/nx-syntax/tests/parser_tests.rs
+- [ ] T197 [US1] Test edge case: incomplete entities `<p>&amp</p>` without semicolon in crates/nx-syntax/tests/parser_tests.rs
+
+**Step 7: Documentation**
+
+- [ ] T198 [US1] Add detailed comments to scanner.c explaining the state machine and token recognition logic
+- [ ] T199 [US1] Update Known Limitations section in tasks.md to mark external scanner as complete
+- [ ] T200 [US1] Update spec.md with notes about text content handling and entity support
+
+**Checkpoint**: At this point, all Phase 3 work should be complete - the parser fully handles both element-only and mixed text/interpolation content
+
+---
+
 ## Phase 4: User Story 2 - Check Types and Semantics (Priority: P1)
 
 **Goal**: Perform type checking, detect type errors, resolve identifiers, infer types
@@ -300,6 +374,7 @@ description: "Implementation tasks for Core NX Parsing and Validation"
 - **Setup (Phase 1)**: No dependencies - can start immediately
 - **Foundational (Phase 2)**: Depends on Setup completion - BLOCKS all user stories
 - **User Story 1 (Phase 3)**: Depends on Foundational phase completion
+- **User Story 1 External Scanner (Phase 3B)**: Depends on Phase 3 core implementation (grammar, parser API)
 - **User Story 2 (Phase 4)**: Depends on Foundational and User Story 1 completion (needs nx-syntax crate)
 - **Polish (Phase 5)**: Depends on both user stories being complete
 
@@ -315,6 +390,8 @@ description: "Implementation tasks for Core NX Parsing and Validation"
 - CST wrappers before parser API
 - Parser API before error recovery
 - Core implementation before session API
+- Core implementation before external scanner
+- External scanner before comprehensive testing with text content
 - Implementation before testing
 - Tests before documentation
 
@@ -384,11 +461,12 @@ Task T145: "Add usage examples in rustdoc"
 
 ### MVP First (User Story 1 Only)
 
-1. Complete Phase 1: Setup
-2. Complete Phase 2: Foundational (nx-diagnostics) - CRITICAL
-3. Complete Phase 3: User Story 1 (Parse and Validate)
-4. **STOP and VALIDATE**: Test parsing independently with various .nx files
-5. Demo/review if ready
+1. Complete Phase 1: Setup ✓
+2. Complete Phase 2: Foundational (nx-diagnostics) ✓ CRITICAL
+3. Complete Phase 3: User Story 1 Core (Grammar, Parser API, Validation) ✓
+4. Complete Phase 3B: External Scanner (Text Content Support) - **CURRENT PHASE**
+5. **STOP and VALIDATE**: Test parsing independently with various .nx files including mixed content
+6. Demo/review if ready
 
 ### Full Feature (Both Stories)
 
@@ -410,21 +488,25 @@ With multiple developers:
 
 ## Summary
 
-- **Total Tasks**: 156 tasks (4 deferred to Phase 4)
-- **User Story 1 Tasks**: 35 tasks (T023-T061, excluding T044-T047 deferred)
-  - Completed: 17 tasks (T023-T039) ✓
-  - Remaining: 18 tasks (T040-T043, T048-T061)
+- **Total Tasks**: 195 tasks (4 deferred to Phase 4)
+- **User Story 1 Tasks**: 74 tasks (T023-T061 + T162-T200, excluding T044-T047 deferred)
+  - Phase 3: 35 tasks (T023-T061, excluding T044-T047)
+    - Completed: 35 tasks (T023-T043, T048-T061) ✓
+    - Remaining: 0 tasks
+  - Phase 3B (External Scanner): 39 tasks (T162-T200)
+    - Completed: 0 tasks
+    - Remaining: 39 tasks
 - **User Story 2 Tasks**: 86 tasks (T062-T147)
 - **Setup Tasks**: 12 tasks (T001-T012) ✓ COMPLETE
 - **Foundational Tasks**: 10 tasks (T013-T022) ✓ COMPLETE
 - **Polish Tasks**: 13 tasks (T148-T160)
 - **Deferred Tasks**: 4 tasks (T044-T047, Session API → Phase 4)
-- **Parallel Opportunities**: 30+ tasks marked [P]
-- **MVP Scope**: Phases 1-3 (Setup + Foundational + User Story 1) = 57 tasks
-  - Completed: 39 tasks (68.4%)
-  - Remaining: 18 tasks
-- **Full Feature Scope**: Phases 1-5 (all non-deferred tasks) = 156 tasks
-  - Completed: 39 tasks (25.0%)
+- **Parallel Opportunities**: 35+ tasks marked [P]
+- **MVP Scope**: Phases 1-3B (Setup + Foundational + User Story 1 Complete) = 96 tasks
+  - Completed: 57 tasks (59.4%)
+  - Remaining: 39 tasks (all in Phase 3B - External Scanner)
+- **Full Feature Scope**: Phases 1-5 (all non-deferred tasks) = 195 tasks
+  - Completed: 57 tasks (29.2%)
 
 ---
 
