@@ -316,5 +316,6 @@ TextChar         ::=
     ? any character except "<", "&", and "{" ?
 
 EscapedBrace     ::=
-    "{{" | "}}"
+    "\{" | "\}"
+? Only "\{" and "\}" sequences are treated as escapes; all other backslashes remain literal.
 ```

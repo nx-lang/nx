@@ -149,7 +149,7 @@
       ]
     },
     "interpolation": {
-      "begin": "\\{",
+      "begin": "(?<!\\\\)\\{",
       "beginCaptures": { "0": { "name": "punctuation.section.interpolation.begin.nx" } },
       "end": "\\}",
       "endCaptures": { "0": { "name": "punctuation.section.interpolation.end.nx" } },

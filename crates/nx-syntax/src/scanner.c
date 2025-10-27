@@ -4,8 +4,11 @@
  * This scanner handles text content inside markup elements, including:
  * - TEXT_CHUNK: sequences of text characters
  * - ENTITY: HTML/XML entities like &amp; &#10;
- * - ESCAPED_LBRACE: {{
- * - ESCAPED_RBRACE: }}
+ * - ESCAPED_LBRACE: \{
+ * - ESCAPED_RBRACE: \}
+ *
+ * Only backslash-brace pairs are treated as escapes; any other backslash
+ * sequence is left as literal text.
  */
 
 #include <tree_sitter/parser.h>

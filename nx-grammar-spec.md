@@ -55,10 +55,11 @@ Literals
  - AMP_AMP (&&), PIPE_PIPE (||)
 
 Text content tokens (inside text elements)
-- TEXT_CHUNK (sequence of text chars excluding '<', '&', '{')
+- TEXT_CHUNK (sequence of text chars excluding '<', '&', '{'; backslashes are literal unless part of an escaped brace)
 - ENTITY (named or numeric entity; e.g., &amp; &#10;)
-- ESCAPED_LBRACE ("{{")
-- ESCAPED_RBRACE ("}}")
+- ESCAPED_LBRACE (`"\{"`)
+- ESCAPED_RBRACE (`"\}"`)
+- Only `"\{"` and `"\}"` sequences are treated as escapes; any other backslash-prefixed sequences remain literal text.
 
 Special
 - EOF (end of file)

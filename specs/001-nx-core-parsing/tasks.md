@@ -169,9 +169,9 @@ description: "Implementation tasks for Core NX Parsing and Validation"
 
 **Step 3: Token Recognition**
 
-- [ ] T171 [US1] Implement TEXT_CHUNK scanning: consume chars until '<', '&', '{', or '}' in crates/nx-syntax/src/scanner.c
-- [ ] T172 [US1] Implement ESCAPED_LBRACE scanning: recognize '{{' and emit token in crates/nx-syntax/src/scanner.c
-- [ ] T173 [US1] Implement ESCAPED_RBRACE scanning: recognize '}}' and emit token in crates/nx-syntax/src/scanner.c
+- [ ] T171 [US1] Implement TEXT_CHUNK scanning: consume chars until '<', '&', '{', '}', or '\\' so escaped braces can be split out in crates/nx-syntax/src/scanner.c
+- [ ] T172 [US1] Implement ESCAPED_LBRACE scanning: recognize `\{` and emit token in crates/nx-syntax/src/scanner.c
+- [ ] T173 [US1] Implement ESCAPED_RBRACE scanning: recognize `\}` and emit token in crates/nx-syntax/src/scanner.c
 - [ ] T174 [US1] Implement ENTITY scanning: recognize named entities (&amp; &lt; &gt; &quot; &apos;) in crates/nx-syntax/src/scanner.c
 - [ ] T175 [US1] Implement ENTITY scanning: recognize numeric entities (&#10; &#x0A;) in crates/nx-syntax/src/scanner.c
 - [ ] T176 [US1] Add validation: ensure entity ends with ';' or report as text in crates/nx-syntax/src/scanner.c
@@ -188,7 +188,7 @@ description: "Implementation tasks for Core NX Parsing and Validation"
 - [ ] T181 [P] [US1] Add test fixture: simple text content `<p>Hello world</p>` in crates/nx-syntax/tests/fixtures/valid/text-content.nx
 - [ ] T182 [P] [US1] Add test fixture: mixed text and interpolation `<p>Sum: {x + y}</p>` in crates/nx-syntax/tests/fixtures/valid/text-interpolation.nx
 - [ ] T183 [P] [US1] Add test fixture: entities `<p>&lt;tag&gt; &#10; &#x0A;</p>` in crates/nx-syntax/tests/fixtures/valid/entities.nx
-- [ ] T184 [P] [US1] Add test fixture: escaped braces `<p>Code: {{ example }}</p>` in crates/nx-syntax/tests/fixtures/valid/escaped-braces.nx
+- [ ] T184 [P] [US1] Add test fixture: escaped braces `<p>Code: \{ example \}</p>` in crates/nx-syntax/tests/fixtures/valid/escaped-braces.nx
 - [ ] T185 [P] [US1] Add test fixture: whitespace preservation `<p>  spaces  </p>` in crates/nx-syntax/tests/fixtures/valid/text-whitespace.nx
 - [ ] T186 [US1] Write unit tests for TEXT_CHUNK recognition in crates/nx-syntax/tests/parser_tests.rs
 - [ ] T187 [US1] Write unit tests for ENTITY recognition in crates/nx-syntax/tests/parser_tests.rs

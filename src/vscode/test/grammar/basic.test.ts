@@ -172,6 +172,13 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(line, tokens, 'className')).to.include('meta.interpolation.nx');
   });
 
+  it('treats escaped braces in markup text as literals', function () {
+    const line = '<p>\\{ brace \\}</p>';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    expect(scopesForSubstring(line, tokens, '{')).to.not.include('punctuation.section.interpolation.begin.nx');
+    expect(scopesForSubstring(line, tokens, '}')).to.not.include('punctuation.section.interpolation.end.nx');
+  });
+
   it('highlights inline element as attribute value', function () {
     const line = '<Button prop=<Start/> />';
     const { tokens } = grammar.tokenizeLine(line, null);
