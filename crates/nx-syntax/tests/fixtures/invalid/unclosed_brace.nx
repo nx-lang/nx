@@ -1,3 +1,5 @@
-// Unclosed brace
-fn foo() {
-    let x = 42
+// Unclosed brace in interpolation
+import core.html
+
+let <Broken /> =
+  <div>{1 + 2</div>

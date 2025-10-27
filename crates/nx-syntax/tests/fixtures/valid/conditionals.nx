@@ -1,6 +1,29 @@
 // Conditional expressions
-let result = if x > 0 { "positive" } else { "non-positive" }
+let <StatusBadge
+  status: string
+  count: int = 0
+/> =
+  <div class="badge">
+    // Simple if expression
+    {if count > 0 {
+      <span class="count">{count}</span>
+    } else {
+      <span class="empty">-</span>
+    }}
 
-fn abs(n: int) {
-    if n < 0 { -n } else { n }
-}
+    // Match expression
+    {if status is {
+      "active": <span class="active">Active</span>
+      "pending": <span class="pending">Pending</span>
+      "error": <span class="error">Error</span>
+      else: <span class="unknown">Unknown</span>
+    }}
+
+    // Condition list expression
+    {if {
+      count == 0: <span>Empty</span>
+      count < 10: <span>Low</span>
+      count < 100: <span>Medium</span>
+      else: <span>High</span>
+    }}
+  </div>

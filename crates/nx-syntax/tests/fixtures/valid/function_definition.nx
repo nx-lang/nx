@@ -1,4 +1,0 @@
-// Function definition
-fn greet(name: string) {
-    "Hello, " + name
-}

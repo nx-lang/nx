@@ -1,5 +1,6 @@
 // Multiple syntax errors
-let x = {
-let y = }
-fn broken(
-    let z = 42
+import core.html
+
+let <Broken1 = {
+let <Broken2 />
+  <div{x</div>

@@ -1,7 +1,11 @@
-// Various expressions
-let sum = 1 + 2 + 3
-let product = 4 * 5
-let comparison = x > 10
-let logical = true && false
-let array_access = items[0]
-let function_call = greet("Bob")
+// Various expression types
+let <MathDemo
+  x: int = 10
+  y: int = 20
+/> =
+  <div>
+    <p>Sum: {x + y}</p>
+    <p>Product: {x * y}</p>
+    <p>Comparison: {x < y ? "x is less" : "x is greater or equal"}</p>
+    <p>Logical: {x > 0 && y > 0}</p>
+  </div>

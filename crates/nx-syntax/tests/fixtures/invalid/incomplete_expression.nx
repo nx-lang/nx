@@ -1,2 +1,2 @@
-// Incomplete expression - missing right-hand side
-let x =
+// Incomplete - missing right-hand side
+let <Button /> =

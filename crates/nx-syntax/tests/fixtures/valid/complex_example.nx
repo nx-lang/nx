@@ -1,12 +1,88 @@
 // Complex example combining multiple features
-fn renderUser(user: User) {
-    let greeting = "Welcome, " + user.name
+import ui.components
+import utils.formatting
 
-    <div class="user-profile">
-        <h1>{greeting}</h1>
-        <p>Email: {user.email}</p>
-        <p>Age: {user.age}</p>
-    </div>
-}
+type TodoItem = object
+type TodoList = TodoItem[]
 
-let <UserCard user: User /> = renderUser(user)
+let <TodoApp
+  todos: TodoList
+  filter: string = "all"
+/> =
+  <div class="todo-app">
+    <header>
+      <h1>Todo List</h1>
+      <TodoStats items={todos} />
+    </header>
+
+    <main>
+      <TodoList items={todos} filter={filter} />
+    </main>
+
+    <footer>
+      <TodoFilters current={filter} />
+    </footer>
+  </div>
+
+let <TodoStats
+  items: TodoList
+/> =
+  <div class="stats">
+    {if {
+      items.length == 0: <p>No todos yet</p>
+      items.length == 1: <p>1 todo</p>
+      else: <p>{items.length} todos</p>
+    }}
+  </div>
+
+let <TodoList
+  items: TodoList
+  filter: string
+/> =
+  <ul class="todo-list">
+    {for item, index in items {
+      <TodoItem
+        item={item}
+        index={index}
+        if filter == "all" {
+          visible={true}
+        } else {
+          visible={item.status == filter}
+        }
+      />
+    }}
+  </ul>
+
+let <TodoItem
+  item: TodoItem
+  index: int
+  visible: boolean = true
+/> =
+  <li
+    class="todo-item"
+    if visible {
+      style="display: block"
+    } else {
+      style="display: none"
+    }
+  >
+    <input type="checkbox" checked={item.completed} />
+    <span class={item.completed ? "completed" : "active"}>
+      {item.text}
+    </span>
+    <button class="delete">Delete</button>
+  </li>
+
+let <TodoFilters
+  current: string
+/> =
+  <div class="filters">
+    {for filter in ["all", "active", "completed"] {
+      <button
+        class={filter == current ? "active" : ""}
+        data-filter={filter}
+      >
+        {filter}
+      </button>
+    }}
+  </div>
