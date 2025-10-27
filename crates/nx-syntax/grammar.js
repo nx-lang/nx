@@ -67,10 +67,11 @@ module.exports = grammar({
     module_definition: $ => seq(
       repeat($.import_statement),
       choice(
-        seq(
-          repeat($.type_definition),
-          repeat($.function_definition),
-        ),
+        repeat(choice(
+          $.type_definition,
+          $.value_definition,
+          $.function_definition,
+        )),
         $.element,
       ),
     ),
@@ -87,6 +88,18 @@ module.exports = grammar({
       field('name', $.identifier),
       '=',
       field('type', $.type),
+    ),
+
+    // ===== Value Definitions =====
+    value_definition: $ => seq(
+      'let',
+      field('name', $.identifier),
+      optional(seq(
+        ':',
+        field('type', $.type),
+      )),
+      '=',
+      field('value', $.rhs_expression),
     ),
 
     type: $ => seq(

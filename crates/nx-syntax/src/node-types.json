@@ -692,6 +692,10 @@
         {
           "type": "type_definition",
           "named": true
+        },
+        {
+          "type": "value_definition",
+          "named": true
         }
       ]
     }
@@ -1180,6 +1184,42 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "value_definition",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "type": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "rhs_expression",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {

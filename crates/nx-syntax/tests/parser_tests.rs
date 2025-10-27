@@ -438,33 +438,33 @@ fn test_all_expression_types() {
 #[test]
 fn test_literal_expressions() {
     // Integer literal
-    let result = parse_str("let <Test /> = 42", "test.nx");
+    let result = parse_str("let test = 42", "test.nx");
     assert!(result.is_ok());
 
     // Real literal
-    let result = parse_str("let <Test /> = 3.14", "test.nx");
+    let result = parse_str("let test = 3.14", "test.nx");
     assert!(result.is_ok());
 
     // Hex literal
-    let result = parse_str("let <Test /> = 0xFF", "test.nx");
+    let result = parse_str("let test = 0xFF", "test.nx");
     assert!(result.is_ok());
 
     // Boolean literals
-    let result = parse_str("let <Test /> = true", "test.nx");
+    let result = parse_str("let test = true", "test.nx");
     assert!(result.is_ok());
-    let result = parse_str("let <Test /> = false", "test.nx");
+    let result = parse_str("let test = false", "test.nx");
     assert!(result.is_ok());
 
     // Null literal
-    let result = parse_str("let <Test /> = null", "test.nx");
+    let result = parse_str("let test = null", "test.nx");
     assert!(result.is_ok());
 
     // String literal
-    let result = parse_str("let <Test /> = \"hello\"", "test.nx");
+    let result = parse_str("let test = \"hello\"", "test.nx");
     assert!(result.is_ok());
 
     // Unit literal in interpolation
-    let result = parse_str("let <Test /> = {()}", "test.nx");
+    let result = parse_str("let test = {()}", "test.nx");
     assert!(result.is_ok());
 }
 
@@ -717,15 +717,60 @@ fn test_property_defaults_with_expressions() {
 #[test]
 fn test_expression_operator_precedence() {
     // Verify operator precedence is correct
-    let source = "let <Test /> = {1 + 2 * 3}"; // Should parse as 1 + (2 * 3)
+    let source = "let test = {1 + 2 * 3}"; // Should parse as 1 + (2 * 3)
     let result = parse_str(source, "test.nx");
     assert!(result.is_ok());
 
-    let source = "let <Test /> = {1 * 2 + 3}"; // Should parse as (1 * 2) + 3
+    let source = "let test = {1 * 2 + 3}"; // Should parse as (1 * 2) + 3
     let result = parse_str(source, "test.nx");
     assert!(result.is_ok());
 
-    let source = "let <Test /> = {true && false || true}"; // Should parse as (true && false) || true
+    let source = "let test = {true && false || true}"; // Should parse as (true && false) || true
     let result = parse_str(source, "test.nx");
     assert!(result.is_ok());
+}
+
+#[test]
+fn test_value_definitions() {
+    // Simple value definition without type
+    let result = parse_str("let x = 42", "test.nx");
+    assert!(result.is_ok(), "Simple value definition should parse. Errors: {:?}", result.errors);
+
+    // Value definition with type annotation
+    let result = parse_str("let x: int = 42", "test.nx");
+    assert!(result.is_ok(), "Value definition with type should parse");
+
+    // Value definition with expression
+    let result = parse_str("let sum = {1 + 2 + 3}", "test.nx");
+    assert!(result.is_ok(), "Value definition with expression should parse");
+
+    // Value definition with type and expression
+    let result = parse_str("let sum: int = {1 + 2 + 3}", "test.nx");
+    assert!(result.is_ok(), "Value definition with type and expression should parse");
+
+    // Multiple value definitions
+    let source = r#"let x = 42
+let y = 10
+let sum = {x + y}"#;
+    let result = parse_str(source, "test.nx");
+    assert!(result.is_ok(), "Multiple value definitions should parse");
+}
+
+#[test]
+fn test_value_definition_vs_function_definition() {
+    // Value definition (no parameters)
+    let result = parse_str("let x = 42", "test.nx");
+    assert!(result.is_ok());
+    let root = result.root().unwrap();
+    // Should find a value_definition child
+    let has_value_def = root.children().any(|c| c.kind() == SyntaxKind::VALUE_DEFINITION);
+    assert!(has_value_def, "Should have value_definition node");
+
+    // Function definition (with parameters)
+    let result = parse_str("let <Add x: int y: int /> = {x + y}", "test.nx");
+    assert!(result.is_ok());
+    let root = result.root().unwrap();
+    // Should find a function_definition child
+    let has_func_def = root.children().any(|c| c.kind() == SyntaxKind::FUNCTION_DEFINITION);
+    assert!(has_func_def, "Should have function_definition node");
 }

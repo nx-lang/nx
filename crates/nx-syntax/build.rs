@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 fn main() {
-    let src_dir = PathBuf::from("tree-sitter-nx").join("src");
+    let src_dir = PathBuf::from("src");
 
     // Tell cargo to rerun if the grammar changes
     println!("cargo:rerun-if-changed=grammar.js");

@@ -15,6 +15,7 @@ pub enum SyntaxKind {
 
     // === Type Definitions ===
     TYPE_DEFINITION,
+    VALUE_DEFINITION,
     TYPE,
     PRIMITIVE_TYPE,
     USER_DEFINED_TYPE,
@@ -282,6 +283,7 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "ERROR" => SyntaxKind::ERROR,
         "import_statement" => SyntaxKind::IMPORT_STATEMENT,
         "type_definition" => SyntaxKind::TYPE_DEFINITION,
+        "value_definition" => SyntaxKind::VALUE_DEFINITION,
         "type" => SyntaxKind::TYPE,
         "primitive_type" => SyntaxKind::PRIMITIVE_TYPE,
         "user_defined_type" => SyntaxKind::USER_DEFINED_TYPE,
