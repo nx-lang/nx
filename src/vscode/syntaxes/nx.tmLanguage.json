@@ -5,6 +5,7 @@
   "fileTypes": ["nx"],
   "patterns": [
     { "include": "#comments" },
+    { "include": "#value-definition" },
     { "include": "#elements-if" },
     { "include": "#elements-for" },
     { "include": "#value-if" },
@@ -117,6 +118,26 @@
         { "name": "punctuation.separator.conditional.nx", "match": ":" },
         { "name": "punctuation.separator.dot.nx", "match": "\\." },
         { "name": "keyword.operator.assignment.nx", "match": "=" }
+      ]
+    },
+    "value-definition": {
+      "begin": "^(\\s*)(let)\\s+(?!<)([A-Za-z_][A-Za-z0-9_]*)",
+      "beginCaptures": {
+        "2": { "name": "keyword.declaration.let.nx" },
+        "3": { "name": "entity.name.variable.nx" }
+      },
+      "end": "(?==)",
+      "name": "meta.definition.value.nx",
+      "patterns": [
+        { "name": "punctuation.separator.type.annotation.nx", "match": ":" },
+        { "include": "#types" },
+        { "include": "#qualifiers" },
+        { "include": "#operators" },
+        { "include": "#keywords-core" },
+        { "include": "#keywords-control" },
+        { "include": "#numbers" },
+        { "include": "#strings" },
+        { "include": "#comments" }
       ]
     },
     "qualifiers": {

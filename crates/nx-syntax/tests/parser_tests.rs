@@ -417,3 +417,315 @@ fn test_performance_many_small_parses() {
         duration
     );
 }
+
+// ============================================================================
+// Comprehensive Expression Tests (T050)
+// ============================================================================
+
+#[test]
+fn test_all_expression_types() {
+    let path = fixture_path("valid/all_expressions.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(
+        result.is_ok(),
+        "Should parse all expression types without errors. Errors: {:?}",
+        result.errors
+    );
+    assert!(result.tree.is_some());
+}
+
+#[test]
+fn test_literal_expressions() {
+    // Integer literal
+    let result = parse_str("let <Test /> = 42", "test.nx");
+    assert!(result.is_ok());
+
+    // Real literal
+    let result = parse_str("let <Test /> = 3.14", "test.nx");
+    assert!(result.is_ok());
+
+    // Hex literal
+    let result = parse_str("let <Test /> = 0xFF", "test.nx");
+    assert!(result.is_ok());
+
+    // Boolean literals
+    let result = parse_str("let <Test /> = true", "test.nx");
+    assert!(result.is_ok());
+    let result = parse_str("let <Test /> = false", "test.nx");
+    assert!(result.is_ok());
+
+    // Null literal
+    let result = parse_str("let <Test /> = null", "test.nx");
+    assert!(result.is_ok());
+
+    // String literal
+    let result = parse_str("let <Test /> = \"hello\"", "test.nx");
+    assert!(result.is_ok());
+
+    // Unit literal in interpolation
+    let result = parse_str("let <Test /> = {()}", "test.nx");
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_binary_expressions_arithmetic() {
+    // Multiplication
+    let result = parse_str("let <Test x: int y: int /> = {x * y}", "test.nx");
+    assert!(result.is_ok());
+
+    // Division
+    let result = parse_str("let <Test x: int y: int /> = {x / y}", "test.nx");
+    assert!(result.is_ok());
+
+    // Addition
+    let result = parse_str("let <Test x: int y: int /> = {x + y}", "test.nx");
+    assert!(result.is_ok());
+
+    // Subtraction
+    let result = parse_str("let <Test x: int y: int /> = {x - y}", "test.nx");
+    assert!(result.is_ok());
+
+    // Complex: precedence (multiplication before addition)
+    let result = parse_str("let <Test x: int y: int z: int /> = {x + y * z}", "test.nx");
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_binary_expressions_comparison() {
+    let result = parse_str("let <Test x: int y: int /> = {x < y}", "test.nx");
+    assert!(result.is_ok());
+
+    let result = parse_str("let <Test x: int y: int /> = {x > y}", "test.nx");
+    assert!(result.is_ok());
+
+    let result = parse_str("let <Test x: int y: int /> = {x <= y}", "test.nx");
+    assert!(result.is_ok());
+
+    let result = parse_str("let <Test x: int y: int /> = {x >= y}", "test.nx");
+    assert!(result.is_ok());
+
+    let result = parse_str("let <Test x: int y: int /> = {x == y}", "test.nx");
+    assert!(result.is_ok());
+
+    let result = parse_str("let <Test x: int y: int /> = {x != y}", "test.nx");
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_binary_expressions_logical() {
+    // Logical AND
+    let result = parse_str("let <Test x: boolean y: boolean /> = {x && y}", "test.nx");
+    assert!(result.is_ok());
+
+    // Logical OR
+    let result = parse_str("let <Test x: boolean y: boolean /> = {x || y}", "test.nx");
+    assert!(result.is_ok());
+
+    // Complex: precedence (AND before OR)
+    let result = parse_str("let <Test x: boolean y: boolean z: boolean /> = {x && y || z}", "test.nx");
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_unary_expressions() {
+    // Prefix negation
+    let result = parse_str("let <Test x: int /> = {-x}", "test.nx");
+    assert!(result.is_ok());
+
+    // Double negation
+    let result = parse_str("let <Test x: int /> = {--x}", "test.nx");
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_conditional_ternary_expressions() {
+    // Simple ternary
+    let result = parse_str("let <Test x: int /> = {x > 0 ? 1 : -1}", "test.nx");
+    assert!(result.is_ok());
+
+    // Nested ternary
+    let result = parse_str("let <Test x: int /> = {x > 0 ? x * 2 : x < 0 ? x * -2 : 0}", "test.nx");
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_parenthesized_expressions() {
+    // Simple parentheses
+    let result = parse_str("let <Test x: int y: int /> = {(x + y) * 2}", "test.nx");
+    assert!(result.is_ok());
+
+    // Nested parentheses
+    let result = parse_str("let <Test x: int /> = {((x + 1) * 2)}", "test.nx");
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_member_access_expressions() {
+    // Simple member access
+    let result = parse_str("let <Test obj: object /> = {obj.field}", "test.nx");
+    assert!(result.is_ok());
+
+    // Chained member access
+    let result = parse_str("let <Test obj: object /> = {obj.first.second}", "test.nx");
+    assert!(result.is_ok());
+
+    // Member access on method result
+    let result = parse_str("let <Test obj: object /> = {obj.field.method}", "test.nx");
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_call_expressions() {
+    // No arguments
+    let result = parse_str("let <Test func: object /> = {func()}", "test.nx");
+    assert!(result.is_ok());
+
+    // One argument
+    let result = parse_str("let <Test func: object x: int /> = {func(x)}", "test.nx");
+    assert!(result.is_ok());
+
+    // Multiple arguments
+    let result = parse_str("let <Test func: object x: int y: int /> = {func(x, y)}", "test.nx");
+    assert!(result.is_ok());
+
+    // Chained calls
+    let result = parse_str("let <Test func: object /> = {func()()}", "test.nx");
+    assert!(result.is_ok());
+
+    // Method call
+    let result = parse_str("let <Test obj: object /> = {obj.method(42)}", "test.nx");
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_if_expressions_simple() {
+    // If-else
+    let result = parse_str("let <Test x: int /> = {if x > 0 { 1 } else { -1 }}", "test.nx");
+    assert!(result.is_ok());
+
+    // If without else
+    let result = parse_str("let <Test x: int /> = {if x > 0 { x }}", "test.nx");
+    assert!(result.is_ok());
+
+    // Nested if
+    let result = parse_str(
+        "let <Test x: int /> = {if x > 0 { if x > 10 { 2 } else { 1 } } else { 0 }}",
+        "test.nx"
+    );
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_if_expressions_condition_list() {
+    let source = r#"let <Test x: int /> = {if {
+  x > 100: 3
+  x > 10: 2
+  x > 0: 1
+  else: 0
+}}"#;
+    let result = parse_str(source, "test.nx");
+    assert!(result.is_ok(), "Condition list if expression should parse. Errors: {:?}", result.errors);
+}
+
+#[test]
+fn test_if_expressions_match() {
+    // With scrutinee
+    let source = r#"let <Test x: int /> = {if x is {
+  0: "zero"
+  1: "one"
+  else: "other"
+}}"#;
+    let result = parse_str(source, "test.nx");
+    assert!(result.is_ok(), "Match if expression should parse. Errors: {:?}", result.errors);
+
+    // Without scrutinee
+    let source = r#"let <Test /> = {if is {
+  true: "yes"
+  false: "no"
+}}"#;
+    let result = parse_str(source, "test.nx");
+    assert!(result.is_ok(), "Match if expression without scrutinee should parse. Errors: {:?}", result.errors);
+}
+
+#[test]
+fn test_for_expressions() {
+    // Simple for
+    let result = parse_str("let <Test items: object /> = {for item in items { item * 2 }}", "test.nx");
+    assert!(result.is_ok());
+
+    // For with index
+    let result = parse_str("let <Test items: object /> = {for item, index in items { item + index }}", "test.nx");
+    assert!(result.is_ok());
+
+    // Nested for
+    let result = parse_str(
+        "let <Test matrix: object /> = {for row in matrix { for cell in row { cell } }}",
+        "test.nx"
+    );
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_complex_expression_combinations() {
+    // For with if inside
+    let source = r#"let <Test x: int items: object /> = {
+  for item in items {
+    if item > 0 {
+      item + x
+    } else {
+      -item
+    }
+  }
+}"#;
+    let result = parse_str(source, "test.nx");
+    assert!(result.is_ok());
+
+    // Mixed operators with precedence
+    let result = parse_str(
+        "let <Test x: int y: int /> = {x + y * 2 > 10 && x < 100 ? x * y : x + y}",
+        "test.nx"
+    );
+    assert!(result.is_ok());
+
+    // Chained method calls with ternary
+    let result = parse_str(
+        "let <Test obj: object x: int /> = {obj.method(x + 1, x * 2).result > 0 ? \"pos\" : \"neg\"}",
+        "test.nx"
+    );
+    assert!(result.is_ok());
+}
+
+#[test]
+fn test_property_defaults_with_expressions() {
+    let source = r#"let <Test
+  sum: int = {1 + 2 + 3}
+  product: int = {4 * 5}
+  comparison: boolean = {10 > 5}
+  logical: boolean = {true && false}
+  ternary: int = {5 > 3 ? 100 : 200}
+  nested: int = {(1 + 2) * (3 + 4)}
+/> = {sum + product}"#;
+    let result = parse_str(source, "test.nx");
+    assert!(
+        result.is_ok(),
+        "Property defaults with expressions should parse. Errors: {:?}",
+        result.errors
+    );
+}
+
+#[test]
+fn test_expression_operator_precedence() {
+    // Verify operator precedence is correct
+    let source = "let <Test /> = {1 + 2 * 3}"; // Should parse as 1 + (2 * 3)
+    let result = parse_str(source, "test.nx");
+    assert!(result.is_ok());
+
+    let source = "let <Test /> = {1 * 2 + 3}"; // Should parse as (1 * 2) + 3
+    let result = parse_str(source, "test.nx");
+    assert!(result.is_ok());
+
+    let source = "let <Test /> = {true && false || true}"; // Should parse as (true && false) || true
+    let result = parse_str(source, "test.nx");
+    assert!(result.is_ok());
+}

@@ -122,9 +122,15 @@ Grouping
 Nonterminals are CamelCase. Terminals are UPPER_SNAKE tokens.
 
 ModuleDefinition (AST: ModuleDefinitionSyntax)
-- ModuleDefinition → ImportStatement* (TypeDefinition* FunctionDefinition* | Element) EOF
-  - fields: imports: ImportStatementSyntax[], types: TypeDefinitionSyntax[], functions: FunctionDefinitionSyntax[], moduleElement?: MarkupElementSyntax
-    (either types/functions or moduleElement is present, not both)
+- ModuleDefinition → ImportStatement* ModuleMember* EOF
+- ModuleDefinition → Element EOF
+  - fields: imports: ImportStatementSyntax[], members: ModuleMemberSyntax[], moduleElement?: MarkupElementSyntax
+    (either members or moduleElement is present, not both)
+
+ModuleMember (AST: ModuleMemberSyntax is a sum type)
+- ModuleMember → TypeDefinition
+- ModuleMember → ValueDefinition
+- ModuleMember → FunctionDefinition
 
 ImportStatement (AST: ImportStatementSyntax)
 - ImportStatement → IMPORT QualifiedName
@@ -133,6 +139,14 @@ ImportStatement (AST: ImportStatementSyntax)
 TypeDefinition (AST: TypeDefinitionSyntax)
 - TypeDefinition → TYPE IDENTIFIER EQ Type
   - fields: name: string, type: TypeSyntax
+
+ValueDefinition (AST: ValueDefinitionSyntax)
+- ValueDefinition → LET IDENTIFIER ValueDefinitionTypeOpt EQ RhsExpression
+  - fields: name: string, type?: TypeSyntax, value: ExpressionSyntax
+
+ValueDefinitionTypeOpt
+- ValueDefinitionTypeOpt → COLON Type
+- ValueDefinitionTypeOpt → ε
 
 Type (AST: TypeSyntax)
 - Type → PrimitiveType TypeOptModifier
@@ -451,10 +465,12 @@ Pattern (AST: PatternSyntax)
 
 This section lists the AST node types with fields for implementers.
 
-- ModuleDefinitionSyntax: imports: ImportStatementSyntax[], types: TypeDefinitionSyntax[], functions: FunctionDefinitionSyntax[], moduleElement?: MarkupElementSyntax
+- ModuleDefinitionSyntax: imports: ImportStatementSyntax[], members: ModuleMemberSyntax[], moduleElement?: MarkupElementSyntax
+- ModuleMemberSyntax: TypeDefinitionSyntax | ValueDefinitionSyntax | FunctionDefinitionSyntax
 - ImportStatementSyntax: name: QualifiedNameSyntax
 - TypeDefinitionSyntax: name: string, type: TypeSyntax
-- TypeSyntax: kind: "primitive"|"user", name: string (qualified), modifier?: "nullable"|"list"
+- ValueDefinitionSyntax: name: string, type?: TypeSyntax, value: ExpressionSyntax
+- TypeSyntax: kind: "primitive"|"user", name: string (qualified), modifier?: "nullable"|"sequence"
 - PrimitiveTypeSyntax: name: string
 - UserTypeSyntax: name: QualifiedNameSyntax
  - FunctionDefinitionSyntax: elementName: QualifiedMarkupNameSyntax, props: PropertyDefinitionSyntax[], body: ExpressionSyntax

@@ -10,8 +10,8 @@ generation, see [nx-grammar-spec.md](nx-grammar-spec.md).
 ```ebnf
 ModuleDefinition ::=
     {ImportStatement}
-        ( {TypeDefinition} {FunctionDefinition} )
-        | Element
+    { TypeDefinition | ValueDefinition | FunctionDefinition }
+    | Element
 
 ImportStatement ::=
     "import" QualifiedName
@@ -42,8 +42,17 @@ PrimitiveType ::=
 UserDefinedType ::=
     QualifiedName
 ```
-<a id="function-definition"></a>
-## Function Definition
+
+<a id="values"></a>
+## Values
+
+```ebnf
+ValueDefinition ::=
+    "let" IdentifierName [":" TypeDeclaration] "=" RhsExpression
+```
+
+<a id="functions"></a>
+## Functions
 
 ```ebnf
 FunctionDefinition ::=
@@ -57,7 +66,7 @@ PropertyDefinition ::=
 ## Expressions
 
 ```ebnf
-(* Right-hand side of a property/let definition, after "-" *)
+(* Right-hand side of a property/let definition, after "=" *)
 RhsExpression ::=
     Element
     | Literal

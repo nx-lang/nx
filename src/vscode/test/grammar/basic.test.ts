@@ -72,6 +72,16 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(forLine, forTokens, 'in')).to.include('meta.control.loop.value.nx');
   });
 
+  it('highlights value definitions', function () {
+    const line = 'let totalCount: int = 42';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    expect(scopesForSubstring(line, tokens, 'let')).to.include('keyword.declaration.let.nx');
+    expect(scopesForSubstring(line, tokens, 'totalCount')).to.include('entity.name.variable.nx');
+    expect(scopesForSubstring(line, tokens, ':')).to.include('punctuation.separator.type.annotation.nx');
+    expect(scopesForSubstring(line, tokens, 'int')).to.include('storage.type.primitive.nx');
+    expect(scopesForSubstring(line, tokens, '=')).to.include('keyword.operator.assignment.nx');
+  });
+
   it('highlights inline else within control block', function () {
     const line = 'if user.isAuthenticated { 2 } else { 2 }';
     const { tokens } = grammar.tokenizeLine(line, null);
