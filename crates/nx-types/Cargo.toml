@@ -9,9 +9,11 @@ repository.workspace = true
 
 [dependencies]
 nx-hir = { path = "../nx-hir" }
+nx-syntax = { path = "../nx-syntax" }
 nx-diagnostics = { path = "../nx-diagnostics" }
 rustc-hash.workspace = true
 salsa.workspace = true
+la-arena.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

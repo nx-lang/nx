@@ -9,6 +9,10 @@ mod render;
 pub use diagnostic::{Diagnostic, DiagnosticBuilder, Label, Severity};
 pub use render::render_diagnostic;
 
+// Re-export text-size types with NX-specific names
+pub use text_size::TextRange as TextSpan;
+pub use text_size::TextSize;
+
 #[cfg(test)]
 mod tests {
     use super::*;

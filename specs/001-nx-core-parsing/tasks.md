@@ -226,47 +226,47 @@ description: "Implementation tasks for Core NX Parsing and Validation"
 
 **Step 1: HIR Layer (AST)**
 
-- [ ] T062 [P] [US2] Implement Name type using SmolStr in crates/nx-hir/src/lib.rs
-- [ ] T063 [P] [US2] Implement SourceId newtype in crates/nx-hir/src/lib.rs
-- [ ] T064 [US2] Implement Literal enum (String, Int, Float, Bool, Null) in crates/nx-hir/src/ast/expr.rs
-- [ ] T065 [US2] Implement BinOp and UnOp enums in crates/nx-hir/src/ast/expr.rs
-- [ ] T066 [US2] Implement Expr enum with all variants (Literal, Ident, BinaryOp, etc.) in crates/nx-hir/src/ast/expr.rs
-- [ ] T067 [US2] Implement Stmt enum (Let, Expr) in crates/nx-hir/src/ast/stmt.rs
-- [ ] T068 [P] [US2] Implement TypeRef enum (Name, Array, Nullable, Function) in crates/nx-hir/src/ast/types.rs
-- [ ] T069 [P] [US2] Implement Param struct with name, ty, span in crates/nx-hir/src/lib.rs
-- [ ] T070 [US2] Implement Function struct with name, params, return_type, body in crates/nx-hir/src/lib.rs
-- [ ] T071 [US2] Implement Property struct with key, value, span in crates/nx-hir/src/lib.rs
-- [ ] T072 [US2] Implement Element struct with tag, properties, children in crates/nx-hir/src/lib.rs
-- [ ] T073 [US2] Implement Item enum (Function, TypeAlias, Element) in crates/nx-hir/src/lib.rs
-- [ ] T074 [US2] Implement Module struct with arena-based storage in crates/nx-hir/src/lib.rs
-- [ ] T075 [US2] Implement Module::items(), find_item() methods in crates/nx-hir/src/lib.rs
+- [X] T062 [P] [US2] Implement Name type using SmolStr in crates/nx-hir/src/lib.rs
+- [X] T063 [P] [US2] Implement SourceId newtype in crates/nx-hir/src/lib.rs
+- [X] T064 [US2] Implement Literal enum (String, Int, Float, Bool, Null) in crates/nx-hir/src/ast/expr.rs
+- [X] T065 [US2] Implement BinOp and UnOp enums in crates/nx-hir/src/ast/expr.rs
+- [X] T066 [US2] Implement Expr enum with all variants (Literal, Ident, BinaryOp, etc.) in crates/nx-hir/src/ast/expr.rs
+- [X] T067 [US2] Implement Stmt enum (Let, Expr) in crates/nx-hir/src/ast/stmt.rs
+- [X] T068 [P] [US2] Implement TypeRef enum (Name, Array, Nullable, Function) in crates/nx-hir/src/ast/types.rs
+- [X] T069 [P] [US2] Implement Param struct with name, ty, span in crates/nx-hir/src/lib.rs
+- [X] T070 [US2] Implement Function struct with name, params, return_type, body in crates/nx-hir/src/lib.rs
+- [X] T071 [US2] Implement Property struct with key, value, span in crates/nx-hir/src/lib.rs
+- [X] T072 [US2] Implement Element struct with tag, properties, children in crates/nx-hir/src/lib.rs
+- [X] T073 [US2] Implement Item enum (Function, TypeAlias, Element) in crates/nx-hir/src/lib.rs
+- [X] T074 [US2] Implement Module struct with arena-based storage in crates/nx-hir/src/lib.rs
+- [X] T075 [US2] Implement Module::items(), find_item() methods in crates/nx-hir/src/lib.rs
 
 **Step 2: CST → HIR Lowering**
 
-- [ ] T076 [US2] Implement lowering from SyntaxNode to Expr in crates/nx-hir/src/lower.rs
-- [ ] T077 [US2] Implement lowering from SyntaxNode to Stmt in crates/nx-hir/src/lower.rs
+- [X] T076 [US2] Implement lowering from SyntaxNode to Expr in crates/nx-hir/src/lower.rs
+- [X] T077 [US2] Implement lowering from SyntaxNode to Stmt in crates/nx-hir/src/lower.rs
 - [ ] T078 [US2] Implement lowering from SyntaxNode to Function in crates/nx-hir/src/lower.rs
 - [ ] T079 [US2] Implement lowering from SyntaxNode to Element in crates/nx-hir/src/lower.rs
-- [ ] T080 [US2] Implement lowering from SyntaxNode to Module in crates/nx-hir/src/lower.rs
-- [ ] T081 [US2] Add error handling for malformed CST during lowering in crates/nx-hir/src/lower.rs
-- [ ] T082 [US2] Implement ParseResult::to_hir() method in crates/nx-syntax/src/lib.rs
+- [X] T080 [US2] Implement lowering from SyntaxNode to Module in crates/nx-hir/src/lower.rs
+- [X] T081 [US2] Add error handling for malformed CST during lowering in crates/nx-hir/src/lower.rs
+- [X] T082 [US2] Implement ParseResult::to_hir() method (standalone lower() function to avoid circular dependency)
 
 **Step 3: Salsa Database Setup**
 
-- [ ] T083 [US2] Define Salsa input query: source_text(SourceId) in crates/nx-hir/src/db.rs
-- [ ] T084 [US2] Define Salsa derived query: parse(SourceId) → SyntaxTree in crates/nx-hir/src/db.rs
-- [ ] T085 [US2] Define Salsa derived query: lower(SourceId) → Module in crates/nx-hir/src/db.rs
-- [ ] T086 [US2] Implement NxDatabase trait with query group in crates/nx-hir/src/db.rs
-- [ ] T087 [US2] Create default database implementation in crates/nx-hir/src/db.rs
+- [X] T083 [US2] Define Salsa input query: source_text(SourceId) in crates/nx-hir/src/db.rs
+- [X] T084 [US2] Define Salsa derived query: parse(SourceId) → SyntaxTree (combined with lower for efficiency) in crates/nx-hir/src/db.rs
+- [X] T085 [US2] Define Salsa derived query: lower(SourceId) → Module in crates/nx-hir/src/db.rs
+- [X] T086 [US2] Implement NxDatabase trait with query group in crates/nx-hir/src/db.rs
+- [X] T087 [US2] Create default database implementation in crates/nx-hir/src/db.rs
 
 **Step 4: Scope and Symbol Resolution**
 
-- [ ] T088 [US2] Implement Scope struct with parent, symbols map in crates/nx-hir/src/lib.rs
-- [ ] T089 [US2] Implement SymbolKind enum (Function, Variable, Parameter, Type) in crates/nx-hir/src/lib.rs
-- [ ] T090 [US2] Implement Symbol struct with name, kind, ty, span in crates/nx-hir/src/lib.rs
-- [ ] T091 [US2] Implement scope building from Module in crates/nx-hir/src/lib.rs
-- [ ] T092 [US2] Implement identifier resolution in scopes in crates/nx-hir/src/lib.rs
-- [ ] T093 [US2] Detect undefined identifiers and create diagnostics in crates/nx-hir/src/lib.rs
+- [X] T088 [US2] Implement Scope struct with parent, symbols map in crates/nx-hir/src/scope.rs
+- [X] T089 [US2] Implement SymbolKind enum (Function, Variable, Parameter, Type) in crates/nx-hir/src/scope.rs
+- [X] T090 [US2] Implement Symbol struct with name, kind, ty, span in crates/nx-hir/src/scope.rs
+- [X] T091 [US2] Implement scope building from Module in crates/nx-hir/src/scope.rs
+- [X] T092 [US2] Implement identifier resolution in scopes in crates/nx-hir/src/scope.rs
+- [X] T093 [US2] Detect undefined identifiers and create diagnostics in crates/nx-hir/src/scope.rs
 
 **Step 5: Type System**
 
@@ -497,6 +497,22 @@ With multiple developers:
     - Completed: 35 tasks (T162-T191, T198-T199) ✓
     - Remaining: 1 task (T200 - optional spec.md update)
 - **User Story 2 Tasks**: 86 tasks (T062-T147)
+  - Phase 4: Step 1 (HIR Layer): 14 tasks (T062-T075)
+    - Completed: 14 tasks (T062-T075) ✓
+    - Remaining: 0 tasks
+  - Phase 4: Step 2 (CST → HIR Lowering): 7 tasks (T076-T082)
+    - Completed: 5 tasks (T076, T077, T080, T081, T082) ✓
+    - Remaining: 2 tasks (T078, T079 - Function/Element lowering)
+  - Phase 4: Step 3 (Salsa Database): 5 tasks (T083-T087)
+    - Completed: 5 tasks (T083-T087) ✓
+    - Remaining: 0 tasks
+  - Phase 4: Step 4 (Scope & Symbol Resolution): 6 tasks (T088-T093)
+    - Completed: 6 tasks (T088-T093) ✓
+    - Remaining: 0 tasks
+  - Phase 4: Step 5 (Type System): 15 tasks (T094-T108)
+    - Completed: 15 tasks (T094-T108) ✓
+    - Remaining: 0 tasks
+  - Phase 4: Remaining: 39 tasks (T109-T147)
 - **Setup Tasks**: 12 tasks (T001-T012) ✓ COMPLETE
 - **Foundational Tasks**: 10 tasks (T013-T022) ✓ COMPLETE
 - **Polish Tasks**: 13 tasks (T148-T160)
@@ -506,7 +522,7 @@ With multiple developers:
   - Completed: 92 tasks (95.8%) ✓
   - Remaining: 4 tasks (3 deferred, 1 optional documentation)
 - **Full Feature Scope**: Phases 1-5 (all non-deferred tasks) = 195 tasks
-  - Completed: 57 tasks (29.2%)
+  - Completed: 102 tasks (52.3%)
 
 ---
 
