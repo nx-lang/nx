@@ -6,6 +6,7 @@
   "patterns": [
     { "include": "#comments" },
     { "include": "#value-definition" },
+    { "include": "#module-root-element" },
     { "include": "#elements-if" },
     { "include": "#elements-for" },
     { "include": "#value-if" },
@@ -180,6 +181,18 @@
     "attr-name": {
       "name": "entity.other.attribute-name.nx",
       "match": "[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*"
+    },
+    "module-root-element": {
+      "begin": "^(?=<[A-Za-z_])",
+      "end": "(?=\\s*$)",
+      "name": "meta.module.root-element.nx",
+      "patterns": [
+        { "include": "#tags" },
+        { "include": "#interpolation" },
+        { "include": "#strings" },
+        { "include": "#entities" },
+        { "include": "#comments" }
+      ]
     },
     "tags": {
       "patterns": [

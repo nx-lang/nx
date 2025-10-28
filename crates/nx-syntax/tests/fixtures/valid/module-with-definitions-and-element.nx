@@ -1,0 +1,13 @@
+// Module mixing declarations with a trailing root element
+import ui.components
+
+type UserName = string
+
+let greetingPrefix: string = "Hello"
+
+let <Greeting
+  name:UserName
+/> =
+  <span class="greeting">{greetingPrefix} {name}</span>
+
+<Greeting name="World" />

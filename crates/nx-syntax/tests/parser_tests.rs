@@ -89,6 +89,36 @@ fn test_parse_complex_example() {
 }
 
 #[test]
+fn test_parse_module_with_definitions_and_element() {
+    let path = fixture_path("valid/module-with-definitions-and-element.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(result.is_ok(), "Should parse module that mixes declarations and a root element");
+    let root = result.root().expect("Should have root node");
+
+    let kinds: Vec<SyntaxKind> = root.children().map(|child| child.kind()).collect();
+    assert!(
+        kinds.iter().any(|kind| *kind == SyntaxKind::TYPE_DEFINITION),
+        "Expected at least one type definition"
+    );
+    assert!(
+        kinds.iter().any(|kind| *kind == SyntaxKind::VALUE_DEFINITION),
+        "Expected at least one value definition"
+    );
+    assert!(
+        kinds.iter().any(|kind| *kind == SyntaxKind::FUNCTION_DEFINITION),
+        "Expected at least one function definition"
+    );
+
+    let last = *kinds.last().expect("Module should have at least one child");
+    assert!(
+        matches!(last, SyntaxKind::ELEMENT | SyntaxKind::SELF_CLOSING_ELEMENT),
+        "Expected trailing root element, found {:?}",
+        last
+    );
+}
+
+#[test]
 fn test_parse_all_valid_fixtures() {
     let valid_dir = fixture_path("valid");
 

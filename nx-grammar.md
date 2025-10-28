@@ -11,11 +11,13 @@ generation, see [nx-grammar-spec.md](nx-grammar-spec.md).
 ModuleDefinition ::=
     {ImportStatement}
     { TypeDefinition | ValueDefinition | FunctionDefinition }
-    | Element
+    [Element]
 
 ImportStatement ::=
     "import" QualifiedName
 ```
+
+A module can mix any number of definitions with an optional trailing root `Element`, which is present when the module defines rendered markup alongside its declarations.
 
 <a id="types"></a>
 ## Types

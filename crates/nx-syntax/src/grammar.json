@@ -13,31 +13,34 @@
           }
         },
         {
+          "type": "REPEAT",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "type_definition"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "value_definition"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "function_definition"
+              }
+            ]
+          }
+        },
+        {
           "type": "CHOICE",
           "members": [
             {
-              "type": "REPEAT",
-              "content": {
-                "type": "CHOICE",
-                "members": [
-                  {
-                    "type": "SYMBOL",
-                    "name": "type_definition"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "value_definition"
-                  },
-                  {
-                    "type": "SYMBOL",
-                    "name": "function_definition"
-                  }
-                ]
-              }
-            },
-            {
               "type": "SYMBOL",
               "name": "element"
+            },
+            {
+              "type": "BLANK"
             }
           ]
         }

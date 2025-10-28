@@ -123,10 +123,8 @@ Grouping
 Nonterminals are CamelCase. Terminals are UPPER_SNAKE tokens.
 
 ModuleDefinition (AST: ModuleDefinitionSyntax)
-- ModuleDefinition → ImportStatement* ModuleMember* EOF
-- ModuleDefinition → Element EOF
+- ModuleDefinition → ImportStatement* ModuleMember* Element? EOF
   - fields: imports: ImportStatementSyntax[], members: ModuleMemberSyntax[], moduleElement?: MarkupElementSyntax
-    (either members or moduleElement is present, not both)
 
 ModuleMember (AST: ModuleMemberSyntax is a sum type)
 - ModuleMember → TypeDefinition
@@ -466,7 +464,7 @@ Pattern (AST: PatternSyntax)
 
 This section lists the AST node types with fields for implementers.
 
-- ModuleDefinitionSyntax: imports: ImportStatementSyntax[], members: ModuleMemberSyntax[], moduleElement?: MarkupElementSyntax
+- ModuleDefinitionSyntax: imports: ImportStatementSyntax[], members: ModuleMemberSyntax[], moduleElement?: MarkupElementSyntax (members and moduleElement can both be present)
 - ModuleMemberSyntax: TypeDefinitionSyntax | ValueDefinitionSyntax | FunctionDefinitionSyntax
 - ImportStatementSyntax: name: QualifiedNameSyntax
 - TypeDefinitionSyntax: name: string, type: TypeSyntax

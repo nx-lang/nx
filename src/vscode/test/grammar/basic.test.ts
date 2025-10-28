@@ -163,6 +163,28 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(line, tokens, '1')).to.include('constant.numeric.integer.nx');
   });
 
+  it('highlights a module root element after declarations', function () {
+    const lines = [
+      'type User = string',
+      'let greeting = "hi"',
+      'let <Greeting name:string /> = <span>{name}</span>',
+      '<Greeting name="World" />'
+    ];
+
+    let ruleStack: StateStack | null = null;
+
+    lines.forEach((line, index) => {
+      const result = grammar.tokenizeLine(line, ruleStack);
+      ruleStack = result.ruleStack;
+
+      if (index === lines.length - 1) {
+        const scopes = scopesForSubstring(line, result.tokens, 'Greeting');
+        expect(scopes).to.include('entity.name.tag.nx');
+        expect(scopes).to.include('meta.module.root-element.nx');
+      }
+    });
+  });
+
   it('highlights interpolation regions', function () {
     const line = 'class="card {className}"';
     const { tokens } = grammar.tokenizeLine(line, null);

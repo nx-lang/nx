@@ -66,14 +66,12 @@ module.exports = grammar({
     // ===== Module Definition =====
     module_definition: $ => seq(
       repeat($.import_statement),
-      choice(
-        repeat(choice(
-          $.type_definition,
-          $.value_definition,
-          $.function_definition,
-        )),
-        $.element,
-      ),
+      repeat(choice(
+        $.type_definition,
+        $.value_definition,
+        $.function_definition,
+      )),
+      optional($.element),
     ),
 
     // ===== Imports =====
