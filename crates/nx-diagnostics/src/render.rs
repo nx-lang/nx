@@ -86,7 +86,11 @@ pub fn render_diagnostic(diagnostic: &Diagnostic, sources: &HashMap<String, Stri
 }
 
 /// Renders multiple diagnostics to a string.
-pub fn render_diagnostics(diagnostics: &[Diagnostic], sources: &HashMap<String, String>) -> String {
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn render_diagnostics(
+    diagnostics: &[Diagnostic],
+    sources: &HashMap<String, String>,
+) -> String {
     diagnostics
         .iter()
         .map(|d| render_diagnostic(d, sources))
