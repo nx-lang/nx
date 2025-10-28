@@ -2,7 +2,7 @@
 
 use nx_syntax::{parse_file, parse_str, SyntaxKind};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
 

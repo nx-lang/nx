@@ -151,24 +151,51 @@ bool tree_sitter_nx_external_scanner_scan(void *payload, TSLexer *lexer, const b
 
   // Check for escaped braces first (highest priority)
   if (lexer->lookahead == '\\') {
-    lexer->mark_end(lexer);
     lexer->advance(lexer, false);
 
-    if (lexer->lookahead == '{' && valid_symbols[ESCAPED_LBRACE]) {
-      lexer->advance(lexer, false);
-      lexer->result_symbol = ESCAPED_LBRACE;
+    if (lexer->lookahead == '{') {
+      if (valid_symbols[ESCAPED_LBRACE]) {
+        lexer->advance(lexer, false);
+        lexer->mark_end(lexer);
+        lexer->result_symbol = ESCAPED_LBRACE;
+        return true;
+      }
+
+      if (valid_symbols[TEXT_CHUNK]) {
+        lexer->advance(lexer, false);
+        lexer->mark_end(lexer);
+        lexer->result_symbol = TEXT_CHUNK;
+        return true;
+      }
+
+      return false;
+    }
+
+    if (lexer->lookahead == '}') {
+      if (valid_symbols[ESCAPED_RBRACE]) {
+        lexer->advance(lexer, false);
+        lexer->mark_end(lexer);
+        lexer->result_symbol = ESCAPED_RBRACE;
+        return true;
+      }
+
+      if (valid_symbols[TEXT_CHUNK]) {
+        lexer->advance(lexer, false);
+        lexer->mark_end(lexer);
+        lexer->result_symbol = TEXT_CHUNK;
+        return true;
+      }
+
+      return false;
+    }
+
+    if (valid_symbols[TEXT_CHUNK]) {
+      lexer->mark_end(lexer);
+      lexer->result_symbol = TEXT_CHUNK;
       return true;
     }
 
-    if (lexer->lookahead == '}' && valid_symbols[ESCAPED_RBRACE]) {
-      lexer->advance(lexer, false);
-      lexer->result_symbol = ESCAPED_RBRACE;
-      return true;
-    }
-
-    // Not an escaped brace, backtrack and handle as text
-    // (Note: tree-sitter doesn't support backtracking, so we'll
-    // include the backslash in the text chunk below)
+    return false;
   }
 
   // Check for entities
