@@ -4,5 +4,5 @@ assertion_line: 372
 expression: errors
 ---
 [
-    "Syntax error",
+    "Expected string_literal here",
 ]
