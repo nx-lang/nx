@@ -181,7 +181,7 @@ pub enum Item {
 - `tag: Name` - Element tag name
 - `properties: Vec<Property>` - Element properties
 - `children: Vec<Element>` - Nested elements
-- `closing_tag: Option<Name>` - Closing tag (must match opening)
+- `close_name: Option<Name>` - Closing tag (must match opening)
 - `span: TextSpan` - Source location
 
 **Relationships**:

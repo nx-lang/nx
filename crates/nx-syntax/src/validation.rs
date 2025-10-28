@@ -49,12 +49,11 @@ fn validate_element_tags(
         // Get opening tag
         let opening_tag = node
             .child_by_field("opening_tag")
-            .or_else(|| node.child_by_field("tag"));
+            .or_else(|| node.child_by_field("tag"))
+            .or_else(|| node.child_by_field("name"));
+        let close_name_node = node.child_by_field("close_name");
 
-        let closing_tag = node.child_by_field("closing_tag");
-
-        // If we have both tags, check if they match
-        if let (Some(opening), Some(closing)) = (opening_tag, closing_tag) {
+        if let (Some(opening), Some(closing)) = (opening_tag, close_name_node) {
             // Get the tag name from the opening tag
             let opening_name = extract_tag_name(&opening);
 
@@ -97,15 +96,19 @@ fn validate_element_tags(
 
 /// Extracts the tag name from an element tag node.
 fn extract_tag_name(tag_node: &SyntaxNode) -> Option<String> {
-    // Try to find identifier child
     for child in tag_node.children() {
         if child.kind() == SyntaxKind::IDENTIFIER {
             return Some(child.text().to_string());
         }
+
+        if child.kind() == SyntaxKind::QUALIFIED_MARKUP_NAME {
+            return extract_tag_name(&child);
+        }
     }
 
-    // Fallback: if the node itself is an identifier
-    if tag_node.kind() == SyntaxKind::IDENTIFIER {
+    if tag_node.kind() == SyntaxKind::IDENTIFIER
+        || tag_node.kind() == SyntaxKind::QUALIFIED_MARKUP_NAME
+    {
         return Some(tag_node.text().to_string());
     }
 
