@@ -147,7 +147,7 @@ impl<'tree> std::fmt::Debug for SyntaxNode<'tree> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{language, parser};
+    use crate::parser;
 
     #[test]
     fn test_syntax_node_kind() {

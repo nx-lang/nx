@@ -34,13 +34,19 @@ void *tree_sitter_nx_external_scanner_create() {
 }
 
 void tree_sitter_nx_external_scanner_destroy(void *payload) {
+  (void)payload; // unused
 }
 
 unsigned tree_sitter_nx_external_scanner_serialize(void *payload, char *buffer) {
+  (void)payload; // unused
+  (void)buffer;  // unused
   return 0;
 }
 
 void tree_sitter_nx_external_scanner_deserialize(void *payload, const char *buffer, unsigned length) {
+  (void)payload; // unused
+  (void)buffer;  // unused
+  (void)length;  // unused
 }
 
 /**
@@ -146,6 +152,7 @@ static bool scan_entity(TSLexer *lexer) {
  * - '\' followed by '{' or '}' (escaped brace)
  */
 bool tree_sitter_nx_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {
+  (void)payload; // unused
   // Note: We do NOT skip leading whitespace here because whitespace is significant
   // in text content. The grammar handles whitespace in the "extras" section.
 

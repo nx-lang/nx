@@ -3,6 +3,7 @@
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
 #endif
 
 #define LANGUAGE_VERSION 14
