@@ -5,7 +5,7 @@
 
 use crate::ast::{BinOp, Expr, Literal, OrderedFloat, Stmt, TypeRef, UnOp};
 use crate::{Element, ExprId, Function, Item, Module, Name, Param, Property, SourceId};
-use nx_diagnostics::{TextSpan, TextSize};
+use nx_diagnostics::{TextSize, TextSpan};
 use nx_syntax::{SyntaxKind, SyntaxNode};
 use smol_str::SmolStr;
 
@@ -59,19 +59,39 @@ impl LoweringContext {
                 self.alloc_expr(Expr::Literal(Literal::String(SmolStr::new(s))))
             }
 
-            SyntaxKind::INT_LITERAL | SyntaxKind::NUMBER_LITERAL | SyntaxKind::NUMBER_EXPRESSION => {
+            SyntaxKind::INT_LITERAL => {
                 let text = node.text();
-                let value = text.parse::<i64>().unwrap_or(0);
-                self.alloc_expr(Expr::Literal(Literal::Int(value)))
+                match text.parse::<i64>() {
+                    Ok(value) => self.alloc_expr(Expr::Literal(Literal::Int(value))),
+                    Err(_) => self.error_expr(node.span()),
+                }
             }
 
-            SyntaxKind::REAL_LITERAL => {
+            SyntaxKind::HEX_LITERAL => {
                 let text = node.text();
-                let value = text.parse::<f64>().unwrap_or(0.0);
-                self.alloc_expr(Expr::Literal(Literal::Float(OrderedFloat(value))))
+                let digits = text.trim_start_matches("0x").trim_start_matches("0X");
+                match i64::from_str_radix(digits, 16) {
+                    Ok(value) => self.alloc_expr(Expr::Literal(Literal::Int(value))),
+                    Err(_) => self.error_expr(node.span()),
+                }
             }
 
-            SyntaxKind::BOOLEAN_LITERAL | SyntaxKind::BOOL_LITERAL | SyntaxKind::BOOLEAN_EXPRESSION => {
+            SyntaxKind::NUMBER_LITERAL
+            | SyntaxKind::NUMBER_EXPRESSION
+            | SyntaxKind::REAL_LITERAL => {
+                let text = node.text();
+                if let Ok(value) = text.parse::<i64>() {
+                    self.alloc_expr(Expr::Literal(Literal::Int(value)))
+                } else if let Ok(value) = text.parse::<f64>() {
+                    self.alloc_expr(Expr::Literal(Literal::Float(OrderedFloat(value))))
+                } else {
+                    self.error_expr(node.span())
+                }
+            }
+
+            SyntaxKind::BOOLEAN_LITERAL
+            | SyntaxKind::BOOL_LITERAL
+            | SyntaxKind::BOOLEAN_EXPRESSION => {
                 let text = node.text();
                 let value = text == "true";
                 self.alloc_expr(Expr::Literal(Literal::Bool(value)))
@@ -84,7 +104,8 @@ impl LoweringContext {
             // Identifier
             SyntaxKind::IDENTIFIER | SyntaxKind::IDENTIFIER_EXPRESSION => {
                 // For identifier expressions, get the actual identifier child
-                if let Some(id_node) = node.child_by_field("name")
+                if let Some(id_node) = node
+                    .child_by_field("name")
                     .or_else(|| node.children().find(|n| n.kind() == SyntaxKind::IDENTIFIER))
                 {
                     let name = Name::new(id_node.text());
@@ -97,61 +118,50 @@ impl LoweringContext {
 
             // Binary operations
             SyntaxKind::BINARY_EXPRESSION => {
-                let lhs = node.child_by_field("left")
+                let lhs = node
+                    .child_by_field("left")
                     .map(|n| self.lower_expr(n))
                     .unwrap_or_else(|| self.error_expr(node.span()));
 
-                let rhs = node.child_by_field("right")
+                let rhs = node
+                    .child_by_field("right")
                     .map(|n| self.lower_expr(n))
                     .unwrap_or_else(|| self.error_expr(node.span()));
 
                 // Find operator
-                let op = node.children_with_tokens()
-                    .find(|n| matches!(
-                        n.kind(),
-                        SyntaxKind::PLUS
-                            | SyntaxKind::MINUS
-                            | SyntaxKind::STAR
-                            | SyntaxKind::SLASH
-                            | SyntaxKind::PERCENT
-                            | SyntaxKind::EQ_EQ
-                            | SyntaxKind::BANG_EQ
-                            | SyntaxKind::LT
-                            | SyntaxKind::GT
-                            | SyntaxKind::LT_EQ
-                            | SyntaxKind::GT_EQ
-                            | SyntaxKind::AMP_AMP
-                            | SyntaxKind::PIPE_PIPE
-                    ))
-                    .and_then(|n| match n.kind() {
-                        SyntaxKind::PLUS => Some(BinOp::Add),
-                        SyntaxKind::MINUS => Some(BinOp::Sub),
-                        SyntaxKind::STAR => Some(BinOp::Mul),
-                        SyntaxKind::SLASH => Some(BinOp::Div),
-                        SyntaxKind::PERCENT => Some(BinOp::Mod),
-                        SyntaxKind::EQ_EQ => Some(BinOp::Eq),
-                        SyntaxKind::BANG_EQ => Some(BinOp::Ne),
-                        SyntaxKind::LT => Some(BinOp::Lt),
-                        SyntaxKind::GT => Some(BinOp::Gt),
-                        SyntaxKind::LT_EQ => Some(BinOp::Le),
-                        SyntaxKind::GT_EQ => Some(BinOp::Ge),
-                        SyntaxKind::AMP_AMP => Some(BinOp::And),
-                        SyntaxKind::PIPE_PIPE => Some(BinOp::Or),
-                        _ => None,
-                    })
-                    .unwrap_or(BinOp::Add);
+                let op = node.children_with_tokens().find_map(|n| match n.kind() {
+                    SyntaxKind::PLUS => Some(BinOp::Add),
+                    SyntaxKind::MINUS => Some(BinOp::Sub),
+                    SyntaxKind::STAR => Some(BinOp::Mul),
+                    SyntaxKind::SLASH => Some(BinOp::Div),
+                    SyntaxKind::PERCENT => Some(BinOp::Mod),
+                    SyntaxKind::EQ_EQ => Some(BinOp::Eq),
+                    SyntaxKind::BANG_EQ => Some(BinOp::Ne),
+                    SyntaxKind::LT => Some(BinOp::Lt),
+                    SyntaxKind::GT => Some(BinOp::Gt),
+                    SyntaxKind::LT_EQ => Some(BinOp::Le),
+                    SyntaxKind::GT_EQ => Some(BinOp::Ge),
+                    SyntaxKind::AMP_AMP => Some(BinOp::And),
+                    SyntaxKind::PIPE_PIPE => Some(BinOp::Or),
+                    _ => None,
+                });
 
-                self.alloc_expr(Expr::BinaryOp {
-                    lhs,
-                    op,
-                    rhs,
-                    span: node.span(),
-                })
+                if let Some(op) = op {
+                    self.alloc_expr(Expr::BinaryOp {
+                        lhs,
+                        op,
+                        rhs,
+                        span: node.span(),
+                    })
+                } else {
+                    self.error_expr(node.span())
+                }
             }
 
             // Unary operations
             SyntaxKind::UNARY_EXPRESSION | SyntaxKind::PREFIX_UNARY_EXPRESSION => {
-                let expr_node = node.child_by_field("operand")
+                let expr_node = node
+                    .child_by_field("operand")
                     .or_else(|| node.children().last())
                     .unwrap();
                 let expr = self.lower_expr(expr_node);
@@ -171,17 +181,21 @@ impl LoweringContext {
 
             // Call expression
             SyntaxKind::CALL_EXPRESSION => {
-                let func = node.child_by_field("function")
+                let func = node
+                    .child_by_field("function")
                     .or_else(|| node.children().next())
                     .map(|n| self.lower_expr(n))
                     .unwrap_or_else(|| self.error_expr(node.span()));
 
-                let args = node.children()
+                let args = node
+                    .children()
                     .skip(1)
-                    .filter(|n| !matches!(
-                        n.kind(),
-                        SyntaxKind::LPAREN | SyntaxKind::RPAREN | SyntaxKind::COMMA
-                    ))
+                    .filter(|n| {
+                        !matches!(
+                            n.kind(),
+                            SyntaxKind::LPAREN | SyntaxKind::RPAREN | SyntaxKind::COMMA
+                        )
+                    })
                     .map(|n| self.lower_expr(n))
                     .collect();
 
@@ -194,12 +208,14 @@ impl LoweringContext {
 
             // Member access
             SyntaxKind::MEMBER_EXPRESSION | SyntaxKind::MEMBER_ACCESS_EXPRESSION => {
-                let base = node.child_by_field("object")
+                let base = node
+                    .child_by_field("object")
                     .or_else(|| node.children().next())
                     .map(|n| self.lower_expr(n))
                     .unwrap_or_else(|| self.error_expr(node.span()));
 
-                let member = node.child_by_field("property")
+                let member = node
+                    .child_by_field("property")
                     .or_else(|| node.children().nth(1))
                     .map(|n| Name::new(n.text()))
                     .unwrap_or_else(|| Name::new(""));
@@ -211,10 +227,26 @@ impl LoweringContext {
                 })
             }
 
+            SyntaxKind::ELEMENT => {
+                let span = node.span();
+                let element = self.lower_element(node);
+                let element_id = self.module.alloc_element(element);
+                self.alloc_expr(Expr::Element {
+                    element: element_id,
+                    span,
+                })
+            }
+
             // Sequence (array) expression
             SyntaxKind::SEQUENCE_EXPRESSION => {
-                let elements = node.children()
-                    .filter(|n| !matches!(n.kind(), SyntaxKind::LBRACKET | SyntaxKind::RBRACKET | SyntaxKind::COMMA))
+                let elements = node
+                    .children()
+                    .filter(|n| {
+                        !matches!(
+                            n.kind(),
+                            SyntaxKind::LBRACKET | SyntaxKind::RBRACKET | SyntaxKind::COMMA
+                        )
+                    })
                     .map(|n| self.lower_expr(n))
                     .collect();
 
@@ -225,17 +257,14 @@ impl LoweringContext {
             }
 
             // Parenthesized expression - unwrap
-            SyntaxKind::PARENTHESIZED_EXPRESSION => {
-                node.children()
-                    .find(|n| !matches!(n.kind(), SyntaxKind::LPAREN | SyntaxKind::RPAREN))
-                    .map(|n| self.lower_expr(n))
-                    .unwrap_or_else(|| self.error_expr(node.span()))
-            }
+            SyntaxKind::PARENTHESIZED_EXPRESSION => node
+                .children()
+                .find(|n| !matches!(n.kind(), SyntaxKind::LPAREN | SyntaxKind::RPAREN))
+                .map(|n| self.lower_expr(n))
+                .unwrap_or_else(|| self.error_expr(node.span())),
 
             // Value expression wrappers - unwrap
-            SyntaxKind::VALUE_EXPRESSION
-            | SyntaxKind::VALUE_EXPR
-            | SyntaxKind::RHS_EXPRESSION => {
+            SyntaxKind::VALUE_EXPRESSION | SyntaxKind::VALUE_EXPR | SyntaxKind::RHS_EXPRESSION => {
                 node.children()
                     .next()
                     .map(|n| self.lower_expr(n))
@@ -243,9 +272,7 @@ impl LoweringContext {
             }
 
             // Default: create error
-            _ => {
-                self.error_expr(node.span())
-            }
+            _ => self.error_expr(node.span()),
         }
     }
 
@@ -266,9 +293,7 @@ impl LoweringContext {
         }
 
         match node.kind() {
-            SyntaxKind::PRIMITIVE_TYPE | SyntaxKind::IDENTIFIER => {
-                TypeRef::name(node.text())
-            }
+            SyntaxKind::PRIMITIVE_TYPE | SyntaxKind::IDENTIFIER => TypeRef::name(node.text()),
             _ => TypeRef::name("unknown"),
         }
     }
@@ -280,7 +305,8 @@ impl LoweringContext {
         let span = node.span();
 
         // Extract function name from the element_name field
-        let name = node.child_by_field("name")
+        let name = node
+            .child_by_field("name")
             .map(|n| Name::new(n.text()))
             .unwrap_or_else(|| Name::new("anonymous"));
 
@@ -289,11 +315,13 @@ impl LoweringContext {
         for child in node.children() {
             if child.kind() == SyntaxKind::PROPERTY_DEFINITION {
                 // property_definition: name ':' type ['=' default]
-                let param_name = child.child_by_field("name")
+                let param_name = child
+                    .child_by_field("name")
                     .map(|n| Name::new(n.text()))
                     .unwrap_or_else(|| Name::new("_"));
 
-                let param_type = child.child_by_field("type")
+                let param_type = child
+                    .child_by_field("type")
                     .map(|n| self.lower_type(n))
                     .unwrap_or_else(|| TypeRef::name("unknown"));
 
@@ -307,7 +335,8 @@ impl LoweringContext {
         }
 
         // Lower the body expression
-        let body = node.child_by_field("body")
+        let body = node
+            .child_by_field("body")
             .map(|n| self.lower_expr(n))
             .unwrap_or_else(|| self.error_expr(span));
 
@@ -332,9 +361,7 @@ impl LoweringContext {
                 children.push(child_id);
             }
             // These are container nodes - recurse into their children
-            SyntaxKind::MIXED_CONTENT |
-            SyntaxKind::ELEMENTS_EXPRESSION |
-            SyntaxKind::CONTENT => {
+            SyntaxKind::MIXED_CONTENT | SyntaxKind::ELEMENTS_EXPRESSION | SyntaxKind::CONTENT => {
                 for child in node.children() {
                     self.lower_element_children(child, children);
                 }
@@ -352,7 +379,8 @@ impl LoweringContext {
         let span = node.span();
 
         // Extract tag name
-        let tag = node.child_by_field("name")
+        let tag = node
+            .child_by_field("name")
             .map(|n| Name::new(n.text()))
             .unwrap_or_else(|| Name::new("unknown"));
 
@@ -362,23 +390,32 @@ impl LoweringContext {
             for child in prop_list.children() {
                 if child.kind() == SyntaxKind::PROPERTY_VALUE {
                     // property_value: name '=' expression
-                    let key = child.child_by_field("name")
+                    let key = child
+                        .child_by_field("name")
                         .map(|n| Name::new(n.text()))
                         .unwrap_or_else(|| Name::new("_"));
 
                     // The value can be various expression types
-                    let value = child.children()
-                        .find(|n| matches!(n.kind(),
-                            SyntaxKind::STRING_LITERAL |
-                            SyntaxKind::INTERPOLATION_EXPRESSION |
-                            SyntaxKind::VALUE_EXPRESSION |
-                            SyntaxKind::RHS_EXPRESSION
-                        ))
+                    let value = child
+                        .children()
+                        .find(|n| {
+                            matches!(
+                                n.kind(),
+                                SyntaxKind::STRING_LITERAL
+                                    | SyntaxKind::INTERPOLATION_EXPRESSION
+                                    | SyntaxKind::VALUE_EXPRESSION
+                                    | SyntaxKind::RHS_EXPRESSION
+                            )
+                        })
                         .map(|n| self.lower_expr(n))
                         .unwrap_or_else(|| self.error_expr(child.span()));
 
                     let prop_span = child.span();
-                    properties.push(Property { key, value, span: prop_span });
+                    properties.push(Property {
+                        key,
+                        value,
+                        span: prop_span,
+                    });
                 }
             }
         }
@@ -392,7 +429,8 @@ impl LoweringContext {
         }
 
         // Extract closing tag name for validation
-        let close_name = node.child_by_field("close_name")
+        let close_name = node
+            .child_by_field("close_name")
             .map(|n| Name::new(n.text()));
 
         Element {
@@ -561,6 +599,32 @@ mod tests {
                 assert_eq!(child.tag.as_str(), "button");
             }
             _ => panic!("Expected Element item"),
+        }
+    }
+
+    #[test]
+    fn test_lower_function_body_element_expression() {
+        use crate::ast::Expr;
+
+        let source = "let <Button text:string /> = <button />";
+        let parse_result = parse_str(source, "test.nx");
+
+        let tree = parse_result.tree.unwrap();
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        match &module.items()[0] {
+            Item::Function(func) => {
+                let body_expr = module.expr(func.body);
+                match body_expr {
+                    Expr::Element { element, .. } => {
+                        let element_ref = module.element(*element);
+                        assert_eq!(element_ref.tag.as_str(), "button");
+                    }
+                    _ => panic!("Expected element expression in function body"),
+                }
+            }
+            _ => panic!("Expected Function item"),
         }
     }
 }

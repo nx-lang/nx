@@ -1,7 +1,7 @@
 //! Expression AST nodes.
 
-use crate::{Name, ExprId};
-use nx_diagnostics::{TextSpan, TextSize};
+use crate::{ElementId, ExprId, Name};
+use nx_diagnostics::{TextSize, TextSpan};
 use smol_str::SmolStr;
 
 /// Literal value in source code.
@@ -67,26 +67,26 @@ impl std::hash::Hash for OrderedFloat {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BinOp {
     // Arithmetic
-    Add,      // +
-    Sub,      // -
-    Mul,      // *
-    Div,      // /
-    Mod,      // %
+    Add, // +
+    Sub, // -
+    Mul, // *
+    Div, // /
+    Mod, // %
 
     // Comparison
-    Eq,       // ==
-    Ne,       // !=
-    Lt,       // <
-    Le,       // <=
-    Gt,       // >
-    Ge,       // >=
+    Eq, // ==
+    Ne, // !=
+    Lt, // <
+    Le, // <=
+    Gt, // >
+    Ge, // >=
 
     // Logical
-    And,      // &&
-    Or,       // ||
+    And, // &&
+    Or,  // ||
 
     // String
-    Concat,   // + (for strings)
+    Concat, // + (for strings)
 }
 
 /// Unary operator.
@@ -187,6 +187,11 @@ pub enum Expr {
         span: TextSpan,
     },
 
+    /// Element literal expression.
+    ///
+    /// Example: `<button class="primary" />`
+    Element { element: ElementId, span: TextSpan },
+
     /// Error placeholder for malformed expressions.
     ///
     /// This is used during lowering when the CST contains errors.
@@ -207,6 +212,7 @@ impl Expr {
             Expr::Array { span, .. } => *span,
             Expr::Index { span, .. } => *span,
             Expr::Member { span, .. } => *span,
+            Expr::Element { span, .. } => *span,
             Expr::Error(span) => *span,
         }
     }

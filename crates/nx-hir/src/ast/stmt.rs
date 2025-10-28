@@ -1,8 +1,8 @@
 //! Statement AST nodes.
 
-use crate::{Name, ExprId};
 use super::TypeRef;
-use nx_diagnostics::{TextSpan, TextSize};
+use crate::{ExprId, Name};
+use nx_diagnostics::TextSpan;
 
 /// Statement AST node.
 ///
@@ -43,7 +43,8 @@ impl Stmt {
 mod tests {
     use super::*;
     use crate::ast::Expr;
-    use la_arena::{Arena, Idx};
+    use la_arena::Arena;
+    use nx_diagnostics::TextSize;
 
     #[test]
     fn test_stmt_variants() {
@@ -57,9 +58,18 @@ mod tests {
             span: TextSpan::new(TextSize::from(0), TextSize::from(10)),
         };
 
-        assert_eq!(let_stmt.span(), TextSpan::new(TextSize::from(0), TextSize::from(10)));
+        assert_eq!(
+            let_stmt.span(),
+            TextSpan::new(TextSize::from(0), TextSize::from(10))
+        );
 
-        let expr_stmt = Stmt::Expr(expr_id, TextSpan::new(TextSize::from(10), TextSize::from(15)));
-        assert_eq!(expr_stmt.span(), TextSpan::new(TextSize::from(10), TextSize::from(15)));
+        let expr_stmt = Stmt::Expr(
+            expr_id,
+            TextSpan::new(TextSize::from(10), TextSize::from(15)),
+        );
+        assert_eq!(
+            expr_stmt.span(),
+            TextSpan::new(TextSize::from(10), TextSize::from(15))
+        );
     }
 }

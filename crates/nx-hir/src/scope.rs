@@ -215,17 +215,13 @@ impl Default for ScopeManager {
 /// Returns a scope manager and a list of diagnostics for undefined identifiers.
 pub fn build_scopes(module: &Module) -> (ScopeManager, Vec<Diagnostic>) {
     let mut manager = ScopeManager::new();
-    let mut diagnostics = Vec::new();
+    let diagnostics = Vec::new();
 
     // First pass: define all top-level symbols
     for item in module.items() {
         match item {
             crate::Item::Function(func) => {
-                let symbol = Symbol::new(
-                    func.name.clone(),
-                    SymbolKind::Function,
-                    func.span,
-                );
+                let symbol = Symbol::new(func.name.clone(), SymbolKind::Function, func.span);
                 manager.define(manager.root(), symbol);
             }
             crate::Item::TypeAlias => {

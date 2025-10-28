@@ -4,7 +4,7 @@
 //! incremental parsing, lowering, and semantic analysis.
 
 use crate::{lower, Module, SourceId};
-use nx_syntax::{parse_str, SyntaxTree};
+use nx_syntax::parse_str;
 use std::sync::Arc;
 
 /// The main query group for NX language analysis.
@@ -146,7 +146,6 @@ mod tests {
 
         assert_eq!(db.file_name(file), name);
     }
-
 
     #[test]
     fn test_lower_query() {

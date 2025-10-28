@@ -72,8 +72,7 @@ fn validate_element_tags(
                             close_name, open_name
                         ))
                         .with_label(
-                            Label::primary(file_name, close_range)
-                                .with_message("closing tag here"),
+                            Label::primary(file_name, close_range).with_message("closing tag here"),
                         )
                         .with_label(
                             Label::secondary(file_name, open_range)
@@ -161,9 +160,7 @@ fn walk_and_collect_errors(
 
         let mut diagnostic_builder = Diagnostic::error("syntax-error")
             .with_message(message)
-            .with_label(
-                Label::primary(file_name, range).with_message("unexpected syntax here"),
-            );
+            .with_label(Label::primary(file_name, range).with_message("unexpected syntax here"));
 
         if let Some(note) = suggestion {
             diagnostic_builder = diagnostic_builder.with_note(note);
@@ -198,7 +195,9 @@ fn analyze_error_context(
             "element" => {
                 return (
                     "Invalid element syntax".to_string(),
-                    Some("Expected element with format: <Tag prop={value}>content</Tag>".to_string()),
+                    Some(
+                        "Expected element with format: <Tag prop={value}>content</Tag>".to_string(),
+                    ),
                 );
             }
             "function_definition" => {
@@ -210,7 +209,9 @@ fn analyze_error_context(
             "let_declaration" => {
                 return (
                     "Invalid let declaration".to_string(),
-                    Some("Expected format: let name = value or let <Pattern /> = value".to_string()),
+                    Some(
+                        "Expected format: let name = value or let <Pattern /> = value".to_string(),
+                    ),
                 );
             }
             _ => {}
@@ -240,7 +241,10 @@ fn analyze_error_context(
     }
 
     // Default error message
-    ("Syntax error".to_string(), Some("Check the syntax and try again".to_string()))
+    (
+        "Syntax error".to_string(),
+        Some("Check the syntax and try again".to_string()),
+    )
 }
 
 #[cfg(test)]
@@ -255,7 +259,10 @@ mod tests {
         let tree = result.tree.unwrap();
 
         let diagnostics = validate(&tree, "test.nx");
-        assert!(diagnostics.is_empty(), "Matching tags should not produce errors");
+        assert!(
+            diagnostics.is_empty(),
+            "Matching tags should not produce errors"
+        );
     }
 
     #[test]
@@ -288,7 +295,8 @@ mod tests {
         // Should have errors with helpful suggestions
         assert!(!result.errors.is_empty());
 
-        let error_msgs: String = result.errors
+        let error_msgs: String = result
+            .errors
             .iter()
             .map(|d| d.message())
             .collect::<Vec<_>>()

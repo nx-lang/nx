@@ -78,7 +78,7 @@ pub fn check_str(source: &str, file_name: &str) -> TypeCheckResult {
         let module = lower(root, source_id);
 
         // Build scopes
-        let (scope_manager, scope_diagnostics) = nx_hir::build_scopes(&module);
+        let (_scope_manager, scope_diagnostics) = nx_hir::build_scopes(&module);
         diagnostics.extend(scope_diagnostics);
 
         // Type check
@@ -91,7 +91,7 @@ pub fn check_str(source: &str, file_name: &str) -> TypeCheckResult {
                     // Add function to environment
                     // TODO: Build function type from params and return type
                     // For now, infer the body
-                    let _body_ty = ctx.infer_expr(func.body);
+                    ctx.infer_function(func);
                 }
                 nx_hir::Item::Element(_) => {
                     // Elements don't need type checking yet
@@ -156,7 +156,7 @@ pub fn check_file(path: impl AsRef<Path>) -> io::Result<TypeCheckResult> {
         let module = lower(root, source_id);
 
         // Build scopes
-        let (scope_manager, scope_diagnostics) = nx_hir::build_scopes(&module);
+        let (_scope_manager, scope_diagnostics) = nx_hir::build_scopes(&module);
         diagnostics.extend(scope_diagnostics);
 
         // Type check
@@ -166,7 +166,7 @@ pub fn check_file(path: impl AsRef<Path>) -> io::Result<TypeCheckResult> {
         for item in module.items() {
             match item {
                 nx_hir::Item::Function(func) => {
-                    let _body_ty = ctx.infer_expr(func.body);
+                    ctx.infer_function(func);
                 }
                 nx_hir::Item::Element(_) => {}
                 nx_hir::Item::TypeAlias => {}
@@ -222,7 +222,7 @@ pub struct TypeCheckSession {
     /// Files in the session
     files: FxHashMap<String, String>,
     /// Next source ID to allocate
-    next_id: u32,
+    _next_id: u32,
 }
 
 impl TypeCheckSession {
@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn test_type_check_result_is_ok() {
         let source = "let x = 42";
-        let result = check_str(source, "test.nx");
+        let _result = check_str(source, "test.nx");
 
         // Should succeed (or have warnings, not errors)
         // Note: May have errors if lowering isn't complete
@@ -340,7 +340,7 @@ mod tests {
     fn test_session_diagnostics() {
         let mut session = TypeCheckSession::new();
         session.add_file("file1.nx", "let x = 42");
-        session.add_file("file2.nx", "let y = ");  // Parse error
+        session.add_file("file2.nx", "let y = "); // Parse error
 
         let diagnostics = session.diagnostics();
         // Should have at least one diagnostic from the parse error

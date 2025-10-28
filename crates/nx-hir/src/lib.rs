@@ -21,13 +21,13 @@
 //! ```
 
 pub mod ast;
-pub mod lower;
 pub mod db;
+pub mod lower;
 pub mod scope;
 
-use smol_str::SmolStr;
 use la_arena::{Arena, Idx};
-use nx_diagnostics::{TextSpan, TextSize};
+use nx_diagnostics::TextSpan;
+use smol_str::SmolStr;
 
 // Re-export lowering function
 pub use lower::lower;
@@ -242,6 +242,7 @@ impl Module {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nx_diagnostics::TextSize;
 
     #[test]
     fn test_name_creation() {

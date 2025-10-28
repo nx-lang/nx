@@ -107,7 +107,10 @@ mod tests {
             TypeRef::name("bool"),
         );
         match ty {
-            TypeRef::Function { params, return_type } => {
+            TypeRef::Function {
+                params,
+                return_type,
+            } => {
                 assert_eq!(params.len(), 2);
                 match &return_type.as_ref() {
                     TypeRef::Name(name) => assert_eq!(name.as_str(), "bool"),

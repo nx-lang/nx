@@ -26,9 +26,7 @@ impl<'tree> SyntaxNode<'tree> {
 
     /// Returns the source text for this node.
     pub fn text(&self) -> &'tree str {
-        self.node
-            .utf8_text(self.source.as_bytes())
-            .unwrap_or("")
+        self.node.utf8_text(self.source.as_bytes()).unwrap_or("")
     }
 
     /// Returns the text range (span) of this node in the source.
@@ -199,7 +197,7 @@ mod tests {
     #[test]
     fn test_syntax_node_is_error() {
         let mut parser = parser();
-        let source = "let x = ";  // Incomplete expression
+        let source = "let x = "; // Incomplete expression
         let tree = parser.parse(source, None).unwrap();
         let root = SyntaxNode::new(tree.root_node(), source);
 

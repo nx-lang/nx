@@ -27,7 +27,10 @@ fn test_parse_simple_element() {
     let path = fixture_path("valid/simple-element.nx");
     let result = parse_file(&path).unwrap();
 
-    assert!(result.is_ok(), "Should parse valid simple element without errors");
+    assert!(
+        result.is_ok(),
+        "Should parse valid simple element without errors"
+    );
     assert!(result.tree.is_some(), "Should produce a syntax tree");
 
     let root = result.root().expect("Should have root node");
@@ -39,7 +42,10 @@ fn test_parse_function_definition() {
     let path = fixture_path("valid/function.nx");
     let result = parse_file(&path).unwrap();
 
-    assert!(result.is_ok(), "Should parse function definition without errors");
+    assert!(
+        result.is_ok(),
+        "Should parse function definition without errors"
+    );
     assert!(result.tree.is_some());
 }
 
@@ -48,7 +54,10 @@ fn test_parse_nested_elements() {
     let path = fixture_path("valid/nested-elements.nx");
     let result = parse_file(&path).unwrap();
 
-    assert!(result.is_ok(), "Should parse nested elements without errors");
+    assert!(
+        result.is_ok(),
+        "Should parse nested elements without errors"
+    );
     assert!(result.tree.is_some());
 }
 
@@ -57,7 +66,10 @@ fn test_parse_type_annotations() {
     let path = fixture_path("valid/type-annotations.nx");
     let result = parse_file(&path).unwrap();
 
-    assert!(result.is_ok(), "Should parse type annotations without errors");
+    assert!(
+        result.is_ok(),
+        "Should parse type annotations without errors"
+    );
     assert!(result.tree.is_some());
 }
 
@@ -66,7 +78,10 @@ fn test_parse_expressions() {
     let path = fixture_path("valid/expressions.nx");
     let result = parse_file(&path).unwrap();
 
-    assert!(result.is_ok(), "Should parse various expressions without errors");
+    assert!(
+        result.is_ok(),
+        "Should parse various expressions without errors"
+    );
     assert!(result.tree.is_some());
 }
 
@@ -75,7 +90,10 @@ fn test_parse_conditionals() {
     let path = fixture_path("valid/conditionals.nx");
     let result = parse_file(&path).unwrap();
 
-    assert!(result.is_ok(), "Should parse conditional expressions without errors");
+    assert!(
+        result.is_ok(),
+        "Should parse conditional expressions without errors"
+    );
     assert!(result.tree.is_some());
 }
 
@@ -84,7 +102,10 @@ fn test_parse_complex_example() {
     let path = fixture_path("valid/complex-example.nx");
     let result = parse_file(&path).unwrap();
 
-    assert!(result.is_ok(), "Should parse complex example without errors");
+    assert!(
+        result.is_ok(),
+        "Should parse complex example without errors"
+    );
     assert!(result.tree.is_some());
 }
 
@@ -93,20 +114,29 @@ fn test_parse_module_with_definitions_and_element() {
     let path = fixture_path("valid/module-with-definitions-and-element.nx");
     let result = parse_file(&path).unwrap();
 
-    assert!(result.is_ok(), "Should parse module that mixes declarations and a root element");
+    assert!(
+        result.is_ok(),
+        "Should parse module that mixes declarations and a root element"
+    );
     let root = result.root().expect("Should have root node");
 
     let kinds: Vec<SyntaxKind> = root.children().map(|child| child.kind()).collect();
     assert!(
-        kinds.iter().any(|kind| *kind == SyntaxKind::TYPE_DEFINITION),
+        kinds
+            .iter()
+            .any(|kind| *kind == SyntaxKind::TYPE_DEFINITION),
         "Expected at least one type definition"
     );
     assert!(
-        kinds.iter().any(|kind| *kind == SyntaxKind::VALUE_DEFINITION),
+        kinds
+            .iter()
+            .any(|kind| *kind == SyntaxKind::VALUE_DEFINITION),
         "Expected at least one value definition"
     );
     assert!(
-        kinds.iter().any(|kind| *kind == SyntaxKind::FUNCTION_DEFINITION),
+        kinds
+            .iter()
+            .any(|kind| *kind == SyntaxKind::FUNCTION_DEFINITION),
         "Expected at least one function definition"
     );
 
@@ -167,7 +197,10 @@ fn test_parse_mismatched_tags() {
     let result = parse_file(&path).unwrap();
 
     // May have parse errors or validation errors depending on grammar
-    assert!(!result.is_ok() || !result.errors.is_empty(), "Should detect tag mismatch");
+    assert!(
+        !result.is_ok() || !result.errors.is_empty(),
+        "Should detect tag mismatch"
+    );
 }
 
 #[test]
@@ -249,7 +282,10 @@ fn test_error_recovery_continues_parsing() {
     let result = parse_str(source, "test.nx");
 
     // Should detect the error but continue parsing
-    assert!(!result.errors.is_empty(), "Should detect error in invalid statement");
+    assert!(
+        !result.errors.is_empty(),
+        "Should detect error in invalid statement"
+    );
     assert!(result.tree.is_some(), "Should continue parsing after error");
 }
 
@@ -329,7 +365,10 @@ fn test_concurrent_parsing_same_source() {
             let src = Arc::clone(&source);
             thread::spawn(move || {
                 let result = parse_str(&src, &format!("test{}.nx", i));
-                assert!(result.is_ok(), "Concurrent parsing of same source should succeed");
+                assert!(
+                    result.is_ok(),
+                    "Concurrent parsing of same source should succeed"
+                );
                 result
             })
         })
@@ -396,7 +435,9 @@ fn test_snapshot_error_diagnostics() {
     let result = parse_str("let x = ", "test.nx");
 
     // Snapshot the error messages
-    let errors: Vec<_> = result.errors.iter()
+    let errors: Vec<_> = result
+        .errors
+        .iter()
         .map(|d| format!("{}", d.message()))
         .collect();
 
@@ -554,7 +595,10 @@ fn test_binary_expressions_logical() {
     assert!(result.is_ok());
 
     // Complex: precedence (AND before OR)
-    let result = parse_str("let <Test x: boolean y: boolean z: boolean /> = {x && y || z}", "test.nx");
+    let result = parse_str(
+        "let <Test x: boolean y: boolean z: boolean /> = {x && y || z}",
+        "test.nx",
+    );
     assert!(result.is_ok());
 }
 
@@ -576,7 +620,10 @@ fn test_conditional_ternary_expressions() {
     assert!(result.is_ok());
 
     // Nested ternary
-    let result = parse_str("let <Test x: int /> = {x > 0 ? x * 2 : x < 0 ? x * -2 : 0}", "test.nx");
+    let result = parse_str(
+        "let <Test x: int /> = {x > 0 ? x * 2 : x < 0 ? x * -2 : 0}",
+        "test.nx",
+    );
     assert!(result.is_ok());
 }
 
@@ -617,7 +664,10 @@ fn test_call_expressions() {
     assert!(result.is_ok());
 
     // Multiple arguments
-    let result = parse_str("let <Test func: object x: int y: int /> = {func(x, y)}", "test.nx");
+    let result = parse_str(
+        "let <Test func: object x: int y: int /> = {func(x, y)}",
+        "test.nx",
+    );
     assert!(result.is_ok());
 
     // Chained calls
@@ -632,7 +682,10 @@ fn test_call_expressions() {
 #[test]
 fn test_if_expressions_simple() {
     // If-else
-    let result = parse_str("let <Test x: int /> = {if x > 0 { 1 } else { -1 }}", "test.nx");
+    let result = parse_str(
+        "let <Test x: int /> = {if x > 0 { 1 } else { -1 }}",
+        "test.nx",
+    );
     assert!(result.is_ok());
 
     // If without else
@@ -642,7 +695,7 @@ fn test_if_expressions_simple() {
     // Nested if
     let result = parse_str(
         "let <Test x: int /> = {if x > 0 { if x > 10 { 2 } else { 1 } } else { 0 }}",
-        "test.nx"
+        "test.nx",
     );
     assert!(result.is_ok());
 }
@@ -656,7 +709,11 @@ fn test_if_expressions_condition_list() {
   else: 0
 }}"#;
     let result = parse_str(source, "test.nx");
-    assert!(result.is_ok(), "Condition list if expression should parse. Errors: {:?}", result.errors);
+    assert!(
+        result.is_ok(),
+        "Condition list if expression should parse. Errors: {:?}",
+        result.errors
+    );
 }
 
 #[test]
@@ -668,7 +725,11 @@ fn test_if_expressions_match() {
   else: "other"
 }}"#;
     let result = parse_str(source, "test.nx");
-    assert!(result.is_ok(), "Match if expression should parse. Errors: {:?}", result.errors);
+    assert!(
+        result.is_ok(),
+        "Match if expression should parse. Errors: {:?}",
+        result.errors
+    );
 
     // Without scrutinee
     let source = r#"let <Test /> = {if is {
@@ -676,23 +737,33 @@ fn test_if_expressions_match() {
   false: "no"
 }}"#;
     let result = parse_str(source, "test.nx");
-    assert!(result.is_ok(), "Match if expression without scrutinee should parse. Errors: {:?}", result.errors);
+    assert!(
+        result.is_ok(),
+        "Match if expression without scrutinee should parse. Errors: {:?}",
+        result.errors
+    );
 }
 
 #[test]
 fn test_for_expressions() {
     // Simple for
-    let result = parse_str("let <Test items: object /> = {for item in items { item * 2 }}", "test.nx");
+    let result = parse_str(
+        "let <Test items: object /> = {for item in items { item * 2 }}",
+        "test.nx",
+    );
     assert!(result.is_ok());
 
     // For with index
-    let result = parse_str("let <Test items: object /> = {for item, index in items { item + index }}", "test.nx");
+    let result = parse_str(
+        "let <Test items: object /> = {for item, index in items { item + index }}",
+        "test.nx",
+    );
     assert!(result.is_ok());
 
     // Nested for
     let result = parse_str(
         "let <Test matrix: object /> = {for row in matrix { for cell in row { cell } }}",
-        "test.nx"
+        "test.nx",
     );
     assert!(result.is_ok());
 }
@@ -715,7 +786,7 @@ fn test_complex_expression_combinations() {
     // Mixed operators with precedence
     let result = parse_str(
         "let <Test x: int y: int /> = {x + y * 2 > 10 && x < 100 ? x * y : x + y}",
-        "test.nx"
+        "test.nx",
     );
     assert!(result.is_ok());
 
@@ -765,7 +836,11 @@ fn test_expression_operator_precedence() {
 fn test_value_definitions() {
     // Simple value definition without type
     let result = parse_str("let x = 42", "test.nx");
-    assert!(result.is_ok(), "Simple value definition should parse. Errors: {:?}", result.errors);
+    assert!(
+        result.is_ok(),
+        "Simple value definition should parse. Errors: {:?}",
+        result.errors
+    );
 
     // Value definition with type annotation
     let result = parse_str("let x: int = 42", "test.nx");
@@ -773,11 +848,17 @@ fn test_value_definitions() {
 
     // Value definition with expression
     let result = parse_str("let sum = {1 + 2 + 3}", "test.nx");
-    assert!(result.is_ok(), "Value definition with expression should parse");
+    assert!(
+        result.is_ok(),
+        "Value definition with expression should parse"
+    );
 
     // Value definition with type and expression
     let result = parse_str("let sum: int = {1 + 2 + 3}", "test.nx");
-    assert!(result.is_ok(), "Value definition with type and expression should parse");
+    assert!(
+        result.is_ok(),
+        "Value definition with type and expression should parse"
+    );
 
     // Multiple value definitions
     let source = r#"let x = 42
@@ -794,7 +875,9 @@ fn test_value_definition_vs_function_definition() {
     assert!(result.is_ok());
     let root = result.root().unwrap();
     // Should find a value_definition child
-    let has_value_def = root.children().any(|c| c.kind() == SyntaxKind::VALUE_DEFINITION);
+    let has_value_def = root
+        .children()
+        .any(|c| c.kind() == SyntaxKind::VALUE_DEFINITION);
     assert!(has_value_def, "Should have value_definition node");
 
     // Function definition (with parameters)
@@ -802,6 +885,8 @@ fn test_value_definition_vs_function_definition() {
     assert!(result.is_ok());
     let root = result.root().unwrap();
     // Should find a function_definition child
-    let has_func_def = root.children().any(|c| c.kind() == SyntaxKind::FUNCTION_DEFINITION);
+    let has_func_def = root
+        .children()
+        .any(|c| c.kind() == SyntaxKind::FUNCTION_DEFINITION);
     assert!(has_func_def, "Should have function_definition node");
 }

@@ -48,6 +48,11 @@ impl TypeEnvironment {
         self.bindings.insert(name, Arc::new(ty));
     }
 
+    /// Removes a binding for a name, returning the previous type if it existed.
+    pub fn remove(&mut self, name: &Name) -> Option<Arc<Type>> {
+        self.bindings.remove(name)
+    }
+
     /// Looks up the type of a name.
     pub fn lookup(&self, name: &Name) -> Option<&Type> {
         self.bindings.get(name).map(|arc| arc.as_ref())
@@ -65,9 +70,7 @@ impl TypeEnvironment {
 
     /// Returns all name bindings.
     pub fn bindings(&self) -> impl Iterator<Item = (&Name, &Type)> {
-        self.bindings
-            .iter()
-            .map(|(name, ty)| (name, ty.as_ref()))
+        self.bindings.iter().map(|(name, ty)| (name, ty.as_ref()))
     }
 
     /// Returns the number of bindings.
@@ -126,6 +129,17 @@ mod tests {
 
         env.bind(name.clone(), Type::string());
         assert_eq!(env.lookup(&name), Some(&Type::string()));
+    }
+
+    #[test]
+    fn test_env_remove() {
+        let mut env = TypeEnvironment::new();
+        let name = Name::new("temp");
+
+        env.bind(name.clone(), Type::bool());
+        let removed = env.remove(&name);
+        assert!(removed.is_some());
+        assert!(env.lookup(&name).is_none());
     }
 
     #[test]

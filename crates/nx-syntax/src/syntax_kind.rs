@@ -263,10 +263,7 @@ impl SyntaxKind {
 
     /// Returns true if this kind represents trivia (whitespace, comments, etc.).
     pub fn is_trivia(self) -> bool {
-        matches!(
-            self,
-            SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE
-        ) || self.is_comment()
+        matches!(self, SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE) || self.is_comment()
     }
 }
 
@@ -420,7 +417,10 @@ mod tests {
 
     #[test]
     fn test_syntax_kind_from_str() {
-        assert_eq!(syntax_kind_from_str("module_definition"), SyntaxKind::MODULE_DEFINITION);
+        assert_eq!(
+            syntax_kind_from_str("module_definition"),
+            SyntaxKind::MODULE_DEFINITION
+        );
         assert_eq!(syntax_kind_from_str("identifier"), SyntaxKind::IDENTIFIER);
         assert_eq!(syntax_kind_from_str("unknown"), SyntaxKind::ERROR);
     }

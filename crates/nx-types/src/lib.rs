@@ -18,13 +18,13 @@
 //! assert!(result.module.is_some());
 //! ```
 
-pub mod ty;
-pub mod infer;
-pub mod env;
 pub mod check;
+pub mod env;
+pub mod infer;
+pub mod ty;
 
 // Re-export main types
-pub use ty::{Type, TypeId, Primitive};
-pub use infer::{TypeInference, InferenceContext};
-pub use env::{TypeEnvironment, TypeBinding};
-pub use check::{TypeCheckResult, TypeCheckSession, check_str, check_file};
+pub use check::{check_file, check_str, TypeCheckResult, TypeCheckSession};
+pub use env::{TypeBinding, TypeEnvironment};
+pub use infer::{InferenceContext, TypeInference};
+pub use ty::{Primitive, Type, TypeId};

@@ -135,9 +135,7 @@ pub struct ParseResult {
 impl ParseResult {
     /// Returns true if parsing succeeded (no errors).
     pub fn is_ok(&self) -> bool {
-        self.errors
-            .iter()
-            .all(|d| d.severity() != Severity::Error)
+        self.errors.iter().all(|d| d.severity() != Severity::Error)
     }
 
     /// Returns the root syntax node if available.
@@ -178,9 +176,12 @@ pub fn parse_str(source: &str, file_name: &str) -> ParseResult {
     let mut parser = parser();
     let tree = parser.parse(source, None);
 
-    let source_id = SourceId::new(file_name.as_bytes().iter().fold(0u32, |acc, &b| {
-        acc.wrapping_mul(31).wrapping_add(b as u32)
-    }));
+    let source_id = SourceId::new(
+        file_name
+            .as_bytes()
+            .iter()
+            .fold(0u32, |acc, &b| acc.wrapping_mul(31).wrapping_add(b as u32)),
+    );
 
     match tree {
         Some(tree) => {
@@ -246,22 +247,19 @@ pub fn parse_file(path: impl AsRef<Path>) -> io::Result<ParseResult> {
         return Ok(ParseResult {
             tree: None,
             errors: vec![Diagnostic::error("invalid-utf8")
-                .with_message(format!(
-                    "File contains invalid UTF-8: {}",
-                    path.display()
-                ))
+                .with_message(format!("File contains invalid UTF-8: {}", path.display()))
                 .build()],
             source_id: SourceId::new(0),
         });
     }
 
-    let file_name = path.file_name()
+    let file_name = path
+        .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown");
 
     Ok(parse_str(&source, file_name))
 }
-
 
 /// Extension trait for `&str` to check UTF-8 validity.
 trait Utf8Ext {
@@ -302,7 +300,7 @@ mod tests {
 
     #[test]
     fn test_parse_str_with_error() {
-        let source = "let x = ";  // Incomplete
+        let source = "let x = "; // Incomplete
         let result = parse_str(source, "test.nx");
 
         // Should still have a tree, but with errors
@@ -338,7 +336,7 @@ mod tests {
         let result = parse_str(source, "test.nx");
 
         let tree = result.tree.unwrap();
-        let node = tree.node_at(7);  // Middle of "foo"
+        let node = tree.node_at(7); // Middle of "foo"
 
         assert!(node.is_some());
     }
@@ -354,7 +352,7 @@ mod tests {
 
     #[test]
     fn test_parse_result_with_errors() {
-        let source = "let x = ";  // Incomplete
+        let source = "let x = "; // Incomplete
         let result = parse_str(source, "test.nx");
 
         assert!(!result.is_ok());
@@ -393,6 +391,10 @@ mod tests {
         }
 
         // This will fail if there are ANY error nodes anywhere
-        assert!(errors.is_empty(), "Tree should not contain any ERROR nodes! Found: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "Tree should not contain any ERROR nodes! Found: {:?}",
+            errors
+        );
     }
 }

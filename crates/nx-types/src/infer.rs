@@ -97,10 +97,7 @@ impl<'a> InferenceContext<'a> {
                 if !cond_ty.is_compatible_with(&Type::bool()) && !cond_ty.is_error() {
                     self.error(
                         "type-mismatch",
-                        format!(
-                            "If condition must be bool, found {}",
-                            cond_ty
-                        ),
+                        format!("If condition must be bool, found {}", cond_ty),
                         *span,
                     );
                 }
@@ -111,7 +108,10 @@ impl<'a> InferenceContext<'a> {
                     let else_ty = self.infer_expr(*else_id);
 
                     // Both branches must have compatible types
-                    if !then_ty.is_compatible_with(&else_ty) && !then_ty.is_error() && !else_ty.is_error() {
+                    if !then_ty.is_compatible_with(&else_ty)
+                        && !then_ty.is_error()
+                        && !else_ty.is_error()
+                    {
                         self.error(
                             "type-mismatch",
                             format!(
@@ -137,13 +137,15 @@ impl<'a> InferenceContext<'a> {
                     Type::array(self.fresh_var())
                 } else {
                     // Infer element types
-                    let elem_tys: Vec<_> =
-                        elements.iter().map(|e| self.infer_expr(*e)).collect();
+                    let elem_tys: Vec<_> = elements.iter().map(|e| self.infer_expr(*e)).collect();
 
                     // All elements should have the same type
                     let first_ty = &elem_tys[0];
                     for (i, ty) in elem_tys.iter().enumerate().skip(1) {
-                        if !ty.is_compatible_with(first_ty) && !ty.is_error() && !first_ty.is_error() {
+                        if !ty.is_compatible_with(first_ty)
+                            && !ty.is_error()
+                            && !first_ty.is_error()
+                        {
                             self.error(
                                 "type-mismatch",
                                 format!(
@@ -200,6 +202,11 @@ impl<'a> InferenceContext<'a> {
                 Type::Error
             }
 
+            ast::Expr::Element { element, .. } => {
+                let element_ref = self.module.element(*element);
+                Type::named(element_ref.tag.clone())
+            }
+
             // Block expressions
             ast::Expr::Block { stmts: _, expr, .. } => {
                 // TODO: Process statements
@@ -217,6 +224,22 @@ impl<'a> InferenceContext<'a> {
         // Record the inferred type
         self.env.set_expr_type(expr_id, ty.clone());
         ty
+    }
+
+    /// Infers all types within a function, binding parameters while visiting the body.
+    pub fn infer_function(&mut self, func: &nx_hir::Function) {
+        let mut bound_names = Vec::new();
+
+        for param in &func.params {
+            self.env.bind(param.name.clone(), Type::Unknown);
+            bound_names.push(param.name.clone());
+        }
+
+        let _ = self.infer_expr(func.body);
+
+        for name in bound_names {
+            self.env.remove(&name);
+        }
     }
 
     /// Infers the type of a literal.
@@ -389,10 +412,7 @@ impl<'a> InferenceContext<'a> {
                     if !arg_ty.is_compatible_with(param_ty) && !arg_ty.is_error() {
                         self.error(
                             "type-mismatch",
-                            format!(
-                                "Argument {} has type {}, expected {}",
-                                i, arg_ty, param_ty
-                            ),
+                            format!("Argument {} has type {}, expected {}", i, arg_ty, param_ty),
                             span,
                         );
                     }
@@ -442,7 +462,7 @@ pub struct TypeInference;
 impl TypeInference {
     /// Infers types for all expressions in a module.
     pub fn infer_module(module: &Module) -> (TypeEnvironment, Vec<Diagnostic>) {
-        let mut ctx = InferenceContext::new(module);
+        let ctx = InferenceContext::new(module);
 
         // TODO: Process all items and their expressions
         // For now, just return empty results
@@ -454,7 +474,8 @@ impl TypeInference {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nx_hir::{ast::Expr, ast::Literal, SourceId};
+    use nx_diagnostics::{TextSize, TextSpan};
+    use nx_hir::{ast::Expr, ast::Literal, ast::TypeRef, Function, Item, Name, Param, SourceId};
 
     #[test]
     fn test_infer_int_literal() {
@@ -488,5 +509,37 @@ mod tests {
         let ty = ctx.infer_expr(expr_id);
 
         assert_eq!(ty, Type::bool());
+    }
+
+    #[test]
+    fn test_infer_function_parameter_reference() {
+        let mut module = Module::new(SourceId::new(0));
+        let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
+
+        let body = module.alloc_expr(Expr::Ident(Name::new("text")));
+        let param = Param::new(Name::new("text"), TypeRef::name("string"), span);
+
+        let function = Function {
+            name: Name::new("Button"),
+            params: vec![param],
+            return_type: None,
+            body,
+            span,
+        };
+
+        module.add_item(Item::Function(function));
+
+        let mut ctx = InferenceContext::new(&module);
+
+        if let Item::Function(func) = &module.items()[0] {
+            ctx.infer_function(func);
+        } else {
+            panic!("Expected function item");
+        }
+
+        let (env, diagnostics) = ctx.finish();
+        assert!(diagnostics.is_empty());
+        let name = Name::new("text");
+        assert!(env.lookup(&name).is_none());
     }
 }
