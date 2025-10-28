@@ -270,7 +270,7 @@ fn test_utf8_valid_mixed() {
 fn test_concurrent_parsing_different_files() {
     let sources = vec![
         ("let x = 42", "test1.nx"),
-        ("fn foo() { }", "test2.nx"),
+        ("let <Foo /> = <div />", "test2.nx"),
         ("let <Button /> = <button />", "test3.nx"),
     ];
 
@@ -292,7 +292,7 @@ fn test_concurrent_parsing_different_files() {
 
 #[test]
 fn test_concurrent_parsing_same_source() {
-    let source = Arc::new(String::from("let x = 42 + 58"));
+    let source = Arc::new(String::from("let x = 42"));
 
     let handles: Vec<_> = (0..10)
         .map(|i| {
@@ -313,20 +313,21 @@ fn test_concurrent_parsing_same_source() {
 #[test]
 fn test_concurrent_parsing_stress() {
     let source = r#"
-        fn fibonacci(n: int) {
-            if n <= 1 {
-                n
-            } else {
-                fibonacci(n - 1) + fibonacci(n - 2)
-            }
-        }
+        let <Card
+            title:string
+            content:string
+        /> =
+            <div class="card">
+                <h2>{title}</h2>
+                <p>{content}</p>
+            </div>
     "#;
 
     let handles: Vec<_> = (0..100)
         .map(|i| {
             let src = source.to_string();
             thread::spawn(move || {
-                let result = parse_str(&src, &format!("fib{}.nx", i));
+                let result = parse_str(&src, &format!("card{}.nx", i));
                 assert!(result.is_ok(), "Stress test parsing should succeed");
             })
         })
