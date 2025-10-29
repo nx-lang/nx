@@ -221,8 +221,11 @@ bool tree_sitter_nx_external_scanner_scan(void *payload, TSLexer *lexer, const b
 
     // Consume characters until we hit a delimiter
     while (lexer->lookahead != 0) {
-      // Stop at element delimiters
-      if (lexer->lookahead == '<' || lexer->lookahead == '>') {
+      // Stop at element start delimiter. Do NOT stop on '>' because it
+      // can legitimately appear in text (e.g., in comparisons like `a > b`).
+      // This matches XML semantics: '>' need not be escaped in character
+      // data; only '<' and '&' must be escaped.
+      if (lexer->lookahead == '<') {
         break;
       }
 
