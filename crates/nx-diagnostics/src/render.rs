@@ -3,6 +3,8 @@
 use crate::{Diagnostic, Severity};
 use ariadne::{Color, Fmt, Label as AriadneLabel, Report, ReportKind, Source};
 use std::collections::HashMap;
+use std::fmt::Write as _;
+//
 
 /// Renders a diagnostic to a string with beautiful formatting.
 ///
@@ -96,6 +98,107 @@ pub fn render_diagnostics(
         .map(|d| render_diagnostic(d, sources))
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+/// Renders diagnostics in a compact CLI style similar to common compilers.
+///
+/// Format example:
+///   error complex-example.nx:12:34: Syntax error
+///    12 | let <Foo x: string =
+///       |                                  ^^^^^ unexpected syntax here
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn render_diagnostics_cli(
+    diagnostics: &[Diagnostic],
+    sources: &HashMap<String, String>,
+) -> String {
+    let mut out = String::new();
+
+    for (idx, d) in diagnostics.iter().enumerate() {
+        // Pick primary label, or fall back to the first label if none is primary.
+        let label = d
+            .labels()
+            .iter()
+            .find(|l| l.primary)
+            .or_else(|| d.labels().first())
+            .cloned();
+
+        let (file, start, end, label_msg) = if let Some(l) = label {
+            let s: usize = l.range.start().into();
+            let e: usize = l.range.end().into();
+            (l.file, s, e, l.message)
+        } else {
+            (String::from("<unknown>"), 0usize, 0usize, None)
+        };
+
+        // Resolve source and compute line/col
+        let src = sources.get(&file).map(String::as_str).unwrap_or("");
+        let (line_num, col_num, line_text, col_in_line, highlight_len) = locate(src, start, end);
+
+        // Header: severity file:line:col: message
+        let severity = match d.severity() {
+            Severity::Error => "error",
+            Severity::Warning => "warning",
+            Severity::Info => "info",
+            Severity::Hint => "hint",
+        };
+        let _ = writeln!(out, "{} {}:{}:{}: {}", severity, file, line_num, col_num, d.message());
+
+        // Source line with caret underline
+        if !line_text.is_empty() {
+            let _ = writeln!(out, " {:>4} | {}", line_num, line_text);
+            let caret_padding: String = " ".repeat(col_in_line.saturating_sub(1));
+            let carets: String = "^".repeat(highlight_len.max(1));
+            let caret_msg = label_msg.unwrap_or_default();
+            if caret_msg.is_empty() {
+                let _ = writeln!(out, "      | {}{}", caret_padding, carets);
+            } else {
+                let _ = writeln!(out, "      | {}{} {}", caret_padding, carets, caret_msg);
+            }
+        }
+
+        if let Some(help) = d.help() {
+            let _ = writeln!(out, "help: {}", help);
+        }
+        if let Some(note) = d.note() {
+            let _ = writeln!(out, "note: {}", note);
+        }
+
+        if idx + 1 < diagnostics.len() {
+            let _ = writeln!(out);
+        }
+    }
+
+    out
+}
+
+// Compute 1-based line/col and a single-line highlight presentation
+#[cfg_attr(not(test), allow(dead_code))]
+fn locate<'a>(src: &'a str, start: usize, end: usize) -> (usize, usize, &'a str, usize, usize) {
+    // Clamp indices to source length
+    let len = src.len();
+    let s = start.min(len);
+    let e = end.min(len);
+
+    // Find line boundaries
+    let mut line_start = 0usize;
+    let mut line_idx = 1usize; // 1-based
+    for (i, ch) in src.char_indices() {
+        if i >= s { break; }
+        if ch == '\n' { line_idx += 1; line_start = i + ch.len_utf8(); }
+    }
+    let line_end = src[line_start..].find('\n').map(|o| line_start + o).unwrap_or(len);
+
+    let line_text = &src[line_start..line_end];
+
+    // Column (1-based) computed by counting chars from line_start to s
+    let col_by_chars = src[line_start..s].chars().count() + 1;
+
+    // Highlight length limited to the rest of the line, at least 1
+    let range_len_chars = src[s..e].chars().count().max(1);
+    let remaining_chars = line_text.chars().count().saturating_sub(col_by_chars - 1);
+    let hl = range_len_chars.min(remaining_chars).max(1);
+
+    (line_idx, col_by_chars, line_text, col_by_chars, hl)
 }
 
 #[cfg(test)]

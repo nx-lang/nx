@@ -1,6 +1,8 @@
 //! Comprehensive parser tests for NX syntax.
 
 use nx_syntax::{parse_file, parse_str, SyntaxKind};
+use nx_diagnostics::render_diagnostics_cli;
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -161,9 +163,15 @@ fn test_parse_all_valid_fixtures() {
 
             assert!(
                 result.is_ok(),
-                "File {:?} should parse without errors, but got: {:?}",
+                "File {:?} should parse without errors, but got:\n{}",
                 path.file_name(),
-                result.errors
+                {
+                    let mut sources = HashMap::new();
+                    let file_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                    let src = std::fs::read_to_string(&path).unwrap_or_default();
+                    sources.insert(file_name.clone(), src);
+                    render_diagnostics_cli(&result.errors, &sources)
+                }
             );
         }
     }
@@ -501,8 +509,12 @@ fn test_all_expression_types() {
 
     assert!(
         result.is_ok(),
-        "Should parse all expression types without errors. Errors: {:?}",
-        result.errors
+        "Should parse all expression types without errors. Errors:\n{}",
+        {
+            let mut sources = HashMap::new();
+            sources.insert("test.nx".to_string(), std::fs::read_to_string(path).unwrap_or_default());
+            render_diagnostics_cli(&result.errors, &sources)
+        }
     );
     assert!(result.tree.is_some());
 }
