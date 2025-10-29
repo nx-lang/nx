@@ -447,14 +447,23 @@ module.exports = grammar({
         seq(
           ':',
           field('text_type', $.identifier),
-          optional('raw'),
-          field('properties', optional($.property_list)),
-          '>',
-          field('content', $.embed_content),
-          '<',
-          '/',
-          field('close_name', $.element_name),
-          '>',
+          choice(
+            // parsed embed content
+            seq(
+              field('properties', optional($.property_list)),
+              '>',
+              field('content', $.embed_content),
+              '<', '/', field('close_name', $.element_name), '>'
+            ),
+            // raw embed content
+            seq(
+              'raw',
+              field('properties', optional($.property_list)),
+              '>',
+              field('content', $.embed_raw_content),
+              '<', '/', field('close_name', $.element_name), '>'
+            ),
+          ),
         ),
       ),
     ),
@@ -558,6 +567,11 @@ module.exports = grammar({
       $.text_run,
       $.interpolation_expression,
     )),
+
+    // Raw embed content: braces and ampersands are literal; no interpolation
+    // Implemented as a simple token that consumes any run of non-'<' characters
+    embed_raw_content: $ => repeat1($.raw_text),
+    raw_text: $ => token(/[^<]+/),
 
     // ===== Patterns =====
     pattern: $ => choice(

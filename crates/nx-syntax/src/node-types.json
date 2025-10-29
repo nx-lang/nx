@@ -190,6 +190,10 @@
           {
             "type": "embed_content",
             "named": true
+          },
+          {
+            "type": "embed_raw_content",
+            "named": true
           }
         ]
       },
@@ -489,6 +493,21 @@
         },
         {
           "type": "text_run",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "embed_raw_content",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "raw_text",
           "named": true
         }
       ]
@@ -1671,6 +1690,10 @@
   {
     "type": "raw",
     "named": false
+  },
+  {
+    "type": "raw_text",
+    "named": true
   },
   {
     "type": "real_literal",

@@ -12,6 +12,6 @@ let <CodeBlock
 let <StyleBlock
   css:string
 /> =
-  <style:text raw>
+  <style:text>
     {css}
   </style:text>

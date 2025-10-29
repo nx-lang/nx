@@ -76,6 +76,9 @@ Notes
 - Block comments are nestable with same-kind openers only. The lexer maintains a depth counter: increment on opener, decrement on closer, emit one token at depth 0. Unterminated blocks are lexing errors.
 - Comments are not recognized inside string literals or text content tokens (TEXT_CHUNK/ENTITY/ESCAPED_*).
 
+Raw embed tokens
+- RAW_TEXT_CHUNK — produced only inside raw embed content; scanners treat '{', '}', '&' as ordinary characters.
+
 ## Operator Precedence (Pratt)
 
 Conventional expressions (non-markup) use a Pratt parser with the following precedence and associativity. Higher number binds tighter.
@@ -391,7 +394,7 @@ Content (AST: ElementContentSyntax is a sum type)
   - fields: items: MarkupItemSyntax[]
 
 MixedContentExpression (AST: MixedContentSyntax)
-- MixedContentExpression → MixedContentItem*
+- MixedContentExpression → MixedContentItem+
   - fields: items: MixedContentItemSyntax[]
 
 MixedContentItem (AST: MixedContentItemSyntax is a sum type)
@@ -400,7 +403,7 @@ MixedContentItem (AST: MixedContentItemSyntax is a sum type)
 - MixedContentItem → InterpolationExpression (InterpolationExpressionSyntax)
 
 EmbedContent (AST: EmbedContentSyntax)
-- EmbedContent → EmbedContentItem*
+- EmbedContent → EmbedContentItem+
   - fields: items: EmbedContentItemSyntax[]
 
 EmbedContentItem (AST: EmbedContentItemSyntax is a sum type)
@@ -408,8 +411,12 @@ EmbedContentItem (AST: EmbedContentItemSyntax is a sum type)
 - EmbedContentItem → InterpolationExpression (InterpolationExpressionSyntax)
 
 RawEmbedContent (AST: RawEmbedContentSyntax)
-- RawEmbedContent → TextRun
+- RawEmbedContent → RawTextRun
   - fields: text: string
+
+RawTextRun (AST: TextRunSyntax)
+- RawTextRun → RAW_TEXT_CHUNK+
+  - fields: text: string (concatenated as-is)
 
 TextPart (AST: TextPartSyntax)
 - TextPart → TextRun

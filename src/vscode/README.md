@@ -51,3 +51,7 @@ Set the publisher to `nx-lang` and the extension ID to `nx-language` (already co
 
 - The grammar aims for correctness and performance; regexes are kept conservative to avoid backtracking.
 - HTML-style comments (`<!-- -->`) are recognized as comments, matching the language spec.
+
+## Limitations
+
+- TextMate raw embed blocks: An `embed-raw-block` rule scopes regions like `<tag:text raw> ... </tag>` and reduces interference from other patterns, but TextMate grammars don’t make it easy to fully block interpolation inside nested regions. The added test asserts the `raw` keyword highlighting in the start tag. Achieving a strict “no interpolation inside raw blocks” guarantee in TextMate would require deeper rule restructuring.

@@ -214,6 +214,15 @@ description: "Implementation tasks for Core NX Parsing and Validation"
 
 **Checkpoint**: At this point, all Phase 3 work should be complete - the parser fully handles both element-only and mixed text/interpolation content
 
+### Follow-up Bugfix: Typed Raw Embed Acceptance
+
+- [ ] T201 [US1] Fix typed typed-embed raw parsing at element position (module root and nested)
+  - Update `crates/nx-syntax/grammar.js` to left-factor the typed embed branch after `< ElementName` and branch on `:` explicitly. Ensure the `raw` alternative is recognized at the same decision point so `<tag:text raw>...</tag>` parses as an `Element` anywhere an `Element` is allowed (including module root).
+  - Regenerate parser artifacts (`tree-sitter generate`) and run `cargo test -p nx-syntax`.
+  - Reintroduce a valid fixture for a module-root typed raw embed: `crates/nx-syntax/tests/fixtures/valid/raw-embed-root.nx` (e.g., `<style:text raw>raw</style:text>`), and add a targeted unit test for a nested typed raw embed via `parse_str`.
+  - Keep TextMate limitation documented (cannot fully suppress interpolation scopes inside raw regions without deeper restructuring). Adjust `src/vscode/test/grammar/raw-embed.test.ts` only to assert `raw` highlighting and basic scoping, not suppression.
+  - Sync `nx-grammar-spec.md` if the left-factoring shape differs, and keep `nx-grammar.md` consistent.
+
 ---
 
 ## Phase 4: User Story 2 - Check Types and Semantics (Priority: P1)

@@ -7,6 +7,7 @@
     { "include": "#comments" },
     { "include": "#value-definition" },
     { "include": "#module-root-element" },
+    { "include": "#embed-raw-block" },
     { "include": "#elements-if" },
     { "include": "#elements-for" },
     { "include": "#value-if" },
@@ -196,9 +197,25 @@
     },
     "tags": {
       "patterns": [
+        { "include": "#embed-raw-block" },
         { "include": "#fragment" },
         { "include": "#end-tag" },
         { "include": "#start-tag" }
+      ]
+    },
+    "embed-raw-block": {
+      "begin": "<([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*)\\s*:[A-Za-z_][A-Za-z0-9_-]*\\s+raw\b[^>]*>",
+      "beginCaptures": {
+        "0": { "name": "meta.tag.start.nx" }
+      },
+      "end": "</\\1>",
+      "endCaptures": {
+        "0": { "name": "meta.tag.end.nx" }
+      },
+      "name": "meta.embed.raw.nx",
+      "patterns": [
+        { "name": "meta.embed.raw.content.nx", "match": "[^<]+" },
+        { "include": "#comments" }
       ]
     },
     "fragment": {

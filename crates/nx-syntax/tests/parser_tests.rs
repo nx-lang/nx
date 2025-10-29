@@ -177,6 +177,8 @@ fn test_parse_all_valid_fixtures() {
     }
 }
 
+// (reserved) typed raw embed tests to be added after parser accepts typed raw embeds
+
 // ============================================================================
 // Syntax Error Tests (T051)
 // ============================================================================

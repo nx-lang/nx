@@ -156,6 +156,8 @@ bool tree_sitter_nx_external_scanner_scan(void *payload, TSLexer *lexer, const b
   // Note: We do NOT skip leading whitespace here because whitespace is significant
   // in text content. The grammar handles whitespace in the "extras" section.
 
+  // No special handling for raw text here; raw content is handled by a regex token in the grammar.
+
   // Check for escaped braces first (highest priority)
   if (lexer->lookahead == '\\') {
     lexer->advance(lexer, false);
