@@ -77,12 +77,12 @@ let <TodoFilters
   current:string
 /> =
   <div class="filters">
-    {for filter in statusTypes {
+    for filter in statusTypes {
       <button
         class={filter == current ? "active" : ""}
         dataFilter={filter}
       >
         {filter}
       </button>
-    }}
+    }
   </div>

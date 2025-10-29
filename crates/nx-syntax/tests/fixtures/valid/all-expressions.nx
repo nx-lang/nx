@@ -88,22 +88,24 @@ let <IfNested x:int /> = {if x > 0 { if x > 10 { 2 } else { 1 } } else { 0 }}
 
 // === If Expressions (Condition List) ===
 
-let <IfConditionList x:int /> = {if {
-  x > 100: 3
-  x > 10: 2
-  x > 0: 1
-  else: 0
-}}
+let <IfConditionList x:int /> = {
+  if {
+    x > 100: 3
+    x > 10: 2
+    x > 0: 1
+    else: 0
+  }
+}
 
 // === If Expressions (Match) ===
 
-let <IfMatch x:int /> = {if x is {
-  0: "zero"
-  1: "one"
-  else: "other"
-}}
-
-
+let <IfMatch x:int /> = {
+  if x is {
+    0: "zero"
+    1: "one"
+    else: "other"
+  }
+}
 
 // === For Expressions ===
 // Note:Array types (int[]) have grammar parsing issues, using object for now
