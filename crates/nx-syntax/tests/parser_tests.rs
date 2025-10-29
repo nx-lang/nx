@@ -743,16 +743,15 @@ fn test_if_expressions_match() {
         result.errors
     );
 
-    // Without scrutinee
+    // Without scrutinee should now be an error
     let source = r#"let <Test /> = {if is {
   true: "yes"
   false: "no"
 }}"#;
     let result = parse_str(source, "test.nx");
     assert!(
-        result.is_ok(),
-        "Match if expression without scrutinee should parse. Errors: {:?}",
-        result.errors
+        !result.is_ok(),
+        "Match if expression without scrutinee should now fail to parse"
     );
 }
 

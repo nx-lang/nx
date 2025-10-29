@@ -103,10 +103,7 @@ let <IfMatch x:int /> = {if x is {
   else: "other"
 }}
 
-let <IfMatchNoScrutinee /> = {if is {
-  true: "yes"
-  false: "no"
-}}
+
 
 // === For Expressions ===
 // Note:Array types (int[]) have grammar parsing issues, using object for now

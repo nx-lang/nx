@@ -106,13 +106,13 @@ ValueIfSimpleExpression ::=
     "if" ValueExpression "{" ValueExpression "}" ["else" "{" ValueExpression "}"]
 
 ValueIfMatchExpression ::=
-    "if" [ValueExpression] "is" "{"
+    "if" ValueExpression "is" "{"
     {Pattern {"," Pattern} ":" ValueExpression}
     ["else" ":" ValueExpression]
     "}"
 
 ValueIfConditionListExpression ::=
-    "if" [ValueExpression] "{"
+    "if" "{"
     {ValueExpression ":" ValueExpression}
     ["else" ":" ValueExpression]
     "}"
@@ -160,13 +160,13 @@ ElementsIfSimpleExpression ::=
     "if" ValueExpression "{" ElementsExpression "}" ["else" "{" ElementsExpression "}"]
 
 ElementsIfMatchExpression ::=
-    "if" [ValueExpression] "is" "{"
+    "if" ValueExpression "is" "{"
     {Pattern {"," Pattern} ":" ElementsExpression}
     ["else" ":" ElementsExpression]
     "}"
 
 ElementsIfConditionListExpression ::=
-    "if" [ValueExpression] "{"
+    "if" "{"
     {ValueExpression ":" ElementsExpression}
     ["else" ":" ElementsExpression]
     "}"
@@ -197,13 +197,13 @@ PropertyListIfSimple ::=
     "if" ValueExpression "{" PropertyList "}" ["else" "{" PropertyList "}"]
 
 PropertyListIfMatch ::=
-    "if" [ValueExpression] "is" "{"
+    "if" ValueExpression "is" "{"
     {Pattern {"," Pattern} ":" PropertyList}
     ["else" ":" PropertyList]
     "}"
 
 PropertyListIfConditionList ::=
-    "if" [ValueExpression] "{"
+    "if" "{"
     {ValueExpression ":" PropertyList}
     ["else" ":" PropertyList]
     "}"

@@ -296,7 +296,7 @@ module.exports = grammar({
 
     value_if_match_expression: $ => seq(
       'if',
-      optional(field('scrutinee', $.value_expression)),
+      field('scrutinee', $.value_expression),
       'is',
       '{',
       repeat1($.value_if_match_arm),
@@ -317,7 +317,6 @@ module.exports = grammar({
 
     value_if_condition_list_expression: $ => seq(
       'if',
-      optional(field('scrutinee', $.value_expression)),
       '{',
       repeat1($.value_if_condition_arm),
       optional(seq(
@@ -375,7 +374,7 @@ module.exports = grammar({
 
     elements_if_match_expression: $ => seq(
       'if',
-      optional(field('scrutinee', $.value_expression)),
+      field('scrutinee', $.value_expression),
       'is',
       '{',
       repeat1($.elements_if_match_arm),
@@ -396,7 +395,6 @@ module.exports = grammar({
 
     elements_if_condition_list_expression: $ => seq(
       'if',
-      optional(field('scrutinee', $.value_expression)),
       '{',
       repeat1($.elements_if_condition_arm),
       optional(seq(
@@ -497,7 +495,7 @@ module.exports = grammar({
 
     property_list_if_match_expression: $ => seq(
       'if',
-      optional(field('scrutinee', $.value_expression)),
+      field('scrutinee', $.value_expression),
       'is',
       '{',
       repeat1($.property_list_if_match_arm),
@@ -518,7 +516,6 @@ module.exports = grammar({
 
     property_list_if_condition_list_expression: $ => seq(
       'if',
-      optional(field('scrutinee', $.value_expression)),
       '{',
       repeat1($.property_list_if_condition_arm),
       optional(seq(
