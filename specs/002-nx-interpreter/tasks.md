@@ -176,28 +176,28 @@ Can run in parallel after T044-T046 complete.
 
 #### Error Infrastructure
 
-- [ ] T026 [US4] Implement RuntimeError::new() and builder methods (with_call_stack, with_location) in crates/nx-interpreter/src/error.rs
-- [ ] T027 [US4] Implement RuntimeError::format() using Ariadne for beautiful error output with source context
+- [X] T026 [US4] Implement RuntimeError::new() and builder methods (with_call_stack, with_location) in crates/nx-interpreter/src/error.rs
+- [X] T027 [US4] Implement RuntimeError::format() using Ariadne for beautiful error output with source context
 
 #### Error Detection - Arithmetic
 
-- [ ] T028 [P] [US4] Add division by zero check in crates/nx-interpreter/src/eval/arithmetic.rs, return RuntimeErrorKind::DivisionByZero
-- [ ] T029 [P] [US4] Add null operation check in arithmetic eval: return RuntimeErrorKind::NullOperation if operand is Value::Null
-- [ ] T030 [P] [US4] Add type mismatch detection for arithmetic ops: verify operands are Int or Float
+- [X] T028 [P] [US4] Add division by zero check in crates/nx-interpreter/src/eval/arithmetic.rs, return RuntimeErrorKind::DivisionByZero
+- [X] T029 [P] [US4] Add null operation check in arithmetic eval: return RuntimeErrorKind::NullOperation if operand is Value::Null
+- [X] T030 [P] [US4] Add type mismatch detection for arithmetic ops: verify operands are Int or Float
 
 #### Error Detection - Variables & Functions
 
-- [ ] T031 [P] [US4] Implement undefined variable error in ExecutionContext::lookup_variable(): return RuntimeErrorKind::UndefinedVariable
-- [ ] T032 [P] [US4] Implement parameter count validation in execute_function(): return RuntimeErrorKind::ParameterCountMismatch
-- [ ] T033 [P] [US4] Implement function not found error in execute_function(): return RuntimeErrorKind::FunctionNotFound
+- [X] T031 [P] [US4] Implement undefined variable error in ExecutionContext::lookup_variable(): return RuntimeErrorKind::UndefinedVariable
+- [X] T032 [P] [US4] Implement parameter count validation in execute_function(): return RuntimeErrorKind::ParameterCountMismatch
+- [X] T033 [P] [US4] Implement function not found error in execute_function(): return RuntimeErrorKind::FunctionNotFound
 
 #### Error Detection - Resource Limits
 
-- [ ] T034 [P] [US4] Implement operation limit exceeded check in ExecutionContext::check_operation_limit(): return RuntimeErrorKind::OperationLimitExceeded
+- [X] T034 [P] [US4] Implement operation limit exceeded check in ExecutionContext::check_operation_limit(): return RuntimeErrorKind::OperationLimitExceeded
 
 #### Integration & Testing
 
-- [ ] T035 [US4] Create integration test crates/nx-interpreter/tests/integration/error_handling.rs with tests for all RuntimeErrorKind variants
+- [X] T035 [US4] Create integration test crates/nx-interpreter/tests/integration/error_handling.rs with tests for all RuntimeErrorKind variants
 
 **Acceptance Criteria**:
 - ✅ Division by zero produces clear error with source location

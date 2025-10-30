@@ -20,3 +20,4 @@ rustc-hash.workspace = true
 [dev-dependencies]
 insta.workspace = true
 nx-syntax = { path = "../nx-syntax" }
+ordered-float = "4"
