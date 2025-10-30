@@ -1,0 +1,44 @@
+// Sample survey markup showcasing 5 question types
+
+<Survey id="cust-sat-2025"
+        title="Customer Satisfaction Survey"
+        description="Help us improve by sharing your feedback.">
+
+  <Question id="q1" type="text" required=true>
+    <Label>What is your full name?</Label>
+    <TextInput placeholder="Your name" />
+  </Question>
+
+  <Question id="q2" type="singleChoice">
+    <Label>How did you hear about us?</Label>
+    <Options>
+      <Option value="social">Social media</Option>
+      <Option value="search">Search engine</Option>
+      <Option value="friend">Friend or family</Option>
+      <Option value="other">Other</Option>
+    </Options>
+  </Question>
+
+  <Question id="q3" type="multiChoice">
+    <Label>Which features do you use? (Select all that apply)</Label>
+    <Options>
+      <Option>Dashboards</Option>
+      <Option>Data exports</Option>
+      <Option>Alerts</Option>
+      <Option>API</Option>
+    </Options>
+  </Question>
+
+  <Question id="q4" type="rating" min=1 max=5>
+    <Label>Rate your overall satisfaction</Label>
+    <Rating scale=5 />
+  </Question>
+
+  <Question id="q5" type="date">
+    <Label>When did you start using the product?</Label>
+    <DateInput />
+  </Question>
+
+  <Submit label="Submit Survey" />
+
+</Survey>

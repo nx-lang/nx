@@ -1,0 +1,389 @@
+let Hive5Survey =
+  <Survey
+    title = "Hive5: 2-minute concept check"
+    description = <:>
+        We're exploring an easier way for neighbors to share tools & gear instead of everyone buying rarely used items. Your quick feedback helps us decide what to build next. Responses are anonymous unless you add email at the end.
+      </>
+    >
+
+    <MultipleChoice
+      title = "Have you ever borrowed or lent a tool or piece of equipment with a neighbor or friend?"
+      type = "multiple"
+      options = [
+        <>Yes, borrowed</>
+        <>Yes, lent</>
+        <>Both</>
+        <>No</>
+      ]
+    />
+
+    <MultipleChoice
+      title = "Have you ever borrowed or lent a tool or piece of equipment with a neighbor or friend?"
+      type = "multiple"
+      options = ["Yes, borrowed","Yes, lent", "Both", "No"]
+    />
+
+    <MultipleChoice
+      title = "Have you ever borrowed or lent a tool or piece of equipment with a neighbor or friend?"
+      options = {
+        <Option "Yes, borrowed"/>
+        <Option "Yes, lent"/>
+        if allowBoth {
+          <Option "Both"/>
+        }
+        <Option "No"/>
+      }
+    />
+
+    <MultipleChoice
+      title = "Have you ever borrowed or lent a tool or piece of equipment with a neighbor or friend?"
+      options = [
+        <Option "Yes, borrowed"/>
+        <Option "Yes, lent"/>
+        if allowBoth [
+          <Option "Both"/>
+        ]
+        <Option "No"/>
+      ]
+    />
+
+    <MultipleChoice
+      title = "Have you ever borrowed or lent a tool or piece of equipment with a neighbor or friend?"
+      options = [
+        <Option "Yes, borrowed"/>
+        <Option "Yes, lent"/>
+        if allowBoth { <Option "Both"/> }
+        <Option "No"/>
+      ]
+    />
+
+    <MultipleChoice
+      title = "Have you ever borrowed or lent a tool or piece of equipment with a neighbor or friend?"
+      options = [
+        <Option "Yes, borrowed"/>
+        <Option "Yes, lent"/>
+        if allowBoth { <Option "Both"/> }
+        <Option "No"/>
+      ]
+    />
+
+    <MultipleChoice
+      title = "Have you ever borrowed or lent a tool or piece of equipment with a neighbor or friend?"
+      options = [
+        <Option "Yes, borrowed"/>
+        <Option "Yes, lent"/>
+        if allowBoth {
+          <Option "Both"/>
+        }
+        <Option "No"/>
+      ]
+    />
+
+    <MultipleChoice
+      title = "Have you ever borrowed or lent a tool or piece of equipment with a neighbor or friend?"
+      options = [
+        <Option "Yes, borrowed"/>
+        <Option "Yes, lent"/>
+        if allowBoth {
+          <Option "Both"/>
+        }
+        <Option "No"/>
+      ]
+    />
+
+
+    <MultipleChoice
+      title = "Have you ever borrowed or lent a tool or piece of equipment with a neighbor or friend?"
+      options = [
+        <Option "Yes, borrowed"/>
+        <Option "Yes, lent"/>
+        if allowBoth {
+          <Option "Both"/>
+        }
+        <Option "No"/>
+      ]
+    />
+
+    <MultipleChoice
+      title = "Have you ever borrowed or lent a tool or piece of equipment with a neighbor or friend?"
+      options = {
+        <Option "Yes, borrowed"/>
+        <Option "Yes, lent"/>
+        if allowBoth {
+          <Option "Both"/>
+        }
+        <Option "No"/>
+      }
+    />
+
+
+    let myOptions = {
+      <Option "Yes, borrowed"/>
+      <Option "Yes, lent"/>
+      if allowBoth {
+        <Option "Both"/>
+      }
+      <Option "No"/>
+    }
+
+
+    let myOptions = {
+      <Option "Yes, borrowed"/>
+      <Option "Yes, lent"/>
+      if allowBoth {
+        <Option "Both"/>
+      }
+      <Option "No"/>
+    ]
+
+
+    let myOptions:Option[] = {
+      <Option "Yes, borrowed"/>
+      <Option "Yes, lent"/>
+      if allowBoth {
+        <Option "Both"/>
+      }
+      else {
+        <Option "Neither"/>
+      }
+
+      if allowBoth {
+        <Option "Both"/>
+      }
+      else {
+        <Option "Neither"/>
+      }
+
+      if {
+        allowBoth:
+          <Option "Both"/>
+        else:
+          <Option "Neither"/>
+      }
+
+      if { condition: optionA else: optionB }
+
+      if allowBoth {
+        <Option "Both"/>
+      } else {
+        <Option "Neither"/>
+      }
+
+      if {
+        allowBoth:  <Option "Both"/>
+        !allowBoth: <Option "Neither"/>
+        else:       <Option "Neither"/>
+      }
+
+      if value is {
+        1:     <Option "Both"/>
+        2:     <Option "Neither"/>
+        else:  <Option "Neither"/>
+      }
+
+      if {allowBoth: <Option "Both"/>  else: <Option "Neither"/>}
+
+      match allowBoth {
+        true:  <Option "Both"/>
+        false: <Option "Neither"/>
+      }
+
+      if allowBoth {<Option "Both"/>} else {<Option "Neither"/>}
+
+      allowBoth ? {<Option "Both"/>} : {<Option "Neither"/>}
+
+      if allowBoth { <Option "Both"/> }
+      else:         {<Option "Neither"/>}
+
+
+      match allowBoth {
+        true:  <Option "Both"/>
+        false: <Option "Neither"/>
+      }
+
+      <Option "No"/>
+    }
+
+    let <myOptions allowBoth:boolean = false/> =
+      <Option "Yes, borrowed"/>
+
+    let <myOptions allowBoth:boolean = false/> = <:>
+      <Option "Yes, borrowed"/>
+      <Option "Yes, lent"/>
+      if allowBoth {
+        <Option "Both"/>
+      }
+      <Option "No"/>
+    </>
+
+
+    let myOptions = {
+      <Option "Yes, borrowed"/>
+      <Option "Yes, lent"/>
+      if allowBoth {
+        <Option "Both"/>
+      }
+      <Option "No"/>
+    ]
+
+    let myOptions = [
+      <Option "Yes, borrowed"/>
+      <Option "Yes, lent"/>
+      if allowBoth {
+        <Option "Both"/>
+      }
+      <Option "No"/>
+    ]
+
+
+    let myOptions = <>
+      <Option "Yes, borrowed"/>
+      <Option "Yes, lent"/>
+      if allowBoth {
+        <Option "Both"/>
+      }
+      <Option "No"/>
+    </>
+
+
+    <MultipleChoice
+      title = "Have you ever borrowed or lent a tool or piece of equipment with a neighbor or friend?"
+      options = [
+        <Option "Yes, borrowed"/>
+        <Option "Yes, lent"/>
+        if allowBoth {
+          <Option "Both"/>
+          <Option "No"/>
+        }
+      ]
+    />
+
+
+    <MultipleChoice
+      title = "Have you ever borrowed or lent a tool or piece of equipment with a neighbor or friend?"
+      options = {
+        <Option "Yes, borrowed"/>
+        <Option "Yes, lent"/>
+        if allowBoth {
+          <Option "Both"/>
+        }
+        <Option "No"/>
+      }
+    />
+
+
+
+    <MultipleChoice
+      title = "Have you ever borrowed or lent a tool or piece of equipment with a neighbor or friend?"
+      if allowAutomation {
+        id = "this"
+        type = "multiple"
+      }
+      options = {
+        <Option "Yes, borrowed"/>
+        <Option "Yes, lent"/>
+        if allowBoth {
+          <Option "Both"/>
+        }
+        <Option "No"/>
+      }
+    />
+
+    <MultipleChoice
+      title = "Have you ever borrowed or lent a tool or piece of equipment with a neighbor or friend?"
+      type = "multiple"
+      options = [
+        <Option>Yes, borrowed</Option>
+        <Option>Yes, lent</Option>
+        <Option>Both</Option>
+        <Option>No</Option>
+      ]
+    />
+
+    <MultipleChoice
+      title = "Have you ever borrowed or lent a tool or piece of equipment with a neighbor or friend?"
+      type = "multiple"
+      options = <>
+        <>Yes, borrowed</>
+        <>Yes, lent</>
+        <>Both</>
+        <>No</>
+      </>
+    />
+
+    <MultipleChoice
+      title = "Have you ever borrowed or lent a tool or piece of equipment with a neighbor or friend?"
+      type = "multiple"
+      options = [
+        <:>Yes, borrowed</>
+        <:>Yes, lent</>
+        <:>Both</>
+        <:>No</>
+      ]
+    />
+
+
+/title Hive5: 2-minute concept check
+/paragraph We’re exploring an easier way for neighbors to share tools & gear instead of everyone buying rarely used items. Your quick feedback helps us decide what to build next. Responses are anonymous unless you add email at the end.
+
+/title Have you ever borrowed or lent a tool or piece of equipment with a neighbor or friend?
+/multiple
+- Yes, borrowed
+- Yes, lent
+- Both
+- No
+
+/title What kinds of things would you consider sharing (or borrowing)?
+/multi-select
+- Yard tools (mowers, trimmers, blowers)
+- Power tools (drills, saws, sanders)
+- Outdoor / event gear (tents, tables, coolers)
+- Sports or hobby gear (bikes, kayaks, cameras)
+- Something else — add below
+/long Optional: What else would you share?
+
+/title If there were an easy app to find and borrow items nearby, how interested would you be?
+/multiple
+- Very interested
+- Somewhat interested
+- Neutral
+- Not really interested
+- Not at all interested
+
+/title What would make you hesitate to use it?
+/multi-select
+- Trust or safety concerns
+- Worry about damage or theft
+- Too much hassle
+- Don’t think neighbors would participate
+- Other — add below
+/short Optional: Other hesitation
+
+/title If Hive5 helped you save money and reduce clutter, how valuable would that be to you?
+/multiple
+- Extremely valuable
+- Somewhat valuable
+- Neutral
+- Not valuable
+
+/title If Hive5 offered optional per-rental insurance, would that make you more likely to use it?
+/multiple
+- Yes
+- Maybe
+- No
+
+/title Would you like an invite when a local beta launches?
+/multiple
+- Yes, I’d like early access
+- Maybe — tell me more first
+- No thanks
+
+/title What’s your ZIP code?
+/short
+/title Your email (optional, for invite)
+/email
+
+/logic If [Would you like an invite…] is [Yes, I’d like early access] or [Maybe — tell me more first] THEN [Show blocks: ZIP + Email]
+/logic If [Would you like an invite…] is [No thanks] THEN [Hide blocks: ZIP + Email]
+
+/thankyou Thanks! Want updates? Follow our progress and early launch notes at hive5app.com
