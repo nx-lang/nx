@@ -6,6 +6,7 @@ members = [
     "crates/nx-hir",
     "crates/nx-types",
     "crates/nx-cli",
+    "crates/nx-interpreter",
 ]
 
 [workspace.package]
