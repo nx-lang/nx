@@ -112,6 +112,20 @@ impl Interpreter {
                 ..
             } => self.eval_if(module, ctx, *condition, *then_branch, *else_branch),
             ast::Expr::Call { func, args, .. } => self.eval_call(module, ctx, *func, args),
+            ast::Expr::For {
+                item,
+                index,
+                iterable,
+                body,
+                ..
+            } => self.eval_for(module, ctx, item, index.as_ref(), *iterable, *body),
+            ast::Expr::Array { elements, .. } => {
+                let mut values = Vec::with_capacity(elements.len());
+                for elem_expr in elements {
+                    values.push(self.eval_expr(module, ctx, *elem_expr)?);
+                }
+                Ok(Value::Array(values))
+            }
             _ => {
                 // Other expression types not yet implemented
                 Ok(Value::Null)
@@ -342,6 +356,59 @@ impl Interpreter {
         ctx.pop_call_frame();
 
         result
+    }
+
+    /// Evaluate a for loop expression
+    fn eval_for(
+        &self,
+        module: &Module,
+        ctx: &mut ExecutionContext,
+        item: &Name,
+        index: Option<&Name>,
+        iterable_expr: ExprId,
+        body_expr: ExprId,
+    ) -> Result<Value, RuntimeError> {
+        // Evaluate the iterable expression
+        let iterable_value = self.eval_expr(module, ctx, iterable_expr)?;
+
+        // Extract array elements
+        let elements = match iterable_value {
+            Value::Array(ref arr) => arr.clone(),
+            _ => {
+                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                    expected: "array".to_string(),
+                    actual: iterable_value.type_name().to_string(),
+                    operation: "for loop iteration".to_string(),
+                }))
+            }
+        };
+
+        // Collect results from each iteration
+        let mut results = Vec::with_capacity(elements.len());
+
+        // Iterate over elements
+        for (idx, element) in elements.iter().enumerate() {
+            // Create new scope for loop variables
+            ctx.push_scope();
+
+            // Bind item variable
+            ctx.define_variable(SmolStr::new(item.as_str()), element.clone());
+
+            // Bind index variable if present
+            if let Some(index_name) = index {
+                ctx.define_variable(SmolStr::new(index_name.as_str()), Value::Int(idx as i64));
+            }
+
+            // Evaluate body
+            let result = self.eval_expr(module, ctx, body_expr)?;
+            results.push(result);
+
+            // Pop scope
+            ctx.pop_scope();
+        }
+
+        // Return array of results
+        Ok(Value::Array(results))
     }
 }
 

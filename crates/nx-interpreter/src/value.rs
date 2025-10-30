@@ -15,6 +15,8 @@ pub enum Value {
     Boolean(bool),
     /// Null/undefined value
     Null,
+    /// Array of values
+    Array(Vec<Value>),
 }
 
 impl Value {
@@ -48,6 +50,11 @@ impl Value {
         matches!(self, Value::Boolean(_))
     }
 
+    /// Check if the value is an array
+    pub fn is_array(&self) -> bool {
+        matches!(self, Value::Array(_))
+    }
+
     /// Get the type name as a string
     pub fn type_name(&self) -> &'static str {
         match self {
@@ -56,6 +63,7 @@ impl Value {
             Value::String(_) => "string",
             Value::Boolean(_) => "boolean",
             Value::Null => "null",
+            Value::Array(_) => "array",
         }
     }
 }
@@ -68,6 +76,16 @@ impl std::fmt::Display for Value {
             Value::String(s) => write!(f, "{}", s),
             Value::Boolean(b) => write!(f, "{}", b),
             Value::Null => write!(f, "null"),
+            Value::Array(elements) => {
+                write!(f, "[")?;
+                for (i, elem) in elements.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", elem)?;
+                }
+                write!(f, "]")
+            }
         }
     }
 }
