@@ -13,6 +13,7 @@ nx-diagnostics = { path = "../nx-diagnostics" }
 smol_str.workspace = true
 la-arena.workspace = true
 salsa.workspace = true
+rustc-hash.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

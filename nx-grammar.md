@@ -4,18 +4,23 @@ This document defines the grammar for the NX markup language using Extended Back
 It's intended to be readable, human friendly. For a machine readable version used for AI code
 generation, see [nx-grammar-spec.md](nx-grammar-spec.md).
 
+Note: The postfix "+" meta-operator denotes one-or-more repetitions.
+Notation: "{…}" means zero-or-more, "[…]" means optional, and "(…)" denotes grouping.
+
 <a id="module-definition"></a>
 ## Module Definition
 
 ```ebnf
 ModuleDefinition ::=
     {ImportStatement}
-        ( {TypeDefinition} {FunctionDefinition} )
-        | Element
+    { TypeDefinition | ValueDefinition | FunctionDefinition }
+    [Element]
 
 ImportStatement ::=
     "import" QualifiedName
 ```
+
+A module can mix any number of definitions with an optional trailing root `Element`, which is present when the module defines rendered markup alongside its declarations.
 
 <a id="types"></a>
 ## Types
@@ -42,8 +47,17 @@ PrimitiveType ::=
 UserDefinedType ::=
     QualifiedName
 ```
-<a id="function-definition"></a>
-## Function Definition
+
+<a id="values"></a>
+## Values
+
+```ebnf
+ValueDefinition ::=
+    "let" Identifier [":" TypeDeclaration] "=" RhsExpression
+```
+
+<a id="functions"></a>
+## Functions
 
 ```ebnf
 FunctionDefinition ::=
@@ -57,7 +71,7 @@ PropertyDefinition ::=
 ## Expressions
 
 ```ebnf
-(* Right-hand side of a property/let definition, after "-" *)
+(* Right-hand side of a property/let definition, after "=" *)
 RhsExpression ::=
     Element
     | Literal
@@ -95,29 +109,32 @@ ValueIfSimpleExpression ::=
     "if" ValueExpression "{" ValueExpression "}" ["else" "{" ValueExpression "}"]
 
 ValueIfMatchExpression ::=
-    "if" [ValueExpression] "is" "{"
-    {Pattern {"," Pattern} ":" ValueExpression}
+    "if" ValueExpression "is" "{"
+    ( Pattern {"," Pattern} ":" ValueExpression )+
     ["else" ":" ValueExpression]
     "}"
 
 ValueIfConditionListExpression ::=
-    "if" [ValueExpression] "{"
-    {ValueExpression ":" ValueExpression}
+    "if" "{"
+    ( ValueExpression ":" ValueExpression )+
     ["else" ":" ValueExpression]
     "}"
 
 ValueForExpression ::=
-    "for" {Identifier} "in" ValueExpression "{" ValueExpression "}"
+    "for" Identifier "in" ValueExpression "{" ValueExpression "}"
     | "for" Identifier "," Identifier "in" ValueExpression "{" ValueExpression "}"  (* With index *)
 
 PrefixUnaryExpression ::=
     "-" ValueExpression
 BinaryExpression ::=
-    ValueExpression ("+" | "-" | "*" | "/" | ">" | "<" | ">=" | "<=" | "==" | "!=" | "&&" | "||") ValueExpression
+    ValueExpression ( "+" | "-" | "*" | "/" | ">" | "<" | ">=" | "<=" | "==" | "!=" | "&&" | "||" ) ValueExpression
 MemberAccess ::=
     ValueExpression "." Identifier
 FunctionCall ::=
-    ValueExpression "(" {ValueExpression} ")"
+    ValueExpression "(" [ ValueExpression { "," ValueExpression } ] ")"
+
+Pattern ::=
+    Literal | QualifiedName
 
 Unit ::=
     "()"
@@ -138,7 +155,7 @@ Literal ::=
 ```ebnf
 (* list of elements, with if/for allowed *)
 ElementsExpression ::=
-    (Element | ElementsIfExpression | ElementsForExpression)+
+    ( Element | ElementsIfExpression | ElementsForExpression )+
 
 ElementsIfExpression ::=
     ElementsIfSimpleExpression
@@ -149,19 +166,19 @@ ElementsIfSimpleExpression ::=
     "if" ValueExpression "{" ElementsExpression "}" ["else" "{" ElementsExpression "}"]
 
 ElementsIfMatchExpression ::=
-    "if" [ValueExpression] "is" "{"
-    {Pattern {"," Pattern} ":" ElementsExpression}
+    "if" ValueExpression "is" "{"
+    ( Pattern {"," Pattern} ":" ElementsExpression )+
     ["else" ":" ElementsExpression]
     "}"
 
 ElementsIfConditionListExpression ::=
-    "if" [ValueExpression] "{"
-    {ValueExpression ":" ElementsExpression}
+    "if" "{"
+    ( ValueExpression ":" ElementsExpression )+
     ["else" ":" ElementsExpression]
     "}"
 
 ElementsForExpression ::=
-    "for" {Identifier} "in" ValueExpression "{" ElementsExpression "}"
+    "for" Identifier "in" ValueExpression "{" ElementsExpression "}"
     | "for" Identifier "," Identifier "in" ValueExpression "{" ElementsExpression "}"  (* With index *)
 
 Element ::=
@@ -186,14 +203,14 @@ PropertyListIfSimple ::=
     "if" ValueExpression "{" PropertyList "}" ["else" "{" PropertyList "}"]
 
 PropertyListIfMatch ::=
-    "if" [ValueExpression] "is" "{"
-    {Pattern {"," Pattern} ":" PropertyList}
+    "if" ValueExpression "is" "{"
+    ( Pattern {"," Pattern} ":" PropertyList )+
     ["else" ":" PropertyList]
     "}"
 
 PropertyListIfConditionList ::=
-    "if" [ValueExpression] "{"
-    {ValueExpression ":" PropertyList}
+    "if" "{"
+    ( ValueExpression ":" PropertyList )+
     ["else" ":" PropertyList]
     "}"
 
@@ -202,7 +219,7 @@ Content ::=
     MixedContentExpression   (* text with optional embedded elements and interpolations; no if/for allowed except inside interpolated expressions *)
 
 MixedContentExpression ::=
-    { TextPart | Element | InterpolationExpression }
+    ( TextRun | Element | InterpolationExpression )+
 
 EmbedTextType ::=
     Identifier
@@ -214,10 +231,10 @@ PropertyValue ::=
     QualifiedMarkupName "=" RhsExpression
 
 EmbedContent ::=
-    { TextRun | InterpolationExpression }
+    ( TextRun | InterpolationExpression )+
 
 RawEmbedContent ::=
-    TextRun
+    RawTextRun
 ```
 
 <a id="lexical-structure"></a>
@@ -250,9 +267,9 @@ HtmlBlockChar        ::= ? any character including newline, except "<!--" and "-
    string literals or textual content (e.g., TextRun/Embed text). *)
 
 Identifier  ::=
-    (Letter | "_") { Letter | Digit | "_" }
+    ( Letter | "_" ) { Letter | Digit | "_" }
 MarkupIdentifier  ::=
-    (Letter | "_") { Letter | Digit | "_" | "-" }
+    ( Letter | "_" ) { Letter | Digit | "_" | "-" }
 
 QualifiedName  ::=
     Identifier { "." Identifier }
@@ -290,10 +307,10 @@ RealLiteral      ::=
     DigitsUnderscore "." DigitsUnderscore [ExponentPart]
     | DigitsUnderscore ExponentPart
 ExponentPart     ::=
-    ("e" | "E") ["+" | "-"] DigitsUnderscore
+    ( "e" | "E" ) [ "+" | "-" ] DigitsUnderscore
 
 HexLiteral       ::=
-    ("0x" | "0X") HexDigitsUnderscore
+    ( "0x" | "0X" ) HexDigitsUnderscore
 HexDigitsUnderscore  ::=
     HexDigit { ["_"] HexDigit }
 
@@ -302,10 +319,15 @@ BooleanLiteral  ::=
 NullLiteral     ::=
     "null"
 
-TextRun          ::= { TextChar | Entity | EscapedBrace }
+TextRun          ::= ( TextChar | Entity | EscapedBrace )+
 TextChar         ::=
     ? any character except "<", "&", and "{" ?
 
+RawTextRun          ::= ( RawTextChar )+
+RawTextChar         ::=
+     ? any character other than '<'; the sequence '</' terminates the run ?
+
 EscapedBrace     ::=
-    "{{" | "}}"
+    "\{" | "\}"
+? Only "\{" and "\}" sequences are treated as escapes; all other backslashes remain literal. ?
 ```

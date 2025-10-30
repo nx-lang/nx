@@ -55,10 +55,11 @@ Literals
  - AMP_AMP (&&), PIPE_PIPE (||)
 
 Text content tokens (inside text elements)
-- TEXT_CHUNK (sequence of text chars excluding '<', '&', '{')
+- TEXT_CHUNK (sequence of text chars excluding '<', '&', '{'; backslashes are literal unless part of an escaped brace)
 - ENTITY (named or numeric entity; e.g., &amp; &#10;)
-- ESCAPED_LBRACE ("{{")
-- ESCAPED_RBRACE ("}}")
+- ESCAPED_LBRACE (`"\{"`)
+- ESCAPED_RBRACE (`"\}"`)
+- Only `"\{"` and `"\}"` sequences are treated as escapes; any other backslash-prefixed sequences remain literal text.
 
 Special
 - EOF (end of file)
@@ -74,6 +75,9 @@ Notes
 - Comments and whitespace may appear between any tokens.
 - Block comments are nestable with same-kind openers only. The lexer maintains a depth counter: increment on opener, decrement on closer, emit one token at depth 0. Unterminated blocks are lexing errors.
 - Comments are not recognized inside string literals or text content tokens (TEXT_CHUNK/ENTITY/ESCAPED_*).
+
+Raw embed tokens
+- RAW_TEXT_CHUNK — produced only inside raw embed content; scanners treat '{', '}', '&' as ordinary characters.
 
 ## Operator Precedence (Pratt)
 
@@ -122,9 +126,13 @@ Grouping
 Nonterminals are CamelCase. Terminals are UPPER_SNAKE tokens.
 
 ModuleDefinition (AST: ModuleDefinitionSyntax)
-- ModuleDefinition → ImportStatement* (TypeDefinition* FunctionDefinition* | Element) EOF
-  - fields: imports: ImportStatementSyntax[], types: TypeDefinitionSyntax[], functions: FunctionDefinitionSyntax[], moduleElement?: MarkupElementSyntax
-    (either types/functions or moduleElement is present, not both)
+- ModuleDefinition → ImportStatement* ModuleMember* Element? EOF
+  - fields: imports: ImportStatementSyntax[], members: ModuleMemberSyntax[], moduleElement?: MarkupElementSyntax
+
+ModuleMember (AST: ModuleMemberSyntax is a sum type)
+- ModuleMember → TypeDefinition
+- ModuleMember → ValueDefinition
+- ModuleMember → FunctionDefinition
 
 ImportStatement (AST: ImportStatementSyntax)
 - ImportStatement → IMPORT QualifiedName
@@ -133,6 +141,14 @@ ImportStatement (AST: ImportStatementSyntax)
 TypeDefinition (AST: TypeDefinitionSyntax)
 - TypeDefinition → TYPE IDENTIFIER EQ Type
   - fields: name: string, type: TypeSyntax
+
+ValueDefinition (AST: ValueDefinitionSyntax)
+- ValueDefinition → LET IDENTIFIER ValueDefinitionTypeOpt EQ RhsExpression
+  - fields: name: string, type?: TypeSyntax, value: ExpressionSyntax
+
+ValueDefinitionTypeOpt
+- ValueDefinitionTypeOpt → COLON Type
+- ValueDefinitionTypeOpt → ε
 
 Type (AST: TypeSyntax)
 - Type → PrimitiveType TypeOptModifier
@@ -212,13 +228,8 @@ ValueIfElseClauseOpt
   - fields (on ValueIfSimpleExpressionSyntax): elseExpr?: ExpressionSyntax
 
 ValueIfMatchExpression (AST: ValueIfMatchExpressionSyntax)
-- ValueIfMatchExpression → IF ValueIfMatchScrutineeOpt IS LBRACE ValueIfMatchArm+ ValueIfMatchElseOpt RBRACE
-  - fields: scrutinee?: ExpressionSyntax, arms: ValueIfMatchArmSyntax[], elseExpr?: ExpressionSyntax
-
-ValueIfMatchScrutineeOpt
-- ValueIfMatchScrutineeOpt → ValueExpression
-- ValueIfMatchScrutineeOpt → ε        (selected when next token is IS)
-  - fields (on ValueIfMatchExpressionSyntax): scrutinee?: ExpressionSyntax
+- ValueIfMatchExpression → IF ValueExpression IS LBRACE ValueIfMatchArm+ ValueIfMatchElseOpt RBRACE
+  - fields: scrutinee: ExpressionSyntax, arms: ValueIfMatchArmSyntax[], elseExpr?: ExpressionSyntax
 
 ValueIfMatchArm (AST: ValueIfMatchArmSyntax)
 - ValueIfMatchArm → Pattern (COMMA Pattern)* COLON ValueExpression
@@ -230,13 +241,8 @@ ValueIfMatchElseOpt
   - fields (on ValueIfMatchExpressionSyntax): elseExpr?: ExpressionSyntax
 
 ValueIfConditionListExpression (AST: ValueIfConditionListExpressionSyntax)
-- ValueIfConditionListExpression → IF ValueIfConditionScrutineeOpt LBRACE ValueIfConditionArm+ ValueIfConditionElseOpt RBRACE
-  - fields: scrutinee?: ExpressionSyntax, arms: ValueIfConditionArmSyntax[], elseExpr?: ExpressionSyntax
-
-ValueIfConditionScrutineeOpt
-- ValueIfConditionScrutineeOpt → ValueExpression
-- ValueIfConditionScrutineeOpt → ε        (selected when next token starts a condition arm)
-  - fields (on ValueIfConditionListExpressionSyntax): scrutinee?: ExpressionSyntax
+- ValueIfConditionListExpression → IF LBRACE ValueIfConditionArm+ ValueIfConditionElseOpt RBRACE
+  - fields: arms: ValueIfConditionArmSyntax[], elseExpr?: ExpressionSyntax
 
 ValueIfConditionArm (AST: ValueIfConditionArmSyntax)
 - ValueIfConditionArm → ValueExpression COLON ValueExpression
@@ -278,13 +284,8 @@ ElementsIfElseClauseOpt
   - fields (on MarkupIfSimpleExpressionSyntax): elseElements?: MarkupListSyntax
 
 ElementsIfMatchExpression (AST: MarkupIfMatchExpressionSyntax)
-- ElementsIfMatchExpression → IF ElementsIfMatchScrutineeOpt IS LBRACE ElementsIfMatchArm+ ElementsIfMatchElseOpt RBRACE
-  - fields: scrutinee?: ExpressionSyntax, arms: MarkupIfMatchArmSyntax[], elseElements?: MarkupListSyntax
-
-ElementsIfMatchScrutineeOpt
-- ElementsIfMatchScrutineeOpt → ValueExpression
-- ElementsIfMatchScrutineeOpt → ε        (selected when next token is IS)
-  - fields (on MarkupIfMatchExpressionSyntax): scrutinee?: ExpressionSyntax
+- ElementsIfMatchExpression → IF ValueExpression IS LBRACE ElementsIfMatchArm+ ElementsIfMatchElseOpt RBRACE
+  - fields: scrutinee: ExpressionSyntax, arms: MarkupIfMatchArmSyntax[], elseElements?: MarkupListSyntax
 
 ElementsIfMatchArm (AST: MarkupIfMatchArmSyntax)
 - ElementsIfMatchArm → Pattern (COMMA Pattern)* COLON ElementsExpression
@@ -296,13 +297,8 @@ ElementsIfMatchElseOpt
   - fields (on MarkupIfMatchExpressionSyntax): elseElements?: MarkupListSyntax
 
 ElementsIfConditionListExpression (AST: MarkupIfConditionListExpressionSyntax)
-- ElementsIfConditionListExpression → IF ElementsIfConditionScrutineeOpt LBRACE ElementsIfConditionArm+ ElementsIfConditionElseOpt RBRACE
-  - fields: scrutinee?: ExpressionSyntax, arms: MarkupIfConditionArmSyntax[], elseElements?: MarkupListSyntax
-
-ElementsIfConditionScrutineeOpt
-- ElementsIfConditionScrutineeOpt → ValueExpression
-- ElementsIfConditionScrutineeOpt → ε        (selected when next token starts a condition arm)
-  - fields (on MarkupIfConditionListExpressionSyntax): scrutinee?: ExpressionSyntax
+- ElementsIfConditionListExpression → IF LBRACE ElementsIfConditionArm+ ElementsIfConditionElseOpt RBRACE
+  - fields: arms: MarkupIfConditionArmSyntax[], elseElements?: MarkupListSyntax
 
 ElementsIfConditionArm (AST: MarkupIfConditionArmSyntax)
 - ElementsIfConditionArm → ValueExpression COLON ElementsExpression
@@ -369,12 +365,8 @@ PropertyListIfElseClauseOpt
 - PropertyListIfElseClauseOpt → ε
 
 PropertyListIfMatchExpression (AST: PropertyIfMatchSyntax)
-- PropertyListIfMatchExpression → IF PropertyListIfMatchScrutineeOpt IS LBRACE PropertyListIfMatchArm+ PropertyListIfMatchElseOpt RBRACE
-  - fields: scrutinee?: ExpressionSyntax, arms: PropertyIfMatchArmSyntax[], elseProps?: PropertyListSyntax
-
-PropertyListIfMatchScrutineeOpt
-- PropertyListIfMatchScrutineeOpt → ValueExpression
-- PropertyListIfMatchScrutineeOpt → ε        (selected when next token is IS)
+- PropertyListIfMatchExpression → IF ValueExpression IS LBRACE PropertyListIfMatchArm+ PropertyListIfMatchElseOpt RBRACE
+  - fields: scrutinee: ExpressionSyntax, arms: PropertyIfMatchArmSyntax[], elseProps?: PropertyListSyntax
 
 PropertyListIfMatchArm (AST: PropertyIfMatchArmSyntax)
 - PropertyListIfMatchArm → Pattern (COMMA Pattern)* COLON PropertyList
@@ -385,12 +377,8 @@ PropertyListIfMatchElseOpt
 - PropertyListIfMatchElseOpt → ε
 
 PropertyListIfConditionListExpression (AST: PropertyIfConditionListSyntax)
-- PropertyListIfConditionListExpression → IF PropertyListIfConditionScrutineeOpt LBRACE PropertyListIfConditionArm+ PropertyListIfConditionElseOpt RBRACE
-  - fields: scrutinee?: ExpressionSyntax, arms: PropertyIfConditionArmSyntax[], elseProps?: PropertyListSyntax
-
-PropertyListIfConditionScrutineeOpt
-- PropertyListIfConditionScrutineeOpt → ValueExpression
-- PropertyListIfConditionScrutineeOpt → ε        (selected when next token starts a condition arm)
+- PropertyListIfConditionListExpression → IF LBRACE PropertyListIfConditionArm+ PropertyListIfConditionElseOpt RBRACE
+  - fields: arms: PropertyIfConditionArmSyntax[], elseProps?: PropertyListSyntax
 
 PropertyListIfConditionArm (AST: PropertyIfConditionArmSyntax)
 - PropertyListIfConditionArm → ValueExpression COLON PropertyList
@@ -406,7 +394,7 @@ Content (AST: ElementContentSyntax is a sum type)
   - fields: items: MarkupItemSyntax[]
 
 MixedContentExpression (AST: MixedContentSyntax)
-- MixedContentExpression → MixedContentItem*
+- MixedContentExpression → MixedContentItem+
   - fields: items: MixedContentItemSyntax[]
 
 MixedContentItem (AST: MixedContentItemSyntax is a sum type)
@@ -415,7 +403,7 @@ MixedContentItem (AST: MixedContentItemSyntax is a sum type)
 - MixedContentItem → InterpolationExpression (InterpolationExpressionSyntax)
 
 EmbedContent (AST: EmbedContentSyntax)
-- EmbedContent → EmbedContentItem*
+- EmbedContent → EmbedContentItem+
   - fields: items: EmbedContentItemSyntax[]
 
 EmbedContentItem (AST: EmbedContentItemSyntax is a sum type)
@@ -423,8 +411,12 @@ EmbedContentItem (AST: EmbedContentItemSyntax is a sum type)
 - EmbedContentItem → InterpolationExpression (InterpolationExpressionSyntax)
 
 RawEmbedContent (AST: RawEmbedContentSyntax)
-- RawEmbedContent → TextRun
+- RawEmbedContent → RawTextRun
   - fields: text: string
+
+RawTextRun (AST: TextRunSyntax)
+- RawTextRun → RAW_TEXT_CHUNK+
+  - fields: text: string (concatenated as-is)
 
 TextPart (AST: TextPartSyntax)
 - TextPart → TextRun
@@ -451,10 +443,12 @@ Pattern (AST: PatternSyntax)
 
 This section lists the AST node types with fields for implementers.
 
-- ModuleDefinitionSyntax: imports: ImportStatementSyntax[], types: TypeDefinitionSyntax[], functions: FunctionDefinitionSyntax[], moduleElement?: MarkupElementSyntax
+- ModuleDefinitionSyntax: imports: ImportStatementSyntax[], members: ModuleMemberSyntax[], moduleElement?: MarkupElementSyntax (members and moduleElement can both be present)
+- ModuleMemberSyntax: TypeDefinitionSyntax | ValueDefinitionSyntax | FunctionDefinitionSyntax
 - ImportStatementSyntax: name: QualifiedNameSyntax
 - TypeDefinitionSyntax: name: string, type: TypeSyntax
-- TypeSyntax: kind: "primitive"|"user", name: string (qualified), modifier?: "nullable"|"list"
+- ValueDefinitionSyntax: name: string, type?: TypeSyntax, value: ExpressionSyntax
+- TypeSyntax: kind: "primitive"|"user", name: string (qualified), modifier?: "nullable"|"sequence"
 - PrimitiveTypeSyntax: name: string
 - UserTypeSyntax: name: QualifiedNameSyntax
  - FunctionDefinitionSyntax: elementName: QualifiedMarkupNameSyntax, props: PropertyDefinitionSyntax[], body: ExpressionSyntax
@@ -470,17 +464,17 @@ This section lists the AST node types with fields for implementers.
  - LiteralExpressionSyntax: kind, value
  - IdentifierNameSyntax: name: string
 - ValueIfSimpleExpressionSyntax: condition: ExpressionSyntax, thenExpr: ExpressionSyntax, elseExpr?: ExpressionSyntax
-- ValueIfMatchExpressionSyntax: scrutinee?: ExpressionSyntax, arms: ValueIfMatchArmSyntax[], elseExpr?: ExpressionSyntax
+- ValueIfMatchExpressionSyntax: scrutinee: ExpressionSyntax, arms: ValueIfMatchArmSyntax[], elseExpr?: ExpressionSyntax
 - ValueIfMatchArmSyntax: patterns: PatternSyntax[], expr: ExpressionSyntax
-- ValueIfConditionListExpressionSyntax: scrutinee?: ExpressionSyntax, arms: ValueIfConditionArmSyntax[], elseExpr?: ExpressionSyntax
+- ValueIfConditionListExpressionSyntax: arms: ValueIfConditionArmSyntax[], elseExpr?: ExpressionSyntax
 - ValueIfConditionArmSyntax: condition: ExpressionSyntax, expr: ExpressionSyntax
 - ValueForExpressionSyntax: itemVar: string, indexVar?: string, iterable: ExpressionSyntax, body: ExpressionSyntax
 - MarkupListSyntax: items: MarkupItemSyntax[]
 - MarkupItemSyntax: MarkupElementSyntax | MarkupIfSimpleExpressionSyntax | MarkupIfMatchExpressionSyntax | MarkupIfConditionListExpressionSyntax | MarkupForExpressionSyntax
 - MarkupIfSimpleExpressionSyntax: condition: ExpressionSyntax, thenElements: MarkupListSyntax, elseElements?: MarkupListSyntax
-- MarkupIfMatchExpressionSyntax: scrutinee?: ExpressionSyntax, arms: MarkupIfMatchArmSyntax[], elseElements?: MarkupListSyntax
+- MarkupIfMatchExpressionSyntax: scrutinee: ExpressionSyntax, arms: MarkupIfMatchArmSyntax[], elseElements?: MarkupListSyntax
 - MarkupIfMatchArmSyntax: patterns: PatternSyntax[], elements: MarkupListSyntax
-- MarkupIfConditionListExpressionSyntax: scrutinee?: ExpressionSyntax, arms: MarkupIfConditionArmSyntax[], elseElements?: MarkupListSyntax
+- MarkupIfConditionListExpressionSyntax: arms: MarkupIfConditionArmSyntax[], elseElements?: MarkupListSyntax
 - MarkupIfConditionArmSyntax: condition: ExpressionSyntax, elements: MarkupListSyntax
 - MarkupForExpressionSyntax: itemVar: string, indexVar?: string, iterable: ExpressionSyntax, body: MarkupListSyntax
 - MarkupElementSyntax: name: QualifiedMarkupNameSyntax, props: PropertyListSyntax, children: ElementContentSyntax (MarkupListSyntax or MixedContentSyntax)
@@ -489,9 +483,9 @@ This section lists the AST node types with fields for implementers.
 - PropertyListItemSyntax: PropertyValueSyntax | PropertyIfSimpleSyntax | PropertyIfMatchSyntax | PropertyIfConditionListSyntax
 - PropertyValueSyntax: name: QualifiedMarkupNameSyntax, value: ExpressionSyntax
 - PropertyIfSimpleSyntax: condition: ExpressionSyntax, thenProps: PropertyListSyntax, elseProps?: PropertyListSyntax
-- PropertyIfMatchSyntax: scrutinee?: ExpressionSyntax, arms: PropertyIfMatchArmSyntax[], elseProps?: PropertyListSyntax
+- PropertyIfMatchSyntax: scrutinee: ExpressionSyntax, arms: PropertyIfMatchArmSyntax[], elseProps?: PropertyListSyntax
 - PropertyIfMatchArmSyntax: patterns: PatternSyntax[], props: PropertyListSyntax
-- PropertyIfConditionListSyntax: scrutinee?: ExpressionSyntax, arms: PropertyIfConditionArmSyntax[], elseProps?: PropertyListSyntax
+- PropertyIfConditionListSyntax: arms: PropertyIfConditionArmSyntax[], elseProps?: PropertyListSyntax
 - PropertyIfConditionArmSyntax: condition: ExpressionSyntax, props: PropertyListSyntax
 - ElementContentSyntax: items: MarkupItemSyntax[] | MixedContentItemSyntax[]
 - MixedContentSyntax: items: MixedContentItemSyntax[]
@@ -516,8 +510,8 @@ This section lists the AST node types with fields for implementers.
   - If next token is LT → Element
   - If next token ∈ {IF, FOR} → the corresponding Elements* form
 - IfMatch scrutinee (value/elements/property variants):
-  - After IF, if next token is IS → no scrutinee
-  - Else → parse ValueExpression before IS as the scrutinee
+  - After IF, parse a required ValueExpression before IS as the scrutinee
+  - Condition-list form begins directly with LBRACE and never has a scrutinee
 - Element is left-factored: after LT ElementName, COLON selects the embed branch; otherwise parse PropertyList and choose SLASH GT (self-closing) or GT … LT SLASH ElementName GT using lookahead at SLASH vs GT.
 
 ## Validation Rules (post-parse)

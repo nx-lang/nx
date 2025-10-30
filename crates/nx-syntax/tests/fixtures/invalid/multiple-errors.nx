@@ -1,0 +1,6 @@
+// Multiple syntax errors
+import core.html
+
+let <Broken1 = {
+let <Broken2 />
+  <div{x</div>

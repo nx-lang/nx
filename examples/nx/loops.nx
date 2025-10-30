@@ -1,6 +1,6 @@
 // For loop expressions
 let <ItemList
-  items: string[]
+  items:string[]
 /> =
   <ul class="list">
     {for item in items {
@@ -9,7 +9,7 @@ let <ItemList
   </ul>
 
 let <IndexedList
-  items: string[]
+  items:string[]
 /> =
   <ol>
     {for item, index in items {

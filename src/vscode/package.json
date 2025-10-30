@@ -28,8 +28,8 @@
   },
   "type": "module",
   "scripts": {
-    "test": "mocha",
-    "test:grammar": "mocha",
+    "test": "node --loader ./node_modules/ts-node/esm.mjs ./node_modules/mocha/bin/mocha.js \"test/**/*.ts\"",
+    "test:grammar": "node --loader ./node_modules/ts-node/esm.mjs ./node_modules/mocha/bin/mocha.js \"test/**/*.ts\"",
     "package": "vsce package",
     "publish:vsce": "vsce publish",
     "publish:ovsx": "ovsx publish"

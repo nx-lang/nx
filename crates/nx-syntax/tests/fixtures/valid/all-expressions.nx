@@ -1,0 +1,159 @@
+// Comprehensive test of all expression types in NX
+
+// === Literal Expressions ===
+
+// Integer literals
+let intLiteral = 42
+
+// Real/Float literals
+let realLiteral = 3.14159
+
+// Hexadecimal literals
+let hexLiteral = 0xFF
+
+// Boolean literals
+let boolTrue = true
+let boolFalse = false
+
+// Null literal
+let nullValue = null
+
+// String literals
+let stringValue = "Hello, World!"
+
+// Unit literal
+let unitValue = {()}
+
+// === Identifier Expressions ===
+
+let <IdentifierExpr x:int /> = {x}
+
+// === Binary Expressions ===
+
+// Arithmetic operators (precedence: *, / > +, -)
+let <Multiplication x:int y:int /> = {x * y}
+let <Division x:int y:int /> = {x / y}
+let <Addition x:int y:int /> = {x + y}
+let <Subtraction x:int y:int /> = {x - y}
+let <ComplexArithmetic x:int y:int z:int /> = {x + y * z}
+
+// Comparison operators
+let <LessThan x:int y:int /> = {x < y}
+let <GreaterThan x:int y:int /> = {x > y}
+let <LessOrEqual x:int y:int /> = {x <= y}
+let <GreaterOrEqual x:int y:int /> = {x >= y}
+let <Equal x:int y:int /> = {x == y}
+let <NotEqual x:int y:int /> = {x != y}
+
+// Logical operators (precedence: && > ||)
+let <LogicalAnd x:boolean y:boolean /> = {x && y}
+let <LogicalOr x:boolean y:boolean /> = {x || y}
+let <ComplexLogical x:boolean y:boolean z:boolean /> = {x && y || z}
+
+// === Unary Expressions ===
+
+// Prefix unary minus
+let <Negation x:int /> = {-x}
+let <DoubleNegation x:int /> = {--x}
+
+// === Conditional (Ternary) Expressions ===
+
+let <TernarySimple x:int /> = {x > 0 ? 1 : -1}
+let <TernaryNested x:int /> = {x > 0 ? x * 2 : x < 0 ? x * -2 : 0}
+
+// === Parenthesized Expressions ===
+
+let <Parenthesized x:int y:int /> = {(x + y) * 2}
+let <NestedParentheses x:int /> = {((x + 1) * 2)}
+
+// === Member Access Expressions ===
+
+let <MemberAccess obj:object /> = {obj.field}
+let <ChainedMemberAccess obj:object /> = {obj.first.second}
+let <MemberWithCall obj:object /> = {obj.field.method}
+
+// === Call Expressions ===
+
+let <SimpleCall func:object /> = {func()}
+let <CallWithOneArg func:object x:int /> = {func(x)}
+let <CallWithMultipleArgs func:object x:int y:int /> = {func(x, y)}
+let <ChainedCalls func:object /> = {func()()}
+let <CallOnMember obj:object /> = {obj.method(42)}
+
+// === If Expressions (Simple) ===
+
+let <IfSimple x:int /> = {if x > 0 { 1 } else { -1 }}
+let <IfWithoutElse x:int /> = {if x > 0 { x }}
+let <IfNested x:int /> = {if x > 0 { if x > 10 { 2 } else { 1 } } else { 0 }}
+
+// === If Expressions (Condition List) ===
+
+let <IfConditionList x:int /> = {
+  if {
+    x > 100: 3
+    x > 10: 2
+    x > 0: 1
+    else: 0
+  }
+}
+
+// === If Expressions (Match) ===
+
+let <IfMatch x:int /> = {
+  if x is {
+    0: "zero"
+    1: "one"
+    else: "other"
+  }
+}
+
+// === For Expressions ===
+// Note:Array types (int[]) have grammar parsing issues, using object for now
+
+let <ForSimple items:object /> = {for item in items { item * 2 }}
+let <ForWithIndex items:object /> = {for item, index in items { item + index }}
+let <ForNested matrix:object /> = {for row in matrix { for cell in row { cell } }}
+
+// === Complex Combinations ===
+
+let <ComplexExpression x:int y:int items:object /> = {
+  for item in items {
+    if item > 0 {
+      (item + x) * y
+    } else {
+      -item
+    }
+  }
+}
+
+let <MixedOperators x:int y:int /> = {
+  x + y * 2 > 10 && x < 100 ? x * y : x + y
+}
+
+let <ChainedOperations obj:object x:int /> = {
+  obj.method(x + 1, x * 2).result.value > 0 ? "positive" : "negative"
+}
+
+// === Property Defaults with Expressions ===
+
+let <WithDefaultExpressions
+  sum:int={1 + 2 + 3}
+  product:int={4 * 5}
+  comparison:boolean={10 > 5}
+  logical:boolean={true && false}
+  ternary:int={5 > 3 ? 100 : 200}
+  nested:int={(1 + 2) * (3 + 4)}
+/> = {sum + product}
+
+// === Value Definitions with Complex Expressions ===
+
+// With type annotations
+let sum:int={1 + 2 + 3}
+let product:int={4 * 5}
+let comparison:boolean={10 > 5}
+let logical:boolean={true && false}
+
+// Without type annotations (inferred)
+let ternary = {5 > 3 ? 100 : 200}
+let nested = {(1 + 2) * (3 + 4)}
+let complex = {1 + 2 * 3 - 4 / 2}

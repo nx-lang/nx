@@ -1,0 +1,2 @@
+// Invalid element syntax - missing closing bracket
+let <Button text:string  = <button>{text}</button>

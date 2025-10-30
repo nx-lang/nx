@@ -72,6 +72,16 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(forLine, forTokens, 'in')).to.include('meta.control.loop.value.nx');
   });
 
+  it('highlights value definitions', function () {
+    const line = 'let totalCount: int = 42';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    expect(scopesForSubstring(line, tokens, 'let')).to.include('keyword.declaration.let.nx');
+    expect(scopesForSubstring(line, tokens, 'totalCount')).to.include('entity.name.variable.nx');
+    expect(scopesForSubstring(line, tokens, ':')).to.include('punctuation.separator.type.annotation.nx');
+    expect(scopesForSubstring(line, tokens, 'int')).to.include('storage.type.primitive.nx');
+    expect(scopesForSubstring(line, tokens, '=')).to.include('keyword.operator.assignment.nx');
+  });
+
   it('highlights inline else within control block', function () {
     const line = 'if user.isAuthenticated { 2 } else { 2 }';
     const { tokens } = grammar.tokenizeLine(line, null);
@@ -153,6 +163,28 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(line, tokens, '1')).to.include('constant.numeric.integer.nx');
   });
 
+  it('highlights a module root element after declarations', function () {
+    const lines = [
+      'type User = string',
+      'let greeting = "hi"',
+      'let <Greeting name:string /> = <span>{name}</span>',
+      '<Greeting name="World" />'
+    ];
+
+    let ruleStack: StateStack | null = null;
+
+    lines.forEach((line, index) => {
+      const result = grammar.tokenizeLine(line, ruleStack);
+      ruleStack = result.ruleStack;
+
+      if (index === lines.length - 1) {
+        const scopes = scopesForSubstring(line, result.tokens, 'Greeting');
+        expect(scopes).to.include('entity.name.tag.nx');
+        expect(scopes).to.include('meta.module.root-element.nx');
+      }
+    });
+  });
+
   it('highlights interpolation regions', function () {
     const line = 'class="card {className}"';
     const { tokens } = grammar.tokenizeLine(line, null);
@@ -160,6 +192,13 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(line, tokens, '{')).to.include('punctuation.section.interpolation.begin.nx');
     // Inner identifier should carry the interpolation meta scope
     expect(scopesForSubstring(line, tokens, 'className')).to.include('meta.interpolation.nx');
+  });
+
+  it('treats escaped braces in markup text as literals', function () {
+    const line = '<p>\\{ brace \\}</p>';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    expect(scopesForSubstring(line, tokens, '{')).to.not.include('punctuation.section.interpolation.begin.nx');
+    expect(scopesForSubstring(line, tokens, '}')).to.not.include('punctuation.section.interpolation.end.nx');
   });
 
   it('highlights inline element as attribute value', function () {

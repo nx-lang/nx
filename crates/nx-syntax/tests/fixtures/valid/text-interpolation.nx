@@ -1,0 +1,8 @@
+// Mixed text and interpolation
+let x = 10
+let y = 20
+
+<div>
+  <p>Sum: {x + y}</p>
+  <p>Product: {x * y}</p>
+</div>

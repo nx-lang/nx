@@ -66,13 +66,12 @@ module.exports = grammar({
     // ===== Module Definition =====
     module_definition: $ => seq(
       repeat($.import_statement),
-      choice(
-        seq(
-          repeat($.type_definition),
-          repeat($.function_definition),
-        ),
-        $.element,
-      ),
+      repeat(choice(
+        $.type_definition,
+        $.value_definition,
+        $.function_definition,
+      )),
+      optional($.element),
     ),
 
     // ===== Imports =====
@@ -87,6 +86,18 @@ module.exports = grammar({
       field('name', $.identifier),
       '=',
       field('type', $.type),
+    ),
+
+    // ===== Value Definitions =====
+    value_definition: $ => seq(
+      'let',
+      field('name', $.identifier),
+      optional(seq(
+        ':',
+        field('type', $.type),
+      )),
+      '=',
+      field('value', $.rhs_expression),
     ),
 
     type: $ => seq(
@@ -285,7 +296,7 @@ module.exports = grammar({
 
     value_if_match_expression: $ => seq(
       'if',
-      optional(field('scrutinee', $.value_expression)),
+      field('scrutinee', $.value_expression),
       'is',
       '{',
       repeat1($.value_if_match_arm),
@@ -306,7 +317,6 @@ module.exports = grammar({
 
     value_if_condition_list_expression: $ => seq(
       'if',
-      optional(field('scrutinee', $.value_expression)),
       '{',
       repeat1($.value_if_condition_arm),
       optional(seq(
@@ -364,7 +374,7 @@ module.exports = grammar({
 
     elements_if_match_expression: $ => seq(
       'if',
-      optional(field('scrutinee', $.value_expression)),
+      field('scrutinee', $.value_expression),
       'is',
       '{',
       repeat1($.elements_if_match_arm),
@@ -385,7 +395,6 @@ module.exports = grammar({
 
     elements_if_condition_list_expression: $ => seq(
       'if',
-      optional(field('scrutinee', $.value_expression)),
       '{',
       repeat1($.elements_if_condition_arm),
       optional(seq(
@@ -438,14 +447,23 @@ module.exports = grammar({
         seq(
           ':',
           field('text_type', $.identifier),
-          optional('raw'),
-          field('properties', optional($.property_list)),
-          '>',
-          field('content', $.embed_content),
-          '<',
-          '/',
-          field('close_name', $.element_name),
-          '>',
+          choice(
+            // parsed embed content
+            seq(
+              field('properties', optional($.property_list)),
+              '>',
+              field('content', $.embed_content),
+              '<', '/', field('close_name', $.element_name), '>'
+            ),
+            // raw embed content
+            seq(
+              'raw',
+              field('properties', optional($.property_list)),
+              '>',
+              field('content', $.embed_raw_content),
+              '<', '/', field('close_name', $.element_name), '>'
+            ),
+          ),
         ),
       ),
     ),
@@ -486,7 +504,7 @@ module.exports = grammar({
 
     property_list_if_match_expression: $ => seq(
       'if',
-      optional(field('scrutinee', $.value_expression)),
+      field('scrutinee', $.value_expression),
       'is',
       '{',
       repeat1($.property_list_if_match_arm),
@@ -507,7 +525,6 @@ module.exports = grammar({
 
     property_list_if_condition_list_expression: $ => seq(
       'if',
-      optional(field('scrutinee', $.value_expression)),
       '{',
       repeat1($.property_list_if_condition_arm),
       optional(seq(
@@ -550,6 +567,11 @@ module.exports = grammar({
       $.text_run,
       $.interpolation_expression,
     )),
+
+    // Raw embed content: braces and ampersands are literal; no interpolation
+    // Implemented as a simple token that consumes any run of non-'<' characters
+    embed_raw_content: $ => repeat1($.raw_text),
+    raw_text: $ => token(/[^<]+/),
 
     // ===== Patterns =====
     pattern: $ => choice(

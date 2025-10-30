@@ -7,7 +7,11 @@ mod diagnostic;
 mod render;
 
 pub use diagnostic::{Diagnostic, DiagnosticBuilder, Label, Severity};
-pub use render::render_diagnostic;
+pub use render::{render_diagnostic, render_diagnostics, render_diagnostics_cli};
+
+// Re-export text-size types with NX-specific names
+pub use text_size::TextRange as TextSpan;
+pub use text_size::TextSize;
 
 #[cfg(test)]
 mod tests {

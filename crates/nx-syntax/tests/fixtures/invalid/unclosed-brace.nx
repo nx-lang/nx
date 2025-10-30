@@ -1,0 +1,5 @@
+// Unclosed brace in interpolation
+import core.html
+
+let <Broken /> =
+  <div>{1 + 2</div>

@@ -371,3 +371,8 @@ Cargo.lock
 .cargo/
 rust-analyzer/
 crates/nx-syntax/bindings/rust/build.rs
+debug/
+release/
+*.rlib
+*.prof*
+.env*
