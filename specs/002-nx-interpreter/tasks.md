@@ -124,30 +124,30 @@ Can run in parallel after T044-T046 complete.
 
 #### Core Interpreter Implementation
 
-- [ ] T011 [US1] Implement execute_function() in crates/nx-interpreter/src/interpreter.rs: find function in module, validate parameter count, create ExecutionContext
-- [ ] T012 [US1] Implement parameter binding in execute_function(): create new scope, bind parameters to argument values
-- [ ] T013 [US1] Implement eval_expr() skeleton in crates/nx-interpreter/src/interpreter.rs with pattern matching on Expr variants
-- [ ] T014 [US1] Implement eval_stmt() in crates/nx-interpreter/src/interpreter.rs for Let and Expr statements
+- [X] T011 [US1] Implement execute_function() in crates/nx-interpreter/src/interpreter.rs: find function in module, validate parameter count, create ExecutionContext
+- [X] T012 [US1] Implement parameter binding in execute_function(): create new scope, bind parameters to argument values
+- [X] T013 [US1] Implement eval_expr() skeleton in crates/nx-interpreter/src/interpreter.rs with pattern matching on Expr variants
+- [X] T014 [US1] Implement eval_stmt() in crates/nx-interpreter/src/interpreter.rs for Let and Expr statements
 
 #### Expression Evaluation - Basic Operations
 
-- [ ] T015 [P] [US1] Implement literal evaluation in eval_expr(): convert HIR Literal to Value (int, float, string, bool, null)
-- [ ] T016 [P] [US1] Implement identifier lookup in eval_expr(): call ExecutionContext.lookup_variable()
-- [ ] T017 [P] [US1] Implement arithmetic operations in crates/nx-interpreter/src/eval/arithmetic.rs (Add, Sub, Mul, Div, Mod)
+- [X] T015 [P] [US1] Implement literal evaluation in eval_expr(): convert HIR Literal to Value (int, float, string, bool, null)
+- [X] T016 [P] [US1] Implement identifier lookup in eval_expr(): call ExecutionContext.lookup_variable()
+- [X] T017 [P] [US1] Implement arithmetic operations in crates/nx-interpreter/src/eval/arithmetic.rs (Add, Sub, Mul, Div, Mod)
 
 #### Context Management
 
-- [ ] T018 [US1] Implement ExecutionContext::push_scope() and pop_scope() for block scoping
-- [ ] T019 [US1] Implement ExecutionContext::define_variable() for let statements
-- [ ] T020 [US1] Implement ExecutionContext::lookup_variable() with scope stack traversal
-- [ ] T021 [US1] Implement ExecutionContext::check_operation_limit() called in eval_expr()
+- [X] T018 [US1] Implement ExecutionContext::push_scope() and pop_scope() for block scoping
+- [X] T019 [US1] Implement ExecutionContext::define_variable() for let statements
+- [X] T020 [US1] Implement ExecutionContext::lookup_variable() with scope stack traversal
+- [X] T021 [US1] Implement ExecutionContext::check_operation_limit() called in eval_expr()
 
 #### Integration & Testing
 
-- [ ] T022 [US1] Implement public API in crates/nx-interpreter/src/lib.rs: re-export Interpreter, Value, RuntimeError, ResourceLimits
-- [ ] T023 [US1] Create integration test crates/nx-interpreter/tests/integration/simple_functions.rs: test arithmetic function execution
-- [ ] T024 [US1] Add integration test for string concatenation function
-- [ ] T025 [US1] Add integration test for boolean logic function with variable bindings
+- [X] T022 [US1] Implement public API in crates/nx-interpreter/src/lib.rs: re-export Interpreter, Value, RuntimeError, ResourceLimits
+- [X] T023 [US1] Create integration test (direct HIR): test arithmetic function execution
+- [X] T024 [US1] Add integration test (direct HIR) for string concatenation function
+- [X] T025 [US1] Add integration test (direct HIR) for boolean logic function with variable bindings
 
 **Acceptance Criteria**:
 - ✅ Can execute function with arithmetic operations and return correct result
@@ -155,6 +155,8 @@ Can run in parallel after T044-T046 complete.
 - ✅ Can execute function with boolean operations
 - ✅ Can handle local variable declarations and references
 - ✅ Parameter binding works correctly
+
+**Note**: Integration tests use directly-constructed HIR modules due to parser limitations with block expressions. Parser-based integration tests exist but are blocked on HIR lowering implementation.
 
 ---
 
