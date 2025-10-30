@@ -151,7 +151,7 @@ impl RuntimeError {
                 .with_message(format!("Runtime Error: {}", self.kind))
                 .with_label(
                     Label::new((filename, location.start().into()..location.end().into()))
-                        .with_message(&self.kind.to_string())
+                        .with_message(self.kind.to_string())
                         .with_color(Color::Red),
                 );
 

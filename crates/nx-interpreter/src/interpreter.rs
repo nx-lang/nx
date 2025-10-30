@@ -111,6 +111,7 @@ impl Interpreter {
                 else_branch,
                 ..
             } => self.eval_if(module, ctx, *condition, *then_branch, *else_branch),
+            ast::Expr::Call { func, args, .. } => self.eval_call(module, ctx, *func, args),
             _ => {
                 // Other expression types not yet implemented
                 Ok(Value::Null)
@@ -181,7 +182,7 @@ impl Interpreter {
         }
     }
 
-    /// Evaluate a binary operation (T017)
+    /// Evaluate a binary operation (T017, T036, T038)
     fn eval_binary_op(
         &self,
         module: &Module,
@@ -193,33 +194,154 @@ impl Interpreter {
         let lhs_val = self.eval_expr(module, ctx, lhs)?;
         let rhs_val = self.eval_expr(module, ctx, rhs)?;
 
-        // Delegate to arithmetic module
-        crate::eval::arithmetic::eval_arithmetic_op(lhs_val, op, rhs_val)
+        // Route to appropriate evaluation module based on operator
+        match op {
+            // Arithmetic operators
+            ast::BinOp::Add
+            | ast::BinOp::Sub
+            | ast::BinOp::Mul
+            | ast::BinOp::Div
+            | ast::BinOp::Mod
+            | ast::BinOp::Concat => {
+                crate::eval::arithmetic::eval_arithmetic_op(lhs_val, op, rhs_val)
+            }
+
+            // Comparison operators (T036)
+            ast::BinOp::Eq
+            | ast::BinOp::Ne
+            | ast::BinOp::Lt
+            | ast::BinOp::Le
+            | ast::BinOp::Gt
+            | ast::BinOp::Ge => crate::eval::logical::eval_comparison_op(lhs_val, op, rhs_val),
+
+            // Logical operators (T038)
+            ast::BinOp::And | ast::BinOp::Or => {
+                crate::eval::logical::eval_logical_op(lhs_val, op, rhs_val)
+            }
+        }
     }
 
-    /// Evaluate a unary operation (placeholder)
+    /// Evaluate a unary operation (T038)
     fn eval_unary_op(
         &self,
-        _module: &Module,
-        _ctx: &mut ExecutionContext,
-        _op: ast::UnOp,
-        _expr: ExprId,
+        module: &Module,
+        ctx: &mut ExecutionContext,
+        op: ast::UnOp,
+        expr: ExprId,
     ) -> Result<Value, RuntimeError> {
-        // Will be implemented later
-        Ok(Value::Null)
+        let operand = self.eval_expr(module, ctx, expr)?;
+
+        match op {
+            ast::UnOp::Not => crate::eval::logical::eval_logical_unary(op, operand),
+            ast::UnOp::Neg => {
+                // Arithmetic negation
+                match operand {
+                    Value::Int(n) => Ok(Value::Int(-n)),
+                    Value::Float(f) => Ok(Value::Float(-f)),
+                    v => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                        expected: "number".to_string(),
+                        actual: v.type_name().to_string(),
+                        operation: "negation".to_string(),
+                    })),
+                }
+            }
+        }
     }
 
-    /// Evaluate an if expression (placeholder)
+    /// Evaluate an if expression (T037)
     fn eval_if(
         &self,
-        _module: &Module,
-        _ctx: &mut ExecutionContext,
-        _condition: ExprId,
-        _then_branch: ExprId,
-        _else_branch: Option<ExprId>,
+        module: &Module,
+        ctx: &mut ExecutionContext,
+        condition: ExprId,
+        then_branch: ExprId,
+        else_branch: Option<ExprId>,
     ) -> Result<Value, RuntimeError> {
-        // Will be implemented in Phase 5
-        Ok(Value::Null)
+        // Evaluate condition
+        let condition_value = self.eval_expr(module, ctx, condition)?;
+
+        // Condition must be a boolean
+        let condition_bool = match condition_value {
+            Value::Boolean(b) => b,
+            v => {
+                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                    expected: "boolean".to_string(),
+                    actual: v.type_name().to_string(),
+                    operation: "if condition".to_string(),
+                }))
+            }
+        };
+
+        // Execute appropriate branch
+        if condition_bool {
+            self.eval_expr(module, ctx, then_branch)
+        } else if let Some(else_expr) = else_branch {
+            self.eval_expr(module, ctx, else_expr)
+        } else {
+            Ok(Value::Null)
+        }
+    }
+
+    /// Evaluate a function call expression (T053)
+    fn eval_call(
+        &self,
+        module: &Module,
+        ctx: &mut ExecutionContext,
+        func_expr: ExprId,
+        args: &[ExprId],
+    ) -> Result<Value, RuntimeError> {
+        // Evaluate the function expression (should be an identifier)
+        let func_name = match module.expr(func_expr) {
+            ast::Expr::Ident(name) => name.as_str(),
+            _ => {
+                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                    expected: "function name".to_string(),
+                    actual: "complex expression".to_string(),
+                    operation: "function call".to_string(),
+                }))
+            }
+        };
+
+        // Find the function in the module
+        let function = self.find_function(module, func_name)?;
+
+        // Validate parameter count
+        if function.params.len() != args.len() {
+            return Err(RuntimeError::new(
+                RuntimeErrorKind::ParameterCountMismatch {
+                    expected: function.params.len(),
+                    actual: args.len(),
+                    function: SmolStr::new(func_name),
+                },
+            ));
+        }
+
+        // Evaluate arguments
+        let mut arg_values = Vec::with_capacity(args.len());
+        for arg_expr in args {
+            arg_values.push(self.eval_expr(module, ctx, *arg_expr)?);
+        }
+
+        // Create call frame (T054)
+        let call_frame = crate::error::CallFrame::new(SmolStr::new(func_name), None);
+        ctx.push_call_frame(call_frame)?; // This checks recursion depth
+
+        // Create new scope for function parameters
+        ctx.push_scope();
+
+        // Bind parameters to argument values
+        for (param, arg) in function.params.iter().zip(arg_values.iter()) {
+            ctx.define_variable(SmolStr::new(param.name.as_str()), arg.clone());
+        }
+
+        // Execute the function body
+        let result = self.eval_expr(module, ctx, function.body);
+
+        // Clean up scope and call frame
+        ctx.pop_scope();
+        ctx.pop_call_frame();
+
+        result
     }
 }
 
