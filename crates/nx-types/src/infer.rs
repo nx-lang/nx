@@ -217,6 +217,20 @@ impl<'a> InferenceContext<'a> {
                 }
             }
 
+            // For loop expressions
+            ast::Expr::For { item: _, index: _, iterable, body, .. } => {
+                // Infer iterable type (should be array)
+                let iterable_ty = self.infer_expr(*iterable);
+
+                // TODO: Add item and index to environment with proper types
+                // For now, just infer the body type
+                let _body_ty = self.infer_expr(*body);
+
+                // For loops return arrays of the body type
+                // For simplicity, return the iterable type for now
+                iterable_ty
+            }
+
             // Error expressions
             ast::Expr::Error(_) => Type::Error,
         };

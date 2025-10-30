@@ -192,6 +192,22 @@ pub enum Expr {
     /// Example: `<button class="primary" />`
     Element { element: ElementId, span: TextSpan },
 
+    /// For loop expression.
+    ///
+    /// Example: `for item in items { item * 2 }`
+    /// Example with index: `for item, index in items { item + index }`
+    For {
+        /// Loop variable (item)
+        item: Name,
+        /// Optional index variable
+        index: Option<Name>,
+        /// Iterable expression
+        iterable: ExprId,
+        /// Loop body expression
+        body: ExprId,
+        span: TextSpan,
+    },
+
     /// Error placeholder for malformed expressions.
     ///
     /// This is used during lowering when the CST contains errors.
@@ -213,6 +229,7 @@ impl Expr {
             Expr::Index { span, .. } => *span,
             Expr::Member { span, .. } => *span,
             Expr::Element { span, .. } => *span,
+            Expr::For { span, .. } => *span,
             Expr::Error(span) => *span,
         }
     }

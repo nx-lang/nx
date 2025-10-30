@@ -408,6 +408,38 @@ impl LoweringContext {
                 .map(|n| self.lower_expr(n))
                 .unwrap_or_else(|| self.error_expr(node.span())),
 
+            // For loop expression
+            SyntaxKind::VALUE_FOR_EXPRESSION => {
+                // Get item identifier
+                let item = node
+                    .child_by_field("item")
+                    .map(|n| Name::new(n.text()))
+                    .unwrap_or_else(|| Name::new("_"));
+
+                // Get optional index identifier
+                let index = node.child_by_field("index").map(|n| Name::new(n.text()));
+
+                // Get iterable expression
+                let iterable = node
+                    .child_by_field("iterable")
+                    .map(|n| self.lower_expr(n))
+                    .unwrap_or_else(|| self.error_expr(node.span()));
+
+                // Get body expression
+                let body = node
+                    .child_by_field("body")
+                    .map(|n| self.lower_expr(n))
+                    .unwrap_or_else(|| self.error_expr(node.span()));
+
+                self.alloc_expr(Expr::For {
+                    item,
+                    index,
+                    iterable,
+                    body,
+                    span: node.span(),
+                })
+            }
+
             // Default: create error
             _ => self.error_expr(node.span()),
         }
@@ -814,5 +846,102 @@ mod tests {
         };
 
         assert_concat(func.body);
+    }
+
+    #[test]
+    fn test_lower_for_loop_simple() {
+        let source = "let <ForSimple items:object /> = {for item in items { item * 2 }}";
+        let parse_result = parse_str(source, "test.nx");
+
+        assert!(
+            parse_result.errors.is_empty(),
+            "parse errors: {:?}",
+            parse_result.errors
+        );
+
+        let tree = parse_result.tree.unwrap();
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        // Should have one function item
+        assert_eq!(module.items().len(), 1);
+
+        match &module.items()[0] {
+            Item::Function(func) => {
+                assert_eq!(func.name.as_str(), "ForSimple");
+
+                // Function body should be a block containing a for loop
+                let body_expr = module.expr(func.body);
+
+                // Navigate through potential block wrapper
+                let for_expr = match body_expr {
+                    Expr::For { .. } => body_expr,
+                    Expr::Block { expr: Some(e), .. } => module.expr(*e),
+                    other => panic!("Expected For or Block expression, got {:?}", other),
+                };
+
+                // Verify it's a for loop
+                match for_expr {
+                    Expr::For { item, index, iterable, body, .. } => {
+                        assert_eq!(item.as_str(), "item");
+                        assert!(index.is_none());
+
+                        // Verify iterable is an identifier
+                        match module.expr(*iterable) {
+                            Expr::Ident(name) => assert_eq!(name.as_str(), "items"),
+                            other => panic!("Expected Ident for iterable, got {:?}", other),
+                        }
+
+                        // Verify body is a binary operation
+                        match module.expr(*body) {
+                            Expr::BinaryOp { op, .. } => assert_eq!(*op, BinOp::Mul),
+                            other => panic!("Expected BinaryOp for body, got {:?}", other),
+                        }
+                    }
+                    other => panic!("Expected For expression, got {:?}", other),
+                }
+            }
+            _ => panic!("Expected Function item"),
+        }
+    }
+
+    #[test]
+    fn test_lower_for_loop_with_index() {
+        let source = "let <ForWithIndex items:object /> = {for item, index in items { item + index }}";
+        let parse_result = parse_str(source, "test.nx");
+
+        assert!(
+            parse_result.errors.is_empty(),
+            "parse errors: {:?}",
+            parse_result.errors
+        );
+
+        let tree = parse_result.tree.unwrap();
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        assert_eq!(module.items().len(), 1);
+
+        match &module.items()[0] {
+            Item::Function(func) => {
+                let body_expr = module.expr(func.body);
+
+                let for_expr = match body_expr {
+                    Expr::For { .. } => body_expr,
+                    Expr::Block { expr: Some(e), .. } => module.expr(*e),
+                    other => panic!("Expected For or Block expression, got {:?}", other),
+                };
+
+                match for_expr {
+                    Expr::For { item, index, .. } => {
+                        assert_eq!(item.as_str(), "item");
+                        assert!(index.is_some());
+                        assert_eq!(index.as_ref().unwrap().as_str(), "index");
+                    }
+                    other => panic!("Expected For expression, got {:?}", other),
+                }
+            }
+            _ => panic!("Expected Function item"),
+        }
     }
 }
