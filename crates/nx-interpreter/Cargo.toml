@@ -19,3 +19,4 @@ rustc-hash.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
+nx-syntax = { path = "../nx-syntax" }

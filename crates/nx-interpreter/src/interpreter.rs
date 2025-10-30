@@ -181,17 +181,20 @@ impl Interpreter {
         }
     }
 
-    /// Evaluate a binary operation (T017 - placeholder)
+    /// Evaluate a binary operation (T017)
     fn eval_binary_op(
         &self,
-        _module: &Module,
-        _ctx: &mut ExecutionContext,
-        _lhs: ExprId,
-        _op: ast::BinOp,
-        _rhs: ExprId,
+        module: &Module,
+        ctx: &mut ExecutionContext,
+        lhs: ExprId,
+        op: ast::BinOp,
+        rhs: ExprId,
     ) -> Result<Value, RuntimeError> {
-        // Will be implemented in Phase 3
-        Ok(Value::Null)
+        let lhs_val = self.eval_expr(module, ctx, lhs)?;
+        let rhs_val = self.eval_expr(module, ctx, rhs)?;
+        
+        // Delegate to arithmetic module
+        crate::eval::arithmetic::eval_arithmetic_op(lhs_val, op, rhs_val)
     }
 
     /// Evaluate a unary operation (placeholder)
