@@ -83,7 +83,7 @@ mod tests {
         assert!(int_val.is_number());
         assert!(!int_val.is_null());
 
-        let float_val = Value::Float(3.14);
+        let float_val = Value::Float(2.5);
         assert!(float_val.is_float());
         assert!(float_val.is_number());
 
@@ -100,7 +100,7 @@ mod tests {
     #[test]
     fn test_value_display() {
         assert_eq!(Value::Int(42).to_string(), "42");
-        assert_eq!(Value::Float(3.14).to_string(), "3.14");
+        assert_eq!(Value::Float(2.5).to_string(), "2.5");
         assert_eq!(Value::String(SmolStr::new("test")).to_string(), "test");
         assert_eq!(Value::Boolean(true).to_string(), "true");
         assert_eq!(Value::Null.to_string(), "null");
@@ -109,7 +109,7 @@ mod tests {
     #[test]
     fn test_type_names() {
         assert_eq!(Value::Int(42).type_name(), "int");
-        assert_eq!(Value::Float(3.14).type_name(), "float");
+        assert_eq!(Value::Float(2.5).type_name(), "float");
         assert_eq!(Value::String(SmolStr::new("test")).type_name(), "string");
         assert_eq!(Value::Boolean(true).type_name(), "boolean");
         assert_eq!(Value::Null.type_name(), "null");

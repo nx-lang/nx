@@ -21,3 +21,10 @@
 * Honor StyleCop rules and fix any reported build warnings *after* getting tests to pass.
 * In C# files, use namespace *statements* instead of namespace *blocks* for all new files.
 * Add API doc comments to all new public and internal members.
+
+## Active Technologies
+- Rust 1.80.1 + nx-hir (HIR data structures), nx-diagnostics (error reporting), nx-types (type information) (002-nx-interpreter)
+- N/A (in-memory execution only) (002-nx-interpreter)
+
+## Recent Changes
+- 002-nx-interpreter: Added Rust 1.80.1 + nx-hir (HIR data structures), nx-diagnostics (error reporting), nx-types (type information)
