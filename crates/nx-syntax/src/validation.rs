@@ -40,7 +40,7 @@ pub fn validate(tree: &SyntaxTree, file_name: &str) -> Vec<Diagnostic> {
 /// Validates that element opening and closing tags match.
 fn validate_element_tags(
     node: &SyntaxNode,
-    tree: &SyntaxTree,
+    _tree: &SyntaxTree,
     file_name: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -89,7 +89,7 @@ fn validate_element_tags(
 
     // Recursively validate children
     for child in node.children() {
-        validate_element_tags(&child, tree, file_name, diagnostics);
+        validate_element_tags(&child, _tree, file_name, diagnostics);
     }
 }
 

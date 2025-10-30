@@ -89,10 +89,7 @@ pub fn render_diagnostic(diagnostic: &Diagnostic, sources: &HashMap<String, Stri
 
 /// Renders multiple diagnostics to a string.
 #[cfg_attr(not(test), allow(dead_code))]
-pub fn render_diagnostics(
-    diagnostics: &[Diagnostic],
-    sources: &HashMap<String, String>,
-) -> String {
+pub fn render_diagnostics(diagnostics: &[Diagnostic], sources: &HashMap<String, String>) -> String {
     diagnostics
         .iter()
         .map(|d| render_diagnostic(d, sources))
@@ -141,7 +138,15 @@ pub fn render_diagnostics_cli(
             Severity::Info => "info",
             Severity::Hint => "hint",
         };
-        let _ = writeln!(out, "{} {}:{}:{}: {}", severity, file, line_num, col_num, d.message());
+        let _ = writeln!(
+            out,
+            "{} {}:{}:{}: {}",
+            severity,
+            file,
+            line_num,
+            col_num,
+            d.message()
+        );
 
         // Source line with caret underline
         if !line_text.is_empty() {
@@ -173,7 +178,7 @@ pub fn render_diagnostics_cli(
 
 // Compute 1-based line/col and a single-line highlight presentation
 #[cfg_attr(not(test), allow(dead_code))]
-fn locate<'a>(src: &'a str, start: usize, end: usize) -> (usize, usize, &'a str, usize, usize) {
+fn locate(src: &str, start: usize, end: usize) -> (usize, usize, &str, usize, usize) {
     // Clamp indices to source length
     let len = src.len();
     let s = start.min(len);
@@ -183,10 +188,18 @@ fn locate<'a>(src: &'a str, start: usize, end: usize) -> (usize, usize, &'a str,
     let mut line_start = 0usize;
     let mut line_idx = 1usize; // 1-based
     for (i, ch) in src.char_indices() {
-        if i >= s { break; }
-        if ch == '\n' { line_idx += 1; line_start = i + ch.len_utf8(); }
+        if i >= s {
+            break;
+        }
+        if ch == '\n' {
+            line_idx += 1;
+            line_start = i + ch.len_utf8();
+        }
     }
-    let line_end = src[line_start..].find('\n').map(|o| line_start + o).unwrap_or(len);
+    let line_end = src[line_start..]
+        .find('\n')
+        .map(|o| line_start + o)
+        .unwrap_or(len);
 
     let line_text = &src[line_start..line_end];
 

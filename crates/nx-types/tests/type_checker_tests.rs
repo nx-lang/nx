@@ -245,13 +245,19 @@ fn test_conditional_expressions() {
 fn test_session_multiple_files() {
     let mut session = TypeCheckSession::new();
 
-    session.add_file("button.nx", r#"
+    session.add_file(
+        "button.nx",
+        r#"
         let <Button text:string /> = <button>{text}</button>
-    "#);
+    "#,
+    );
 
-    session.add_file("app.nx", r#"
+    session.add_file(
+        "app.nx",
+        r#"
         let <App /> = <Button text="Click me" />
-    "#);
+    "#,
+    );
 
     let results = session.check_all();
     assert_eq!(results.len(), 2);
@@ -272,9 +278,7 @@ fn test_session_with_errors() {
     assert_eq!(results.len(), 2);
 
     // At least one should have errors
-    let total_errors: usize = results.iter()
-        .map(|(_, r)| r.errors().len())
-        .sum();
+    let total_errors: usize = results.iter().map(|(_, r)| r.errors().len()).sum();
     assert!(total_errors > 0);
 }
 
