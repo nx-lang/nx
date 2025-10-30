@@ -7,14 +7,58 @@ use crate::ast::{BinOp, Expr, Literal, OrderedFloat, Stmt, TypeRef, UnOp};
 use crate::{Element, ExprId, Function, Item, Module, Name, Param, Property, SourceId};
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_syntax::{SyntaxKind, SyntaxNode};
+use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
 
 /// Context for lowering operations.
 ///
 /// Maintains the module being built and provides helper methods for
 /// allocating expressions and handling errors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TypeTag {
+    Int,
+    Float,
+    Boolean,
+    String,
+    Null,
+    Unknown,
+}
+
+impl TypeTag {
+    fn from_type_ref(ty: &TypeRef) -> Self {
+        match ty {
+            TypeRef::Name(name) => {
+                let lower = name.as_str().to_ascii_lowercase();
+                match lower.as_str() {
+                    "string" => TypeTag::String,
+                    "int" | "long" => TypeTag::Int,
+                    "float" | "double" => TypeTag::Float,
+                    "boolean" | "bool" => TypeTag::Boolean,
+                    _ => TypeTag::Unknown,
+                }
+            }
+            TypeRef::Nullable(inner) => TypeTag::from_type_ref(inner),
+            _ => TypeTag::Unknown,
+        }
+    }
+
+    fn combine_numeric(lhs: TypeTag, rhs: TypeTag) -> TypeTag {
+        match (lhs, rhs) {
+            (TypeTag::Float, _) | (_, TypeTag::Float) => TypeTag::Float,
+            (TypeTag::Int, TypeTag::Int) => TypeTag::Int,
+            _ => TypeTag::Unknown,
+        }
+    }
+
+    fn is_string(self) -> bool {
+        matches!(self, TypeTag::String)
+    }
+}
+
 pub struct LoweringContext {
     module: Module,
+    expr_types: FxHashMap<ExprId, TypeTag>,
+    scope_stack: Vec<FxHashMap<Name, TypeTag>>,
 }
 
 impl LoweringContext {
@@ -22,6 +66,8 @@ impl LoweringContext {
     pub fn new(source_id: SourceId) -> Self {
         Self {
             module: Module::new(source_id),
+            expr_types: FxHashMap::default(),
+            scope_stack: vec![FxHashMap::default()],
         }
     }
 
@@ -32,12 +78,48 @@ impl LoweringContext {
 
     /// Allocates an expression in the module arena.
     fn alloc_expr(&mut self, expr: Expr) -> ExprId {
-        self.module.alloc_expr(expr)
+        let id = self.module.alloc_expr(expr);
+        self.expr_types.insert(id, TypeTag::Unknown);
+        id
     }
 
     /// Creates an error expression for malformed CST nodes.
     fn error_expr(&mut self, span: TextSpan) -> ExprId {
         self.alloc_expr(Expr::Error(span))
+    }
+
+    fn push_scope(&mut self) {
+        self.scope_stack.push(FxHashMap::default());
+    }
+
+    fn pop_scope(&mut self) {
+        self.scope_stack.pop();
+    }
+
+    fn define_name(&mut self, name: &Name, ty: TypeTag) {
+        if let Some(scope) = self.scope_stack.last_mut() {
+            scope.insert(name.clone(), ty);
+        }
+    }
+
+    fn lookup_name(&self, name: &Name) -> TypeTag {
+        for scope in self.scope_stack.iter().rev() {
+            if let Some(ty) = scope.get(name) {
+                return *ty;
+            }
+        }
+        TypeTag::Unknown
+    }
+
+    fn set_expr_type(&mut self, expr: ExprId, ty: TypeTag) {
+        self.expr_types.insert(expr, ty);
+    }
+
+    fn expr_type(&self, expr: ExprId) -> TypeTag {
+        self.expr_types
+            .get(&expr)
+            .copied()
+            .unwrap_or(TypeTag::Unknown)
     }
 
     /// Lowers a SyntaxNode to an expression.
@@ -56,13 +138,19 @@ impl LoweringContext {
                 } else {
                     text
                 };
-                self.alloc_expr(Expr::Literal(Literal::String(SmolStr::new(s))))
+                let expr = self.alloc_expr(Expr::Literal(Literal::String(SmolStr::new(s))));
+                self.set_expr_type(expr, TypeTag::String);
+                expr
             }
 
             SyntaxKind::INT_LITERAL => {
                 let text = node.text();
                 match text.parse::<i64>() {
-                    Ok(value) => self.alloc_expr(Expr::Literal(Literal::Int(value))),
+                    Ok(value) => {
+                        let expr = self.alloc_expr(Expr::Literal(Literal::Int(value)));
+                        self.set_expr_type(expr, TypeTag::Int);
+                        expr
+                    }
                     Err(_) => self.error_expr(node.span()),
                 }
             }
@@ -71,7 +159,11 @@ impl LoweringContext {
                 let text = node.text();
                 let digits = text.trim_start_matches("0x").trim_start_matches("0X");
                 match i64::from_str_radix(digits, 16) {
-                    Ok(value) => self.alloc_expr(Expr::Literal(Literal::Int(value))),
+                    Ok(value) => {
+                        let expr = self.alloc_expr(Expr::Literal(Literal::Int(value)));
+                        self.set_expr_type(expr, TypeTag::Int);
+                        expr
+                    }
                     Err(_) => self.error_expr(node.span()),
                 }
             }
@@ -81,9 +173,13 @@ impl LoweringContext {
             | SyntaxKind::REAL_LITERAL => {
                 let text = node.text();
                 if let Ok(value) = text.parse::<i64>() {
-                    self.alloc_expr(Expr::Literal(Literal::Int(value)))
+                    let expr = self.alloc_expr(Expr::Literal(Literal::Int(value)));
+                    self.set_expr_type(expr, TypeTag::Int);
+                    expr
                 } else if let Ok(value) = text.parse::<f64>() {
-                    self.alloc_expr(Expr::Literal(Literal::Float(OrderedFloat(value))))
+                    let expr = self.alloc_expr(Expr::Literal(Literal::Float(OrderedFloat(value))));
+                    self.set_expr_type(expr, TypeTag::Float);
+                    expr
                 } else {
                     self.error_expr(node.span())
                 }
@@ -94,11 +190,15 @@ impl LoweringContext {
             | SyntaxKind::BOOLEAN_EXPRESSION => {
                 let text = node.text();
                 let value = text == "true";
-                self.alloc_expr(Expr::Literal(Literal::Bool(value)))
+                let expr = self.alloc_expr(Expr::Literal(Literal::Bool(value)));
+                self.set_expr_type(expr, TypeTag::Boolean);
+                expr
             }
 
             SyntaxKind::NULL_LITERAL | SyntaxKind::NULL_EXPRESSION => {
-                self.alloc_expr(Expr::Literal(Literal::Null))
+                let expr = self.alloc_expr(Expr::Literal(Literal::Null));
+                self.set_expr_type(expr, TypeTag::Null);
+                expr
             }
 
             // Identifier
@@ -109,10 +209,16 @@ impl LoweringContext {
                     .or_else(|| node.children().find(|n| n.kind() == SyntaxKind::IDENTIFIER))
                 {
                     let name = Name::new(id_node.text());
-                    self.alloc_expr(Expr::Ident(name))
+                    let expr = self.alloc_expr(Expr::Ident(name.clone()));
+                    let ty = self.lookup_name(&name);
+                    self.set_expr_type(expr, ty);
+                    expr
                 } else {
                     let name = Name::new(node.text());
-                    self.alloc_expr(Expr::Ident(name))
+                    let expr = self.alloc_expr(Expr::Ident(name.clone()));
+                    let ty = self.lookup_name(&name);
+                    self.set_expr_type(expr, ty);
+                    expr
                 }
             }
 
@@ -146,13 +252,38 @@ impl LoweringContext {
                     _ => None,
                 });
 
-                if let Some(op) = op {
-                    self.alloc_expr(Expr::BinaryOp {
+                if let Some(mut op) = op {
+                    if matches!(op, BinOp::Add) {
+                        let lhs_ty = self.expr_type(lhs);
+                        let rhs_ty = self.expr_type(rhs);
+                        if lhs_ty.is_string() && rhs_ty.is_string() {
+                            op = BinOp::Concat;
+                        }
+                    }
+
+                    let result_ty = match op {
+                        BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
+                            TypeTag::combine_numeric(self.expr_type(lhs), self.expr_type(rhs))
+                        }
+                        BinOp::Eq
+                        | BinOp::Ne
+                        | BinOp::Lt
+                        | BinOp::Gt
+                        | BinOp::Le
+                        | BinOp::Ge
+                        | BinOp::And
+                        | BinOp::Or => TypeTag::Boolean,
+                        BinOp::Concat => TypeTag::String,
+                    };
+
+                    let expr = self.alloc_expr(Expr::BinaryOp {
                         lhs,
                         op,
                         rhs,
                         span: node.span(),
-                    })
+                    });
+                    self.set_expr_type(expr, result_ty);
+                    expr
                 } else {
                     self.error_expr(node.span())
                 }
@@ -271,6 +402,12 @@ impl LoweringContext {
                     .unwrap_or_else(|| self.error_expr(node.span()))
             }
 
+            SyntaxKind::INTERPOLATION_EXPRESSION => node
+                .children()
+                .find(|n| !matches!(n.kind(), SyntaxKind::LBRACE | SyntaxKind::RBRACE))
+                .map(|n| self.lower_expr(n))
+                .unwrap_or_else(|| self.error_expr(node.span())),
+
             // Default: create error
             _ => self.error_expr(node.span()),
         }
@@ -294,6 +431,11 @@ impl LoweringContext {
 
         match node.kind() {
             SyntaxKind::PRIMITIVE_TYPE | SyntaxKind::IDENTIFIER => TypeRef::name(node.text()),
+            SyntaxKind::TYPE => node
+                .children()
+                .next()
+                .map(|child| self.lower_type(child))
+                .unwrap_or_else(|| TypeRef::name("unknown")),
             _ => TypeRef::name("unknown"),
         }
     }
@@ -320,8 +462,11 @@ impl LoweringContext {
                     .map(|n| Name::new(n.text()))
                     .unwrap_or_else(|| Name::new("_"));
 
-                let param_type = child
+                let type_node = child
                     .child_by_field("type")
+                    .or_else(|| child.children().find(|n| n.kind() == SyntaxKind::TYPE));
+
+                let param_type = type_node
                     .map(|n| self.lower_type(n))
                     .unwrap_or_else(|| TypeRef::name("unknown"));
 
@@ -334,11 +479,20 @@ impl LoweringContext {
             }
         }
 
+        // Track parameter types in a new scope so expression lowering can infer operand kinds.
+        self.push_scope();
+        for param in &params {
+            let ty = TypeTag::from_type_ref(&param.ty);
+            self.define_name(&param.name, ty);
+        }
+
         // Lower the body expression
         let body = node
             .child_by_field("body")
             .map(|n| self.lower_expr(n))
             .unwrap_or_else(|| self.error_expr(span));
+
+        self.pop_scope();
 
         Function {
             name,
@@ -626,5 +780,39 @@ mod tests {
             }
             _ => panic!("Expected Function item"),
         }
+    }
+
+    #[test]
+    fn test_string_addition_lowers_to_concat() {
+        let source = r#"let <concat a:string b:string /> = { a + b }"#;
+        let parse_result = parse_str(source, "test.nx");
+        assert!(
+            parse_result.errors.is_empty(),
+            "parse errors: {:?}",
+            parse_result.errors
+        );
+        let tree = parse_result.tree.unwrap();
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        assert_eq!(module.items().len(), 1);
+        let func = match &module.items()[0] {
+            Item::Function(f) => f,
+            _ => panic!("expected function item"),
+        };
+
+        let assert_concat = |expr_id: ExprId| match module.expr(expr_id) {
+            Expr::BinaryOp { op, .. } => assert_eq!(*op, BinOp::Concat),
+            Expr::Block {
+                expr: Some(final_expr),
+                ..
+            } => match module.expr(*final_expr) {
+                Expr::BinaryOp { op, .. } => assert_eq!(*op, BinOp::Concat),
+                other => panic!("expected binary op in block, found {:?}", other),
+            },
+            other => panic!("expected binary op, found {:?}", other),
+        };
+
+        assert_concat(func.body);
     }
 }

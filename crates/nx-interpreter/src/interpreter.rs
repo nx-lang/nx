@@ -192,7 +192,7 @@ impl Interpreter {
     ) -> Result<Value, RuntimeError> {
         let lhs_val = self.eval_expr(module, ctx, lhs)?;
         let rhs_val = self.eval_expr(module, ctx, rhs)?;
-        
+
         // Delegate to arithmetic module
         crate::eval::arithmetic::eval_arithmetic_op(lhs_val, op, rhs_val)
     }

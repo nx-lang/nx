@@ -165,7 +165,9 @@ impl RuntimeError {
                 report
             };
 
-            let _ = report.finish().write((filename, Source::from(source)), &mut output);
+            let _ = report
+                .finish()
+                .write((filename, Source::from(source)), &mut output);
         } else {
             // No source location, format as simple message
             output.extend_from_slice(format!("Runtime Error: {}", self.kind).as_bytes());

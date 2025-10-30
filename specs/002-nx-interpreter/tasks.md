@@ -149,11 +149,13 @@ Can run in parallel after T044-T046 complete.
 - [X] T024 [US1] Add integration test (direct HIR) for string concatenation function
 - [X] T025 [US1] Add integration test (direct HIR) for boolean logic function with variable bindings
 
+**Status Update (2025-10-30)**: Parser-driven integration tests (`tests/simple_functions.rs`) currently omit local variable bindings because the NX parser does not yet accept them. Coverage for bindings remains through the direct-HIR test suite (`tests/interpreter_direct_hir.rs`). Re-enable the parser-based scenarios once the grammar supports block `let` declarations.
+
 **Acceptance Criteria**:
 - ✅ Can execute function with arithmetic operations and return correct result
 - ✅ Can execute function with string concatenation
 - ✅ Can execute function with boolean operations
-- ✅ Can handle local variable declarations and references
+- ✅ Can handle local variable declarations and references (covered via direct HIR; parser coverage blocked pending grammar updates)
 - ✅ Parameter binding works correctly
 
 **Note**: Integration tests use directly-constructed HIR modules due to parser limitations with block expressions. Parser-based integration tests exist but are blocked on HIR lowering implementation.

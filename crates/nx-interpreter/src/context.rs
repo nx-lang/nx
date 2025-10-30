@@ -156,11 +156,9 @@ impl ExecutionContext {
     pub fn check_operation_limit(&mut self) -> Result<(), RuntimeError> {
         self.operation_count += 1;
         if self.operation_count > self.limits.max_operations {
-            return Err(RuntimeError::new(
-                RuntimeErrorKind::OperationLimitExceeded {
-                    limit: self.limits.max_operations,
-                },
-            )
+            return Err(RuntimeError::new(RuntimeErrorKind::OperationLimitExceeded {
+                limit: self.limits.max_operations,
+            })
             .with_call_stack(self.call_stack.clone()));
         }
         Ok(())

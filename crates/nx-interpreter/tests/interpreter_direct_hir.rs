@@ -3,10 +3,10 @@
 //! These tests bypass the parser and create HIR modules directly to test
 //! interpreter functionality.
 
+use nx_diagnostics::{TextSize, TextSpan};
 use nx_hir::ast::{BinOp, Expr, Stmt};
 use nx_hir::{Function, Item, Module, Name, Param, SourceId};
 use nx_interpreter::{Interpreter, Value};
-use nx_diagnostics::{TextSize, TextSpan};
 use smol_str::SmolStr;
 
 /// Helper to create a text span
