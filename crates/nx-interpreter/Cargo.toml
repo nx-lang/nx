@@ -1,0 +1,21 @@
+[package]
+name = "nx-interpreter"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+nx-hir = { path = "../nx-hir" }
+nx-diagnostics = { path = "../nx-diagnostics" }
+nx-types = { path = "../nx-types" }
+la-arena.workspace = true
+smol_str.workspace = true
+ariadne.workspace = true
+text-size.workspace = true
+rustc-hash.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

@@ -88,10 +88,10 @@ Can run in parallel after T044-T046 complete.
 
 ### Tasks
 
-- [ ] T001 Create nx-interpreter crate directory at crates/nx-interpreter/
-- [ ] T002 Create Cargo.toml for nx-interpreter with dependencies (nx-hir, nx-diagnostics, nx-types, la-arena, smol_str)
-- [ ] T003 Add nx-interpreter to workspace Cargo.toml members list
-- [ ] T004 Create src/ directory structure: lib.rs, interpreter.rs, context.rs, value.rs, error.rs, eval/ subdirectory
+- [X] T001 Create nx-interpreter crate directory at crates/nx-interpreter/
+- [X] T002 Create Cargo.toml for nx-interpreter with dependencies (nx-hir, nx-diagnostics, nx-types, la-arena, smol_str)
+- [X] T003 Add nx-interpreter to workspace Cargo.toml members list
+- [X] T004 Create src/ directory structure: lib.rs, interpreter.rs, context.rs, value.rs, error.rs, eval/ subdirectory
 
 ---
 
@@ -103,12 +103,12 @@ Can run in parallel after T044-T046 complete.
 
 ### Tasks
 
-- [ ] T005 [P] Implement Value enum in crates/nx-interpreter/src/value.rs with variants (Int, Float, String, Boolean, Null)
-- [ ] T006 [P] Implement ExecutionContext struct in crates/nx-interpreter/src/context.rs with scopes, call_stack, operation_count, limits
-- [ ] T007 [P] Implement RuntimeError and RuntimeErrorKind in crates/nx-interpreter/src/error.rs with Ariadne integration
-- [ ] T008 Implement CallFrame struct in crates/nx-interpreter/src/error.rs for call stack tracking
-- [ ] T009 Create eval module structure: crates/nx-interpreter/src/eval/mod.rs with submodules (arithmetic, logical, control, functions)
-- [ ] T010 Implement Interpreter struct skeleton in crates/nx-interpreter/src/interpreter.rs with execute_function stub
+- [X] T005 [P] Implement Value enum in crates/nx-interpreter/src/value.rs with variants (Int, Float, String, Boolean, Null)
+- [X] T006 [P] Implement ExecutionContext struct in crates/nx-interpreter/src/context.rs with scopes, call_stack, operation_count, limits
+- [X] T007 [P] Implement RuntimeError and RuntimeErrorKind in crates/nx-interpreter/src/error.rs with Ariadne integration
+- [X] T008 Implement CallFrame struct in crates/nx-interpreter/src/error.rs for call stack tracking
+- [X] T009 Create eval module structure: crates/nx-interpreter/src/eval/mod.rs with submodules (arithmetic, logical, control, functions)
+- [X] T010 Implement Interpreter struct skeleton in crates/nx-interpreter/src/interpreter.rs with execute_function stub
 
 ---
 
