@@ -6,11 +6,34 @@ use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
 
 /// Resource limits for execution
+///
+/// Configures safety limits to prevent runaway execution, infinite loops,
+/// and stack overflow. These limits protect against both accidental and
+/// malicious code.
+///
+/// # Default Values
+/// - `max_operations`: 1,000,000 (prevents infinite loops)
+/// - `max_recursion_depth`: 1,000 (prevents stack overflow)
+///
+/// # Examples
+/// ```
+/// use nx_interpreter::ResourceLimits;
+///
+/// let strict_limits = ResourceLimits {
+///     max_operations: 10_000,
+///     max_recursion_depth: 100,
+/// };
+/// ```
 #[derive(Debug, Clone)]
 pub struct ResourceLimits {
     /// Maximum number of operations allowed per execution
+    ///
+    /// Each expression evaluation increments the counter. Prevents infinite loops.
     pub max_operations: usize,
+
     /// Maximum recursion depth
+    ///
+    /// Each function call increments depth. Prevents stack overflow.
     pub max_recursion_depth: usize,
 }
 
@@ -55,6 +78,15 @@ impl Scope {
 }
 
 /// Execution context maintaining runtime state
+///
+/// Manages the runtime state during expression evaluation, including:
+/// - Variable scopes (with proper lexical scoping)
+/// - Call stack (for recursion tracking)
+/// - Operation counting (for infinite loop protection)
+/// - Resource limits enforcement
+///
+/// The context is passed through all evaluation functions and tracks
+/// state changes during execution.
 #[derive(Debug)]
 pub struct ExecutionContext {
     /// Stack of scopes (innermost scope is last)

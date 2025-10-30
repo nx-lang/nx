@@ -20,13 +20,36 @@ impl Interpreter {
 
     /// Execute a function by name with the given arguments
     ///
+    /// Uses default resource limits (recursion: 1000, operations: 1M).
+    /// For custom limits, use [`execute_function_with_limits`](Self::execute_function_with_limits).
+    ///
     /// # Arguments
     /// * `module` - The HIR module containing the function
     /// * `function_name` - Name of the function to execute
-    /// * `args` - Arguments to pass to the function
+    /// * `args` - Arguments to pass to the function (must match parameter count)
     ///
     /// # Returns
     /// The result value or a runtime error
+    ///
+    /// # Errors
+    /// Returns `RuntimeError` if:
+    /// - Function not found in module
+    /// - Parameter count mismatch
+    /// - Runtime error occurs during execution (division by zero, type mismatch, etc.)
+    /// - Resource limits exceeded (recursion depth or operation count)
+    ///
+    /// # Example
+    /// ```ignore
+    /// use nx_interpreter::{Interpreter, Value};
+    ///
+    /// let interpreter = Interpreter::new();
+    /// let result = interpreter.execute_function(
+    ///     &module,
+    ///     "add",
+    ///     vec![Value::Int(5), Value::Int(3)],
+    /// )?;
+    /// assert_eq!(result, Value::Int(8));
+    /// ```
     pub fn execute_function(
         &self,
         module: &Module,
@@ -37,6 +60,36 @@ impl Interpreter {
     }
 
     /// Execute a function with custom resource limits
+    ///
+    /// # Arguments
+    /// * `module` - The HIR module containing the function
+    /// * `function_name` - Name of the function to execute
+    /// * `args` - Arguments to pass to the function
+    /// * `limits` - Custom resource limits (recursion depth, operation count)
+    ///
+    /// # Returns
+    /// The result value or a runtime error
+    ///
+    /// # Errors
+    /// Returns `RuntimeError` if:
+    /// - Function not found in module
+    /// - Parameter count mismatch
+    /// - Runtime error occurs during execution
+    /// - Resource limits exceeded
+    ///
+    /// # Example
+    /// ```ignore
+    /// let limits = ResourceLimits {
+    ///     recursion_limit: 100,
+    ///     operation_limit: 10_000,
+    /// };
+    /// let result = interpreter.execute_function_with_limits(
+    ///     &module,
+    ///     "factorial",
+    ///     vec![Value::Int(5)],
+    ///     limits,
+    /// )?;
+    /// ```
     pub fn execute_function_with_limits(
         &self,
         module: &Module,

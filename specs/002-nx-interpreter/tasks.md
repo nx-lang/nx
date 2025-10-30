@@ -310,7 +310,7 @@ Can run in parallel after T044-T046 complete.
 
 #### Documentation
 
-- [ ] T060 Add rustdoc comments to all public APIs in crates/nx-interpreter/src/lib.rs, interpreter.rs, value.rs, error.rs (partially complete - key APIs documented)
+- [X] T060 Add rustdoc comments to all public APIs in crates/nx-interpreter/src/lib.rs, interpreter.rs, value.rs, error.rs, context.rs
 
 **Status**: ✅ **PHASE 7 MOSTLY COMPLETE** - Recursion fully implemented and tested, code formatted and linted
 

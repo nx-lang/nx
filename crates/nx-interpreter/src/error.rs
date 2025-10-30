@@ -6,31 +6,59 @@ use std::fmt;
 use text_size::TextRange;
 
 /// Runtime error kinds that can occur during interpretation
+///
+/// Represents all possible runtime errors that can be detected during
+/// expression evaluation. Each variant includes context-specific information
+/// to aid in debugging and error reporting.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RuntimeErrorKind {
     /// Division by zero
+    ///
+    /// Triggered when attempting to divide or modulo by zero
     DivisionByZero,
+
     /// Operation on null value
+    ///
+    /// Triggered when attempting arithmetic or logical operations on null
     NullOperation { operation: String },
+
     /// Type mismatch in operation
+    ///
+    /// Triggered when operand types don't match operation requirements
+    /// (e.g., adding string to int, comparing incompatible types)
     TypeMismatch {
         expected: String,
         actual: String,
         operation: String,
     },
+
     /// Undefined variable reference
+    ///
+    /// Triggered when referencing a variable that doesn't exist in scope
     UndefinedVariable { name: SmolStr },
+
     /// Parameter count mismatch in function call
+    ///
+    /// Triggered when function is called with wrong number of arguments
     ParameterCountMismatch {
         expected: usize,
         actual: usize,
         function: SmolStr,
     },
+
     /// Function not found
+    ///
+    /// Triggered when attempting to call a non-existent function
     FunctionNotFound { name: SmolStr },
+
     /// Operation limit exceeded (infinite loop protection)
+    ///
+    /// Triggered when execution exceeds the configured operation count limit
     OperationLimitExceeded { limit: usize },
+
     /// Stack overflow (recursion depth exceeded)
+    ///
+    /// Triggered when recursion depth exceeds the configured limit
     StackOverflow { depth: usize },
 }
 
@@ -95,6 +123,18 @@ impl CallFrame {
 }
 
 /// Runtime error with context and source location
+///
+/// Wraps a [`RuntimeErrorKind`] with additional context including
+/// source location and call stack for detailed error reporting.
+/// Can be formatted with Ariadne for beautiful terminal output.
+///
+/// # Examples
+/// ```ignore
+/// use nx_interpreter::{RuntimeError, RuntimeErrorKind};
+///
+/// let error = RuntimeError::new(RuntimeErrorKind::DivisionByZero);
+/// println!("{}", error.format("example.nx", "let x = 1 / 0"));
+/// ```
 #[derive(Debug, Clone)]
 pub struct RuntimeError {
     /// Error kind
@@ -143,6 +183,16 @@ impl RuntimeError {
     }
 
     /// Format the error with Ariadne for beautiful error output
+    ///
+    /// Generates a formatted error message with source context,
+    /// highlighting the error location and including call stack if available.
+    ///
+    /// # Arguments
+    /// * `filename` - Name of the source file for display
+    /// * `source` - Full source code text for context
+    ///
+    /// # Returns
+    /// Formatted error string with ANSI colors and source highlighting
     pub fn format(&self, filename: &str, source: &str) -> String {
         let mut output = Vec::new();
 

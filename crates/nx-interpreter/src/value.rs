@@ -3,19 +3,53 @@
 use smol_str::SmolStr;
 
 /// Runtime value types supported by the NX interpreter
+///
+/// Represents all possible runtime values that can be produced or consumed
+/// during expression evaluation. Values are used for function arguments,
+/// return values, and intermediate computation results.
+///
+/// # Examples
+/// ```
+/// use nx_interpreter::Value;
+/// use smol_str::SmolStr;
+///
+/// let int_val = Value::Int(42);
+/// let float_val = Value::Float(3.14);
+/// let string_val = Value::String(SmolStr::new("hello"));
+/// let bool_val = Value::Boolean(true);
+/// let null_val = Value::Null;
+/// let array_val = Value::Array(vec![Value::Int(1), Value::Int(2)]);
+/// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     /// Integer value (i64)
+    ///
+    /// Represents whole numbers from -2^63 to 2^63-1
     Int(i64),
+
     /// Floating-point value (f64)
+    ///
+    /// Represents decimal numbers with IEEE 754 double precision
     Float(f64),
+
     /// String value
+    ///
+    /// Efficiently stores strings using SmolStr (inline for small strings)
     String(SmolStr),
+
     /// Boolean value
+    ///
+    /// Represents true or false logical values
     Boolean(bool),
+
     /// Null/undefined value
+    ///
+    /// Represents the absence of a value
     Null,
+
     /// Array of values
+    ///
+    /// Represents a collection of values, used for iteration and collections
     Array(Vec<Value>),
 }
 
@@ -56,6 +90,17 @@ impl Value {
     }
 
     /// Get the type name as a string
+    ///
+    /// Returns a static string describing the type of this value.
+    /// Useful for error messages and debugging.
+    ///
+    /// # Returns
+    /// - "int" for `Int` values
+    /// - "float" for `Float` values
+    /// - "string" for `String` values
+    /// - "boolean" for `Boolean` values
+    /// - "null" for `Null` values
+    /// - "array" for `Array` values
     pub fn type_name(&self) -> &'static str {
         match self {
             Value::Int(_) => "int",
