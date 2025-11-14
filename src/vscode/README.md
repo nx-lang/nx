@@ -16,9 +16,26 @@ Basic syntax highlighting and language configuration for the NX language using a
 
 ## Getting Started
 
-1. Open this repository in VS Code.
-2. Run the launch config: "Run NX Language Extension".
-3. Open `src/vscode/samples/basic.nx` to see highlighting.
+1. Install and load `nvm` (recommended on WSL):
+   ```bash
+   curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+   source ~/.nvm/nvm.sh
+   ```
+2. Install the Node.js version the VS Code tooling expects (Node 24 LTS or newer):
+   ```bash
+   nvm install 24 && nvm use 24
+   ```
+3. From `src/vscode`, install dependencies and build the VSIX package when needed:
+   ```bash
+   npm install
+   npm run package
+   ```
+4. Launch VS Code with the extension loaded and pointing at the repo root (from `src/vscode`):
+   ```bash
+   code --extensionDevelopmentPath=. ../..
+   ```
+   OR use the launch config: "Run NX Language Extension".
+5. Open `src/vscode/samples` files to see highlighting.
 
 ## File Structure
 

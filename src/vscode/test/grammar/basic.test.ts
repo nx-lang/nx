@@ -155,6 +155,21 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(line, tokens, ':')).to.include('punctuation.separator.conditional.nx');
   });
 
+  it('highlights paren-style function calls', function () {
+    const line = 'let message = render(user, index)';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    expect(scopesForSubstring(line, tokens, 'render')).to.include('source.nx');
+    expect(scopesForSubstring(line, tokens, '(')).to.be.an('array');
+  });
+
+  it('highlights paren-style function definitions', function () {
+    const line = 'let render(title:string, count:int) = title';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    expect(scopesForSubstring(line, tokens, 'render')).to.include('entity.name.variable.nx');
+    expect(scopesForSubstring(line, tokens, 'string')).to.include('storage.type.primitive.nx');
+    expect(scopesForSubstring(line, tokens, 'int')).to.include('storage.type.primitive.nx');
+  });
+
   it('highlights tags and attributes', function () {
     const line = '<Button x=1 y=2/>';
     const { tokens } = grammar.tokenizeLine(line, null);

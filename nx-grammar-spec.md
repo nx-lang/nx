@@ -83,9 +83,9 @@ Raw embed tokens
 
 Conventional expressions (non-markup) use a Pratt parser with the following precedence and associativity. Higher number binds tighter.
 
- 140: Postfix call, member access
-- Postfix call: led token: LPAREN … RPAREN, left-associative
-  - form: callee LPAREN [Expr (COMMA Expr)*] RPAREN → Call(callee, args)
+ 140: Paren function call, member access
+- Paren function call: led token: LPAREN … RPAREN, left-associative
+  - form: callee LPAREN [Expr (COMMA Expr)*] RPAREN → ParenFunctionCall(callee, args)
 - Member access: led token: DOT IDENTIFIER, left-associative
   - form: left DOT IDENTIFIER → Member(left, name)
 
@@ -168,9 +168,28 @@ UserDefinedType (AST: UserTypeSyntax)
 - UserDefinedType → QualifiedName
   - fields: name: QualifiedNameSyntax
 
-FunctionDefinition (AST: FunctionDefinitionSyntax)
-- FunctionDefinition → LET LT ElementName PropertyDefinition* SLASH GT EQ RhsExpression
-  - fields: elementName: QualifiedMarkupNameSyntax, props: PropertyDefinitionSyntax[], body: ExpressionSyntax
+FunctionDefinition (AST: FunctionDefinitionSyntax is a sum type)
+- FunctionDefinition → ElementFunctionDefinition        (ElementFunctionDefinitionSyntax)
+- FunctionDefinition → ParenFunctionDefinition          (ParenFunctionDefinitionSyntax)
+
+ElementFunctionDefinition (AST: ElementFunctionDefinitionSyntax)
+- ElementFunctionDefinition → LET LT ElementName PropertyDefinition* SLASH GT FunctionReturnTypeOpt EQ RhsExpression
+  - fields: elementName: QualifiedMarkupNameSyntax, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
+
+ParenFunctionDefinition (AST: ParenFunctionDefinitionSyntax)
+- ParenFunctionDefinition → LET IDENTIFIER LPAREN FunctionParameterListOpt RPAREN FunctionReturnTypeOpt EQ RhsExpression
+  - fields: name: string, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
+
+FunctionParameterListOpt
+- FunctionParameterListOpt → FunctionParameterList
+- FunctionParameterListOpt → ε
+
+FunctionParameterList
+- FunctionParameterList → PropertyDefinition (COMMA PropertyDefinition)*
+
+FunctionReturnTypeOpt
+- FunctionReturnTypeOpt → COLON Type
+- FunctionReturnTypeOpt → ε
 
 PropertyDefinition (AST: PropertyDefinitionSyntax)
 - PropertyDefinition → MARKUP_IDENTIFIER COLON Type [EQ RhsExpression]
@@ -191,11 +210,23 @@ ValueExpression (AST: ExpressionSyntax; Pratt-parsed for operators)
 - ValueExpression → Element
 - ValueExpression → ValueIfExpression
 - ValueExpression → ValueForExpression
+- ValueExpression → ParenFunctionCall
 - ValueExpression → ValueExpr
 
 ValueExpr (parsed by Pratt; not a standalone AST node)
 - Primaries (nud): Literal | IDENTIFIER | Unit | ParenthesizedExpression
 - Postfix/infix handled via the operator table (including the conditional operator `?:` at precedence 20)
+
+ParenFunctionCall (AST: ParenFunctionCallExpressionSyntax)
+- ParenFunctionCall → ValueExpression LPAREN ParenFunctionCallArgumentListOpt RPAREN   (* parsed via Pratt entry at precedence 140; left-recursive form shown for clarity *)
+  - fields: callee: ExpressionSyntax, args: ExpressionSyntax[]
+
+ParenFunctionCallArgumentListOpt
+- ParenFunctionCallArgumentListOpt → ParenFunctionCallArgumentList
+- ParenFunctionCallArgumentListOpt → ε
+
+ParenFunctionCallArgumentList
+- ParenFunctionCallArgumentList → ValueExpression (COMMA ValueExpression)*
 
 Unit (AST: UnitLiteralSyntax)
 - Unit → LPAREN RPAREN
@@ -451,10 +482,12 @@ This section lists the AST node types with fields for implementers.
 - TypeSyntax: kind: "primitive"|"user", name: string (qualified), modifier?: "nullable"|"sequence"
 - PrimitiveTypeSyntax: name: string
 - UserTypeSyntax: name: QualifiedNameSyntax
- - FunctionDefinitionSyntax: elementName: QualifiedMarkupNameSyntax, props: PropertyDefinitionSyntax[], body: ExpressionSyntax
+ - FunctionDefinitionSyntax: ElementFunctionDefinitionSyntax | ParenFunctionDefinitionSyntax
+ - ElementFunctionDefinitionSyntax: elementName: QualifiedMarkupNameSyntax, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
+ - ParenFunctionDefinitionSyntax: name: string, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
  - PropertyDefinitionSyntax: name: string, type: TypeSyntax, default?: ExpressionSyntax
-- ExpressionSyntax: union of MarkupElementSyntax | LiteralExpressionSyntax | IdentifierNameSyntax | ValueIfSimpleExpressionSyntax | ValueIfMatchExpressionSyntax | ValueIfConditionListExpressionSyntax | ValueForExpressionSyntax | ConditionalExpressionSyntax | CallExpressionSyntax | MemberAccessExpressionSyntax | BinaryExpressionSyntax | PrefixUnaryExpressionSyntax | ParenthesizedExpressionSyntax | UnitLiteralSyntax
- - CallExpressionSyntax: callee: ExpressionSyntax, args: ExpressionSyntax[]
+- ExpressionSyntax: union of MarkupElementSyntax | LiteralExpressionSyntax | IdentifierNameSyntax | ValueIfSimpleExpressionSyntax | ValueIfMatchExpressionSyntax | ValueIfConditionListExpressionSyntax | ValueForExpressionSyntax | ConditionalExpressionSyntax | ParenFunctionCallExpressionSyntax | MemberAccessExpressionSyntax | BinaryExpressionSyntax | PrefixUnaryExpressionSyntax | ParenthesizedExpressionSyntax | UnitLiteralSyntax
+ - ParenFunctionCallExpressionSyntax: callee: ExpressionSyntax, args: ExpressionSyntax[]
  - MemberAccessExpressionSyntax: target: ExpressionSyntax, name: string
  - ConditionalExpressionSyntax: condition: ExpressionSyntax, whenTrue: ExpressionSyntax, whenFalse: ExpressionSyntax
  - BinaryExpressionSyntax: op: token, left: ExpressionSyntax, right: ExpressionSyntax

@@ -61,7 +61,14 @@ ValueDefinition ::=
 
 ```ebnf
 FunctionDefinition ::=
-    "let" "<" ElementName {PropertyDefinition} "/>" "=" RhsExpression
+    ElementFunctionDefinition
+    | ParenFunctionDefinition
+
+ElementFunctionDefinition ::=
+    "let" "<" ElementName {PropertyDefinition} "/>" [":" TypeDeclaration] "=" RhsExpression
+
+ParenFunctionDefinition ::=
+    "let" Identifier "(" [PropertyDefinition {"," PropertyDefinition}] ")" [":" TypeDeclaration] "=" RhsExpression
 
 PropertyDefinition ::=
     MarkupIdentifier ":" TypeDeclaration ["=" RhsExpression]
@@ -90,7 +97,7 @@ ValueExpression ::=
     | PrefixUnaryExpression
     | BinaryExpression
     | MemberAccess
-    | FunctionCall
+    | ParenFunctionCall
     | Unit
     | ParenthesizedExpression
 
@@ -130,7 +137,7 @@ BinaryExpression ::=
     ValueExpression ( "+" | "-" | "*" | "/" | ">" | "<" | ">=" | "<=" | "==" | "!=" | "&&" | "||" ) ValueExpression
 MemberAccess ::=
     ValueExpression "." Identifier
-FunctionCall ::=
+ParenFunctionCall ::=
     ValueExpression "(" [ ValueExpression { "," ValueExpression } ] ")"
 
 Pattern ::=
