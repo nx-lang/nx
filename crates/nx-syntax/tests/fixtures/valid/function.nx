@@ -11,3 +11,6 @@ let <Button
   >
     {text}
   </button>
+
+// Paren-style function with explicit return type
+let add(a:int, b:int): int = { a + b }

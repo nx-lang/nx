@@ -153,3 +153,31 @@ fn test_division_by_zero() {
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("Division by zero"));
 }
+
+// ============================================================================
+// Paren Function Tests
+// ============================================================================
+
+#[test]
+fn test_paren_function_execution() {
+    let source = r#"
+        let add(a:int, b:int): int = { a + b }
+    "#;
+
+    let result = execute_function(source, "add", vec![Value::Int(2), Value::Int(6)])
+        .unwrap_or_else(|err| panic!("Paren function execution failed:\n{}", err));
+    assert_eq!(result, Value::Int(8));
+}
+
+#[test]
+fn test_nested_paren_function_calls() {
+    let source = r#"
+        let add(a:int, b:int): int = { a + b }
+        let double(value:int): int = { add(value, value) }
+        let compute(n:int): int = { double(add(n, 1)) }
+    "#;
+
+    let result = execute_function(source, "compute", vec![Value::Int(3)])
+        .unwrap_or_else(|err| panic!("Nested paren call failed:\n{}", err));
+    assert_eq!(result, Value::Int(8));
+}

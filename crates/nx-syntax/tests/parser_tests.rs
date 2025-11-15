@@ -52,6 +52,40 @@ fn test_parse_function_definition() {
 }
 
 #[test]
+fn test_parse_paren_function_definition() {
+    let source = "let add(a:int, b:int): int = { a + b }";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "Paren-style function definition should parse"
+    );
+    let root = result.root().expect("Should have root node");
+
+    let func_node = root
+        .children()
+        .find(|c| c.kind() == SyntaxKind::FUNCTION_DEFINITION)
+        .expect("Should find function_definition node");
+
+    let name = func_node
+        .child_by_field("name")
+        .expect("Function should have name field");
+    assert_eq!(name.kind(), SyntaxKind::IDENTIFIER);
+    assert_eq!(name.text(), "add");
+
+    let param_count = func_node
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::PROPERTY_DEFINITION)
+        .count();
+    assert_eq!(param_count, 2, "Should parse two parameters");
+
+    assert!(
+        func_node.child_by_field("return_type").is_some(),
+        "Function should capture return type annotation"
+    );
+}
+
+#[test]
 fn test_parse_nested_elements() {
     let path = fixture_path("valid/nested-elements.nx");
     let result = parse_file(&path).unwrap();

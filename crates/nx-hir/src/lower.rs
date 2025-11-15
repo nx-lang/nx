@@ -395,6 +395,12 @@ impl LoweringContext {
                 .unwrap_or_else(|| self.error_expr(node.span())),
 
             // Value expression wrappers - unwrap
+            SyntaxKind::LITERAL => node
+                .children()
+                .next()
+                .map(|n| self.lower_expr(n))
+                .unwrap_or_else(|| self.error_expr(node.span())),
+
             SyntaxKind::VALUE_EXPRESSION | SyntaxKind::VALUE_EXPR | SyntaxKind::RHS_EXPRESSION => {
                 node.children()
                     .next()
@@ -474,11 +480,12 @@ impl LoweringContext {
 
     /// Lowers a function definition.
     ///
-    /// Parses: `let <Name param1:type1 param2:type2=default /> = body`
+    /// Supports both element-style (`let <Name props... />`) and paren-style (`let name(params)`)
+    /// declarations with an optional `: Type` return annotation.
     pub fn lower_function(&mut self, node: SyntaxNode) -> Function {
         let span = node.span();
 
-        // Extract function name from the element_name field
+        // Extract function name (`element_name` for markup functions, `identifier` for paren forms)
         let name = node
             .child_by_field("name")
             .map(|n| Name::new(n.text()))
@@ -518,6 +525,11 @@ impl LoweringContext {
             self.define_name(&param.name, ty);
         }
 
+        // Lower the optional return type annotation if present
+        let return_type = node
+            .child_by_field("return_type")
+            .map(|n| self.lower_type(n));
+
         // Lower the body expression
         let body = node
             .child_by_field("body")
@@ -529,7 +541,7 @@ impl LoweringContext {
         Function {
             name,
             params,
-            return_type: None, // NX doesn't have explicit return types in this syntax
+            return_type,
             body,
             span,
         }
@@ -712,6 +724,37 @@ mod tests {
                 assert_eq!(func.params.len(), 2);
                 assert_eq!(func.params[0].name.as_str(), "text");
                 assert_eq!(func.params[1].name.as_str(), "disabled");
+            }
+            _ => panic!("Expected Function item"),
+        }
+    }
+
+    #[test]
+    fn test_lower_paren_function_with_return_type() {
+        let source = "let add(a:int, b:int): int = { a + b }";
+        let parse_result = parse_str(source, "test.nx");
+
+        let tree = parse_result.tree.unwrap();
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        assert_eq!(module.items().len(), 1);
+
+        match &module.items()[0] {
+            Item::Function(func) => {
+                assert_eq!(func.name.as_str(), "add");
+                assert_eq!(func.params.len(), 2);
+                assert_eq!(func.params[0].name.as_str(), "a");
+                assert_eq!(func.params[1].name.as_str(), "b");
+
+                let ret = func
+                    .return_type
+                    .as_ref()
+                    .expect("Function should capture return type annotation");
+                match ret {
+                    TypeRef::Name(name) => assert_eq!(name.as_str(), "int"),
+                    _ => panic!("Expected simple return type"),
+                }
             }
             _ => panic!("Expected Function item"),
         }
