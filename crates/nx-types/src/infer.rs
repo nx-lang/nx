@@ -22,12 +22,14 @@ pub struct InferenceContext<'a> {
 impl<'a> InferenceContext<'a> {
     /// Creates a new inference context for a module.
     pub fn new(module: &'a Module) -> Self {
-        Self {
+        let mut ctx = Self {
             module,
             env: TypeEnvironment::new(),
             diagnostics: Vec::new(),
             next_var_id: 0,
-        }
+        };
+        ctx.register_function_signatures();
+        ctx
     }
 
     /// Generates a fresh type variable for inference.
@@ -245,7 +247,8 @@ impl<'a> InferenceContext<'a> {
         let mut bound_names = Vec::new();
 
         for param in &func.params {
-            self.env.bind(param.name.clone(), Type::Unknown);
+            let param_ty = self.type_from_type_ref(&param.ty);
+            self.env.bind(param.name.clone(), param_ty);
             bound_names.push(param.name.clone());
         }
 
@@ -468,6 +471,54 @@ impl<'a> InferenceContext<'a> {
     pub fn finish(self) -> (TypeEnvironment, Vec<Diagnostic>) {
         (self.env, self.diagnostics)
     }
+
+    fn register_function_signatures(&mut self) {
+        for item in self.module.items() {
+            if let nx_hir::Item::Function(func) = item {
+                let param_types: Vec<Type> = func
+                    .params
+                    .iter()
+                    .map(|p| self.type_from_type_ref(&p.ty))
+                    .collect();
+                let return_type = func
+                    .return_type
+                    .as_ref()
+                    .map(|ty| self.type_from_type_ref(ty))
+                    .unwrap_or(Type::Unknown);
+                self.env
+                    .bind(func.name.clone(), Type::function(param_types, return_type));
+            }
+        }
+    }
+
+    fn type_from_type_ref(&self, type_ref: &ast::TypeRef) -> Type {
+        match type_ref {
+            ast::TypeRef::Name(name) => {
+                let lower = name.as_str().to_ascii_lowercase();
+                match lower.as_str() {
+                    "string" => Type::string(),
+                    "int" | "long" => Type::int(),
+                    "float" | "double" => Type::float(),
+                    "boolean" | "bool" => Type::bool(),
+                    "void" => Type::void(),
+                    _ => Type::named(name.clone()),
+                }
+            }
+            ast::TypeRef::Array(inner) => Type::array(self.type_from_type_ref(inner)),
+            ast::TypeRef::Nullable(inner) => Type::nullable(self.type_from_type_ref(inner)),
+            ast::TypeRef::Function {
+                params,
+                return_type,
+            } => {
+                let param_types = params
+                    .iter()
+                    .map(|p| self.type_from_type_ref(p))
+                    .collect();
+                let ret = self.type_from_type_ref(return_type);
+                Type::function(param_types, ret)
+            }
+        }
+    }
 }
 
 /// High-level type inference entry point.
@@ -489,7 +540,9 @@ impl TypeInference {
 mod tests {
     use super::*;
     use nx_diagnostics::{TextSize, TextSpan};
-    use nx_hir::{ast::Expr, ast::Literal, ast::TypeRef, Function, Item, Name, Param, SourceId};
+    use nx_hir::{
+        ast::BinOp, ast::Expr, ast::Literal, ast::TypeRef, Function, Item, Name, Param, SourceId,
+    };
 
     #[test]
     fn test_infer_int_literal() {
@@ -555,5 +608,99 @@ mod tests {
         assert!(diagnostics.is_empty());
         let name = Name::new("text");
         assert!(env.lookup(&name).is_none());
+    }
+
+    #[test]
+    fn test_infer_paren_function_call() {
+        let mut module = Module::new(SourceId::new(0));
+        let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
+
+        // add(a:int, b:int): int = a + b
+        let add_lhs = module.alloc_expr(Expr::Ident(Name::new("a")));
+        let add_rhs = module.alloc_expr(Expr::Ident(Name::new("b")));
+        let add_body = module.alloc_expr(Expr::BinaryOp {
+            lhs: add_lhs,
+            op: BinOp::Add,
+            rhs: add_rhs,
+            span,
+        });
+        let add_fn = Function {
+            name: Name::new("add"),
+            params: vec![
+                Param::new(Name::new("a"), TypeRef::name("int"), span),
+                Param::new(Name::new("b"), TypeRef::name("int"), span),
+            ],
+            return_type: Some(TypeRef::name("int")),
+            body: add_body,
+            span,
+        };
+        module.add_item(Item::Function(add_fn));
+
+        // double(value:int): int = add(value, value)
+        let double_callee = module.alloc_expr(Expr::Ident(Name::new("add")));
+        let double_arg1 = module.alloc_expr(Expr::Ident(Name::new("value")));
+        let double_arg2 = module.alloc_expr(Expr::Ident(Name::new("value")));
+        let double_body = module.alloc_expr(Expr::Call {
+            func: double_callee,
+            args: vec![double_arg1, double_arg2],
+            span,
+        });
+        let double_fn = Function {
+            name: Name::new("double"),
+            params: vec![Param::new(Name::new("value"), TypeRef::name("int"), span)],
+            return_type: Some(TypeRef::name("int")),
+            body: double_body,
+            span,
+        };
+        module.add_item(Item::Function(double_fn));
+
+        // compute(n:int): int = double(add(n, 1))
+        let inner_add_callee = module.alloc_expr(Expr::Ident(Name::new("add")));
+        let inner_arg_n = module.alloc_expr(Expr::Ident(Name::new("n")));
+        let inner_arg_one = module.alloc_expr(Expr::Literal(Literal::Int(1)));
+        let inner_call = module.alloc_expr(Expr::Call {
+            func: inner_add_callee,
+            args: vec![inner_arg_n, inner_arg_one],
+            span,
+        });
+        let outer_callee = module.alloc_expr(Expr::Ident(Name::new("double")));
+        let compute_body = module.alloc_expr(Expr::Call {
+            func: outer_callee,
+            args: vec![inner_call],
+            span,
+        });
+        let compute_fn = Function {
+            name: Name::new("compute"),
+            params: vec![Param::new(Name::new("n"), TypeRef::name("int"), span)],
+            return_type: Some(TypeRef::name("int")),
+            body: compute_body,
+            span,
+        };
+        module.add_item(Item::Function(compute_fn));
+
+        let mut ctx = InferenceContext::new(&module);
+        for item in module.items() {
+            if let Item::Function(func) = item {
+                ctx.infer_function(func);
+            }
+        }
+
+        let (env, diagnostics) = ctx.finish();
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics, got {:?}",
+            diagnostics
+        );
+
+        let add_ty = env.lookup(&Name::new("add")).expect("add type binding");
+        match add_ty {
+            Type::Function { params, ret } => {
+                assert_eq!(params.len(), 2);
+                assert_eq!(params[0], Type::int());
+                assert_eq!(params[1], Type::int());
+                assert_eq!(**ret, Type::int());
+            }
+            _ => panic!("expected function type"),
+        }
     }
 }
