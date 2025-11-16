@@ -114,6 +114,25 @@ fn test_parse_element_function_with_return_type() {
 }
 
 #[test]
+fn test_parse_paren_function_without_return_type() {
+    let source = "let subtract(a:int, b:int) = { a - b }";
+    let result = parse_str(source, "test.nx");
+
+    assert!(result.is_ok(), "Paren function without return type should parse");
+    let root = result.root().expect("Should have root node");
+
+    let func_node = root
+        .children()
+        .find(|c| c.kind() == SyntaxKind::FUNCTION_DEFINITION)
+        .expect("Should find function_definition node");
+
+    assert!(
+        func_node.child_by_field("return_type").is_none(),
+        "Return type should be optional for paren functions"
+    );
+}
+
+#[test]
 fn test_parse_nested_elements() {
     let path = fixture_path("valid/nested-elements.nx");
     let result = parse_file(&path).unwrap();

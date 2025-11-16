@@ -14,3 +14,6 @@ let <Button
 
 // Paren-style function with explicit return type
 let add(a:int, b:int): int = { a + b }
+
+// Paren-style function without explicit return type
+let subtract(a:int, b:int) = { a - b }

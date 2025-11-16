@@ -159,15 +159,16 @@ describe('NX TextMate grammar', function () {
     const line = 'let message = render(user, index)';
     const { tokens } = grammar.tokenizeLine(line, null);
     expect(scopesForSubstring(line, tokens, 'render')).to.include('source.nx');
-    expect(scopesForSubstring(line, tokens, '(')).to.be.an('array');
+    expect(scopesForSubstring(line, tokens, '(')).to.include('source.nx');
   });
 
   it('highlights paren-style function definitions', function () {
-    const line = 'let render(title:string, count:int) = title';
+    const line = 'let render(title:string, count:int): boolean = title == ""';
     const { tokens } = grammar.tokenizeLine(line, null);
     expect(scopesForSubstring(line, tokens, 'render')).to.include('entity.name.variable.nx');
     expect(scopesForSubstring(line, tokens, 'string')).to.include('storage.type.primitive.nx');
     expect(scopesForSubstring(line, tokens, 'int')).to.include('storage.type.primitive.nx');
+    expect(scopesForSubstring(line, tokens, 'boolean')).to.include('storage.type.primitive.nx');
   });
 
   it('highlights tags and attributes', function () {

@@ -396,6 +396,9 @@ impl LoweringContext {
 
             // Value expression wrappers - unwrap
             SyntaxKind::LITERAL => node
+                // Tree-sitter wraps actual literal nodes (string/int/etc.) in a
+                // `literal` parent. Unwrap so downstream code keeps seeing the
+                // concrete literal expression.
                 .children()
                 .next()
                 .map(|n| self.lower_expr(n))
