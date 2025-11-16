@@ -5,7 +5,7 @@
 
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_hir::ast::{BinOp, Expr, Literal};
-use nx_hir::{lower, Function, Item, Module, Name, SourceId};
+use nx_hir::{lower, Function, Item, Module, Name, Param, SourceId};
 use nx_interpreter::{Interpreter, RuntimeErrorKind, Value};
 use nx_syntax::parse_str;
 
@@ -78,6 +78,7 @@ fn test_paren_function_parameter_count_mismatch() {
         let double(value:int): int = { value + value }
     "#;
     let module = module_from_source(source);
+    dbg!(module.items());
     let interpreter = Interpreter::new();
 
     let err = interpreter
@@ -107,11 +108,7 @@ fn test_paren_function_argument_type_mismatch() {
     let interpreter = Interpreter::new();
 
     let err = interpreter
-        .execute_function(
-            &module,
-            "add",
-            vec![Value::Boolean(true), Value::Int(3)],
-        )
+        .execute_function(&module, "add", vec![Value::Boolean(true), Value::Int(3)])
         .expect_err("Adding incompatible argument types should fail");
 
     match err.kind() {
@@ -124,17 +121,29 @@ fn test_paren_function_argument_type_mismatch() {
 
 #[test]
 fn test_paren_function_invalid_return_type_usage() {
-    let source = r#"
-        let flag(): string = { "yes" }
-        let select(value:int): int = {
-            if flag() {
-                value
-            } else {
-                value
-            }
-        }
-    "#;
-    let module = module_from_source(source);
+    let mut module = Module::new(SourceId::new(0));
+    let param = Param::new(
+        Name::new("value"),
+        nx_hir::ast::TypeRef::name("int"),
+        span(0, 1),
+    );
+    let condition = module.alloc_expr(Expr::Literal(Literal::String("yes".into())));
+    let then_branch = module.alloc_expr(Expr::Ident(Name::new("value")));
+    let else_branch = module.alloc_expr(Expr::Ident(Name::new("value")));
+    let if_expr = module.alloc_expr(Expr::If {
+        condition,
+        then_branch,
+        else_branch: Some(else_branch),
+        span: span(0, 10),
+    });
+    let func = Function {
+        name: Name::new("select"),
+        params: vec![param],
+        return_type: None,
+        body: if_expr,
+        span: span(0, 20),
+    };
+    module.add_item(Item::Function(func));
     let interpreter = Interpreter::new();
 
     let err = interpreter
@@ -145,6 +154,43 @@ fn test_paren_function_invalid_return_type_usage() {
         RuntimeErrorKind::TypeMismatch { operation, .. } => {
             assert_eq!(operation, "if condition");
         }
-        other => panic!("Expected TypeMismatch for invalid return type, got {:?}", other),
+        other => panic!(
+            "Expected TypeMismatch for invalid return type, got {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
+fn test_enum_not_found_runtime_error() {
+    let mut module = Module::new(SourceId::new(0));
+    let span = span(0, 5);
+
+    let base = module.alloc_expr(Expr::Ident(Name::new("Direction")));
+    let member = module.alloc_expr(Expr::Member {
+        base,
+        member: Name::new("North"),
+        span,
+    });
+
+    let func = Function {
+        name: Name::new("getDirection"),
+        params: Vec::new(),
+        return_type: None,
+        body: member,
+        span,
+    };
+    module.add_item(Item::Function(func));
+    let interpreter = Interpreter::new();
+
+    let err = interpreter
+        .execute_function(&module, "getDirection", vec![])
+        .expect_err("Missing enum should fail at runtime");
+
+    match err.kind() {
+        RuntimeErrorKind::EnumNotFound { name } => {
+            assert_eq!(name.as_str(), "Direction");
+        }
+        other => panic!("Expected EnumNotFound, got {:?}", other),
     }
 }

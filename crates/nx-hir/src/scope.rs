@@ -22,6 +22,8 @@ pub enum SymbolKind {
     Parameter,
     /// A type definition
     Type,
+    /// An enum member
+    EnumMember,
 }
 
 impl SymbolKind {
@@ -32,6 +34,7 @@ impl SymbolKind {
             SymbolKind::Variable => "variable",
             SymbolKind::Parameter => "parameter",
             SymbolKind::Type => "type",
+            SymbolKind::EnumMember => "enum member",
         }
     }
 }
@@ -224,17 +227,19 @@ pub fn build_scopes(module: &Module) -> (ScopeManager, Vec<Diagnostic>) {
                 let symbol = Symbol::new(func.name.clone(), SymbolKind::Function, func.span);
                 manager.define(manager.root(), symbol);
             }
-            crate::Item::TypeAlias => {
-                // TODO: Handle type aliases when implemented
+            crate::Item::TypeAlias(alias) => {
+                let symbol = Symbol::new(alias.name.clone(), SymbolKind::Type, alias.span);
+                manager.define(manager.root(), symbol);
+            }
+            crate::Item::Enum(enum_def) => {
+                let symbol = Symbol::new(enum_def.name.clone(), SymbolKind::Type, enum_def.span);
+                manager.define(manager.root(), symbol);
             }
             crate::Item::Element(_) => {
                 // Elements don't introduce symbols at module scope
             }
         }
     }
-
-    // TODO: Second pass - validate all identifier references
-    // This will be implemented when we add expression traversal
 
     (manager, diagnostics)
 }

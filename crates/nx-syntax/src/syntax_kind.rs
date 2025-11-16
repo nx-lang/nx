@@ -15,6 +15,9 @@ pub enum SyntaxKind {
 
     // === Type Definitions ===
     TYPE_DEFINITION,
+    ENUM_DEFINITION,
+    ENUM_MEMBER_LIST,
+    ENUM_MEMBER,
     VALUE_DEFINITION,
     TYPE,
     PRIMITIVE_TYPE,
@@ -124,6 +127,7 @@ pub enum SyntaxKind {
     // === Keywords ===
     LET,
     TYPE_KW,
+    ENUM,
     IMPORT,
     IF,
     ELSE,
@@ -148,6 +152,7 @@ pub enum SyntaxKind {
     GT_EQ,
     AMP_AMP,
     PIPE_PIPE,
+    PIPE,
     BANG,
     QUESTION,
     COLON,
@@ -188,6 +193,7 @@ impl SyntaxKind {
                 | SyntaxKind::LET
                 | SyntaxKind::TYPE_KW
                 | SyntaxKind::IMPORT
+                | SyntaxKind::ENUM
                 | SyntaxKind::IF
                 | SyntaxKind::ELSE
                 | SyntaxKind::FOR
@@ -209,6 +215,7 @@ impl SyntaxKind {
                 | SyntaxKind::GT_EQ
                 | SyntaxKind::AMP_AMP
                 | SyntaxKind::PIPE_PIPE
+                | SyntaxKind::PIPE
                 | SyntaxKind::BANG
                 | SyntaxKind::QUESTION
                 | SyntaxKind::COLON
@@ -250,6 +257,7 @@ impl SyntaxKind {
                 | SyntaxKind::TRUE
                 | SyntaxKind::FALSE
                 | SyntaxKind::NULL_KW
+                | SyntaxKind::ENUM
         )
     }
 
@@ -280,6 +288,9 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "ERROR" => SyntaxKind::ERROR,
         "import_statement" => SyntaxKind::IMPORT_STATEMENT,
         "type_definition" => SyntaxKind::TYPE_DEFINITION,
+        "enum_definition" => SyntaxKind::ENUM_DEFINITION,
+        "enum_member_list" => SyntaxKind::ENUM_MEMBER_LIST,
+        "enum_member" => SyntaxKind::ENUM_MEMBER,
         "value_definition" => SyntaxKind::VALUE_DEFINITION,
         "type" => SyntaxKind::TYPE,
         "primitive_type" => SyntaxKind::PRIMITIVE_TYPE,
@@ -353,6 +364,7 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "let" => SyntaxKind::LET,
         // Note: "type" already matched earlier as TYPE
         "import" => SyntaxKind::IMPORT,
+        "enum" => SyntaxKind::ENUM,
         "if" => SyntaxKind::IF,
         "else" => SyntaxKind::ELSE,
         "for" => SyntaxKind::FOR,
@@ -374,6 +386,7 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         ">=" => SyntaxKind::GT_EQ,
         "&&" => SyntaxKind::AMP_AMP,
         "||" => SyntaxKind::PIPE_PIPE,
+        "|" => SyntaxKind::PIPE,
         "!" => SyntaxKind::BANG,
         "?" => SyntaxKind::QUESTION,
         ":" => SyntaxKind::COLON,

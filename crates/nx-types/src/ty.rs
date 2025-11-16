@@ -75,6 +75,9 @@ pub enum Type {
     /// Example: `MyType`, `Person`
     Named(Name),
 
+    /// Enum type (nominal with fixed set of members)
+    Enum(EnumType),
+
     /// Type variable for inference (e.g., T0, T1, T2)
     ///
     /// Used during type inference before the concrete type is known.
@@ -138,6 +141,11 @@ impl Type {
     /// Creates a named type.
     pub fn named(name: impl Into<Name>) -> Self {
         Type::Named(name.into())
+    }
+
+    /// Creates an enum type.
+    pub fn enum_type(name: impl Into<Name>, members: Vec<Name>) -> Self {
+        Type::Enum(EnumType::new(name.into(), members))
     }
 
     /// Creates a type variable.
@@ -262,10 +270,27 @@ impl fmt::Display for Type {
                 write!(f, ") => {}", ret)
             }
             Type::Named(name) => write!(f, "{}", name),
+            Type::Enum(enum_ty) => write!(f, "{}", enum_ty.name),
             Type::Variable(id) => write!(f, "T{}", id),
             Type::Unknown => write!(f, "?"),
             Type::Error => write!(f, "<error>"),
         }
+    }
+}
+
+/// Describes an enum type with its members.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct EnumType {
+    /// Enum name
+    pub name: Name,
+    /// Ordered member names
+    pub members: Vec<Name>,
+}
+
+impl EnumType {
+    /// Creates a new enum type definition.
+    pub fn new(name: Name, members: Vec<Name>) -> Self {
+        Self { name, members }
     }
 }
 
@@ -375,6 +400,10 @@ mod tests {
         assert_eq!(
             Type::function(vec![Type::int(), Type::int()], Type::int()).to_string(),
             "(int, int) => int"
+        );
+        assert_eq!(
+            Type::enum_type(Name::new("Direction"), vec![Name::new("North")]).to_string(),
+            "Direction"
         );
     }
 

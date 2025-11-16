@@ -96,9 +96,10 @@ pub fn check_str(source: &str, file_name: &str) -> TypeCheckResult {
                 nx_hir::Item::Element(_) => {
                     // Elements don't need type checking yet
                 }
-                nx_hir::Item::TypeAlias => {
-                    // Not implemented yet
+                nx_hir::Item::TypeAlias(_) => {
+                    // Processed during type registration
                 }
+                nx_hir::Item::Enum(_) => {}
             }
         }
 
@@ -169,7 +170,8 @@ pub fn check_file(path: impl AsRef<Path>) -> io::Result<TypeCheckResult> {
                     ctx.infer_function(func);
                 }
                 nx_hir::Item::Element(_) => {}
-                nx_hir::Item::TypeAlias => {}
+                nx_hir::Item::TypeAlias(_) => {}
+                nx_hir::Item::Enum(_) => {}
             }
         }
 

@@ -51,6 +51,16 @@ pub enum Value {
     ///
     /// Represents a collection of values, used for iteration and collections
     Array(Vec<Value>),
+
+    /// Enum variant value
+    ///
+    /// Stores the enum type name and selected member.
+    EnumVariant {
+        /// Enum type name
+        type_name: SmolStr,
+        /// Variant name
+        variant: SmolStr,
+    },
 }
 
 impl Value {
@@ -109,6 +119,7 @@ impl Value {
             Value::Boolean(_) => "boolean",
             Value::Null => "null",
             Value::Array(_) => "array",
+            Value::EnumVariant { .. } => "enum",
         }
     }
 }
@@ -131,6 +142,7 @@ impl std::fmt::Display for Value {
                 }
                 write!(f, "]")
             }
+            Value::EnumVariant { type_name, variant } => write!(f, "{}.{}", type_name, variant),
         }
     }
 }
@@ -167,6 +179,14 @@ mod tests {
         assert_eq!(Value::String(SmolStr::new("test")).to_string(), "test");
         assert_eq!(Value::Boolean(true).to_string(), "true");
         assert_eq!(Value::Null.to_string(), "null");
+        assert_eq!(
+            Value::EnumVariant {
+                type_name: SmolStr::new("Status"),
+                variant: SmolStr::new("Active")
+            }
+            .to_string(),
+            "Status.Active"
+        );
     }
 
     #[test]

@@ -55,6 +55,34 @@ fn test_infer_array_types() {
     assert!(result.module.is_some());
 }
 
+#[test]
+fn test_enum_definition_type_checks() {
+    let source = r#"
+        enum Direction = | North | South | East | West
+        let current: Direction = { Direction.North }
+    "#;
+
+    let result = check_str(source, "enum.nx");
+    assert!(result.is_ok(), "Enum usage should type check");
+}
+
+#[test]
+fn test_unknown_enum_member_diagnostic() {
+    let source = r#"
+        enum Direction = | North | South
+        let useDirection(): Direction = { Direction.Nort }
+    "#;
+
+    let result = check_str(source, "bad-enum.nx");
+    assert!(
+        result
+            .errors()
+            .iter()
+            .any(|diag| diag.code() == Some("undefined-enum-member")),
+        "Expected undefined-enum-member diagnostic"
+    );
+}
+
 // ============================================================================
 // Type Mismatch Detection Tests (T132)
 // ============================================================================
@@ -232,7 +260,7 @@ fn test_conditional_expressions() {
         let <Test flag:bool /> = if flag then <div>Yes</div> else <div>No</div>
     "#;
 
-    let result = check_str(source, "conditional.nx");
+    let _result = check_str(source, "conditional.nx");
     // May or may not parse depending on grammar support
     // This documents expected behavior
 }

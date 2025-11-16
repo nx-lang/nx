@@ -68,6 +68,7 @@ module.exports = grammar({
       repeat($.import_statement),
       repeat(choice(
         $.type_definition,
+        $.enum_definition,
         $.value_definition,
         $.function_definition,
       )),
@@ -87,6 +88,21 @@ module.exports = grammar({
       '=',
       field('type', $.type),
     ),
+
+    enum_definition: $ => seq(
+      'enum',
+      field('name', $.identifier),
+      '=',
+      field('members', $.enum_member_list),
+    ),
+
+    enum_member_list: $ => seq(
+      optional('|'),
+      $.enum_member,
+      repeat(seq('|', $.enum_member)),
+    ),
+
+    enum_member: $ => field('name', $.identifier),
 
     // ===== Value Definitions =====
     value_definition: $ => seq(

@@ -118,7 +118,10 @@ fn test_parse_paren_function_without_return_type() {
     let source = "let subtract(a:int, b:int) = { a - b }";
     let result = parse_str(source, "test.nx");
 
-    assert!(result.is_ok(), "Paren function without return type should parse");
+    assert!(
+        result.is_ok(),
+        "Paren function without return type should parse"
+    );
     let root = result.root().expect("Should have root node");
 
     let func_node = root
@@ -228,6 +231,42 @@ fn test_parse_module_with_definitions_and_element() {
         matches!(last, SyntaxKind::ELEMENT | SyntaxKind::SELF_CLOSING_ELEMENT),
         "Expected trailing root element, found {:?}",
         last
+    );
+}
+
+#[test]
+fn test_parse_enum_definition() {
+    let path = fixture_path("valid/enum-definition.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(result.is_ok(), "Enum definition file should parse");
+    let root = result.root().expect("Should produce root node");
+
+    let enums: Vec<_> = root
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::ENUM_DEFINITION)
+        .collect();
+    assert_eq!(enums.len(), 2, "Expected two enum definitions");
+
+    let status = enums.first().expect("First enum definition should exist");
+    let name_node = status
+        .child_by_field("name")
+        .expect("Enum definition should expose name field");
+    assert_eq!(name_node.text(), "Status");
+
+    let members_node = status
+        .child_by_field("members")
+        .expect("Enum definition should contain members list");
+    let member_names: Vec<_> = members_node
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::ENUM_MEMBER)
+        .map(|member| member.text().to_string())
+        .collect();
+    assert!(
+        member_names.contains(&"Pending".to_string())
+            && member_names.contains(&"Active".to_string())
+            && member_names.contains(&"Disabled".to_string()),
+        "All enum members should be captured"
     );
 }
 

@@ -82,6 +82,20 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(line, tokens, '=')).to.include('keyword.operator.assignment.nx');
   });
 
+  it('highlights enum definitions with leading pipe', function () {
+    const line = 'enum Status = | Active | Pending | Disabled';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    expect(scopesForSubstring(line, tokens, 'enum')).to.include('keyword.declaration.type.nx');
+    expect(scopesForSubstring(line, tokens, '|')).to.include('punctuation.separator.enum.nx');
+  });
+
+  it('highlights enum definitions without leading pipe', function () {
+    const line = 'enum Color = Red | Green | Blue';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    expect(scopesForSubstring(line, tokens, 'enum')).to.include('keyword.declaration.type.nx');
+    expect(scopesForSubstring(line, tokens, '|')).to.include('punctuation.separator.enum.nx');
+  });
+
   it('highlights inline else within control block', function () {
     const line = 'if user.isAuthenticated { 2 } else { 2 }';
     const { tokens } = grammar.tokenizeLine(line, null);
