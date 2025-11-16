@@ -68,6 +68,16 @@ fn eval_eq(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
         (Value::Float(a), Value::Int(b)) => a == (b as f64),
         (Value::String(a), Value::String(b)) => a == b,
         (Value::Boolean(a), Value::Boolean(b)) => a == b,
+        (
+            Value::EnumVariant {
+                type_name: a_type,
+                variant: a_variant,
+            },
+            Value::EnumVariant {
+                type_name: b_type,
+                variant: b_variant,
+            },
+        ) => a_type == b_type && a_variant == b_variant,
         (Value::Null, Value::Null) => true,
         _ => false,
     };

@@ -85,7 +85,7 @@
     "keywords-core": {
       "patterns": [
         { "name": "keyword.control.import.nx", "match": "\\bimport\\b" },
-        { "name": "keyword.declaration.type.nx", "match": "\\btype\\b" },
+        { "name": "keyword.declaration.type.nx", "match": "\\b(?:type|enum)\\b" },
         { "name": "keyword.declaration.let.nx", "match": "\\blet\\b" },
         { "name": "keyword.other.raw.nx", "match": "\\braw\\b" },
         { "name": "constant.language.boolean.nx", "match": "\\b(?:true|false)\\b" },
@@ -116,6 +116,7 @@
         { "name": "keyword.operator.arithmetic.nx", "match": "\\+|-|\\*|/" },
         { "name": "keyword.operator.comparison.nx", "match": "<=|>=|==|!=|<|>" },
         { "name": "keyword.operator.logical.nx", "match": "&&|\\|\\|" },
+        { "name": "punctuation.separator.enum.nx", "match": "\\|" },
         { "name": "keyword.operator.conditional.nx", "match": "\\?" },
         { "name": "punctuation.separator.conditional.nx", "match": ":" },
         { "name": "punctuation.separator.dot.nx", "match": "\\." },

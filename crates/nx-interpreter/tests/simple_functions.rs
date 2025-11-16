@@ -193,3 +193,43 @@ fn test_paren_function_without_return_annotation() {
         .unwrap_or_else(|err| panic!("Paren function without annotation failed:\n{}", err));
     assert_eq!(result, Value::Int(10));
 }
+
+// ============================================================================
+// Enum Support Tests
+// ============================================================================
+
+#[test]
+fn test_enum_member_return() {
+    let source = r#"
+        enum Direction = | North | South | East | West
+        let <north /> = { Direction.North }
+    "#;
+
+    let result = execute_function(source, "north", vec![]).unwrap_or_else(|err| panic!("{}", err));
+    assert_eq!(
+        result,
+        Value::EnumVariant {
+            type_name: SmolStr::new("Direction"),
+            variant: SmolStr::new("North")
+        }
+    );
+}
+
+#[test]
+fn test_enum_comparison() {
+    let source = r#"
+        enum Direction = | North | South | East | West
+        let isNorth(value:Direction): boolean = { value == Direction.North }
+    "#;
+
+    let result = execute_function(
+        source,
+        "isNorth",
+        vec![Value::EnumVariant {
+            type_name: SmolStr::new("Direction"),
+            variant: SmolStr::new("North"),
+        }],
+    )
+    .unwrap_or_else(|err| panic!("{}", err));
+    assert_eq!(result, Value::Boolean(true));
+}

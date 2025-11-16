@@ -4,7 +4,10 @@
 //! our typed High-level Intermediate Representation (HIR).
 
 use crate::ast::{BinOp, Expr, Literal, OrderedFloat, Stmt, TypeRef, UnOp};
-use crate::{Element, ExprId, Function, Item, Module, Name, Param, Property, SourceId};
+use crate::{
+    Element, EnumDef, EnumMember, ExprId, Function, Item, Module, Name, Param, Property, SourceId,
+    TypeAlias,
+};
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_syntax::{SyntaxKind, SyntaxNode};
 use rustc_hash::FxHashMap;
@@ -472,12 +475,61 @@ impl LoweringContext {
 
         match node.kind() {
             SyntaxKind::PRIMITIVE_TYPE | SyntaxKind::IDENTIFIER => TypeRef::name(node.text()),
+            SyntaxKind::USER_DEFINED_TYPE => node
+                .children()
+                .next()
+                .map(|child| self.lower_type(child))
+                .unwrap_or_else(|| TypeRef::name(node.text())),
+            SyntaxKind::QUALIFIED_NAME => TypeRef::name(node.text()),
             SyntaxKind::TYPE => node
                 .children()
                 .next()
                 .map(|child| self.lower_type(child))
                 .unwrap_or_else(|| TypeRef::name("unknown")),
             _ => TypeRef::name("unknown"),
+        }
+    }
+
+    /// Lowers a type alias definition node.
+    pub fn lower_type_alias(&self, node: SyntaxNode) -> TypeAlias {
+        let name = node
+            .child_by_field("name")
+            .map(|n| Name::new(n.text()))
+            .unwrap_or_else(|| Name::new("unknown"));
+        let type_node = node.child_by_field("type").unwrap_or(node);
+        let ty = self.lower_type(type_node);
+
+        TypeAlias {
+            name,
+            ty,
+            span: node.span(),
+        }
+    }
+
+    /// Lowers an enum definition node.
+    pub fn lower_enum_definition(&self, node: SyntaxNode) -> EnumDef {
+        let name = node
+            .child_by_field("name")
+            .map(|n| Name::new(n.text()))
+            .unwrap_or_else(|| Name::new("unknown"));
+
+        let members = node
+            .child_by_field("members")
+            .map(|list| {
+                list.children()
+                    .filter(|child| child.kind() == SyntaxKind::ENUM_MEMBER)
+                    .map(|child| EnumMember {
+                        name: Name::new(child.text()),
+                        span: child.span(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_else(Vec::new);
+
+        EnumDef {
+            name,
+            members,
+            span: node.span(),
         }
     }
 
@@ -652,6 +704,14 @@ impl LoweringContext {
                     let func = self.lower_function(child);
                     self.module.add_item(Item::Function(func));
                 }
+                SyntaxKind::TYPE_DEFINITION => {
+                    let alias = self.lower_type_alias(child);
+                    self.module.add_item(Item::TypeAlias(alias));
+                }
+                SyntaxKind::ENUM_DEFINITION => {
+                    let enum_def = self.lower_enum_definition(child);
+                    self.module.add_item(Item::Enum(enum_def));
+                }
                 SyntaxKind::ELEMENT => {
                     let element = self.lower_element(child);
                     let element_id = self.module.alloc_element(element);
@@ -790,6 +850,67 @@ mod tests {
             }
             _ => panic!("Expected Function item"),
         }
+    }
+
+    #[test]
+    fn test_lower_type_alias_and_enum() {
+        let source = r#"
+            type UserId = string
+            enum Direction = | North | South | East | West
+        "#;
+        let parse_result = parse_str(source, "types.nx");
+        let tree = parse_result.tree.expect("Should parse enum/type defs");
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        assert_eq!(module.items().len(), 2);
+
+        match &module.items()[0] {
+            Item::TypeAlias(alias) => {
+                assert_eq!(alias.name.as_str(), "UserId");
+            }
+            other => panic!("Expected type alias, got {:?}", other),
+        }
+
+        match &module.items()[1] {
+            Item::Enum(enum_def) => {
+                assert_eq!(enum_def.name.as_str(), "Direction");
+                let names: Vec<_> = enum_def
+                    .members
+                    .iter()
+                    .map(|member| member.name.as_str())
+                    .collect();
+                assert!(names.contains(&"North"));
+                assert!(names.contains(&"West"));
+            }
+            other => panic!("Expected enum definition, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_lower_enum_with_leading_pipe() {
+        let source = r#"
+            enum Orientation = | Horizontal | Vertical
+        "#;
+        let parse_result = parse_str(source, "enum-lead.nx");
+        let tree = parse_result.tree.expect("Should parse enum");
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        let enums: Vec<_> = module
+            .items()
+            .iter()
+            .filter_map(|item| match item {
+                Item::Enum(def) => Some(def),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(enums.len(), 1);
+        let enum_def = enums[0];
+        assert_eq!(enum_def.name.as_str(), "Orientation");
+        assert_eq!(enum_def.members.len(), 2);
+        assert_eq!(enum_def.members[0].name.as_str(), "Horizontal");
+        assert_eq!(enum_def.members[1].name.as_str(), "Vertical");
     }
 
     #[test]
@@ -957,7 +1078,13 @@ mod tests {
 
                 // Verify it's a for loop
                 match for_expr {
-                    Expr::For { item, index, iterable, body, .. } => {
+                    Expr::For {
+                        item,
+                        index,
+                        iterable,
+                        body,
+                        ..
+                    } => {
                         assert_eq!(item.as_str(), "item");
                         assert!(index.is_none());
 
@@ -982,7 +1109,8 @@ mod tests {
 
     #[test]
     fn test_lower_for_loop_with_index() {
-        let source = "let <ForWithIndex items:object /> = {for item, index in items { item + index }}";
+        let source =
+            "let <ForWithIndex items:object /> = {for item, index in items { item + index }}";
         let parse_result = parse_str(source, "test.nx");
 
         assert!(

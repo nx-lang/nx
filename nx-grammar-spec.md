@@ -16,6 +16,7 @@ Terminals are UPPER_SNAKE token kinds produced by the lexer. Lexeme hints are il
 Keywords
 - IMPORT ("import")
 - TYPE ("type")
+- ENUM ("enum")
 - LET ("let")
 - IF ("if"), ELSE ("else"), IS ("is")
 - FOR ("for"), IN ("in")
@@ -49,6 +50,7 @@ Literals
 - SLASH (/), COLON (:), COMMA (,), DOT (.)
 - EQ (=)
 - QMARK (?)
+- PIPE (|)
  - ELLIPSIS (...)
  - PLUS (+), MINUS (-), STAR (*), SLASH (/)
  - LT_EQ (<=), GT_EQ (>=), EQ_EQ (==), BANG_EQ (!=)
@@ -87,7 +89,8 @@ Conventional expressions (non-markup) use a Pratt parser with the following prec
 - Paren function call: led token: LPAREN … RPAREN, left-associative
   - form: callee LPAREN [Expr (COMMA Expr)*] RPAREN → ParenFunctionCall(callee, args)
 - Member access: led token: DOT IDENTIFIER, left-associative
-  - form: left DOT IDENTIFIER → Member(left, name)
+  - form: left DOT IDENTIFIER → MemberAccess(left, name)
+  - Note: Handles both property/field access on values and enum member access; semantic analysis distinguishes based on whether left resolves to a type or value
 
  130: Prefix unary, right-associative
  - Prefix minus: nud token: MINUS
@@ -138,9 +141,32 @@ ImportStatement (AST: ImportStatementSyntax)
 - ImportStatement → IMPORT QualifiedName
   - fields: name: QualifiedNameSyntax
 
-TypeDefinition (AST: TypeDefinitionSyntax)
-- TypeDefinition → TYPE IDENTIFIER EQ Type
+TypeDefinition (AST: TypeDefinitionSyntax is a sum type)
+- TypeDefinition → TypeAliasDefinition (TypeAliasDefinitionSyntax)
+- TypeDefinition → EnumDefinition (EnumDefinitionSyntax)
+
+TypeAliasDefinition (AST: TypeAliasDefinitionSyntax)
+- TypeAliasDefinition → TYPE IDENTIFIER EQ Type
   - fields: name: string, type: TypeSyntax
+
+EnumDefinition (AST: EnumDefinitionSyntax)
+- EnumDefinition → ENUM IDENTIFIER EQ EnumMemberList
+  - fields: name: string, members: EnumMemberSyntax[]
+
+EnumMemberList
+- EnumMemberList → EnumMemberListLead EnumMemberListTail
+
+EnumMemberListLead
+- EnumMemberListLead → EnumMember
+- EnumMemberListLead → PIPE EnumMember
+
+EnumMemberListTail
+- EnumMemberListTail → PIPE EnumMember EnumMemberListTail
+- EnumMemberListTail → ε
+
+EnumMember (AST: EnumMemberSyntax)
+- EnumMember → IDENTIFIER
+  - fields: name: string
 
 ValueDefinition (AST: ValueDefinitionSyntax)
 - ValueDefinition → LET IDENTIFIER ValueDefinitionTypeOpt EQ RhsExpression
@@ -490,7 +516,7 @@ This section lists the AST node types with fields for implementers.
  - PropertyDefinitionSyntax: name: string, type: TypeSyntax, default?: ExpressionSyntax
 - ExpressionSyntax: union of MarkupElementSyntax | LiteralExpressionSyntax | IdentifierNameSyntax | ValueIfSimpleExpressionSyntax | ValueIfMatchExpressionSyntax | ValueIfConditionListExpressionSyntax | ValueForExpressionSyntax | ConditionalExpressionSyntax | ParenFunctionCallExpressionSyntax | MemberAccessExpressionSyntax | BinaryExpressionSyntax | PrefixUnaryExpressionSyntax | ParenthesizedExpressionSyntax | UnitLiteralSyntax
  - ParenFunctionCallExpressionSyntax: callee: ExpressionSyntax, args: ExpressionSyntax[]
- - MemberAccessExpressionSyntax: target: ExpressionSyntax, name: string
+ - MemberAccessExpressionSyntax: target: ExpressionSyntax, name: string (includes both property access and enum member access; distinguished during semantic analysis)
  - ConditionalExpressionSyntax: condition: ExpressionSyntax, whenTrue: ExpressionSyntax, whenFalse: ExpressionSyntax
  - BinaryExpressionSyntax: op: token, left: ExpressionSyntax, right: ExpressionSyntax
  - PrefixUnaryExpressionSyntax: op: token, expr: ExpressionSyntax
@@ -548,6 +574,12 @@ This section lists the AST node types with fields for implementers.
   - After IF, parse a required ValueExpression before IS as the scrutinee
   - Condition-list form begins directly with LBRACE and never has a scrutinee
 - Element is left-factored: after LT ElementName, COLON selects the embed branch; otherwise parse PropertyList and choose SLASH GT (self-closing) or GT … LT SLASH ElementName GT using lookahead at SLASH vs GT.
+- MemberAccess handles both property/field access and enum member access:
+  - All `target.name` expressions parse uniformly as MemberAccessExpressionSyntax
+  - Semantic analysis resolves the target expression to determine interpretation:
+    - If target resolves to an enum type → enum member access (verify name is valid enum member)
+    - If target resolves to a value → property/field access (verify name is valid property/field on target's type)
+  - Examples: `Status.Active` (if Status is enum type), `obj.field` (if obj is value), `foo.bar` (ambiguous at parse time, resolved during type checking)
 
 ## Validation Rules (post-parse)
 

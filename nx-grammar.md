@@ -27,7 +27,14 @@ A module can mix any number of definitions with an optional trailing root `Eleme
 
 ```ebnf
 TypeDefinition ::=
+    TypeAliasDefinition
+    | EnumDefinition
+
+TypeAliasDefinition ::=
     "type" Identifier "=" TypeDeclaration
+
+EnumDefinition ::=
+    "enum" Identifier "=" ["|"] Identifier { "|" Identifier }
 
 TypeDeclaration ::=
     PrimitiveType [TypeModifier]
@@ -136,7 +143,7 @@ PrefixUnaryExpression ::=
 BinaryExpression ::=
     ValueExpression ( "+" | "-" | "*" | "/" | ">" | "<" | ">=" | "<=" | "==" | "!=" | "&&" | "||" ) ValueExpression
 MemberAccess ::=
-    ValueExpression "." Identifier
+    ValueExpression "." Identifier  (* includes both property/field access and enum member access; semantic analysis distinguishes *)
 ParenFunctionCall ::=
     ValueExpression "(" [ ValueExpression { "," ValueExpression } ] ")"
 

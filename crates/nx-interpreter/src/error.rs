@@ -60,6 +60,12 @@ pub enum RuntimeErrorKind {
     ///
     /// Triggered when recursion depth exceeds the configured limit
     StackOverflow { depth: usize },
+
+    /// Enum type referenced at runtime could not be found
+    EnumNotFound { name: SmolStr },
+
+    /// Enum member not defined on the referenced enum type
+    EnumMemberNotFound { enum_name: SmolStr, member: SmolStr },
 }
 
 impl fmt::Display for RuntimeErrorKind {
@@ -98,6 +104,12 @@ impl fmt::Display for RuntimeErrorKind {
             }
             RuntimeErrorKind::StackOverflow { depth } => {
                 write!(f, "Stack overflow: recursion depth {} exceeded", depth)
+            }
+            RuntimeErrorKind::EnumNotFound { name } => {
+                write!(f, "Enum not found: {}", name)
+            }
+            RuntimeErrorKind::EnumMemberNotFound { enum_name, member } => {
+                write!(f, "Enum '{}' has no member named '{}'", enum_name, member)
             }
         }
     }

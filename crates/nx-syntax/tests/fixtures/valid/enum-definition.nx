@@ -1,0 +1,11 @@
+enum Status = Pending | Active | Disabled
+
+enum Direction = | North | South | East | West
+
+let <Indicator current:Direction /> = {
+    if current == Direction.North {
+        1
+    } else {
+        0
+    }
+}

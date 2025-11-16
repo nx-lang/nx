@@ -4,6 +4,7 @@ use crate::context::{ExecutionContext, ResourceLimits};
 use crate::error::{RuntimeError, RuntimeErrorKind};
 use crate::value::Value;
 use nx_hir::{ast, ExprId, Function, Module, Name};
+use rustc_hash::FxHashSet;
 use smol_str::SmolStr;
 
 /// Tree-walking interpreter for NX HIR
@@ -179,6 +180,7 @@ impl Interpreter {
                 }
                 Ok(Value::Array(values))
             }
+            ast::Expr::Member { base, member, .. } => self.eval_member(module, ctx, *base, member),
             _ => {
                 // Other expression types not yet implemented
                 Ok(Value::Null)
@@ -411,6 +413,45 @@ impl Interpreter {
         result
     }
 
+    fn eval_member(
+        &self,
+        module: &Module,
+        ctx: &mut ExecutionContext,
+        base_expr: ExprId,
+        member: &Name,
+    ) -> Result<Value, RuntimeError> {
+        if let ast::Expr::Ident(base_name) = module.expr(base_expr) {
+            if let Some(enum_def) = self.resolve_enum_definition(module, base_name) {
+                if enum_def
+                    .members
+                    .iter()
+                    .any(|m| m.name.as_str() == member.as_str())
+                {
+                    return Ok(Value::EnumVariant {
+                        type_name: SmolStr::new(enum_def.name.as_str()),
+                        variant: SmolStr::new(member.as_str()),
+                    });
+                } else {
+                    return Err(RuntimeError::new(RuntimeErrorKind::EnumMemberNotFound {
+                        enum_name: SmolStr::new(enum_def.name.as_str()),
+                        member: SmolStr::new(member.as_str()),
+                    }));
+                }
+            } else {
+                return Err(RuntimeError::new(RuntimeErrorKind::EnumNotFound {
+                    name: SmolStr::new(base_name.as_str()),
+                }));
+            }
+        }
+
+        let base_value = self.eval_expr(module, ctx, base_expr)?;
+        Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+            expected: "enum type".to_string(),
+            actual: base_value.type_name().to_string(),
+            operation: format!("member access .{}", member.as_str()),
+        }))
+    }
+
     /// Evaluate a for loop expression
     fn eval_for(
         &self,
@@ -462,6 +503,40 @@ impl Interpreter {
 
         // Return array of results
         Ok(Value::Array(results))
+    }
+
+    fn resolve_enum_definition<'a>(
+        &self,
+        module: &'a Module,
+        name: &Name,
+    ) -> Option<&'a nx_hir::EnumDef> {
+        self.resolve_enum_definition_inner(module, name, &mut FxHashSet::default())
+    }
+
+    fn resolve_enum_definition_inner<'a>(
+        &self,
+        module: &'a Module,
+        name: &Name,
+        seen: &mut FxHashSet<SmolStr>,
+    ) -> Option<&'a nx_hir::EnumDef> {
+        let key = SmolStr::new(name.as_str());
+        if !seen.insert(key.clone()) {
+            return None;
+        }
+
+        let result = match module.find_item(name.as_str()) {
+            Some(nx_hir::Item::Enum(enum_def)) => Some(enum_def),
+            Some(nx_hir::Item::TypeAlias(alias)) => match &alias.ty {
+                ast::TypeRef::Name(target) => {
+                    self.resolve_enum_definition_inner(module, target, seen)
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+
+        seen.remove(&key);
+        result
     }
 }
 

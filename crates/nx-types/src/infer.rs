@@ -1,9 +1,14 @@
 //! Type inference for expressions.
 
-use crate::{Type, TypeEnvironment};
-use nx_diagnostics::{Diagnostic, Label};
+use crate::{ty::EnumType, Type, TypeEnvironment};
+use nx_diagnostics::{Diagnostic, Label, TextSpan};
 use nx_hir::{ast, ExprId, Module, Name};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
+
+struct TypeAliasInfo {
+    target: ast::TypeRef,
+    span: TextSpan,
+}
 
 /// Type inference context.
 ///
@@ -20,6 +25,10 @@ pub struct InferenceContext<'a> {
     next_var_id: u32,
     /// Placeholder return types for functions without explicit annotations
     function_return_placeholders: FxHashMap<Name, Type>,
+    /// Registered type aliases
+    type_aliases: FxHashMap<Name, TypeAliasInfo>,
+    /// Registered enum definitions
+    enum_defs: FxHashMap<Name, EnumType>,
 }
 
 impl<'a> InferenceContext<'a> {
@@ -31,7 +40,10 @@ impl<'a> InferenceContext<'a> {
             diagnostics: Vec::new(),
             next_var_id: 0,
             function_return_placeholders: FxHashMap::default(),
+            type_aliases: FxHashMap::default(),
+            enum_defs: FxHashMap::default(),
         };
+        ctx.register_type_definitions();
         ctx.register_function_signatures();
         ctx
     }
@@ -198,14 +210,26 @@ impl<'a> InferenceContext<'a> {
 
             // Member access
             ast::Expr::Member { base, member, span } => {
-                let _base_ty = self.infer_expr(*base);
-                // TODO: Implement struct/object types and member lookup
-                self.error(
-                    "not-implemented",
-                    format!("Member access not yet implemented: .{}", member),
-                    *span,
-                );
-                Type::Error
+                if let Some(enum_info) = self.enum_info_for_expr(*base) {
+                    if enum_info.members.iter().any(|m| m == member) {
+                        Type::Enum(enum_info.clone())
+                    } else {
+                        self.error(
+                            "unknown-enum-member",
+                            format!("Enum '{}' has no member named '{}'", enum_info.name, member),
+                            *span,
+                        );
+                        Type::Error
+                    }
+                } else {
+                    let _base_ty = self.infer_expr(*base);
+                    self.error(
+                        "not-implemented",
+                        format!("Member access not yet implemented: .{}", member),
+                        *span,
+                    );
+                    Type::Error
+                }
             }
 
             ast::Expr::Element { element, .. } => {
@@ -224,7 +248,13 @@ impl<'a> InferenceContext<'a> {
             }
 
             // For loop expressions
-            ast::Expr::For { item: _, index: _, iterable, body, .. } => {
+            ast::Expr::For {
+                item: _,
+                index: _,
+                iterable,
+                body,
+                ..
+            } => {
                 // Infer iterable type (should be array)
                 let iterable_ty = self.infer_expr(*iterable);
 
@@ -262,16 +292,15 @@ impl<'a> InferenceContext<'a> {
             self.env.remove(&name);
         }
 
-        let return_ty = func
-            .return_type
-            .as_ref()
-            .map(|ty| self.type_from_type_ref(ty))
-            .unwrap_or_else(|| body_ty.clone());
+        let return_ty = if let Some(ty) = func.return_type.as_ref() {
+            self.type_from_type_ref(ty)
+        } else {
+            body_ty.clone()
+        };
 
         self.bind_function_signature(func, return_ty.clone());
         if func.return_type.is_none() {
-            self.function_return_placeholders
-                .remove(&func.name);
+            self.function_return_placeholders.remove(&func.name);
         }
     }
 
@@ -488,55 +517,143 @@ impl<'a> InferenceContext<'a> {
         (self.env, self.diagnostics)
     }
 
+    fn register_type_definitions(&mut self) {
+        for item in self.module.items() {
+            match item {
+                nx_hir::Item::TypeAlias(alias) => {
+                    self.type_aliases.insert(
+                        alias.name.clone(),
+                        TypeAliasInfo {
+                            target: alias.ty.clone(),
+                            span: alias.span,
+                        },
+                    );
+                }
+                nx_hir::Item::Enum(enum_def) => {
+                    let members = enum_def
+                        .members
+                        .iter()
+                        .map(|member| member.name.clone())
+                        .collect();
+                    self.enum_defs.insert(
+                        enum_def.name.clone(),
+                        EnumType::new(enum_def.name.clone(), members),
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn register_function_signatures(&mut self) {
         for item in self.module.items() {
             if let nx_hir::Item::Function(func) = item {
-                let return_type = func
-                    .return_type
-                    .as_ref()
-                    .map(|ty| self.type_from_type_ref(ty))
-                    .unwrap_or_else(|| {
-                        let placeholder = self.fresh_var();
-                        self.function_return_placeholders
-                            .insert(func.name.clone(), placeholder.clone());
-                        placeholder
-                    });
+                let return_type = if let Some(ty) = func.return_type.as_ref() {
+                    self.type_from_type_ref(ty)
+                } else {
+                    let placeholder = self.fresh_var();
+                    self.function_return_placeholders
+                        .insert(func.name.clone(), placeholder.clone());
+                    placeholder
+                };
 
                 self.bind_function_signature(func, return_type);
             }
         }
     }
 
-    fn type_from_type_ref(&self, type_ref: &ast::TypeRef) -> Type {
-        match type_ref {
-            ast::TypeRef::Name(name) => {
-                let lower = name.as_str().to_ascii_lowercase();
-                match lower.as_str() {
-                    "string" => Type::string(),
-                    "int" | "long" => Type::int(),
-                    "float" | "double" => Type::float(),
-                    "boolean" | "bool" => Type::bool(),
-                    "void" => Type::void(),
-                    _ => Type::named(name.clone()),
-                }
+    fn enum_info_for_expr(&self, expr_id: ExprId) -> Option<&EnumType> {
+        match self.module.expr(expr_id) {
+            ast::Expr::Ident(name) => {
+                let mut seen = FxHashSet::default();
+                self.enum_info_from_name(name, &mut seen)
             }
-            ast::TypeRef::Array(inner) => Type::array(self.type_from_type_ref(inner)),
-            ast::TypeRef::Nullable(inner) => Type::nullable(self.type_from_type_ref(inner)),
+            _ => None,
+        }
+    }
+
+    fn enum_info_from_name<'info>(
+        &'info self,
+        name: &Name,
+        seen: &mut FxHashSet<Name>,
+    ) -> Option<&'info EnumType> {
+        if let Some(info) = self.enum_defs.get(name) {
+            return Some(info);
+        }
+
+        if let Some(alias) = self.type_aliases.get(name) {
+            if !seen.insert(name.clone()) {
+                return None;
+            }
+            if let ast::TypeRef::Name(target) = &alias.target {
+                let target_info = self.enum_info_from_name(target, seen);
+                seen.remove(name);
+                return target_info;
+            }
+            seen.remove(name);
+        }
+
+        None
+    }
+
+    fn type_from_type_ref(&mut self, type_ref: &ast::TypeRef) -> Type {
+        let mut seen = FxHashSet::default();
+        self.resolve_type_ref(type_ref, &mut seen)
+    }
+
+    fn resolve_type_ref(&mut self, type_ref: &ast::TypeRef, seen: &mut FxHashSet<Name>) -> Type {
+        match type_ref {
+            ast::TypeRef::Name(name) => self.resolve_named_type(name, seen),
+            ast::TypeRef::Array(inner) => Type::array(self.resolve_type_ref(inner, seen)),
+            ast::TypeRef::Nullable(inner) => Type::nullable(self.resolve_type_ref(inner, seen)),
             ast::TypeRef::Function {
                 params,
                 return_type,
             } => {
                 let param_types = params
                     .iter()
-                    .map(|p| self.type_from_type_ref(p))
+                    .map(|p| self.resolve_type_ref(p, seen))
                     .collect();
-                let ret = self.type_from_type_ref(return_type);
+                let ret = self.resolve_type_ref(return_type, seen);
                 Type::function(param_types, ret)
             }
         }
     }
 
-    fn function_param_types(&self, func: &nx_hir::Function) -> Vec<Type> {
+    fn resolve_named_type(&mut self, name: &Name, seen: &mut FxHashSet<Name>) -> Type {
+        let lower = name.as_str().to_ascii_lowercase();
+        match lower.as_str() {
+            "string" => Type::string(),
+            "int" | "long" => Type::int(),
+            "float" | "double" => Type::float(),
+            "boolean" | "bool" => Type::bool(),
+            "void" => Type::void(),
+            _ => {
+                if let Some(alias) = self.type_aliases.get(name) {
+                    if !seen.insert(name.clone()) {
+                        self.error(
+                            "type-alias-cycle",
+                            format!("Type alias '{}' forms a cycle", name),
+                            alias.span,
+                        );
+                        return Type::Error;
+                    }
+                    let target = alias.target.clone();
+                    let ty = self.resolve_type_ref(&target, seen);
+                    seen.remove(name);
+                    return ty;
+                }
+
+                if let Some(enum_ty) = self.enum_defs.get(name) {
+                    return Type::Enum(enum_ty.clone());
+                }
+
+                Type::named(name.clone())
+            }
+        }
+    }
+
+    fn function_param_types(&mut self, func: &nx_hir::Function) -> Vec<Type> {
         func.params
             .iter()
             .map(|p| self.type_from_type_ref(&p.ty))
@@ -570,7 +687,8 @@ mod tests {
     use super::*;
     use nx_diagnostics::{TextSize, TextSpan};
     use nx_hir::{
-        ast::BinOp, ast::Expr, ast::Literal, ast::TypeRef, Function, Item, Name, Param, SourceId,
+        ast::BinOp, ast::Expr, ast::Literal, ast::TypeRef, EnumDef, EnumMember, Function, Item,
+        Name, Param, SourceId, TypeAlias,
     };
 
     #[test]
@@ -660,7 +778,11 @@ mod tests {
         }
 
         let (env, diagnostics) = ctx.finish();
-        assert!(diagnostics.is_empty(), "Unexpected diagnostics: {:?}", diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Unexpected diagnostics: {:?}",
+            diagnostics
+        );
 
         let func_ty = env
             .lookup(&Name::new("identity"))
@@ -766,6 +888,157 @@ mod tests {
                 assert_eq!(**ret, Type::int());
             }
             _ => panic!("expected function type"),
+        }
+    }
+
+    #[test]
+    fn test_infer_enum_member_access() {
+        let mut module = Module::new(SourceId::new(0));
+        let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
+        let enum_def = EnumDef {
+            name: Name::new("Direction"),
+            members: vec![
+                EnumMember {
+                    name: Name::new("North"),
+                    span,
+                },
+                EnumMember {
+                    name: Name::new("South"),
+                    span,
+                },
+            ],
+            span,
+        };
+        module.add_item(Item::Enum(enum_def));
+
+        let base = module.alloc_expr(Expr::Ident(Name::new("Direction")));
+        let expr_id = module.alloc_expr(Expr::Member {
+            base,
+            member: Name::new("North"),
+            span,
+        });
+
+        let mut ctx = InferenceContext::new(&module);
+        let ty = ctx.infer_expr(expr_id);
+
+        match ty {
+            Type::Enum(enum_ty) => assert_eq!(enum_ty.name.as_str(), "Direction"),
+            other => panic!("Expected enum type, got {:?}", other),
+        }
+        assert!(
+            ctx.diagnostics().is_empty(),
+            "Enum member access should not emit diagnostics"
+        );
+    }
+
+    #[test]
+    fn test_infer_enum_invalid_member() {
+        let mut module = Module::new(SourceId::new(0));
+        let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
+        let enum_def = EnumDef {
+            name: Name::new("Status"),
+            members: vec![EnumMember {
+                name: Name::new("Active"),
+                span,
+            }],
+            span,
+        };
+        module.add_item(Item::Enum(enum_def));
+
+        let base = module.alloc_expr(Expr::Ident(Name::new("Status")));
+        let expr_id = module.alloc_expr(Expr::Member {
+            base,
+            member: Name::new("Pending"),
+            span,
+        });
+
+        let mut ctx = InferenceContext::new(&module);
+        let ty = ctx.infer_expr(expr_id);
+
+        assert!(ty.is_error());
+        assert_eq!(ctx.diagnostics().len(), 1);
+    }
+
+    #[test]
+    fn test_enum_member_access_via_alias() {
+        let mut module = Module::new(SourceId::new(0));
+        let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
+        let enum_def = EnumDef {
+            name: Name::new("Status"),
+            members: vec![EnumMember {
+                name: Name::new("Active"),
+                span,
+            }],
+            span,
+        };
+        module.add_item(Item::Enum(enum_def));
+        let alias = TypeAlias {
+            name: Name::new("State"),
+            ty: ast::TypeRef::name("Status"),
+            span,
+        };
+        module.add_item(Item::TypeAlias(alias));
+
+        let base = module.alloc_expr(Expr::Ident(Name::new("State")));
+        let expr_id = module.alloc_expr(Expr::Member {
+            base,
+            member: Name::new("Active"),
+            span,
+        });
+
+        let mut ctx = InferenceContext::new(&module);
+        let ty = ctx.infer_expr(expr_id);
+
+        match ty {
+            Type::Enum(enum_ty) => assert_eq!(enum_ty.name.as_str(), "Status"),
+            other => panic!("Expected enum type, got {:?}", other),
+        }
+        assert!(ctx.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn test_function_signature_uses_enum_type() {
+        let mut module = Module::new(SourceId::new(0));
+        let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
+        let enum_def = EnumDef {
+            name: Name::new("Direction"),
+            members: vec![EnumMember {
+                name: Name::new("North"),
+                span,
+            }],
+            span,
+        };
+        module.add_item(Item::Enum(enum_def));
+
+        let base = module.alloc_expr(Expr::Ident(Name::new("Direction")));
+        let member = module.alloc_expr(Expr::Member {
+            base,
+            member: Name::new("North"),
+            span,
+        });
+        let func = Function {
+            name: Name::new("north"),
+            params: vec![],
+            return_type: None,
+            body: member,
+            span,
+        };
+        module.add_item(Item::Function(func));
+
+        let mut ctx = InferenceContext::new(&module);
+        if let Item::Function(func) = &module.items()[1] {
+            ctx.infer_function(func);
+        }
+        let (env, diagnostics) = ctx.finish();
+        assert!(diagnostics.is_empty());
+
+        let func_ty = env.lookup(&Name::new("north")).expect("function type");
+        match func_ty {
+            Type::Function { ret, .. } => match ret.as_ref() {
+                Type::Enum(enum_ty) => assert_eq!(enum_ty.name.as_str(), "Direction"),
+                other => panic!("Expected enum return type, got {:?}", other),
+            },
+            other => panic!("Expected function type, got {:?}", other),
         }
     }
 }

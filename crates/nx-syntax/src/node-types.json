@@ -514,6 +514,63 @@
     }
   },
   {
+    "type": "enum_definition",
+    "named": true,
+    "fields": {
+      "members": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "enum_member_list",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "enum_member",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "enum_member_list",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "enum_member",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "function_definition",
     "named": true,
     "fields": {
@@ -702,6 +759,10 @@
       "types": [
         {
           "type": "element",
+          "named": true
+        },
+        {
+          "type": "enum_definition",
           "named": true
         },
         {
@@ -1622,6 +1683,10 @@
     "named": true
   },
   {
+    "type": "enum",
+    "named": false
+  },
+  {
     "type": "escaped_lbrace",
     "named": true
   },
@@ -1739,6 +1804,10 @@
   },
   {
     "type": "{",
+    "named": false
+  },
+  {
+    "type": "|",
     "named": false
   },
   {

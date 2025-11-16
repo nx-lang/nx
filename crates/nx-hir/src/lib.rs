@@ -129,6 +129,37 @@ pub struct Function {
     pub span: TextSpan,
 }
 
+/// Type alias definition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeAlias {
+    /// Alias name
+    pub name: Name,
+    /// Target type reference
+    pub ty: ast::TypeRef,
+    /// Source span
+    pub span: TextSpan,
+}
+
+/// Enum member.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumMember {
+    /// Member name
+    pub name: Name,
+    /// Source span
+    pub span: TextSpan,
+}
+
+/// Enum definition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumDef {
+    /// Enum name
+    pub name: Name,
+    /// Members for the enum
+    pub members: Vec<EnumMember>,
+    /// Source span
+    pub span: TextSpan,
+}
+
 /// Element property (key-value pair).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Property {
@@ -160,8 +191,10 @@ pub struct Element {
 pub enum Item {
     /// Function declaration
     Function(Function),
-    /// Type alias (not yet implemented)
-    TypeAlias,
+    /// Type alias declaration
+    TypeAlias(TypeAlias),
+    /// Enum declaration
+    Enum(EnumDef),
     /// Element declaration
     Element(ElementId),
 }
@@ -208,7 +241,8 @@ impl Module {
     pub fn find_item(&self, name: &str) -> Option<&Item> {
         self.items.iter().find(|item| match item {
             Item::Function(func) => func.name.as_str() == name,
-            Item::TypeAlias => false,
+            Item::TypeAlias(alias) => alias.name.as_str() == name,
+            Item::Enum(enum_def) => enum_def.name.as_str() == name,
             Item::Element(_) => false,
         })
     }
