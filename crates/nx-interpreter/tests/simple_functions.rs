@@ -181,3 +181,15 @@ fn test_nested_paren_function_calls() {
         .unwrap_or_else(|err| panic!("Nested paren call failed:\n{}", err));
     assert_eq!(result, Value::Int(8));
 }
+
+#[test]
+fn test_paren_function_without_return_annotation() {
+    let source = r#"
+        let sum(a:int, b:int) = { a + b }
+        let apply(n:int) = { sum(n, 1) }
+    "#;
+
+    let result = execute_function(source, "apply", vec![Value::Int(9)])
+        .unwrap_or_else(|err| panic!("Paren function without annotation failed:\n{}", err));
+    assert_eq!(result, Value::Int(10));
+}
