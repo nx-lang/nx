@@ -2,7 +2,8 @@
 
 use crate::{Type, TypeEnvironment};
 use nx_diagnostics::{Diagnostic, Label};
-use nx_hir::{ast, ExprId, Module};
+use nx_hir::{ast, ExprId, Module, Name};
+use rustc_hash::FxHashMap;
 
 /// Type inference context.
 ///
@@ -17,6 +18,8 @@ pub struct InferenceContext<'a> {
     diagnostics: Vec<Diagnostic>,
     /// Next type variable ID for inference
     next_var_id: u32,
+    /// Placeholder return types for functions without explicit annotations
+    function_return_placeholders: FxHashMap<Name, Type>,
 }
 
 impl<'a> InferenceContext<'a> {
@@ -27,6 +30,7 @@ impl<'a> InferenceContext<'a> {
             env: TypeEnvironment::new(),
             diagnostics: Vec::new(),
             next_var_id: 0,
+            function_return_placeholders: FxHashMap::default(),
         };
         ctx.register_function_signatures();
         ctx
@@ -252,10 +256,22 @@ impl<'a> InferenceContext<'a> {
             bound_names.push(param.name.clone());
         }
 
-        let _ = self.infer_expr(func.body);
+        let body_ty = self.infer_expr(func.body);
 
         for name in bound_names {
             self.env.remove(&name);
+        }
+
+        let return_ty = func
+            .return_type
+            .as_ref()
+            .map(|ty| self.type_from_type_ref(ty))
+            .unwrap_or_else(|| body_ty.clone());
+
+        self.bind_function_signature(func, return_ty.clone());
+        if func.return_type.is_none() {
+            self.function_return_placeholders
+                .remove(&func.name);
         }
     }
 
@@ -475,18 +491,18 @@ impl<'a> InferenceContext<'a> {
     fn register_function_signatures(&mut self) {
         for item in self.module.items() {
             if let nx_hir::Item::Function(func) = item {
-                let param_types: Vec<Type> = func
-                    .params
-                    .iter()
-                    .map(|p| self.type_from_type_ref(&p.ty))
-                    .collect();
                 let return_type = func
                     .return_type
                     .as_ref()
                     .map(|ty| self.type_from_type_ref(ty))
-                    .unwrap_or(Type::Unknown);
-                self.env
-                    .bind(func.name.clone(), Type::function(param_types, return_type));
+                    .unwrap_or_else(|| {
+                        let placeholder = self.fresh_var();
+                        self.function_return_placeholders
+                            .insert(func.name.clone(), placeholder.clone());
+                        placeholder
+                    });
+
+                self.bind_function_signature(func, return_type);
             }
         }
     }
@@ -518,6 +534,19 @@ impl<'a> InferenceContext<'a> {
                 Type::function(param_types, ret)
             }
         }
+    }
+
+    fn function_param_types(&self, func: &nx_hir::Function) -> Vec<Type> {
+        func.params
+            .iter()
+            .map(|p| self.type_from_type_ref(&p.ty))
+            .collect()
+    }
+
+    fn bind_function_signature(&mut self, func: &nx_hir::Function, return_type: Type) {
+        let param_types = self.function_param_types(func);
+        self.env
+            .bind(func.name.clone(), Type::function(param_types, return_type));
     }
 }
 
@@ -608,6 +637,42 @@ mod tests {
         assert!(diagnostics.is_empty());
         let name = Name::new("text");
         assert!(env.lookup(&name).is_none());
+    }
+
+    #[test]
+    fn test_infers_return_type_for_unannotated_function() {
+        let mut module = Module::new(SourceId::new(0));
+        let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
+
+        let body = module.alloc_expr(Expr::Ident(Name::new("value")));
+        let function = Function {
+            name: Name::new("identity"),
+            params: vec![Param::new(Name::new("value"), TypeRef::name("int"), span)],
+            return_type: None,
+            body,
+            span,
+        };
+        module.add_item(Item::Function(function));
+
+        let mut ctx = InferenceContext::new(&module);
+        if let Item::Function(func) = &module.items()[0] {
+            ctx.infer_function(func);
+        }
+
+        let (env, diagnostics) = ctx.finish();
+        assert!(diagnostics.is_empty(), "Unexpected diagnostics: {:?}", diagnostics);
+
+        let func_ty = env
+            .lookup(&Name::new("identity"))
+            .expect("Function binding should exist");
+        match func_ty {
+            Type::Function { params, ret } => {
+                assert_eq!(params.len(), 1);
+                assert_eq!(params[0], Type::int());
+                assert_eq!(**ret, Type::int());
+            }
+            other => panic!("Expected function type, got {:?}", other),
+        }
     }
 
     #[test]
