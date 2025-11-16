@@ -5,12 +5,25 @@
 
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_hir::ast::{BinOp, Expr, Literal};
-use nx_hir::{Function, Item, Module, Name, SourceId};
-use nx_interpreter::{Interpreter, RuntimeErrorKind};
+use nx_hir::{lower, Function, Item, Module, Name, SourceId};
+use nx_interpreter::{Interpreter, RuntimeErrorKind, Value};
+use nx_syntax::parse_str;
 
 /// Helper to create a text span
 fn span(start: u32, end: u32) -> TextSpan {
     TextSpan::new(TextSize::from(start), TextSize::from(end))
+}
+
+/// Parses NX source and lowers it into a module for interpreter tests.
+fn module_from_source(source: &str) -> Module {
+    let parse_result = parse_str(source, "error-handling.nx");
+    assert!(
+        parse_result.is_ok(),
+        "Parser diagnostics: {:?}",
+        parse_result.errors
+    );
+    let root = parse_result.root().expect("Should have root node");
+    lower(root, SourceId::new(0))
 }
 
 #[test]
@@ -57,4 +70,81 @@ fn test_function_not_found() {
         err.kind(),
         RuntimeErrorKind::FunctionNotFound { .. }
     ));
+}
+
+#[test]
+fn test_paren_function_parameter_count_mismatch() {
+    let source = r#"
+        let double(value:int): int = { value + value }
+    "#;
+    let module = module_from_source(source);
+    let interpreter = Interpreter::new();
+
+    let err = interpreter
+        .execute_function(&module, "double", vec![Value::Int(2), Value::Int(8)])
+        .expect_err("Calling with the wrong number of args should fail");
+
+    match err.kind() {
+        RuntimeErrorKind::ParameterCountMismatch {
+            expected,
+            actual,
+            function,
+        } => {
+            assert_eq!(*expected, 1);
+            assert_eq!(*actual, 2);
+            assert_eq!(function.as_str(), "double");
+        }
+        other => panic!("Expected ParameterCountMismatch, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_paren_function_argument_type_mismatch() {
+    let source = r#"
+        let add(a:int, b:int): int = { a + b }
+    "#;
+    let module = module_from_source(source);
+    let interpreter = Interpreter::new();
+
+    let err = interpreter
+        .execute_function(
+            &module,
+            "add",
+            vec![Value::Boolean(true), Value::Int(3)],
+        )
+        .expect_err("Adding incompatible argument types should fail");
+
+    match err.kind() {
+        RuntimeErrorKind::TypeMismatch { operation, .. } => {
+            assert_eq!(operation, "addition");
+        }
+        other => panic!("Expected TypeMismatch during addition, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_paren_function_invalid_return_type_usage() {
+    let source = r#"
+        let flag(): string = { "yes" }
+        let select(value:int): int = {
+            if flag() {
+                value
+            } else {
+                value
+            }
+        }
+    "#;
+    let module = module_from_source(source);
+    let interpreter = Interpreter::new();
+
+    let err = interpreter
+        .execute_function(&module, "select", vec![Value::Int(1)])
+        .expect_err("Function should fail when condition isn't boolean");
+
+    match err.kind() {
+        RuntimeErrorKind::TypeMismatch { operation, .. } => {
+            assert_eq!(operation, "if condition");
+        }
+        other => panic!("Expected TypeMismatch for invalid return type, got {:?}", other),
+    }
 }

@@ -44,18 +44,17 @@
     "snippets/**"
   ],
   "devDependencies": {
-    "@vscode/vsce": "^3.0.0",
+    "@types/chai": "^4.3.11",
+    "@types/mocha": "^10.0.6",
+    "@vscode/vsce": "^3.7.0",
     "chai": "^4.4.1",
     "mocha": "^10.5.0",
     "ovsx": "^0.8.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.6.3",
-    "@types/chai": "^4.3.11",
-    "@types/mocha": "^10.0.6",
     "vscode-oniguruma": "^1.7.0",
     "vscode-textmate": "^9.0.0"
   },
-  
   "contributes": {
     "languages": [
       {

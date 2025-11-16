@@ -127,11 +127,28 @@ module.exports = grammar({
     // ===== Function Definitions =====
     function_definition: $ => seq(
       'let',
-      '<',
-      field('name', $.element_name),
-      repeat($.property_definition),
-      '/',
-      '>',
+      choice(
+        seq(
+          '<',
+          field('name', $.element_name),
+          repeat($.property_definition),
+          '/',
+          '>'
+        ),
+        seq(
+          field('name', $.identifier),
+          '(',
+          optional(seq(
+            $.property_definition,
+            repeat(seq(',', $.property_definition)),
+          )),
+          ')',
+        ),
+      ),
+      optional(seq(
+        ':',
+        field('return_type', $.type),
+      )),
       '=',
       field('body', $.rhs_expression),
     ),
