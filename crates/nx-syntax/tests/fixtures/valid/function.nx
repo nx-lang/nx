@@ -4,7 +4,7 @@ import core.html
 let <Button
   text:string
   disabled:boolean=false
-/> =
+/>: Element =
   <button
     class="btn"
     disabled={disabled}

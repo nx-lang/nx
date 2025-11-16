@@ -761,6 +761,35 @@ mod tests {
     }
 
     #[test]
+    fn test_lower_element_function_with_return_type() {
+        let source = r#"let <Button text:string />: Element = <button>{text}</button>"#;
+        let parse_result = parse_str(source, "test.nx");
+
+        let tree = parse_result.tree.unwrap();
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        assert_eq!(module.items().len(), 1);
+
+        match &module.items()[0] {
+            Item::Function(func) => {
+                assert_eq!(func.name.as_str(), "Button");
+                assert_eq!(func.params.len(), 1);
+
+                let ret = func
+                    .return_type
+                    .as_ref()
+                    .expect("Element-style function should retain return type");
+                match ret {
+                    TypeRef::Name(name) => assert_eq!(name.as_str(), "Element"),
+                    _ => panic!("Expected simple return type"),
+                }
+            }
+            _ => panic!("Expected Function item"),
+        }
+    }
+
+    #[test]
     fn test_lower_simple_element() {
         let source = "<button />";
         let parse_result = parse_str(source, "test.nx");
