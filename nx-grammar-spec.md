@@ -177,15 +177,17 @@ ElementFunctionDefinition (AST: ElementFunctionDefinitionSyntax)
   - fields: elementName: QualifiedMarkupNameSyntax, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
 
 ParenFunctionDefinition (AST: ParenFunctionDefinitionSyntax)
-- ParenFunctionDefinition → LET IDENTIFIER LPAREN FunctionParameterListOpt RPAREN FunctionReturnTypeOpt EQ RhsExpression
+- ParenFunctionDefinition → LET IDENTIFIER LPAREN ParenParameterListOpt RPAREN FunctionReturnTypeOpt EQ RhsExpression
   - fields: name: string, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
 
-FunctionParameterListOpt
-- FunctionParameterListOpt → FunctionParameterList
-- FunctionParameterListOpt → ε
+ParenParameterListOpt
+- ParenParameterListOpt → ParenParameterList
+- ParenParameterListOpt → ε
 
-FunctionParameterList
-- FunctionParameterList → PropertyDefinition (COMMA PropertyDefinition)*
+ParenParameterList
+- ParenParameterList → PropertyDefinition (COMMA PropertyDefinition)*
+  - Note: we intentionally reuse `PropertyDefinition` here so paren-style and element-style
+    declarations share the same syntax tree representation for parameters (name, type, default).
 
 FunctionReturnTypeOpt
 - FunctionReturnTypeOpt → COLON Type
