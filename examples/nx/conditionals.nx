@@ -5,25 +5,25 @@ let <StatusBadge
 /> =
   <div class="badge">
     // Simple if expression
-    {if count > 0 {
+    if count > 0 {
       <span class="count">{count}</span>
     } else {
       <span class="empty">-</span>
-    }}
+    }
 
     // Match expression
-    {if status is {
+    if status is {
       "active": <span class="active">Active</span>
       "pending": <span class="pending">Pending</span>
       "error": <span class="error">Error</span>
       else: <span class="unknown">Unknown</span>
-    }}
+    }
 
     // Condition list expression
-    {if {
+    if {
       count == 0: <span>Empty</span>
       count < 10: <span>Low</span>
       count < 100: <span>Medium</span>
       else: <span>High</span>
-    }}
+    }
   </div>

@@ -3,19 +3,19 @@ let <ItemList
   items:string[]
 /> =
   <ul class="list">
-    {for item in items {
+    for item in items {
       <li>{item}</li>
-    }}
+    }
   </ul>
 
 let <IndexedList
   items:string[]
 /> =
   <ol>
-    {for item, index in items {
+    for item, index in items {
       <li>
         <span class="index">{index + 1}.</span>
         <span class="text">{item}</span>
       </li>
-    }}
+    }
   </ol>

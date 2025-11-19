@@ -25,7 +25,7 @@ let <TodoApp
   </div>
 
 let <TodoStats
-  items:TodoList
+  items:TodoItem[]
 /> =
   <div class="stats">
     if {
@@ -36,11 +36,11 @@ let <TodoStats
   </div>
 
 let <TodoList
-  items:TodoList
+  items:TodoItem[]
   filter:string
 /> =
   <ul class="todo-list">
-    {for item, index in items {
+    for item, index in items {
       <TodoItem
         item={item}
         index={index}
@@ -50,7 +50,7 @@ let <TodoList
           visible={item.status == filter}
         }
       />
-    }}
+    }
   </ul>
 
 let <TodoItem
@@ -67,7 +67,7 @@ let <TodoItem
     }
   >
     <input type="checkbox" checked={item.completed} />
-    <span class={item.completed ? "completed" : "active"}>
+    <span class={item.completed ? <:uitext>completed</> : "active"}>
       {item.text}
     </span>
     <button class="delete">Delete</button>
@@ -77,12 +77,12 @@ let <TodoFilters
   current:string
 /> =
   <div class="filters">
-    {for filter in ["all", "active", "completed"] {
+    for filter in ["all", "active", "completed"] {
       <button
         class={filter == current ? "active" : ""}
         data-filter={filter}
       >
         {filter}
       </button>
-    }}
+    }
   </div>

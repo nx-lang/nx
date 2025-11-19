@@ -1,4 +1,4 @@
-// Type definitions
+// Type aliases
 type UserId = int
 type Username = string
 type MaybeUser = User?
@@ -15,9 +15,9 @@ let <UserCard
   <div class="user-card">
     <h3>{name}</h3>
     <p>ID: {id}</p>
-    {if email is {
+    if email is {
       null: <p>No email</p>
       else: <p>Email: {email}</p>
-    }}
+    }
     <p>Age: {age}</p>
   </div>
