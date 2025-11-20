@@ -197,12 +197,14 @@ ElementsForExpression ::=
 
 Element ::=
     "<" ElementName PropertyList "/>"
-    | "<" ElementName PropertyList ">" Content "</" ElementName ">"
-    | EmbedElement
+    | "<" ElementName PropertyList ">" ElementsExpression "</" ElementName ">"
+    | TextElement
 
-EmbedElement ::=
-    "<" ElementName ":" EmbedTextType PropertyList ">" EmbedContent "</" ElementName ">"
-    | "<" ElementName ":" EmbedTextType "raw" PropertyList ">" RawEmbedContent "</" ElementName ">"
+TextElement ::=
+    "<" ElementName ":" PropertyList ">" TextContent "</" ElementName ">"
+    | "<" ElementName ":" "raw" PropertyList ">" RawTextRun "</" ElementName ">"
+    | "<" ElementName ":" TextType PropertyList ">" EmbedTextContent "</" ElementName ">"
+    | "<" ElementName ":" TextType "raw" PropertyList ">" RawTextRun "</" ElementName ">"
 
 (* list of properties, with if allowed *)
 PropertyList ::=
@@ -228,14 +230,16 @@ PropertyListIfConditionList ::=
     ["else" ":" PropertyList]
     "}"
 
-Content ::=
-    ElementsExpression |     (* list of elements, with if/for allowed *)
-    MixedContentExpression   (* text with optional embedded elements and interpolations; no if/for allowed except inside interpolated expressions *)
+TextContent ::=
+    ( TextRun | InterpolationExpression )+
 
-MixedContentExpression ::=
-    ( TextRun | Element | InterpolationExpression )+
+EmbedTextContent ::=
+    ( EmbedTextRun | EmbedInterpolationExpression )+
 
-EmbedTextType ::=
+EmbedInterpolationExpression ::=
+    "@{" ValueExpression "}"
+
+TextType ::=
     Identifier
 
 ElementName ::=
@@ -244,11 +248,6 @@ ElementName ::=
 PropertyValue ::=
     QualifiedMarkupName "=" RhsExpression
 
-EmbedContent ::=
-    ( TextRun | InterpolationExpression )+
-
-RawEmbedContent ::=
-    RawTextRun
 ```
 
 <a id="lexical-structure"></a>
@@ -278,7 +277,7 @@ CBlockChar           ::= ? any character including newline, except "/*" and "*/"
 HtmlBlockChar        ::= ? any character including newline, except "<!--" and "-->" ?
 
 (* Notes: Comments may appear anywhere whitespace is allowed, but are not recognized inside
-   string literals or textual content (e.g., TextRun/Embed text). *)
+   string literals or textual content (e.g., TextRun/Text elements). *)
 
 Identifier  ::=
     ( Letter | "_" ) { Letter | Digit | "_" }
@@ -334,6 +333,8 @@ NullLiteral     ::=
     "null"
 
 TextRun          ::= ( TextChar | Entity | EscapedBrace )+
+EmbedTextRun     ::= ( TextChar | Entity | EscapedBrace | EscapedAtSign )+
+
 TextChar         ::=
     ? any character except "<", "&", and "{" ?
 
@@ -343,5 +344,9 @@ RawTextChar         ::=
 
 EscapedBrace     ::=
     "\{" | "\}"
-? Only "\{" and "\}" sequences are treated as escapes; all other backslashes remain literal. ?
+    ? "\{" and "\}" sequences are treated as escapes; other backslashes remain literal. ?
+
+EscapedAtSign    ::=
+    "\@"
+    ? "\@" is treated as an escape; other backslashes remain literal. ?
 ```

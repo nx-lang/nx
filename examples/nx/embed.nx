@@ -4,14 +4,14 @@ let <CodeBlock
   code:string
 /> =
   <pre class="code-block">
-    <code:text class="language-{language}">
+    <code: class="language-{language}">
       {code}
-    </code:text>
+    </code>
   </pre>
 
 let <StyleBlock
   css:string
 /> =
-  <style:text>
+  <style:>
     {css}
-  </style:text>
+  </style>

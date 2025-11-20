@@ -7,7 +7,9 @@
     { "include": "#comments" },
     { "include": "#value-definition" },
     { "include": "#module-root-element" },
-    { "include": "#embed-raw-block" },
+    { "include": "#text-raw-block" },
+    { "include": "#text-typed-block" },
+    { "include": "#text-plain-block" },
     { "include": "#elements-if" },
     { "include": "#elements-for" },
     { "include": "#value-if" },
@@ -158,6 +160,26 @@
       "endCaptures": { "0": { "name": "punctuation.section.interpolation.end.nx" } },
       "name": "meta.interpolation.nx",
       "patterns": [
+        { "include": "#tags" },
+        { "include": "#value-if" },
+        { "include": "#value-for" },
+        { "include": "#comments" },
+        { "include": "#strings" },
+        { "include": "#numbers" },
+        { "include": "#keywords-core" },
+        { "include": "#keywords-control" },
+        { "include": "#types" },
+        { "include": "#operators" },
+        { "include": "#qualifiers" }
+      ]
+    },
+    "embed-interpolation": {
+      "begin": "(?<!\\\\)@\\{",
+      "beginCaptures": { "0": { "name": "punctuation.section.interpolation.begin.nx" } },
+      "end": "\\}",
+      "endCaptures": { "0": { "name": "punctuation.section.interpolation.end.nx" } },
+      "name": "meta.interpolation.nx",
+      "patterns": [
         { "include": "#value-if" },
         { "include": "#value-for" },
         { "include": "#comments" },
@@ -198,25 +220,102 @@
     },
     "tags": {
       "patterns": [
-        { "include": "#embed-raw-block" },
+        { "include": "#text-raw-block" },
+        { "include": "#text-typed-block" },
+        { "include": "#text-plain-block" },
         { "include": "#fragment" },
         { "include": "#end-tag" },
         { "include": "#start-tag" }
       ]
     },
-    "embed-raw-block": {
-      "begin": "<([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*)\\s*:[A-Za-z_][A-Za-z0-9_-]*\\s+raw\b[^>]*>",
+    "text-raw-block": {
+      "begin": "<([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*)\\s*(:)\\s*(?:([A-Za-z_][A-Za-z0-9_-]*))?\\s*(raw)\\b",
       "beginCaptures": {
-        "0": { "name": "meta.tag.start.nx" }
+        "0": { "name": "meta.tag.start.nx" },
+        "1": { "name": "entity.name.tag.nx" },
+        "2": { "name": "support.type.text.nx" },
+        "3": { "name": "support.type.text.nx" },
+        "4": { "name": "keyword.other.raw.nx" }
       },
-      "end": "</\\1>",
+      "end": "</([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*)>",
       "endCaptures": {
-        "0": { "name": "meta.tag.end.nx" }
+        "0": { "name": "meta.tag.end.nx" },
+        "1": { "name": "entity.name.tag.nx" }
       },
-      "name": "meta.embed.raw.nx",
+      "name": "meta.text.raw.nx",
       "patterns": [
-        { "name": "meta.embed.raw.content.nx", "match": "[^<]+" },
-        { "include": "#comments" }
+        { "name": "meta.tag.start.nx", "match": "\\s+" },
+        { "include": "#attributes" },
+        { "include": "#keywords-core" },
+        { "include": "#keywords-control" },
+        { "include": "#types" },
+        { "include": "#numbers" },
+        { "include": "#strings" },
+        { "include": "#comments" },
+        { "name": "punctuation.definition.tag.end.nx", "match": ">" },
+        { "name": "meta.text.raw.content.nx", "match": "[^<]+" }
+      ]
+    },
+    "text-typed-block": {
+      "begin": "<([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*)\\s*(:)\\s*([A-Za-z_][A-Za-z0-9_-]*)\\b(?!\\s*=)(?!\\s*raw\\b)",
+      "beginCaptures": {
+        "0": { "name": "meta.tag.start.nx" },
+        "1": { "name": "entity.name.tag.nx" },
+        "2": { "name": "support.type.text.nx" },
+        "3": { "name": "support.type.text.nx" }
+      },
+      "end": "</([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*)>",
+      "endCaptures": {
+        "0": { "name": "meta.tag.end.nx" },
+        "1": { "name": "entity.name.tag.nx" }
+      },
+      "name": "meta.text.typed.nx",
+      "patterns": [
+        { "name": "meta.tag.start.nx", "match": "\\s+" },
+        { "include": "#attributes" },
+        { "include": "#keywords-core" },
+        { "include": "#keywords-control" },
+        { "include": "#types" },
+        { "include": "#numbers" },
+        { "include": "#strings" },
+        { "include": "#comments" },
+        { "name": "punctuation.definition.tag.end.nx", "match": ">" },
+        { "include": "#embed-interpolation" },
+        { "name": "constant.character.escape.nx", "match": "\\\\[@{}]" },
+        { "include": "#entities" },
+        { "name": "meta.text.typed.content.nx", "match": "[^@<\\\\{}]+" },
+        { "name": "meta.text.typed.content.nx", "match": "@(?!(\\{))" },
+        { "name": "meta.text.typed.content.nx", "match": "\\\\" }
+      ]
+    },
+    "text-plain-block": {
+      "begin": "<([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*)\\s*(:)(?!\\s*raw\\b)(?!\\s*[A-Za-z_][A-Za-z0-9_-]*\\b(?!\\s*=))",
+      "beginCaptures": {
+        "0": { "name": "meta.tag.start.nx" },
+        "1": { "name": "entity.name.tag.nx" },
+        "2": { "name": "support.type.text.nx" }
+      },
+      "end": "</([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*)>",
+      "endCaptures": {
+        "0": { "name": "meta.tag.end.nx" },
+        "1": { "name": "entity.name.tag.nx" }
+      },
+      "name": "meta.text.plain.nx",
+      "patterns": [
+        { "name": "meta.tag.start.nx", "match": "\\s+" },
+        { "include": "#attributes" },
+        { "include": "#keywords-core" },
+        { "include": "#keywords-control" },
+        { "include": "#types" },
+        { "include": "#numbers" },
+        { "include": "#strings" },
+        { "include": "#comments" },
+        { "name": "punctuation.definition.tag.end.nx", "match": ">" },
+        { "include": "#interpolation" },
+        { "name": "constant.character.escape.nx", "match": "\\\\[{}]" },
+        { "include": "#entities" },
+        { "name": "meta.text.plain.content.nx", "match": "[^<&{\\\\]+" },
+        { "name": "meta.text.plain.content.nx", "match": "\\\\" }
       ]
     },
     "fragment": {
@@ -272,7 +371,7 @@
         },
         {
           "name": "support.type.text.nx",
-          "match": ":[A-Za-z_][A-Za-z0-9_-]*"
+          "match": ":\\s*(?:(?!(?:raw|if)\\b)(?:[A-Za-z_][A-Za-z0-9_-]*)(?!\\s*=))?"
         },
         {
           "name": "keyword.other.raw.nx",

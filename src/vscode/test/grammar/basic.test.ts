@@ -231,6 +231,15 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(line, tokens, '}')).to.not.include('punctuation.section.interpolation.end.nx');
   });
 
+  it('highlights elements inside interpolation value expressions', function () {
+    const line = '<div>{ <Inner/> }</div>';
+    const { tokens } = grammar.tokenizeLine(line, null);
+
+    expect(scopesForSubstring(line, tokens, '<Inner')).to.include('entity.name.tag.nx');
+    expect(scopesForSubstring(line, tokens, '<Inner')).to.include('meta.tag.start.nx');
+    expect(scopesForSubstring(line, tokens, '/')).to.include('punctuation.definition.tag.self-closing.nx');
+  });
+
   it('highlights inline element as attribute value', function () {
     const line = '<Button prop=<Start/> />';
     const { tokens } = grammar.tokenizeLine(line, null);

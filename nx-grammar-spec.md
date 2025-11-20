@@ -61,7 +61,11 @@ Text content tokens (inside text elements)
 - ENTITY (named or numeric entity; e.g., &amp; &#10;)
 - ESCAPED_LBRACE (`"\{"`)
 - ESCAPED_RBRACE (`"\}"`)
-- Only `"\{"` and `"\}"` sequences are treated as escapes; any other backslash-prefixed sequences remain literal text.
+- ESCAPED_AT (`"\@"`; only appears in typed text content)
+- Only the listed escape sequences are treated as escapes; any other backslash-prefixed sequences remain literal text.
+
+Embed text tokens
+- EMBED_TEXT_CHUNK — produced only inside typed text content; scanners split runs at the `@{` interpolation delimiter and at `\@` escapes.
 
 Special
 - EOF (end of file)
@@ -76,10 +80,10 @@ Notes
 - The lexer does not produce tokens for trivia; they are attached as trivia or discarded.
 - Comments and whitespace may appear between any tokens.
 - Block comments are nestable with same-kind openers only. The lexer maintains a depth counter: increment on opener, decrement on closer, emit one token at depth 0. Unterminated blocks are lexing errors.
-- Comments are not recognized inside string literals or text content tokens (TEXT_CHUNK/ENTITY/ESCAPED_*).
+- Comments are not recognized inside string literals or text content tokens (TEXT_CHUNK/ENTITY/ESCAPED_*, EMBED_TEXT_CHUNK, RAW_TEXT_CHUNK).
 
-Raw embed tokens
-- RAW_TEXT_CHUNK — produced only inside raw embed content; scanners treat '{', '}', '&' as ordinary characters.
+Raw text tokens
+- RAW_TEXT_CHUNK — produced only inside raw text content; scanners treat '{', '}', '&' as ordinary characters.
 
 ## Operator Precedence (Pratt)
 
@@ -375,28 +379,32 @@ ElementsForExpression (AST: MarkupForExpressionSyntax)
 Element (AST: MarkupElementSyntax is a sum type)
 - Element → LT ElementName ElementSuffix
 
-ElementSuffix (builds either Element or EmbedElement AST)
+ElementSuffix (builds either Element or TextElement AST)
 - ElementSuffix → PropertyList RegularElementTail
-- ElementSuffix → COLON EmbedTextType EmbedElementTail
+- ElementSuffix → COLON TextElementTail
 
 RegularElementTail (AST: ElementSyntax)
 - RegularElementTail → SLASH GT
   - fields: name (from ElementName), props: PropertyListSyntax, children: []
-- RegularElementTail → GT Content LT SLASH ElementName GT
-  - fields: name (from ElementName), props: PropertyListSyntax, children: ElementContentSyntax.items
+- RegularElementTail → GT ElementsExpression LT SLASH ElementName GT
+  - fields: name (from ElementName), props: PropertyListSyntax, children: MarkupListSyntax
 
-EmbedElementTail (AST: EmbedElementSyntax)
-- EmbedElementTail → PropertyList GT EmbedContent LT SLASH ElementName GT
-  - fields: name (from ElementName), textType (from EmbedTextType), mode: "parsed", props: PropertyListSyntax, content: EmbedContentSyntax.items
-- EmbedElementTail → RAW PropertyList GT RawEmbedContent LT SLASH ElementName GT
-  - fields: name (from ElementName), textType (from EmbedTextType), mode: "raw", props: PropertyListSyntax, content: RawEmbedContentSyntax.text
+TextElementTail (AST: TextElementSyntax)
+- TextElementTail → PropertyList GT TextContent LT SLASH ElementName GT
+  - fields: name (from ElementName), textType?: string, mode: "text", props: PropertyListSyntax, content: TextContentSyntax.items
+- TextElementTail → RAW PropertyList GT RawTextRun LT SLASH ElementName GT
+  - fields: name (from ElementName), textType?: string, mode: "text-raw", props: PropertyListSyntax, content: RawTextRunSyntax.text
+- TextElementTail → TextType PropertyList GT EmbedTextContent LT SLASH ElementName GT
+  - fields: name (from ElementName), textType: string, mode: "embed", props: PropertyListSyntax, content: EmbedTextContentSyntax.items
+- TextElementTail → TextType RAW PropertyList GT RawTextRun LT SLASH ElementName GT
+  - fields: name (from ElementName), textType: string, mode: "embed-raw", props: PropertyListSyntax, content: RawTextRunSyntax.text
 
 ElementName
 - ElementName → QualifiedMarkupName
 
-EmbedTextType
-- EmbedTextType → IDENTIFIER
-  - fields (on EmbedElement): textType: string
+TextType
+- TextType → IDENTIFIER
+  - fields (on TextElementSyntax): textType: string
 
 PropertyList (AST: PropertyListSyntax)
 - PropertyList → PropertyListItem*
@@ -447,38 +455,32 @@ PropertyListIfConditionElseOpt
 - PropertyListIfConditionElseOpt → ELSE COLON PropertyList
 - PropertyListIfConditionElseOpt → ε
 
-Content (AST: ElementContentSyntax is a sum type)
-- Content → ElementsExpression
-- Content → MixedContentExpression
-  - fields: items: MarkupItemSyntax[]
+TextContent (AST: TextContentSyntax)
+- TextContent → TextItem+
+  - fields: items: TextItemSyntax[]
 
-MixedContentExpression (AST: MixedContentSyntax)
-- MixedContentExpression → MixedContentItem+
-  - fields: items: MixedContentItemSyntax[]
+TextItem (AST: TextItemSyntax is a sum type)
+- TextItem → TextRun                       (TextRunSyntax)
+- TextItem → InterpolationExpression       (InterpolationExpressionSyntax)
 
-MixedContentItem (AST: MixedContentItemSyntax is a sum type)
-- MixedContentItem → TextPart        (TextPartSyntax)
-- MixedContentItem → Element         (MarkupElementSyntax)
-- MixedContentItem → InterpolationExpression (InterpolationExpressionSyntax)
+EmbedTextContent (AST: EmbedTextContentSyntax)
+- EmbedTextContent → EmbedTextItem+
+  - fields: items: EmbedTextItemSyntax[]
 
-EmbedContent (AST: EmbedContentSyntax)
-- EmbedContent → EmbedContentItem+
-  - fields: items: EmbedContentItemSyntax[]
+EmbedTextItem (AST: EmbedTextItemSyntax is a sum type)
+- EmbedTextItem → EmbedTextRun                     (EmbedTextRunSyntax)
+- EmbedTextItem → EmbedInterpolationExpression     (EmbedInterpolationExpressionSyntax)
 
-EmbedContentItem (AST: EmbedContentItemSyntax is a sum type)
-- EmbedContentItem → TextRun         (TextRunSyntax)
-- EmbedContentItem → InterpolationExpression (InterpolationExpressionSyntax)
+EmbedInterpolationExpression (AST: EmbedInterpolationExpressionSyntax)
+- EmbedInterpolationExpression → "@{" ValueExpression "}"
+  - fields: expression: ExpressionSyntax
 
-RawEmbedContent (AST: RawEmbedContentSyntax)
-- RawEmbedContent → RawTextRun
-  - fields: text: string
-
-RawTextRun (AST: TextRunSyntax)
+RawTextRun (AST: RawTextRunSyntax)
 - RawTextRun → RAW_TEXT_CHUNK+
   - fields: text: string (concatenated as-is)
 
-TextPart (AST: TextPartSyntax)
-- TextPart → TextRun
+EmbedTextRun (AST: EmbedTextRunSyntax)
+- EmbedTextRun → (EMBED_TEXT_CHUNK | ENTITY | ESCAPED_LBRACE | ESCAPED_RBRACE | ESCAPED_AT)+
   - fields: text: string
 
 TextRun (AST: TextRunSyntax)
@@ -538,8 +540,8 @@ This section lists the AST node types with fields for implementers.
 - MarkupIfConditionListExpressionSyntax: arms: MarkupIfConditionArmSyntax[], elseElements?: MarkupListSyntax
 - MarkupIfConditionArmSyntax: condition: ExpressionSyntax, elements: MarkupListSyntax
 - MarkupForExpressionSyntax: itemVar: string, indexVar?: string, iterable: ExpressionSyntax, body: MarkupListSyntax
-- MarkupElementSyntax: name: QualifiedMarkupNameSyntax, props: PropertyListSyntax, children: ElementContentSyntax (MarkupListSyntax or MixedContentSyntax)
-- EmbedElementSyntax: name: QualifiedMarkupNameSyntax, textType: string, mode: "parsed"|"raw", props: PropertyListSyntax, content: EmbedContentSyntax|RawEmbedContentSyntax
+- MarkupElementSyntax: name: QualifiedMarkupNameSyntax, props: PropertyListSyntax, children: MarkupListSyntax
+- TextElementSyntax: name: QualifiedMarkupNameSyntax, textType?: string, mode: "text"|"text-raw"|"embed"|"embed-raw", props: PropertyListSyntax, content: TextContentSyntax|EmbedTextContentSyntax|RawTextRunSyntax
 - PropertyListSyntax: items: PropertyListItemSyntax[]
 - PropertyListItemSyntax: PropertyValueSyntax | PropertyIfSimpleSyntax | PropertyIfMatchSyntax | PropertyIfConditionListSyntax
 - PropertyValueSyntax: name: QualifiedMarkupNameSyntax, value: ExpressionSyntax
@@ -548,12 +550,13 @@ This section lists the AST node types with fields for implementers.
 - PropertyIfMatchArmSyntax: patterns: PatternSyntax[], props: PropertyListSyntax
 - PropertyIfConditionListSyntax: arms: PropertyIfConditionArmSyntax[], elseProps?: PropertyListSyntax
 - PropertyIfConditionArmSyntax: condition: ExpressionSyntax, props: PropertyListSyntax
-- ElementContentSyntax: items: MarkupItemSyntax[] | MixedContentItemSyntax[]
-- MixedContentSyntax: items: MixedContentItemSyntax[]
-- MixedContentItemSyntax: kind: "text"|"element"|"interpolation", value: TextRunSyntax|MarkupElementSyntax|EmbedElementSyntax|InterpolationExpressionSyntax
-- EmbedContentSyntax: items: (TextRunSyntax|InterpolationExpressionSyntax)[]
-- RawEmbedContentSyntax: text: string
-- TextPartSyntax: text: string
+- TextContentSyntax: items: TextItemSyntax[]
+- TextItemSyntax: kind: "text"|"interpolation", value: TextRunSyntax|InterpolationExpressionSyntax
+- EmbedTextContentSyntax: items: EmbedTextItemSyntax[]
+- EmbedTextItemSyntax: kind: "text"|"interpolation", value: EmbedTextRunSyntax|EmbedInterpolationExpressionSyntax
+- EmbedInterpolationExpressionSyntax: expr: ExpressionSyntax
+- EmbedTextRunSyntax: text: string
+- RawTextRunSyntax: text: string
 - TextRunSyntax: text: string
 - InterpolationExpressionSyntax: expr: ExpressionSyntax
 - QualifiedNameSyntax: parts: string[]
@@ -573,7 +576,7 @@ This section lists the AST node types with fields for implementers.
 - IfMatch scrutinee (value/elements/property variants):
   - After IF, parse a required ValueExpression before IS as the scrutinee
   - Condition-list form begins directly with LBRACE and never has a scrutinee
-- Element is left-factored: after LT ElementName, COLON selects the embed branch; otherwise parse PropertyList and choose SLASH GT (self-closing) or GT … LT SLASH ElementName GT using lookahead at SLASH vs GT.
+- Element is left-factored: after LT ElementName, COLON selects the text branch; otherwise parse PropertyList and choose SLASH GT (self-closing) or GT … LT SLASH ElementName GT using lookahead at SLASH vs GT.
 - MemberAccess handles both property/field access and enum member access:
   - All `target.name` expressions parse uniformly as MemberAccessExpressionSyntax
   - Semantic analysis resolves the target expression to determine interpretation:
@@ -584,7 +587,7 @@ This section lists the AST node types with fields for implementers.
 ## Validation Rules (post-parse)
 
 - Element closing tag name must match opening ElementName.
-- EmbedElement closing tag name must match opening ElementName.
+- TextElement closing tag name must match opening ElementName.
 - PropertyDefinition names within a single FunctionDefinition should be unique.
 - Type modifiers: at most one of QMARK or LBRACK RBRACK.
 - Switch expressions (property variants): at least one case; patterns per case must be non-empty.
