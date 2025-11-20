@@ -17,25 +17,19 @@ module.exports = grammar({
 
   externals: $ => [
     $.text_chunk,
+    $.embed_text_chunk,
     $.entity,
     $.escaped_lbrace,
     $.escaped_rbrace,
+    $.escaped_at,
   ],
 
   conflicts: $ => [
-    // Disambiguate contexts where 'if' can start different expression types
     [$.value_if_expression, $.elements_if_expression],
     [$.property_list_if_expression],
-    // Elements vs mixed content - disambiguated by presence of text
-    [$.elements_expression, $.mixed_content],
-    // Value expression can contain element
     [$.value_expression, $.elements_expression],
-    // Recursive content expressions
     [$.elements_expression],
-    [$.mixed_content],
-    [$.text_run],
     [$.property_list],
-    // Property list if arms vs value if arms
     [$.property_list_if_condition_arm],
     [$.property_list_if_match_arm],
     [$.property_list_if_simple_expression],
@@ -49,13 +43,13 @@ module.exports = grammar({
     [$.value_if_condition_arm, $.property_list_if_condition_arm],
     [$.value_if_match_arm, $.property_list_if_match_arm],
     [$.value_if_simple_expression, $.property_list_if_simple_expression],
-    // Elements if arms
     [$.elements_if_condition_arm],
     [$.elements_if_match_arm],
     [$.elements_if_simple_expression],
     [$.elements_if_match_expression],
     [$.elements_if_condition_list_expression],
-    // Identifier as expression vs property name
+    [$.text_run],
+    [$.embed_text_run],
     [$.identifier_expression, $.qualified_markup_name],
     [$.identifier_expression, $.qualified_name],
   ],
@@ -383,6 +377,7 @@ module.exports = grammar({
       $.element,
       $.elements_if_expression,
       $.elements_for_expression,
+      $.interpolation_expression,
     )),
 
     elements_if_expression: $ => choice(
@@ -461,14 +456,13 @@ module.exports = grammar({
       '<',
       field('name', $.element_name),
       choice(
-        // Regular element
         seq(
           field('properties', optional($.property_list)),
           choice(
             seq('/', '>'),  // self-closing
             seq(
               '>',
-              field('content', $.content),
+              field('content', $.elements_expression),
               '<',
               '/',
               field('close_name', $.element_name),
@@ -476,25 +470,51 @@ module.exports = grammar({
             ),
           ),
         ),
-        // Embed element
         seq(
           ':',
-          field('text_type', $.identifier),
           choice(
-            // parsed embed content
             seq(
               field('properties', optional($.property_list)),
               '>',
-              field('content', $.embed_content),
-              '<', '/', field('close_name', $.element_name), '>'
+              field('content', $.text_content),
+              '<',
+              '/',
+              field('close_name', $.element_name),
+              '>'
             ),
-            // raw embed content
             seq(
               'raw',
               field('properties', optional($.property_list)),
               '>',
-              field('content', $.embed_raw_content),
-              '<', '/', field('close_name', $.element_name), '>'
+              field('content', $.raw_text_run),
+              '<',
+              '/',
+              field('close_name', $.element_name),
+              '>'
+            ),
+            seq(
+              field('text_type', $.identifier),
+              choice(
+                seq(
+                  field('properties', optional($.property_list)),
+                  '>',
+                  field('content', $.embed_text_content),
+                  '<',
+                  '/',
+                  field('close_name', $.element_name),
+                  '>'
+                ),
+                seq(
+                  'raw',
+                  field('properties', optional($.property_list)),
+                  '>',
+                  field('content', $.raw_text_run),
+                  '<',
+                  '/',
+                  field('close_name', $.element_name),
+                  '>'
+                ),
+              ),
             ),
           ),
         ),
@@ -574,19 +594,22 @@ module.exports = grammar({
       field('body', optional($.property_list)),
     ),
 
-    // ===== Content =====
-    content: $ => choice(
-      $.elements_expression,
-      $.mixed_content,
-    ),
-
-    mixed_content: $ => repeat1(choice(
-      $.text_part,
-      $.element,
+    // ===== Text Content =====
+    text_content: $ => repeat1(choice(
+      $.text_run,
       $.interpolation_expression,
     )),
 
-    text_part: $ => $.text_run,
+    embed_text_content: $ => repeat1(choice(
+      $.embed_text_run,
+      $.embed_interpolation_expression,
+    )),
+
+    embed_interpolation_expression: $ => seq(
+      '@{',
+      $.value_expression,
+      '}',
+    ),
 
     text_run: $ => repeat1(choice(
       $.text_chunk,
@@ -595,16 +618,16 @@ module.exports = grammar({
       $.escaped_rbrace,
     )),
 
-    // ===== Embed Content =====
-    embed_content: $ => repeat1(choice(
-      $.text_run,
-      $.interpolation_expression,
+    embed_text_run: $ => repeat1(choice(
+      $.embed_text_chunk,
+      $.entity,
+      $.escaped_lbrace,
+      $.escaped_rbrace,
+      $.escaped_at,
     )),
 
-    // Raw embed content: braces and ampersands are literal; no interpolation
-    // Implemented as a simple token that consumes any run of non-'<' characters
-    embed_raw_content: $ => repeat1($.raw_text),
-    raw_text: $ => token(/[^<]+/),
+    raw_text_run: $ => repeat1($.raw_text_chunk),
+    raw_text_chunk: $ => token(/[^<]+/),
 
     // ===== Patterns =====
     pattern: $ => choice(

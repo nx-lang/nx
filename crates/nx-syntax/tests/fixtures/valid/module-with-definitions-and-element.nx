@@ -8,6 +8,6 @@ let greetingPrefix: string = "Hello"
 let <Greeting
   name:UserName
 /> =
-  <span class="greeting">{greetingPrefix} {name}</span>
+  <span: class="greeting">{greetingPrefix} {name}</span>
 
 <Greeting name="World" />

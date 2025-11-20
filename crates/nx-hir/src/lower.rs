@@ -419,6 +419,11 @@ impl LoweringContext {
                 .find(|n| !matches!(n.kind(), SyntaxKind::LBRACE | SyntaxKind::RBRACE))
                 .map(|n| self.lower_expr(n))
                 .unwrap_or_else(|| self.error_expr(node.span())),
+            SyntaxKind::EMBED_INTERPOLATION_EXPRESSION => node
+                .children()
+                .find(|n| !matches!(n.kind(), SyntaxKind::LBRACE | SyntaxKind::RBRACE))
+                .map(|n| self.lower_expr(n))
+                .unwrap_or_else(|| self.error_expr(node.span())),
 
             // For loop expression
             SyntaxKind::VALUE_FOR_EXPRESSION => {
@@ -933,6 +938,42 @@ mod tests {
                 assert_eq!(element.children.len(), 0);
             }
             _ => panic!("Expected Element item"),
+        }
+    }
+
+    #[test]
+    fn test_lower_embed_interpolation_inside_text_element() {
+        let source = r#"
+            <Root>
+              <markdown:text>@{user}</markdown:text>
+            </Root>
+        "#;
+        let parse_result = parse_str(source, "text.nx");
+        let tree = parse_result.tree.expect("Should parse typed text element");
+        let root = tree.root();
+
+        fn find_kind(node: SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {
+            if node.kind() == kind {
+                return Some(node);
+            }
+            for child in node.children() {
+                if let Some(found) = find_kind(child, kind) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+
+        let embed_interp =
+            find_kind(root, SyntaxKind::EMBED_INTERPOLATION_EXPRESSION).expect("expected embed interpolation node");
+
+        let mut ctx = LoweringContext::new(SourceId::new(0));
+        let expr_id = ctx.lower_expr(embed_interp);
+        let expr = ctx.module.expr(expr_id);
+
+        match expr {
+            Expr::Ident(name) => assert_eq!(name.as_str(), "user"),
+            other => panic!("Expected identifier from embed interpolation, got {:?}", other),
         }
     }
 

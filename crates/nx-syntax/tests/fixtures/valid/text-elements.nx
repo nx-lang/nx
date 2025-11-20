@@ -1,0 +1,19 @@
+// Text element variants with typed and raw content
+<Root>
+  <message:>
+    Hello {name} \{literal\}
+  </message>
+
+  <markdown:text>
+    Welcome @{user}!
+    Escaped at: \@
+  </markdown>
+
+  <style: raw>
+    body { color: red; }
+  </style>
+
+  <code:text raw>
+    if (ready) { run(); }
+  </code>
+</Root>

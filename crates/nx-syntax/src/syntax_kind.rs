@@ -35,9 +35,15 @@ pub enum SyntaxKind {
     SELF_CLOSING_ELEMENT,
     OPEN_TAG,
     CLOSE_TAG,
+    TEXT_CONTENT,
+    EMBED_TEXT_CONTENT,
     MIXED_CONTENT,
     TEXT_RUN,
+    EMBED_TEXT_RUN,
+    RAW_TEXT_RUN,
     TEXT_CHUNK,
+    EMBED_TEXT_CHUNK,
+    RAW_TEXT_CHUNK,
     TEXT_PART,
     ENTITY,
     CONTENT,
@@ -69,6 +75,7 @@ pub enum SyntaxKind {
     CONDITIONAL_EXPRESSION,
     SEQUENCE_EXPRESSION,
     INTERPOLATION_EXPRESSION,
+    EMBED_INTERPOLATION_EXPRESSION,
     PARENTHESIZED_EXPRESSION,
 
     // === Control Flow ===
@@ -173,6 +180,7 @@ pub enum SyntaxKind {
     EQ,
     ESCAPED_LBRACE,
     ESCAPED_RBRACE,
+    ESCAPED_AT,
 
     // === Special ===
     WHITESPACE,
@@ -235,7 +243,12 @@ impl SyntaxKind {
                 | SyntaxKind::WHITESPACE
                 | SyntaxKind::NEWLINE
                 | SyntaxKind::TEXT_CHUNK
+                | SyntaxKind::EMBED_TEXT_CHUNK
+                | SyntaxKind::RAW_TEXT_CHUNK
                 | SyntaxKind::ENTITY
+                | SyntaxKind::ESCAPED_LBRACE
+                | SyntaxKind::ESCAPED_RBRACE
+                | SyntaxKind::ESCAPED_AT
                 | SyntaxKind::LINE_COMMENT
                 | SyntaxKind::BLOCK_COMMENT
                 | SyntaxKind::HTML_BLOCK_COMMENT
@@ -304,9 +317,15 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "self_closing_element" => SyntaxKind::SELF_CLOSING_ELEMENT,
         "open_tag" => SyntaxKind::OPEN_TAG,
         "close_tag" => SyntaxKind::CLOSE_TAG,
+        "text_content" => SyntaxKind::TEXT_CONTENT,
+        "embed_text_content" => SyntaxKind::EMBED_TEXT_CONTENT,
         "mixed_content" => SyntaxKind::MIXED_CONTENT,
         "text_run" => SyntaxKind::TEXT_RUN,
+        "embed_text_run" => SyntaxKind::EMBED_TEXT_RUN,
+        "raw_text_run" => SyntaxKind::RAW_TEXT_RUN,
         "text_chunk" => SyntaxKind::TEXT_CHUNK,
+        "embed_text_chunk" => SyntaxKind::EMBED_TEXT_CHUNK,
+        "raw_text_chunk" => SyntaxKind::RAW_TEXT_CHUNK,
         "text_part" => SyntaxKind::TEXT_PART,
         "entity" => SyntaxKind::ENTITY,
         "content" => SyntaxKind::CONTENT,
@@ -334,6 +353,7 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "conditional_expression" => SyntaxKind::CONDITIONAL_EXPRESSION,
         "sequence_expression" => SyntaxKind::SEQUENCE_EXPRESSION,
         "interpolation_expression" => SyntaxKind::INTERPOLATION_EXPRESSION,
+        "embed_interpolation_expression" => SyntaxKind::EMBED_INTERPOLATION_EXPRESSION,
         "parenthesized_expression" => SyntaxKind::PARENTHESIZED_EXPRESSION,
         "value_if_expression" => SyntaxKind::VALUE_IF_EXPRESSION,
         "elements_if_expression" => SyntaxKind::ELEMENTS_IF_EXPRESSION,
@@ -358,6 +378,9 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "qualified_markup_name" => SyntaxKind::QUALIFIED_MARKUP_NAME,
         "element_name" => SyntaxKind::ELEMENT_NAME,
         "markup_identifier" => SyntaxKind::MARKUP_IDENTIFIER,
+        "escaped_lbrace" => SyntaxKind::ESCAPED_LBRACE,
+        "escaped_rbrace" => SyntaxKind::ESCAPED_RBRACE,
+        "escaped_at" => SyntaxKind::ESCAPED_AT,
         "line_comment" => SyntaxKind::LINE_COMMENT,
         "block_comment" => SyntaxKind::BLOCK_COMMENT,
         "html_block_comment" => SyntaxKind::HTML_BLOCK_COMMENT,

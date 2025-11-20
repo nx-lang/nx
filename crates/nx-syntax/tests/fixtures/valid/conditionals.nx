@@ -8,22 +8,22 @@ let <StatusBadge
     {if count > 0 {
       <span class="count">{count}</span>
     } else {
-      <span class="empty">-</span>
+      <span: class="empty">-</span>
     }}
 
     // Match expression
     {if status is {
-      "active": <span class="active">Active</span>
-      "pending": <span class="pending">Pending</span>
-      "error": <span class="error">Error</span>
-      else: <span class="unknown">Unknown</span>
+      "active": <span: class="active">Active</span>
+      "pending": <span: class="pending">Pending</span>
+      "error": <span: class="error">Error</span>
+      else: <span: class="unknown">Unknown</span>
     }}
 
     // Condition list expression
     {if {
-      count == 0: <span>Empty</span>
-      count < 10: <span>Low</span>
-      count < 100: <span>Medium</span>
-      else: <span>High</span>
+      count == 0: <span:>Empty</span>
+      count < 10: <span:>Low</span>
+      count < 100: <span:>Medium</span>
+      else: <span:>High</span>
     }}
   </div>

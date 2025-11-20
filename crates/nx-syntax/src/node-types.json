@@ -147,25 +147,6 @@
     }
   },
   {
-    "type": "content",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": false,
-      "required": true,
-      "types": [
-        {
-          "type": "elements_expression",
-          "named": true
-        },
-        {
-          "type": "mixed_content",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
     "type": "element",
     "named": true,
     "fields": {
@@ -184,15 +165,19 @@
         "required": false,
         "types": [
           {
-            "type": "content",
+            "type": "elements_expression",
             "named": true
           },
           {
-            "type": "embed_content",
+            "type": "embed_text_content",
             "named": true
           },
           {
-            "type": "embed_raw_content",
+            "type": "raw_text_run",
+            "named": true
+          },
+          {
+            "type": "text_content",
             "named": true
           }
         ]
@@ -262,6 +247,10 @@
         },
         {
           "type": "elements_if_expression",
+          "named": true
+        },
+        {
+          "type": "interpolation_expression",
           "named": true
         }
       ]
@@ -480,26 +469,22 @@
     }
   },
   {
-    "type": "embed_content",
+    "type": "embed_interpolation_expression",
     "named": true,
     "fields": {},
     "children": {
-      "multiple": true,
+      "multiple": false,
       "required": true,
       "types": [
         {
-          "type": "interpolation_expression",
-          "named": true
-        },
-        {
-          "type": "text_run",
+          "type": "value_expression",
           "named": true
         }
       ]
     }
   },
   {
-    "type": "embed_raw_content",
+    "type": "embed_text_content",
     "named": true,
     "fields": {},
     "children": {
@@ -507,7 +492,42 @@
       "required": true,
       "types": [
         {
-          "type": "raw_text",
+          "type": "embed_interpolation_expression",
+          "named": true
+        },
+        {
+          "type": "embed_text_run",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "embed_text_run",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "embed_text_chunk",
+          "named": true
+        },
+        {
+          "type": "entity",
+          "named": true
+        },
+        {
+          "type": "escaped_at",
+          "named": true
+        },
+        {
+          "type": "escaped_lbrace",
+          "named": true
+        },
+        {
+          "type": "escaped_rbrace",
           "named": true
         }
       ]
@@ -724,29 +744,6 @@
           }
         ]
       }
-    }
-  },
-  {
-    "type": "mixed_content",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": true,
-      "types": [
-        {
-          "type": "element",
-          "named": true
-        },
-        {
-          "type": "interpolation_expression",
-          "named": true
-        },
-        {
-          "type": "text_part",
-          "named": true
-        }
-      ]
     }
   },
   {
@@ -1131,6 +1128,21 @@
     }
   },
   {
+    "type": "raw_text_run",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "raw_text_chunk",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "rhs_expression",
     "named": true,
     "fields": {},
@@ -1154,13 +1166,17 @@
     }
   },
   {
-    "type": "text_part",
+    "type": "text_content",
     "named": true,
     "fields": {},
     "children": {
-      "multiple": false,
+      "multiple": true,
       "required": true,
       "types": [
+        {
+          "type": "interpolation_expression",
+          "named": true
+        },
         {
           "type": "text_run",
           "named": true
@@ -1655,6 +1671,10 @@
     "named": false
   },
   {
+    "type": "@{",
+    "named": false
+  },
+  {
     "type": "[",
     "named": false
   },
@@ -1679,12 +1699,20 @@
     "named": false
   },
   {
+    "type": "embed_text_chunk",
+    "named": true
+  },
+  {
     "type": "entity",
     "named": true
   },
   {
     "type": "enum",
     "named": false
+  },
+  {
+    "type": "escaped_at",
+    "named": true
   },
   {
     "type": "escaped_lbrace",
@@ -1771,7 +1799,7 @@
     "named": false
   },
   {
-    "type": "raw_text",
+    "type": "raw_text_chunk",
     "named": true
   },
   {

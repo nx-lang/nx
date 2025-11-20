@@ -1,2 +1,2 @@
 // Escaped braces test
-<p>Code example: \{ variable \}</p>
+<p:>Code example: \{ variable \}</p>

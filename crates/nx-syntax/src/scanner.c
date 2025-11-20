@@ -3,9 +3,11 @@
  *
  * This scanner handles text content inside markup elements, including:
  * - TEXT_CHUNK: sequences of text characters
+ * - EMBED_TEXT_CHUNK: sequences of text characters inside typed text content
  * - ENTITY: HTML/XML entities like &amp; &#10;
  * - ESCAPED_LBRACE: \{
  * - ESCAPED_RBRACE: \}
+ * - ESCAPED_AT: \@ (only used inside typed text content)
  *
  * Only backslash-brace pairs are treated as escapes; any other backslash
  * sequence is left as literal text.
@@ -24,9 +26,11 @@
 
 enum TokenType {
   TEXT_CHUNK,
+  EMBED_TEXT_CHUNK,
   ENTITY,
   ESCAPED_LBRACE,
   ESCAPED_RBRACE,
+  ESCAPED_AT,
 };
 
 void *tree_sitter_nx_external_scanner_create() {
@@ -137,19 +141,21 @@ static bool scan_entity(TSLexer *lexer) {
  * Scanner for NX text content tokens.
  *
  * The scanner is invoked when the parser encounters content inside elements.
- * It handles four token types that represent different forms of text content.
+ * It handles tokens for both plain text content and typed text content.
  *
  * Token Priority (highest to lowest):
  * 1. ESCAPED_LBRACE: \{
  * 2. ESCAPED_RBRACE: \}
- * 3. ENTITY: &name; &#10; &#x0A;
- * 4. TEXT_CHUNK: any other text
+ * 3. ESCAPED_AT: \@ (typed text content only)
+ * 4. ENTITY: &name; &#10; &#x0A;
+ * 5. TEXT_CHUNK / EMBED_TEXT_CHUNK: any other text
  *
  * The scanner stops at:
  * - '<' (start of element or close tag)
- * - '{' (start of interpolation expression)
+ * - '{' / '}' (interpolation delimiters)
+ * - '@{' (typed text interpolation delimiter)
  * - '&' (might be entity or part of text)
- * - '\' followed by '{' or '}' (escaped brace)
+ * - '\' followed by '{', '}', or '@' (escaped delimiter)
  */
 bool tree_sitter_nx_external_scanner_scan(void *payload, TSLexer *lexer, const bool *valid_symbols) {
   (void)payload; // unused
@@ -157,23 +163,26 @@ bool tree_sitter_nx_external_scanner_scan(void *payload, TSLexer *lexer, const b
   // in text content. The grammar handles whitespace in the "extras" section.
 
   // No special handling for raw text here; raw content is handled by a regex token in the grammar.
+  const bool allow_text_chunk = valid_symbols[TEXT_CHUNK];
+  const bool allow_embed_text_chunk = valid_symbols[EMBED_TEXT_CHUNK];
+  const bool allow_entity = valid_symbols[ENTITY];
+  const bool allow_escaped_lbrace = valid_symbols[ESCAPED_LBRACE];
+  const bool allow_escaped_rbrace = valid_symbols[ESCAPED_RBRACE];
+  const bool allow_escaped_at = valid_symbols[ESCAPED_AT];
+  const bool allow_any_chunk = allow_text_chunk || allow_embed_text_chunk;
+  const enum TokenType chunk_kind =
+      allow_embed_text_chunk ? EMBED_TEXT_CHUNK : TEXT_CHUNK;
+  const bool embed_mode = chunk_kind == EMBED_TEXT_CHUNK;
 
-  // Check for escaped braces first (highest priority)
+  // Check for escapes first (highest priority)
   if (lexer->lookahead == '\\') {
     lexer->advance(lexer, false);
 
     if (lexer->lookahead == '{') {
-      if (valid_symbols[ESCAPED_LBRACE]) {
+      if (allow_escaped_lbrace) {
         lexer->advance(lexer, false);
         lexer->mark_end(lexer);
         lexer->result_symbol = ESCAPED_LBRACE;
-        return true;
-      }
-
-      if (valid_symbols[TEXT_CHUNK]) {
-        lexer->advance(lexer, false);
-        lexer->mark_end(lexer);
-        lexer->result_symbol = TEXT_CHUNK;
         return true;
       }
 
@@ -181,34 +190,34 @@ bool tree_sitter_nx_external_scanner_scan(void *payload, TSLexer *lexer, const b
     }
 
     if (lexer->lookahead == '}') {
-      if (valid_symbols[ESCAPED_RBRACE]) {
+      if (allow_escaped_rbrace) {
         lexer->advance(lexer, false);
         lexer->mark_end(lexer);
         lexer->result_symbol = ESCAPED_RBRACE;
         return true;
       }
 
-      if (valid_symbols[TEXT_CHUNK]) {
-        lexer->advance(lexer, false);
-        lexer->mark_end(lexer);
-        lexer->result_symbol = TEXT_CHUNK;
-        return true;
-      }
-
       return false;
     }
 
-    if (valid_symbols[TEXT_CHUNK]) {
+    if (lexer->lookahead == '@' && allow_escaped_at) {
+      lexer->advance(lexer, false);
       lexer->mark_end(lexer);
-      lexer->result_symbol = TEXT_CHUNK;
+      lexer->result_symbol = ESCAPED_AT;
       return true;
     }
 
-    return false;
+    if (allow_any_chunk) {
+      lexer->mark_end(lexer);
+      lexer->result_symbol = chunk_kind;
+      return true;
+    } else {
+      return false;
+    }
   }
 
   // Check for entities
-  if (lexer->lookahead == '&' && valid_symbols[ENTITY]) {
+  if (lexer->lookahead == '&' && allow_entity) {
     // Save position in case entity scan fails
     if (scan_entity(lexer)) {
       lexer->result_symbol = ENTITY;
@@ -217,74 +226,84 @@ bool tree_sitter_nx_external_scanner_scan(void *payload, TSLexer *lexer, const b
     // If entity scan failed, fall through to text chunk
   }
 
+  if (!allow_any_chunk) {
+    return false;
+  }
+
   // Scan text chunk
-  if (valid_symbols[TEXT_CHUNK]) {
-    bool has_content = false;
+  bool has_content = false;
 
-    // Consume characters until we hit a delimiter
-    while (lexer->lookahead != 0) {
-      // Stop at element start delimiter. Do NOT stop on '>' because it
-      // can legitimately appear in text (e.g., in comparisons like `a > b`).
-      // This matches XML semantics: '>' need not be escaped in character
-      // data; only '<' and '&' must be escaped.
-      if (lexer->lookahead == '<') {
-        break;
-      }
+  // Consume characters until we hit a delimiter
+  while (lexer->lookahead != 0) {
+    // Stop at element start delimiter. Do NOT stop on '>' because it
+    // can legitimately appear in text (e.g., in comparisons like `a > b`).
+    if (lexer->lookahead == '<') {
+      break;
+    }
 
-      // Stop at interpolation start (but not escaped brace)
-      if (lexer->lookahead == '{') {
-        break;
-      }
-
-      // Stop at closing brace (might be end of interpolation)
-      if (lexer->lookahead == '}') {
-        break;
-      }
-
-      // Stop at backslash if next char is brace (let escaped brace scanner handle it)
-      if (lexer->lookahead == '\\') {
-        lexer->mark_end(lexer);
-        lexer->advance(lexer, false);
-        if (lexer->lookahead == '{' || lexer->lookahead == '}') {
-          // Don't include the backslash, let escaped brace scanner handle it
-          if (has_content) {
-            lexer->result_symbol = TEXT_CHUNK;
-            return true;
-          }
-          return false;
-        }
-        // Include the backslash in text (it's not escaping a brace)
-        has_content = true;
-        continue;
-      }
-
-      // Stop at entity start (let entity scanner handle it)
-      if (lexer->lookahead == '&') {
-        // Check if it looks like an entity
-        TSLexer saved = *lexer;
-        if (is_entity_start(lexer)) {
-          // Restore lexer position
-          *lexer = saved;
-          if (has_content) {
-            lexer->result_symbol = TEXT_CHUNK;
-            return true;
-          }
-          return false;
-        }
-        // Not an entity, restore and include in text
-        *lexer = saved;
-      }
-
-      // Include this character in text chunk
+    if (embed_mode && lexer->lookahead == '@') {
+      // Check for interpolation opener "@{"
+      TSLexer saved = *lexer;
       lexer->advance(lexer, false);
-      has_content = true;
-      lexer->mark_end(lexer);
+      if (lexer->lookahead == '{') {
+        *lexer = saved;
+        if (has_content) {
+          lexer->result_symbol = chunk_kind;
+          return true;
+        }
+        return false;
+      }
+      *lexer = saved;
     }
 
-    if (has_content) {
-      lexer->result_symbol = TEXT_CHUNK;
-      return true;
+    // Stop at interpolation delimiters
+    if (lexer->lookahead == '{' || lexer->lookahead == '}') {
+      break;
     }
+
+    // Stop at backslash if next char is a delimiter (let escaped token handle it)
+    if (lexer->lookahead == '\\') {
+      lexer->mark_end(lexer);
+      lexer->advance(lexer, false);
+      if (lexer->lookahead == '{' || lexer->lookahead == '}' || (embed_mode && lexer->lookahead == '@')) {
+        // Don't include the backslash, let escaped token scanner handle it
+        if (has_content) {
+          lexer->result_symbol = chunk_kind;
+          return true;
+        }
+        return false;
+      }
+
+      has_content = true;
+      continue;
+    }
+
+    // Stop at entity start (let entity scanner handle it)
+    if (lexer->lookahead == '&' && allow_entity) {
+      // Check if it looks like an entity
+      TSLexer saved = *lexer;
+      if (is_entity_start(lexer)) {
+        // Restore lexer position
+        *lexer = saved;
+        if (has_content) {
+          lexer->result_symbol = chunk_kind;
+          return true;
+        }
+        return false;
+      }
+      // Not an entity, restore and include in text
+      *lexer = saved;
+    }
+
+    // Include this character in text chunk
+    lexer->advance(lexer, false);
+    has_content = true;
+    lexer->mark_end(lexer);
+  }
+
+  if (has_content) {
+    lexer->result_symbol = chunk_kind;
+    return true;
   }
 
   return false;

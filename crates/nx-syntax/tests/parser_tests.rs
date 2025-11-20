@@ -1,7 +1,7 @@
 //! Comprehensive parser tests for NX syntax.
 
 use nx_diagnostics::render_diagnostics_cli;
-use nx_syntax::{parse_file, parse_str, SyntaxKind};
+use nx_syntax::{parse_file, parse_str, SyntaxKind, SyntaxNode};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -18,6 +18,14 @@ fn fixture_path(relative: &str) -> PathBuf {
     } else {
         from_workspace
     }
+}
+
+fn contains_kind(node: &SyntaxNode, kind: SyntaxKind) -> bool {
+    if node.kind() == kind {
+        return true;
+    }
+
+    node.children().any(|child| contains_kind(&child, kind))
 }
 
 // ============================================================================
@@ -181,6 +189,44 @@ fn test_parse_conditionals() {
         "Should parse conditional expressions without errors"
     );
     assert!(result.tree.is_some());
+}
+
+#[test]
+fn test_parse_markup_interpolation_items() {
+    let path = fixture_path("valid/markup-interpolation.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(
+        result.is_ok(),
+        "Should allow interpolation items between markup children"
+    );
+
+    let root = result.root().expect("Should have root node");
+    assert!(
+        contains_kind(&root, SyntaxKind::INTERPOLATION_EXPRESSION),
+        "Interpolation expression should appear in the markup tree"
+    );
+}
+
+#[test]
+fn test_parse_text_elements_and_embed_interpolation() {
+    let path = fixture_path("valid/text-elements.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(
+        result.is_ok(),
+        "Typed and raw text element variants should parse"
+    );
+
+    let root = result.root().expect("Should have root node");
+    assert!(
+        contains_kind(&root, SyntaxKind::EMBED_INTERPOLATION_EXPRESSION),
+        "Expected embed interpolation parsed from @{{...}}"
+    );
+    assert!(
+        contains_kind(&root, SyntaxKind::RAW_TEXT_RUN),
+        "Expected raw text run inside raw text elements"
+    );
 }
 
 #[test]

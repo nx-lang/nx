@@ -1,2 +1,2 @@
 // HTML/XML entities test
-<p>&lt;tag&gt; entities work &#10; and &#x0A; too</p>
+<p:>&lt;tag&gt; entities work &#10; and &#x0A; too</p>

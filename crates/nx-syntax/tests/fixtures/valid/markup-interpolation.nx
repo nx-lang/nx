@@ -1,0 +1,6 @@
+// Interpolation items allowed between elements
+<Section>
+  <Header/>
+  {content}
+  <Footer/>
+</Section>

@@ -1,2 +1,2 @@
 // Whitespace preservation test
-<p>  Multiple   spaces   preserved  </p>
+<p:>  Multiple   spaces   preserved  </p>
