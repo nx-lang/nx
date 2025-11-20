@@ -167,9 +167,9 @@ Literal ::=
 ## Elements
 
 ```ebnf
-(* list of elements, with if/for allowed *)
+(* list of elements, with if/for and interpolations allowed *)
 ElementsExpression ::=
-    ( Element | ElementsIfExpression | ElementsForExpression )+
+    ( Element | ElementsIfExpression | ElementsForExpression | InterpolationExpression )+
 
 ElementsIfExpression ::=
     ElementsIfSimpleExpression

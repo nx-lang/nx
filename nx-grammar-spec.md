@@ -331,6 +331,7 @@ ElementsExpression (AST: MarkupListSyntax)
 - ElementsExpressionItem → Element                     (MarkupElementSyntax)
 - ElementsExpressionItem → ElementsIfExpression        (MarkupIfSimpleExpressionSyntax | MarkupIfMatchExpressionSyntax | MarkupIfConditionListExpressionSyntax)
 - ElementsExpressionItem → ElementsForExpression       (MarkupForExpressionSyntax)
+- ElementsExpressionItem → InterpolationExpression     (InterpolationExpressionSyntax)
 
 ElementsIfExpression (AST: MarkupItemSyntax is a sum type)
 - ElementsIfExpression → ElementsIfSimpleExpression        (MarkupIfSimpleExpressionSyntax)
@@ -516,7 +517,7 @@ This section lists the AST node types with fields for implementers.
  - ElementFunctionDefinitionSyntax: elementName: QualifiedMarkupNameSyntax, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
  - ParenFunctionDefinitionSyntax: name: string, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
  - PropertyDefinitionSyntax: name: string, type: TypeSyntax, default?: ExpressionSyntax
-- ExpressionSyntax: union of MarkupElementSyntax | LiteralExpressionSyntax | IdentifierNameSyntax | ValueIfSimpleExpressionSyntax | ValueIfMatchExpressionSyntax | ValueIfConditionListExpressionSyntax | ValueForExpressionSyntax | ConditionalExpressionSyntax | ParenFunctionCallExpressionSyntax | MemberAccessExpressionSyntax | BinaryExpressionSyntax | PrefixUnaryExpressionSyntax | ParenthesizedExpressionSyntax | UnitLiteralSyntax
+- ExpressionSyntax: union of MarkupElementSyntax | InterpolationExpressionSyntax | LiteralExpressionSyntax | IdentifierNameSyntax | ValueIfSimpleExpressionSyntax | ValueIfMatchExpressionSyntax | ValueIfConditionListExpressionSyntax | ValueForExpressionSyntax | ConditionalExpressionSyntax | ParenFunctionCallExpressionSyntax | MemberAccessExpressionSyntax | BinaryExpressionSyntax | PrefixUnaryExpressionSyntax | ParenthesizedExpressionSyntax | UnitLiteralSyntax
  - ParenFunctionCallExpressionSyntax: callee: ExpressionSyntax, args: ExpressionSyntax[]
  - MemberAccessExpressionSyntax: target: ExpressionSyntax, name: string (includes both property access and enum member access; distinguished during semantic analysis)
  - ConditionalExpressionSyntax: condition: ExpressionSyntax, whenTrue: ExpressionSyntax, whenFalse: ExpressionSyntax
@@ -533,7 +534,7 @@ This section lists the AST node types with fields for implementers.
 - ValueIfConditionArmSyntax: condition: ExpressionSyntax, expr: ExpressionSyntax
 - ValueForExpressionSyntax: itemVar: string, indexVar?: string, iterable: ExpressionSyntax, body: ExpressionSyntax
 - MarkupListSyntax: items: MarkupItemSyntax[]
-- MarkupItemSyntax: MarkupElementSyntax | MarkupIfSimpleExpressionSyntax | MarkupIfMatchExpressionSyntax | MarkupIfConditionListExpressionSyntax | MarkupForExpressionSyntax
+- MarkupItemSyntax: MarkupElementSyntax | MarkupIfSimpleExpressionSyntax | MarkupIfMatchExpressionSyntax | MarkupIfConditionListExpressionSyntax | MarkupForExpressionSyntax | InterpolationExpressionSyntax
 - MarkupIfSimpleExpressionSyntax: condition: ExpressionSyntax, thenElements: MarkupListSyntax, elseElements?: MarkupListSyntax
 - MarkupIfMatchExpressionSyntax: scrutinee: ExpressionSyntax, arms: MarkupIfMatchArmSyntax[], elseElements?: MarkupListSyntax
 - MarkupIfMatchArmSyntax: patterns: PatternSyntax[], elements: MarkupListSyntax
@@ -572,6 +573,7 @@ This section lists the AST node types with fields for implementers.
   - Otherwise → ValueExpr (Pratt)
 - ElementsExpression item selection:
   - If next token is LT → Element
+  - If next token is LBRACE → InterpolationExpression
   - If next token ∈ {IF, FOR} → the corresponding Elements* form
 - IfMatch scrutinee (value/elements/property variants):
   - After IF, parse a required ValueExpression before IS as the scrutinee

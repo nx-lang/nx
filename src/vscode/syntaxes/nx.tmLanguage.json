@@ -212,6 +212,8 @@
       "name": "meta.module.root-element.nx",
       "patterns": [
         { "include": "#tags" },
+        { "include": "#elements-if" },
+        { "include": "#elements-for" },
         { "include": "#interpolation" },
         { "include": "#strings" },
         { "include": "#entities" },

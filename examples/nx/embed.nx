@@ -4,7 +4,7 @@ let <CodeBlock
   code:string
 /> =
   <pre class="code-block">
-    <code: class="language-{language}">
+    <code class="language-{language}">
       {code}
     </code>
   </pre>
@@ -12,6 +12,6 @@ let <CodeBlock
 let <StyleBlock
   css:string
 /> =
-  <style:>
+  <style>
     {css}
   </style>
