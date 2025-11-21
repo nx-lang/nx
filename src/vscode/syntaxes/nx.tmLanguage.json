@@ -357,7 +357,7 @@
       ]
     },
     "start-tag": {
-      "begin": "<(?!/)",
+      "begin": "<(?=[A-Za-z_:])",
       "beginCaptures": {
         "0": { "name": "punctuation.definition.tag.begin.nx" }
       },

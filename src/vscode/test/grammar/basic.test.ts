@@ -153,6 +153,33 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(line, tokens, 'else')).to.include('keyword.control.conditional.nx');
   });
 
+  it('does not treat comparison operators as tag starts before elements', function () {
+    const lines = [
+      '<abc>',
+      '  if {',
+      '    count < 10: <span:>Low</span>',
+      '  }',
+      '</abc>'
+    ];
+
+    let ruleStack: StateStack | null = null;
+
+    const advance = (line: string) => {
+      const result = grammar.tokenizeLine(line, ruleStack);
+      ruleStack = result.ruleStack;
+      return result.tokens;
+    };
+
+    advance(lines[0]);
+    advance(lines[1]);
+    const tokens = advance(lines[2]);
+
+    expect(scopesForSubstring(lines[2], tokens, '<')).to.include('keyword.operator.comparison.nx');
+    expect(scopesForSubstring(lines[2], tokens, '<')).to.not.include('meta.tag.start.nx');
+    expect(scopesForSubstring(lines[2], tokens, '<span')).to.include('meta.tag.start.nx');
+    expect(scopesForSubstring(lines[2], tokens, '<span')).to.include('entity.name.tag.nx');
+  });
+
   it('highlights inline for blocks within element content', function () {
     const line = 'render for item in items { item } done';
     const { tokens } = grammar.tokenizeLine(line, null);
