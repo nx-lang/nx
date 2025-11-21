@@ -215,7 +215,7 @@ impl<'a> InferenceContext<'a> {
                         Type::Enum(enum_info.clone())
                     } else {
                         self.error(
-                            "unknown-enum-member",
+                            "undefined-enum-member",
                             format!("Enum '{}' has no member named '{}'", enum_info.name, member),
                             *span,
                         );
