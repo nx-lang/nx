@@ -34,14 +34,14 @@ NX extends `if` to support match-style pattern blocks. Each arm is evaluated in 
 
 ```nx
 let dashboard = if user.role is {
-  "admin": <AdminPanel/>
-  "member": <MemberHome/>
-  else: <ReadOnlyView/>
+  "admin" => <AdminPanel/>
+  "member" => <MemberHome/>
+  else => <ReadOnlyView/>
 }
 ```
 
 - Arms never fall through; each case is independent.
-- Multiple patterns can share a result: `"saturday", "sunday": <Weekend/>`.
+- Multiple patterns can share a result: `"saturday", "sunday" => <Weekend/>`.
 - Omitting `else` is allowed but failing to match will raise an error at runtime, so reserve it for exhaustive sets.
 
 ## Iteration Expressions

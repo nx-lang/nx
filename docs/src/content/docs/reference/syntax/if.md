@@ -32,14 +32,14 @@ Use compact expressions for attributes and property assignments.
 
 ```nx
 let statusBadge = if status is {
-  "pending":  <Badge tone="info">Pending</Badge>
-  "approved": <Badge tone="success">Approved</Badge>
-  "rejected": <Badge tone="danger">Rejected</Badge>
-  else:       <Badge tone="neutral">Unknown</Badge>
+  "pending"  => <Badge: tone="info">Pending</Badge>
+  "approved" => <Badge: tone="success">Approved</Badge>
+  "rejected" => <Badge: tone="danger">Rejected</Badge>
+  else       => <Badge: tone="neutral">Unknown</Badge>
 }
 ```
 
-- Multiple patterns can share a body: `"saturday", "sunday": <WeekendIcon/>`.
+- Multiple patterns can share a body: `"saturday", "sunday" => <WeekendIcon/>`.
 - Omitting `else` is allowed. If no case matches, evaluation fails to surface incorrect assumptions.
 
 ## Best Practices

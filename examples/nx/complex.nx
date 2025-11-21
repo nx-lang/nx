@@ -29,9 +29,9 @@ let <TodoStats
 /> =
   <div class="stats">
     if {
-      items.length == 0: <p:>No todos yet</p>
-      items.length == 1: <p:>1 todo</p>
-      else:              <p:>{items.length} todos</p>
+      items.length == 0 => <p:>No todos yet</p>
+      items.length == 1 => <p:>1 todo</p>
+      else              => <p:>{items.length} todos</p>
     }
   </div>
 

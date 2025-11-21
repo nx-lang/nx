@@ -68,9 +68,9 @@
     "description": "Match expression producing elements",
     "body": [
       "if ${1:scrutinee} is {",
-      "\t${2:pattern}:",
+      "\t${2:pattern} =>",
       "\t\t$3",
-      "\telse:",
+      "\telse =>",
       "\t\t$0",
       "}"
     ]
@@ -80,8 +80,8 @@
     "description": "Match expression producing a value",
     "body": [
       "if ${1:scrutinee} is {",
-      "\t${2:pattern}: ${3:expr}",
-      "\telse: ${0:expr}",
+      "\t${2:pattern} => ${3:expr}",
+      "\telse => ${0:expr}",
       "}"
     ]
   },

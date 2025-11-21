@@ -141,10 +141,10 @@ let Hive5Survey =
       <Option "Yes, borrowed"/>
       <Option "Yes, lent"/>
       if allowBoth {
-        <Option "Both"/>
+        <Option>Both</Option>
       }
       else {
-        <Option "Neither"/>
+        <Option>Neither</Option>
       }
 
       if allowBoth {
@@ -155,13 +155,13 @@ let Hive5Survey =
       }
 
       if {
-        allowBoth:
+        allowBoth =>
           <Option "Both"/>
-        else:
+        else =>
           <Option "Neither"/>
       }
 
-      if { condition: optionA else: optionB }
+      if { condition => optionA else => optionB }
 
       if allowBoth {
         <Option "Both"/>
@@ -170,22 +170,22 @@ let Hive5Survey =
       }
 
       if {
-        allowBoth:  <Option "Both"/>
-        !allowBoth: <Option "Neither"/>
-        else:       <Option "Neither"/>
+        allowBoth  => <Option "Both"/>
+        !allowBoth => <Option "Neither"/>
+        else       => <Option "Neither"/>
       }
 
       if value is {
-        1:     <Option "Both"/>
-        2:     <Option "Neither"/>
-        else:  <Option "Neither"/>
+        1    => <Option "Both"/>
+        2    => <Option "Neither"/>
+        else => <Option "Neither"/>
       }
 
-      if {allowBoth: <Option "Both"/>  else: <Option "Neither"/>}
+      if {allowBoth => <Option "Both"/>  else => <Option "Neither"/>}
 
-      match allowBoth {
-        true:  <Option "Both"/>
-        false: <Option "Neither"/>
+      if allowBoth is {
+        true  => <Option "Both"/>
+        false => <Option "Neither"/>
       }
 
       if allowBoth {<Option "Both"/>} else {<Option "Neither"/>}
@@ -193,12 +193,12 @@ let Hive5Survey =
       allowBoth ? {<Option "Both"/>} : {<Option "Neither"/>}
 
       if allowBoth { <Option "Both"/> }
-      else:         {<Option "Neither"/>}
+      else         {<Option "Neither"/>}
 
 
-      match allowBoth {
-        true:  <Option "Both"/>
-        false: <Option "Neither"/>
+      if allowBoth is {
+        true  => <Option "Both"/>
+        false => <Option "Neither"/>
       }
 
       <Option "No"/>

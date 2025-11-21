@@ -162,6 +162,7 @@ pub enum SyntaxKind {
     PIPE,
     BANG,
     QUESTION,
+    FAT_ARROW,
     COLON,
 
     // === Punctuation ===
@@ -226,6 +227,7 @@ impl SyntaxKind {
                 | SyntaxKind::PIPE
                 | SyntaxKind::BANG
                 | SyntaxKind::QUESTION
+                | SyntaxKind::FAT_ARROW
                 | SyntaxKind::COLON
                 | SyntaxKind::LPAREN
                 | SyntaxKind::RPAREN
@@ -412,6 +414,7 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "|" => SyntaxKind::PIPE,
         "!" => SyntaxKind::BANG,
         "?" => SyntaxKind::QUESTION,
+        "=>" => SyntaxKind::FAT_ARROW,
         ":" => SyntaxKind::COLON,
         "(" => SyntaxKind::LPAREN,
         ")" => SyntaxKind::RPAREN,

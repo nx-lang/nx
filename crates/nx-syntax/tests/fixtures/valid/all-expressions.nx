@@ -90,10 +90,10 @@ let <IfNested x:int /> = {if x > 0 { if x > 10 { 2 } else { 1 } } else { 0 }}
 
 let <IfConditionList x:int /> = {
   if {
-    x > 100: 3
-    x > 10: 2
-    x > 0: 1
-    else: 0
+    x > 100 => 3
+    x > 10 => 2
+    x > 0 => 1
+    else => 0
   }
 }
 
@@ -101,9 +101,9 @@ let <IfConditionList x:int /> = {
 
 let <IfMatch x:int /> = {
   if x is {
-    0: "zero"
-    1: "one"
-    else: "other"
+    0 => "zero"
+    1 => "one"
+    else => "other"
   }
 }
 

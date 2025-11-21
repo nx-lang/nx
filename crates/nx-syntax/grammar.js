@@ -329,7 +329,7 @@ module.exports = grammar({
       repeat1($.value_if_match_arm),
       optional(seq(
         'else',
-        ':',
+        '=>',
         field('else', $.value_expression),
       )),
       '}',
@@ -338,7 +338,7 @@ module.exports = grammar({
     value_if_match_arm: $ => seq(
       $.pattern,
       repeat(seq(',', $.pattern)),
-      ':',
+      '=>',
       $.value_expression,
     ),
 
@@ -348,7 +348,7 @@ module.exports = grammar({
       repeat1($.value_if_condition_arm),
       optional(seq(
         'else',
-        ':',
+        '=>',
         field('else', $.value_expression),
       )),
       '}',
@@ -356,7 +356,7 @@ module.exports = grammar({
 
     value_if_condition_arm: $ => seq(
       field('condition', $.value_expression),
-      ':',
+      '=>',
       field('body', $.value_expression),
     ),
 
@@ -408,7 +408,7 @@ module.exports = grammar({
       repeat1($.elements_if_match_arm),
       optional(seq(
         'else',
-        ':',
+        '=>',
         field('else', $.elements_expression),
       )),
       '}',
@@ -417,7 +417,7 @@ module.exports = grammar({
     elements_if_match_arm: $ => seq(
       $.pattern,
       repeat(seq(',', $.pattern)),
-      ':',
+      '=>',
       $.elements_expression,
     ),
 
@@ -427,7 +427,7 @@ module.exports = grammar({
       repeat1($.elements_if_condition_arm),
       optional(seq(
         'else',
-        ':',
+        '=>',
         field('else', $.elements_expression),
       )),
       '}',
@@ -435,7 +435,7 @@ module.exports = grammar({
 
     elements_if_condition_arm: $ => seq(
       field('condition', $.value_expression),
-      ':',
+      '=>',
       field('body', $.elements_expression),
     ),
 
@@ -563,7 +563,7 @@ module.exports = grammar({
       repeat1($.property_list_if_match_arm),
       optional(seq(
         'else',
-        ':',
+        '=>',
         field('else', optional($.property_list)),
       )),
       '}',
@@ -572,7 +572,7 @@ module.exports = grammar({
     property_list_if_match_arm: $ => seq(
       $.pattern,
       repeat(seq(',', $.pattern)),
-      ':',
+      '=>',
       optional($.property_list),
     ),
 
@@ -582,7 +582,7 @@ module.exports = grammar({
       repeat1($.property_list_if_condition_arm),
       optional(seq(
         'else',
-        ':',
+        '=>',
         field('else', optional($.property_list)),
       )),
       '}',
@@ -590,7 +590,7 @@ module.exports = grammar({
 
     property_list_if_condition_arm: $ => seq(
       field('condition', $.value_expression),
-      ':',
+      '=>',
       field('body', optional($.property_list)),
     ),
 

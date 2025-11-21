@@ -1404,7 +1404,7 @@
                 },
                 {
                   "type": "STRING",
-                  "value": ":"
+                  "value": "=>"
                 },
                 {
                   "type": "FIELD",
@@ -1452,7 +1452,7 @@
         },
         {
           "type": "STRING",
-          "value": ":"
+          "value": "=>"
         },
         {
           "type": "SYMBOL",
@@ -1490,7 +1490,7 @@
                 },
                 {
                   "type": "STRING",
-                  "value": ":"
+                  "value": "=>"
                 },
                 {
                   "type": "FIELD",
@@ -1526,7 +1526,7 @@
         },
         {
           "type": "STRING",
-          "value": ":"
+          "value": "=>"
         },
         {
           "type": "FIELD",
@@ -1757,7 +1757,7 @@
                 },
                 {
                   "type": "STRING",
-                  "value": ":"
+                  "value": "=>"
                 },
                 {
                   "type": "FIELD",
@@ -1805,7 +1805,7 @@
         },
         {
           "type": "STRING",
-          "value": ":"
+          "value": "=>"
         },
         {
           "type": "SYMBOL",
@@ -1843,7 +1843,7 @@
                 },
                 {
                   "type": "STRING",
-                  "value": ":"
+                  "value": "=>"
                 },
                 {
                   "type": "FIELD",
@@ -1879,7 +1879,7 @@
         },
         {
           "type": "STRING",
-          "value": ":"
+          "value": "=>"
         },
         {
           "type": "FIELD",
@@ -2497,7 +2497,7 @@
                 },
                 {
                   "type": "STRING",
-                  "value": ":"
+                  "value": "=>"
                 },
                 {
                   "type": "FIELD",
@@ -2553,7 +2553,7 @@
         },
         {
           "type": "STRING",
-          "value": ":"
+          "value": "=>"
         },
         {
           "type": "CHOICE",
@@ -2599,7 +2599,7 @@
                 },
                 {
                   "type": "STRING",
-                  "value": ":"
+                  "value": "=>"
                 },
                 {
                   "type": "FIELD",
@@ -2643,7 +2643,7 @@
         },
         {
           "type": "STRING",
-          "value": ":"
+          "value": "=>"
         },
         {
           "type": "FIELD",

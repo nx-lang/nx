@@ -162,13 +162,13 @@ let <UserCard user:User className:string content:Element[]/> =
     }
 
     if foo is {
-      foo: {
+      foo => {
         if bar is {
-          bar: <BarCase/>
-          else: <FallbackCase/>
+          bar => <BarCase/>
+          else => <FallbackCase/>
         }
       }
-      else: <OtherFooCase/>
+      else => <OtherFooCase/>
     }
   </abc>
 
@@ -176,8 +176,8 @@ let <UserCard user:User className:string content:Element[]/> =
   if isLoading: user={user} /if
 
   if foo is {
-    1: className="primary"
-    else: className="secondary"
+    1 => className="primary"
+    else => className="secondary"
   }
   className="primary">
 
