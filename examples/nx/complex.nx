@@ -11,7 +11,7 @@ let <TodoApp
 /> =
   <div class="todo-app">
     <header>
-      <h1>Todo List</h1>
+      <h1:>Todo List</h1>
       <TodoStats items={todos} />
     </header>
 
@@ -67,10 +67,10 @@ let <TodoItem
     }
   >
     <input type="checkbox" checked={item.completed} />
-    <span class={item.completed ? <:uitext>completed</> : "active"}>
+    <span class={item.completed ? <:>completed</> : "active"}>
       {item.text}
     </span>
-    <button class="delete">Delete</button>
+    <button: class="delete">Delete</button>
   </li>
 
 let <TodoFilters
