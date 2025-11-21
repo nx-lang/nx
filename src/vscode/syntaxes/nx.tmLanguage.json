@@ -115,6 +115,7 @@
     },
     "operators": {
       "patterns": [
+        { "name": "keyword.operator.arrow.nx", "match": "=>" },
         { "name": "keyword.operator.arithmetic.nx", "match": "\\+|-|\\*|/" },
         { "name": "keyword.operator.comparison.nx", "match": "<=|>=|==|!=|<|>" },
         { "name": "keyword.operator.logical.nx", "match": "&&|\\|\\|" },
@@ -199,7 +200,8 @@
         { "include": "#tags" },
         { "include": "#numbers" },
         { "include": "#keywords-core" },
-        { "include": "#keywords-control" }
+        { "include": "#keywords-control" },
+        { "include": "#operators" }
       ]
     },
     "attr-name": {

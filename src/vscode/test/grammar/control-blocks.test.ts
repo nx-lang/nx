@@ -80,7 +80,7 @@ describe('NX control blocks', () => {
   });
 
   it('highlights property-list match arms', () => {
-    const line = '<UserCard if status is { "active": icon=ActiveIcon "idle": icon=IdleIcon else: icon=DefaultIcon }>';
+    const line = '<UserCard if status is { "active" => icon=ActiveIcon "idle" => icon=IdleIcon else => icon=DefaultIcon }>';
     const ifScopes = scopesForSubstring(line, 'if', grammar);
     expect(ifScopes).to.include('keyword.control.conditional.nx');
     expect(ifScopes).to.include('meta.control.if.properties.nx');
@@ -93,7 +93,7 @@ describe('NX control blocks', () => {
   });
 
   it('highlights property-list condition list arms', () => {
-    const line = '<UserCard if layout { "compact": gap=4 "full": gap=8 else: gap=2 }>';
+    const line = '<UserCard if layout { "compact" => gap=4 "full" => gap=8 else => gap=2 }>';
     const ifScopes = scopesForSubstring(line, 'if', grammar);
     expect(ifScopes).to.include('keyword.control.conditional.nx');
     expect(ifScopes).to.include('meta.control.if.properties.nx');
@@ -101,5 +101,20 @@ describe('NX control blocks', () => {
     expect(elseScopes).to.include('keyword.control.conditional.nx');
     expect(elseScopes).to.include('meta.control.if.properties.nx');
     expect(scopesForSubstring(line, 'gap', grammar)).to.include('entity.other.attribute-name.nx');
+  });
+
+  it('highlights fat arrows in elements match arms', () => {
+    const line = 'if status is { "active" => <Span.Active/> else => <Span.Inactive/> }';
+    expect(scopesForSubstring(line, '=>', grammar)).to.include('keyword.operator.arrow.nx');
+  });
+
+  it('highlights fat arrows in elements condition-list arms', () => {
+    const line = 'if { count == 0 => <span:>Empty</span> }';
+    expect(scopesForSubstring(line, '=>', grammar)).to.include('keyword.operator.arrow.nx');
+  });
+
+  it('highlights fat arrows inside attribute value expressions', () => {
+    const line = '<UserCard icon=if { isAdmin => <Icon.Admin/> else => <Icon.User/> } />';
+    expect(scopesForSubstring(line, '=>', grammar)).to.include('keyword.operator.arrow.nx');
   });
 });

@@ -61,15 +61,16 @@ describe('NX if-forms (scrutinee vs condition-list)', function () {
   });
 
   it('value if: match form (scrutinee required) highlights scrutinee and keywords', function () {
-    const line = 'let result = if status is { "active": 1 "idle": 2 else: 0 }';
+    const line = 'let result = if status is { "active" => 1 "idle" => 2 else => 0 }';
     const { tokens } = grammar.tokenizeLine(line, null);
     expect(scopesForSubstring(line, tokens, 'if')).to.include('meta.control.if.value.nx');
     expect(scopesForSubstring(line, tokens, 'is')).to.include('keyword.control.match.nx');
     expect(scopesForSubstring(line, tokens, 'else')).to.include('keyword.control.conditional.nx');
+    expect(scopesForSubstring(line, tokens, '=>')).to.include('keyword.operator.arrow.nx');
   });
 
   it('value if: condition-list form has no scrutinee between if and {', function () {
-    const line = 'let result = if { x > 0: 1 else: 0 }';
+    const line = 'let result = if { x > 0 => 1 else => 0 }';
     const { tokens } = grammar.tokenizeLine(line, null);
     const slice = tokensInSlice(line, tokens, 'if', '{');
     const hasQualifier = slice.some(t => t.scopes.includes('entity.name.qualifier.nx'));
@@ -78,7 +79,7 @@ describe('NX if-forms (scrutinee vs condition-list)', function () {
   });
 
   it('elements if: match form highlights scrutinee and keywords', function () {
-    const line = 'if kind is { "compact": <C/> "full": <F/> else: <X/> }';
+    const line = 'if kind is { "compact" => <C/> "full" => <F/> else => <X/> }';
     const { tokens } = grammar.tokenizeLine(line, null);
     expect(scopesForSubstring(line, tokens, 'if')).to.include('keyword.control.conditional.nx');
     expect(scopesForSubstring(line, tokens, 'is')).to.include('keyword.control.match.nx');
@@ -86,7 +87,7 @@ describe('NX if-forms (scrutinee vs condition-list)', function () {
   });
 
   it('elements if: condition-list form has no scrutinee between if and {', function () {
-    const line = 'if { cond: <A/> else: <B/> }';
+    const line = 'if { cond => <A/> else => <B/> }';
     const { tokens } = grammar.tokenizeLine(line, null);
     const slice = tokensInSlice(line, tokens, 'if', '{');
     const hasQualifier = slice.some(t => t.scopes.includes('entity.name.qualifier.nx'));
@@ -94,7 +95,7 @@ describe('NX if-forms (scrutinee vs condition-list)', function () {
   });
 
   it('properties if: match form highlights scrutinee and keywords', function () {
-    const line = '<Card if status is { "ok": icon=Ok "fail": icon=No else: icon=Default } />';
+    const line = '<Card if status is { "ok" => icon=Ok "fail" => icon=No else => icon=Default } />';
     const { tokens } = grammar.tokenizeLine(line, null);
     const ifScopes = scopesForSubstring(line, tokens, 'if');
     expect(ifScopes).to.include('keyword.control.conditional.nx');
@@ -102,10 +103,11 @@ describe('NX if-forms (scrutinee vs condition-list)', function () {
     const isScopes = scopesForSubstring(line, tokens, 'is');
     expect(isScopes).to.include('keyword.control.match.nx');
     expect(isScopes).to.include('meta.control.if.properties.nx');
+    expect(scopesForSubstring(line, tokens, '=>')).to.include('keyword.operator.arrow.nx');
   });
 
   it('properties if: condition-list form has no scrutinee between if and {', function () {
-    const line = '<Card if { status == "ok": icon=Ok else: icon=Default } />';
+    const line = '<Card if { status == "ok" => icon=Ok else => icon=Default } />';
     const { tokens } = grammar.tokenizeLine(line, null);
     const slice = tokensInSlice(line, tokens, 'if', '{');
     const hasQualifier = slice.some(t => t.scopes.includes('entity.name.qualifier.nx'));
@@ -113,7 +115,7 @@ describe('NX if-forms (scrutinee vs condition-list)', function () {
   });
 
   it('interpolation: value condition-list form carries interpolation and value-if meta', function () {
-    const line = 'class="btn {if { active: \"on\" else: \"off\" }}"';
+    const line = 'class="btn {if { active => \"on\" else => \"off\" }}"';
     const { tokens } = grammar.tokenizeLine(line, null);
     expect(scopesForSubstring(line, tokens, '{')).to.include('punctuation.section.interpolation.begin.nx');
     expect(scopesForSubstring(line, tokens, 'if')).to.include('meta.interpolation.nx');
@@ -121,10 +123,9 @@ describe('NX if-forms (scrutinee vs condition-list)', function () {
   });
 
   it('tokens still highlight for ill-formed match without scrutinee (syntax legality is parser responsibility)', function () {
-    const line = 'if is { "x": 1 }';
+    const line = 'if is { "x" => 1 }';
     const { tokens } = grammar.tokenizeLine(line, null);
     expect(scopesForSubstring(line, tokens, 'if')).to.include('keyword.control.conditional.nx');
     expect(scopesForSubstring(line, tokens, 'is')).to.include('keyword.control.match.nx');
   });
 });
-

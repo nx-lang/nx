@@ -124,14 +124,14 @@ ValueIfSimpleExpression ::=
 
 ValueIfMatchExpression ::=
     "if" ValueExpression "is" "{"
-    ( Pattern {"," Pattern} ":" ValueExpression )+
-    ["else" ":" ValueExpression]
+    ( Pattern {"," Pattern} "=>" ValueExpression )+
+    ["else" "=>" ValueExpression]
     "}"
 
 ValueIfConditionListExpression ::=
     "if" "{"
-    ( ValueExpression ":" ValueExpression )+
-    ["else" ":" ValueExpression]
+    ( ValueExpression "=>" ValueExpression )+
+    ["else" "=>" ValueExpression]
     "}"
 
 ValueForExpression ::=
@@ -181,14 +181,14 @@ ElementsIfSimpleExpression ::=
 
 ElementsIfMatchExpression ::=
     "if" ValueExpression "is" "{"
-    ( Pattern {"," Pattern} ":" ElementsExpression )+
-    ["else" ":" ElementsExpression]
+    ( Pattern {"," Pattern} "=>" ElementsExpression )+
+    ["else" "=>" ElementsExpression]
     "}"
 
 ElementsIfConditionListExpression ::=
     "if" "{"
-    ( ValueExpression ":" ElementsExpression )+
-    ["else" ":" ElementsExpression]
+    ( ValueExpression "=>" ElementsExpression )+
+    ["else" "=>" ElementsExpression]
     "}"
 
 ElementsForExpression ::=
@@ -220,14 +220,14 @@ PropertyListIfSimple ::=
 
 PropertyListIfMatch ::=
     "if" ValueExpression "is" "{"
-    ( Pattern {"," Pattern} ":" PropertyList )+
-    ["else" ":" PropertyList]
+    ( Pattern {"," Pattern} "=>" PropertyList )+
+    ["else" "=>" PropertyList]
     "}"
 
 PropertyListIfConditionList ::=
     "if" "{"
-    ( ValueExpression ":" PropertyList )+
-    ["else" ":" PropertyList]
+    ( ValueExpression "=>" PropertyList )+
+    ["else" "=>" PropertyList]
     "}"
 
 TextContent ::=

@@ -48,6 +48,7 @@ Literals
 - LBRACE ({), RBRACE (})
 - LBRACK ([), RBRACK (])
 - SLASH (/), COLON (:), COMMA (,), DOT (.)
+- FAT_ARROW (=>)
 - EQ (=)
 - QMARK (?)
 - PIPE (|)
@@ -295,11 +296,11 @@ ValueIfMatchExpression (AST: ValueIfMatchExpressionSyntax)
   - fields: scrutinee: ExpressionSyntax, arms: ValueIfMatchArmSyntax[], elseExpr?: ExpressionSyntax
 
 ValueIfMatchArm (AST: ValueIfMatchArmSyntax)
-- ValueIfMatchArm → Pattern (COMMA Pattern)* COLON ValueExpression
+- ValueIfMatchArm → Pattern (COMMA Pattern)* FAT_ARROW ValueExpression
   - fields: patterns: PatternSyntax[], expr: ExpressionSyntax
 
 ValueIfMatchElseOpt
-- ValueIfMatchElseOpt → ELSE COLON ValueExpression
+- ValueIfMatchElseOpt → ELSE FAT_ARROW ValueExpression
 - ValueIfMatchElseOpt → ε
   - fields (on ValueIfMatchExpressionSyntax): elseExpr?: ExpressionSyntax
 
@@ -308,11 +309,11 @@ ValueIfConditionListExpression (AST: ValueIfConditionListExpressionSyntax)
   - fields: arms: ValueIfConditionArmSyntax[], elseExpr?: ExpressionSyntax
 
 ValueIfConditionArm (AST: ValueIfConditionArmSyntax)
-- ValueIfConditionArm → ValueExpression COLON ValueExpression
+- ValueIfConditionArm → ValueExpression FAT_ARROW ValueExpression
   - fields: condition: ExpressionSyntax, expr: ExpressionSyntax
 
 ValueIfConditionElseOpt
-- ValueIfConditionElseOpt → ELSE COLON ValueExpression
+- ValueIfConditionElseOpt → ELSE FAT_ARROW ValueExpression
 - ValueIfConditionElseOpt → ε
   - fields (on ValueIfConditionListExpressionSyntax): elseExpr?: ExpressionSyntax
 
@@ -352,11 +353,11 @@ ElementsIfMatchExpression (AST: MarkupIfMatchExpressionSyntax)
   - fields: scrutinee: ExpressionSyntax, arms: MarkupIfMatchArmSyntax[], elseElements?: MarkupListSyntax
 
 ElementsIfMatchArm (AST: MarkupIfMatchArmSyntax)
-- ElementsIfMatchArm → Pattern (COMMA Pattern)* COLON ElementsExpression
+- ElementsIfMatchArm → Pattern (COMMA Pattern)* FAT_ARROW ElementsExpression
   - fields: patterns: PatternSyntax[], elements: MarkupListSyntax
 
 ElementsIfMatchElseOpt
-- ElementsIfMatchElseOpt → ELSE COLON ElementsExpression
+- ElementsIfMatchElseOpt → ELSE FAT_ARROW ElementsExpression
 - ElementsIfMatchElseOpt → ε
   - fields (on MarkupIfMatchExpressionSyntax): elseElements?: MarkupListSyntax
 
@@ -365,11 +366,11 @@ ElementsIfConditionListExpression (AST: MarkupIfConditionListExpressionSyntax)
   - fields: arms: MarkupIfConditionArmSyntax[], elseElements?: MarkupListSyntax
 
 ElementsIfConditionArm (AST: MarkupIfConditionArmSyntax)
-- ElementsIfConditionArm → ValueExpression COLON ElementsExpression
+- ElementsIfConditionArm → ValueExpression FAT_ARROW ElementsExpression
   - fields: condition: ExpressionSyntax, elements: MarkupListSyntax
 
 ElementsIfConditionElseOpt
-- ElementsIfConditionElseOpt → ELSE COLON ElementsExpression
+- ElementsIfConditionElseOpt → ELSE FAT_ARROW ElementsExpression
 - ElementsIfConditionElseOpt → ε
   - fields (on MarkupIfConditionListExpressionSyntax): elseElements?: MarkupListSyntax
 
@@ -437,11 +438,11 @@ PropertyListIfMatchExpression (AST: PropertyIfMatchSyntax)
   - fields: scrutinee: ExpressionSyntax, arms: PropertyIfMatchArmSyntax[], elseProps?: PropertyListSyntax
 
 PropertyListIfMatchArm (AST: PropertyIfMatchArmSyntax)
-- PropertyListIfMatchArm → Pattern (COMMA Pattern)* COLON PropertyList
+- PropertyListIfMatchArm → Pattern (COMMA Pattern)* FAT_ARROW PropertyList
   - fields: patterns: PatternSyntax[], props: PropertyListSyntax
 
 PropertyListIfMatchElseOpt
-- PropertyListIfMatchElseOpt → ELSE COLON PropertyList
+- PropertyListIfMatchElseOpt → ELSE FAT_ARROW PropertyList
 - PropertyListIfMatchElseOpt → ε
 
 PropertyListIfConditionListExpression (AST: PropertyIfConditionListSyntax)
@@ -449,11 +450,11 @@ PropertyListIfConditionListExpression (AST: PropertyIfConditionListSyntax)
   - fields: arms: PropertyIfConditionArmSyntax[], elseProps?: PropertyListSyntax
 
 PropertyListIfConditionArm (AST: PropertyIfConditionArmSyntax)
-- PropertyListIfConditionArm → ValueExpression COLON PropertyList
+- PropertyListIfConditionArm → ValueExpression FAT_ARROW PropertyList
   - fields: condition: ExpressionSyntax, props: PropertyListSyntax
 
 PropertyListIfConditionElseOpt
-- PropertyListIfConditionElseOpt → ELSE COLON PropertyList
+- PropertyListIfConditionElseOpt → ELSE FAT_ARROW PropertyList
 - PropertyListIfConditionElseOpt → ε
 
 TextContent (AST: TextContentSyntax)

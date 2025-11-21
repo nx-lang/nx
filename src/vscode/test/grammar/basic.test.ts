@@ -104,7 +104,7 @@ describe('NX TextMate grammar', function () {
   });
 
   it('highlights match-style value if expressions', function () {
-    const line = 'if status is { "active": 1 "idle": 2 else: 0 }';
+    const line = 'if status is { "active" => 1 "idle" => 2 else => 0 }';
     const { tokens } = grammar.tokenizeLine(line, null);
     expect(scopesForSubstring(line, tokens, 'if')).to.include('keyword.control.conditional.nx');
     expect(scopesForSubstring(line, tokens, 'is')).to.include('keyword.control.match.nx');
@@ -146,7 +146,7 @@ describe('NX TextMate grammar', function () {
   });
 
   it('highlights match-style elements if expressions', function () {
-    const line = 'render if kind is { "compact": <Compact/> "full": <Full/> else: <Fallback/> }';
+    const line = 'render if kind is { "compact" => <Compact/> "full" => <Full/> else => <Fallback/> }';
     const { tokens } = grammar.tokenizeLine(line, null);
     expect(scopesForSubstring(line, tokens, 'if')).to.include('keyword.control.conditional.nx');
     expect(scopesForSubstring(line, tokens, 'is')).to.include('keyword.control.match.nx');
@@ -157,7 +157,7 @@ describe('NX TextMate grammar', function () {
     const lines = [
       '<abc>',
       '  if {',
-      '    count < 10: <span:>Low</span>',
+      '    count < 10 => <span:>Low</span>',
       '  }',
       '</abc>'
     ];
@@ -298,7 +298,7 @@ describe('NX TextMate grammar', function () {
   });
 
   it('highlights match and for blocks inside interpolations', function () {
-    const line = '{if state is { "active": "A" else: "D" } for item in items { item }}';
+    const line = '{if state is { "active" => "A" else => "D" } for item in items { item }}';
     const { tokens } = grammar.tokenizeLine(line, null);
     expect(scopesForSubstring(line, tokens, 'if')).to.include('keyword.control.conditional.nx');
     expect(scopesForSubstring(line, tokens, 'is')).to.include('keyword.control.match.nx');
