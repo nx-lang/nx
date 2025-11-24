@@ -160,6 +160,30 @@ pub struct EnumDef {
     pub span: TextSpan,
 }
 
+/// Record field definition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordField {
+    /// Field name
+    pub name: Name,
+    /// Field type
+    pub ty: ast::TypeRef,
+    /// Default value expression (if present)
+    pub default: Option<ExprId>,
+    /// Source span
+    pub span: TextSpan,
+}
+
+/// Record type definition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordDef {
+    /// Record name
+    pub name: Name,
+    /// Property definitions
+    pub properties: Vec<RecordField>,
+    /// Source span
+    pub span: TextSpan,
+}
+
 /// Element property (key-value pair).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Property {
@@ -195,6 +219,8 @@ pub enum Item {
     TypeAlias(TypeAlias),
     /// Enum declaration
     Enum(EnumDef),
+    /// Record declaration
+    Record(RecordDef),
     /// Element declaration
     Element(ElementId),
 }
@@ -243,6 +269,7 @@ impl Module {
             Item::Function(func) => func.name.as_str() == name,
             Item::TypeAlias(alias) => alias.name.as_str() == name,
             Item::Enum(enum_def) => enum_def.name.as_str() == name,
+            Item::Record(record_def) => record_def.name.as_str() == name,
             Item::Element(_) => false,
         })
     }

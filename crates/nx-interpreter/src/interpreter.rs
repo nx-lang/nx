@@ -4,6 +4,7 @@ use crate::context::{ExecutionContext, ResourceLimits};
 use crate::error::{RuntimeError, RuntimeErrorKind};
 use crate::value::Value;
 use nx_hir::{ast, ExprId, Function, Module, Name};
+use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 use smol_str::SmolStr;
 
@@ -180,6 +181,9 @@ impl Interpreter {
                 }
                 Ok(Value::Array(values))
             }
+            ast::Expr::RecordLiteral {
+                record, properties, ..
+            } => self.eval_record_literal(module, ctx, record, properties),
             ast::Expr::Member { base, member, .. } => self.eval_member(module, ctx, *base, member),
             _ => {
                 // Other expression types not yet implemented
@@ -421,6 +425,11 @@ impl Interpreter {
         member: &Name,
     ) -> Result<Value, RuntimeError> {
         if let ast::Expr::Ident(base_name) = module.expr(base_expr) {
+            // Prefer runtime value if variable exists
+            if let Some(var_value) = ctx.try_lookup_variable(base_name.as_str()) {
+                return self.project_member(var_value, member, Some(base_name.as_str()));
+            }
+
             if let Some(enum_def) = self.resolve_enum_definition(module, base_name) {
                 if enum_def
                     .members
@@ -445,11 +454,48 @@ impl Interpreter {
         }
 
         let base_value = self.eval_expr(module, ctx, base_expr)?;
-        Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-            expected: "enum type".to_string(),
-            actual: base_value.type_name().to_string(),
-            operation: format!("member access .{}", member.as_str()),
-        }))
+        self.project_member(base_value, member, None)
+    }
+
+    fn project_member(
+        &self,
+        base_value: Value,
+        member: &Name,
+        record_label: Option<&str>,
+    ) -> Result<Value, RuntimeError> {
+        match base_value {
+            Value::Record(fields) => {
+                if let Some(value) = fields.get(member.as_str()) {
+                    Ok(value.clone())
+                } else {
+                    let name = record_label.unwrap_or("record");
+                    Err(RuntimeError::new(RuntimeErrorKind::RecordFieldNotFound {
+                        record: SmolStr::new(name),
+                        field: SmolStr::new(member.as_str()),
+                    }))
+                }
+            }
+            Value::EnumVariant { .. } => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: "record".to_string(),
+                actual: "enum".to_string(),
+                operation: format!("member access .{}", member.as_str()),
+            })),
+            other => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: "record".to_string(),
+                actual: other.type_name().to_string(),
+                operation: format!("member access .{}", member.as_str()),
+            })),
+        }
+    }
+
+    /// Instantiate a record value from its definition, applying default values.
+    pub fn instantiate_record_defaults(
+        &self,
+        module: &Module,
+        record_name: &str,
+    ) -> Result<Value, RuntimeError> {
+        let mut ctx = ExecutionContext::new();
+        self.build_record_value(module, &mut ctx, record_name, FxHashMap::default())
     }
 
     /// Evaluate a for loop expression
@@ -537,6 +583,57 @@ impl Interpreter {
 
         seen.remove(&key);
         result
+    }
+}
+
+impl Interpreter {
+    fn eval_record_literal(
+        &self,
+        module: &Module,
+        ctx: &mut ExecutionContext,
+        record: &Name,
+        properties: &[(Name, ExprId)],
+    ) -> Result<Value, RuntimeError> {
+        let mut overrides = FxHashMap::default();
+        for (name, expr_id) in properties {
+            let value = self.eval_expr(module, ctx, *expr_id)?;
+            overrides.insert(SmolStr::new(name.as_str()), value);
+        }
+
+        self.build_record_value(module, ctx, record.as_str(), overrides)
+    }
+
+    fn build_record_value(
+        &self,
+        module: &Module,
+        ctx: &mut ExecutionContext,
+        record_name: &str,
+        mut overrides: FxHashMap<SmolStr, Value>,
+    ) -> Result<Value, RuntimeError> {
+        let record_def = module.find_item(record_name);
+        let record_def = match record_def {
+            Some(nx_hir::Item::Record(def)) => def,
+            _ => {
+                return Err(RuntimeError::new(RuntimeErrorKind::UndefinedVariable {
+                    name: SmolStr::new(record_name),
+                }))
+            }
+        };
+
+        for prop in &record_def.properties {
+            if overrides.contains_key(prop.name.as_str()) {
+                continue;
+            }
+
+            let value = if let Some(default_expr) = prop.default {
+                self.eval_expr(module, ctx, default_expr)?
+            } else {
+                Value::Null
+            };
+            overrides.insert(SmolStr::new(prop.name.as_str()), value);
+        }
+
+        Ok(Value::Record(overrides))
     }
 }
 

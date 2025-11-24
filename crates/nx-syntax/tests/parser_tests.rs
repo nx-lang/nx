@@ -168,6 +168,29 @@ fn test_parse_type_annotations() {
 }
 
 #[test]
+fn test_parse_record_definition() {
+    let path = fixture_path("valid/record-definition.nx");
+    let result = parse_file(&path).expect("record fixture should load");
+
+    assert!(result.is_ok(), "Record definition should parse");
+    let root = result.root().expect("Should have syntax tree root");
+    assert!(
+        contains_kind(&root, SyntaxKind::RECORD_DEFINITION),
+        "Should contain record_definition node"
+    );
+
+    let record_node = root
+        .children()
+        .find(|c| c.kind() == SyntaxKind::RECORD_DEFINITION)
+        .expect("Should find record_definition");
+    let prop_count = record_node
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::PROPERTY_DEFINITION)
+        .count();
+    assert_eq!(prop_count, 3, "Should parse three record fields");
+}
+
+#[test]
 fn test_parse_expressions() {
     let path = fixture_path("valid/expressions.nx");
     let result = parse_file(&path).unwrap();

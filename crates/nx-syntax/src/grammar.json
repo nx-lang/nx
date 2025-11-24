@@ -19,6 +19,10 @@
             "members": [
               {
                 "type": "SYMBOL",
+                "name": "record_definition"
+              },
+              {
+                "type": "SYMBOL",
                 "name": "type_definition"
               },
               {
@@ -60,6 +64,46 @@
         {
           "type": "SYMBOL",
           "name": "qualified_name"
+        }
+      ]
+    },
+    "record_definition": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "type"
+        },
+        {
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "="
+        },
+        {
+          "type": "STRING",
+          "value": "{"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "FIELD",
+            "name": "properties",
+            "content": {
+              "type": "SYMBOL",
+              "name": "property_definition"
+            }
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "}"
         }
       ]
     },

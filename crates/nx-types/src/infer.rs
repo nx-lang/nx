@@ -237,6 +237,8 @@ impl<'a> InferenceContext<'a> {
                 Type::named(element_ref.tag.clone())
             }
 
+            ast::Expr::RecordLiteral { record, .. } => Type::named(record.clone()),
+
             // Block expressions
             ast::Expr::Block { stmts: _, expr, .. } => {
                 // TODO: Process statements
@@ -539,6 +541,28 @@ impl<'a> InferenceContext<'a> {
                         enum_def.name.clone(),
                         EnumType::new(enum_def.name.clone(), members),
                     );
+                }
+                nx_hir::Item::Record(record_def) => {
+                    for prop in &record_def.properties {
+                        if let Some(default_expr) = prop.default {
+                            let expected = self.type_from_type_ref(&prop.ty);
+                            let actual = self.infer_expr(default_expr);
+
+                            if !actual.is_compatible_with(&expected)
+                                && !actual.is_error()
+                                && !expected.is_error()
+                            {
+                                self.error(
+                                    "record-default-type-mismatch",
+                                    format!(
+                                        "Default value for record property '{}' expects {}, found {}",
+                                        prop.name, expected, actual
+                                    ),
+                                    prop.span,
+                                );
+                            }
+                        }
+                    }
                 }
                 _ => {}
             }

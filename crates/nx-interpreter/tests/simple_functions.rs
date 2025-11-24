@@ -6,6 +6,7 @@ use nx_diagnostics::render_diagnostics_cli;
 use nx_hir::{lower, SourceId};
 use nx_interpreter::{Interpreter, Value};
 use nx_syntax::parse_str;
+use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
 use std::collections::HashMap;
 
@@ -232,4 +233,184 @@ fn test_enum_comparison() {
     )
     .unwrap_or_else(|err| panic!("{}", err));
     assert_eq!(result, Value::Boolean(true));
+}
+
+// ============================================================================
+// Record Support Tests
+// ============================================================================
+
+#[test]
+fn test_record_field_access() {
+    let source = r#"
+        type User = { name: string age: int }
+        let getName(user:User): string = { user.name }
+    "#;
+
+    let mut record = FxHashMap::default();
+    record.insert(SmolStr::new("name"), Value::String(SmolStr::new("Ada")));
+    record.insert(SmolStr::new("age"), Value::Int(32));
+
+    let result =
+        execute_function(source, "getName", vec![Value::Record(record)]).unwrap_or_else(|err| {
+            panic!("Record field access failed:\n{}", err);
+        });
+
+    assert_eq!(result, Value::String(SmolStr::new("Ada")));
+}
+
+#[test]
+fn test_record_missing_field_errors() {
+    let source = r#"
+        type User = { name: string }
+        let missing(user:User) = { user.email }
+    "#;
+
+    let mut record = FxHashMap::default();
+    record.insert(SmolStr::new("name"), Value::String(SmolStr::new("Ada")));
+
+    let result = execute_function(source, "missing", vec![Value::Record(record)]);
+    assert!(result.is_err());
+    assert!(
+        result.unwrap_err().contains("no field"),
+        "Expected missing field error"
+    );
+}
+
+#[test]
+fn test_record_defaults_instantiation() {
+    let source = r#"
+        type User = { name: string = "Anon" age: int = 30 }
+        let greet(user:User): string = { user.name }
+    "#;
+
+    // Build module
+    let parse_result = parse_str(source, "record-defaults.nx");
+    assert!(
+        parse_result.errors.is_empty(),
+        "Parse errors: {:?}",
+        parse_result.errors
+    );
+    let root = parse_result.root().expect("root");
+    let module = lower(root, SourceId::new(0));
+
+    let interpreter = Interpreter::new();
+    let record = interpreter
+        .instantiate_record_defaults(&module, "User")
+        .expect("instantiate record");
+
+    let result = interpreter
+        .execute_function(&module, "greet", vec![record])
+        .unwrap_or_else(|err| panic!("Execution failed: {}", err));
+
+    assert_eq!(result, Value::String(SmolStr::new("Anon")));
+}
+
+#[test]
+fn test_record_literal_defaults_and_overrides() {
+    let source = r#"
+        type User = { name: string = "Anon" age: int = 30 }
+        let getName(): string = { <User name="Bob" />.name }
+        let getAge(): int = { <User name="Bob" />.age }
+    "#;
+
+    let result = execute_function(source, "getName", vec![])
+        .unwrap_or_else(|err| panic!("record literal name failed: {}", err));
+    assert_eq!(result, Value::String(SmolStr::new("Bob")));
+
+    let result = execute_function(source, "getAge", vec![])
+        .unwrap_or_else(|err| panic!("record literal age failed: {}", err));
+    assert_eq!(result, Value::Int(30));
+}
+
+#[test]
+fn test_nested_record_access() {
+    let source = r#"
+        type Address = { city: string = "SF" }
+        type User = { address: Address }
+        let city(user:User): string = { user.address.city }
+    "#;
+
+    let mut addr = FxHashMap::default();
+    addr.insert(SmolStr::new("city"), Value::String(SmolStr::new("Paris")));
+    let mut user = FxHashMap::default();
+    user.insert(SmolStr::new("address"), Value::Record(addr));
+
+    let result = execute_function(source, "city", vec![Value::Record(user)])
+        .unwrap_or_else(|err| panic!("Nested record access failed: {}", err));
+    assert_eq!(result, Value::String(SmolStr::new("Paris")));
+}
+
+#[test]
+fn test_record_return_type_and_collection() {
+    let source = r#"
+        type User = { name: string = "Anon" }
+        let make(): User = { <User /> }
+    "#;
+
+    let interpreter = Interpreter::new();
+    let parse = parse_str(source, "record-return.nx");
+    assert!(parse.errors.is_empty(), "parse errors: {:?}", parse.errors);
+    let module = lower(parse.root().unwrap(), SourceId::new(0));
+
+    let made = interpreter
+        .execute_function(&module, "make", vec![])
+        .unwrap_or_else(|e| panic!("{}", e));
+    match made {
+        Value::Record(fields) => {
+            assert_eq!(
+                fields.get("name"),
+                Some(&Value::String(SmolStr::new("Anon")))
+            );
+        }
+        other => panic!("expected record, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_optional_record_field_defaults_to_null() {
+    let source = r#"
+        type User = { email: string? }
+        let getEmail(user:User) = { user.email }
+    "#;
+
+    let interpreter = Interpreter::new();
+    let parse = parse_str(source, "optional.nx");
+    assert!(parse.errors.is_empty());
+    let module = lower(parse.root().unwrap(), SourceId::new(0));
+
+    // instantiate with defaults (null for optional field)
+    let record = interpreter
+        .instantiate_record_defaults(&module, "User")
+        .unwrap();
+    let result = interpreter
+        .execute_function(&module, "getEmail", vec![record])
+        .unwrap();
+    assert_eq!(result, Value::Null);
+}
+
+#[test]
+fn test_record_all_fields_have_defaults() {
+    let source = r#"
+        type Config = { host: string = "localhost" port: int = 80 }
+        let make(): Config = { <Config /> }
+    "#;
+
+    let interpreter = Interpreter::new();
+    let parse = parse_str(source, "config.nx");
+    assert!(parse.errors.is_empty());
+    let module = lower(parse.root().unwrap(), SourceId::new(0));
+
+    let result = interpreter
+        .execute_function(&module, "make", vec![])
+        .unwrap();
+    match result {
+        Value::Record(fields) => {
+            assert_eq!(
+                fields.get("host"),
+                Some(&Value::String(SmolStr::new("localhost")))
+            );
+            assert_eq!(fields.get("port"), Some(&Value::Int(80)));
+        }
+        other => panic!("expected record, got {:?}", other),
+    }
 }

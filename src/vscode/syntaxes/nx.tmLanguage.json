@@ -6,6 +6,7 @@
   "patterns": [
     { "include": "#comments" },
     { "include": "#value-definition" },
+    { "include": "#type-definition" },
     { "include": "#module-root-element" },
     { "include": "#text-raw-block" },
     { "include": "#text-typed-block" },
@@ -136,6 +137,10 @@
       "name": "meta.definition.value.nx",
       "patterns": [
         { "name": "punctuation.separator.type.annotation.nx", "match": ":" },
+        {
+          "name": "entity.name.type.nx",
+          "match": "(?<=:)\\s*(?!string\\b|int\\b|long\\b|float\\b|double\\b|boolean\\b|void\\b|object\\b)[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*"
+        },
         { "include": "#types" },
         { "include": "#qualifiers" },
         { "include": "#operators" },
@@ -144,6 +149,94 @@
         { "include": "#numbers" },
         { "include": "#strings" },
         { "include": "#comments" }
+      ]
+    },
+    "type-definition": {
+      "patterns": [
+        {
+          "name": "meta.definition.type.record.nx",
+          "begin": "^(\\s*)(type)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(=)\\s*(\\{)",
+          "beginCaptures": {
+            "2": { "name": "keyword.declaration.type.nx" },
+            "3": { "name": "entity.name.type.nx" },
+            "4": { "name": "keyword.operator.assignment.nx" },
+            "5": { "name": "punctuation.section.block.begin.nx" }
+          },
+          "end": "\\}",
+          "endCaptures": { "0": { "name": "punctuation.section.block.end.nx" } },
+          "patterns": [
+            { "include": "#record-body" }
+          ]
+        },
+        {
+          "name": "meta.definition.type.alias.nx",
+          "match": "^(\\s*)(type)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(=)(?!\\s*\\{)",
+          "captures": {
+            "2": { "name": "keyword.declaration.type.nx" },
+            "3": { "name": "entity.name.type.nx" },
+            "4": { "name": "keyword.operator.assignment.nx" }
+          }
+        }
+      ]
+    },
+    "record-body": {
+      "patterns": [
+        { "include": "#record-property" },
+        { "include": "#comments" },
+        { "include": "#strings" },
+        { "include": "#numbers" },
+        { "include": "#value-if" },
+        { "include": "#value-for" },
+        { "include": "#elements-if" },
+        { "include": "#elements-for" },
+        { "include": "#tags" },
+        { "include": "#interpolation" },
+        { "include": "#keywords-core" },
+        { "include": "#keywords-control" },
+        { "include": "#types" },
+        { "include": "#operators" },
+        { "include": "#qualifiers" },
+        {
+          "begin": "\\{",
+          "beginCaptures": { "0": { "name": "punctuation.section.block.begin.nx" } },
+          "end": "\\}",
+          "endCaptures": { "0": { "name": "punctuation.section.block.end.nx" } },
+          "patterns": [
+            { "include": "#record-body" }
+          ]
+        }
+      ]
+    },
+    "record-property": {
+      "patterns": [
+        {
+          "begin": "\\b([A-Za-z_][A-Za-z0-9_-]*)\\s*(:)",
+          "beginCaptures": {
+            "1": { "name": "variable.other.property.nx" },
+            "2": { "name": "punctuation.separator.type.annotation.nx" }
+          },
+          "end": "(?=\\s*[A-Za-z_][A-Za-z0-9_-]*\\s*:|\\s*\\})",
+          "patterns": [
+            {
+              "name": "entity.name.type.nx",
+              "match": "\\G\\s*(?!string\\b|int\\b|long\\b|float\\b|double\\b|boolean\\b|void\\b|object\\b)[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*"
+            },
+            { "include": "#strings" },
+            { "include": "#numbers" },
+            { "include": "#value-if" },
+            { "include": "#value-for" },
+            { "include": "#elements-if" },
+            { "include": "#elements-for" },
+            { "include": "#tags" },
+            { "include": "#interpolation" },
+            { "include": "#keywords-core" },
+            { "include": "#keywords-control" },
+            { "include": "#types" },
+            { "include": "#operators" },
+            { "include": "#qualifiers" },
+            { "include": "#comments" }
+          ]
+        }
       ]
     },
     "qualifiers": {

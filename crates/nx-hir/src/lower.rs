@@ -5,8 +5,8 @@
 
 use crate::ast::{BinOp, Expr, Literal, OrderedFloat, Stmt, TypeRef, UnOp};
 use crate::{
-    Element, EnumDef, EnumMember, ExprId, Function, Item, Module, Name, Param, Property, SourceId,
-    TypeAlias,
+    Element, EnumDef, EnumMember, ExprId, Function, Item, Module, Name, Param, Property, RecordDef,
+    RecordField, SourceId, TypeAlias,
 };
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_syntax::{SyntaxKind, SyntaxNode};
@@ -364,6 +364,24 @@ impl LoweringContext {
             SyntaxKind::ELEMENT => {
                 let span = node.span();
                 let element = self.lower_element(node);
+
+                if element.children.is_empty() {
+                    if let Some(Item::Record(record_def)) =
+                        self.module.find_item(element.tag.as_str())
+                    {
+                        let props = element
+                            .properties
+                            .iter()
+                            .map(|p| (p.key.clone(), p.value))
+                            .collect();
+                        return self.alloc_expr(Expr::RecordLiteral {
+                            record: record_def.name.clone(),
+                            properties: props,
+                            span,
+                        });
+                    }
+                }
+
                 let element_id = self.module.alloc_element(element);
                 self.alloc_expr(Expr::Element {
                     element: element_id,
@@ -507,6 +525,43 @@ impl LoweringContext {
         TypeAlias {
             name,
             ty,
+            span: node.span(),
+        }
+    }
+
+    /// Lowers a record definition node.
+    pub fn lower_record_definition(&mut self, node: SyntaxNode) -> RecordDef {
+        let name = node
+            .child_by_field("name")
+            .map(|n| Name::new(n.text()))
+            .unwrap_or_else(|| Name::new("unknown"));
+
+        let mut properties = Vec::new();
+        for prop in node
+            .children()
+            .filter(|child| child.kind() == SyntaxKind::PROPERTY_DEFINITION)
+        {
+            let field_name = prop
+                .child_by_field("name")
+                .map(|n| Name::new(n.text()))
+                .unwrap_or_else(|| Name::new("_"));
+            let ty_node = prop.child_by_field("type").unwrap_or(prop);
+            let ty = self.lower_type(ty_node);
+            let default = prop
+                .child_by_field("default")
+                .map(|default_node| self.lower_expr(default_node));
+
+            properties.push(RecordField {
+                name: field_name,
+                ty,
+                default,
+                span: prop.span(),
+            });
+        }
+
+        RecordDef {
+            name,
+            properties,
             span: node.span(),
         }
     }
@@ -713,6 +768,10 @@ impl LoweringContext {
                     let alias = self.lower_type_alias(child);
                     self.module.add_item(Item::TypeAlias(alias));
                 }
+                SyntaxKind::RECORD_DEFINITION => {
+                    let record = self.lower_record_definition(child);
+                    self.module.add_item(Item::Record(record));
+                }
                 SyntaxKind::ENUM_DEFINITION => {
                     let enum_def = self.lower_enum_definition(child);
                     self.module.add_item(Item::Enum(enum_def));
@@ -893,6 +952,67 @@ mod tests {
     }
 
     #[test]
+    fn test_lower_record_definition() {
+        let source = r#"
+            type User = {
+              name: string
+              age: int = 0
+            }
+        "#;
+        let parse_result = parse_str(source, "record.nx");
+        let tree = parse_result.tree.expect("Should parse record");
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        let record = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Record(def) => Some(def),
+                _ => None,
+            })
+            .expect("Should lower record definition");
+
+        assert_eq!(record.name.as_str(), "User");
+        assert_eq!(record.properties.len(), 2);
+        let defaults = record
+            .properties
+            .iter()
+            .filter(|f| f.default.is_some())
+            .count();
+        assert_eq!(defaults, 1, "One field should carry a default value");
+    }
+
+    #[test]
+    fn test_lower_record_literal_expression() {
+        let source = r#"
+            type User = { name: string age: int = 30 }
+            let make(): User = { <User name="Bob" /> }
+        "#;
+
+        let parse_result = parse_str(source, "record-literal.nx");
+        let tree = parse_result.tree.expect("Should parse record literal");
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        let func = match module.items()[1] {
+            Item::Function(ref f) => f,
+            _ => panic!("expected function item"),
+        };
+
+        match module.expr(func.body) {
+            Expr::RecordLiteral {
+                record, properties, ..
+            } => {
+                assert_eq!(record.as_str(), "User");
+                assert_eq!(properties.len(), 1);
+                assert_eq!(properties[0].0.as_str(), "name");
+            }
+            other => panic!("expected record literal expr, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_lower_enum_with_leading_pipe() {
         let source = r#"
             enum Orientation = | Horizontal | Vertical
@@ -964,8 +1084,8 @@ mod tests {
             None
         }
 
-        let embed_interp =
-            find_kind(root, SyntaxKind::EMBED_INTERPOLATION_EXPRESSION).expect("expected embed interpolation node");
+        let embed_interp = find_kind(root, SyntaxKind::EMBED_INTERPOLATION_EXPRESSION)
+            .expect("expected embed interpolation node");
 
         let mut ctx = LoweringContext::new(SourceId::new(0));
         let expr_id = ctx.lower_expr(embed_interp);
@@ -973,7 +1093,10 @@ mod tests {
 
         match expr {
             Expr::Ident(name) => assert_eq!(name.as_str(), "user"),
-            other => panic!("Expected identifier from embed interpolation, got {:?}", other),
+            other => panic!(
+                "Expected identifier from embed interpolation, got {:?}",
+                other
+            ),
         }
     }
 

@@ -27,14 +27,20 @@ A module can mix any number of definitions with an optional trailing root `Eleme
 
 ```ebnf
 TypeDefinition ::=
-    TypeAliasDefinition
+    RecordDefinition
     | EnumDefinition
-
-TypeAliasDefinition ::=
-    "type" Identifier "=" TypeDeclaration
+    | TypeAliasDefinition
 
 EnumDefinition ::=
     "enum" Identifier "=" ["|"] Identifier { "|" Identifier }
+
+RecordDefinition ::=
+    "type" Identifier "=" "{"
+        {PropertyDefinition}
+    "}"
+
+TypeAliasDefinition ::=
+    "type" Identifier "=" TypeDeclaration
 
 TypeDeclaration ::=
     PrimitiveType [TypeModifier]

@@ -1,5 +1,6 @@
 //! Runtime value representation for the NX interpreter.
 
+use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
 
 /// Runtime value types supported by the NX interpreter
@@ -61,6 +62,9 @@ pub enum Value {
         /// Variant name
         variant: SmolStr,
     },
+
+    /// Record value (map of field names to values)
+    Record(FxHashMap<SmolStr, Value>),
 }
 
 impl Value {
@@ -120,6 +124,7 @@ impl Value {
             Value::Null => "null",
             Value::Array(_) => "array",
             Value::EnumVariant { .. } => "enum",
+            Value::Record(_) => "record",
         }
     }
 }
@@ -143,6 +148,16 @@ impl std::fmt::Display for Value {
                 write!(f, "]")
             }
             Value::EnumVariant { type_name, variant } => write!(f, "{}.{}", type_name, variant),
+            Value::Record(fields) => {
+                write!(f, "{{")?;
+                for (i, (k, v)) in fields.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}: {}", k, v)?;
+                }
+                write!(f, "}}")
+            }
         }
     }
 }
@@ -187,6 +202,13 @@ mod tests {
             .to_string(),
             "Status.Active"
         );
+
+        let mut fields = FxHashMap::default();
+        fields.insert(SmolStr::new("name"), Value::String(SmolStr::new("Ada")));
+        fields.insert(SmolStr::new("age"), Value::Int(42));
+        let display = Value::Record(fields).to_string();
+        assert!(display.contains("age: 42"));
+        assert!(display.contains("name: Ada"));
     }
 
     #[test]
@@ -196,5 +218,6 @@ mod tests {
         assert_eq!(Value::String(SmolStr::new("test")).type_name(), "string");
         assert_eq!(Value::Boolean(true).type_name(), "boolean");
         assert_eq!(Value::Null.type_name(), "null");
+        assert_eq!(Value::Record(FxHashMap::default()).type_name(), "record");
     }
 }

@@ -61,6 +61,7 @@ module.exports = grammar({
     module_definition: $ => seq(
       repeat($.import_statement),
       repeat(choice(
+        $.record_definition,
         $.type_definition,
         $.enum_definition,
         $.value_definition,
@@ -76,6 +77,15 @@ module.exports = grammar({
     ),
 
     // ===== Type Definitions =====
+    record_definition: $ => seq(
+      'type',
+      field('name', $.identifier),
+      '=',
+      '{',
+      repeat(field('properties', $.property_definition)),
+      '}',
+    ),
+
     type_definition: $ => seq(
       'type',
       field('name', $.identifier),

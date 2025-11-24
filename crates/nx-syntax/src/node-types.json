@@ -771,6 +771,10 @@
           "named": true
         },
         {
+          "type": "record_definition",
+          "named": true
+        },
+        {
           "type": "type_definition",
           "named": true
         },
@@ -1140,6 +1144,32 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "record_definition",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "properties": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "property_definition",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {

@@ -146,6 +146,44 @@ impl<'tree> TypeDef<'tree> {
     }
 }
 
+/// Represents a record definition in the AST.
+#[derive(Debug, Clone, Copy)]
+pub struct RecordDef<'tree> {
+    syntax: SyntaxNode<'tree>,
+}
+
+impl<'tree> AstNode<'tree> for RecordDef<'tree> {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::RECORD_DEFINITION
+    }
+
+    fn cast(node: SyntaxNode<'tree>) -> Option<Self> {
+        if Self::can_cast(node.kind()) {
+            Some(Self { syntax: node })
+        } else {
+            None
+        }
+    }
+
+    fn syntax(&self) -> SyntaxNode<'tree> {
+        self.syntax
+    }
+}
+
+impl<'tree> RecordDef<'tree> {
+    /// Returns the record name.
+    pub fn name(&self) -> Option<SyntaxNode<'tree>> {
+        self.syntax.child_by_field("name")
+    }
+
+    /// Returns an iterator over record property definitions.
+    pub fn properties(&self) -> impl Iterator<Item = SyntaxNode<'tree>> + 'tree {
+        self.syntax
+            .children()
+            .filter(move |node| node.kind() == SyntaxKind::PROPERTY_DEFINITION)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,5 +227,20 @@ mod tests {
         let type_node = root.children().next().unwrap();
         let type_def = <SyntaxNode as SyntaxNodeExt>::try_into::<TypeDef>(type_node);
         assert!(type_def.is_some());
+    }
+
+    #[test]
+    fn test_record_def_cast() {
+        let mut parser = parser();
+        let source = "type User = { name: string age: int }";
+        let tree = parser.parse(source, None).unwrap();
+        let root = SyntaxNode::new(tree.root_node(), source);
+
+        let record_node = root.children().next().unwrap();
+        assert!(RecordDef::can_cast(record_node.kind()));
+
+        let record_def = RecordDef::cast(record_node).expect("Should cast to RecordDef");
+        let props: Vec<_> = record_def.properties().collect();
+        assert_eq!(props.len(), 2);
     }
 }

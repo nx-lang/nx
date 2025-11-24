@@ -147,8 +147,21 @@ ImportStatement (AST: ImportStatementSyntax)
   - fields: name: QualifiedNameSyntax
 
 TypeDefinition (AST: TypeDefinitionSyntax is a sum type)
-- TypeDefinition → TypeAliasDefinition (TypeAliasDefinitionSyntax)
+- TypeDefinition → RecordDefinition (RecordDefinitionSyntax)
 - TypeDefinition → EnumDefinition (EnumDefinitionSyntax)
+- TypeDefinition → TypeAliasDefinition (TypeAliasDefinitionSyntax)
+
+RecordDefinition (AST: RecordDefinitionSyntax)
+- RecordDefinition → TYPE IDENTIFIER EQ LBRACE RecordPropertyDefinition* RBRACE
+  - fields: name: string, properties: RecordPropertyDefinitionSyntax[]
+
+RecordPropertyDefinition (AST: RecordPropertyDefinitionSyntax)
+- RecordPropertyDefinition → MARKUP_IDENTIFIER COLON Type RecordPropertyDefaultOpt
+  - fields: name: string, type: TypeSyntax, default?: ExpressionSyntax
+
+RecordPropertyDefaultOpt
+- RecordPropertyDefaultOpt → EQ RhsExpression
+- RecordPropertyDefaultOpt → ε
 
 TypeAliasDefinition (AST: TypeAliasDefinitionSyntax)
 - TypeAliasDefinition → TYPE IDENTIFIER EQ Type
@@ -509,7 +522,11 @@ This section lists the AST node types with fields for implementers.
 - ModuleDefinitionSyntax: imports: ImportStatementSyntax[], members: ModuleMemberSyntax[], moduleElement?: MarkupElementSyntax (members and moduleElement can both be present)
 - ModuleMemberSyntax: TypeDefinitionSyntax | ValueDefinitionSyntax | FunctionDefinitionSyntax
 - ImportStatementSyntax: name: QualifiedNameSyntax
-- TypeDefinitionSyntax: name: string, type: TypeSyntax
+- TypeDefinitionSyntax: TypeAliasDefinitionSyntax | EnumDefinitionSyntax | RecordDefinitionSyntax
+- TypeAliasDefinitionSyntax: name: string, type: TypeSyntax
+- EnumDefinitionSyntax: name: string, members: EnumMemberSyntax[]
+- RecordDefinitionSyntax: name: string, properties: RecordPropertyDefinitionSyntax[]
+- RecordPropertyDefinitionSyntax: name: string, type: TypeSyntax, default?: ExpressionSyntax
 - ValueDefinitionSyntax: name: string, type?: TypeSyntax, value: ExpressionSyntax
 - TypeSyntax: kind: "primitive"|"user", name: string (qualified), modifier?: "nullable"|"sequence"
 - PrimitiveTypeSyntax: name: string

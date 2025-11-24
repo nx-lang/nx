@@ -136,16 +136,23 @@ impl ExecutionContext {
 
     /// Look up a variable in the scope stack (innermost to outermost)
     pub fn lookup_variable(&self, name: &str) -> Result<Value, RuntimeError> {
-        // Search from innermost to outermost scope
+        if let Some(value) = self.try_lookup_variable(name) {
+            Ok(value)
+        } else {
+            Err(RuntimeError::new(RuntimeErrorKind::UndefinedVariable {
+                name: SmolStr::new(name),
+            }))
+        }
+    }
+
+    /// Try to get a variable without raising an error.
+    pub fn try_lookup_variable(&self, name: &str) -> Option<Value> {
         for scope in self.scopes.iter().rev() {
             if let Some(value) = scope.lookup(name) {
-                return Ok(value.clone());
+                return Some(value.clone());
             }
         }
-
-        Err(RuntimeError::new(RuntimeErrorKind::UndefinedVariable {
-            name: SmolStr::new(name),
-        }))
+        None
     }
 
     /// Update a variable in the scope stack

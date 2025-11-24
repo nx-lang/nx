@@ -15,6 +15,7 @@ pub enum SyntaxKind {
 
     // === Type Definitions ===
     TYPE_DEFINITION,
+    RECORD_DEFINITION,
     ENUM_DEFINITION,
     ENUM_MEMBER_LIST,
     ENUM_MEMBER,
@@ -303,6 +304,7 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "ERROR" => SyntaxKind::ERROR,
         "import_statement" => SyntaxKind::IMPORT_STATEMENT,
         "type_definition" => SyntaxKind::TYPE_DEFINITION,
+        "record_definition" => SyntaxKind::RECORD_DEFINITION,
         "enum_definition" => SyntaxKind::ENUM_DEFINITION,
         "enum_member_list" => SyntaxKind::ENUM_MEMBER_LIST,
         "enum_member" => SyntaxKind::ENUM_MEMBER,

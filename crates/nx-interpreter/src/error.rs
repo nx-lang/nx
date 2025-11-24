@@ -66,6 +66,9 @@ pub enum RuntimeErrorKind {
 
     /// Enum member not defined on the referenced enum type
     EnumMemberNotFound { enum_name: SmolStr, member: SmolStr },
+
+    /// Record field not found on the given record value
+    RecordFieldNotFound { record: SmolStr, field: SmolStr },
 }
 
 impl fmt::Display for RuntimeErrorKind {
@@ -110,6 +113,9 @@ impl fmt::Display for RuntimeErrorKind {
             }
             RuntimeErrorKind::EnumMemberNotFound { enum_name, member } => {
                 write!(f, "Enum '{}' has no member named '{}'", enum_name, member)
+            }
+            RuntimeErrorKind::RecordFieldNotFound { record, field } => {
+                write!(f, "Record '{}' has no field named '{}'", record, field)
             }
         }
     }

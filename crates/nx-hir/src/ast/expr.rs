@@ -187,6 +187,18 @@ pub enum Expr {
         span: TextSpan,
     },
 
+    /// Record literal instantiation.
+    ///
+    /// Example: `<User name="Bob" />`
+    RecordLiteral {
+        /// Record type name
+        record: Name,
+        /// Property assignments
+        properties: Vec<(Name, ExprId)>,
+        /// Source span
+        span: TextSpan,
+    },
+
     /// Element literal expression.
     ///
     /// Example: `<button class="primary" />`
@@ -228,6 +240,7 @@ impl Expr {
             Expr::Array { span, .. } => *span,
             Expr::Index { span, .. } => *span,
             Expr::Member { span, .. } => *span,
+            Expr::RecordLiteral { span, .. } => *span,
             Expr::Element { span, .. } => *span,
             Expr::For { span, .. } => *span,
             Expr::Error(span) => *span,

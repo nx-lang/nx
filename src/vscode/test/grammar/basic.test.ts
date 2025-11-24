@@ -96,6 +96,37 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(line, tokens, '|')).to.include('punctuation.separator.enum.nx');
   });
 
+  it('highlights record definitions and fields', function () {
+    const lines = ['type User = {', '  name: string', '  profile: models.Profile', '  age: int = 0', '}'];
+
+    let ruleStack: StateStack | null = null;
+
+    const start = grammar.tokenizeLine(lines[0], ruleStack);
+    ruleStack = start.ruleStack;
+    expect(scopesForSubstring(lines[0], start.tokens, 'type')).to.include('keyword.declaration.type.nx');
+    expect(scopesForSubstring(lines[0], start.tokens, 'User')).to.include('entity.name.type.nx');
+    expect(scopesForSubstring(lines[0], start.tokens, '{')).to.include('punctuation.section.block.begin.nx');
+
+    const fieldOne = grammar.tokenizeLine(lines[1], ruleStack);
+    ruleStack = fieldOne.ruleStack;
+    expect(scopesForSubstring(lines[1], fieldOne.tokens, 'name')).to.include('variable.other.property.nx');
+    expect(scopesForSubstring(lines[1], fieldOne.tokens, ':')).to.include('punctuation.separator.type.annotation.nx');
+
+    const fieldTwo = grammar.tokenizeLine(lines[2], ruleStack);
+    ruleStack = fieldTwo.ruleStack;
+    expect(scopesForSubstring(lines[2], fieldTwo.tokens, 'profile')).to.include('variable.other.property.nx');
+    expect(scopesForSubstring(lines[2], fieldTwo.tokens, ':')).to.include('punctuation.separator.type.annotation.nx');
+    expect(scopesForSubstring(lines[2], fieldTwo.tokens, 'models.Profile')).to.include('entity.name.type.nx');
+
+    const fieldThree = grammar.tokenizeLine(lines[3], ruleStack);
+    ruleStack = fieldThree.ruleStack;
+    expect(scopesForSubstring(lines[3], fieldThree.tokens, 'age')).to.include('variable.other.property.nx');
+    expect(scopesForSubstring(lines[3], fieldThree.tokens, '=')).to.include('keyword.operator.assignment.nx');
+
+    const end = grammar.tokenizeLine(lines[4], ruleStack);
+    expect(scopesForSubstring(lines[4], end.tokens, '}')).to.include('punctuation.section.block.end.nx');
+  });
+
   it('highlights inline else within control block', function () {
     const line = 'if user.isAuthenticated { 2 } else { 2 }';
     const { tokens } = grammar.tokenizeLine(line, null);

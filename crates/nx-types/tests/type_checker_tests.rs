@@ -83,6 +83,62 @@ fn test_unknown_enum_member_diagnostic() {
     );
 }
 
+#[test]
+fn test_record_default_type_mismatch_diagnostic() {
+    let source = r#"
+        type User = {
+          name: string = 123
+          age: int = 42
+        }
+    "#;
+
+    let result = check_str(source, "record-default.nx");
+    let errors = result.errors();
+    assert!(
+        errors
+            .iter()
+            .any(|diag| diag.code() == Some("record-default-type-mismatch")),
+        "Expected record-default-type-mismatch diagnostic, got {:?}",
+        errors
+            .iter()
+            .map(|d| d.code().unwrap_or("<none>"))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+#[ignore = "Array literals are not yet accepted as RHS expressions (parser limitation)"]
+fn test_record_in_collections_type_checks() {
+    let source = r#"
+        type User = { name: string age: int }
+        let a: User = { <User name="A" age=1 /> }
+        let b: User = { <User name="B" age=2 /> }
+        let users: User[] = [ a, b ]
+    "#;
+
+    let result = check_str(source, "record-array.nx");
+    assert!(
+        result.is_ok(),
+        "record arrays should type check, diagnostics: {:?}",
+        result
+            .errors()
+            .iter()
+            .map(|d| (d.code(), d.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_empty_record_definition_parses() {
+    let source = r#"
+        type Empty = {}
+        let make(): Empty = { <Empty /> }
+    "#;
+
+    let result = check_str(source, "empty-record.nx");
+    assert!(result.is_ok(), "empty record definition should type check");
+}
+
 // ============================================================================
 // Type Mismatch Detection Tests (T132)
 // ============================================================================

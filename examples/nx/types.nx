@@ -3,14 +3,29 @@ type UserId = int
 type Username = string
 type MaybeUser = User?
 type UserList = User[]
-
 type User = object
 
+// Enums
+enum Foo = Abc | Def | Ghi
+enum Bar =
+  | Abc
+  | Def
+  | Ghi
+
+// Records
+type User = {
+  id: UserId
+  name: Username = "Anonymous"
+  email: string?
+  age: int
+}
+
 let <UserCard
-  id:UserId
-  name:Username
-  email:string?
-  age:int
+  foo: int
+  id: UserId
+  name: Username
+  email: string?
+  age: int
 /> =
   <div class="user-card">
     <h3>{name}</h3>
