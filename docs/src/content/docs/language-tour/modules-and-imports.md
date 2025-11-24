@@ -39,8 +39,6 @@ let <Footer text:string = footerText/> =
 
 If present, the final element is the module’s rendered output or default export, depending on the host runtime.
 
-## Next up
-
 ## See also (Reference/Grammar)
 - Reference: [Modules](/reference/syntax/modules)
 - Reference: [Functions & Components](/reference/syntax/functions)

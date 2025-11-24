@@ -40,8 +40,6 @@ let spacing = 12
 
 `let` binds any expression to a name; use explicit types when inference isn’t obvious.
 
-## Next up
-
 ## See also (Reference/Grammar)
 - Reference: [Functions & Components](/reference/syntax/functions)
 - Reference: [Modules](/reference/syntax/modules)

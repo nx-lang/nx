@@ -56,8 +56,6 @@ let hasAccess = user.role == "admin" || user.role == "editor"
 
 Use standard arithmetic/comparison/logical operators; see the Reference for precedence.
 
-## Next up
-
 ## See also (Reference/Grammar)
 - Reference: [if](/reference/syntax/if)
 - Reference: [for](/reference/syntax/for)

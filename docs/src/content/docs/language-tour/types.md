@@ -55,8 +55,6 @@ let badgeTone = if plan is {
 
 Type annotations are optional when inference is obvious; add them for clarity or to surface diagnostics early.
 
-## Next up
-
 ## See also (Reference/Grammar)
 - Reference: [Types](/reference/syntax/types)
 - Reference: [Sequences & Object Duality](/reference/concepts/sequences-and-objects)

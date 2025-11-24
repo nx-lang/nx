@@ -45,8 +45,6 @@ Use `raw` to prevent interpretation of braces or entities.
 - `@{}` interpolates expressions inside typed text content.
 - Escape `@` as `\@` when you need a literal at-sign.
 
-## Next up
-
 ## See also (Reference/Grammar)
 - Reference: [Elements](/reference/syntax/elements)
 - Reference: [Expressions](/reference/syntax/expressions)

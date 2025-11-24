@@ -48,8 +48,6 @@ let isLoading = true
 
 Children are just more elements in the same expression list; you can mix literals, loops, and conditionals.
 
-## Next up
-
 ## See also (Reference/Grammar)
 - Reference: [Elements](/reference/syntax/elements)
 - Grammar: [nx-grammar.md on GitHub](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#elements)
