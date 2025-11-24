@@ -3,7 +3,7 @@ title: 'Modules'
 description: 'Structure of NX source files, imports, and main elements.'
 ---
 
-An NX module defines imports, local declarations, and the element tree to render or export. Modules keep presentation and logic together without requiring additional scaffolding files.
+An NX module defines imports, local declarations, and an optional root element. For the full grammar, see [nx-grammar.md](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#module-definition).
 
 ## File Layout
 - Imports appear at the top of the file and pull in components, values, or namespaces.
@@ -33,4 +33,7 @@ private let WelcomeMessage = <span>Hello World</span>
 
 ## Access Modifiers
 - `private` keeps declarations internal to the module.
-- Future versions will introduce more granular visibility rules for packages and assemblies.
+
+## See also
+- Language Tour: [Modules & Imports](/language-tour/modules-and-imports)
+- Grammar: [nx-grammar.md – Module Definition](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#module-definition)

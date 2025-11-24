@@ -3,7 +3,7 @@ title: 'Sequences & Object Duality'
 description: 'How NX treats sequences as the core collection type and keeps objects in sync with components.'
 ---
 
-Sequences are the primary collection type in NX. They underpin iteration, comprehensions, and list rendering.
+Sequences are the primary collection type in NX. They underpin iteration, comprehensions, and list rendering. See [nx-grammar.md](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#expressions) for formal rules.
 
 ## Working with Sequences
 
@@ -18,7 +18,7 @@ let squares = for n in numbers { n * n }
 let evens = for n in numbers { if (n % 2 == 0) { n } }
 ```
 
-- Sequences may be eager or lazy depending on the runtime, but the syntax stays consistent.
+- Sequences may be eager or lazy depending on the host runtime; syntax is unchanged.
 - Nested sequences are straightforward: `int[][]` represents a matrix, and `(string, User[])[]` models grouped buckets.
 
 ```nx
@@ -89,3 +89,8 @@ let stringContainer = <StringContainer
 ```
 
 This duality simplifies data modelling, component authoring, and tooling: the same grammar powers both structures.
+
+## See also
+- Language Tour: [Types](/language-tour/types)
+- Reference: [Expressions](/reference/syntax/expressions), [Types](/reference/syntax/types)
+- Grammar: [nx-grammar.md – Types/Expressions](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#types)

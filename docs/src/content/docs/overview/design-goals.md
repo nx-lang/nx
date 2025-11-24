@@ -3,24 +3,58 @@ title: 'Design Goals'
 description: 'High-level design goals that guide NX language decisions.'
 ---
 
-NX’s design goals explain why the language looks and behaves the way it does. They act as guardrails when evaluating new syntax, runtime capabilities, and tooling investments.
+NX’s design goals explain why the language looks and behaves the way it does. They anchor decisions about syntax, runtime capabilities, and tooling so that NX stays cohesive.
 
-## Unified Language Design
-- Treat markup and logic as the same language surface so authors never leave "NX mode".
-- Keep invocation and declaration syntax aligned: the way you use a component mirrors the way you define it.
-- Allow any property to hold rich markup, not just strings, so composition feels natural.
+## Single, Integrated Language
+- Markup, functions, and data modelling share one syntax—no “template language” bolted to a scripting language.
+- Declarations mirror usage: a component signature is shaped exactly like the element you render.
+- Any attribute can hold expressions or markup, so composition never falls back to string concatenation.
 
-## Strong Type System
-- Provide compile-time guarantees for both data flow and structural markup.
-- Blend inference with explicit types: obvious cases stay lightweight, complex cases stay explicit.
-- Surface precise diagnostics that help developers discover errors before runtime.
+## Built for UI and Design Systems
+- Components, slots, and design tokens are first-class; children slots sit beside typed attributes.
+- Namespaces keep large UI libraries organised without sacrificing readability.
+- Styling and theming can be expressed as data, not strings, so tokens remain type-checked.
 
-## Familiar Yet Improved Syntax
-- Start from XML and JSX patterns so developers recognise the structure immediately.
-- Remove historical pain points (untyped props, stringly-typed attributes, unstructured children).
-- Offer modern composition patterns without sacrificing readability.
+## Familiar Yet Improved for JSX/XAML Devs
+- Starts from the element/attribute model you already know.
+- Adds enforced types, expression semantics that always yield values, and runtime flexibility beyond browsers or .NET.
+- Removes common pain points: no stringly-typed props, no ad hoc child typing, no forced split between markup and logic.
 
-## Performance & Tooling Parity
-- Make sophisticated tooling—LSP features, debugging, formatting—part of the baseline experience.
-- Design the runtime so expression trees can be interpreted, compiled, or transpiled depending on the host.
-- Optimise for cross-platform delivery so teams can adopt NX wherever they build experiences.
+## Schema-Free Typed Configuration
+- NX can replace JSON/YAML/XML plus a separate schema: types live in the file that uses them.
+- Type annotations, defaults, and constraints travel with the data, so validation and documentation are always in sync.
+- The same syntax defines UI and configuration, enabling mixed-mode files (e.g., UI + typed data sources).
+
+## Tooling and Runtime Flexibility
+- LSP-style diagnostics, formatting, and symbol navigation come from the language, not a framework.
+- Expression trees can be interpreted, compiled, or transpiled depending on the host runtime.
+- Purity-first semantics (expressions return values, no hidden side effects) keep optimisation and reasoning straightforward.
+
+## Example Alignment
+This small example shows the goals working together: unified syntax, UI-first design, JSX/XAML familiarity, and typed data in one file.
+
+```nx
+import { Button, Stack } from "./ui"
+
+type <Action label:string href:string? onClick:() => void/>
+type <Theme primary:string surface:string text:string/>
+
+let <Hero actions:Action[] theme:Theme> content:Element </Hero> =
+  <section style=<Style backgroundColor={theme.surface} color={theme.text} />>
+    <Stack gap=12>
+      {content}
+      <div>
+        for action in actions {
+          <Button
+            href={action.href}
+            onClick={action.onClick}
+            tone={if action.href { "link" } else { "primary" }}>
+            {action.label}
+          </Button>
+        }
+      </div>
+    </Stack>
+  </section>
+```
+
+Everything—types, styling tokens, behaviour, and markup—is expressed in NX. That cohesion is the design north star.

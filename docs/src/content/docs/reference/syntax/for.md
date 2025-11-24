@@ -3,7 +3,7 @@ title: 'for'
 description: 'Iteration patterns available in NX.'
 ---
 
-`for` is NX’s primary way to transform sequences. It produces a new sequence by evaluating the body for each item in the input.
+`for` transforms a source sequence into a new sequence by evaluating the body per element. See [nx-grammar.md](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#elements) for formal syntax.
 
 ## Value Form
 
@@ -13,7 +13,7 @@ let gallery = for image in images {
 }
 ```
 
-- `for` returns a sequence, so `gallery` above is the list of `<img/>` elements.
+- `for` returns a sequence.
 - The loop variable is scoped to the body.
 
 ## Index + Value Form
@@ -49,7 +49,7 @@ let cells = for row in grid {
 }
 ```
 
-## Performance Notes
-- Sequences may be lazy in future runtimes, so avoid side effects in loop bodies.
-- Prefer computing derived data once and passing it into the loop instead of recomputing in each iteration.
-- When you only need aggregation (folding into a single value), consider helper functions from the standard library once available.
+## See also
+- Language Tour: [Expressions & Control Flow](/language-tour/expressions)
+- Reference: [if](/reference/syntax/if)
+- Grammar: [nx-grammar.md – Elements/for](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#elements)

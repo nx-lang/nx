@@ -3,7 +3,7 @@ title: 'Functions & Components'
 description: 'Declaring reusable elements whose definitions mirror their usage.'
 ---
 
-Functions in NX look exactly like the elements you invoke. Parameters, default values, and child slots appear in the tag signature, making APIs self-documenting.
+Functions in NX use either element-style or paren-style syntax. Parameters, default values, and child slots appear in the signature. For grammar rules, see [nx-grammar.md](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#functions).
 
 ## Definition Mirrors Invocation
 
@@ -74,5 +74,7 @@ let <DataGrid
 - Complex defaults can reference other parameters or inline expressions.
 - Iteration and conditionals in the body behave like any other expression.
 
-## Self-Contained Helpers
-Because functions are just expressions, you can nest local bindings, pattern matches, or calls without switching syntaxes. Future revisions will add attributes such as `JsonRpcMethod` for host integrations.
+## See also
+- Language Tour: [Functions & Bindings](/language-tour/functions)
+- Reference: [Modules](/reference/syntax/modules)
+- Grammar: [nx-grammar.md – Functions](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#functions)

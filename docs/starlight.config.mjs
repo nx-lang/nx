@@ -24,6 +24,17 @@ const config = {
       ]
     },
     {
+      label: 'Language Tour',
+      items: [
+        { label: 'Elements', link: '/language-tour/elements' },
+        { label: 'Functions & Bindings', link: '/language-tour/functions' },
+        { label: 'Expressions & Control Flow', link: '/language-tour/expressions' },
+        { label: 'Types', link: '/language-tour/types' },
+        { label: 'Textual Content', link: '/language-tour/textual-content' },
+        { label: 'Modules & Imports', link: '/language-tour/modules-and-imports' }
+      ]
+    },
+    {
       label: 'Tutorials',
       items: [
         { label: 'Getting Started', link: '/tutorials/getting-started' },

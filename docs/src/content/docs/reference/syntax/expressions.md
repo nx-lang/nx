@@ -3,11 +3,11 @@ title: 'Expressions'
 description: 'Expression syntax and evaluation rules in NX.'
 ---
 
-Every construct in NX is an expression that yields a value. That includes conditionals, loops, object creation, and control-flow helpers. The examples below illustrate the most common forms and how they compose.
+Every construct in NX yields a value: literals, conditionals, loops, object creation, and function calls. For formal production rules, see [nx-grammar.md](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#expressions).
 
 ## Literals and Basic Forms
-- Numbers, strings, booleans, and sequences use familiar literal syntax.
-- Object creation reuses element syntax so data looks like the components that consume it.
+- Numbers, strings, booleans, null, and sequences use familiar literal syntax.
+- Object creation reuses element syntax.
 
 ```nx
 let numbers = [1, 2, 3, 4, 5]
@@ -30,7 +30,7 @@ let cssClass = if (isActive) { "active" } else { "inactive" }
 ```
 
 ### Pattern Matching
-NX extends `if` to support match-style pattern blocks. Each arm is evaluated in order and the first match wins.
+Match-style `if` evaluates arms in order; the first match wins.
 
 ```nx
 let dashboard = if user.role is {
@@ -87,4 +87,7 @@ let avatarUrl = if user.avatarUrl {
 }
 ```
 
-Future iterations of the language will expand the expression set with advanced pattern matching, async orchestration, and exhaustive exhaustiveness checking, but the core principle remains: everything evaluates to a value and composes predictably.
+## See also
+- Language Tour: [Expressions & Control Flow](/language-tour/expressions)
+- Reference: [if](/reference/syntax/if), [for](/reference/syntax/for)
+- Grammar: [nx-grammar.md – Expressions](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#expressions)

@@ -3,7 +3,7 @@ title: 'if'
 description: 'Conditional logic in NX.'
 ---
 
-NX uses `if` expressions for both classic two-branch conditionals and match-style pattern matching. Because every `if` is an expression, it can appear inline wherever a value is expected.
+NX uses `if` expressions for classic two-branch conditionals, match-style dispatch, and condition lists. Because every `if` is an expression, it can appear wherever a value is expected. See [nx-grammar.md](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#expressions) for syntax.
 
 ## Basic Form
 
@@ -42,7 +42,25 @@ let statusBadge = if status is {
 - Multiple patterns can share a body: `"saturday", "sunday" => <WeekendIcon/>`.
 - Omitting `else` is allowed. If no case matches, evaluation fails to surface incorrect assumptions.
 
+## Condition-list form
+
+```nx
+let banner = if {
+  hasErrors => <Alert tone="danger">Fix errors</Alert>
+  isLoading => <Alert tone="info">Loading…</Alert>
+  else => null
+}
+```
+
+- Arms are evaluated in order; the first true condition wins.
+- `else` is optional but recommended for clarity.
+
 ## Best Practices
 - Keep cases small and consider extracting functions or components for large branches.
 - Use explicit return types when inference becomes ambiguous, especially when mixing markup and scalar values.
 - Prefer pattern matching over nested `if/else` chains when dispatching on known sets of values.
+
+## See also
+- Language Tour: [Expressions & Control Flow](/language-tour/expressions)
+- Reference: [Expressions](/reference/syntax/expressions)
+- Grammar: [nx-grammar.md – Expressions/if](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#expressions)

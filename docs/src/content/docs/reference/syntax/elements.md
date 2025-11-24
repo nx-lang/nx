@@ -3,7 +3,7 @@ title: 'Elements'
 description: 'Markup syntax, attributes, and advanced element capabilities in NX.'
 ---
 
-NX elements look familiar to anyone who has written XML or JSX, but they fully participate in the type system and expression model.
+This page describes element syntax and attribute rules. For full grammar, see [nx-grammar.md](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#elements).
 
 ## Basic Elements
 
@@ -12,8 +12,8 @@ NX elements look familiar to anyone who has written XML or JSX, but they fully p
 <Input value={user.name} disabled={isLocked}/>
 ```
 
-- Use camelCase for attributes to align with host platform conventions.
-- Attribute values accept expressions, not just strings.
+- Attributes accept any expression inside `{}`; string literals may be provided without braces.
+- Attribute names are case-sensitive and must match the component signature.
 
 ## Nested Markup in Attributes
 
@@ -27,20 +27,7 @@ NX elements look familiar to anyone who has written XML or JSX, but they fully p
 </Tooltip>
 ```
 
-By treating attributes as expressions, you can inline complex fragments without escaping into strings.
-
-## Spread Attributes
-
-```nx
-let commonButtonProps = <Button.properties className="btn" disabled=false/>
-
-<Button ...commonButtonProps onClick={handleClick}>
-  Submit
-</Button>
-```
-
-- Spread syntax makes it easy to compose configuration objects or share default props.
-- The `.properties` convention distinguishes attribute objects from rendered elements.
+Attributes may contain markup as values when the parameter type accepts elements.
 
 ## Namespaces
 
@@ -48,7 +35,7 @@ let commonButtonProps = <Button.properties className="btn" disabled=false/>
 <UI.Controls.Button variant="primary">Click</UI.Controls.Button>
 ```
 
-Namespaces keep large component libraries organised and reduce naming conflicts.
+Namespaces qualify element names and help avoid collisions in large libraries.
 
 ## Complex Attribute Expressions
 
@@ -65,8 +52,7 @@ Namespaces keep large component libraries organised and reduce naming conflicts.
 </Form>
 ```
 
-- Interpolate conditionals and loops directly inside attribute expressions.
-- Arrays, objects, and functions are all first-class citizens.
+Expressions, conditionals, and sequences are valid attribute values.
 
 ## Styling
 
@@ -86,8 +72,7 @@ let <StyledButton variant:string = "primary" content:Element/> =
   </button>
 ```
 
-- Inline styles use the same attribute syntax as any other element.
-- Because `style` accepts markup, you can compose tokens, variables, or nested structures without switching formats.
+Inline styles follow the same attribute rules as other properties.
 
 ## Objects as Attributes
 
@@ -96,4 +81,8 @@ let <StyledButton variant:string = "primary" content:Element/> =
 <DrawingCanvas points=<><Point x=10 y=20/> <Point x=30 y=40/></> />
 ```
 
-Passing fully-typed objects into attributes is straightforward, unlocking strongly-typed component APIs.
+Attributes may receive typed objects or sequences when the signature permits.
+
+## See also
+- Language Tour: [Elements](/language-tour/elements)
+- Grammar: [nx-grammar.md – Elements](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#elements)

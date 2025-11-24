@@ -3,7 +3,7 @@ title: 'Types'
 description: 'Declaring and using types in NX.'
 ---
 
-NX embraces a strong, expressive type system to keep components, data models, and function signatures aligned.
+This page describes type declarations and usage. For formal grammar, see [nx-grammar.md](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#types).
 
 ## Type Aliases
 Use aliases to name primitive or composite types.
@@ -64,7 +64,7 @@ let <SimpleList items:User[] renderer:ItemRenderer/> =
   </ul>
 ```
 
-## Type Checking
-- The type checker validates modules at compile time.
-- Nullable types (`T?`) express optional data explicitly.
-- Future runtime integrations will expose diagnostics that highlight mismatches directly in editors.
+## See also
+- Language Tour: [Types](/language-tour/types)
+- Reference: [Sequences & Object Duality](/reference/concepts/sequences-and-objects)
+- Grammar: [nx-grammar.md – Types](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#types)
