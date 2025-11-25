@@ -1,0 +1,7 @@
+# Node.js / node-gyp build artifacts
+build/
+node_modules/
+
+# Tree-sitter generated files that shouldn't be committed
+# (parser.c and related are kept as they're needed for Rust compilation)
+*.node

@@ -166,4 +166,62 @@ describe('NX TextMate text elements', function () {
     // Let's just ensure the tag is still recognized.
     expect(scopesForSubstring(line, tokens, '</p>')).to.include('meta.tag.end.nx');
   });
+
+  // ============================================================================
+  // Text Child Element Tests
+  // ============================================================================
+
+  it('highlights child elements inside text content', function () {
+    const line = '<p:>Hello <b>world</b>!</p>';
+    const { tokens } = grammar.tokenizeLine(line, null);
+
+    // The <b> tag should be recognized
+    expect(scopesForSubstring(line, tokens, '<b>')).to.include('entity.name.tag.nx');
+    // The closing </b> should be part of the child element with proper tag scope
+    expect(scopesForSubstring(line, tokens, '</b>')).to.include('entity.name.tag.nx');
+    expect(scopesForSubstring(line, tokens, '</b>')).to.include('meta.text.child-element.nx');
+    // The outer closing tag should still work
+    expect(scopesForSubstring(line, tokens, '</p>')).to.include('meta.tag.end.nx');
+  });
+
+  it('highlights self-closing child elements in text content', function () {
+    const line = '<p:>Line<br />break</p>';
+    const { tokens } = grammar.tokenizeLine(line, null);
+
+    // The <br /> should be recognized as a tag
+    expect(scopesForSubstring(line, tokens, 'br')).to.include('entity.name.tag.nx');
+  });
+
+  it('highlights nested child elements in text content', function () {
+    const lines = [
+      '<p:>Start <b>bold <i>italic</i> bold</b> end</p>'
+    ];
+
+    const { tokens } = grammar.tokenizeLine(lines[0], null);
+
+    // Both b and i should be recognized as tags
+    expect(scopesForSubstring(lines[0], tokens, '<b>')).to.include('entity.name.tag.nx');
+    expect(scopesForSubstring(lines[0], tokens, '<i>')).to.include('entity.name.tag.nx');
+  });
+
+  it('highlights child elements with attributes in text content', function () {
+    const line = '<p:>Click <a href="link">here</a></p>';
+    const { tokens } = grammar.tokenizeLine(line, null);
+
+    // The <a> tag should be recognized
+    expect(scopesForSubstring(line, tokens, '<a')).to.include('entity.name.tag.nx');
+    // The href attribute should be highlighted
+    expect(scopesForSubstring(line, tokens, 'href')).to.include('entity.other.attribute-name.nx');
+    // The string value should be highlighted
+    expect(scopesForSubstring(line, tokens, '"link"')).to.include('string.quoted.double.nx');
+  });
+
+  it('handles interpolation inside child elements in text content', function () {
+    const line = '<p:>Hello <b>{name}</b>!</p>';
+    const { tokens } = grammar.tokenizeLine(line, null);
+
+    // Interpolation should work inside child elements
+    expect(scopesForSubstring(line, tokens, '{')).to.include('punctuation.section.interpolation.begin.nx');
+    expect(scopesForSubstring(line, tokens, 'name')).to.include('meta.interpolation.nx');
+  });
 });

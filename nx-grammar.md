@@ -237,7 +237,12 @@ PropertyListIfConditionList ::=
     "}"
 
 TextContent ::=
-    ( TextRun | InterpolationExpression )+
+    ( TextRun | TextChildElement | InterpolationExpression )+
+
+(* Text allows other text elements as children, without needing the ":" *)
+TextChildElement ::=
+    "<" ElementName PropertyList "/>"
+    | "<" ElementName PropertyList ">" TextContent "</" ElementName ">"
 
 EmbedTextContent ::=
     ( EmbedTextRun | EmbedInterpolationExpression )+

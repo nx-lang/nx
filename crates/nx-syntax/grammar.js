@@ -49,6 +49,8 @@ module.exports = grammar({
     [$.elements_if_match_expression],
     [$.elements_if_condition_list_expression],
     [$.text_run],
+    [$.text_child_element],
+    [$.text_content],
     [$.embed_text_run],
     [$.identifier_expression, $.qualified_markup_name],
     [$.identifier_expression, $.qualified_name],
@@ -607,8 +609,28 @@ module.exports = grammar({
     // ===== Text Content =====
     text_content: $ => repeat1(choice(
       $.text_run,
+      $.text_child_element,
       $.interpolation_expression,
     )),
+
+    // TextChildElement allows nested elements inside text content
+    // e.g., <p:>Hello <b>world</b>!</p>
+    text_child_element: $ => seq(
+      '<',
+      field('name', $.element_name),
+      field('properties', optional($.property_list)),
+      choice(
+        seq('/', '>'),  // self-closing
+        seq(
+          '>',
+          field('content', $.text_content),
+          '<',
+          '/',
+          field('close_name', $.element_name),
+          '>',
+        ),
+      ),
+    ),
 
     embed_text_content: $ => repeat1(choice(
       $.embed_text_run,

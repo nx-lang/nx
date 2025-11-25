@@ -408,6 +408,7 @@
         { "include": "#strings" },
         { "include": "#comments" },
         { "name": "punctuation.definition.tag.end.nx", "match": ">" },
+        { "include": "#text-child-element" },
         { "include": "#interpolation" },
         { "name": "constant.character.escape.nx", "match": "\\\\[{}]" },
         { "include": "#entities" },
@@ -654,6 +655,62 @@
         { "include": "#types" },
         { "include": "#operators" },
         { "name": "keyword.control.loop.nx", "match": "\\bin\\b" }
+      ]
+    },
+
+    "text-child-element": {
+      "patterns": [
+        {
+          "comment": "Self-closing child element inside text content",
+          "match": "(<)([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*)\\s*(/)(>)",
+          "captures": {
+            "1": { "name": "punctuation.definition.tag.begin.nx" },
+            "2": { "name": "entity.name.tag.nx" },
+            "3": { "name": "punctuation.definition.tag.self-closing.nx" },
+            "4": { "name": "punctuation.definition.tag.end.nx" }
+          },
+          "name": "meta.text.child-element.self-closing.nx"
+        },
+        {
+          "comment": "Paired child element inside text content with content",
+          "begin": "(<)([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*)\\b",
+          "beginCaptures": {
+            "1": { "name": "punctuation.definition.tag.begin.nx" },
+            "2": { "name": "entity.name.tag.nx" }
+          },
+          "end": "(</)(\\2)(>)",
+          "endCaptures": {
+            "1": { "name": "punctuation.definition.tag.begin.nx" },
+            "2": { "name": "entity.name.tag.nx" },
+            "3": { "name": "punctuation.definition.tag.end.nx" }
+          },
+          "name": "meta.text.child-element.nx",
+          "patterns": [
+            {
+              "comment": "Inside the opening tag - attributes before >",
+              "begin": "\\G(?!>)",
+              "end": ">",
+              "endCaptures": {
+                "0": { "name": "punctuation.definition.tag.end.nx" }
+              },
+              "patterns": [
+                {
+                  "name": "entity.other.attribute-name.nx",
+                  "match": "[A-Za-z_][A-Za-z0-9_-]*(?=\\s*=)"
+                },
+                { "name": "keyword.operator.assignment.nx", "match": "=" },
+                { "include": "#strings" },
+                { "include": "#interpolation" }
+              ]
+            },
+            { "include": "#text-child-element" },
+            { "include": "#interpolation" },
+            { "name": "constant.character.escape.nx", "match": "\\\\[{}]" },
+            { "include": "#entities" },
+            { "name": "meta.text.plain.content.nx", "match": "[^<&{\\\\]+" },
+            { "name": "meta.text.plain.content.nx", "match": "\\\\" }
+          ]
+        }
       ]
     },
 

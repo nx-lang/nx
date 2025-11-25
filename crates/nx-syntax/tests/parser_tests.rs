@@ -253,6 +253,123 @@ fn test_parse_text_elements_and_embed_interpolation() {
 }
 
 #[test]
+fn test_parse_text_child_elements() {
+    let path = fixture_path("valid/text-child-elements.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(
+        result.is_ok(),
+        "Text child elements should parse without errors. Errors:\n{}",
+        {
+            let mut sources = HashMap::new();
+            sources.insert(
+                "test.nx".to_string(),
+                std::fs::read_to_string(&path).unwrap_or_default(),
+            );
+            render_diagnostics_cli(&result.errors, &sources)
+        }
+    );
+
+    let root = result.root().expect("Should have root node");
+    assert!(
+        contains_kind(&root, SyntaxKind::TEXT_CHILD_ELEMENT),
+        "Expected text_child_element nodes in the tree"
+    );
+    assert!(
+        contains_kind(&root, SyntaxKind::TEXT_CONTENT),
+        "Expected text_content nodes in the tree"
+    );
+}
+
+#[test]
+fn test_text_child_element_simple() {
+    let source = "<p:>Hello <b>world</b>!</p>";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "Simple text child element should parse. Errors: {:?}",
+        result.errors
+    );
+
+    let root = result.root().expect("Should have root node");
+    assert!(
+        contains_kind(&root, SyntaxKind::TEXT_CHILD_ELEMENT),
+        "Should contain text_child_element node for <b>world</b>"
+    );
+}
+
+#[test]
+fn test_text_child_element_self_closing() {
+    let source = "<p:>Line<br />break</p>";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "Self-closing text child element should parse. Errors: {:?}",
+        result.errors
+    );
+
+    let root = result.root().expect("Should have root node");
+    assert!(
+        contains_kind(&root, SyntaxKind::TEXT_CHILD_ELEMENT),
+        "Should contain text_child_element node for <br />"
+    );
+}
+
+#[test]
+fn test_text_child_element_nested() {
+    let source = "<p:>Start <b>bold <i>italic</i> bold</b> end</p>";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "Nested text child elements should parse. Errors: {:?}",
+        result.errors
+    );
+
+    let root = result.root().expect("Should have root node");
+
+    // Count text_child_element nodes - should have at least 2 (b and i)
+    fn count_kind(node: &SyntaxNode, kind: SyntaxKind) -> usize {
+        let mut count = if node.kind() == kind { 1 } else { 0 };
+        for child in node.children() {
+            count += count_kind(&child, kind);
+        }
+        count
+    }
+
+    let text_child_count = count_kind(&root, SyntaxKind::TEXT_CHILD_ELEMENT);
+    assert!(
+        text_child_count >= 2,
+        "Should have at least 2 text_child_element nodes, found {}",
+        text_child_count
+    );
+}
+
+#[test]
+fn test_text_child_element_with_properties() {
+    let source = r#"<p:>Click <a href="link">here</a></p>"#;
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "Text child element with properties should parse. Errors: {:?}",
+        result.errors
+    );
+
+    let root = result.root().expect("Should have root node");
+    assert!(
+        contains_kind(&root, SyntaxKind::TEXT_CHILD_ELEMENT),
+        "Should contain text_child_element node"
+    );
+    assert!(
+        contains_kind(&root, SyntaxKind::PROPERTY_VALUE),
+        "Should contain property_value node for href attribute"
+    );
+}
+
+#[test]
 fn test_parse_complex_example() {
     let path = fixture_path("valid/complex-example.nx");
     let result = parse_file(&path).unwrap();

@@ -1,0 +1,27 @@
+// Test text child elements - nested elements inside text content
+// This tests the TextChildElement grammar rule
+<Root>
+  // Simple inline element
+  <p:>Hello <b>world</b>!</p>
+
+  // Multiple nested elements
+  <p:>This is <strong>bold</strong> and <em>italic</em> text.</p>
+
+  // Self-closing child element
+  <p:>Line break here<br />and more text</p>
+
+  // Deeply nested elements
+  <p:>Start <b>bold <i>bold-italic</i> bold</b> end</p>
+
+  // Child elements with properties
+  <p:>Click <a href="https://example.com">this link</a> for more.</p>
+
+  // Mixed with interpolation
+  <p:>Hello <b>{name}</b> and <em>friends</em>!</p>
+
+  // Complex nested structure
+  <div:>
+    Welcome <strong>user</strong>!
+    <span class="highlight">Important</span> notice.
+  </div>
+</Root>

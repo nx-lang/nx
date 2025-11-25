@@ -2718,10 +2718,102 @@
           },
           {
             "type": "SYMBOL",
+            "name": "text_child_element"
+          },
+          {
+            "type": "SYMBOL",
             "name": "interpolation_expression"
           }
         ]
       }
+    },
+    "text_child_element": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "<"
+        },
+        {
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "element_name"
+          }
+        },
+        {
+          "type": "FIELD",
+          "name": "properties",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "property_list"
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
+          }
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "/"
+                },
+                {
+                  "type": "STRING",
+                  "value": ">"
+                }
+              ]
+            },
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": ">"
+                },
+                {
+                  "type": "FIELD",
+                  "name": "content",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "text_content"
+                  }
+                },
+                {
+                  "type": "STRING",
+                  "value": "<"
+                },
+                {
+                  "type": "STRING",
+                  "value": "/"
+                },
+                {
+                  "type": "FIELD",
+                  "name": "close_name",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "element_name"
+                  }
+                },
+                {
+                  "type": "STRING",
+                  "value": ">"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     },
     "embed_text_content": {
       "type": "REPEAT1",
@@ -3073,6 +3165,12 @@
     ],
     [
       "text_run"
+    ],
+    [
+      "text_child_element"
+    ],
+    [
+      "text_content"
     ],
     [
       "embed_text_run"

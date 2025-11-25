@@ -1196,6 +1196,52 @@
     }
   },
   {
+    "type": "text_child_element",
+    "named": true,
+    "fields": {
+      "close_name": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "element_name",
+            "named": true
+          }
+        ]
+      },
+      "content": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "text_content",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "element_name",
+            "named": true
+          }
+        ]
+      },
+      "properties": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "property_list",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "text_content",
     "named": true,
     "fields": {},
@@ -1205,6 +1251,10 @@
       "types": [
         {
           "type": "interpolation_expression",
+          "named": true
+        },
+        {
+          "type": "text_child_element",
           "named": true
         },
         {

@@ -476,7 +476,14 @@ TextContent (AST: TextContentSyntax)
 
 TextItem (AST: TextItemSyntax is a sum type)
 - TextItem → TextRun                       (TextRunSyntax)
+- TextItem → TextChildElement              (TextChildElementSyntax)
 - TextItem → InterpolationExpression       (InterpolationExpressionSyntax)
+
+TextChildElement (AST: TextChildElementSyntax)
+- TextChildElement → LT ElementName PropertyList SLASH GT
+  - fields: name: QualifiedMarkupNameSyntax, props: PropertyListSyntax, children: []
+- TextChildElement → LT ElementName PropertyList GT TextContent LT SLASH ElementName GT
+  - fields: name: QualifiedMarkupNameSyntax, props: PropertyListSyntax, children: TextContentSyntax
 
 EmbedTextContent (AST: EmbedTextContentSyntax)
 - EmbedTextContent → EmbedTextItem+
@@ -570,7 +577,8 @@ This section lists the AST node types with fields for implementers.
 - PropertyIfConditionListSyntax: arms: PropertyIfConditionArmSyntax[], elseProps?: PropertyListSyntax
 - PropertyIfConditionArmSyntax: condition: ExpressionSyntax, props: PropertyListSyntax
 - TextContentSyntax: items: TextItemSyntax[]
-- TextItemSyntax: kind: "text"|"interpolation", value: TextRunSyntax|InterpolationExpressionSyntax
+- TextItemSyntax: kind: "text"|"element"|"interpolation", value: TextRunSyntax|TextChildElementSyntax|InterpolationExpressionSyntax
+- TextChildElementSyntax: name: QualifiedMarkupNameSyntax, props: PropertyListSyntax, children: TextContentSyntax
 - EmbedTextContentSyntax: items: EmbedTextItemSyntax[]
 - EmbedTextItemSyntax: kind: "text"|"interpolation", value: EmbedTextRunSyntax|EmbedInterpolationExpressionSyntax
 - EmbedInterpolationExpressionSyntax: expr: ExpressionSyntax
