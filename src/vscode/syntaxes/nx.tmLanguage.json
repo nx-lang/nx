@@ -661,15 +661,27 @@
     "text-child-element": {
       "patterns": [
         {
-          "comment": "Self-closing child element inside text content",
-          "match": "(<)([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*)\\s*(/)(>)",
-          "captures": {
+          "comment": "Self-closing child element inside text content with optional attributes",
+          "begin": "(<)([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*)\\b(?=[^>]*/>)",
+          "beginCaptures": {
             "1": { "name": "punctuation.definition.tag.begin.nx" },
-            "2": { "name": "entity.name.tag.nx" },
-            "3": { "name": "punctuation.definition.tag.self-closing.nx" },
-            "4": { "name": "punctuation.definition.tag.end.nx" }
+            "2": { "name": "entity.name.tag.nx" }
           },
-          "name": "meta.text.child-element.self-closing.nx"
+          "end": "(/)(>)",
+          "endCaptures": {
+            "1": { "name": "punctuation.definition.tag.self-closing.nx" },
+            "2": { "name": "punctuation.definition.tag.end.nx" }
+          },
+          "name": "meta.text.child-element.self-closing.nx",
+          "patterns": [
+            {
+              "name": "entity.other.attribute-name.nx",
+              "match": "[A-Za-z_][A-Za-z0-9_-]*(?=\\s*=)"
+            },
+            { "name": "keyword.operator.assignment.nx", "match": "=" },
+            { "include": "#strings" },
+            { "include": "#interpolation" }
+          ]
         },
         {
           "comment": "Paired child element inside text content with content",

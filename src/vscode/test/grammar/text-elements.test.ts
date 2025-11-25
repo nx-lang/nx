@@ -224,4 +224,18 @@ describe('NX TextMate text elements', function () {
     expect(scopesForSubstring(line, tokens, '{')).to.include('punctuation.section.interpolation.begin.nx');
     expect(scopesForSubstring(line, tokens, 'name')).to.include('meta.interpolation.nx');
   });
+
+  it('highlights self-closing child elements with attributes in text content', function () {
+    const line = '<p:>Break<br class="spacer" />here</p>';
+    const { tokens } = grammar.tokenizeLine(line, null);
+
+    // The <br> tag should be recognized
+    expect(scopesForSubstring(line, tokens, 'br')).to.include('entity.name.tag.nx');
+    // The class attribute should be highlighted
+    expect(scopesForSubstring(line, tokens, 'class')).to.include('entity.other.attribute-name.nx');
+    // The string value should be highlighted
+    expect(scopesForSubstring(line, tokens, '"spacer"')).to.include('string.quoted.double.nx');
+    // The self-closing marker should be recognized (just the slash)
+    expect(scopesForSubstring(line, tokens, ' /')).to.include('punctuation.definition.tag.self-closing.nx');
+  });
 });

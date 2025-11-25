@@ -44,8 +44,8 @@ fn validate_element_tags(
     file_name: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // Check if this is an element node
-    if node.kind() == SyntaxKind::ELEMENT {
+    // Check if this is an element node or text child element
+    if node.kind() == SyntaxKind::ELEMENT || node.kind() == SyntaxKind::TEXT_CHILD_ELEMENT {
         // Get opening tag
         let opening_tag = node
             .child_by_field("opening_tag")
@@ -319,5 +319,44 @@ mod tests {
 
         // Should have multiple errors
         assert!(result.errors.len() >= 1, "Should detect syntax errors");
+    }
+
+    #[test]
+    fn test_validate_text_child_element_matching_tags() {
+        let source = "<p:>Hello <b>world</b>!</p>";
+        let result = parse_str(source, "test.nx");
+        let tree = result.tree.unwrap();
+
+        let diagnostics = validate(&tree, "test.nx");
+        assert!(
+            diagnostics.is_empty(),
+            "Matching text child element tags should not produce errors"
+        );
+    }
+
+    #[test]
+    fn test_validate_text_child_element_mismatched_tags() {
+        let source = "<p:>Hello <b>world</i>!</p>";
+        let result = parse_str(source, "test.nx");
+
+        if let Some(tree) = result.tree {
+            let diagnostics = validate(&tree, "test.nx");
+
+            // Find tag mismatch errors
+            let tag_errors: Vec<_> = diagnostics
+                .iter()
+                .filter(|d| d.code() == Some("tag-mismatch"))
+                .collect();
+
+            // Should detect the mismatched <b>...</i> tags
+            assert!(
+                !tag_errors.is_empty(),
+                "Should detect mismatched text child element tags"
+            );
+            assert!(
+                tag_errors[0].message().contains("does not match"),
+                "Error message should indicate tag mismatch"
+            );
+        }
     }
 }
