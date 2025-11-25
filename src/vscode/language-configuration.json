@@ -29,7 +29,7 @@
   ],
   "wordPattern": "(-?\\d*\\.\\d\\w*)|([^\\`\\~!@#%\\^&*()=+[\\]{}\\|;:'\",.\\s<>/]+)",
   "indentationRules": {
-    "increaseIndentPattern": "^\\s*.*\\{\\s*$|^\\s*<(?!(?:/|!)).*[^/]>(\\s*)$",
+    "increaseIndentPattern": "^\\s*.*\\{\\s*$|^\\s*<(?!(?:/|!)).*[^/]>(\\s*)$|^\\s*<[a-zA-Z][a-zA-Z0-9]*\\s*$",
     "decreaseIndentPattern": "^\\s*\\}|^\\s*</|^\\s*.*?/>(\\s*)$"
   },
   "folding": {
