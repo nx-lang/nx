@@ -240,9 +240,6 @@ pub fn build_scopes(module: &Module) -> (ScopeManager, Vec<Diagnostic>) {
                     Symbol::new(record_def.name.clone(), SymbolKind::Type, record_def.span);
                 manager.define(manager.root(), symbol);
             }
-            crate::Item::Element(_) => {
-                // Elements don't introduce symbols at module scope
-            }
         }
     }
 

@@ -1,0 +1,10 @@
+// Invalid: Multiple top-level elements are not allowed
+// The grammar permits only zero or one top-level element per module
+
+<FirstElement>
+  <Child />
+</FirstElement>
+
+<SecondElement>
+  <Child />
+</SecondElement>

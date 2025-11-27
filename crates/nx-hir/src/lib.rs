@@ -221,8 +221,6 @@ pub enum Item {
     Enum(EnumDef),
     /// Record declaration
     Record(RecordDef),
-    /// Element declaration
-    Element(ElementId),
 }
 
 /// Arena index for expressions.
@@ -270,7 +268,6 @@ impl Module {
             Item::TypeAlias(alias) => alias.name.as_str() == name,
             Item::Enum(enum_def) => enum_def.name.as_str() == name,
             Item::Record(record_def) => record_def.name.as_str() == name,
-            Item::Element(_) => false,
         })
     }
 
