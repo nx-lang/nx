@@ -16,3 +16,10 @@ nx-syntax = { path = "../nx-syntax" }
 nx-hir = { path = "../nx-hir" }
 nx-types = { path = "../nx-types" }
 nx-diagnostics = { path = "../nx-diagnostics" }
+nx-interpreter = { path = "../nx-interpreter" }
+clap = { version = "4", features = ["derive"] }
+smol_str = { workspace = true }
+rustc-hash = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
