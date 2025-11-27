@@ -1,9 +1,9 @@
 //! NX CLI - Command-line tools for parsing, checking, and formatting NX code.
 //!
 //! This will provide commands like:
-//! - `nx parse <file>` - Parse and display AST
-//! - `nx check <file>` - Type check and report errors
-//! - `nx format <file>` - Format NX source code
+//! - `nxlang parse <file>` - Parse and display AST
+//! - `nxlang check <file>` - Type check and report errors
+//! - `nxlang format <file>` - Format NX source code
 //!
 //! (To be fully implemented in later phases)
 
