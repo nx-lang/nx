@@ -221,8 +221,6 @@ pub enum Item {
     Enum(EnumDef),
     /// Record declaration
     Record(RecordDef),
-    /// Element declaration
-    Element(ElementId),
 }
 
 /// Arena index for expressions.
@@ -234,7 +232,9 @@ pub type ElementId = Idx<Element>;
 /// High-level intermediate representation of a module.
 ///
 /// A module corresponds to a single .nx source file and contains all top-level
-/// items (functions, types, elements) along with the expression arena.
+/// items (functions, type aliases, enums, records) along with the expression
+/// and element arenas. Top-level elements are represented as implicit 'root'
+/// functions rather than as separate items.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Module {
     /// Source file identifier
@@ -270,7 +270,6 @@ impl Module {
             Item::TypeAlias(alias) => alias.name.as_str() == name,
             Item::Enum(enum_def) => enum_def.name.as_str() == name,
             Item::Record(record_def) => record_def.name.as_str() == name,
-            Item::Element(_) => false,
         })
     }
 

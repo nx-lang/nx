@@ -777,9 +777,27 @@ impl LoweringContext {
                     self.module.add_item(Item::Enum(enum_def));
                 }
                 SyntaxKind::ELEMENT => {
+                    // Top-level element becomes an implicit 'root' function
+                    let span = child.span();
                     let element = self.lower_element(child);
                     let element_id = self.module.alloc_element(element);
-                    self.module.add_item(Item::Element(element_id));
+
+                    // Create an Expr::Element that references the element
+                    let body = self.alloc_expr(Expr::Element {
+                        element: element_id,
+                        span,
+                    });
+
+                    // Create the implicit 'root' function
+                    let root_func = Function {
+                        name: Name::new("root"),
+                        params: vec![],
+                        return_type: None,
+                        body,
+                        span,
+                    };
+
+                    self.module.add_item(Item::Function(root_func));
                 }
                 _ => {
                     // Skip other node types for now
@@ -1047,17 +1065,27 @@ mod tests {
         let root = tree.root();
         let module = lower(root, SourceId::new(0));
 
-        // Should have one element item
+        // Should have one function item named 'root' (implicit from top-level element)
         assert_eq!(module.items().len(), 1);
 
         match &module.items()[0] {
-            Item::Element(element_id) => {
-                let element = module.element(*element_id);
-                assert_eq!(element.tag.as_str(), "button");
-                assert_eq!(element.properties.len(), 0);
-                assert_eq!(element.children.len(), 0);
+            Item::Function(func) => {
+                assert_eq!(func.name.as_str(), "root");
+                assert!(func.params.is_empty());
+
+                // The body should be an Element expression
+                let body_expr = module.expr(func.body);
+                match body_expr {
+                    Expr::Element { element, .. } => {
+                        let elem = module.element(*element);
+                        assert_eq!(elem.tag.as_str(), "button");
+                        assert_eq!(elem.properties.len(), 0);
+                        assert_eq!(elem.children.len(), 0);
+                    }
+                    _ => panic!("Expected Element expression as body"),
+                }
             }
-            _ => panic!("Expected Element item"),
+            _ => panic!("Expected Function item for implicit root"),
         }
     }
 
@@ -1112,14 +1140,23 @@ mod tests {
         assert_eq!(module.items().len(), 1);
 
         match &module.items()[0] {
-            Item::Element(element_id) => {
-                let element = module.element(*element_id);
-                assert_eq!(element.tag.as_str(), "button");
-                assert_eq!(element.properties.len(), 2);
-                assert_eq!(element.properties[0].key.as_str(), "class");
-                assert_eq!(element.properties[1].key.as_str(), "disabled");
+            Item::Function(func) => {
+                assert_eq!(func.name.as_str(), "root");
+
+                // The body should be an Element expression
+                let body_expr = module.expr(func.body);
+                match body_expr {
+                    Expr::Element { element, .. } => {
+                        let elem = module.element(*element);
+                        assert_eq!(elem.tag.as_str(), "button");
+                        assert_eq!(elem.properties.len(), 2);
+                        assert_eq!(elem.properties[0].key.as_str(), "class");
+                        assert_eq!(elem.properties[1].key.as_str(), "disabled");
+                    }
+                    _ => panic!("Expected Element expression as body"),
+                }
             }
-            _ => panic!("Expected Element item"),
+            _ => panic!("Expected Function item for implicit root"),
         }
     }
 
@@ -1135,16 +1172,25 @@ mod tests {
         assert_eq!(module.items().len(), 1);
 
         match &module.items()[0] {
-            Item::Element(element_id) => {
-                let element = module.element(*element_id);
-                assert_eq!(element.tag.as_str(), "div");
-                assert_eq!(element.children.len(), 1);
+            Item::Function(func) => {
+                assert_eq!(func.name.as_str(), "root");
 
-                // Check nested button element
-                let child = module.element(element.children[0]);
-                assert_eq!(child.tag.as_str(), "button");
+                // The body should be an Element expression
+                let body_expr = module.expr(func.body);
+                match body_expr {
+                    Expr::Element { element, .. } => {
+                        let elem = module.element(*element);
+                        assert_eq!(elem.tag.as_str(), "div");
+                        assert_eq!(elem.children.len(), 1);
+
+                        // Check nested button element
+                        let child = module.element(elem.children[0]);
+                        assert_eq!(child.tag.as_str(), "button");
+                    }
+                    _ => panic!("Expected Element expression as body"),
+                }
             }
-            _ => panic!("Expected Element item"),
+            _ => panic!("Expected Function item for implicit root"),
         }
     }
 

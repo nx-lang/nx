@@ -34,6 +34,9 @@ pub fn validate(tree: &SyntaxTree, file_name: &str) -> Vec<Diagnostic> {
     // Validate element tag matching
     validate_element_tags(&root, tree, file_name, &mut diagnostics);
 
+    // Validate root definitions (no duplicates between explicit 'root' and top-level element)
+    validate_root_definitions(&root, file_name, &mut diagnostics);
+
     diagnostics
 }
 
@@ -112,6 +115,86 @@ fn extract_tag_name(tag_node: &SyntaxNode) -> Option<String> {
     }
 
     None
+}
+
+/// Validates that there are no duplicate 'root' definitions.
+///
+/// A module can have at most one 'root' definition, which can come from either:
+/// - An explicit `let root = ...` or `let root() = ...` definition
+/// - An implicit top-level element (which becomes the 'root' function)
+///
+/// This function detects:
+/// - Multiple explicit 'root' definitions (error)
+/// - Both explicit 'root' and top-level element (error)
+fn validate_root_definitions(
+    root: &SyntaxNode,
+    file_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut explicit_roots: Vec<TextRange> = Vec::new();
+    let mut implicit_root: Option<TextRange> = None;
+
+    // Scan top-level children of the module
+    for child in root.children() {
+        match child.kind() {
+            SyntaxKind::FUNCTION_DEFINITION | SyntaxKind::VALUE_DEFINITION => {
+                // Check if this defines 'root'
+                if let Some(name_node) = child.child_by_field("name") {
+                    if name_node.text() == "root" {
+                        explicit_roots.push(name_node.span());
+                    }
+                }
+            }
+            SyntaxKind::ELEMENT => {
+                // Top-level element becomes implicit 'root'
+                implicit_root = Some(child.span());
+            }
+            _ => {}
+        }
+    }
+
+    // Check for multiple explicit root definitions
+    if explicit_roots.len() > 1 {
+        let first_span = explicit_roots[0];
+        let second_span = explicit_roots[1];
+
+        let diagnostic = Diagnostic::error("duplicate-root")
+            .with_message("Duplicate definition of 'root'")
+            .with_label(
+                Label::primary(file_name, second_span)
+                    .with_message("duplicate 'root' definition"),
+            )
+            .with_label(
+                Label::secondary(file_name, first_span)
+                    .with_message("first 'root' definition here"),
+            )
+            .with_note("A module can have at most one 'root' definition")
+            .build();
+
+        diagnostics.push(diagnostic);
+    }
+
+    // Check for conflict between explicit root and top-level element
+    if let (Some(explicit_span), Some(implicit_span)) =
+        (explicit_roots.first().copied(), implicit_root)
+    {
+        let diagnostic = Diagnostic::error("duplicate-root")
+            .with_message("Duplicate definition of 'root'")
+            .with_label(
+                Label::primary(file_name, implicit_span)
+                    .with_message("top-level element implicitly defines 'root'"),
+            )
+            .with_label(
+                Label::secondary(file_name, explicit_span)
+                    .with_message("explicit 'root' definition here"),
+            )
+            .with_note(
+                "A module can have either a top-level element or an explicit 'root' definition, but not both",
+            )
+            .build();
+
+        diagnostics.push(diagnostic);
+    }
 }
 
 /// Collects all parse errors from tree-sitter ERROR nodes with enhanced messages.
@@ -358,5 +441,145 @@ mod tests {
                 "Error message should indicate tag mismatch"
             );
         }
+    }
+
+    #[test]
+    fn test_validate_top_level_element_only() {
+        // A top-level element alone should not produce errors
+        let source = "<App><Header /></App>";
+        let result = parse_str(source, "test.nx");
+        let tree = result.tree.unwrap();
+
+        let diagnostics = validate(&tree, "test.nx");
+        let root_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code() == Some("duplicate-root"))
+            .collect();
+
+        assert!(
+            root_errors.is_empty(),
+            "Top-level element alone should not produce duplicate-root error"
+        );
+    }
+
+    #[test]
+    fn test_validate_explicit_root_only() {
+        // An explicit root function alone should not produce errors
+        let source = "let root() = <App />";
+        let result = parse_str(source, "test.nx");
+        let tree = result.tree.unwrap();
+
+        let diagnostics = validate(&tree, "test.nx");
+        let root_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code() == Some("duplicate-root"))
+            .collect();
+
+        assert!(
+            root_errors.is_empty(),
+            "Explicit root function alone should not produce duplicate-root error"
+        );
+    }
+
+    #[test]
+    fn test_validate_duplicate_root_function_and_element() {
+        // Both explicit root function and top-level element should produce error
+        let source = r#"
+            let root() = <Explicit />
+
+            <Implicit />
+        "#;
+        let result = parse_str(source, "test.nx");
+        let tree = result.tree.unwrap();
+
+        let diagnostics = validate(&tree, "test.nx");
+        let root_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code() == Some("duplicate-root"))
+            .collect();
+
+        assert_eq!(
+            root_errors.len(),
+            1,
+            "Should detect duplicate root definition"
+        );
+        assert!(
+            root_errors[0].message().contains("Duplicate"),
+            "Error message should indicate duplicate"
+        );
+    }
+
+    #[test]
+    fn test_validate_duplicate_root_value_and_element() {
+        // Both explicit root value and top-level element should produce error
+        let source = r#"
+            let root = <Explicit />
+
+            <Implicit />
+        "#;
+        let result = parse_str(source, "test.nx");
+        let tree = result.tree.unwrap();
+
+        let diagnostics = validate(&tree, "test.nx");
+        let root_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code() == Some("duplicate-root"))
+            .collect();
+
+        assert_eq!(
+            root_errors.len(),
+            1,
+            "Should detect duplicate root definition (value)"
+        );
+    }
+
+    #[test]
+    fn test_validate_multiple_explicit_root_functions() {
+        // Two explicit root functions should produce error
+        let source = r#"
+            let root() = <First />
+            let root() = <Second />
+        "#;
+        let result = parse_str(source, "test.nx");
+        let tree = result.tree.unwrap();
+
+        let diagnostics = validate(&tree, "test.nx");
+        let root_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code() == Some("duplicate-root"))
+            .collect();
+
+        assert_eq!(
+            root_errors.len(),
+            1,
+            "Should detect duplicate explicit root definitions"
+        );
+        assert!(
+            root_errors[0].message().contains("Duplicate"),
+            "Error message should indicate duplicate"
+        );
+    }
+
+    #[test]
+    fn test_validate_multiple_explicit_root_mixed() {
+        // Function and value both named 'root' should produce error
+        let source = r#"
+            let root = 42
+            let root() = <App />
+        "#;
+        let result = parse_str(source, "test.nx");
+        let tree = result.tree.unwrap();
+
+        let diagnostics = validate(&tree, "test.nx");
+        let root_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code() == Some("duplicate-root"))
+            .collect();
+
+        assert_eq!(
+            root_errors.len(),
+            1,
+            "Should detect duplicate root (value + function)"
+        );
     }
 }
