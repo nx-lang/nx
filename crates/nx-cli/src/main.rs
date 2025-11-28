@@ -9,10 +9,11 @@
 mod format;
 
 use clap::{Parser, Subcommand};
-use nx_diagnostics::Severity;
+use nx_diagnostics::{render_diagnostics_cli, Severity};
 use nx_hir::{lower, Item, SourceId};
 use nx_interpreter::{Interpreter, Value};
-use nx_syntax::parse_file;
+use nx_syntax::parse_str;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -60,28 +61,40 @@ fn run_file(path: &PathBuf) -> ExitCode {
         );
     }
 
-    // Parse the file
-    let parse_result = match parse_file(path) {
-        Ok(result) => result,
+    // Read the source file once
+    let source = match std::fs::read_to_string(path) {
+        Ok(s) => s,
         Err(e) => {
             eprintln!("Error reading file: {}", e);
             return ExitCode::from(1);
         }
     };
 
+    // Get the file name for error messages
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+
+    // Parse the source (using the already-read content to ensure consistency)
+    let parse_result = parse_str(&source, file_name);
+
     // Check for parse errors
-    let has_errors = parse_result
+    let errors: Vec<_> = parse_result
         .errors
         .iter()
-        .any(|d| d.severity() == Severity::Error);
+        .filter(|d| d.severity() == Severity::Error)
+        .cloned()
+        .collect();
 
-    if has_errors {
-        eprintln!("Parse errors in '{}':", path.display());
-        for error in &parse_result.errors {
-            if error.severity() == Severity::Error {
-                eprintln!("  {}", error.message());
-            }
-        }
+    if !errors.is_empty() {
+        // Build a sources map for error rendering
+        let mut sources = HashMap::new();
+        sources.insert(file_name.to_string(), source);
+
+        // Render errors with line numbers and context
+        let rendered = render_diagnostics_cli(&errors, &sources);
+        eprint!("{}", rendered);
         return ExitCode::from(1);
     }
 
@@ -132,6 +145,7 @@ fn format_output(value: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nx_syntax::parse_file;
     use std::fs;
     use tempfile::TempDir;
 
@@ -415,5 +429,63 @@ mod tests {
         let stderr = String::from_utf8_lossy(&output.stderr);
         // clap reports missing required argument
         assert!(stderr.contains("FILE") || stderr.contains("required"));
+    }
+
+    #[test]
+    fn test_cli_run_parse_error_shows_line_numbers() {
+        // Create a file with a syntax error
+        let (_dir, path) = create_temp_nx_file("let x = {");
+
+        let output = run_cli(&["run", path.to_str().unwrap()]);
+
+        assert!(!output.status.success(), "CLI should fail on parse error");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        // Should show error with line number (format: "error file.nx:1:1: ...")
+        assert!(
+            stderr.contains(":1:"),
+            "Error should include line number. Got: {}",
+            stderr
+        );
+        // Should show the source line
+        assert!(
+            stderr.contains("let x = {"),
+            "Error should include source line. Got: {}",
+            stderr
+        );
+        // Should include caret indicators
+        assert!(
+            stderr.contains("^"),
+            "Error should include caret indicator. Got: {}",
+            stderr
+        );
+    }
+
+    #[test]
+    fn test_cli_run_parse_error_multiline_shows_correct_line() {
+        // Create a file with a syntax error on line 3
+        let source = r#"let x = 42
+let y = 100
+let z = {
+"#;
+        let (_dir, path) = create_temp_nx_file(source);
+
+        let output = run_cli(&["run", path.to_str().unwrap()]);
+
+        assert!(!output.status.success(), "CLI should fail on parse error");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        // Should show error on line 3 (format: "error file.nx:3:...")
+        assert!(
+            stderr.contains(":3:"),
+            "Error should be on line 3. Got: {}",
+            stderr
+        );
+        // Should show the problematic source line
+        assert!(
+            stderr.contains("let z = {"),
+            "Error should include the problematic source line. Got: {}",
+            stderr
+        );
     }
 }
