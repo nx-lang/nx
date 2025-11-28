@@ -94,13 +94,8 @@ fn run_file(path: &PathBuf) -> ExitCode {
         }
     };
 
-    // Lower to HIR
-    let source_id = SourceId::new(
-        path.to_string_lossy()
-            .as_bytes()
-            .iter()
-            .fold(0u32, |acc, &b| acc.wrapping_mul(31).wrapping_add(b as u32)),
-    );
+    // Lower to HIR using the same source_id from parsing for consistency
+    let source_id = SourceId::new(parse_result.source_id.as_u32());
     let module = lower(tree.root(), source_id);
 
     // Check if there's a root function
@@ -300,5 +295,125 @@ mod tests {
         assert!(result.is_ok());
         let value = result.unwrap();
         assert_eq!(format_output(&value), "null");
+    }
+
+    // ===== CLI Integration Tests =====
+    // These tests run the actual CLI binary and verify exit codes and output
+
+    /// Helper to run the CLI binary with arguments and capture output
+    fn run_cli(args: &[&str]) -> std::process::Output {
+        use std::process::Command;
+
+        // Build the path to the test binary
+        // In tests, CARGO_MANIFEST_DIR points to the crate's directory
+        let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let target_dir = manifest_dir
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("target")
+            .join("debug")
+            .join("nxlang");
+
+        Command::new(&target_dir)
+            .args(args)
+            .output()
+            .expect("Failed to execute CLI - ensure 'cargo build' was run first")
+    }
+
+    #[test]
+    fn test_cli_run_success() {
+        let (_dir, path) = create_temp_nx_file("let root() = { 42 }");
+
+        let output = run_cli(&["run", path.to_str().unwrap()]);
+
+        assert!(output.status.success(), "CLI should exit with success");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(stdout.trim(), "42");
+    }
+
+    #[test]
+    fn test_cli_run_string_output() {
+        let (_dir, path) = create_temp_nx_file("let root() = { \"Hello, World!\" }");
+
+        let output = run_cli(&["run", path.to_str().unwrap()]);
+
+        assert!(output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(stdout.trim(), "Hello, World!");
+    }
+
+    #[test]
+    fn test_cli_run_file_not_found() {
+        let output = run_cli(&["run", "/nonexistent/path/to/file.nx"]);
+
+        assert!(!output.status.success(), "CLI should fail for missing file");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("File not found"));
+    }
+
+    #[test]
+    fn test_cli_run_no_root_error() {
+        let (_dir, path) =
+            create_temp_nx_file("let <Button text:string /> = <button>{text}</button>");
+
+        let output = run_cli(&["run", path.to_str().unwrap()]);
+
+        assert!(!output.status.success(), "CLI should fail when no root");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("No root element found"));
+        assert!(stderr.contains("Hint:"));
+    }
+
+    #[test]
+    fn test_cli_run_typed_record_preserves_name() {
+        let source = r#"
+            type User = {
+              name: string
+              age: int = 30
+            }
+
+            let root() = { <User name="Bob" /> }
+        "#;
+        let (_dir, path) = create_temp_nx_file(source);
+
+        let output = run_cli(&["run", path.to_str().unwrap()]);
+
+        assert!(output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // Should use "User" as the tag name, not generic "result"
+        assert!(stdout.contains("<User"));
+        assert!(stdout.contains("name=\"Bob\""));
+        assert!(stdout.contains("age=\"30\""));
+    }
+
+    #[test]
+    fn test_cli_help() {
+        let output = run_cli(&["--help"]);
+
+        assert!(output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("NX Language CLI"));
+        assert!(stdout.contains("run"));
+    }
+
+    #[test]
+    fn test_cli_version() {
+        let output = run_cli(&["--version"]);
+
+        assert!(output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains(env!("CARGO_PKG_VERSION")));
+    }
+
+    #[test]
+    fn test_cli_run_missing_argument() {
+        let output = run_cli(&["run"]);
+
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // clap reports missing required argument
+        assert!(stderr.contains("FILE") || stderr.contains("required"));
     }
 }

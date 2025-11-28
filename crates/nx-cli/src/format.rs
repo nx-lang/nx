@@ -44,14 +44,24 @@ fn format_value_inner(value: &Value, output: &mut String, indent: usize) {
             }
         }
 
-        // Record - print as XML-like element
+        // Typed record - print as XML-like element with preserved type name
+        Value::TypedRecord { type_name, fields } => {
+            format_record_with_name(type_name.as_str(), fields, output, indent);
+        }
+
+        // Untyped record - print as generic "result" element
         Value::Record(fields) => {
-            format_record(fields, output, indent);
+            format_record_with_name("result", fields, output, indent);
         }
     }
 }
 
-fn format_record(fields: &FxHashMap<SmolStr, Value>, output: &mut String, indent: usize) {
+fn format_record_with_name(
+    tag_name: &str,
+    fields: &FxHashMap<SmolStr, Value>,
+    output: &mut String,
+    indent: usize,
+) {
     // Collect and sort fields for deterministic output
     let mut field_vec: Vec<_> = fields.iter().collect();
     field_vec.sort_by_key(|(k, _)| k.as_str());
@@ -61,7 +71,7 @@ fn format_record(fields: &FxHashMap<SmolStr, Value>, output: &mut String, indent
 
     if has_complex_children {
         // Multi-line format with children
-        output.push_str("<result");
+        write!(output, "<{}", tag_name).unwrap();
 
         // Print simple attributes on the opening tag
         for (key, value) in &field_vec {
@@ -79,15 +89,15 @@ fn format_record(fields: &FxHashMap<SmolStr, Value>, output: &mut String, indent
         let child_indent = indent + 2;
         for (key, value) in &field_vec {
             if is_complex_value(value) {
-                write!(output, "{:indent$}<{}", "", key, indent = child_indent).unwrap();
-                format_nested_value(value, output, child_indent);
+                write!(output, "{:indent$}", "", indent = child_indent).unwrap();
+                format_nested_element(key.as_str(), value, output, child_indent);
             }
         }
 
-        write!(output, "{:indent$}</result>", "", indent = indent).unwrap();
+        write!(output, "{:indent$}</{}>", "", tag_name, indent = indent).unwrap();
     } else {
         // Single-line format with all attributes
-        output.push_str("<result");
+        write!(output, "<{}", tag_name).unwrap();
 
         for (key, value) in &field_vec {
             output.push(' ');
@@ -100,65 +110,83 @@ fn format_record(fields: &FxHashMap<SmolStr, Value>, output: &mut String, indent
     }
 }
 
-fn format_nested_value(value: &Value, output: &mut String, indent: usize) {
+/// Format a nested element with proper opening and closing tags.
+fn format_nested_element(tag_name: &str, value: &Value, output: &mut String, indent: usize) {
     match value {
+        Value::TypedRecord { type_name, fields } => {
+            // Use the typed record's own type name as the tag
+            format_nested_record(type_name.as_str(), fields, output, indent);
+        }
         Value::Record(fields) => {
-            let mut field_vec: Vec<_> = fields.iter().collect();
-            field_vec.sort_by_key(|(k, _)| k.as_str());
-
-            let has_complex = field_vec.iter().any(|(_, v)| is_complex_value(v));
-
-            if has_complex {
-                // Print simple attrs, then children
-                for (key, val) in &field_vec {
-                    if !is_complex_value(val) {
-                        output.push(' ');
-                        output.push_str(key.as_str());
-                        output.push('=');
-                        format_attribute_value(val, output);
-                    }
-                }
-                output.push_str(">\n");
-
-                let child_indent = indent + 2;
-                for (key, val) in &field_vec {
-                    if is_complex_value(val) {
-                        write!(output, "{:indent$}<{}", "", key, indent = child_indent).unwrap();
-                        format_nested_value(val, output, child_indent);
-                    }
-                }
-
-                // Close tag - we need to find the element name from context
-                // Since we're formatting a field, we need to track it
-                output.push_str(&format!("{:indent$}</>", "", indent = indent));
-                output.push('\n');
-            } else {
-                // All simple - inline
-                for (key, val) in &field_vec {
-                    output.push(' ');
-                    output.push_str(key.as_str());
-                    output.push('=');
-                    format_attribute_value(val, output);
-                }
-                output.push_str(" />\n");
-            }
+            // Use the field name as the tag for untyped records
+            format_nested_record(tag_name, fields, output, indent);
         }
         Value::Array(elements) => {
-            output.push_str(">\n");
+            write!(output, "<{}>", tag_name).unwrap();
+            output.push('\n');
             let child_indent = indent + 2;
             for elem in elements {
                 write!(output, "{:indent$}", "", indent = child_indent).unwrap();
                 format_value_inner(elem, output, child_indent);
                 output.push('\n');
             }
-            write!(output, "{:indent$}</>", "", indent = indent).unwrap();
+            write!(output, "{:indent$}</{}>", "", tag_name, indent = indent).unwrap();
             output.push('\n');
         }
         _ => {
+            // Simple value - shouldn't happen for complex values but handle gracefully
+            write!(output, "<{}", tag_name).unwrap();
             output.push('=');
             format_attribute_value(value, output);
             output.push_str(" />\n");
         }
+    }
+}
+
+fn format_nested_record(
+    tag_name: &str,
+    fields: &FxHashMap<SmolStr, Value>,
+    output: &mut String,
+    indent: usize,
+) {
+    let mut field_vec: Vec<_> = fields.iter().collect();
+    field_vec.sort_by_key(|(k, _)| k.as_str());
+
+    let has_complex = field_vec.iter().any(|(_, v)| is_complex_value(v));
+
+    write!(output, "<{}", tag_name).unwrap();
+
+    if has_complex {
+        // Print simple attrs, then children
+        for (key, val) in &field_vec {
+            if !is_complex_value(val) {
+                output.push(' ');
+                output.push_str(key.as_str());
+                output.push('=');
+                format_attribute_value(val, output);
+            }
+        }
+        output.push_str(">\n");
+
+        let child_indent = indent + 2;
+        for (key, val) in &field_vec {
+            if is_complex_value(val) {
+                write!(output, "{:indent$}", "", indent = child_indent).unwrap();
+                format_nested_element(key.as_str(), val, output, child_indent);
+            }
+        }
+
+        write!(output, "{:indent$}</{}>", "", tag_name, indent = indent).unwrap();
+        output.push('\n');
+    } else {
+        // All simple - inline
+        for (key, val) in &field_vec {
+            output.push(' ');
+            output.push_str(key.as_str());
+            output.push('=');
+            format_attribute_value(val, output);
+        }
+        output.push_str(" />\n");
     }
 }
 
@@ -172,7 +200,7 @@ fn format_attribute_value(value: &Value, output: &mut String) {
         Value::EnumVariant { type_name, variant } => {
             write!(output, "\"{}.{}\"", type_name, variant).unwrap()
         }
-        Value::Array(_) | Value::Record(_) => {
+        Value::Array(_) | Value::Record(_) | Value::TypedRecord { .. } => {
             // Complex values shouldn't be formatted as attributes
             output.push_str("\"...\"");
         }
@@ -181,7 +209,7 @@ fn format_attribute_value(value: &Value, output: &mut String) {
 
 fn is_complex_value(value: &Value) -> bool {
     match value {
-        Value::Record(_) => true,
+        Value::Record(_) | Value::TypedRecord { .. } => true,
         Value::Array(elements) => !elements.is_empty(),
         _ => false,
     }

@@ -65,6 +65,16 @@ pub enum Value {
 
     /// Record value (map of field names to values)
     Record(FxHashMap<SmolStr, Value>),
+
+    /// Typed record value with preserved type name
+    ///
+    /// Like Record but preserves the original type/element name for pretty printing.
+    TypedRecord {
+        /// The type/element name (e.g., "User", "Button")
+        type_name: SmolStr,
+        /// Field values
+        fields: FxHashMap<SmolStr, Value>,
+    },
 }
 
 impl Value {
@@ -125,6 +135,7 @@ impl Value {
             Value::Array(_) => "array",
             Value::EnumVariant { .. } => "enum",
             Value::Record(_) => "record",
+            Value::TypedRecord { .. } => "record",
         }
     }
 }
@@ -148,6 +159,16 @@ impl std::fmt::Display for Value {
                 write!(f, "]")
             }
             Value::EnumVariant { type_name, variant } => write!(f, "{}.{}", type_name, variant),
+            Value::TypedRecord { type_name, fields } => {
+                write!(f, "{}{{ ", type_name)?;
+                for (i, (k, v)) in fields.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}: {}", k, v)?;
+                }
+                write!(f, " }}")
+            }
             Value::Record(fields) => {
                 write!(f, "{{")?;
                 for (i, (k, v)) in fields.iter().enumerate() {
