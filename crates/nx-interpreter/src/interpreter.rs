@@ -464,7 +464,7 @@ impl Interpreter {
         record_label: Option<&str>,
     ) -> Result<Value, RuntimeError> {
         match base_value {
-            Value::Record(fields) => {
+            Value::Record(fields) | Value::TypedRecord { fields, .. } => {
                 if let Some(value) = fields.get(member.as_str()) {
                     Ok(value.clone())
                 } else {
@@ -633,7 +633,10 @@ impl Interpreter {
             overrides.insert(SmolStr::new(prop.name.as_str()), value);
         }
 
-        Ok(Value::Record(overrides))
+        Ok(Value::TypedRecord {
+            type_name: SmolStr::new(record_name),
+            fields: overrides,
+        })
     }
 }
 

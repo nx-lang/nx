@@ -356,13 +356,14 @@ fn test_record_return_type_and_collection() {
         .execute_function(&module, "make", vec![])
         .unwrap_or_else(|e| panic!("{}", e));
     match made {
-        Value::Record(fields) => {
+        Value::TypedRecord { fields, type_name } => {
+            assert_eq!(type_name.as_str(), "User");
             assert_eq!(
                 fields.get("name"),
                 Some(&Value::String(SmolStr::new("Anon")))
             );
         }
-        other => panic!("expected record, got {:?}", other),
+        other => panic!("expected TypedRecord, got {:?}", other),
     }
 }
 
@@ -404,13 +405,14 @@ fn test_record_all_fields_have_defaults() {
         .execute_function(&module, "make", vec![])
         .unwrap();
     match result {
-        Value::Record(fields) => {
+        Value::TypedRecord { fields, type_name } => {
+            assert_eq!(type_name.as_str(), "Config");
             assert_eq!(
                 fields.get("host"),
                 Some(&Value::String(SmolStr::new("localhost")))
             );
             assert_eq!(fields.get("port"), Some(&Value::Int(80)));
         }
-        other => panic!("expected record, got {:?}", other),
+        other => panic!("expected TypedRecord, got {:?}", other),
     }
 }
