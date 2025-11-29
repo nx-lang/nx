@@ -13,23 +13,23 @@ members = [
 version = "0.1.0"
 authors = ["Bret Johnson"]
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.85"
 license = "MIT"
 repository = "https://github.com/bret/nx"
 homepage = "https://nx-lang.dev"
 
 [workspace.dependencies]
 # Error reporting
-ariadne = "0.4"
+ariadne = "0.6"
 text-size = "1.1"
 
 # Parsing
-tree-sitter = "0.20"
+tree-sitter = "0.25.10"
 
 # Data structures
-smol_str = "0.2"
-la-arena = "0.3"
-rustc-hash = "1.1"
+smol_str = "0.3.4"
+la-arena = "0.3.1"
+rustc-hash = "2.1.1"
 
 # Incremental computation
 salsa = "0.16"

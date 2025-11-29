@@ -34,7 +34,7 @@ pub fn language() -> Language {
 pub fn parser() -> Parser {
     let mut parser = Parser::new();
     parser
-        .set_language(language())
+        .set_language(&language())
         .expect("Failed to set NX language");
     parser
 }
@@ -73,7 +73,7 @@ impl SyntaxTree {
     }
 
     /// Returns the root syntax node.
-    pub fn root(&self) -> SyntaxNode {
+    pub fn root(&self) -> SyntaxNode<'_> {
         SyntaxNode::new(self.tree.root_node(), &self.source)
     }
 
@@ -90,7 +90,7 @@ impl SyntaxTree {
     }
 
     /// Finds the node at the given byte offset.
-    pub fn node_at(&self, offset: usize) -> Option<SyntaxNode> {
+    pub fn node_at(&self, offset: usize) -> Option<SyntaxNode<'_>> {
         let node = self
             .tree
             .root_node()
@@ -139,7 +139,7 @@ impl ParseResult {
     }
 
     /// Returns the root syntax node if available.
-    pub fn root(&self) -> Option<SyntaxNode> {
+    pub fn root(&self) -> Option<SyntaxNode<'_>> {
         self.tree.as_ref().map(|t| t.root())
     }
 

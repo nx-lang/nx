@@ -749,6 +749,7 @@
   {
     "type": "module_definition",
     "named": true,
+    "root": true,
     "fields": {},
     "children": {
       "multiple": true,
@@ -1768,7 +1769,8 @@
   },
   {
     "type": "block_comment",
-    "named": true
+    "named": true,
+    "extra": true
   },
   {
     "type": "boolean",
@@ -1824,7 +1826,8 @@
   },
   {
     "type": "html_block_comment",
-    "named": true
+    "named": true,
+    "extra": true
   },
   {
     "type": "identifier",
@@ -1860,7 +1863,8 @@
   },
   {
     "type": "line_comment",
-    "named": true
+    "named": true,
+    "extra": true
   },
   {
     "type": "long",

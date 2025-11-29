@@ -1,7 +1,7 @@
 //! Rendering functionality for displaying diagnostics with beautiful formatting.
 
 use crate::{Diagnostic, Severity};
-use ariadne::{Color, Fmt, Label as AriadneLabel, Report, ReportKind, Source};
+use ariadne::{sources, Color, Fmt, Label as AriadneLabel, Report, ReportKind};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 //
@@ -17,7 +17,7 @@ use std::fmt::Write as _;
 ///
 /// A formatted string containing the rendered diagnostic with syntax highlighting,
 /// source snippets, and helpful annotations.
-pub fn render_diagnostic(diagnostic: &Diagnostic, sources: &HashMap<String, String>) -> String {
+pub fn render_diagnostic(diagnostic: &Diagnostic, source_map: &HashMap<String, String>) -> String {
     let mut output = Vec::new();
 
     let report_kind = match diagnostic.severity() {
@@ -27,7 +27,22 @@ pub fn render_diagnostic(diagnostic: &Diagnostic, sources: &HashMap<String, Stri
         Severity::Hint => ReportKind::Advice,
     };
 
-    let mut report = Report::build(report_kind, (), 0);
+    // Choose a primary span for the report (defaults to an empty, unknown span).
+    let primary_label = diagnostic
+        .labels()
+        .iter()
+        .find(|l| l.primary)
+        .or_else(|| diagnostic.labels().first());
+
+    let (primary_file, primary_span) = primary_label
+        .map(|l| {
+            let start: usize = l.range.start().into();
+            let end: usize = l.range.end().into();
+            (l.file.clone(), start..end)
+        })
+        .unwrap_or_else(|| (String::from("<unknown>"), 0..0));
+
+    let mut report = Report::build(report_kind, (primary_file.clone(), primary_span));
 
     // Set the main message
     report = report.with_message(diagnostic.message());
@@ -44,11 +59,11 @@ pub fn render_diagnostic(diagnostic: &Diagnostic, sources: &HashMap<String, Stri
         let end: usize = label.range.end().into();
 
         let ariadne_label = if let Some(msg) = &label.message {
-            AriadneLabel::new(start..end)
+            AriadneLabel::new((label.file.clone(), start..end))
                 .with_message(msg.fg(color))
                 .with_color(color)
         } else {
-            AriadneLabel::new(start..end).with_color(color)
+            AriadneLabel::new((label.file.clone(), start..end)).with_color(color)
         };
 
         report = report.with_label(ariadne_label);
@@ -66,33 +81,24 @@ pub fn render_diagnostic(diagnostic: &Diagnostic, sources: &HashMap<String, Stri
 
     let report = report.finish();
 
-    // Find the primary source file
-    let primary_file = diagnostic
-        .labels()
-        .iter()
-        .find(|l| l.primary)
-        .map(|l| &l.file)
-        .or_else(|| diagnostic.labels().first().map(|l| &l.file));
-
-    if let Some(file) = primary_file {
-        if let Some(source) = sources.get(file) {
-            let _ = report.write(Source::from(source), &mut output);
-        } else {
-            let _ = report.write(Source::from(""), &mut output);
-        }
-    } else {
-        let _ = report.write(Source::from(""), &mut output);
+    // Build a cache of sources for ariadne, ensuring every labeled file has an entry.
+    let mut cache_inputs: HashMap<String, String> = source_map.clone();
+    for label in diagnostic.labels() {
+        cache_inputs.entry(label.file.clone()).or_insert_with(String::new);
     }
+
+    let cache = sources(cache_inputs);
+    let _ = report.write(cache, &mut output);
 
     String::from_utf8_lossy(&output).to_string()
 }
 
 /// Renders multiple diagnostics to a string.
 #[cfg_attr(not(test), allow(dead_code))]
-pub fn render_diagnostics(diagnostics: &[Diagnostic], sources: &HashMap<String, String>) -> String {
+pub fn render_diagnostics(diagnostics: &[Diagnostic], source_map: &HashMap<String, String>) -> String {
     diagnostics
         .iter()
-        .map(|d| render_diagnostic(d, sources))
+        .map(|d| render_diagnostic(d, source_map))
         .collect::<Vec<_>>()
         .join("\n\n")
 }

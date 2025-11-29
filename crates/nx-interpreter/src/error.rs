@@ -1,6 +1,6 @@
 //! Runtime error types and handling for the NX interpreter.
 
-use ariadne::{Color, Label, Report, ReportKind, Source};
+use ariadne::{sources, Color, Label, Report, ReportKind};
 use smol_str::SmolStr;
 use std::fmt;
 use text_size::TextRange;
@@ -215,10 +215,12 @@ impl RuntimeError {
         let mut output = Vec::new();
 
         if let Some(location) = self.location {
-            let report = Report::build(ReportKind::Error, filename, location.start().into())
+            let file_id = filename.to_string();
+            let span = location.start().into()..location.end().into();
+            let report = Report::build(ReportKind::Error, (file_id.clone(), span.clone()))
                 .with_message(format!("Runtime Error: {}", self.kind))
                 .with_label(
-                    Label::new((filename, location.start().into()..location.end().into()))
+                    Label::new((file_id.clone(), span))
                         .with_message(self.kind.to_string())
                         .with_color(Color::Red),
                 );
@@ -233,9 +235,8 @@ impl RuntimeError {
                 report
             };
 
-            let _ = report
-                .finish()
-                .write((filename, Source::from(source)), &mut output);
+            let cache = sources([(file_id, source.to_string())]);
+            let _ = report.finish().write(cache, &mut output);
         } else {
             // No source location, format as simple message
             output.extend_from_slice(format!("Runtime Error: {}", self.kind).as_bytes());
