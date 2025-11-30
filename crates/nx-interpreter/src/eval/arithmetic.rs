@@ -117,8 +117,26 @@ fn eval_mod(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
             }
             Ok(Value::Int(a % b))
         }
+        (Value::Float(a), Value::Float(b)) => {
+            if b == 0.0 {
+                return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero));
+            }
+            Ok(Value::Float(a % b))
+        }
+        (Value::Int(a), Value::Float(b)) => {
+            if b == 0.0 {
+                return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero));
+            }
+            Ok(Value::Float(a as f64 % b))
+        }
+        (Value::Float(a), Value::Int(b)) => {
+            if b == 0 {
+                return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero));
+            }
+            Ok(Value::Float(a % b as f64))
+        }
         (a, b) => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-            expected: "integer".to_string(),
+            expected: "number".to_string(),
             actual: format!("{} and {}", a.type_name(), b.type_name()),
             operation: "modulo".to_string(),
         })),
@@ -191,6 +209,30 @@ mod tests {
     fn test_mod() {
         let result = eval_mod(Value::Int(10), Value::Int(3)).unwrap();
         assert_eq!(result, Value::Int(1));
+    }
+
+    #[test]
+    fn test_mod_float() {
+        let result = eval_mod(Value::Float(10.5), Value::Float(4.0)).unwrap();
+        assert_eq!(result, Value::Float(10.5 % 4.0));
+    }
+
+    #[test]
+    fn test_mod_mixed_int_float() {
+        let result = eval_mod(Value::Int(10), Value::Float(4.0)).unwrap();
+        assert_eq!(result, Value::Float(10.0 % 4.0));
+    }
+
+    #[test]
+    fn test_mod_mixed_float_int() {
+        let result = eval_mod(Value::Float(10.5), Value::Int(4)).unwrap();
+        assert_eq!(result, Value::Float(10.5 % 4.0));
+    }
+
+    #[test]
+    fn test_mod_by_zero_float() {
+        let result = eval_mod(Value::Float(10.0), Value::Float(0.0));
+        assert!(matches!(result, Err(RuntimeError { .. })));
     }
 
     #[test]

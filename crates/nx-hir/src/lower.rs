@@ -302,9 +302,23 @@ impl LoweringContext {
 
                 let op = node
                     .child_by_field("operator")
-                    .map(|n| match n.text() {
-                        "!" => UnOp::Not,
-                        _ => UnOp::Neg,
+                    .map(|n| match n.kind() {
+                        SyntaxKind::BANG => UnOp::Not,
+                        SyntaxKind::MINUS => UnOp::Neg,
+                        _ => {
+                            if n.text() == "!" {
+                                UnOp::Not
+                            } else {
+                                UnOp::Neg
+                            }
+                        }
+                    })
+                    .or_else(|| {
+                        node.children_with_tokens().find_map(|n| match n.kind() {
+                            SyntaxKind::BANG => Some(UnOp::Not),
+                            SyntaxKind::MINUS => Some(UnOp::Neg),
+                            _ => None,
+                        })
                     })
                     .unwrap_or_else(|| {
                         let text = node.text().trim_start();
@@ -315,11 +329,23 @@ impl LoweringContext {
                         }
                     });
 
-                self.alloc_expr(Expr::UnaryOp {
+                let expr_id = self.alloc_expr(Expr::UnaryOp {
                     op,
                     expr,
                     span: node.span(),
-                })
+                });
+
+                let operand_ty = self.expr_type(expr);
+                let result_ty = match op {
+                    UnOp::Not => TypeTag::Boolean,
+                    UnOp::Neg => match operand_ty {
+                        TypeTag::Int | TypeTag::Float => operand_ty,
+                        _ => TypeTag::Unknown,
+                    },
+                };
+
+                self.set_expr_type(expr_id, result_ty);
+                expr_id
             }
 
             // Call expression
