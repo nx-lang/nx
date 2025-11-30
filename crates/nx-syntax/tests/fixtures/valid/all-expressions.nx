@@ -33,6 +33,7 @@ let <IdentifierExpr x:int /> = {x}
 // Arithmetic operators (precedence: *, / > +, -)
 let <Multiplication x:int y:int /> = {x * y}
 let <Division x:int y:int /> = {x / y}
+let <Modulus x:int y:int /> = {x % y}
 let <Addition x:int y:int /> = {x + y}
 let <Subtraction x:int y:int /> = {x - y}
 let <ComplexArithmetic x:int y:int z:int /> = {x + y * z}
@@ -55,6 +56,7 @@ let <ComplexLogical x:boolean y:boolean z:boolean /> = {x && y || z}
 // Prefix unary minus
 let <Negation x:int /> = {-x}
 let <DoubleNegation x:int /> = {--x}
+let <LogicalNot flag:boolean /> = {!flag}
 
 // === Conditional (Ternary) Expressions ===
 

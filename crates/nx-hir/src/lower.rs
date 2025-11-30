@@ -300,11 +300,20 @@ impl LoweringContext {
                     .unwrap();
                 let expr = self.lower_expr(expr_node);
 
-                let op = if node.text().starts_with('!') {
-                    UnOp::Not
-                } else {
-                    UnOp::Neg
-                };
+                let op = node
+                    .child_by_field("operator")
+                    .map(|n| match n.text() {
+                        "!" => UnOp::Not,
+                        _ => UnOp::Neg,
+                    })
+                    .unwrap_or_else(|| {
+                        let text = node.text().trim_start();
+                        if text.starts_with('!') {
+                            UnOp::Not
+                        } else {
+                            UnOp::Neg
+                        }
+                    });
 
                 self.alloc_expr(Expr::UnaryOp {
                     op,

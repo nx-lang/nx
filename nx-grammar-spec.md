@@ -53,7 +53,8 @@ Literals
 - QMARK (?)
 - PIPE (|)
  - ELLIPSIS (...)
- - PLUS (+), MINUS (-), STAR (*), SLASH (/)
+ - PLUS (+), MINUS (-), STAR (*), SLASH (/), PERCENT (%)
+ - BANG (!)
  - LT_EQ (<=), GT_EQ (>=), EQ_EQ (==), BANG_EQ (!=)
  - AMP_AMP (&&), PIPE_PIPE (||)
 
@@ -100,9 +101,11 @@ Conventional expressions (non-markup) use a Pratt parser with the following prec
  130: Prefix unary, right-associative
  - Prefix minus: nud token: MINUS
    - form: MINUS Expr → PrefixUnaryExpression(op: MINUS, expr)
+ - Prefix not: nud token: BANG
+   - form: token Expr → PrefixUnaryExpression(op: token, expr)
 
  120: Multiplicative, left-associative
-- STAR (*), SLASH (/)
+- STAR (*), SLASH (/), PERCENT (%)
 
 110: Additive, left-associative
 - PLUS (+), MINUS (-)

@@ -145,9 +145,9 @@ ValueForExpression ::=
     | "for" Identifier "," Identifier "in" ValueExpression "{" ValueExpression "}"  (* With index *)
 
 PrefixUnaryExpression ::=
-    "-" ValueExpression
+    ( "-" | "!" ) ValueExpression
 BinaryExpression ::=
-    ValueExpression ( "+" | "-" | "*" | "/" | ">" | "<" | ">=" | "<=" | "==" | "!=" | "&&" | "||" ) ValueExpression
+    ValueExpression ( "+" | "-" | "*" | "/" | "%" | ">" | "<" | ">=" | "<=" | "==" | "!=" | "&&" | "||" ) ValueExpression
 MemberAccess ::=
     ValueExpression "." Identifier  (* includes both property/field access and enum member access; semantic analysis distinguishes *)
 ParenFunctionCall ::=

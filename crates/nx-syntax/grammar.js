@@ -245,6 +245,7 @@ module.exports = grammar({
       const operators = [
         [prec.left, 120, '*'],
         [prec.left, 120, '/'],
+        [prec.left, 120, '%'],
         [prec.left, 110, '+'],
         [prec.left, 110, '-'],
         [prec.left, 90, '<'],
@@ -267,7 +268,7 @@ module.exports = grammar({
     },
 
     prefix_unary_expression: $ => prec.right(130, seq(
-      field('operator', '-'),
+      field('operator', choice('-', '!')),
       field('operand', $.value_expression),
     )),
 

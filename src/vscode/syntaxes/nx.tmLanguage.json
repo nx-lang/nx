@@ -117,9 +117,10 @@
     "operators": {
       "patterns": [
         { "name": "keyword.operator.arrow.nx", "match": "=>" },
-        { "name": "keyword.operator.arithmetic.nx", "match": "\\+|-|\\*|/" },
+        { "name": "keyword.operator.arithmetic.nx", "match": "\\+|-|\\*|/|%" },
         { "name": "keyword.operator.comparison.nx", "match": "<=|>=|==|!=|<|>" },
         { "name": "keyword.operator.logical.nx", "match": "&&|\\|\\|" },
+        { "name": "keyword.operator.logical.nx", "match": "!(?![=])" },
         { "name": "punctuation.separator.enum.nx", "match": "\\|" },
         { "name": "keyword.operator.conditional.nx", "match": "\\?" },
         { "name": "punctuation.separator.conditional.nx", "match": ":" },

@@ -877,6 +877,10 @@ fn test_binary_expressions_arithmetic() {
     let result = parse_str("let <Test x: int y: int /> = {x / y}", "test.nx");
     assert!(result.is_ok());
 
+    // Remainder
+    let result = parse_str("let <Test x: int y: int /> = {x % y}", "test.nx");
+    assert!(result.is_ok());
+
     // Addition
     let result = parse_str("let <Test x: int y: int /> = {x + y}", "test.nx");
     assert!(result.is_ok());
@@ -937,6 +941,10 @@ fn test_unary_expressions() {
 
     // Double negation
     let result = parse_str("let <Test x: int /> = {--x}", "test.nx");
+    assert!(result.is_ok());
+
+    // Logical not
+    let result = parse_str("let <Test flag: boolean /> = {!flag}", "test.nx");
     assert!(result.is_ok());
 }
 
