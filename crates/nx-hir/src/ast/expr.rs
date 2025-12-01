@@ -25,7 +25,7 @@ pub enum Literal {
     /// Boolean literal.
     ///
     /// Example: `true`, `false`
-    Bool(bool),
+    Boolean(bool),
 
     /// Null literal.
     ///
@@ -152,6 +152,19 @@ pub enum Expr {
         span: TextSpan,
     },
 
+    /// Let binding expression.
+    ///
+    /// Evaluates the value expression once and binds it to a name,
+    /// then evaluates the body with that binding in scope.
+    ///
+    /// Example: `let x = expensive() in x + x`
+    Let {
+        name: Name,
+        value: ExprId,
+        body: ExprId,
+        span: TextSpan,
+    },
+
     /// Block expression.
     ///
     /// Example: `{ let x = 1; x + 2 }`
@@ -236,6 +249,7 @@ impl Expr {
             Expr::UnaryOp { span, .. } => *span,
             Expr::Call { span, .. } => *span,
             Expr::If { span, .. } => *span,
+            Expr::Let { span, .. } => *span,
             Expr::Block { span, .. } => *span,
             Expr::Array { span, .. } => *span,
             Expr::Index { span, .. } => *span,
@@ -266,8 +280,8 @@ mod tests {
 
     #[test]
     fn test_literal_bool() {
-        assert_eq!(Literal::Bool(true), Literal::Bool(true));
-        assert_ne!(Literal::Bool(true), Literal::Bool(false));
+        assert_eq!(Literal::Boolean(true), Literal::Boolean(true));
+        assert_ne!(Literal::Boolean(true), Literal::Boolean(false));
     }
 
     #[test]

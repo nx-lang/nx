@@ -166,6 +166,9 @@ impl Interpreter {
                 else_branch,
                 ..
             } => self.eval_if(module, ctx, *condition, *then_branch, *else_branch),
+            ast::Expr::Let {
+                name, value, body, ..
+            } => self.eval_let(module, ctx, name, *value, *body),
             ast::Expr::Call { func, args, .. } => self.eval_call(module, ctx, *func, args),
             ast::Expr::For {
                 item,
@@ -198,7 +201,7 @@ impl Interpreter {
             ast::Literal::Int(n) => Value::Int(*n),
             ast::Literal::Float(f) => Value::Float(f.0),
             ast::Literal::String(s) => Value::String(s.clone()),
-            ast::Literal::Bool(b) => Value::Boolean(*b),
+            ast::Literal::Boolean(b) => Value::Boolean(*b),
             ast::Literal::Null => Value::Null,
         };
         Ok(value)
@@ -264,32 +267,81 @@ impl Interpreter {
         op: ast::BinOp,
         rhs: ExprId,
     ) -> Result<Value, RuntimeError> {
-        let lhs_val = self.eval_expr(module, ctx, lhs)?;
-        let rhs_val = self.eval_expr(module, ctx, rhs)?;
-
-        // Route to appropriate evaluation module based on operator
+        // Handle short-circuit operators specially - don't evaluate rhs eagerly
         match op {
-            // Arithmetic operators
-            ast::BinOp::Add
-            | ast::BinOp::Sub
-            | ast::BinOp::Mul
-            | ast::BinOp::Div
-            | ast::BinOp::Mod
-            | ast::BinOp::Concat => {
-                crate::eval::arithmetic::eval_arithmetic_op(lhs_val, op, rhs_val)
+            ast::BinOp::And => {
+                let lhs_val = self.eval_expr(module, ctx, lhs)?;
+                match lhs_val {
+                    Value::Boolean(false) => Ok(Value::Boolean(false)),
+                    Value::Boolean(true) => {
+                        let rhs_val = self.eval_expr(module, ctx, rhs)?;
+                        match rhs_val {
+                            Value::Boolean(b) => Ok(Value::Boolean(b)),
+                            v => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                                expected: "boolean".to_string(),
+                                actual: v.type_name().to_string(),
+                                operation: "logical and".to_string(),
+                            })),
+                        }
+                    }
+                    v => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                        expected: "boolean".to_string(),
+                        actual: v.type_name().to_string(),
+                        operation: "logical and".to_string(),
+                    })),
+                }
             }
+            ast::BinOp::Or => {
+                let lhs_val = self.eval_expr(module, ctx, lhs)?;
+                match lhs_val {
+                    Value::Boolean(true) => Ok(Value::Boolean(true)),
+                    Value::Boolean(false) => {
+                        let rhs_val = self.eval_expr(module, ctx, rhs)?;
+                        match rhs_val {
+                            Value::Boolean(b) => Ok(Value::Boolean(b)),
+                            v => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                                expected: "boolean".to_string(),
+                                actual: v.type_name().to_string(),
+                                operation: "logical or".to_string(),
+                            })),
+                        }
+                    }
+                    v => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                        expected: "boolean".to_string(),
+                        actual: v.type_name().to_string(),
+                        operation: "logical or".to_string(),
+                    })),
+                }
+            }
+            // All other operators evaluate both sides eagerly
+            _ => {
+                let lhs_val = self.eval_expr(module, ctx, lhs)?;
+                let rhs_val = self.eval_expr(module, ctx, rhs)?;
 
-            // Comparison operators (T036)
-            ast::BinOp::Eq
-            | ast::BinOp::Ne
-            | ast::BinOp::Lt
-            | ast::BinOp::Le
-            | ast::BinOp::Gt
-            | ast::BinOp::Ge => crate::eval::logical::eval_comparison_op(lhs_val, op, rhs_val),
+                match op {
+                    // Arithmetic operators
+                    ast::BinOp::Add
+                    | ast::BinOp::Sub
+                    | ast::BinOp::Mul
+                    | ast::BinOp::Div
+                    | ast::BinOp::Mod
+                    | ast::BinOp::Concat => {
+                        crate::eval::arithmetic::eval_arithmetic_op(lhs_val, op, rhs_val)
+                    }
 
-            // Logical operators (T038)
-            ast::BinOp::And | ast::BinOp::Or => {
-                crate::eval::logical::eval_logical_op(lhs_val, op, rhs_val)
+                    // Comparison operators (T036)
+                    ast::BinOp::Eq
+                    | ast::BinOp::Ne
+                    | ast::BinOp::Lt
+                    | ast::BinOp::Le
+                    | ast::BinOp::Gt
+                    | ast::BinOp::Ge => {
+                        crate::eval::logical::eval_comparison_op(lhs_val, op, rhs_val)
+                    }
+
+                    // And/Or already handled above
+                    ast::BinOp::And | ast::BinOp::Or => unreachable!(),
+                }
             }
         }
     }
@@ -353,6 +405,34 @@ impl Interpreter {
         } else {
             Ok(Value::Null)
         }
+    }
+
+    /// Evaluate a let binding expression
+    ///
+    /// Evaluates the value expression once, binds it to the name in a new scope,
+    /// then evaluates the body expression with that binding.
+    fn eval_let(
+        &self,
+        module: &Module,
+        ctx: &mut ExecutionContext,
+        name: &Name,
+        value: ExprId,
+        body: ExprId,
+    ) -> Result<Value, RuntimeError> {
+        // Evaluate the value expression once
+        let val = self.eval_expr(module, ctx, value)?;
+
+        // Create a new scope with the binding
+        ctx.push_scope();
+        ctx.define_variable(name.as_str().into(), val);
+
+        // Evaluate the body
+        let result = self.eval_expr(module, ctx, body);
+
+        // Pop the scope
+        ctx.pop_scope();
+
+        result
     }
 
     /// Evaluate a function call expression (T053)
