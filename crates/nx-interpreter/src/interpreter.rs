@@ -198,7 +198,7 @@ impl Interpreter {
             ast::Literal::Int(n) => Value::Int(*n),
             ast::Literal::Float(f) => Value::Float(f.0),
             ast::Literal::String(s) => Value::String(s.clone()),
-            ast::Literal::Bool(b) => Value::Boolean(*b),
+            ast::Literal::Boolean(b) => Value::Boolean(*b),
             ast::Literal::Null => Value::Null,
         };
         Ok(value)

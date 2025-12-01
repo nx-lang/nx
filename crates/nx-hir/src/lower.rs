@@ -193,7 +193,7 @@ impl LoweringContext {
             | SyntaxKind::BOOLEAN_EXPRESSION => {
                 let text = node.text();
                 let value = text == "true";
-                let expr = self.alloc_expr(Expr::Literal(Literal::Bool(value)));
+                let expr = self.alloc_expr(Expr::Literal(Literal::Boolean(value)));
                 self.set_expr_type(expr, TypeTag::Boolean);
                 expr
             }
@@ -508,6 +508,208 @@ impl LoweringContext {
                     body,
                     span: node.span(),
                 })
+            }
+
+            // Ternary expression: condition ? consequent : alternative
+            SyntaxKind::CONDITIONAL_EXPRESSION => {
+                let condition = node
+                    .child_by_field("condition")
+                    .map(|n| self.lower_expr(n))
+                    .unwrap_or_else(|| self.error_expr(node.span()));
+
+                let then_branch = node
+                    .child_by_field("consequent")
+                    .map(|n| self.lower_expr(n))
+                    .unwrap_or_else(|| self.error_expr(node.span()));
+
+                let else_branch = node
+                    .child_by_field("alternative")
+                    .map(|n| self.lower_expr(n));
+
+                self.alloc_expr(Expr::If {
+                    condition,
+                    then_branch,
+                    else_branch,
+                    span: node.span(),
+                })
+            }
+
+            // Value if expression wrapper
+            SyntaxKind::VALUE_IF_EXPRESSION => node
+                .children()
+                .next()
+                .map(|n| self.lower_expr(n))
+                .unwrap_or_else(|| self.error_expr(node.span())),
+
+            // If-else expression: if condition { then } else { else }
+            SyntaxKind::VALUE_IF_SIMPLE_EXPRESSION => {
+                let condition = node
+                    .child_by_field("condition")
+                    .map(|n| self.lower_expr(n))
+                    .unwrap_or_else(|| self.error_expr(node.span()));
+
+                let then_branch = node
+                    .child_by_field("then")
+                    .map(|n| self.lower_expr(n))
+                    .unwrap_or_else(|| self.error_expr(node.span()));
+
+                let else_branch = node.child_by_field("else").map(|n| self.lower_expr(n));
+
+                self.alloc_expr(Expr::If {
+                    condition,
+                    then_branch,
+                    else_branch,
+                    span: node.span(),
+                })
+            }
+
+            // Condition list expression: if { cond1 => expr1, cond2 => expr2, else => default }
+            // We lower this to nested if-else expressions
+            SyntaxKind::VALUE_IF_CONDITION_LIST_EXPRESSION => {
+                // Collect all condition arms
+                let mut arms: Vec<(ExprId, ExprId)> = Vec::new();
+                let mut else_expr: Option<ExprId> = None;
+
+                for child in node.children() {
+                    match child.kind() {
+                        SyntaxKind::VALUE_IF_CONDITION_ARM => {
+                            let condition = child
+                                .child_by_field("condition")
+                                .map(|n| self.lower_expr(n))
+                                .unwrap_or_else(|| self.error_expr(child.span()));
+                            let body = child
+                                .child_by_field("body")
+                                .map(|n| self.lower_expr(n))
+                                .unwrap_or_else(|| self.error_expr(child.span()));
+                            arms.push((condition, body));
+                        }
+                        _ => {
+                            // Check for else branch by looking for the field
+                            if let Some(else_node) = node.child_by_field("else") {
+                                else_expr = Some(self.lower_expr(else_node));
+                            }
+                        }
+                    }
+                }
+
+                // Build nested if-else from the arms (in reverse order)
+                // if { a => x, b => y, else => z } becomes: if a { x } else { if b { y } else { z } }
+                let mut result = else_expr;
+                for (condition, body) in arms.into_iter().rev() {
+                    result = Some(self.alloc_expr(Expr::If {
+                        condition,
+                        then_branch: body,
+                        else_branch: result,
+                        span: node.span(),
+                    }));
+                }
+
+                result.unwrap_or_else(|| self.error_expr(node.span()))
+            }
+
+            // Match expression: if scrutinee is { pattern => expr, ... }
+            // We lower this to nested if-else with equality checks
+            SyntaxKind::VALUE_IF_MATCH_EXPRESSION => {
+                // Get the scrutinee expression
+                let scrutinee = node
+                    .child_by_field("scrutinee")
+                    .map(|n| self.lower_expr(n))
+                    .unwrap_or_else(|| self.error_expr(node.span()));
+
+                // Collect all match arms
+                let mut arms: Vec<(Vec<ExprId>, ExprId)> = Vec::new();
+                let mut else_expr: Option<ExprId> = None;
+
+                for child in node.children() {
+                    if child.kind() == SyntaxKind::VALUE_IF_MATCH_ARM {
+                        // Each arm can have multiple patterns (comma-separated)
+                        let mut patterns: Vec<ExprId> = Vec::new();
+                        let mut body: Option<ExprId> = None;
+
+                        for arm_child in child.children() {
+                            match arm_child.kind() {
+                                SyntaxKind::PATTERN => {
+                                    // Lower the pattern as an expression (literal or qualified name)
+                                    let pattern_expr = arm_child
+                                        .children()
+                                        .next()
+                                        .map(|n| self.lower_expr(n))
+                                        .unwrap_or_else(|| self.lower_expr(arm_child));
+                                    patterns.push(pattern_expr);
+                                }
+                                _ => {
+                                    // The last non-pattern child is the body
+                                    if !arm_child.text().is_empty()
+                                        && arm_child.text() != "=>"
+                                        && arm_child.text() != ","
+                                    {
+                                        body = Some(self.lower_expr(arm_child));
+                                    }
+                                }
+                            }
+                        }
+
+                        if !patterns.is_empty() {
+                            arms.push((
+                                patterns,
+                                body.unwrap_or_else(|| self.error_expr(child.span())),
+                            ));
+                        }
+                    }
+                }
+
+                // Check for else branch
+                if let Some(else_node) = node.child_by_field("else") {
+                    else_expr = Some(self.lower_expr(else_node));
+                }
+
+                // Build nested if-else from the arms (in reverse order)
+                // if x is { 1 => a, 2, 3 => b, else => c } becomes:
+                // if x == 1 { a } else { if x == 2 || x == 3 { b } else { c } }
+                let mut result = else_expr;
+                for (patterns, body) in arms.into_iter().rev() {
+                    // Build OR condition for multiple patterns: scrutinee == p1 || scrutinee == p2 ...
+                    let condition = if patterns.len() == 1 {
+                        self.alloc_expr(Expr::BinaryOp {
+                            lhs: scrutinee,
+                            op: BinOp::Eq,
+                            rhs: patterns[0],
+                            span: node.span(),
+                        })
+                    } else {
+                        // Multiple patterns: build OR chain
+                        let mut or_expr = self.alloc_expr(Expr::BinaryOp {
+                            lhs: scrutinee,
+                            op: BinOp::Eq,
+                            rhs: patterns[0],
+                            span: node.span(),
+                        });
+                        for pattern in patterns.into_iter().skip(1) {
+                            let eq_expr = self.alloc_expr(Expr::BinaryOp {
+                                lhs: scrutinee,
+                                op: BinOp::Eq,
+                                rhs: pattern,
+                                span: node.span(),
+                            });
+                            or_expr = self.alloc_expr(Expr::BinaryOp {
+                                lhs: or_expr,
+                                op: BinOp::Or,
+                                rhs: eq_expr,
+                                span: node.span(),
+                            });
+                        }
+                        or_expr
+                    };
+
+                    result = Some(self.alloc_expr(Expr::If {
+                        condition,
+                        then_branch: body,
+                        else_branch: result,
+                        span: node.span(),
+                    }));
+                }
+
+                result.unwrap_or_else(|| self.error_expr(node.span()))
             }
 
             // Default: create error
@@ -1387,6 +1589,227 @@ mod tests {
                         assert_eq!(index.as_ref().unwrap().as_str(), "index");
                     }
                     other => panic!("Expected For expression, got {:?}", other),
+                }
+            }
+            _ => panic!("Expected Function item"),
+        }
+    }
+
+    #[test]
+    fn test_lower_ternary_expression() {
+        // Ternary: condition ? consequent : alternative
+        let source = "let choose(cond:bool): int = { cond ? 1 : 0 }";
+        let parse_result = parse_str(source, "test.nx");
+
+        assert!(
+            parse_result.errors.is_empty(),
+            "parse errors: {:?}",
+            parse_result.errors
+        );
+
+        let tree = parse_result.tree.unwrap();
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        assert_eq!(module.items().len(), 1);
+
+        match &module.items()[0] {
+            Item::Function(func) => {
+                assert_eq!(func.name.as_str(), "choose");
+
+                // Navigate through potential block wrapper
+                let if_expr = match module.expr(func.body) {
+                    Expr::If { .. } => module.expr(func.body),
+                    Expr::Block { expr: Some(e), .. } => module.expr(*e),
+                    other => panic!("Expected If or Block expression, got {:?}", other),
+                };
+
+                match if_expr {
+                    Expr::If {
+                        condition,
+                        then_branch,
+                        else_branch,
+                        ..
+                    } => {
+                        // Verify condition is an identifier
+                        match module.expr(*condition) {
+                            Expr::Ident(name) => assert_eq!(name.as_str(), "cond"),
+                            other => panic!("Expected Ident for condition, got {:?}", other),
+                        }
+
+                        // Verify then branch is literal 1
+                        match module.expr(*then_branch) {
+                            Expr::Literal(Literal::Int(1)) => (),
+                            other => {
+                                panic!("Expected Literal(Int(1)) for then_branch, got {:?}", other)
+                            }
+                        }
+
+                        // Verify else branch is literal 0
+                        assert!(else_branch.is_some());
+                        match module.expr(else_branch.unwrap()) {
+                            Expr::Literal(Literal::Int(0)) => (),
+                            other => {
+                                panic!("Expected Literal(Int(0)) for else_branch, got {:?}", other)
+                            }
+                        }
+                    }
+                    other => panic!("Expected If expression, got {:?}", other),
+                }
+            }
+            _ => panic!("Expected Function item"),
+        }
+    }
+
+    #[test]
+    fn test_lower_if_else_expression() {
+        // If-else: if condition { then } else { else }
+        let source = "let max(a:int, b:int): int = { if a > b { a } else { b } }";
+        let parse_result = parse_str(source, "test.nx");
+
+        assert!(
+            parse_result.errors.is_empty(),
+            "parse errors: {:?}",
+            parse_result.errors
+        );
+
+        let tree = parse_result.tree.unwrap();
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        assert_eq!(module.items().len(), 1);
+
+        match &module.items()[0] {
+            Item::Function(func) => {
+                assert_eq!(func.name.as_str(), "max");
+
+                // Navigate through potential block wrapper
+                let if_expr = match module.expr(func.body) {
+                    Expr::If { .. } => module.expr(func.body),
+                    Expr::Block { expr: Some(e), .. } => module.expr(*e),
+                    other => panic!("Expected If or Block expression, got {:?}", other),
+                };
+
+                match if_expr {
+                    Expr::If {
+                        condition,
+                        then_branch,
+                        else_branch,
+                        ..
+                    } => {
+                        // Verify condition is a > b
+                        match module.expr(*condition) {
+                            Expr::BinaryOp { op, .. } => assert_eq!(*op, BinOp::Gt),
+                            other => panic!("Expected BinaryOp for condition, got {:?}", other),
+                        }
+
+                        // Verify then branch is identifier 'a'
+                        match module.expr(*then_branch) {
+                            Expr::Ident(name) => assert_eq!(name.as_str(), "a"),
+                            other => panic!("Expected Ident for then_branch, got {:?}", other),
+                        }
+
+                        // Verify else branch is identifier 'b'
+                        assert!(else_branch.is_some());
+                        match module.expr(else_branch.unwrap()) {
+                            Expr::Ident(name) => assert_eq!(name.as_str(), "b"),
+                            other => panic!("Expected Ident for else_branch, got {:?}", other),
+                        }
+                    }
+                    other => panic!("Expected If expression, got {:?}", other),
+                }
+            }
+            _ => panic!("Expected Function item"),
+        }
+    }
+
+    #[test]
+    fn test_lower_if_without_else() {
+        // If without else: if condition { then }
+        let source = "let maybe(x:int): int = { if x > 0 { x } }";
+        let parse_result = parse_str(source, "test.nx");
+
+        assert!(
+            parse_result.errors.is_empty(),
+            "parse errors: {:?}",
+            parse_result.errors
+        );
+
+        let tree = parse_result.tree.unwrap();
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        assert_eq!(module.items().len(), 1);
+
+        match &module.items()[0] {
+            Item::Function(func) => {
+                assert_eq!(func.name.as_str(), "maybe");
+
+                // Navigate through potential block wrapper
+                let if_expr = match module.expr(func.body) {
+                    Expr::If { .. } => module.expr(func.body),
+                    Expr::Block { expr: Some(e), .. } => module.expr(*e),
+                    other => panic!("Expected If or Block expression, got {:?}", other),
+                };
+
+                match if_expr {
+                    Expr::If { else_branch, .. } => {
+                        // Verify no else branch
+                        assert!(else_branch.is_none(), "Expected no else branch");
+                    }
+                    other => panic!("Expected If expression, got {:?}", other),
+                }
+            }
+            _ => panic!("Expected Function item"),
+        }
+    }
+
+    #[test]
+    fn test_lower_nested_ternary() {
+        // Nested ternary: x > 0 ? "positive" : x < 0 ? "negative" : "zero"
+        let source =
+            r#"let classify(x:int): string = { x > 0 ? "positive" : x < 0 ? "negative" : "zero" }"#;
+        let parse_result = parse_str(source, "test.nx");
+
+        assert!(
+            parse_result.errors.is_empty(),
+            "parse errors: {:?}",
+            parse_result.errors
+        );
+
+        let tree = parse_result.tree.unwrap();
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        assert_eq!(module.items().len(), 1);
+
+        match &module.items()[0] {
+            Item::Function(func) => {
+                assert_eq!(func.name.as_str(), "classify");
+
+                // Navigate through potential block wrapper
+                let if_expr = match module.expr(func.body) {
+                    Expr::If { .. } => module.expr(func.body),
+                    Expr::Block { expr: Some(e), .. } => module.expr(*e),
+                    other => panic!("Expected If or Block expression, got {:?}", other),
+                };
+
+                // Verify it's a nested if expression
+                match if_expr {
+                    Expr::If { else_branch, .. } => {
+                        assert!(else_branch.is_some());
+                        // The else branch should be another if expression
+                        match module.expr(else_branch.unwrap()) {
+                            Expr::If {
+                                else_branch: inner_else,
+                                ..
+                            } => {
+                                assert!(inner_else.is_some());
+                            }
+                            other => panic!("Expected nested If expression, got {:?}", other),
+                        }
+                    }
+                    other => panic!("Expected If expression, got {:?}", other),
                 }
             }
             _ => panic!("Expected Function item"),

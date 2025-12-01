@@ -25,7 +25,7 @@ pub enum Literal {
     /// Boolean literal.
     ///
     /// Example: `true`, `false`
-    Bool(bool),
+    Boolean(bool),
 
     /// Null literal.
     ///
@@ -266,8 +266,8 @@ mod tests {
 
     #[test]
     fn test_literal_bool() {
-        assert_eq!(Literal::Bool(true), Literal::Bool(true));
-        assert_ne!(Literal::Bool(true), Literal::Bool(false));
+        assert_eq!(Literal::Boolean(true), Literal::Boolean(true));
+        assert_ne!(Literal::Boolean(true), Literal::Boolean(false));
     }
 
     #[test]

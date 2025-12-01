@@ -312,7 +312,7 @@ impl<'a> InferenceContext<'a> {
             ast::Literal::String(_) => Type::string(),
             ast::Literal::Int(_) => Type::int(),
             ast::Literal::Float(_) => Type::float(),
-            ast::Literal::Bool(_) => Type::bool(),
+            ast::Literal::Boolean(_) => Type::bool(),
             ast::Literal::Null => Type::nullable(self.fresh_var()),
         }
     }
@@ -741,7 +741,7 @@ mod tests {
     #[test]
     fn test_infer_bool_literal() {
         let mut module = Module::new(SourceId::new(0));
-        let expr_id = module.alloc_expr(Expr::Literal(Literal::Bool(true)));
+        let expr_id = module.alloc_expr(Expr::Literal(Literal::Boolean(true)));
 
         let mut ctx = InferenceContext::new(&module);
         let ty = ctx.infer_expr(expr_id);
