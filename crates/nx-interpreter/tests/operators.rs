@@ -1036,3 +1036,103 @@ fn test_all_comparison_operators() {
         Value::Boolean(true)
     );
 }
+
+// ============================================================================
+// Short-Circuit Evaluation Tests (using side effects to prove evaluation order)
+// ============================================================================
+
+#[test]
+fn test_and_short_circuit_avoids_division_by_zero() {
+    // If && short-circuits, the division by zero should never happen
+    let source = r#"
+        let safe_divide(numerator:int, denominator:int): boolean = {
+            denominator != 0 && (numerator / denominator) > 0
+        }
+    "#;
+
+    // With denominator = 0, && should short-circuit and NOT evaluate the division
+    let result = execute_function(source, "safe_divide", vec![Value::Int(10), Value::Int(0)]);
+    assert!(
+        result.is_ok(),
+        "Short-circuit should prevent division by zero, got error: {:?}",
+        result.err()
+    );
+    assert_eq!(result.unwrap(), Value::Boolean(false));
+}
+
+#[test]
+fn test_or_short_circuit_avoids_division_by_zero() {
+    // If || short-circuits, the division by zero should never happen
+    let source = r#"
+        let short_or(x:int, denominator:int): boolean = {
+            x > 5 || (10 / denominator) > 0
+        }
+    "#;
+
+    // With x > 5 being true, || should short-circuit and NOT evaluate the division
+    let result = execute_function(source, "short_or", vec![Value::Int(10), Value::Int(0)]);
+    assert!(
+        result.is_ok(),
+        "Short-circuit should prevent division by zero, got error: {:?}",
+        result.err()
+    );
+    assert_eq!(result.unwrap(), Value::Boolean(true));
+}
+
+#[test]
+fn test_and_evaluates_both_when_first_is_true() {
+    // When first operand is true, && SHOULD evaluate the second
+    let source = r#"
+        let check(x:int, denominator:int): boolean = {
+            x > 0 && (10 / denominator) > 0
+        }
+    "#;
+
+    // With x > 0 being true and denominator = 0, division by zero should occur
+    let result = execute_function(source, "check", vec![Value::Int(5), Value::Int(0)]);
+    assert!(
+        result.is_err(),
+        "Should have evaluated RHS and gotten division by zero"
+    );
+}
+
+#[test]
+fn test_or_evaluates_both_when_first_is_false() {
+    // When first operand is false, || SHOULD evaluate the second
+    let source = r#"
+        let check(x:int, denominator:int): boolean = {
+            x > 100 || (10 / denominator) > 0
+        }
+    "#;
+
+    // With x > 100 being false and denominator = 0, division by zero should occur
+    let result = execute_function(source, "check", vec![Value::Int(5), Value::Int(0)]);
+    assert!(
+        result.is_err(),
+        "Should have evaluated RHS and gotten division by zero"
+    );
+}
+
+#[test]
+fn test_nested_short_circuit() {
+    // Test nested short-circuit: (false && x) || (true && y)
+    let source = r#"
+        let nested(a:int, b:int, c:int): boolean = {
+            (a > 10 && (1 / 0) > 0) || (b < 5 && c > 0)
+        }
+    "#;
+
+    // a > 10 is false, so inner && short-circuits (no div by zero)
+    // b < 5 is true, c > 0 is true, so result is true
+    let result = execute_function(
+        source,
+        "nested",
+        vec![Value::Int(5), Value::Int(3), Value::Int(10)],
+    );
+    assert!(
+        result.is_ok(),
+        "Short-circuit should prevent division by zero, got: {:?}",
+        result.err()
+    );
+    assert_eq!(result.unwrap(), Value::Boolean(true));
+}

@@ -152,6 +152,19 @@ pub enum Expr {
         span: TextSpan,
     },
 
+    /// Let binding expression.
+    ///
+    /// Evaluates the value expression once and binds it to a name,
+    /// then evaluates the body with that binding in scope.
+    ///
+    /// Example: `let x = expensive() in x + x`
+    Let {
+        name: Name,
+        value: ExprId,
+        body: ExprId,
+        span: TextSpan,
+    },
+
     /// Block expression.
     ///
     /// Example: `{ let x = 1; x + 2 }`
@@ -236,6 +249,7 @@ impl Expr {
             Expr::UnaryOp { span, .. } => *span,
             Expr::Call { span, .. } => *span,
             Expr::If { span, .. } => *span,
+            Expr::Let { span, .. } => *span,
             Expr::Block { span, .. } => *span,
             Expr::Array { span, .. } => *span,
             Expr::Index { span, .. } => *span,

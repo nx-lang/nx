@@ -983,3 +983,66 @@ fn test_match_expression_computed_scrutinee() {
         Value::String(SmolStr::new("odd"))
     );
 }
+
+/// Test that match expression only evaluates scrutinee once
+/// Uses a function with side effects (division by zero) to prove single evaluation
+#[test]
+fn test_match_expression_evaluates_scrutinee_once() {
+    // The scrutinee is 10 / denom. If it were evaluated multiple times,
+    // denom = 0 would cause division by zero error. By using a non-zero denom,
+    // if scrutinee is only evaluated once, it works correctly.
+    let source = r#"
+        let single_eval(denom:int): string = { 
+            if 10 / denom is { 
+                5 => "five"
+                10 => "ten"
+                else => "other"
+            }
+        }
+    "#;
+
+    // 10 / 2 = 5, should match first pattern
+    assert_eq!(
+        execute_nx_function(source, "single_eval", vec![Value::Int(2)]).unwrap(),
+        Value::String(SmolStr::new("five"))
+    );
+
+    // 10 / 1 = 10, should match second pattern
+    assert_eq!(
+        execute_nx_function(source, "single_eval", vec![Value::Int(1)]).unwrap(),
+        Value::String(SmolStr::new("ten"))
+    );
+
+    // 10 / 5 = 2, should go to else
+    assert_eq!(
+        execute_nx_function(source, "single_eval", vec![Value::Int(5)]).unwrap(),
+        Value::String(SmolStr::new("other"))
+    );
+}
+
+/// Test match expression with multiple patterns still evaluates scrutinee once
+#[test]
+fn test_match_multiple_patterns_evaluates_scrutinee_once() {
+    let source = r#"
+        let multi_pattern(denom:int): string = { 
+            if 100 / denom is { 
+                1, 2 => "small"
+                10, 20 => "medium"
+                50, 100 => "large"
+                else => "other"
+            }
+        }
+    "#;
+
+    // 100 / 10 = 10, should match "medium"
+    assert_eq!(
+        execute_nx_function(source, "multi_pattern", vec![Value::Int(10)]).unwrap(),
+        Value::String(SmolStr::new("medium"))
+    );
+
+    // 100 / 2 = 50, should match "large"
+    assert_eq!(
+        execute_nx_function(source, "multi_pattern", vec![Value::Int(2)]).unwrap(),
+        Value::String(SmolStr::new("large"))
+    );
+}

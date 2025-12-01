@@ -608,13 +608,18 @@ impl LoweringContext {
             }
 
             // Match expression: if scrutinee is { pattern => expr, ... }
-            // We lower this to nested if-else with equality checks
+            // We lower this to: let $match = scrutinee in (nested if-else with equality checks)
+            // This ensures the scrutinee is evaluated only once.
             SyntaxKind::VALUE_IF_MATCH_EXPRESSION => {
                 // Get the scrutinee expression
-                let scrutinee = node
+                let scrutinee_expr = node
                     .child_by_field("scrutinee")
                     .map(|n| self.lower_expr(n))
                     .unwrap_or_else(|| self.error_expr(node.span()));
+
+                // Generate a unique name for the scrutinee binding
+                let scrutinee_name = Name::new("$match");
+                let scrutinee_ref = self.alloc_expr(Expr::Ident(scrutinee_name.clone()));
 
                 // Collect all match arms
                 let mut arms: Vec<(Vec<ExprId>, ExprId)> = Vec::new();
@@ -665,13 +670,13 @@ impl LoweringContext {
 
                 // Build nested if-else from the arms (in reverse order)
                 // if x is { 1 => a, 2, 3 => b, else => c } becomes:
-                // if x == 1 { a } else { if x == 2 || x == 3 { b } else { c } }
+                // let $match = x in (if $match == 1 { a } else { if $match == 2 || $match == 3 { b } else { c } })
                 let mut result = else_expr;
                 for (patterns, body) in arms.into_iter().rev() {
-                    // Build OR condition for multiple patterns: scrutinee == p1 || scrutinee == p2 ...
+                    // Build OR condition for multiple patterns: $match == p1 || $match == p2 ...
                     let condition = if patterns.len() == 1 {
                         self.alloc_expr(Expr::BinaryOp {
-                            lhs: scrutinee,
+                            lhs: scrutinee_ref,
                             op: BinOp::Eq,
                             rhs: patterns[0],
                             span: node.span(),
@@ -679,14 +684,14 @@ impl LoweringContext {
                     } else {
                         // Multiple patterns: build OR chain
                         let mut or_expr = self.alloc_expr(Expr::BinaryOp {
-                            lhs: scrutinee,
+                            lhs: scrutinee_ref,
                             op: BinOp::Eq,
                             rhs: patterns[0],
                             span: node.span(),
                         });
                         for pattern in patterns.into_iter().skip(1) {
                             let eq_expr = self.alloc_expr(Expr::BinaryOp {
-                                lhs: scrutinee,
+                                lhs: scrutinee_ref,
                                 op: BinOp::Eq,
                                 rhs: pattern,
                                 span: node.span(),
@@ -709,7 +714,14 @@ impl LoweringContext {
                     }));
                 }
 
-                result.unwrap_or_else(|| self.error_expr(node.span()))
+                // Wrap in Let expression to evaluate scrutinee once
+                let match_body = result.unwrap_or_else(|| self.error_expr(node.span()));
+                self.alloc_expr(Expr::Let {
+                    name: scrutinee_name,
+                    value: scrutinee_expr,
+                    body: match_body,
+                    span: node.span(),
+                })
             }
 
             // Default: create error
