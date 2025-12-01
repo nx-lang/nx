@@ -3,7 +3,6 @@
 ## High level guidance
 
 * Review the `CONTRIBUTING.md` file for instructions to build and test the software.
-* Set the `NBGV_GitEngine` environment variable to `Disabled` before running any `dotnet` or `msbuild` commands.
 
 ## Software Design
 
