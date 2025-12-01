@@ -24,38 +24,101 @@ impl TypeBinding {
     }
 }
 
+/// A single scope containing name → type bindings.
+#[derive(Debug, Clone, Default)]
+struct Scope {
+    bindings: FxHashMap<Name, Arc<Type>>,
+}
+
+impl Scope {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn bind(&mut self, name: Name, ty: Type) {
+        self.bindings.insert(name, Arc::new(ty));
+    }
+
+    fn lookup(&self, name: &Name) -> Option<&Type> {
+        self.bindings.get(name).map(|arc| arc.as_ref())
+    }
+
+    fn len(&self) -> usize {
+        self.bindings.len()
+    }
+}
+
 /// Type environment mapping names and expressions to types.
 ///
 /// This tracks:
-/// - Variable and function types by name
+/// - Variable and function types by name (with lexical scoping)
 /// - Expression types by ExprId
-#[derive(Debug, Clone, Default)]
+///
+/// The environment uses a scope stack to support lexical scoping.
+/// Use `push_scope`/`pop_scope` to create nested scopes for let bindings,
+/// function bodies, etc.
+#[derive(Debug, Clone)]
 pub struct TypeEnvironment {
-    /// Name → Type mappings
-    bindings: FxHashMap<Name, Arc<Type>>,
+    /// Stack of scopes (innermost at the end)
+    scopes: Vec<Scope>,
     /// ExprId → Type mappings
     expr_types: FxHashMap<ExprId, Arc<Type>>,
 }
 
+impl Default for TypeEnvironment {
+    fn default() -> Self {
+        Self {
+            scopes: vec![Scope::new()],
+            expr_types: FxHashMap::default(),
+        }
+    }
+}
+
 impl TypeEnvironment {
-    /// Creates a new empty type environment.
+    /// Creates a new empty type environment with one scope.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Binds a name to a type.
+    /// Pushes a new scope onto the scope stack.
+    pub fn push_scope(&mut self) {
+        self.scopes.push(Scope::new());
+    }
+
+    /// Pops the current scope from the scope stack.
+    ///
+    /// Does nothing if only one scope remains (the global scope).
+    pub fn pop_scope(&mut self) {
+        if self.scopes.len() > 1 {
+            self.scopes.pop();
+        }
+    }
+
+    /// Binds a name to a type in the current (innermost) scope.
     pub fn bind(&mut self, name: Name, ty: Type) {
-        self.bindings.insert(name, Arc::new(ty));
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.bind(name, ty);
+        }
     }
 
-    /// Removes a binding for a name, returning the previous type if it existed.
+    /// Removes a binding for a name from the current scope.
+    ///
+    /// Note: This only removes from the innermost scope. For proper scoping,
+    /// prefer using `push_scope`/`pop_scope` instead.
     pub fn remove(&mut self, name: &Name) -> Option<Arc<Type>> {
-        self.bindings.remove(name)
+        self.scopes
+            .last_mut()
+            .and_then(|scope| scope.bindings.remove(name))
     }
 
-    /// Looks up the type of a name.
+    /// Looks up the type of a name, searching from innermost to outermost scope.
     pub fn lookup(&self, name: &Name) -> Option<&Type> {
-        self.bindings.get(name).map(|arc| arc.as_ref())
+        for scope in self.scopes.iter().rev() {
+            if let Some(ty) = scope.lookup(name) {
+                return Some(ty);
+            }
+        }
+        None
     }
 
     /// Records the type of an expression.
@@ -68,24 +131,27 @@ impl TypeEnvironment {
         self.expr_types.get(&expr).map(|arc| arc.as_ref())
     }
 
-    /// Returns all name bindings.
+    /// Returns all name bindings across all scopes.
     pub fn bindings(&self) -> impl Iterator<Item = (&Name, &Type)> {
-        self.bindings.iter().map(|(name, ty)| (name, ty.as_ref()))
+        self.scopes
+            .iter()
+            .flat_map(|scope| scope.bindings.iter().map(|(name, ty)| (name, ty.as_ref())))
     }
 
-    /// Returns the number of bindings.
+    /// Returns the total number of bindings across all scopes.
     pub fn len(&self) -> usize {
-        self.bindings.len()
+        self.scopes.iter().map(|s| s.len()).sum()
     }
 
-    /// Returns true if there are no bindings.
+    /// Returns true if there are no bindings in any scope.
     pub fn is_empty(&self) -> bool {
-        self.bindings.is_empty()
+        self.scopes.iter().all(|s| s.bindings.is_empty())
     }
 
-    /// Clears all bindings.
+    /// Clears all bindings and resets to a single empty scope.
     pub fn clear(&mut self) {
-        self.bindings.clear();
+        self.scopes.clear();
+        self.scopes.push(Scope::new());
         self.expr_types.clear();
     }
 }

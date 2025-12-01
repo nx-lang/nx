@@ -271,19 +271,24 @@ impl<'a> InferenceContext<'a> {
 
             // Let expressions (used for match lowering)
             ast::Expr::Let {
-                name,
-                value,
-                body,
-                ..
+                name, value, body, ..
             } => {
                 // Infer the type of the value
                 let value_ty = self.infer_expr(*value);
 
-                // Bind the name to the value type
+                // Create a new scope for the let binding
+                self.env.push_scope();
+
+                // Bind the name to the value type in this scope
                 self.env.bind(name.clone(), value_ty);
 
                 // Infer the body with the binding in scope
-                self.infer_expr(*body)
+                let body_ty = self.infer_expr(*body);
+
+                // Pop the scope to remove the binding
+                self.env.pop_scope();
+
+                body_ty
             }
 
             // Error expressions
