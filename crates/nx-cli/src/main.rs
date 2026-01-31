@@ -7,6 +7,7 @@
 //! - `nxlang format <file>` - Format NX source code (future)
 
 mod format;
+mod json;
 
 use clap::{Parser, Subcommand};
 use nx_diagnostics::{render_diagnostics_cli, Severity};
@@ -40,18 +41,45 @@ enum Commands {
     Run {
         /// Path to the NX file to run
         file: PathBuf,
+
+        /// Output format for the evaluation result
+        #[arg(long, default_value_t = OutputFormat::Nx)]
+        format: OutputFormat,
+
+        /// Write output to a file instead of stdout
+        #[arg(short, long)]
+        output: Option<PathBuf>,
     },
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum OutputFormat {
+    Nx,
+    Json,
+}
+
+impl std::fmt::Display for OutputFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OutputFormat::Nx => write!(f, "nx"),
+            OutputFormat::Json => write!(f, "json"),
+        }
+    }
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Run { file } => run_file(&file),
+        Commands::Run {
+            file,
+            format,
+            output,
+        } => run_file(&file, format, output.as_ref()),
     }
 }
 
-fn run_file(path: &PathBuf) -> ExitCode {
+fn run_file(path: &PathBuf, format: OutputFormat, output: Option<&PathBuf>) -> ExitCode {
     // Check if file exists
     if !path.exists() {
         eprintln!("Error: File not found: {}", path.display());
@@ -132,8 +160,23 @@ fn run_file(path: &PathBuf) -> ExitCode {
     let interpreter = Interpreter::new();
     match interpreter.execute_function(&module, "root", vec![]) {
         Ok(value) => {
-            let output = format_output(&value);
-            println!("{}", output);
+            let output_text = match format_output(&value, format) {
+                Ok(output) => output,
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    return ExitCode::from(1);
+                }
+            };
+
+            if let Some(output_path) = output {
+                if let Err(e) = std::fs::write(output_path, format!("{}\n", output_text)) {
+                    eprintln!("Error writing output to '{}': {}", output_path.display(), e);
+                    return ExitCode::from(1);
+                }
+            } else {
+                println!("{}", output_text);
+            }
+
             ExitCode::SUCCESS
         }
         Err(e) => {
@@ -143,14 +186,18 @@ fn run_file(path: &PathBuf) -> ExitCode {
     }
 }
 
-fn format_output(value: &Value) -> String {
-    format::format_value(value)
+fn format_output(value: &Value, format: OutputFormat) -> Result<String, String> {
+    match format {
+        OutputFormat::Nx => Ok(format::format_value(value)),
+        OutputFormat::Json => json::format_value_json_pretty(value),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use nx_syntax::parse_file;
+    use nx_value::NxValue;
     use std::fs;
     use tempfile::TempDir;
 
@@ -214,7 +261,10 @@ mod tests {
 
         assert!(result.is_ok());
         let value = result.unwrap();
-        assert_eq!(format_output(&value), "42");
+        assert_eq!(
+            format_output(&value, OutputFormat::Nx).unwrap(),
+            "42"
+        );
     }
 
     #[test]
@@ -232,7 +282,10 @@ mod tests {
 
         assert!(result.is_ok());
         let value = result.unwrap();
-        assert_eq!(format_output(&value), "Hello, World!");
+        assert_eq!(
+            format_output(&value, OutputFormat::Nx).unwrap(),
+            "Hello, World!"
+        );
     }
 
     #[test]
@@ -250,7 +303,10 @@ mod tests {
 
         assert!(result.is_ok());
         let value = result.unwrap();
-        assert_eq!(format_output(&value), "14");
+        assert_eq!(
+            format_output(&value, OutputFormat::Nx).unwrap(),
+            "14"
+        );
     }
 
     #[test]
@@ -275,7 +331,7 @@ mod tests {
         let result = interpreter.execute_function(&module, "root", vec![]);
 
         assert!(result.is_ok());
-        let output = format_output(&result.unwrap());
+        let output = format_output(&result.unwrap(), OutputFormat::Nx).unwrap();
         assert!(output.contains("name=\"Alice\""));
         assert!(output.contains("age=\"30\""));
     }
@@ -295,7 +351,10 @@ mod tests {
 
         assert!(result.is_ok());
         let value = result.unwrap();
-        assert_eq!(format_output(&value), "true");
+        assert_eq!(
+            format_output(&value, OutputFormat::Nx).unwrap(),
+            "true"
+        );
     }
 
     #[test]
@@ -313,7 +372,10 @@ mod tests {
 
         assert!(result.is_ok());
         let value = result.unwrap();
-        assert_eq!(format_output(&value), "null");
+        assert_eq!(
+            format_output(&value, OutputFormat::Nx).unwrap(),
+            "null"
+        );
     }
 
     // ===== CLI Integration Tests =====
@@ -322,6 +384,18 @@ mod tests {
     /// Helper to run the CLI binary with arguments and capture output
     fn run_cli(args: &[&str]) -> std::process::Output {
         use std::process::Command;
+        use std::sync::Once;
+
+        static BUILD: Once = Once::new();
+
+        BUILD.call_once(|| {
+            let status = Command::new("cargo")
+                .args(["build", "-p", "nx-cli", "--bin", "nxlang"])
+                .status()
+                .expect("Failed to build nxlang binary");
+
+            assert!(status.success(), "Failed to build nxlang binary");
+        });
 
         // Build the path to the test binary
         // In tests, CARGO_MANIFEST_DIR points to the crate's directory
@@ -361,6 +435,74 @@ mod tests {
         assert!(output.status.success());
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert_eq!(stdout.trim(), "Hello, World!");
+    }
+
+    #[test]
+    fn test_cli_run_json_string_output() {
+        let (_dir, path) = create_temp_nx_file("let root() = { \"Hello, World!\" }");
+
+        let output = run_cli(&["run", path.to_str().unwrap(), "--format", "json"]);
+
+        assert!(output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let value = NxValue::from_json_str(stdout.trim()).unwrap();
+        assert_eq!(value, NxValue::String("Hello, World!".to_string()));
+    }
+
+    #[test]
+    fn test_cli_run_json_typed_record_output() {
+        let source = r#"
+            type User = {
+              name: string
+              age: int = 30
+            }
+
+            let root() = { <User name="Bob" /> }
+        "#;
+        let (_dir, path) = create_temp_nx_file(source);
+
+        let output = run_cli(&["run", path.to_str().unwrap(), "--format", "json"]);
+
+        assert!(output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let value = NxValue::from_json_str(stdout.trim()).unwrap();
+
+        let NxValue::Object(fields) = value else {
+            panic!("Expected JSON object. Got: {:?}", value);
+        };
+
+        assert_eq!(
+            fields.get("$type"),
+            Some(&NxValue::String("User".to_string()))
+        );
+        assert_eq!(
+            fields.get("name"),
+            Some(&NxValue::String("Bob".to_string()))
+        );
+        assert_eq!(fields.get("age"), Some(&NxValue::Int(30)));
+    }
+
+    #[test]
+    fn test_cli_run_json_output_to_file() {
+        let (dir, file_path) = create_temp_nx_file("let root() = { 42 }");
+        let output_path = dir.path().join("out.json");
+
+        let output = run_cli(&[
+            "run",
+            file_path.to_str().unwrap(),
+            "--format",
+            "json",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        assert!(output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(stdout.trim(), "");
+
+        let written = fs::read_to_string(&output_path).unwrap();
+        let value = NxValue::from_json_str(written.trim()).unwrap();
+        assert_eq!(value, NxValue::Int(42));
     }
 
     #[test]
