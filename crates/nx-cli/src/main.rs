@@ -21,7 +21,12 @@ use std::process::ExitCode;
 #[command(name = "nxlang")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "NX Language CLI - Tools for NX development", long_about = None)]
+#[command(disable_version_flag = true)]
 struct Cli {
+    /// Print version
+    #[arg(short = 'v', short_alias = 'V', long = "version", action = clap::ArgAction::Version)]
+    version: (),
+
     #[command(subcommand)]
     command: Commands,
 }
