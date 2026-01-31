@@ -416,3 +416,194 @@ fn test_record_all_fields_have_defaults() {
         other => panic!("expected TypedRecord, got {:?}", other),
     }
 }
+
+// ============================================================================
+// Element and Paren Call Interop Tests
+// ============================================================================
+
+#[test]
+fn test_element_call_invokes_paren_defined_function() {
+    let source = r#"
+        let add(a:int, b:int): int = { a + b }
+        let compute(): int = { <add b=2 a=1 /> }
+    "#;
+
+    let result = execute_function(source, "compute", vec![])
+        .unwrap_or_else(|err| panic!("Element call failed:\n{}", err));
+    assert_eq!(result, Value::Int(3));
+}
+
+#[test]
+fn test_element_call_invokes_element_defined_function() {
+    let source = r#"
+        let <add a:int b:int /> = { a + b }
+        let compute(): int = { <add a=1 b=2 /> }
+    "#;
+
+    let result = execute_function(source, "compute", vec![])
+        .unwrap_or_else(|err| panic!("Element call failed:\n{}", err));
+    assert_eq!(result, Value::Int(3));
+}
+
+#[test]
+fn test_paren_call_constructs_record_type_positionally() {
+    let source = r#"
+        type User = { name:string age:int = 30 }
+        let getName(): string = { User("Bob", 42).name }
+        let getAge(): int = { User("Bob").age }
+    "#;
+
+    let result = execute_function(source, "getName", vec![])
+        .unwrap_or_else(|err| panic!("Record constructor call failed:\n{}", err));
+    assert_eq!(result, Value::String(SmolStr::new("Bob")));
+
+    let result = execute_function(source, "getAge", vec![])
+        .unwrap_or_else(|err| panic!("Record constructor call failed:\n{}", err));
+    assert_eq!(result, Value::Int(30));
+}
+
+#[test]
+fn test_element_call_passes_children_to_function() {
+    let source = r#"
+        let collect(children:object[]): object[] = { children }
+        let root(): object[] = { <collect><div /><span /></collect> }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("Element call with children failed:\n{}", err));
+
+    let expected = Value::Array(vec![
+        Value::TypedRecord {
+            type_name: nx_hir::Name::new("div"),
+            fields: FxHashMap::default(),
+        },
+        Value::TypedRecord {
+            type_name: nx_hir::Name::new("span"),
+            fields: FxHashMap::default(),
+        },
+    ]);
+
+    assert_eq!(result, expected);
+}
+
+#[test]
+fn test_paren_call_invokes_element_defined_function() {
+    let source = r#"
+        let <add a:int b:int /> = { a + b }
+        let compute(): int = { add(1, 2) }
+    "#;
+
+    let result = execute_function(source, "compute", vec![])
+        .unwrap_or_else(|err| panic!("Paren call to element-defined function failed:\n{}", err));
+    assert_eq!(result, Value::Int(3));
+}
+
+#[test]
+fn test_element_call_constructs_record_via_type_alias() {
+    let source = r#"
+        type User = { name: string age: int = 30 }
+        type Person = User
+        let getName(): string = { <Person name="Bob" />.name }
+        let getAge(): int = { <Person name="Bob" />.age }
+    "#;
+
+    let result = execute_function(source, "getName", vec![])
+        .unwrap_or_else(|err| panic!("Element call record alias failed:\n{}", err));
+    assert_eq!(result, Value::String(SmolStr::new("Bob")));
+
+    let result = execute_function(source, "getAge", vec![])
+        .unwrap_or_else(|err| panic!("Element call record alias failed:\n{}", err));
+    assert_eq!(result, Value::Int(30));
+}
+
+#[test]
+fn test_element_call_children_injected_for_element_defined_function() {
+    let source = r#"
+        let <collect children: object[] />: object[] = { children }
+        let root(): object[] = { <collect><div /><span /></collect> }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("Element call with children failed:\n{}", err));
+
+    let expected = Value::Array(vec![
+        Value::TypedRecord {
+            type_name: nx_hir::Name::new("div"),
+            fields: FxHashMap::default(),
+        },
+        Value::TypedRecord {
+            type_name: nx_hir::Name::new("span"),
+            fields: FxHashMap::default(),
+        },
+    ]);
+
+    assert_eq!(result, expected);
+}
+
+#[test]
+fn test_element_call_children_conflict_is_error_for_function() {
+    let source = r#"
+        let collect(children: object[]): object[] = { children }
+        let root(): object[] = { <collect children={null}><div /></collect> }
+    "#;
+
+    let result = execute_function(source, "root", vec![]);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.contains("children"), "Error should mention children:\n{}", err);
+    assert!(err.contains("both"), "Error should mention both:\n{}", err);
+}
+
+#[test]
+fn test_element_call_children_conflict_is_error_for_record() {
+    let source = r#"
+        type Container = { children: object[] }
+        type Box = Container
+        let root(): object = { <Box children={null}><div /></Box> }
+    "#;
+
+    let result = execute_function(source, "root", vec![]);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.contains("children"), "Error should mention children:\n{}", err);
+    assert!(err.contains("both"), "Error should mention both:\n{}", err);
+}
+
+#[test]
+fn test_element_call_body_is_error_for_record_without_children_field() {
+    let source = r#"
+        type User = { name: string }
+        type Person = User
+        let root(): object = { <Person><div /></Person> }
+    "#;
+
+    let result = execute_function(source, "root", vec![]);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.contains("children"), "Error should mention children:\n{}", err);
+}
+
+#[test]
+fn test_element_call_body_populates_record_children_field() {
+    let source = r#"
+        type Container = { children: object[] }
+        type Box = Container
+        let root(): object[] = { <Box><div /><span /></Box>.children }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("Record children injection failed:\n{}", err));
+
+    let expected = Value::Array(vec![
+        Value::TypedRecord {
+            type_name: nx_hir::Name::new("div"),
+            fields: FxHashMap::default(),
+        },
+        Value::TypedRecord {
+            type_name: nx_hir::Name::new("span"),
+            fields: FxHashMap::default(),
+        },
+    ]);
+
+    assert_eq!(result, expected);
+}

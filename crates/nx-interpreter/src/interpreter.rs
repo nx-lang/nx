@@ -3,7 +3,7 @@
 use crate::context::{ExecutionContext, ResourceLimits};
 use crate::error::{RuntimeError, RuntimeErrorKind};
 use crate::value::Value;
-use nx_hir::{ast, ExprId, Function, Module, Name};
+use nx_hir::{ast, ElementId, ExprId, Function, Item, Module, Name};
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 use smol_str::SmolStr;
@@ -184,6 +184,7 @@ impl Interpreter {
                 }
                 Ok(Value::Array(values))
             }
+            ast::Expr::Element { element, .. } => self.eval_element_expr(module, ctx, *element),
             ast::Expr::RecordLiteral {
                 record, properties, ..
             } => self.eval_record_literal(module, ctx, record, properties),
@@ -455,46 +456,214 @@ impl Interpreter {
             }
         };
 
-        // Find the function in the module
-        let function = self.find_function(module, func_name)?;
-
-        // Validate parameter count
-        if function.params.len() != args.len() {
-            return Err(RuntimeError::new(
-                RuntimeErrorKind::ParameterCountMismatch {
-                    expected: function.params.len(),
-                    actual: args.len(),
-                    function: SmolStr::new(func_name),
-                },
-            ));
-        }
-
-        // Evaluate arguments
         let mut arg_values = Vec::with_capacity(args.len());
         for arg_expr in args {
             arg_values.push(self.eval_expr(module, ctx, *arg_expr)?);
         }
 
-        // Create call frame (T054)
+        match module.find_item(func_name) {
+            Some(Item::Function(function)) => {
+                self.eval_function_call(module, ctx, func_name, function, arg_values)
+            }
+            Some(Item::Record(record_def)) => {
+                self.eval_record_constructor_call(module, ctx, func_name, record_def, arg_values)
+            }
+            Some(Item::TypeAlias(_)) => {
+                if let Some(record_def) = self.resolve_record_definition(module, func_name) {
+                    self.eval_record_constructor_call(module, ctx, func_name, record_def, arg_values)
+                } else {
+                    Err(RuntimeError::new(RuntimeErrorKind::FunctionNotFound {
+                        name: SmolStr::new(func_name),
+                    }))
+                }
+            }
+            _ => Err(RuntimeError::new(RuntimeErrorKind::FunctionNotFound {
+                name: SmolStr::new(func_name),
+            })),
+        }
+    }
+
+    fn eval_function_call(
+        &self,
+        module: &Module,
+        ctx: &mut ExecutionContext,
+        func_name: &str,
+        function: &Function,
+        arg_values: Vec<Value>,
+    ) -> Result<Value, RuntimeError> {
+        if function.params.len() != arg_values.len() {
+            return Err(RuntimeError::new(
+                RuntimeErrorKind::ParameterCountMismatch {
+                    expected: function.params.len(),
+                    actual: arg_values.len(),
+                    function: SmolStr::new(func_name),
+                },
+            ));
+        }
+
         let call_frame = crate::error::CallFrame::new(SmolStr::new(func_name), None);
-        ctx.push_call_frame(call_frame)?; // This checks recursion depth
+        ctx.push_call_frame(call_frame)?;
 
-        // Create new scope for function parameters
         ctx.push_scope();
-
-        // Bind parameters to argument values
         for (param, arg) in function.params.iter().zip(arg_values.iter()) {
             ctx.define_variable(SmolStr::new(param.name.as_str()), arg.clone());
         }
 
-        // Execute the function body
         let result = self.eval_expr(module, ctx, function.body);
 
-        // Clean up scope and call frame
         ctx.pop_scope();
         ctx.pop_call_frame();
 
         result
+    }
+
+    fn eval_record_constructor_call(
+        &self,
+        module: &Module,
+        ctx: &mut ExecutionContext,
+        func_name: &str,
+        record_def: &nx_hir::RecordDef,
+        arg_values: Vec<Value>,
+    ) -> Result<Value, RuntimeError> {
+        if arg_values.len() > record_def.properties.len() {
+            return Err(RuntimeError::new(
+                RuntimeErrorKind::ParameterCountMismatch {
+                    expected: record_def.properties.len(),
+                    actual: arg_values.len(),
+                    function: SmolStr::new(func_name),
+                },
+            ));
+        }
+
+        let mut overrides = FxHashMap::default();
+        for (field, value) in record_def.properties.iter().zip(arg_values.into_iter()) {
+            overrides.insert(SmolStr::new(field.name.as_str()), value);
+        }
+
+        self.build_record_value(module, ctx, record_def.name.as_str(), overrides)
+    }
+
+    fn eval_element_expr(
+        &self,
+        module: &Module,
+        ctx: &mut ExecutionContext,
+        element_id: ElementId,
+    ) -> Result<Value, RuntimeError> {
+        let element = module.element(element_id);
+        let tag_name = element.tag.as_str();
+
+        let mut fields = FxHashMap::default();
+        for prop in &element.properties {
+            let value = self.eval_expr(module, ctx, prop.value)?;
+            fields.insert(SmolStr::new(prop.key.as_str()), value);
+        }
+
+        let mut child_values = Vec::with_capacity(element.children.len());
+        for child_id in &element.children {
+            child_values.push(self.eval_element_expr(module, ctx, *child_id)?);
+        }
+
+        if let Some(Item::Function(function)) = module.find_item(tag_name) {
+            let has_children_param = function
+                .params
+                .iter()
+                .any(|p| p.name.as_str() == "children");
+
+            if fields.contains_key("children") && !child_values.is_empty() {
+                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                    expected: "children passed either as a named property or as element body"
+                        .to_string(),
+                    actual: "both a children property and element body".to_string(),
+                    operation: "element function call".to_string(),
+                }));
+            }
+
+            if !has_children_param && !child_values.is_empty() {
+                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                    expected: "function without 'children' parameter".to_string(),
+                    actual: "element body content".to_string(),
+                    operation: "element function call".to_string(),
+                }));
+            }
+
+            if has_children_param && !fields.contains_key("children") {
+                fields.insert(SmolStr::new("children"), Value::Array(child_values));
+            }
+
+            if fields.len() != function.params.len() {
+                return Err(RuntimeError::new(RuntimeErrorKind::ParameterCountMismatch {
+                    expected: function.params.len(),
+                    actual: fields.len(),
+                    function: SmolStr::new(tag_name),
+                }));
+            }
+
+            let mut arg_values = Vec::with_capacity(function.params.len());
+            for param in &function.params {
+                match fields.remove(param.name.as_str()) {
+                    Some(value) => {
+                        arg_values.push(value);
+                    }
+                    None => {
+                        return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                            expected: format!("argument '{}'", param.name.as_str()),
+                            actual: "missing".to_string(),
+                            operation: "element function call".to_string(),
+                        }))
+                    }
+                }
+            }
+
+            if !fields.is_empty() {
+                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                    expected: "known parameters".to_string(),
+                    actual: "unknown property".to_string(),
+                    operation: "element function call".to_string(),
+                }));
+            }
+
+            return self.eval_function_call(module, ctx, tag_name, function, arg_values);
+        }
+
+        if let Some(record_def) = self.resolve_record_definition(module, tag_name) {
+            let record_has_children_field = record_def
+                .properties
+                .iter()
+                .any(|p| p.name.as_str() == "children");
+
+            if fields.contains_key("children") && !child_values.is_empty() {
+                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                    expected: "children passed either as a named property or as element body"
+                        .to_string(),
+                    actual: "both a children property and element body".to_string(),
+                    operation: "element record call".to_string(),
+                }));
+            }
+
+            if !record_has_children_field && !child_values.is_empty() {
+                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                    expected: "record without 'children' field".to_string(),
+                    actual: "element body content".to_string(),
+                    operation: "element record call".to_string(),
+                }));
+            }
+
+            if record_has_children_field && !fields.contains_key("children") && !child_values.is_empty()
+            {
+                fields.insert(SmolStr::new("children"), Value::Array(child_values));
+            }
+
+            return self.build_record_value(module, ctx, record_def.name.as_str(), fields);
+        }
+
+        if !child_values.is_empty() && !fields.contains_key("children") {
+            fields.insert(SmolStr::new("children"), Value::Array(child_values));
+        }
+
+        Ok(Value::TypedRecord {
+            type_name: element.tag.clone(),
+            fields,
+        })
     }
 
     fn eval_member(
@@ -639,6 +808,14 @@ impl Interpreter {
         self.resolve_enum_definition_inner(module, name, &mut FxHashSet::default())
     }
 
+    fn resolve_record_definition<'a>(
+        &self,
+        module: &'a Module,
+        name: &str,
+    ) -> Option<&'a nx_hir::RecordDef> {
+        self.resolve_record_definition_inner(module, name, &mut FxHashSet::default())
+    }
+
     fn resolve_enum_definition_inner<'a>(
         &self,
         module: &'a Module,
@@ -655,6 +832,32 @@ impl Interpreter {
             Some(nx_hir::Item::TypeAlias(alias)) => match &alias.ty {
                 ast::TypeRef::Name(target) => {
                     self.resolve_enum_definition_inner(module, target, seen)
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+
+        seen.remove(&key);
+        result
+    }
+
+    fn resolve_record_definition_inner<'a>(
+        &self,
+        module: &'a Module,
+        name: &str,
+        seen: &mut FxHashSet<SmolStr>,
+    ) -> Option<&'a nx_hir::RecordDef> {
+        let key = SmolStr::new(name);
+        if !seen.insert(key.clone()) {
+            return None;
+        }
+
+        let result = match module.find_item(name) {
+            Some(Item::Record(def)) => Some(def),
+            Some(Item::TypeAlias(alias)) => match &alias.ty {
+                ast::TypeRef::Name(target) => {
+                    self.resolve_record_definition_inner(module, target.as_str(), seen)
                 }
                 _ => None,
             },
