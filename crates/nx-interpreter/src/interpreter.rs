@@ -517,7 +517,7 @@ impl Interpreter {
                     .any(|m| m.name.as_str() == member.as_str())
                 {
                     return Ok(Value::EnumVariant {
-                        type_name: SmolStr::new(enum_def.name.as_str()),
+                        type_name: enum_def.name.clone(),
                         variant: SmolStr::new(member.as_str()),
                     });
                 } else {
@@ -714,7 +714,7 @@ impl Interpreter {
         }
 
         Ok(Value::TypedRecord {
-            type_name: SmolStr::new(record_name),
+            type_name: Name::new(record_name),
             fields: overrides,
         })
     }

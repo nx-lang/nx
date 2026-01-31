@@ -210,7 +210,7 @@ fn test_enum_member_return() {
     assert_eq!(
         result,
         Value::EnumVariant {
-            type_name: SmolStr::new("Direction"),
+            type_name: nx_hir::Name::new("Direction"),
             variant: SmolStr::new("North")
         }
     );
@@ -227,7 +227,7 @@ fn test_enum_comparison() {
         source,
         "isNorth",
         vec![Value::EnumVariant {
-            type_name: SmolStr::new("Direction"),
+            type_name: nx_hir::Name::new("Direction"),
             variant: SmolStr::new("North"),
         }],
     )

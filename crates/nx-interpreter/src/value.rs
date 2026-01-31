@@ -1,5 +1,6 @@
 //! Runtime value representation for the NX interpreter.
 
+use nx_hir::Name;
 use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
 
@@ -13,7 +14,6 @@ use smol_str::SmolStr;
 /// ```
 /// use nx_interpreter::Value;
 /// use smol_str::SmolStr;
-///
 /// let int_val = Value::Int(42);
 /// let float_val = Value::Float(3.14);
 /// let string_val = Value::String(SmolStr::new("hello"));
@@ -58,7 +58,7 @@ pub enum Value {
     /// Stores the enum type name and selected member.
     EnumVariant {
         /// Enum type name
-        type_name: SmolStr,
+        type_name: Name,
         /// Variant name
         variant: SmolStr,
     },
@@ -71,7 +71,7 @@ pub enum Value {
     /// Like Record but preserves the original type/element name for pretty printing.
     TypedRecord {
         /// The type/element name (e.g., "User", "Button")
-        type_name: SmolStr,
+        type_name: Name,
         /// Field values
         fields: FxHashMap<SmolStr, Value>,
     },
@@ -217,7 +217,7 @@ mod tests {
         assert_eq!(Value::Null.to_string(), "null");
         assert_eq!(
             Value::EnumVariant {
-                type_name: SmolStr::new("Status"),
+                type_name: Name::new("Status"),
                 variant: SmolStr::new("Active")
             }
             .to_string(),
