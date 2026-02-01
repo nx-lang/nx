@@ -746,6 +746,29 @@ impl LoweringContext {
         }
 
         match node.kind() {
+            SyntaxKind::TYPE => {
+                let mut children = node.children_with_tokens();
+                let Some(base_node) = children.next() else {
+                    return TypeRef::name("unknown");
+                };
+
+                let mut ty = self.lower_type(base_node);
+                for child in children {
+                    match child.kind() {
+                        SyntaxKind::QUESTION => {
+                            ty = TypeRef::nullable(ty);
+                        }
+                        SyntaxKind::LBRACKET => {
+                            // The grammar only supports `[]` (sequence/list), so we treat the
+                            // presence of `[` as an array type suffix.
+                            ty = TypeRef::array(ty);
+                        }
+                        _ => {}
+                    }
+                }
+
+                ty
+            }
             SyntaxKind::PRIMITIVE_TYPE | SyntaxKind::IDENTIFIER => TypeRef::name(node.text()),
             SyntaxKind::USER_DEFINED_TYPE => node
                 .children()
@@ -753,11 +776,6 @@ impl LoweringContext {
                 .map(|child| self.lower_type(child))
                 .unwrap_or_else(|| TypeRef::name(node.text())),
             SyntaxKind::QUALIFIED_NAME => TypeRef::name(node.text()),
-            SyntaxKind::TYPE => node
-                .children()
-                .next()
-                .map(|child| self.lower_type(child))
-                .unwrap_or_else(|| TypeRef::name("unknown")),
             _ => TypeRef::name("unknown"),
         }
     }
@@ -1248,6 +1266,55 @@ mod tests {
             .filter(|f| f.default.is_some())
             .count();
         assert_eq!(defaults, 1, "One field should carry a default value");
+    }
+
+    #[test]
+    fn test_lower_record_field_nullable_and_array_types() {
+        let source = r#"
+            type User = {
+              tags: string[]
+              age: int?
+            }
+        "#;
+        let parse_result = parse_str(source, "record-types.nx");
+        let tree = parse_result.tree.expect("Should parse record");
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        let record = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Record(def) => Some(def),
+                _ => None,
+            })
+            .expect("Should lower record definition");
+
+        let tags = record
+            .properties
+            .iter()
+            .find(|field| field.name.as_str() == "tags")
+            .expect("Expected tags field");
+        match &tags.ty {
+            TypeRef::Array(inner) => match inner.as_ref() {
+                TypeRef::Name(name) => assert_eq!(name.as_str(), "string"),
+                other => panic!("Expected string element type, got {:?}", other),
+            },
+            other => panic!("Expected array type, got {:?}", other),
+        }
+
+        let age = record
+            .properties
+            .iter()
+            .find(|field| field.name.as_str() == "age")
+            .expect("Expected age field");
+        match &age.ty {
+            TypeRef::Nullable(inner) => match inner.as_ref() {
+                TypeRef::Name(name) => assert_eq!(name.as_str(), "int"),
+                other => panic!("Expected int inner type, got {:?}", other),
+            },
+            other => panic!("Expected nullable type, got {:?}", other),
+        }
     }
 
     #[test]

@@ -8,9 +8,9 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
 
+use serde::de::Error as _;
 use serde::de::{MapAccess, SeqAccess, Visitor};
 use serde::ser::{SerializeMap, SerializeSeq};
-use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A JSON-like tree value used as the stable NX API value type.

@@ -470,7 +470,9 @@ impl Interpreter {
             }
             Some(Item::TypeAlias(_)) => {
                 if let Some(record_def) = self.resolve_record_definition(module, func_name) {
-                    self.eval_record_constructor_call(module, ctx, func_name, record_def, arg_values)
+                    self.eval_record_constructor_call(
+                        module, ctx, func_name, record_def, arg_values,
+                    )
                 } else {
                     Err(RuntimeError::new(RuntimeErrorKind::FunctionNotFound {
                         name: SmolStr::new(func_name),
@@ -591,11 +593,13 @@ impl Interpreter {
             }
 
             if fields.len() != function.params.len() {
-                return Err(RuntimeError::new(RuntimeErrorKind::ParameterCountMismatch {
-                    expected: function.params.len(),
-                    actual: fields.len(),
-                    function: SmolStr::new(tag_name),
-                }));
+                return Err(RuntimeError::new(
+                    RuntimeErrorKind::ParameterCountMismatch {
+                        expected: function.params.len(),
+                        actual: fields.len(),
+                        function: SmolStr::new(tag_name),
+                    },
+                ));
             }
 
             let mut arg_values = Vec::with_capacity(function.params.len());
@@ -648,7 +652,9 @@ impl Interpreter {
                 }));
             }
 
-            if record_has_children_field && !fields.contains_key("children") && !child_values.is_empty()
+            if record_has_children_field
+                && !fields.contains_key("children")
+                && !child_values.is_empty()
             {
                 fields.insert(SmolStr::new("children"), Value::Array(child_values));
             }

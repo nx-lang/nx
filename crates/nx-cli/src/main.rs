@@ -2,10 +2,12 @@
 //!
 //! Provides commands like:
 //! - `nxlang run <file>` - Run an NX file and output the result
+//! - `nxlang generate <file> --language <csharp|typescript>` - Generate language-specific type definitions
 //! - `nxlang parse <file>` - Parse and display AST (future)
 //! - `nxlang check <file>` - Type check and report errors (future)
 //! - `nxlang format <file>` - Format NX source code (future)
 
+mod codegen;
 mod format;
 mod json;
 
@@ -50,12 +52,42 @@ enum Commands {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+
+    /// Generate language-specific type definitions from an NX file
+    ///
+    /// Outputs all NX `record` and `enum` type declarations in the file.
+    Generate {
+        /// Path to the NX file to read type definitions from
+        file: PathBuf,
+
+        /// Target language for generated code
+        #[arg(long, value_enum)]
+        language: GenLanguage,
+
+        /// Write output to a file instead of stdout
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+
+        /// Optional .editorconfig file to control formatting of generated output
+        #[arg(long)]
+        editorconfig: Option<PathBuf>,
+
+        /// C# namespace for generated types (only used for --language csharp)
+        #[arg(long, default_value = "Nx.Generated")]
+        csharp_namespace: String,
+    },
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 enum OutputFormat {
     Nx,
     Json,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum GenLanguage {
+    Csharp,
+    Typescript,
 }
 
 impl std::fmt::Display for OutputFormat {
@@ -76,6 +108,19 @@ fn main() -> ExitCode {
             format,
             output,
         } => run_file(&file, format, output.as_ref()),
+        Commands::Generate {
+            file,
+            language,
+            output,
+            editorconfig,
+            csharp_namespace,
+        } => generate_types(
+            &file,
+            language,
+            output.as_ref(),
+            editorconfig.as_ref(),
+            &csharp_namespace,
+        ),
     }
 }
 
@@ -186,6 +231,119 @@ fn run_file(path: &PathBuf, format: OutputFormat, output: Option<&PathBuf>) -> E
     }
 }
 
+fn generate_types(
+    path: &PathBuf,
+    language: GenLanguage,
+    output: Option<&PathBuf>,
+    editorconfig: Option<&PathBuf>,
+    csharp_namespace: &str,
+) -> ExitCode {
+    if !path.exists() {
+        eprintln!("Error: File not found: {}", path.display());
+        return ExitCode::from(1);
+    }
+
+    if path.extension().and_then(|e| e.to_str()) != Some("nx") {
+        eprintln!(
+            "Warning: File '{}' does not have .nx extension",
+            path.display()
+        );
+    }
+
+    let source = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error reading file: {}", e);
+            return ExitCode::from(1);
+        }
+    };
+
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+
+    let parse_result = parse_str(&source, file_name);
+
+    let errors: Vec<_> = parse_result
+        .errors
+        .iter()
+        .filter(|d| d.severity() == Severity::Error)
+        .cloned()
+        .collect();
+
+    if !errors.is_empty() {
+        let mut sources = HashMap::new();
+        sources.insert(file_name.to_string(), source);
+
+        let rendered = render_diagnostics_cli(&errors, &sources);
+        eprint!("{}", rendered);
+        return ExitCode::from(1);
+    }
+
+    let tree = match parse_result.tree {
+        Some(t) => t,
+        None => {
+            eprintln!("Error: Failed to parse file");
+            return ExitCode::from(1);
+        }
+    };
+
+    let source_id = SourceId::new(parse_result.source_id.as_u32());
+    let module = lower(tree.root(), source_id);
+
+    let (language, default_target_name, ns) = match language {
+        GenLanguage::Typescript => (codegen::TargetLanguage::TypeScript, "types.ts", None),
+        GenLanguage::Csharp => (
+            codegen::TargetLanguage::CSharp,
+            "Types.g.cs",
+            Some(csharp_namespace.to_string()),
+        ),
+    };
+
+    let target_file_name = output
+        .and_then(|p| p.file_name().and_then(|n| n.to_str()))
+        .unwrap_or(default_target_name);
+
+    let format = match editorconfig {
+        Some(path) => {
+            match codegen::format_options_from_editorconfig(language, path, target_file_name) {
+                Ok(opts) => opts,
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    return ExitCode::from(1);
+                }
+            }
+        }
+        None => codegen::options::FormatOptions::defaults_for(language),
+    };
+
+    let opts = codegen::GenerateTypesOptions {
+        language,
+        csharp_namespace: ns,
+        format,
+    };
+
+    let output_text = match codegen::generate_types(&module, &opts) {
+        Ok(text) => text,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            return ExitCode::from(1);
+        }
+    };
+
+    if let Some(output_path) = output {
+        if let Err(e) = std::fs::write(output_path, output_text) {
+            eprintln!("Error writing output to '{}': {}", output_path.display(), e);
+            return ExitCode::from(1);
+        }
+    } else {
+        print!("{}", output_text);
+    }
+
+    ExitCode::SUCCESS
+}
+
 fn format_output(value: &Value, format: OutputFormat) -> Result<String, String> {
     match format {
         OutputFormat::Nx => Ok(format::format_value(value)),
@@ -261,10 +419,7 @@ mod tests {
 
         assert!(result.is_ok());
         let value = result.unwrap();
-        assert_eq!(
-            format_output(&value, OutputFormat::Nx).unwrap(),
-            "42"
-        );
+        assert_eq!(format_output(&value, OutputFormat::Nx).unwrap(), "42");
     }
 
     #[test]
@@ -303,10 +458,7 @@ mod tests {
 
         assert!(result.is_ok());
         let value = result.unwrap();
-        assert_eq!(
-            format_output(&value, OutputFormat::Nx).unwrap(),
-            "14"
-        );
+        assert_eq!(format_output(&value, OutputFormat::Nx).unwrap(), "14");
     }
 
     #[test]
@@ -351,10 +503,7 @@ mod tests {
 
         assert!(result.is_ok());
         let value = result.unwrap();
-        assert_eq!(
-            format_output(&value, OutputFormat::Nx).unwrap(),
-            "true"
-        );
+        assert_eq!(format_output(&value, OutputFormat::Nx).unwrap(), "true");
     }
 
     #[test]
@@ -372,10 +521,7 @@ mod tests {
 
         assert!(result.is_ok());
         let value = result.unwrap();
-        assert_eq!(
-            format_output(&value, OutputFormat::Nx).unwrap(),
-            "null"
-        );
+        assert_eq!(format_output(&value, OutputFormat::Nx).unwrap(), "null");
     }
 
     // ===== CLI Integration Tests =====

@@ -363,7 +363,7 @@ fn test_nested_record_access() {
             fields: user,
         }],
     )
-        .unwrap_or_else(|err| panic!("Nested record access failed: {}", err));
+    .unwrap_or_else(|err| panic!("Nested record access failed: {}", err));
     assert_eq!(result, Value::String(SmolStr::new("Paris")));
 }
 
@@ -577,7 +577,11 @@ fn test_element_call_children_conflict_is_error_for_function() {
     let result = execute_function(source, "root", vec![]);
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(err.contains("children"), "Error should mention children:\n{}", err);
+    assert!(
+        err.contains("children"),
+        "Error should mention children:\n{}",
+        err
+    );
     assert!(err.contains("both"), "Error should mention both:\n{}", err);
 }
 
@@ -592,7 +596,11 @@ fn test_element_call_children_conflict_is_error_for_record() {
     let result = execute_function(source, "root", vec![]);
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(err.contains("children"), "Error should mention children:\n{}", err);
+    assert!(
+        err.contains("children"),
+        "Error should mention children:\n{}",
+        err
+    );
     assert!(err.contains("both"), "Error should mention both:\n{}", err);
 }
 
@@ -607,7 +615,11 @@ fn test_element_call_body_is_error_for_record_without_children_field() {
     let result = execute_function(source, "root", vec![]);
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(err.contains("children"), "Error should mention children:\n{}", err);
+    assert!(
+        err.contains("children"),
+        "Error should mention children:\n{}",
+        err
+    );
 }
 
 #[test]

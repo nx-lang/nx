@@ -161,8 +161,7 @@ fn validate_root_definitions(
         let diagnostic = Diagnostic::error("duplicate-root")
             .with_message("Duplicate definition of 'root'")
             .with_label(
-                Label::primary(file_name, second_span)
-                    .with_message("duplicate 'root' definition"),
+                Label::primary(file_name, second_span).with_message("duplicate 'root' definition"),
             )
             .with_label(
                 Label::secondary(file_name, first_span)

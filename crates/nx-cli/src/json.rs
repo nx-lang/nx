@@ -20,7 +20,10 @@ fn to_nx_value(value: &Value) -> NxValue {
         Value::EnumVariant { type_name, variant } => NxValue::Record {
             type_name: None,
             properties: BTreeMap::from([
-                ("$enum".to_string(), NxValue::String(type_name.as_str().to_string())),
+                (
+                    "$enum".to_string(),
+                    NxValue::String(type_name.as_str().to_string()),
+                ),
                 ("$variant".to_string(), NxValue::String(variant.to_string())),
             ]),
         },

@@ -298,7 +298,8 @@ fn test_for_loop_string_array() {
         Value::String(SmolStr::new("world")),
         Value::String(SmolStr::new("!")),
     ]);
-    let result = execute_function(source, "process", vec![input]).unwrap_or_else(|e| panic!("{}", e));
+    let result =
+        execute_function(source, "process", vec![input]).unwrap_or_else(|e| panic!("{}", e));
 
     assert_eq!(
         result,
@@ -414,7 +415,8 @@ fn test_for_loop_item_plus_index() {
     "#;
 
     let input = Value::Array(vec![Value::Int(100), Value::Int(200), Value::Int(300)]);
-    let result = execute_function(source, "add_index", vec![input]).unwrap_or_else(|e| panic!("{}", e));
+    let result =
+        execute_function(source, "add_index", vec![input]).unwrap_or_else(|e| panic!("{}", e));
 
     // 100+0=100, 200+1=201, 300+2=302
     assert_eq!(
@@ -433,7 +435,8 @@ fn test_for_loop_multiply() {
     "#;
 
     let input = Value::Array(vec![Value::Int(1), Value::Int(2), Value::Int(5)]);
-    let result = execute_function(source, "triple", vec![input]).unwrap_or_else(|e| panic!("{}", e));
+    let result =
+        execute_function(source, "triple", vec![input]).unwrap_or_else(|e| panic!("{}", e));
 
     assert_eq!(
         result,
@@ -451,7 +454,8 @@ fn test_for_loop_subtract() {
     "#;
 
     let input = Value::Array(vec![Value::Int(10), Value::Int(5), Value::Int(1)]);
-    let result = execute_function(source, "decrement", vec![input]).unwrap_or_else(|e| panic!("{}", e));
+    let result =
+        execute_function(source, "decrement", vec![input]).unwrap_or_else(|e| panic!("{}", e));
 
     assert_eq!(
         result,
@@ -473,7 +477,8 @@ fn test_for_loop_boolean_array() {
         Value::Boolean(false),
         Value::Boolean(true),
     ]);
-    let result = execute_function(source, "identity", vec![input]).unwrap_or_else(|e| panic!("{}", e));
+    let result =
+        execute_function(source, "identity", vec![input]).unwrap_or_else(|e| panic!("{}", e));
 
     assert_eq!(
         result,
@@ -563,7 +568,8 @@ fn test_for_loop_single_element() {
     "#;
 
     let input = Value::Array(vec![Value::Int(42)]);
-    let result = execute_function(source, "double", vec![input]).unwrap_or_else(|e| panic!("{}", e));
+    let result =
+        execute_function(source, "double", vec![input]).unwrap_or_else(|e| panic!("{}", e));
 
     assert_eq!(result, Value::Array(vec![Value::Int(84)]));
 }
@@ -584,7 +590,8 @@ fn test_for_loop_preserves_order() {
         Value::Int(1),
         Value::Int(9),
     ]);
-    let result = execute_function(source, "identity", vec![input]).unwrap_or_else(|e| panic!("{}", e));
+    let result =
+        execute_function(source, "identity", vec![input]).unwrap_or_else(|e| panic!("{}", e));
 
     assert_eq!(
         result,
