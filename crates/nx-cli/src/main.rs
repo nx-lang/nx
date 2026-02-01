@@ -467,19 +467,20 @@ mod tests {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let value = NxValue::from_json_str(stdout.trim()).unwrap();
 
-        let NxValue::Object(fields) = value else {
-            panic!("Expected JSON object. Got: {:?}", value);
+        let NxValue::Record {
+            type_name,
+            properties,
+        } = value
+        else {
+            panic!("Expected JSON record. Got: {:?}", value);
         };
 
+        assert_eq!(type_name.as_deref(), Some("User"));
         assert_eq!(
-            fields.get("$type"),
-            Some(&NxValue::String("User".to_string()))
-        );
-        assert_eq!(
-            fields.get("name"),
+            properties.get("name"),
             Some(&NxValue::String("Bob".to_string()))
         );
-        assert_eq!(fields.get("age"), Some(&NxValue::Int(30)));
+        assert_eq!(properties.get("age"), Some(&NxValue::Int(30)));
     }
 
     #[test]

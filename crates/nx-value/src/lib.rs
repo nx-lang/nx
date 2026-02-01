@@ -10,6 +10,7 @@ use std::path::Path;
 
 use serde::de::{MapAccess, SeqAccess, Visitor};
 use serde::ser::{SerializeMap, SerializeSeq};
+use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A JSON-like tree value used as the stable NX API value type.
@@ -21,7 +22,13 @@ pub enum NxValue {
     Float(f64),
     String(String),
     Array(Vec<NxValue>),
-    Object(BTreeMap<String, NxValue>),
+    /// Record value (ordered properties).
+    ///
+    /// When serialized to JSON, `type_name` is encoded as a `"$type"` string property if present.
+    Record {
+        type_name: Option<String>,
+        properties: BTreeMap<String, NxValue>,
+    },
 }
 
 impl NxValue {
@@ -89,11 +96,21 @@ impl Serialize for NxValue {
                 }
                 seq.end()
             }
-            NxValue::Object(fields) => {
-                let mut map = serializer.serialize_map(Some(fields.len()))?;
-                for (key, value) in fields {
+            NxValue::Record {
+                type_name,
+                properties,
+            } => {
+                let len = properties.len() + usize::from(type_name.is_some());
+                let mut map = serializer.serialize_map(Some(len))?;
+
+                if let Some(type_name) = type_name {
+                    map.serialize_entry("$type", type_name)?;
+                }
+
+                for (key, value) in properties {
                     map.serialize_entry(key, value)?;
                 }
+
                 map.end()
             }
         }
@@ -156,11 +173,30 @@ impl<'de> Deserialize<'de> for NxValue {
             }
 
             fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-                let mut values = BTreeMap::new();
+                let mut type_name = None;
+                let mut properties = BTreeMap::new();
                 while let Some((key, value)) = map.next_entry::<String, NxValue>()? {
-                    values.insert(key, value);
+                    if key == "$type" {
+                        match value {
+                            NxValue::String(name) => {
+                                type_name = Some(name);
+                            }
+                            other => {
+                                return Err(A::Error::custom(format!(
+                                    "expected \"$type\" to be a string, got {:?}",
+                                    other
+                                )));
+                            }
+                        }
+                        continue;
+                    }
+
+                    properties.insert(key, value);
                 }
-                Ok(NxValue::Object(values))
+                Ok(NxValue::Record {
+                    type_name,
+                    properties,
+                })
             }
         }
 
@@ -220,7 +256,10 @@ mod tests {
             NxValue::Array(vec![NxValue::Null, NxValue::String("x".to_string())]),
         );
 
-        let value = NxValue::Object(obj);
+        let value = NxValue::Record {
+            type_name: None,
+            properties: obj,
+        };
         let json = value.to_json_string().unwrap();
         let decoded = NxValue::from_json_str(&json).unwrap();
         assert_eq!(decoded, value);
@@ -237,7 +276,13 @@ mod tests {
             ("3.14", NxValue::Float(3.14)),
             ("\"hello\"", NxValue::String("hello".to_string())),
             ("[]", NxValue::Array(vec![])),
-            ("{}", NxValue::Object(BTreeMap::new())),
+            (
+                "{}",
+                NxValue::Record {
+                    type_name: None,
+                    properties: BTreeMap::new(),
+                },
+            ),
         ];
 
         for (json, expected) in cases {
@@ -251,16 +296,25 @@ mod tests {
 
     #[test]
     fn json_round_trip_nested_structures() {
-        let value = NxValue::Object(BTreeMap::from([
-            ("a".to_string(), NxValue::Array(vec![NxValue::Int(1), NxValue::Int(2)])),
-            (
-                "b".to_string(),
-                NxValue::Object(BTreeMap::from([
-                    ("x".to_string(), NxValue::Bool(false)),
-                    ("y".to_string(), NxValue::Null),
-                ])),
-            ),
-        ]));
+        let value = NxValue::Record {
+            type_name: None,
+            properties: BTreeMap::from([
+                (
+                    "a".to_string(),
+                    NxValue::Array(vec![NxValue::Int(1), NxValue::Int(2)]),
+                ),
+                (
+                    "b".to_string(),
+                    NxValue::Record {
+                        type_name: None,
+                        properties: BTreeMap::from([
+                            ("x".to_string(), NxValue::Bool(false)),
+                            ("y".to_string(), NxValue::Null),
+                        ]),
+                    },
+                ),
+            ]),
+        };
 
         let json = value.to_json_string().unwrap();
         let decoded = NxValue::from_json_str(&json).unwrap();
@@ -308,7 +362,10 @@ mod tests {
         obj.insert("b".to_string(), NxValue::Int(2));
         obj.insert("a".to_string(), NxValue::Int(1));
 
-        let value = NxValue::Object(obj);
+        let value = NxValue::Record {
+            type_name: None,
+            properties: obj,
+        };
         let json = value.to_json_string().unwrap();
         assert_eq!(json, "{\"a\":1,\"b\":2}");
     }
@@ -330,10 +387,13 @@ mod tests {
 
     #[test]
     fn json_pretty_string_round_trip() {
-        let value = NxValue::Object(BTreeMap::from([(
-            "a".to_string(),
-            NxValue::Array(vec![NxValue::Int(1), NxValue::Int(2)]),
-        )]));
+        let value = NxValue::Record {
+            type_name: None,
+            properties: BTreeMap::from([(
+                "a".to_string(),
+                NxValue::Array(vec![NxValue::Int(1), NxValue::Int(2)]),
+            )]),
+        };
 
         let json = value.to_json_string_pretty().unwrap();
         let decoded = NxValue::from_json_str(&json).unwrap();
@@ -363,7 +423,10 @@ mod tests {
         let mut obj = BTreeMap::new();
         obj.insert("name".to_string(), NxValue::String("Ada".to_string()));
         obj.insert("age".to_string(), NxValue::Int(42));
-        let value = NxValue::Object(obj);
+        let value = NxValue::Record {
+            type_name: None,
+            properties: obj,
+        };
 
         value.to_json_file_pretty(&path).unwrap();
         let decoded = NxValue::from_json_file(&path).unwrap();

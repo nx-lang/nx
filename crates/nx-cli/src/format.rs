@@ -44,14 +44,8 @@ fn format_value_inner(value: &Value, output: &mut String, indent: usize) {
             }
         }
 
-        // Typed record - print as XML-like element with preserved type name
-        Value::TypedRecord { type_name, fields } => {
+        Value::Record { type_name, fields } => {
             format_record_with_name(type_name.as_str(), fields, output, indent);
-        }
-
-        // Untyped record - print as generic "result" element
-        Value::Record(fields) => {
-            format_record_with_name("result", fields, output, indent);
         }
     }
 }
@@ -113,13 +107,8 @@ fn format_record_with_name(
 /// Format a nested element with proper opening and closing tags.
 fn format_nested_element(tag_name: &str, value: &Value, output: &mut String, indent: usize) {
     match value {
-        Value::TypedRecord { type_name, fields } => {
-            // Use the typed record's own type name as the tag
+        Value::Record { type_name, fields } => {
             format_nested_record(type_name.as_str(), fields, output, indent);
-        }
-        Value::Record(fields) => {
-            // Use the field name as the tag for untyped records
-            format_nested_record(tag_name, fields, output, indent);
         }
         Value::Array(elements) => {
             write!(output, "<{}>", tag_name).unwrap();
@@ -200,7 +189,7 @@ fn format_attribute_value(value: &Value, output: &mut String) {
         Value::EnumVariant { type_name, variant } => {
             write!(output, "\"{}.{}\"", type_name, variant).unwrap()
         }
-        Value::Array(_) | Value::Record(_) | Value::TypedRecord { .. } => {
+        Value::Array(_) | Value::Record { .. } => {
             // Complex values shouldn't be formatted as attributes
             output.push_str("\"...\"");
         }
@@ -209,7 +198,7 @@ fn format_attribute_value(value: &Value, output: &mut String) {
 
 fn is_complex_value(value: &Value) -> bool {
     match value {
-        Value::Record(_) | Value::TypedRecord { .. } => true,
+        Value::Record { .. } => true,
         Value::Array(elements) => !elements.is_empty(),
         _ => false,
     }
@@ -263,7 +252,10 @@ mod tests {
         fields.insert(SmolStr::new("name"), Value::String(SmolStr::new("Alice")));
         fields.insert(SmolStr::new("age"), Value::Int(30));
 
-        let value = Value::Record(fields);
+        let value = Value::Record {
+            type_name: nx_hir::Name::new("result"),
+            fields,
+        };
         let output = format_value(&value);
 
         // Should be a self-closing tag with attributes
@@ -296,15 +288,24 @@ mod tests {
 
         let mut fields = FxHashMap::default();
         fields.insert(SmolStr::new("name"), Value::String(SmolStr::new("Alice")));
-        fields.insert(SmolStr::new("address"), Value::Record(inner_fields));
+        fields.insert(
+            SmolStr::new("address"),
+            Value::Record {
+                type_name: nx_hir::Name::new("Address"),
+                fields: inner_fields,
+            },
+        );
 
-        let value = Value::Record(fields);
+        let value = Value::Record {
+            type_name: nx_hir::Name::new("result"),
+            fields,
+        };
         let output = format_value(&value);
 
         // Should have nested structure
         assert!(output.contains("<result"));
         assert!(output.contains("name=\"Alice\""));
-        assert!(output.contains("<address"));
+        assert!(output.contains("<Address"));
         assert!(output.contains("city=\"Boston\""));
         assert!(output.contains("</result>"));
     }

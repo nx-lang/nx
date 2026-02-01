@@ -660,7 +660,7 @@ impl Interpreter {
             fields.insert(SmolStr::new("children"), Value::Array(child_values));
         }
 
-        Ok(Value::TypedRecord {
+        Ok(Value::Record {
             type_name: element.tag.clone(),
             fields,
         })
@@ -713,7 +713,7 @@ impl Interpreter {
         record_label: Option<&str>,
     ) -> Result<Value, RuntimeError> {
         match base_value {
-            Value::Record(fields) | Value::TypedRecord { fields, .. } => {
+            Value::Record { fields, .. } => {
                 if let Some(value) = fields.get(member.as_str()) {
                     Ok(value.clone())
                 } else {
@@ -916,7 +916,7 @@ impl Interpreter {
             overrides.insert(SmolStr::new(prop.name.as_str()), value);
         }
 
-        Ok(Value::TypedRecord {
+        Ok(Value::Record {
             type_name: Name::new(record_name),
             fields: overrides,
         })

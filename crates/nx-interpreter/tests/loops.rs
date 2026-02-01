@@ -328,7 +328,16 @@ fn test_for_loop_record_array() {
     person2.insert(SmolStr::new("name"), Value::String(SmolStr::new("Bob")));
     person2.insert(SmolStr::new("age"), Value::Int(25));
 
-    let input = Value::Array(vec![Value::Record(person1), Value::Record(person2)]);
+    let input = Value::Array(vec![
+        Value::Record {
+            type_name: nx_hir::Name::new("Person"),
+            fields: person1,
+        },
+        Value::Record {
+            type_name: nx_hir::Name::new("Person"),
+            fields: person2,
+        },
+    ]);
     let result = execute_function(source, "names", vec![input]).unwrap_or_else(|e| panic!("{}", e));
 
     assert_eq!(

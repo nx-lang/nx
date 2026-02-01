@@ -17,27 +17,24 @@ fn to_nx_value(value: &Value) -> NxValue {
         Value::Float(value) => NxValue::Float(*value),
         Value::String(value) => NxValue::String(value.to_string()),
         Value::Array(elements) => NxValue::Array(elements.iter().map(to_nx_value).collect()),
-        Value::EnumVariant { type_name, variant } => NxValue::Object(BTreeMap::from([
-            ("$enum".to_string(), NxValue::String(type_name.as_str().to_string())),
-            ("$variant".to_string(), NxValue::String(variant.to_string())),
-        ])),
-        Value::Record(fields) => NxValue::Object(fields_to_object(fields, None)),
-        Value::TypedRecord { type_name, fields } => {
-            NxValue::Object(fields_to_object(fields, Some(type_name.as_str())))
-        }
+        Value::EnumVariant { type_name, variant } => NxValue::Record {
+            type_name: None,
+            properties: BTreeMap::from([
+                ("$enum".to_string(), NxValue::String(type_name.as_str().to_string())),
+                ("$variant".to_string(), NxValue::String(variant.to_string())),
+            ]),
+        },
+        Value::Record { type_name, fields } => NxValue::Record {
+            type_name: Some(type_name.as_str().to_string()),
+            properties: fields_to_properties(fields),
+        },
     }
 }
 
-fn fields_to_object(
+fn fields_to_properties(
     fields: &rustc_hash::FxHashMap<smol_str::SmolStr, Value>,
-    type_name: Option<&str>,
 ) -> BTreeMap<String, NxValue> {
     let mut obj = BTreeMap::new();
-
-    if let Some(type_name) = type_name {
-        obj.insert("$type".to_string(), NxValue::String(type_name.to_string()));
-    }
-
     for (key, value) in fields {
         obj.insert(key.to_string(), to_nx_value(value));
     }

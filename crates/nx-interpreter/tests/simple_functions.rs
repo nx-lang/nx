@@ -250,10 +250,17 @@ fn test_record_field_access() {
     record.insert(SmolStr::new("name"), Value::String(SmolStr::new("Ada")));
     record.insert(SmolStr::new("age"), Value::Int(32));
 
-    let result =
-        execute_function(source, "getName", vec![Value::Record(record)]).unwrap_or_else(|err| {
-            panic!("Record field access failed:\n{}", err);
-        });
+    let result = execute_function(
+        source,
+        "getName",
+        vec![Value::Record {
+            type_name: nx_hir::Name::new("User"),
+            fields: record,
+        }],
+    )
+    .unwrap_or_else(|err| {
+        panic!("Record field access failed:\n{}", err);
+    });
 
     assert_eq!(result, Value::String(SmolStr::new("Ada")));
 }
@@ -268,7 +275,14 @@ fn test_record_missing_field_errors() {
     let mut record = FxHashMap::default();
     record.insert(SmolStr::new("name"), Value::String(SmolStr::new("Ada")));
 
-    let result = execute_function(source, "missing", vec![Value::Record(record)]);
+    let result = execute_function(
+        source,
+        "missing",
+        vec![Value::Record {
+            type_name: nx_hir::Name::new("User"),
+            fields: record,
+        }],
+    );
     assert!(result.is_err());
     assert!(
         result.unwrap_err().contains("no field"),
@@ -333,9 +347,22 @@ fn test_nested_record_access() {
     let mut addr = FxHashMap::default();
     addr.insert(SmolStr::new("city"), Value::String(SmolStr::new("Paris")));
     let mut user = FxHashMap::default();
-    user.insert(SmolStr::new("address"), Value::Record(addr));
+    user.insert(
+        SmolStr::new("address"),
+        Value::Record {
+            type_name: nx_hir::Name::new("Address"),
+            fields: addr,
+        },
+    );
 
-    let result = execute_function(source, "city", vec![Value::Record(user)])
+    let result = execute_function(
+        source,
+        "city",
+        vec![Value::Record {
+            type_name: nx_hir::Name::new("User"),
+            fields: user,
+        }],
+    )
         .unwrap_or_else(|err| panic!("Nested record access failed: {}", err));
     assert_eq!(result, Value::String(SmolStr::new("Paris")));
 }
@@ -356,14 +383,14 @@ fn test_record_return_type_and_collection() {
         .execute_function(&module, "make", vec![])
         .unwrap_or_else(|e| panic!("{}", e));
     match made {
-        Value::TypedRecord { fields, type_name } => {
+        Value::Record { fields, type_name } => {
             assert_eq!(type_name.as_str(), "User");
             assert_eq!(
                 fields.get("name"),
                 Some(&Value::String(SmolStr::new("Anon")))
             );
         }
-        other => panic!("expected TypedRecord, got {:?}", other),
+        other => panic!("expected Record, got {:?}", other),
     }
 }
 
@@ -405,7 +432,7 @@ fn test_record_all_fields_have_defaults() {
         .execute_function(&module, "make", vec![])
         .unwrap();
     match result {
-        Value::TypedRecord { fields, type_name } => {
+        Value::Record { fields, type_name } => {
             assert_eq!(type_name.as_str(), "Config");
             assert_eq!(
                 fields.get("host"),
@@ -413,7 +440,7 @@ fn test_record_all_fields_have_defaults() {
             );
             assert_eq!(fields.get("port"), Some(&Value::Int(80)));
         }
-        other => panic!("expected TypedRecord, got {:?}", other),
+        other => panic!("expected Record, got {:?}", other),
     }
 }
 
@@ -473,11 +500,11 @@ fn test_element_call_passes_children_to_function() {
         .unwrap_or_else(|err| panic!("Element call with children failed:\n{}", err));
 
     let expected = Value::Array(vec![
-        Value::TypedRecord {
+        Value::Record {
             type_name: nx_hir::Name::new("div"),
             fields: FxHashMap::default(),
         },
-        Value::TypedRecord {
+        Value::Record {
             type_name: nx_hir::Name::new("span"),
             fields: FxHashMap::default(),
         },
@@ -527,11 +554,11 @@ fn test_element_call_children_injected_for_element_defined_function() {
         .unwrap_or_else(|err| panic!("Element call with children failed:\n{}", err));
 
     let expected = Value::Array(vec![
-        Value::TypedRecord {
+        Value::Record {
             type_name: nx_hir::Name::new("div"),
             fields: FxHashMap::default(),
         },
-        Value::TypedRecord {
+        Value::Record {
             type_name: nx_hir::Name::new("span"),
             fields: FxHashMap::default(),
         },
@@ -595,11 +622,11 @@ fn test_element_call_body_populates_record_children_field() {
         .unwrap_or_else(|err| panic!("Record children injection failed:\n{}", err));
 
     let expected = Value::Array(vec![
-        Value::TypedRecord {
+        Value::Record {
             type_name: nx_hir::Name::new("div"),
             fields: FxHashMap::default(),
         },
-        Value::TypedRecord {
+        Value::Record {
             type_name: nx_hir::Name::new("span"),
             fields: FxHashMap::default(),
         },

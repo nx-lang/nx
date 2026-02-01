@@ -63,16 +63,13 @@ pub enum Value {
         variant: SmolStr,
     },
 
-    /// Record value (map of field names to values)
-    Record(FxHashMap<SmolStr, Value>),
-
-    /// Typed record value with preserved type name
+    /// Record value (always typed).
     ///
-    /// Like Record but preserves the original type/element name for pretty printing.
-    TypedRecord {
-        /// The type/element name (e.g., "User", "Button")
+    /// Records in NX are strongly typed, so a record always carries the record/element type name.
+    Record {
+        /// The record/element type name (e.g., "User", "Button").
         type_name: Name,
-        /// Field values
+        /// Field values.
         fields: FxHashMap<SmolStr, Value>,
     },
 }
@@ -134,8 +131,7 @@ impl Value {
             Value::Null => "null",
             Value::Array(_) => "array",
             Value::EnumVariant { .. } => "enum",
-            Value::Record(_) => "record",
-            Value::TypedRecord { .. } => "record",
+            Value::Record { .. } => "record",
         }
     }
 }
@@ -159,7 +155,7 @@ impl std::fmt::Display for Value {
                 write!(f, "]")
             }
             Value::EnumVariant { type_name, variant } => write!(f, "{}.{}", type_name, variant),
-            Value::TypedRecord { type_name, fields } => {
+            Value::Record { type_name, fields } => {
                 write!(f, "{}{{ ", type_name)?;
                 for (i, (k, v)) in fields.iter().enumerate() {
                     if i > 0 {
@@ -168,16 +164,6 @@ impl std::fmt::Display for Value {
                     write!(f, "{}: {}", k, v)?;
                 }
                 write!(f, " }}")
-            }
-            Value::Record(fields) => {
-                write!(f, "{{")?;
-                for (i, (k, v)) in fields.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}: {}", k, v)?;
-                }
-                write!(f, "}}")
             }
         }
     }
@@ -227,7 +213,11 @@ mod tests {
         let mut fields = FxHashMap::default();
         fields.insert(SmolStr::new("name"), Value::String(SmolStr::new("Ada")));
         fields.insert(SmolStr::new("age"), Value::Int(42));
-        let display = Value::Record(fields).to_string();
+        let display = Value::Record {
+            type_name: Name::new("result"),
+            fields,
+        }
+        .to_string();
         assert!(display.contains("age: 42"));
         assert!(display.contains("name: Ada"));
     }
@@ -239,6 +229,13 @@ mod tests {
         assert_eq!(Value::String(SmolStr::new("test")).type_name(), "string");
         assert_eq!(Value::Boolean(true).type_name(), "boolean");
         assert_eq!(Value::Null.type_name(), "null");
-        assert_eq!(Value::Record(FxHashMap::default()).type_name(), "record");
+        assert_eq!(
+            Value::Record {
+                type_name: Name::new("result"),
+                fields: FxHashMap::default(),
+            }
+            .type_name(),
+            "record"
+        );
     }
 }

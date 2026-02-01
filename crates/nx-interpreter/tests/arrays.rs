@@ -284,7 +284,16 @@ fn test_array_of_records() {
     let mut user2 = FxHashMap::default();
     user2.insert(SmolStr::new("name"), Value::String(SmolStr::new("Bob")));
 
-    let users = Value::Array(vec![Value::Record(user1), Value::Record(user2)]);
+    let users = Value::Array(vec![
+        Value::Record {
+            type_name: nx_hir::Name::new("User"),
+            fields: user1,
+        },
+        Value::Record {
+            type_name: nx_hir::Name::new("User"),
+            fields: user2,
+        },
+    ]);
     let result = execute_function(source, "names", vec![users]).unwrap_or_else(|e| panic!("{}", e));
     assert_eq!(
         result,

@@ -479,7 +479,14 @@ fn test_undefined_record_field() {
     let mut person = FxHashMap::default();
     person.insert(SmolStr::new("name"), Value::String(SmolStr::new("Alice")));
 
-    let result = execute_function(source, "age", vec![Value::Record(person)]);
+    let result = execute_function(
+        source,
+        "age",
+        vec![Value::Record {
+            type_name: nx_hir::Name::new("Person"),
+            fields: person,
+        }],
+    );
     // Should error because 'age' field doesn't exist
     assert!(result.is_err(), "Expected error for undefined field access");
 }
@@ -493,11 +500,14 @@ fn test_empty_record() {
         let <identity r:object /> = { r }
     "#;
 
-    let empty_record = Value::Record(FxHashMap::default());
+    let empty_record = Value::Record {
+        type_name: nx_hir::Name::new("object"),
+        fields: FxHashMap::default(),
+    };
     let result = execute_function(source, "identity", vec![empty_record])
         .unwrap_or_else(|e| panic!("{}", e));
     match result {
-        Value::Record(fields) => assert!(fields.is_empty()),
+        Value::Record { fields, .. } => assert!(fields.is_empty()),
         other => panic!("Expected empty Record, got {:?}", other),
     }
 }
