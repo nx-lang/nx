@@ -79,6 +79,16 @@ impl NxValue {
         file.flush()?;
         Ok(())
     }
+
+    /// Serialize a value to MessagePack bytes.
+    pub fn to_msgpack_vec(&self) -> Result<Vec<u8>, rmp_serde::encode::Error> {
+        rmp_serde::to_vec(self)
+    }
+
+    /// Deserialize a value from MessagePack bytes.
+    pub fn from_msgpack_slice(bytes: &[u8]) -> Result<Self, rmp_serde::decode::Error> {
+        rmp_serde::from_slice(bytes)
+    }
 }
 
 impl Serialize for NxValue {
@@ -430,6 +440,22 @@ mod tests {
 
         value.to_json_file_pretty(&path).unwrap();
         let decoded = NxValue::from_json_file(&path).unwrap();
+        assert_eq!(decoded, value);
+    }
+
+    #[test]
+    fn msgpack_round_trip_in_memory() {
+        let mut obj = BTreeMap::new();
+        obj.insert("name".to_string(), NxValue::String("Ada".to_string()));
+        obj.insert("age".to_string(), NxValue::Int(42));
+
+        let value = NxValue::Record {
+            type_name: Some("User".to_string()),
+            properties: obj,
+        };
+
+        let bytes = value.to_msgpack_vec().unwrap();
+        let decoded = NxValue::from_msgpack_slice(&bytes).unwrap();
         assert_eq!(decoded, value);
     }
 }

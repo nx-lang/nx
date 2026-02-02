@@ -9,6 +9,8 @@ pub fn emit_csharp(writer: &mut CodeWriter, ns: &str, types: &ExportedTypes) {
     writer.blank_line();
 
     writer.line("using System;");
+    writer.line("using MessagePack;");
+    writer.line("using MessagePack.Formatters;");
     writer.blank_line();
 
     writer.block(
@@ -32,8 +34,12 @@ pub fn emit_csharp(writer: &mut CodeWriter, ns: &str, types: &ExportedTypes) {
 }
 
 fn emit_enum(writer: &mut CodeWriter, en: &ExportedEnum) {
+    let enum_name = sanitize_csharp_identifier(&en.name);
+    writer.line(&format!(
+        "[MessagePackFormatter(typeof({enum_name}MessagePackFormatter))]"
+    ));
     writer.block(
-        &format!("public enum {}", sanitize_csharp_identifier(&en.name)),
+        &format!("public enum {enum_name}"),
         |writer| {
             for (idx, member) in en.members.iter().enumerate() {
                 let comma = if idx + 1 == en.members.len() { "" } else { "," };
@@ -41,19 +47,30 @@ fn emit_enum(writer: &mut CodeWriter, en: &ExportedEnum) {
             }
         },
     );
+
+    writer.blank_line();
+    emit_enum_messagepack_formatter(writer, en);
 }
 
 fn emit_record(writer: &mut CodeWriter, record: &ExportedRecord) {
+    writer.line("[MessagePackObject]");
     writer.block(
         &format!(
             "public sealed class {}",
             sanitize_csharp_identifier(&record.name)
         ),
         |writer| {
+            writer.line("[Key(\"$type\")]");
+            writer.line("public string? NxType { get; set; }");
+
             for field in &record.fields {
                 let cs_type = csharp_type(&field.ty);
                 let name = sanitize_csharp_identifier(&field.name);
 
+                writer.line(&format!(
+                    "[Key(\"{}\")]",
+                    escape_csharp_string_literal(&field.name)
+                ));
                 if cs_type.is_reference && !cs_type.is_nullable {
                     writer.line(&format!(
                         "public {} {} {{ get; set; }} = default!;",
@@ -63,6 +80,115 @@ fn emit_record(writer: &mut CodeWriter, record: &ExportedRecord) {
                     writer.line(&format!("public {} {} {{ get; set; }}", cs_type.text, name));
                 }
             }
+        },
+    );
+}
+
+fn emit_enum_messagepack_formatter(writer: &mut CodeWriter, en: &ExportedEnum) {
+    let enum_name = sanitize_csharp_identifier(&en.name);
+    writer.block(
+        &format!(
+            "public sealed class {enum_name}MessagePackFormatter : IMessagePackFormatter<{enum_name}>"
+        ),
+        |writer| {
+            writer.block(
+                &format!(
+                    "public void Serialize(ref MessagePackWriter writer, {enum_name} value, MessagePackSerializerOptions options)"
+                ),
+                |writer| {
+                    writer.line("writer.Write(ToVariantString(value));");
+                },
+            );
+
+            writer.blank_line();
+
+            writer.block(
+                &format!(
+                    "public {enum_name} Deserialize(ref MessagePackReader reader, MessagePackSerializerOptions options)"
+                ),
+                |writer| {
+                    writer.block("if (reader.TryReadNil())", |writer| {
+                        writer.line("return default;");
+                    });
+                    writer.blank_line();
+
+                    writer.block("switch (reader.NextMessagePackType)", |writer| {
+                        writer.block("case MessagePackType.String:", |writer| {
+                            writer.line("string variant = reader.ReadString()!;");
+                            writer.line("return ParseVariant(variant);");
+                        });
+                        writer.block("case MessagePackType.Map:", |writer| {
+                            writer.line("int count = reader.ReadMapHeader();");
+                            writer.line("string? variant = null;");
+                            writer.block("for (int i = 0; i < count; i++)", |writer| {
+                                writer.line("string key = reader.ReadString()!;");
+                                writer.block("if (key == \"$variant\")", |writer| {
+                                    writer.line("variant = reader.ReadString();");
+                                });
+                                writer.line("else");
+                                writer.block("else", |writer| {
+                                    writer.line("reader.Skip();");
+                                });
+                            });
+                            writer.blank_line();
+                            writer.block("if (variant is null)", |writer| {
+                                writer.line(
+                                    "throw new MessagePackSerializationException(\"Expected NX enum map with \\\"$variant\\\".\");",
+                                );
+                            });
+                            writer.blank_line();
+                            writer.line("return ParseVariant(variant);");
+                        });
+                        writer.block("default:", |writer| {
+                            writer.line(
+                                "throw new MessagePackSerializationException(\"Expected string or map for NX enum.\");",
+                            );
+                        });
+                    });
+                },
+            );
+
+            writer.blank_line();
+
+            writer.block(
+                &format!("private static {enum_name} ParseVariant(string variant)"),
+                |writer| {
+                    writer.block("switch (variant)", |writer| {
+                        for member in &en.members {
+                            let member_literal = escape_csharp_string_literal(member);
+                            let member_ident = sanitize_csharp_identifier(member);
+                            writer.line(&format!(
+                                "case \"{member_literal}\": return {enum_name}.{member_ident};"
+                            ));
+                        }
+                        writer.line("default:");
+                        writer.line(
+                            "throw new MessagePackSerializationException(\"Unknown NX enum variant.\");",
+                        );
+                    });
+                },
+            );
+
+            writer.blank_line();
+
+            writer.block(
+                &format!("private static string ToVariantString({enum_name} value)"),
+                |writer| {
+                    writer.block("switch (value)", |writer| {
+                        for member in &en.members {
+                            let member_literal = escape_csharp_string_literal(member);
+                            let member_ident = sanitize_csharp_identifier(member);
+                            writer.line(&format!(
+                                "case {enum_name}.{member_ident}: return \"{member_literal}\";"
+                            ));
+                        }
+                        writer.line("default:");
+                        writer.line(
+                            "throw new MessagePackSerializationException(\"Unknown NX enum value.\");",
+                        );
+                    });
+                },
+            );
         },
     );
 }
@@ -180,6 +306,10 @@ fn sanitize_csharp_identifier(name: &str) -> String {
     } else {
         out
     }
+}
+
+fn escape_csharp_string_literal(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 fn is_csharp_keyword(s: &str) -> bool {
