@@ -18,7 +18,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub enum NxValue {
     Null,
     Bool(bool),
+    Int32(i32),
     Int(i64),
+    Float32(f32),
     Float(f64),
     String(String),
     Array(Vec<NxValue>),
@@ -96,7 +98,9 @@ impl Serialize for NxValue {
         match self {
             NxValue::Null => serializer.serialize_unit(),
             NxValue::Bool(value) => serializer.serialize_bool(*value),
+            NxValue::Int32(value) => serializer.serialize_i32(*value),
             NxValue::Int(value) => serializer.serialize_i64(*value),
+            NxValue::Float32(value) => serializer.serialize_f32(*value),
             NxValue::Float(value) => serializer.serialize_f64(*value),
             NxValue::String(value) => serializer.serialize_str(value),
             NxValue::Array(elements) => {
@@ -150,6 +154,10 @@ impl<'de> Deserialize<'de> for NxValue {
                 Ok(NxValue::Bool(v))
             }
 
+            fn visit_i32<E: serde::de::Error>(self, v: i32) -> Result<Self::Value, E> {
+                Ok(NxValue::Int32(v))
+            }
+
             fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
                 Ok(NxValue::Int(v))
             }
@@ -160,6 +168,10 @@ impl<'de> Deserialize<'de> for NxValue {
                 } else {
                     Ok(NxValue::Float(v as f64))
                 }
+            }
+
+            fn visit_f32<E: serde::de::Error>(self, v: f32) -> Result<Self::Value, E> {
+                Ok(NxValue::Float32(v))
             }
 
             fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<Self::Value, E> {
@@ -457,5 +469,38 @@ mod tests {
         let bytes = value.to_msgpack_vec().unwrap();
         let decoded = NxValue::from_msgpack_slice(&bytes).unwrap();
         assert_eq!(decoded, value);
+    }
+
+    #[test]
+    fn int32_round_trip_msgpack() {
+        let value = NxValue::Int32(42);
+        let bytes = value.to_msgpack_vec().unwrap();
+        let decoded = NxValue::from_msgpack_slice(&bytes).unwrap();
+        // MessagePack may widen small integers; the value should be numerically equal
+        match decoded {
+            NxValue::Int32(n) => assert_eq!(n, 42),
+            NxValue::Int(n) => assert_eq!(n, 42),
+            other => panic!("Expected integer, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn float32_serializes_to_json() {
+        let value = NxValue::Float32(3.14);
+        let json = value.to_json_string().unwrap();
+        // JSON serializes f32 as a number
+        let decoded = NxValue::from_json_str(&json).unwrap();
+        // JSON always deserializes as f64, so we get Float back
+        assert!(matches!(decoded, NxValue::Float(_)));
+    }
+
+    #[test]
+    fn int32_serializes_to_json() {
+        let value = NxValue::Int32(42);
+        let json = value.to_json_string().unwrap();
+        assert_eq!(json, "42");
+        // JSON always deserializes integers via visit_i64/visit_u64
+        let decoded = NxValue::from_json_str(&json).unwrap();
+        assert_eq!(decoded, NxValue::Int(42));
     }
 }

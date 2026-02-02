@@ -362,7 +362,9 @@ impl Interpreter {
             ast::UnOp::Neg => {
                 // Arithmetic negation
                 match operand {
+                    Value::Int32(n) => Ok(Value::Int32(-n)),
                     Value::Int(n) => Ok(Value::Int(-n)),
+                    Value::Float32(f) => Ok(Value::Float32(-f)),
                     Value::Float(f) => Ok(Value::Float(-f)),
                     v => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
                         expected: "number".to_string(),

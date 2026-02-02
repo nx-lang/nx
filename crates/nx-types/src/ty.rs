@@ -4,16 +4,42 @@
 
 use nx_hir::Name;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 
 /// Arena index for types (for future interning/arena allocation).
 pub type TypeId = u32;
 
-/// Primitive type kinds.
+/// Canonical discriminant for numeric primitive equality.
+///
+/// `Int` and `I64` map to the same canonical value, as do `Float` and `F64`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum CanonicalPrimitive {
+    I32,
+    I64,
+    F32,
+    F64,
+    String,
+    Bool,
+    Void,
+}
+
+/// Primitive type kinds.
+///
+/// `Int` is a display-preserving synonym for `I64`, and `Float` for `F64`.
+/// They compare equal and hash identically via custom impls.
+#[derive(Debug, Clone, Copy)]
 pub enum Primitive {
-    /// Integer type
+    /// 32-bit signed integer
+    I32,
+    /// 64-bit signed integer
+    I64,
+    /// Synonym for I64 (displays as "int")
     Int,
-    /// Floating-point type
+    /// 32-bit floating-point
+    F32,
+    /// 64-bit floating-point
+    F64,
+    /// Synonym for F64 (displays as "float")
     Float,
     /// String type
     String,
@@ -24,15 +50,92 @@ pub enum Primitive {
 }
 
 impl Primitive {
+    /// Returns the canonical discriminant for equality and hashing.
+    fn canonical(&self) -> CanonicalPrimitive {
+        match self {
+            Primitive::I32 => CanonicalPrimitive::I32,
+            Primitive::I64 | Primitive::Int => CanonicalPrimitive::I64,
+            Primitive::F32 => CanonicalPrimitive::F32,
+            Primitive::F64 | Primitive::Float => CanonicalPrimitive::F64,
+            Primitive::String => CanonicalPrimitive::String,
+            Primitive::Bool => CanonicalPrimitive::Bool,
+            Primitive::Void => CanonicalPrimitive::Void,
+        }
+    }
+
     /// Returns the name of this primitive type.
     pub fn as_str(&self) -> &'static str {
         match self {
+            Primitive::I32 => "i32",
+            Primitive::I64 => "i64",
             Primitive::Int => "int",
+            Primitive::F32 => "f32",
+            Primitive::F64 => "f64",
             Primitive::Float => "float",
             Primitive::String => "string",
             Primitive::Bool => "bool",
             Primitive::Void => "void",
         }
+    }
+
+    /// Returns true if this is any integer type (i32, i64, int).
+    pub fn is_integer(&self) -> bool {
+        matches!(self, Primitive::I32 | Primitive::I64 | Primitive::Int)
+    }
+
+    /// Returns true if this is any float type (f32, f64, float).
+    pub fn is_float(&self) -> bool {
+        matches!(self, Primitive::F32 | Primitive::F64 | Primitive::Float)
+    }
+
+    /// Returns true if this is any numeric type.
+    pub fn is_numeric(&self) -> bool {
+        self.is_integer() || self.is_float()
+    }
+
+    /// Returns the promoted type when combining two numeric primitives of the
+    /// same category (both integer or both float). Returns `None` for
+    /// cross-category combinations (e.g. i32 + f64).
+    ///
+    /// Promotion rules:
+    /// - i32 + i32 → i32
+    /// - i32 + i64/int → i64/int (preserves the wider operand's display)
+    /// - f32 + f32 → f32
+    /// - f32 + f64/float → f64/float (preserves the wider operand's display)
+    pub fn numeric_promotion(a: Primitive, b: Primitive) -> Option<Primitive> {
+        if a.is_integer() && b.is_integer() {
+            if matches!(a, Primitive::I32) && matches!(b, Primitive::I32) {
+                Some(Primitive::I32)
+            } else if matches!(a, Primitive::I32) {
+                Some(b)
+            } else {
+                Some(a)
+            }
+        } else if a.is_float() && b.is_float() {
+            if matches!(a, Primitive::F32) && matches!(b, Primitive::F32) {
+                Some(Primitive::F32)
+            } else if matches!(a, Primitive::F32) {
+                Some(b)
+            } else {
+                Some(a)
+            }
+        } else {
+            None
+        }
+    }
+}
+
+impl PartialEq for Primitive {
+    fn eq(&self, other: &Self) -> bool {
+        self.canonical() == other.canonical()
+    }
+}
+
+impl Eq for Primitive {}
+
+impl Hash for Primitive {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.canonical().hash(state);
     }
 }
 
@@ -47,7 +150,7 @@ impl fmt::Display for Primitive {
 /// Types are immutable and can be shared via `Arc` for efficiency.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
-    /// Primitive type (int, float, string, bool, void)
+    /// Primitive type (i32, i64, int, f32, f64, float, string, bool, void)
     Primitive(Primitive),
 
     /// Array type: T[]
@@ -95,12 +198,32 @@ pub enum Type {
 }
 
 impl Type {
-    /// Creates a primitive int type.
+    /// Creates a primitive i32 type.
+    pub fn i32() -> Self {
+        Type::Primitive(Primitive::I32)
+    }
+
+    /// Creates a primitive i64 type.
+    pub fn i64() -> Self {
+        Type::Primitive(Primitive::I64)
+    }
+
+    /// Creates a primitive int type (synonym for i64, displays as "int").
     pub fn int() -> Self {
         Type::Primitive(Primitive::Int)
     }
 
-    /// Creates a primitive float type.
+    /// Creates a primitive f32 type.
+    pub fn f32() -> Self {
+        Type::Primitive(Primitive::F32)
+    }
+
+    /// Creates a primitive f64 type.
+    pub fn f64() -> Self {
+        Type::Primitive(Primitive::F64)
+    }
+
+    /// Creates a primitive float type (synonym for f64, displays as "float").
     pub fn float() -> Self {
         Type::Primitive(Primitive::Float)
     }
@@ -190,6 +313,7 @@ impl Type {
     ///
     /// Compatibility includes:
     /// - Exact equality
+    /// - Numeric width promotion within the same category (i32 ↔ i64, f32 ↔ f64)
     /// - Subtyping (e.g., T is compatible with T?)
     /// - Error types are compatible with everything (for error recovery)
     pub fn is_compatible_with(&self, other: &Type) -> bool {
@@ -208,9 +332,19 @@ impl Type {
             return true;
         }
 
+        // Numeric width promotion within the same category
+        if let (Type::Primitive(a), Type::Primitive(b)) = (self, other) {
+            if a.is_integer() && b.is_integer() {
+                return true;
+            }
+            if a.is_float() && b.is_float() {
+                return true;
+            }
+        }
+
         // T is compatible with T?
         if let Type::Nullable(inner) = other {
-            if self == inner.as_ref() {
+            if self.is_compatible_with(inner.as_ref()) {
                 return true;
             }
         }
@@ -308,6 +442,118 @@ mod tests {
     }
 
     #[test]
+    fn test_new_numeric_types() {
+        assert_eq!(Type::i32(), Type::Primitive(Primitive::I32));
+        assert_eq!(Type::i64(), Type::Primitive(Primitive::I64));
+        assert_eq!(Type::f32(), Type::Primitive(Primitive::F32));
+        assert_eq!(Type::f64(), Type::Primitive(Primitive::F64));
+    }
+
+    #[test]
+    fn test_synonym_equality() {
+        // int == i64 semantically
+        assert_eq!(Type::int(), Type::i64());
+        assert_eq!(Primitive::Int, Primitive::I64);
+
+        // float == f64 semantically
+        assert_eq!(Type::float(), Type::f64());
+        assert_eq!(Primitive::Float, Primitive::F64);
+    }
+
+    #[test]
+    fn test_synonym_display_preserving() {
+        // Even though int == i64, they display differently
+        assert_eq!(Type::int().to_string(), "int");
+        assert_eq!(Type::i64().to_string(), "i64");
+        assert_eq!(Type::float().to_string(), "float");
+        assert_eq!(Type::f64().to_string(), "f64");
+    }
+
+    #[test]
+    fn test_width_inequality() {
+        // i32 != i64
+        assert_ne!(Type::i32(), Type::i64());
+        assert_ne!(Type::i32(), Type::int());
+        // f32 != f64
+        assert_ne!(Type::f32(), Type::f64());
+        assert_ne!(Type::f32(), Type::float());
+    }
+
+    #[test]
+    fn test_cross_category_inequality() {
+        assert_ne!(Type::i32(), Type::f32());
+        assert_ne!(Type::i64(), Type::f64());
+        assert_ne!(Type::int(), Type::float());
+    }
+
+    #[test]
+    fn test_primitive_is_integer() {
+        assert!(Primitive::I32.is_integer());
+        assert!(Primitive::I64.is_integer());
+        assert!(Primitive::Int.is_integer());
+        assert!(!Primitive::F32.is_integer());
+        assert!(!Primitive::F64.is_integer());
+        assert!(!Primitive::Float.is_integer());
+        assert!(!Primitive::String.is_integer());
+    }
+
+    #[test]
+    fn test_primitive_is_float() {
+        assert!(Primitive::F32.is_float());
+        assert!(Primitive::F64.is_float());
+        assert!(Primitive::Float.is_float());
+        assert!(!Primitive::I32.is_float());
+        assert!(!Primitive::I64.is_float());
+        assert!(!Primitive::Int.is_float());
+    }
+
+    #[test]
+    fn test_numeric_promotion() {
+        // Same width
+        assert_eq!(Primitive::numeric_promotion(Primitive::I32, Primitive::I32), Some(Primitive::I32));
+        assert_eq!(Primitive::numeric_promotion(Primitive::F32, Primitive::F32), Some(Primitive::F32));
+
+        // Cross width, same category
+        let result = Primitive::numeric_promotion(Primitive::I32, Primitive::I64);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), Primitive::I64); // wider wins
+
+        let result = Primitive::numeric_promotion(Primitive::I32, Primitive::Int);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), Primitive::Int); // preserves display
+
+        let result = Primitive::numeric_promotion(Primitive::F32, Primitive::F64);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), Primitive::F64);
+
+        // Cross category: error
+        assert_eq!(Primitive::numeric_promotion(Primitive::I32, Primitive::F32), None);
+        assert_eq!(Primitive::numeric_promotion(Primitive::I64, Primitive::F64), None);
+        assert_eq!(Primitive::numeric_promotion(Primitive::Int, Primitive::Float), None);
+    }
+
+    #[test]
+    fn test_is_compatible_same_category_widths() {
+        // i32 compatible with i64 (same category, different width)
+        assert!(Type::i32().is_compatible_with(&Type::i64()));
+        assert!(Type::i64().is_compatible_with(&Type::i32()));
+        assert!(Type::i32().is_compatible_with(&Type::int()));
+
+        // f32 compatible with f64
+        assert!(Type::f32().is_compatible_with(&Type::f64()));
+        assert!(Type::f64().is_compatible_with(&Type::f32()));
+        assert!(Type::f32().is_compatible_with(&Type::float()));
+    }
+
+    #[test]
+    fn test_is_not_compatible_cross_category() {
+        // i32 not compatible with f32
+        assert!(!Type::i32().is_compatible_with(&Type::f32()));
+        assert!(!Type::i64().is_compatible_with(&Type::f64()));
+        assert!(!Type::int().is_compatible_with(&Type::float()));
+    }
+
+    #[test]
     fn test_array_type() {
         let arr = Type::array(Type::int());
         assert_eq!(arr, Type::Array(Box::new(Type::int())));
@@ -354,6 +600,12 @@ mod tests {
     }
 
     #[test]
+    fn test_is_compatible_nullable_with_width_promotion() {
+        // i32 should be compatible with i64? (via promotion + nullable)
+        assert!(Type::i32().is_compatible_with(&Type::nullable(Type::i64())));
+    }
+
+    #[test]
     fn test_is_compatible_error() {
         let error = Type::Error;
         let int = Type::int();
@@ -395,6 +647,11 @@ mod tests {
     #[test]
     fn test_type_display() {
         assert_eq!(Type::int().to_string(), "int");
+        assert_eq!(Type::i32().to_string(), "i32");
+        assert_eq!(Type::i64().to_string(), "i64");
+        assert_eq!(Type::f32().to_string(), "f32");
+        assert_eq!(Type::f64().to_string(), "f64");
+        assert_eq!(Type::float().to_string(), "float");
         assert_eq!(Type::array(Type::string()).to_string(), "string[]");
         assert_eq!(Type::nullable(Type::bool()).to_string(), "bool?");
         assert_eq!(

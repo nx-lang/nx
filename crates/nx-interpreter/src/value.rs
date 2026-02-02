@@ -14,7 +14,9 @@ use smol_str::SmolStr;
 /// ```
 /// use nx_interpreter::Value;
 /// use smol_str::SmolStr;
+/// let i32_val = Value::Int32(42);
 /// let int_val = Value::Int(42);
+/// let f32_val = Value::Float32(3.14);
 /// let float_val = Value::Float(3.14);
 /// let string_val = Value::String(SmolStr::new("hello"));
 /// let bool_val = Value::Boolean(true);
@@ -23,14 +25,20 @@ use smol_str::SmolStr;
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
-    /// Integer value (i64)
+    /// 32-bit signed integer value (i32)
+    Int32(i32),
+
+    /// 64-bit signed integer value (i64)
     ///
-    /// Represents whole numbers from -2^63 to 2^63-1
+    /// This is the default integer type (`int` / `i64`).
     Int(i64),
 
-    /// Floating-point value (f64)
+    /// 32-bit floating-point value (f32)
+    Float32(f32),
+
+    /// 64-bit floating-point value (f64)
     ///
-    /// Represents decimal numbers with IEEE 754 double precision
+    /// This is the default float type (`float` / `f64`).
     Float(f64),
 
     /// String value
@@ -80,19 +88,22 @@ impl Value {
         matches!(self, Value::Null)
     }
 
-    /// Check if the value is an integer
+    /// Check if the value is any integer type (i32 or i64)
     pub fn is_int(&self) -> bool {
-        matches!(self, Value::Int(_))
+        matches!(self, Value::Int32(_) | Value::Int(_))
     }
 
-    /// Check if the value is a float
+    /// Check if the value is any float type (f32 or f64)
     pub fn is_float(&self) -> bool {
-        matches!(self, Value::Float(_))
+        matches!(self, Value::Float32(_) | Value::Float(_))
     }
 
-    /// Check if the value is a number (int or float)
+    /// Check if the value is a number (any integer or float)
     pub fn is_number(&self) -> bool {
-        matches!(self, Value::Int(_) | Value::Float(_))
+        matches!(
+            self,
+            Value::Int32(_) | Value::Int(_) | Value::Float32(_) | Value::Float(_)
+        )
     }
 
     /// Check if the value is a string
@@ -114,18 +125,12 @@ impl Value {
     ///
     /// Returns a static string describing the type of this value.
     /// Useful for error messages and debugging.
-    ///
-    /// # Returns
-    /// - "int" for `Int` values
-    /// - "float" for `Float` values
-    /// - "string" for `String` values
-    /// - "boolean" for `Boolean` values
-    /// - "null" for `Null` values
-    /// - "array" for `Array` values
     pub fn type_name(&self) -> &'static str {
         match self {
-            Value::Int(_) => "int",
-            Value::Float(_) => "float",
+            Value::Int32(_) => "i32",
+            Value::Int(_) => "i64",
+            Value::Float32(_) => "f32",
+            Value::Float(_) => "f64",
             Value::String(_) => "string",
             Value::Boolean(_) => "boolean",
             Value::Null => "null",
@@ -139,7 +144,9 @@ impl Value {
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Value::Int32(n) => write!(f, "{}", n),
             Value::Int(n) => write!(f, "{}", n),
+            Value::Float32(n) => write!(f, "{}", n),
             Value::Float(n) => write!(f, "{}", n),
             Value::String(s) => write!(f, "{}", s),
             Value::Boolean(b) => write!(f, "{}", b),
@@ -180,9 +187,17 @@ mod tests {
         assert!(int_val.is_number());
         assert!(!int_val.is_null());
 
+        let i32_val = Value::Int32(42);
+        assert!(i32_val.is_int());
+        assert!(i32_val.is_number());
+
         let float_val = Value::Float(2.5);
         assert!(float_val.is_float());
         assert!(float_val.is_number());
+
+        let f32_val = Value::Float32(2.5);
+        assert!(f32_val.is_float());
+        assert!(f32_val.is_number());
 
         let string_val = Value::String(SmolStr::new("hello"));
         assert!(string_val.is_string());
@@ -196,7 +211,9 @@ mod tests {
 
     #[test]
     fn test_value_display() {
+        assert_eq!(Value::Int32(42).to_string(), "42");
         assert_eq!(Value::Int(42).to_string(), "42");
+        assert_eq!(Value::Float32(2.5).to_string(), "2.5");
         assert_eq!(Value::Float(2.5).to_string(), "2.5");
         assert_eq!(Value::String(SmolStr::new("test")).to_string(), "test");
         assert_eq!(Value::Boolean(true).to_string(), "true");
@@ -224,8 +241,10 @@ mod tests {
 
     #[test]
     fn test_type_names() {
-        assert_eq!(Value::Int(42).type_name(), "int");
-        assert_eq!(Value::Float(2.5).type_name(), "float");
+        assert_eq!(Value::Int32(42).type_name(), "i32");
+        assert_eq!(Value::Int(42).type_name(), "i64");
+        assert_eq!(Value::Float32(2.5).type_name(), "f32");
+        assert_eq!(Value::Float(2.5).type_name(), "f64");
         assert_eq!(Value::String(SmolStr::new("test")).type_name(), "string");
         assert_eq!(Value::Boolean(true).type_name(), "boolean");
         assert_eq!(Value::Null.type_name(), "null");

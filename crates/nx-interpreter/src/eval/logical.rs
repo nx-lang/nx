@@ -58,14 +58,34 @@ pub fn eval_logical_unary(op: UnOp, operand: Value) -> Result<Value, RuntimeErro
     }
 }
 
+/// Extract an i64 from any integer Value variant, for comparison.
+fn as_i64(v: &Value) -> Option<i64> {
+    match v {
+        Value::Int32(n) => Some(*n as i64),
+        Value::Int(n) => Some(*n),
+        _ => None,
+    }
+}
+
+/// Extract an f64 from any float Value variant, for comparison.
+fn as_f64(v: &Value) -> Option<f64> {
+    match v {
+        Value::Float32(n) => Some(*n as f64),
+        Value::Float(n) => Some(*n),
+        _ => None,
+    }
+}
+
 // Comparison operators
 
 fn eval_eq(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
-    let result = match (lhs, rhs) {
-        (Value::Int(a), Value::Int(b)) => a == b,
-        (Value::Float(a), Value::Float(b)) => a == b,
-        (Value::Int(a), Value::Float(b)) => (a as f64) == b,
-        (Value::Float(a), Value::Int(b)) => a == (b as f64),
+    let result = match (&lhs, &rhs) {
+        (Value::Int32(_) | Value::Int(_), Value::Int32(_) | Value::Int(_)) => {
+            as_i64(&lhs).unwrap() == as_i64(&rhs).unwrap()
+        }
+        (Value::Float32(_) | Value::Float(_), Value::Float32(_) | Value::Float(_)) => {
+            as_f64(&lhs).unwrap() == as_f64(&rhs).unwrap()
+        }
         (Value::String(a), Value::String(b)) => a == b,
         (Value::Boolean(a), Value::Boolean(b)) => a == b,
         (
@@ -93,16 +113,18 @@ fn eval_ne(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
 }
 
 fn eval_lt(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
-    let result = match (lhs, rhs) {
-        (Value::Int(a), Value::Int(b)) => a < b,
-        (Value::Float(a), Value::Float(b)) => a < b,
-        (Value::Int(a), Value::Float(b)) => (a as f64) < b,
-        (Value::Float(a), Value::Int(b)) => a < (b as f64),
+    let result = match (&lhs, &rhs) {
+        (Value::Int32(_) | Value::Int(_), Value::Int32(_) | Value::Int(_)) => {
+            as_i64(&lhs).unwrap() < as_i64(&rhs).unwrap()
+        }
+        (Value::Float32(_) | Value::Float(_), Value::Float32(_) | Value::Float(_)) => {
+            as_f64(&lhs).unwrap() < as_f64(&rhs).unwrap()
+        }
         (Value::String(a), Value::String(b)) => a < b,
-        (a, b) => {
+        _ => {
             return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                expected: "comparable types (int, float, string)".to_string(),
-                actual: format!("{} and {}", a.type_name(), b.type_name()),
+                expected: "comparable types within same category".to_string(),
+                actual: format!("{} and {}", lhs.type_name(), rhs.type_name()),
                 operation: "less than".to_string(),
             }))
         }
@@ -111,16 +133,18 @@ fn eval_lt(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
 }
 
 fn eval_le(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
-    let result = match (lhs, rhs) {
-        (Value::Int(a), Value::Int(b)) => a <= b,
-        (Value::Float(a), Value::Float(b)) => a <= b,
-        (Value::Int(a), Value::Float(b)) => (a as f64) <= b,
-        (Value::Float(a), Value::Int(b)) => a <= (b as f64),
+    let result = match (&lhs, &rhs) {
+        (Value::Int32(_) | Value::Int(_), Value::Int32(_) | Value::Int(_)) => {
+            as_i64(&lhs).unwrap() <= as_i64(&rhs).unwrap()
+        }
+        (Value::Float32(_) | Value::Float(_), Value::Float32(_) | Value::Float(_)) => {
+            as_f64(&lhs).unwrap() <= as_f64(&rhs).unwrap()
+        }
         (Value::String(a), Value::String(b)) => a <= b,
-        (a, b) => {
+        _ => {
             return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                expected: "comparable types (int, float, string)".to_string(),
-                actual: format!("{} and {}", a.type_name(), b.type_name()),
+                expected: "comparable types within same category".to_string(),
+                actual: format!("{} and {}", lhs.type_name(), rhs.type_name()),
                 operation: "less than or equal".to_string(),
             }))
         }
@@ -129,16 +153,18 @@ fn eval_le(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
 }
 
 fn eval_gt(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
-    let result = match (lhs, rhs) {
-        (Value::Int(a), Value::Int(b)) => a > b,
-        (Value::Float(a), Value::Float(b)) => a > b,
-        (Value::Int(a), Value::Float(b)) => (a as f64) > b,
-        (Value::Float(a), Value::Int(b)) => a > (b as f64),
+    let result = match (&lhs, &rhs) {
+        (Value::Int32(_) | Value::Int(_), Value::Int32(_) | Value::Int(_)) => {
+            as_i64(&lhs).unwrap() > as_i64(&rhs).unwrap()
+        }
+        (Value::Float32(_) | Value::Float(_), Value::Float32(_) | Value::Float(_)) => {
+            as_f64(&lhs).unwrap() > as_f64(&rhs).unwrap()
+        }
         (Value::String(a), Value::String(b)) => a > b,
-        (a, b) => {
+        _ => {
             return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                expected: "comparable types (int, float, string)".to_string(),
-                actual: format!("{} and {}", a.type_name(), b.type_name()),
+                expected: "comparable types within same category".to_string(),
+                actual: format!("{} and {}", lhs.type_name(), rhs.type_name()),
                 operation: "greater than".to_string(),
             }))
         }
@@ -147,16 +173,18 @@ fn eval_gt(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
 }
 
 fn eval_ge(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
-    let result = match (lhs, rhs) {
-        (Value::Int(a), Value::Int(b)) => a >= b,
-        (Value::Float(a), Value::Float(b)) => a >= b,
-        (Value::Int(a), Value::Float(b)) => (a as f64) >= b,
-        (Value::Float(a), Value::Int(b)) => a >= (b as f64),
+    let result = match (&lhs, &rhs) {
+        (Value::Int32(_) | Value::Int(_), Value::Int32(_) | Value::Int(_)) => {
+            as_i64(&lhs).unwrap() >= as_i64(&rhs).unwrap()
+        }
+        (Value::Float32(_) | Value::Float(_), Value::Float32(_) | Value::Float(_)) => {
+            as_f64(&lhs).unwrap() >= as_f64(&rhs).unwrap()
+        }
         (Value::String(a), Value::String(b)) => a >= b,
-        (a, b) => {
+        _ => {
             return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                expected: "comparable types (int, float, string)".to_string(),
-                actual: format!("{} and {}", a.type_name(), b.type_name()),
+                expected: "comparable types within same category".to_string(),
+                actual: format!("{} and {}", lhs.type_name(), rhs.type_name()),
                 operation: "greater than or equal".to_string(),
             }))
         }
@@ -215,9 +243,22 @@ mod tests {
     }
 
     #[test]
-    fn test_eq_mixed_numeric() {
-        let result = eval_eq(Value::Int(5), Value::Float(5.0)).unwrap();
+    fn test_eq_int32() {
+        let result = eval_eq(Value::Int32(5), Value::Int32(5)).unwrap();
         assert_eq!(result, Value::Boolean(true));
+    }
+
+    #[test]
+    fn test_eq_int32_int_cross_width() {
+        let result = eval_eq(Value::Int32(5), Value::Int(5)).unwrap();
+        assert_eq!(result, Value::Boolean(true));
+    }
+
+    #[test]
+    fn test_eq_cross_category_false() {
+        // Int vs Float returns false (not an error for eq/ne)
+        let result = eval_eq(Value::Int(5), Value::Float(5.0)).unwrap();
+        assert_eq!(result, Value::Boolean(false));
     }
 
     #[test]
@@ -233,6 +274,18 @@ mod tests {
 
         let result = eval_lt(Value::Int(5), Value::Int(3)).unwrap();
         assert_eq!(result, Value::Boolean(false));
+    }
+
+    #[test]
+    fn test_lt_int32_int_cross_width() {
+        let result = eval_lt(Value::Int32(3), Value::Int(5)).unwrap();
+        assert_eq!(result, Value::Boolean(true));
+    }
+
+    #[test]
+    fn test_lt_cross_category_error() {
+        let result = eval_lt(Value::Int(3), Value::Float(5.0));
+        assert!(result.is_err());
     }
 
     #[test]

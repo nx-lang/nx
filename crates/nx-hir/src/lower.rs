@@ -19,7 +19,9 @@ use smol_str::SmolStr;
 /// allocating expressions and handling errors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TypeTag {
+    I32,
     Int,
+    F32,
     Float,
     Boolean,
     String,
@@ -34,8 +36,10 @@ impl TypeTag {
                 let lower = name.as_str().to_ascii_lowercase();
                 match lower.as_str() {
                     "string" => TypeTag::String,
-                    "int" | "long" => TypeTag::Int,
-                    "float" | "double" => TypeTag::Float,
+                    "i32" => TypeTag::I32,
+                    "i64" | "int" => TypeTag::Int,
+                    "f32" => TypeTag::F32,
+                    "f64" | "float" => TypeTag::Float,
                     "boolean" | "bool" => TypeTag::Boolean,
                     _ => TypeTag::Unknown,
                 }
@@ -47,8 +51,14 @@ impl TypeTag {
 
     fn combine_numeric(lhs: TypeTag, rhs: TypeTag) -> TypeTag {
         match (lhs, rhs) {
-            (TypeTag::Float, _) | (_, TypeTag::Float) => TypeTag::Float,
+            // Same-category integer promotion
+            (TypeTag::I32, TypeTag::I32) => TypeTag::I32,
+            (TypeTag::I32, TypeTag::Int) | (TypeTag::Int, TypeTag::I32) => TypeTag::Int,
             (TypeTag::Int, TypeTag::Int) => TypeTag::Int,
+            // Same-category float promotion
+            (TypeTag::F32, TypeTag::F32) => TypeTag::F32,
+            (TypeTag::F32, TypeTag::Float) | (TypeTag::Float, TypeTag::F32) => TypeTag::Float,
+            (TypeTag::Float, TypeTag::Float) => TypeTag::Float,
             _ => TypeTag::Unknown,
         }
     }
@@ -339,7 +349,7 @@ impl LoweringContext {
                 let result_ty = match op {
                     UnOp::Not => TypeTag::Boolean,
                     UnOp::Neg => match operand_ty {
-                        TypeTag::Int | TypeTag::Float => operand_ty,
+                        TypeTag::I32 | TypeTag::Int | TypeTag::F32 | TypeTag::Float => operand_ty,
                         _ => TypeTag::Unknown,
                     },
                 };

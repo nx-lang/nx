@@ -20,7 +20,9 @@ pub fn to_nx_value(value: &Value) -> NxValue
     {
         Value::Null => NxValue::Null,
         Value::Boolean(value) => NxValue::Bool(*value),
+        Value::Int32(value) => NxValue::Int32(*value),
         Value::Int(value) => NxValue::Int(*value),
+        Value::Float32(value) => NxValue::Float32(*value),
         Value::Float(value) => NxValue::Float(*value),
         Value::String(value) => NxValue::String(value.to_string()),
         Value::Array(elements) => NxValue::Array(elements.iter().map(to_nx_value).collect()),

@@ -232,22 +232,22 @@ fn csharp_type_name(name: &str) -> CSharpType {
             is_reference: true,
             is_nullable: false,
         },
-        "int" => CSharpType {
+        "i32" => CSharpType {
             text: "int".to_string(),
             is_reference: false,
             is_nullable: false,
         },
-        "long" => CSharpType {
+        "i64" | "int" => CSharpType {
             text: "long".to_string(),
             is_reference: false,
             is_nullable: false,
         },
-        "float" => CSharpType {
+        "f32" => CSharpType {
             text: "float".to_string(),
             is_reference: false,
             is_nullable: false,
         },
-        "double" => CSharpType {
+        "f64" | "float" => CSharpType {
             text: "double".to_string(),
             is_reference: false,
             is_nullable: false,

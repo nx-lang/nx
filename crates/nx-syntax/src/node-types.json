@@ -1793,10 +1793,6 @@
     "named": false
   },
   {
-    "type": "double",
-    "named": false
-  },
-  {
     "type": "else",
     "named": false
   },
@@ -1825,6 +1821,14 @@
     "named": true
   },
   {
+    "type": "f32",
+    "named": false
+  },
+  {
+    "type": "f64",
+    "named": false
+  },
+  {
     "type": "false",
     "named": false
   },
@@ -1844,6 +1848,14 @@
     "type": "html_block_comment",
     "named": true,
     "extra": true
+  },
+  {
+    "type": "i32",
+    "named": false
+  },
+  {
+    "type": "i64",
+    "named": false
   },
   {
     "type": "identifier",
@@ -1881,10 +1893,6 @@
     "type": "line_comment",
     "named": true,
     "extra": true
-  },
-  {
-    "type": "long",
-    "named": false
   },
   {
     "type": "markup_identifier",

@@ -322,19 +322,27 @@
         },
         {
           "type": "STRING",
+          "value": "i32"
+        },
+        {
+          "type": "STRING",
+          "value": "i64"
+        },
+        {
+          "type": "STRING",
           "value": "int"
         },
         {
           "type": "STRING",
-          "value": "long"
+          "value": "f32"
+        },
+        {
+          "type": "STRING",
+          "value": "f64"
         },
         {
           "type": "STRING",
           "value": "float"
-        },
-        {
-          "type": "STRING",
-          "value": "double"
         },
         {
           "type": "STRING",

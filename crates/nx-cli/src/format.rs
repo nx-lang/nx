@@ -23,7 +23,9 @@ pub fn format_value(value: &Value) -> String {
 fn format_value_inner(value: &Value, output: &mut String, indent: usize) {
     match value {
         // Literal values - print directly
+        Value::Int32(n) => write!(output, "{}", n).unwrap(),
         Value::Int(n) => write!(output, "{}", n).unwrap(),
+        Value::Float32(f) => write!(output, "{}", f).unwrap(),
         Value::Float(f) => write!(output, "{}", f).unwrap(),
         Value::String(s) => output.push_str(s.as_str()),
         Value::Boolean(b) => write!(output, "{}", b).unwrap(),
@@ -182,7 +184,9 @@ fn format_nested_record(
 fn format_attribute_value(value: &Value, output: &mut String) {
     match value {
         Value::String(s) => write!(output, "\"{}\"", escape_string(s.as_str())).unwrap(),
+        Value::Int32(n) => write!(output, "\"{}\"", n).unwrap(),
         Value::Int(n) => write!(output, "\"{}\"", n).unwrap(),
+        Value::Float32(f) => write!(output, "\"{}\"", f).unwrap(),
         Value::Float(f) => write!(output, "\"{}\"", f).unwrap(),
         Value::Boolean(b) => write!(output, "\"{}\"", b).unwrap(),
         Value::Null => output.push_str("\"null\""),

@@ -24,8 +24,8 @@ Keywords
 
 Primitive types (keywords)
 - STRING ("string")
-- INT ("int"), LONG ("long")
-- FLOAT ("float"), DOUBLE ("double")
+- I32 ("i32"), I64 ("i64"), INT ("int")
+- F32 ("f32"), F64 ("f64"), FLOAT ("float")
 - BOOLEAN ("boolean")
 - VOID ("void")
 - OBJECT ("object")
@@ -208,8 +208,8 @@ TypeOptModifier
 - TypeOptModifier → ε
 
 PrimitiveType (AST: PrimitiveTypeSyntax)
-- PrimitiveType → STRING | INT | LONG | FLOAT | DOUBLE | BOOLEAN | VOID | OBJECT
-  - fields: name: "string"|"int"|"long"|"float"|"double"|"boolean"|"void"|"object"
+- PrimitiveType → STRING | I32 | I64 | INT | F32 | F64 | FLOAT | BOOLEAN | VOID | OBJECT
+  - fields: name: "string"|"i32"|"i64"|"int"|"f32"|"f64"|"float"|"boolean"|"void"|"object"
 
 UserDefinedType (AST: UserTypeSyntax)
 - UserDefinedType → QualifiedName

@@ -355,14 +355,26 @@ impl<'a> InferenceContext<'a> {
         }
 
         match op {
-            // Arithmetic: int × int → int, float × float → float
+            // Arithmetic: same numeric category with promotion
             Add | Sub | Mul | Div | Mod => {
-                if lhs == &Type::int() && rhs == &Type::int() {
-                    Type::int()
-                } else if lhs == &Type::float() && rhs == &Type::float() {
-                    Type::float()
-                } else if lhs == &Type::string() && rhs == &Type::string() && op == Add {
-                    // String concatenation
+                if let (Type::Primitive(a), Type::Primitive(b)) = (lhs, rhs) {
+                    if a.is_numeric() && b.is_numeric() {
+                        if let Some(promoted) = crate::ty::Primitive::numeric_promotion(*a, *b) {
+                            return Type::Primitive(promoted);
+                        } else {
+                            self.error(
+                                "type-mismatch",
+                                format!(
+                                    "Cannot mix integer and float types: {} and {}",
+                                    lhs, rhs
+                                ),
+                                span,
+                            );
+                            return Type::Error;
+                        }
+                    }
+                }
+                if lhs == &Type::string() && rhs == &Type::string() && op == Add {
                     Type::string()
                 } else {
                     self.error(
@@ -440,16 +452,17 @@ impl<'a> InferenceContext<'a> {
 
         match op {
             ast::UnOp::Neg => {
-                if operand == &Type::int() || operand == &Type::float() {
-                    operand.clone()
-                } else {
-                    self.error(
-                        "type-mismatch",
-                        format!("Negation requires int or float, found {}", operand),
-                        span,
-                    );
-                    Type::Error
+                if let Type::Primitive(p) = operand {
+                    if p.is_numeric() {
+                        return operand.clone();
+                    }
                 }
+                self.error(
+                    "type-mismatch",
+                    format!("Negation requires a numeric type, found {}", operand),
+                    span,
+                );
+                Type::Error
             }
             ast::UnOp::Not => {
                 if operand == &Type::bool() {
@@ -670,8 +683,12 @@ impl<'a> InferenceContext<'a> {
         let lower = name.as_str().to_ascii_lowercase();
         match lower.as_str() {
             "string" => Type::string(),
-            "int" | "long" => Type::int(),
-            "float" | "double" => Type::float(),
+            "i32" => Type::i32(),
+            "i64" => Type::i64(),
+            "int" => Type::int(),
+            "f32" => Type::f32(),
+            "f64" => Type::f64(),
+            "float" => Type::float(),
             "boolean" | "bool" => Type::bool(),
             "void" => Type::void(),
             _ => {

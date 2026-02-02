@@ -83,7 +83,7 @@ fn ts_type(ty: &TypeRef) -> String {
 fn ts_type_name(name: &str) -> String {
     match name {
         "string" => "string".to_string(),
-        "int" | "long" | "float" | "double" => "number".to_string(),
+        "i32" | "i64" | "int" | "f32" | "f64" | "float" => "number".to_string(),
         "boolean" => "boolean".to_string(),
         "void" => "void".to_string(),
         "object" => "unknown".to_string(),
