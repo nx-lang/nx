@@ -279,14 +279,14 @@ impl Interpreter {
                         match rhs_val {
                             Value::Boolean(b) => Ok(Value::Boolean(b)),
                             v => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                                expected: "boolean".to_string(),
+                                expected: "bool".to_string(),
                                 actual: v.type_name().to_string(),
                                 operation: "logical and".to_string(),
                             })),
                         }
                     }
                     v => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                        expected: "boolean".to_string(),
+                        expected: "bool".to_string(),
                         actual: v.type_name().to_string(),
                         operation: "logical and".to_string(),
                     })),
@@ -301,14 +301,14 @@ impl Interpreter {
                         match rhs_val {
                             Value::Boolean(b) => Ok(Value::Boolean(b)),
                             v => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                                expected: "boolean".to_string(),
+                                expected: "bool".to_string(),
                                 actual: v.type_name().to_string(),
                                 operation: "logical or".to_string(),
                             })),
                         }
                     }
                     v => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                        expected: "boolean".to_string(),
+                        expected: "bool".to_string(),
                         actual: v.type_name().to_string(),
                         operation: "logical or".to_string(),
                     })),
@@ -388,12 +388,12 @@ impl Interpreter {
         // Evaluate condition
         let condition_value = self.eval_expr(module, ctx, condition)?;
 
-        // Condition must be a boolean
+        // Condition must be a bool
         let condition_bool = match condition_value {
             Value::Boolean(b) => b,
             v => {
                 return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                    expected: "boolean".to_string(),
+                    expected: "bool".to_string(),
                     actual: v.type_name().to_string(),
                     operation: "if condition".to_string(),
                 }))

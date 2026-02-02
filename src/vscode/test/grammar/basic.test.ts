@@ -235,12 +235,12 @@ describe('NX TextMate grammar', function () {
   });
 
   it('highlights paren-style function definitions', function () {
-    const line = 'let render(title:string, count:int): boolean = title == ""';
+    const line = 'let render(title:string, count:int): bool = title == ""';
     const { tokens } = grammar.tokenizeLine(line, null);
     expect(scopesForSubstring(line, tokens, 'render')).to.include('entity.name.variable.nx');
     expect(scopesForSubstring(line, tokens, 'string')).to.include('storage.type.primitive.nx');
     expect(scopesForSubstring(line, tokens, 'int')).to.include('storage.type.primitive.nx');
-    expect(scopesForSubstring(line, tokens, 'boolean')).to.include('storage.type.primitive.nx');
+    expect(scopesForSubstring(line, tokens, 'bool')).to.include('storage.type.primitive.nx');
   });
 
   it('highlights tags and attributes', function () {

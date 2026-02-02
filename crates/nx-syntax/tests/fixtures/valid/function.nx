@@ -3,7 +3,7 @@ import core.html
 
 let <Button
   text:string
-  disabled:boolean=false
+  disabled:bool=false
 />: Element =
   <button
     class="btn"

@@ -510,8 +510,14 @@ mod tests {
     #[test]
     fn test_numeric_promotion() {
         // Same width
-        assert_eq!(Primitive::numeric_promotion(Primitive::I32, Primitive::I32), Some(Primitive::I32));
-        assert_eq!(Primitive::numeric_promotion(Primitive::F32, Primitive::F32), Some(Primitive::F32));
+        assert_eq!(
+            Primitive::numeric_promotion(Primitive::I32, Primitive::I32),
+            Some(Primitive::I32)
+        );
+        assert_eq!(
+            Primitive::numeric_promotion(Primitive::F32, Primitive::F32),
+            Some(Primitive::F32)
+        );
 
         // Cross width, same category
         let result = Primitive::numeric_promotion(Primitive::I32, Primitive::I64);
@@ -527,9 +533,18 @@ mod tests {
         assert_eq!(result.unwrap(), Primitive::F64);
 
         // Cross category: error
-        assert_eq!(Primitive::numeric_promotion(Primitive::I32, Primitive::F32), None);
-        assert_eq!(Primitive::numeric_promotion(Primitive::I64, Primitive::F64), None);
-        assert_eq!(Primitive::numeric_promotion(Primitive::Int, Primitive::Float), None);
+        assert_eq!(
+            Primitive::numeric_promotion(Primitive::I32, Primitive::F32),
+            None
+        );
+        assert_eq!(
+            Primitive::numeric_promotion(Primitive::I64, Primitive::F64),
+            None
+        );
+        assert_eq!(
+            Primitive::numeric_promotion(Primitive::Int, Primitive::Float),
+            None
+        );
     }
 
     #[test]

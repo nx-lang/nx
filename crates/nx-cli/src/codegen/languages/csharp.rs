@@ -38,15 +38,12 @@ fn emit_enum(writer: &mut CodeWriter, en: &ExportedEnum) {
     writer.line(&format!(
         "[MessagePackFormatter(typeof({enum_name}MessagePackFormatter))]"
     ));
-    writer.block(
-        &format!("public enum {enum_name}"),
-        |writer| {
-            for (idx, member) in en.members.iter().enumerate() {
-                let comma = if idx + 1 == en.members.len() { "" } else { "," };
-                writer.line(&format!("{}{}", sanitize_csharp_identifier(member), comma));
-            }
-        },
-    );
+    writer.block(&format!("public enum {enum_name}"), |writer| {
+        for (idx, member) in en.members.iter().enumerate() {
+            let comma = if idx + 1 == en.members.len() { "" } else { "," };
+            writer.line(&format!("{}{}", sanitize_csharp_identifier(member), comma));
+        }
+    });
 
     writer.blank_line();
     emit_enum_messagepack_formatter(writer, en);
@@ -252,7 +249,7 @@ fn csharp_type_name(name: &str) -> CSharpType {
             is_reference: false,
             is_nullable: false,
         },
-        "boolean" => CSharpType {
+        "bool" => CSharpType {
             text: "bool".to_string(),
             is_reference: false,
             is_nullable: false,

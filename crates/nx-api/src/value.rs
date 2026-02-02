@@ -14,10 +14,8 @@ use std::collections::BTreeMap;
 /// - `$variant` — the variant name
 ///
 /// For example, `Color::Red` becomes `{ "$enum": "Color", "$variant": "Red" }`.
-pub fn to_nx_value(value: &Value) -> NxValue
-{
-    match value
-    {
+pub fn to_nx_value(value: &Value) -> NxValue {
+    match value {
         Value::Null => NxValue::Null,
         Value::Boolean(value) => NxValue::Bool(*value),
         Value::Int32(value) => NxValue::Int32(*value),
@@ -45,14 +43,11 @@ pub fn to_nx_value(value: &Value) -> NxValue
 
 fn fields_to_properties(
     fields: &rustc_hash::FxHashMap<smol_str::SmolStr, Value>,
-) -> BTreeMap<String, NxValue>
-{
+) -> BTreeMap<String, NxValue> {
     let mut obj = BTreeMap::new();
-    for (key, value) in fields
-    {
+    for (key, value) in fields {
         obj.insert(key.to_string(), to_nx_value(value));
     }
 
     obj
 }
-

@@ -11,7 +11,7 @@ use std::fmt::Write;
 /// Pretty print a Value to NX format string.
 ///
 /// # Rules
-/// - Literal values (string, number, boolean, null) are printed directly
+/// - Literal values (string, number, bool, null) are printed directly
 /// - Records and objects are printed as XML-like elements
 /// - Arrays are printed as a sequence of their elements
 pub fn format_value(value: &Value) -> String {

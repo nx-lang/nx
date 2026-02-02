@@ -7,7 +7,7 @@ Basic syntax highlighting and language configuration for the NX language using a
 - NX file association (`.nx`)
 - TextMate grammar (`source.nx`):
   - Keywords: import, type, let, if/is/else (simple/match/condition-list), for/in, raw
-  - Primitive types: string, int, long, float, double, boolean, void, object
+  - Primitive types: string, int, long, float, double, bool, void, object
   - Numbers, strings (single/double), entities, operators
   - Markup elements and attributes, closing/self-closing tags
   - Interpolations: `{ expr }`

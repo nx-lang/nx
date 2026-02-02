@@ -40,7 +40,7 @@ impl TypeTag {
                     "i64" | "int" => TypeTag::Int,
                     "f32" => TypeTag::F32,
                     "f64" | "float" => TypeTag::Float,
-                    "boolean" | "bool" => TypeTag::Boolean,
+                    "bool" => TypeTag::Boolean,
                     _ => TypeTag::Unknown,
                 }
             }
@@ -1131,7 +1131,7 @@ mod tests {
 
     #[test]
     fn test_lower_function_with_multiple_params() {
-        let source = "let <Button text:string disabled:boolean /> = <button />";
+        let source = "let <Button text:string disabled:bool /> = <button />";
         let parse_result = parse_str(source, "test.nx");
 
         let tree = parse_result.tree.unwrap();

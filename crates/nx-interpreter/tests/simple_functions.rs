@@ -220,7 +220,7 @@ fn test_enum_member_return() {
 fn test_enum_comparison() {
     let source = r#"
         enum Direction = | North | South | East | West
-        let isNorth(value:Direction): boolean = { value == Direction.North }
+        let isNorth(value:Direction): bool = { value == Direction.North }
     "#;
 
     let result = execute_function(

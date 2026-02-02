@@ -56,7 +56,7 @@ let <TodoList
 let <TodoItem
   item:TodoItem
   index:int
-  visible:boolean=true
+  visible:bool=true
 /> =
   <li
     class="todo-item"

@@ -40,7 +40,7 @@ enum ts_symbol_identifiers {
   anon_sym_f32 = 18,
   anon_sym_f64 = 19,
   anon_sym_float = 20,
-  anon_sym_boolean = 21,
+  anon_sym_bool = 21,
   anon_sym_void = 22,
   anon_sym_object = 23,
   anon_sym_LT = 24,
@@ -196,7 +196,7 @@ static const char * const ts_symbol_names[] = {
   [anon_sym_f32] = "f32",
   [anon_sym_f64] = "f64",
   [anon_sym_float] = "float",
-  [anon_sym_boolean] = "boolean",
+  [anon_sym_bool] = "bool",
   [anon_sym_void] = "void",
   [anon_sym_object] = "object",
   [anon_sym_LT] = "<",
@@ -352,7 +352,7 @@ static const TSSymbol ts_symbol_map[] = {
   [anon_sym_f32] = anon_sym_f32,
   [anon_sym_f64] = anon_sym_f64,
   [anon_sym_float] = anon_sym_float,
-  [anon_sym_boolean] = anon_sym_boolean,
+  [anon_sym_bool] = anon_sym_bool,
   [anon_sym_void] = anon_sym_void,
   [anon_sym_object] = anon_sym_object,
   [anon_sym_LT] = anon_sym_LT,
@@ -571,7 +571,7 @@ static const TSSymbolMetadata ts_symbol_metadata[] = {
     .visible = true,
     .named = false,
   },
-  [anon_sym_boolean] = {
+  [anon_sym_bool] = {
     .visible = true,
     .named = false,
   },
@@ -2742,7 +2742,7 @@ static bool ts_lex_keywords(TSLexer *lexer, TSStateId state) {
       if (lookahead == 'd') ADVANCE(65);
       END_STATE();
     case 54:
-      if (lookahead == 'e') ADVANCE(66);
+      ACCEPT_TOKEN(anon_sym_bool);
       END_STATE();
     case 55:
       ACCEPT_TOKEN(anon_sym_else);
@@ -2751,22 +2751,22 @@ static bool ts_lex_keywords(TSLexer *lexer, TSStateId state) {
       ACCEPT_TOKEN(anon_sym_enum);
       END_STATE();
     case 57:
-      if (lookahead == 'e') ADVANCE(67);
+      if (lookahead == 'e') ADVANCE(66);
       END_STATE();
     case 58:
-      if (lookahead == 't') ADVANCE(68);
+      if (lookahead == 't') ADVANCE(67);
       END_STATE();
     case 59:
-      if (lookahead == 'r') ADVANCE(69);
+      if (lookahead == 'r') ADVANCE(68);
       END_STATE();
     case 60:
       ACCEPT_TOKEN(sym_null_literal);
       END_STATE();
     case 61:
-      if (lookahead == 'c') ADVANCE(70);
+      if (lookahead == 'c') ADVANCE(69);
       END_STATE();
     case 62:
-      if (lookahead == 'n') ADVANCE(71);
+      if (lookahead == 'n') ADVANCE(70);
       END_STATE();
     case 63:
       ACCEPT_TOKEN(anon_sym_true);
@@ -2778,37 +2778,28 @@ static bool ts_lex_keywords(TSLexer *lexer, TSStateId state) {
       ACCEPT_TOKEN(anon_sym_void);
       END_STATE();
     case 66:
-      if (lookahead == 'a') ADVANCE(72);
-      END_STATE();
-    case 67:
       ACCEPT_TOKEN(anon_sym_false);
       END_STATE();
-    case 68:
+    case 67:
       ACCEPT_TOKEN(anon_sym_float);
       END_STATE();
+    case 68:
+      if (lookahead == 't') ADVANCE(71);
+      END_STATE();
     case 69:
-      if (lookahead == 't') ADVANCE(73);
+      if (lookahead == 't') ADVANCE(72);
       END_STATE();
     case 70:
-      if (lookahead == 't') ADVANCE(74);
+      if (lookahead == 'g') ADVANCE(73);
       END_STATE();
     case 71:
-      if (lookahead == 'g') ADVANCE(75);
-      END_STATE();
-    case 72:
-      if (lookahead == 'n') ADVANCE(76);
-      END_STATE();
-    case 73:
       ACCEPT_TOKEN(anon_sym_import);
       END_STATE();
-    case 74:
+    case 72:
       ACCEPT_TOKEN(anon_sym_object);
       END_STATE();
-    case 75:
+    case 73:
       ACCEPT_TOKEN(anon_sym_string);
-      END_STATE();
-    case 76:
-      ACCEPT_TOKEN(anon_sym_boolean);
       END_STATE();
     default:
       return false;
@@ -3561,7 +3552,7 @@ static const uint16_t ts_parse_table[LARGE_STATE_COUNT][SYMBOL_COUNT] = {
     [anon_sym_f32] = ACTIONS(1),
     [anon_sym_f64] = ACTIONS(1),
     [anon_sym_float] = ACTIONS(1),
-    [anon_sym_boolean] = ACTIONS(1),
+    [anon_sym_bool] = ACTIONS(1),
     [anon_sym_void] = ACTIONS(1),
     [anon_sym_object] = ACTIONS(1),
     [anon_sym_LT] = ACTIONS(1),
@@ -11576,7 +11567,7 @@ static const uint16_t ts_small_parse_table[] = {
       anon_sym_f32,
       anon_sym_f64,
       anon_sym_float,
-      anon_sym_boolean,
+      anon_sym_bool,
       anon_sym_void,
       anon_sym_object,
   [9792] = 6,
@@ -11601,7 +11592,7 @@ static const uint16_t ts_small_parse_table[] = {
       anon_sym_f32,
       anon_sym_f64,
       anon_sym_float,
-      anon_sym_boolean,
+      anon_sym_bool,
       anon_sym_void,
       anon_sym_object,
   [9823] = 6,
@@ -11626,7 +11617,7 @@ static const uint16_t ts_small_parse_table[] = {
       anon_sym_f32,
       anon_sym_f64,
       anon_sym_float,
-      anon_sym_boolean,
+      anon_sym_bool,
       anon_sym_void,
       anon_sym_object,
   [9854] = 6,
@@ -11651,7 +11642,7 @@ static const uint16_t ts_small_parse_table[] = {
       anon_sym_f32,
       anon_sym_f64,
       anon_sym_float,
-      anon_sym_boolean,
+      anon_sym_bool,
       anon_sym_void,
       anon_sym_object,
   [9885] = 6,
@@ -11676,7 +11667,7 @@ static const uint16_t ts_small_parse_table[] = {
       anon_sym_f32,
       anon_sym_f64,
       anon_sym_float,
-      anon_sym_boolean,
+      anon_sym_bool,
       anon_sym_void,
       anon_sym_object,
   [9916] = 12,
@@ -11761,7 +11752,7 @@ static const uint16_t ts_small_parse_table[] = {
       anon_sym_f32,
       anon_sym_f64,
       anon_sym_float,
-      anon_sym_boolean,
+      anon_sym_bool,
       anon_sym_void,
       anon_sym_object,
   [10029] = 6,
@@ -11786,7 +11777,7 @@ static const uint16_t ts_small_parse_table[] = {
       anon_sym_f32,
       anon_sym_f64,
       anon_sym_float,
-      anon_sym_boolean,
+      anon_sym_bool,
       anon_sym_void,
       anon_sym_object,
   [10060] = 6,
@@ -11811,7 +11802,7 @@ static const uint16_t ts_small_parse_table[] = {
       anon_sym_f32,
       anon_sym_f64,
       anon_sym_float,
-      anon_sym_boolean,
+      anon_sym_bool,
       anon_sym_void,
       anon_sym_object,
   [10091] = 6,
@@ -11836,7 +11827,7 @@ static const uint16_t ts_small_parse_table[] = {
       anon_sym_f32,
       anon_sym_f64,
       anon_sym_float,
-      anon_sym_boolean,
+      anon_sym_bool,
       anon_sym_void,
       anon_sym_object,
   [10122] = 12,

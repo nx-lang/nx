@@ -71,4 +71,3 @@ fn ffi_msgpack_error_returns_diagnostics() {
     assert!(!diagnostics.is_empty());
     assert_eq!(diagnostics[0].severity, nx_api::NxSeverity::Error);
 }
-

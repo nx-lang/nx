@@ -53,7 +53,7 @@ TypeModifier ::=
 PrimitiveType ::=
     "string"
     | "i32" | "i64" | "int" | "f32" | "f64" | "float"
-    | "boolean"
+    | "bool"
     | "void"
     | "object"
 

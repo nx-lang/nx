@@ -12,4 +12,3 @@ mod value;
 pub use diagnostics::{NxDiagnostic, NxDiagnosticLabel, NxSeverity, NxTextSpan};
 pub use eval::{eval_source, EvalResult};
 pub use value::to_nx_value;
-

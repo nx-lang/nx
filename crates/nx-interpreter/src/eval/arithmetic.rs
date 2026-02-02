@@ -95,35 +95,51 @@ fn eval_mul(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
 fn eval_div(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
     match (lhs, rhs) {
         (Value::Int32(a), Value::Int32(b)) => {
-            if b == 0 { return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero)); }
+            if b == 0 {
+                return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero));
+            }
             Ok(Value::Int32(a / b))
         }
         (Value::Int(a), Value::Int(b)) => {
-            if b == 0 { return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero)); }
+            if b == 0 {
+                return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero));
+            }
             Ok(Value::Int(a / b))
         }
         (Value::Int32(a), Value::Int(b)) => {
-            if b == 0 { return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero)); }
+            if b == 0 {
+                return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero));
+            }
             Ok(Value::Int((a as i64) / b))
         }
         (Value::Int(a), Value::Int32(b)) => {
-            if b == 0 { return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero)); }
+            if b == 0 {
+                return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero));
+            }
             Ok(Value::Int(a / (b as i64)))
         }
         (Value::Float32(a), Value::Float32(b)) => {
-            if b == 0.0 { return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero)); }
+            if b == 0.0 {
+                return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero));
+            }
             Ok(Value::Float32(a / b))
         }
         (Value::Float(a), Value::Float(b)) => {
-            if b == 0.0 { return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero)); }
+            if b == 0.0 {
+                return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero));
+            }
             Ok(Value::Float(a / b))
         }
         (Value::Float32(a), Value::Float(b)) => {
-            if b == 0.0 { return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero)); }
+            if b == 0.0 {
+                return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero));
+            }
             Ok(Value::Float(a as f64 / b))
         }
         (Value::Float(a), Value::Float32(b)) => {
-            if b == 0.0 { return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero)); }
+            if b == 0.0 {
+                return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero));
+            }
             Ok(Value::Float(a / b as f64))
         }
         (a, b) => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
@@ -137,35 +153,51 @@ fn eval_div(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
 fn eval_mod(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
     match (lhs, rhs) {
         (Value::Int32(a), Value::Int32(b)) => {
-            if b == 0 { return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero)); }
+            if b == 0 {
+                return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero));
+            }
             Ok(Value::Int32(a % b))
         }
         (Value::Int(a), Value::Int(b)) => {
-            if b == 0 { return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero)); }
+            if b == 0 {
+                return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero));
+            }
             Ok(Value::Int(a % b))
         }
         (Value::Int32(a), Value::Int(b)) => {
-            if b == 0 { return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero)); }
+            if b == 0 {
+                return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero));
+            }
             Ok(Value::Int((a as i64) % b))
         }
         (Value::Int(a), Value::Int32(b)) => {
-            if b == 0 { return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero)); }
+            if b == 0 {
+                return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero));
+            }
             Ok(Value::Int(a % (b as i64)))
         }
         (Value::Float32(a), Value::Float32(b)) => {
-            if b == 0.0 { return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero)); }
+            if b == 0.0 {
+                return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero));
+            }
             Ok(Value::Float32(a % b))
         }
         (Value::Float(a), Value::Float(b)) => {
-            if b == 0.0 { return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero)); }
+            if b == 0.0 {
+                return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero));
+            }
             Ok(Value::Float(a % b))
         }
         (Value::Float32(a), Value::Float(b)) => {
-            if b == 0.0 { return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero)); }
+            if b == 0.0 {
+                return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero));
+            }
             Ok(Value::Float(a as f64 % b))
         }
         (Value::Float(a), Value::Float32(b)) => {
-            if b == 0.0 { return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero)); }
+            if b == 0.0 {
+                return Err(RuntimeError::new(RuntimeErrorKind::DivisionByZero));
+            }
             Ok(Value::Float(a % b as f64))
         }
         (a, b) => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {

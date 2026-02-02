@@ -4,17 +4,14 @@ use nx_api::{eval_source, EvalResult, NxDiagnostic, NxSeverity};
 use std::panic;
 
 #[repr(C)]
-pub struct NxBuffer
-{
+pub struct NxBuffer {
     pub ptr: *mut u8,
     pub len: usize,
     pub cap: usize,
 }
 
-impl NxBuffer
-{
-    fn empty() -> Self
-    {
+impl NxBuffer {
+    fn empty() -> Self {
         Self {
             ptr: std::ptr::null_mut(),
             len: 0,
@@ -24,8 +21,7 @@ impl NxBuffer
 }
 
 #[repr(u32)]
-pub enum NxEvalStatus
-{
+pub enum NxEvalStatus {
     Ok = 0,
     Error = 1,
     InvalidArgument = 2,
@@ -33,15 +29,12 @@ pub enum NxEvalStatus
 }
 
 #[no_mangle]
-pub extern "C" fn nx_free_buffer(buffer: NxBuffer)
-{
-    if buffer.ptr.is_null()
-    {
+pub extern "C" fn nx_free_buffer(buffer: NxBuffer) {
+    if buffer.ptr.is_null() {
         return;
     }
 
-    unsafe
-    {
+    unsafe {
         let _ = Vec::from_raw_parts(buffer.ptr, buffer.len, buffer.cap);
     }
 }
@@ -53,12 +46,9 @@ pub extern "C" fn nx_eval_source_msgpack(
     file_name_ptr: *const u8,
     file_name_len: usize,
     out_buffer: *mut NxBuffer,
-) -> NxEvalStatus
-{
-    unsafe
-    {
-        if out_buffer.is_null()
-        {
+) -> NxEvalStatus {
+    unsafe {
+        if out_buffer.is_null() {
             return NxEvalStatus::InvalidArgument;
         }
         *out_buffer = NxBuffer::empty();
@@ -66,20 +56,20 @@ pub extern "C" fn nx_eval_source_msgpack(
 
     let result = panic::catch_unwind(|| {
         let source = unsafe { slice_to_str(source_ptr, source_len) }?;
-        let file_name = unsafe { slice_to_str(file_name_ptr, file_name_len) }
-            .unwrap_or("input.nx");
-        let file_name = if file_name.is_empty() { "input.nx" } else { file_name };
+        let file_name = unsafe { slice_to_str(file_name_ptr, file_name_len) }.unwrap_or("input.nx");
+        let file_name = if file_name.is_empty() {
+            "input.nx"
+        } else {
+            file_name
+        };
 
-        let bytes = match eval_source(source, file_name)
-        {
-            EvalResult::Ok(value) =>
-            {
+        let bytes = match eval_source(source, file_name) {
+            EvalResult::Ok(value) => {
                 let payload = rmp_serde::to_vec(&value)
                     .map_err(|e| format!("messagepack serialize failed: {e}"))?;
                 (NxEvalStatus::Ok, payload)
             }
-            EvalResult::Err(diagnostics) =>
-            {
+            EvalResult::Err(diagnostics) => {
                 let payload = rmp_serde::to_vec_named(&diagnostics)
                     .map_err(|e| format!("messagepack serialize failed: {e}"))?;
                 (NxEvalStatus::Error, payload)
@@ -89,12 +79,9 @@ pub extern "C" fn nx_eval_source_msgpack(
         Ok(bytes)
     });
 
-    match result
-    {
-        Ok(Ok((status, bytes))) =>
-        {
-            unsafe
-            {
+    match result {
+        Ok(Ok((status, bytes))) => {
+            unsafe {
                 *out_buffer = vec_to_buffer(bytes);
             }
             status
@@ -128,12 +115,9 @@ pub extern "C" fn nx_eval_source_json(
     file_name_ptr: *const u8,
     file_name_len: usize,
     out_buffer: *mut NxBuffer,
-) -> NxEvalStatus
-{
-    unsafe
-    {
-        if out_buffer.is_null()
-        {
+) -> NxEvalStatus {
+    unsafe {
+        if out_buffer.is_null() {
             return NxEvalStatus::InvalidArgument;
         }
         *out_buffer = NxBuffer::empty();
@@ -141,34 +125,31 @@ pub extern "C" fn nx_eval_source_json(
 
     let result = panic::catch_unwind(|| {
         let source = unsafe { slice_to_str(source_ptr, source_len) }?;
-        let file_name = unsafe { slice_to_str(file_name_ptr, file_name_len) }
-            .unwrap_or("input.nx");
-        let file_name = if file_name.is_empty() { "input.nx" } else { file_name };
+        let file_name = unsafe { slice_to_str(file_name_ptr, file_name_len) }.unwrap_or("input.nx");
+        let file_name = if file_name.is_empty() {
+            "input.nx"
+        } else {
+            file_name
+        };
 
-        match eval_source(source, file_name)
-        {
-            EvalResult::Ok(value) =>
-            {
+        match eval_source(source, file_name) {
+            EvalResult::Ok(value) => {
                 let json = value
                     .to_json_string()
                     .map_err(|e| format!("json serialize failed: {e}"))?;
                 Ok((NxEvalStatus::Ok, json.into_bytes()))
             }
-            EvalResult::Err(diagnostics) =>
-            {
-                let json =
-                    serde_json::to_string(&diagnostics).map_err(|e| format!("json serialize failed: {e}"))?;
+            EvalResult::Err(diagnostics) => {
+                let json = serde_json::to_string(&diagnostics)
+                    .map_err(|e| format!("json serialize failed: {e}"))?;
                 Ok((NxEvalStatus::Error, json.into_bytes()))
             }
         }
     });
 
-    match result
-    {
-        Ok(Ok((status, bytes))) =>
-        {
-            unsafe
-            {
+    match result {
+        Ok(Ok((status, bytes))) => {
+            unsafe {
                 *out_buffer = vec_to_buffer(bytes);
             }
             status
@@ -195,14 +176,11 @@ pub extern "C" fn nx_eval_source_json(
     }
 }
 
-unsafe fn slice_to_str<'a>(ptr: *const u8, len: usize) -> Result<&'a str, String>
-{
-    if len == 0
-    {
+unsafe fn slice_to_str<'a>(ptr: *const u8, len: usize) -> Result<&'a str, String> {
+    if len == 0 {
         return Ok("");
     }
-    if ptr.is_null()
-    {
+    if ptr.is_null() {
         return Err("null pointer".to_string());
     }
 
@@ -210,8 +188,7 @@ unsafe fn slice_to_str<'a>(ptr: *const u8, len: usize) -> Result<&'a str, String
     std::str::from_utf8(bytes).map_err(|e| format!("invalid utf-8: {e}"))
 }
 
-fn vec_to_buffer(vec: Vec<u8>) -> NxBuffer
-{
+fn vec_to_buffer(vec: Vec<u8>) -> NxBuffer {
     let mut vec = std::mem::ManuallyDrop::new(vec);
     NxBuffer {
         ptr: vec.as_mut_ptr(),

@@ -47,16 +47,16 @@ let <Equal x:int y:int /> = {x == y}
 let <NotEqual x:int y:int /> = {x != y}
 
 // Logical operators (precedence: && > ||)
-let <LogicalAnd x:boolean y:boolean /> = {x && y}
-let <LogicalOr x:boolean y:boolean /> = {x || y}
-let <ComplexLogical x:boolean y:boolean z:boolean /> = {x && y || z}
+let <LogicalAnd x:bool y:bool /> = {x && y}
+let <LogicalOr x:bool y:bool /> = {x || y}
+let <ComplexLogical x:bool y:bool z:bool /> = {x && y || z}
 
 // === Unary Expressions ===
 
 // Prefix unary minus
 let <Negation x:int /> = {-x}
 let <DoubleNegation x:int /> = {--x}
-let <LogicalNot flag:boolean /> = {!flag}
+let <LogicalNot flag:bool /> = {!flag}
 
 // === Conditional (Ternary) Expressions ===
 
@@ -141,8 +141,8 @@ let <ChainedOperations obj:object x:int /> = {
 let <WithDefaultExpressions
   sum:int={1 + 2 + 3}
   product:int={4 * 5}
-  comparison:boolean={10 > 5}
-  logical:boolean={true && false}
+  comparison:bool={10 > 5}
+  logical:bool={true && false}
   ternary:int={5 > 3 ? 100 : 200}
   nested:int={(1 + 2) * (3 + 4)}
 /> = {sum + product}
@@ -152,8 +152,8 @@ let <WithDefaultExpressions
 // With type annotations
 let sum:int={1 + 2 + 3}
 let product:int={4 * 5}
-let comparison:boolean={10 > 5}
-let logical:boolean={true && false}
+let comparison:bool={10 > 5}
+let logical:bool={true && false}
 
 // Without type annotations (inferred)
 let ternary = {5 > 3 ? 100 : 200}

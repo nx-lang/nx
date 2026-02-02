@@ -357,7 +357,7 @@ fn test_not_equal_integers_same() {
 #[test]
 fn test_not_equal_booleans() {
     let source = r#"
-        let <neq a:boolean b:boolean /> = { a != b }
+        let <neq a:bool b:bool /> = { a != b }
     "#;
 
     let result = execute_function(
@@ -454,7 +454,7 @@ fn test_greater_or_equal_negative_numbers() {
 #[test]
 fn test_logical_or_both_true() {
     let source = r#"
-        let <lor a:boolean b:boolean /> = { a || b }
+        let <lor a:bool b:bool /> = { a || b }
     "#;
 
     let result = execute_function(
@@ -469,7 +469,7 @@ fn test_logical_or_both_true() {
 #[test]
 fn test_logical_or_first_true() {
     let source = r#"
-        let <lor a:boolean b:boolean /> = { a || b }
+        let <lor a:bool b:bool /> = { a || b }
     "#;
 
     let result = execute_function(
@@ -484,7 +484,7 @@ fn test_logical_or_first_true() {
 #[test]
 fn test_logical_or_second_true() {
     let source = r#"
-        let <lor a:boolean b:boolean /> = { a || b }
+        let <lor a:bool b:bool /> = { a || b }
     "#;
 
     let result = execute_function(
@@ -499,7 +499,7 @@ fn test_logical_or_second_true() {
 #[test]
 fn test_logical_or_both_false() {
     let source = r#"
-        let <lor a:boolean b:boolean /> = { a || b }
+        let <lor a:bool b:bool /> = { a || b }
     "#;
 
     let result = execute_function(
@@ -577,7 +577,7 @@ fn test_double_negation() {
 #[test]
 fn test_unary_not_true() {
     let source = r#"
-        let <not a:boolean /> = { !a }
+        let <not a:bool /> = { !a }
     "#;
 
     let result = execute_function(source, "not", vec![Value::Boolean(true)])
@@ -588,7 +588,7 @@ fn test_unary_not_true() {
 #[test]
 fn test_unary_not_false() {
     let source = r#"
-        let <not a:boolean /> = { !a }
+        let <not a:bool /> = { !a }
     "#;
 
     let result = execute_function(source, "not", vec![Value::Boolean(false)])
@@ -599,7 +599,7 @@ fn test_unary_not_false() {
 #[test]
 fn test_double_not() {
     let source = r#"
-        let <doublenot a:boolean /> = { !!a }
+        let <doublenot a:bool /> = { !!a }
     "#;
 
     let result = execute_function(source, "doublenot", vec![Value::Boolean(true)])
@@ -614,7 +614,7 @@ fn test_double_not() {
 #[test]
 fn test_triple_not() {
     let source = r#"
-        let <triplenot a:boolean /> = { !!!a }
+        let <triplenot a:bool /> = { !!!a }
     "#;
 
     let result = execute_function(source, "triplenot", vec![Value::Boolean(true)])
@@ -663,7 +663,7 @@ fn test_not_with_equality() {
 #[test]
 fn test_not_with_and() {
     let source = r#"
-        let <notand a:boolean b:boolean /> = { !(a && b) }
+        let <notand a:bool b:bool /> = { !(a && b) }
     "#;
 
     // !(true && true) = false
@@ -697,7 +697,7 @@ fn test_not_with_and() {
 #[test]
 fn test_not_with_or() {
     let source = r#"
-        let <notor a:boolean b:boolean /> = { !(a || b) }
+        let <notor a:bool b:bool /> = { !(a || b) }
     "#;
 
     // !(false || false) = true
@@ -723,7 +723,7 @@ fn test_not_with_or() {
 fn test_not_in_complex_expression() {
     // Test De Morgan's law: !(a && b) == (!a || !b)
     let source = r#"
-        let <demorgans a:boolean b:boolean /> = { !(a && b) == (!a || !b) }
+        let <demorgans a:bool b:bool /> = { !(a && b) == (!a || !b) }
     "#;
 
     // All combinations should return true
@@ -772,7 +772,7 @@ fn test_not_in_complex_expression() {
 fn test_and_short_circuit_false_first() {
     // When first operand is false, second should not matter
     let source = r#"
-        let <test a:boolean b:boolean /> = { a && b }
+        let <test a:bool b:bool /> = { a && b }
     "#;
 
     let result = execute_function(
@@ -788,7 +788,7 @@ fn test_and_short_circuit_false_first() {
 fn test_or_short_circuit_true_first() {
     // When first operand is true, second should not matter
     let source = r#"
-        let <test a:boolean b:boolean /> = { a || b }
+        let <test a:bool b:bool /> = { a || b }
     "#;
 
     let result = execute_function(
@@ -807,7 +807,7 @@ fn test_or_short_circuit_true_first() {
 #[test]
 fn test_chained_and() {
     let source = r#"
-        let <chain a:boolean b:boolean c:boolean /> = { a && b && c }
+        let <chain a:bool b:bool c:bool /> = { a && b && c }
     "#;
 
     let result = execute_function(
@@ -838,7 +838,7 @@ fn test_chained_and() {
 #[test]
 fn test_chained_or() {
     let source = r#"
-        let <chain a:boolean b:boolean c:boolean /> = { a || b || c }
+        let <chain a:bool b:bool c:bool /> = { a || b || c }
     "#;
 
     let result = execute_function(
@@ -870,7 +870,7 @@ fn test_chained_or() {
 fn test_mixed_and_or() {
     // a || b && c should be a || (b && c) due to precedence
     let source = r#"
-        let <mixed a:boolean b:boolean c:boolean /> = { a || b && c }
+        let <mixed a:bool b:bool c:bool /> = { a || b && c }
     "#;
 
     // false || (true && true) = false || true = true
@@ -988,12 +988,12 @@ fn test_complex_boolean_expression() {
 fn test_all_comparison_operators() {
     // Test all comparison operators in one module
     let source = r#"
-        let eq(a:int, b:int): boolean = { a == b }
-        let ne(a:int, b:int): boolean = { a != b }
-        let lt(a:int, b:int): boolean = { a < b }
-        let le(a:int, b:int): boolean = { a <= b }
-        let gt(a:int, b:int): boolean = { a > b }
-        let ge(a:int, b:int): boolean = { a >= b }
+        let eq(a:int, b:int): bool = { a == b }
+        let ne(a:int, b:int): bool = { a != b }
+        let lt(a:int, b:int): bool = { a < b }
+        let le(a:int, b:int): bool = { a <= b }
+        let gt(a:int, b:int): bool = { a > b }
+        let ge(a:int, b:int): bool = { a >= b }
     "#;
 
     // Test with 5 and 3
@@ -1045,7 +1045,7 @@ fn test_all_comparison_operators() {
 fn test_and_short_circuit_avoids_division_by_zero() {
     // If && short-circuits, the division by zero should never happen
     let source = r#"
-        let safe_divide(numerator:int, denominator:int): boolean = {
+        let safe_divide(numerator:int, denominator:int): bool = {
             denominator != 0 && (numerator / denominator) > 0
         }
     "#;
@@ -1064,7 +1064,7 @@ fn test_and_short_circuit_avoids_division_by_zero() {
 fn test_or_short_circuit_avoids_division_by_zero() {
     // If || short-circuits, the division by zero should never happen
     let source = r#"
-        let short_or(x:int, denominator:int): boolean = {
+        let short_or(x:int, denominator:int): bool = {
             x > 5 || (10 / denominator) > 0
         }
     "#;
@@ -1083,7 +1083,7 @@ fn test_or_short_circuit_avoids_division_by_zero() {
 fn test_and_evaluates_both_when_first_is_true() {
     // When first operand is true, && SHOULD evaluate the second
     let source = r#"
-        let check(x:int, denominator:int): boolean = {
+        let check(x:int, denominator:int): bool = {
             x > 0 && (10 / denominator) > 0
         }
     "#;
@@ -1100,7 +1100,7 @@ fn test_and_evaluates_both_when_first_is_true() {
 fn test_or_evaluates_both_when_first_is_false() {
     // When first operand is false, || SHOULD evaluate the second
     let source = r#"
-        let check(x:int, denominator:int): boolean = {
+        let check(x:int, denominator:int): bool = {
             x > 100 || (10 / denominator) > 0
         }
     "#;
@@ -1117,7 +1117,7 @@ fn test_or_evaluates_both_when_first_is_false() {
 fn test_nested_short_circuit() {
     // Test nested short-circuit: (false && x) || (true && y)
     let source = r#"
-        let nested(a:int, b:int, c:int): boolean = {
+        let nested(a:int, b:int, c:int): bool = {
             (a > 10 && (1 / 0) > 0) || (b < 5 && c > 0)
         }
     "#;

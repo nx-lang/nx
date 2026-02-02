@@ -106,7 +106,7 @@
       "patterns": [
         {
           "name": "storage.type.primitive.nx",
-          "match": "\\b(?:string|i32|i64|int|f32|f64|float|boolean|void|object)\\b"
+          "match": "\\b(?:string|i32|i64|int|f32|f64|float|bool|void|object)\\b"
         },
         {
           "name": "keyword.operator.type-modifier.nx",
@@ -140,7 +140,7 @@
         { "name": "punctuation.separator.type.annotation.nx", "match": ":" },
         {
           "name": "entity.name.type.nx",
-          "match": "(?<=:)\\s*(?!string\\b|i32\\b|i64\\b|int\\b|f32\\b|f64\\b|float\\b|boolean\\b|void\\b|object\\b)[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*"
+          "match": "(?<=:)\\s*(?!string\\b|i32\\b|i64\\b|int\\b|f32\\b|f64\\b|float\\b|bool\\b|void\\b|object\\b)[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*"
         },
         { "include": "#types" },
         { "include": "#qualifiers" },
@@ -220,7 +220,7 @@
           "patterns": [
             {
               "name": "entity.name.type.nx",
-              "match": "\\G\\s*(?!string\\b|i32\\b|i64\\b|int\\b|f32\\b|f64\\b|float\\b|boolean\\b|void\\b|object\\b)[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*"
+              "match": "\\G\\s*(?!string\\b|i32\\b|i64\\b|int\\b|f32\\b|f64\\b|float\\b|bool\\b|void\\b|object\\b)[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*"
             },
             { "include": "#strings" },
             { "include": "#numbers" },

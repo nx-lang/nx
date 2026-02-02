@@ -1789,7 +1789,7 @@
     "extra": true
   },
   {
-    "type": "boolean",
+    "type": "bool",
     "named": false
   },
   {

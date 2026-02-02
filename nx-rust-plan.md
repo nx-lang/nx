@@ -661,7 +661,7 @@ text-size = "1.1"
 
 **Tasks:**
 1. Implement type representation in `nx-types` crate
-   - Primitives: string, int, long, float, double, boolean, void, object
+   - Primitives: string, int, long, float, double, bool, void, object
    - Sequences: `T[]`
    - Nullable: `T?`
    - Functions: `(T1, T2) => T3`

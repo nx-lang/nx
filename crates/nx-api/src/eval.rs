@@ -12,8 +12,7 @@ use text_size::{TextRange, TextSize};
 ///
 /// This is intentionally not a `Result` alias so that both variants carry domain-specific
 /// types rather than a generic error trait.
-pub enum EvalResult
-{
+pub enum EvalResult {
     /// Evaluation succeeded, producing an [`NxValue`].
     Ok(NxValue),
     /// Evaluation failed with one or more diagnostics (parse errors, missing root, runtime errors).
@@ -34,8 +33,7 @@ pub enum EvalResult
 /// - The source contains syntax errors
 /// - No `root()` function is defined
 /// - A runtime error occurs during evaluation
-pub fn eval_source(source: &str, file_name: &str) -> EvalResult
-{
+pub fn eval_source(source: &str, file_name: &str) -> EvalResult {
     let parse_result = parse_str(source, file_name);
 
     if parse_result
@@ -46,11 +44,9 @@ pub fn eval_source(source: &str, file_name: &str) -> EvalResult
         return EvalResult::Err(diagnostics_to_api(&parse_result.errors, source));
     }
 
-    let tree = match parse_result.tree
-    {
+    let tree = match parse_result.tree {
         Some(t) => t,
-        None =>
-        {
+        None => {
             let diag = Diagnostic::error("parse-failed")
                 .with_message("Failed to parse source")
                 .build();
@@ -65,8 +61,7 @@ pub fn eval_source(source: &str, file_name: &str) -> EvalResult
         .items()
         .iter()
         .any(|item| matches!(item, Item::Function(f) if f.name.as_str() == "root"));
-    if !has_root
-    {
+    if !has_root {
         let range = TextRange::new(TextSize::from(0), TextSize::from(source.len() as u32));
         let diag = Diagnostic::error("no-root")
             .with_message("No root element found in source")
@@ -77,11 +72,9 @@ pub fn eval_source(source: &str, file_name: &str) -> EvalResult
     }
 
     let interpreter = Interpreter::new();
-    match interpreter.execute_function(&module, "root", vec![])
-    {
+    match interpreter.execute_function(&module, "root", vec![]) {
         Ok(value) => EvalResult::Ok(to_nx_value(&value)),
-        Err(e) =>
-        {
+        Err(e) => {
             let diag = Diagnostic::error("runtime-error")
                 .with_message(e.to_string())
                 .build();
@@ -89,4 +82,3 @@ pub fn eval_source(source: &str, file_name: &str) -> EvalResult
         }
     }
 }
-

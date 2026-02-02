@@ -141,7 +141,7 @@ module.exports = grammar({
       'f32',
       'f64',
       'float',
-      'boolean',
+      'bool',
       'void',
       'object',
     ),

@@ -364,10 +364,7 @@ impl<'a> InferenceContext<'a> {
                         } else {
                             self.error(
                                 "type-mismatch",
-                                format!(
-                                    "Cannot mix integer and float types: {} and {}",
-                                    lhs, rhs
-                                ),
+                                format!("Cannot mix integer and float types: {} and {}", lhs, rhs),
                                 span,
                             );
                             return Type::Error;
@@ -689,7 +686,7 @@ impl<'a> InferenceContext<'a> {
             "f32" => Type::f32(),
             "f64" => Type::f64(),
             "float" => Type::float(),
-            "boolean" | "bool" => Type::bool(),
+            "bool" => Type::bool(),
             "void" => Type::void(),
             _ => {
                 if let Some(alias) = self.type_aliases.get(name) {

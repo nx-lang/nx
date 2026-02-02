@@ -43,7 +43,7 @@ fn generate_nx_source(num_components: usize) -> String {
 
     for i in 0..num_components {
         source.push_str(&format!(
-            "let <Component{} text:string count:int enabled:boolean /> = <div>{{text}} - {{count}} - {{enabled}}</div>\n\n",
+            "let <Component{} text:string count:int enabled:bool /> = <div>{{text}} - {{count}} - {{enabled}}</div>\n\n",
             i
         ));
     }

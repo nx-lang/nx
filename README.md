@@ -92,7 +92,7 @@ for (name, result) in session.check_all() {
 - ✅ UTF-8 validation and encoding detection
 
 ### Type System (nx-types)
-- ✅ Primitive types: `i32`, `i64`/`int`, `f32`, `f64`/`float`, `string`, `boolean`, `void`
+- ✅ Primitive types: `i32`, `i64`/`int`, `f32`, `f64`/`float`, `string`, `bool`, `void`
 - ✅ Compound types: arrays (`T[]`), functions, nullable (`T?`)
 - ✅ Compatibility-based type checking
 - ✅ Type inference for expressions

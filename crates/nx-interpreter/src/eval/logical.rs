@@ -51,7 +51,7 @@ pub fn eval_logical_unary(op: UnOp, operand: Value) -> Result<Value, RuntimeErro
     match op {
         UnOp::Not => eval_not(operand),
         _ => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-            expected: "boolean".to_string(),
+            expected: "bool".to_string(),
             actual: operand.type_name().to_string(),
             operation: format!("{:?}", op),
         })),
@@ -198,7 +198,7 @@ fn eval_and(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
     match (lhs, rhs) {
         (Value::Boolean(a), Value::Boolean(b)) => Ok(Value::Boolean(a && b)),
         (a, b) => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-            expected: "boolean".to_string(),
+            expected: "bool".to_string(),
             actual: format!("{} and {}", a.type_name(), b.type_name()),
             operation: "logical and".to_string(),
         })),
@@ -209,7 +209,7 @@ fn eval_or(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
     match (lhs, rhs) {
         (Value::Boolean(a), Value::Boolean(b)) => Ok(Value::Boolean(a || b)),
         (a, b) => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-            expected: "boolean".to_string(),
+            expected: "bool".to_string(),
             actual: format!("{} and {}", a.type_name(), b.type_name()),
             operation: "logical or".to_string(),
         })),
@@ -220,7 +220,7 @@ fn eval_not(operand: Value) -> Result<Value, RuntimeError> {
     match operand {
         Value::Boolean(b) => Ok(Value::Boolean(!b)),
         v => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-            expected: "boolean".to_string(),
+            expected: "bool".to_string(),
             actual: v.type_name().to_string(),
             operation: "logical not".to_string(),
         })),

@@ -346,7 +346,7 @@
         },
         {
           "type": "STRING",
-          "value": "boolean"
+          "value": "bool"
         },
         {
           "type": "STRING",

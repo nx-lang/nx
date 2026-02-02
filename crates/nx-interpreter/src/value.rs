@@ -132,7 +132,7 @@ impl Value {
             Value::Float32(_) => "f32",
             Value::Float(_) => "f64",
             Value::String(_) => "string",
-            Value::Boolean(_) => "boolean",
+            Value::Boolean(_) => "bool",
             Value::Null => "null",
             Value::Array(_) => "array",
             Value::EnumVariant { .. } => "enum",
@@ -246,7 +246,7 @@ mod tests {
         assert_eq!(Value::Float32(2.5).type_name(), "f32");
         assert_eq!(Value::Float(2.5).type_name(), "f64");
         assert_eq!(Value::String(SmolStr::new("test")).type_name(), "string");
-        assert_eq!(Value::Boolean(true).type_name(), "boolean");
+        assert_eq!(Value::Boolean(true).type_name(), "bool");
         assert_eq!(Value::Null.type_name(), "null");
         assert_eq!(
             Value::Record {
