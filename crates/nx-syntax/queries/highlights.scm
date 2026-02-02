@@ -5,29 +5,44 @@
 [
   "let"
   "type"
+  "enum"
   "import"
   "if"
   "else"
   "for"
   "in"
-  "match"
+  "is"
+  "raw"
 ] @keyword
 
 ;; Types
 (primitive_type) @type.builtin
 
 (user_defined_type
-  (identifier) @type)
+  (qualified_name
+    (identifier) @type))
+
+(enum_definition
+  name: (identifier) @type)
+
+(record_definition
+  name: (identifier) @type)
+
+;; Variables
+(value_definition
+  name: (identifier) @variable)
 
 ;; Functions
 (function_definition
-  name: (function_signature
-    (markup_signature
-      tag: (qualified_markup_name) @function)))
+  name: (element_name) @function)
+
+(function_definition
+  name: (identifier) @function)
 
 ;; Parameters
-(param
-  name: (identifier) @variable.parameter)
+(function_definition
+  (property_definition
+    name: (markup_identifier) @variable.parameter))
 
 ;; Operators
 [
@@ -72,28 +87,36 @@
 
 ;; Literals
 (string_literal) @string
-(number_literal) @number
-(boolean_literal) @constant.builtin
+(int_literal) @number
+(real_literal) @number
+(hex_literal) @number
+(bool_literal) @constant.builtin
+(null_literal) @constant.builtin
 
 ;; Identifiers
 (identifier_expression
   (identifier) @variable)
 
 ;; Property names
-(property
-  name: (identifier) @property)
+(property_value
+  name: (qualified_markup_name) @property)
+
+(record_definition
+  (property_definition
+    name: (markup_identifier) @property))
 
 ;; Element tags
 (element
-  open_tag: (open_tag
-    name: (qualified_markup_name) @tag))
+  name: (element_name) @tag)
 
 (element
-  close_tag: (close_tag
-    name: (qualified_markup_name) @tag))
+  close_name: (element_name) @tag)
 
-(self_closing_element
-  name: (qualified_markup_name) @tag)
+(text_child_element
+  name: (element_name) @tag)
+
+(text_child_element
+  close_name: (element_name) @tag)
 
 ;; Comments
 (line_comment) @comment
