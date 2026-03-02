@@ -1,5 +1,8 @@
 use nx_api::NxDiagnostic;
-use nx_ffi::{nx_eval_source_json, nx_eval_source_msgpack, nx_free_buffer, NxBuffer, NxEvalStatus};
+use nx_ffi::{
+    nx_eval_source_json, nx_eval_source_msgpack, nx_ffi_abi_version, nx_free_buffer, NxBuffer,
+    NxEvalStatus, NX_FFI_ABI_VERSION,
+};
 use nx_value::NxValue;
 
 fn eval_msgpack(source: &str) -> (NxEvalStatus, Vec<u8>) {
@@ -70,4 +73,9 @@ fn ffi_msgpack_error_returns_diagnostics() {
     let diagnostics: Vec<NxDiagnostic> = rmp_serde::from_slice(&bytes).unwrap();
     assert!(!diagnostics.is_empty());
     assert_eq!(diagnostics[0].severity, nx_api::NxSeverity::Error);
+}
+
+#[test]
+fn ffi_exposes_abi_version() {
+    assert_eq!(nx_ffi_abi_version(), NX_FFI_ABI_VERSION);
 }

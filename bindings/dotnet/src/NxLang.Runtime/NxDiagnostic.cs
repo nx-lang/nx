@@ -8,17 +8,17 @@ using MessagePack;
 namespace NxLang.Nx;
 
 /// <summary>
-/// Represents a diagnostic message (error, warning, or info) from the NX language runtime.
+/// Represents a diagnostic message (error, warning, info, or hint) from the NX language runtime.
 /// </summary>
 [MessagePackObject]
 public sealed class NxDiagnostic
 {
     /// <summary>
-    /// Gets or sets the severity level of the diagnostic (e.g., "error", "warning", "info").
+    /// Gets or sets the severity level of the diagnostic.
     /// </summary>
     [Key("severity")]
     [JsonPropertyName("severity")]
-    public string Severity { get; set; } = string.Empty;
+    public NxSeverity Severity { get; set; }
 
     /// <summary>
     /// Gets or sets the diagnostic code, if available. Used to identify the specific type of diagnostic.
@@ -93,50 +93,52 @@ public sealed class NxDiagnosticLabel
 }
 
 /// <summary>
-/// Represents a span of text in a source file, including both byte offsets and line/column positions.
+/// Represents a half-open span of text in a source file, including byte offsets and 1-based line and column positions.
+/// NX source files are limited so byte offsets, line numbers, and column numbers all fit within signed 32-bit values.
+/// The managed API therefore exposes CLS-compliant <see cref="int"/> values for every span field.
 /// </summary>
 [MessagePackObject]
 public sealed class NxTextSpan
 {
     /// <summary>
-    /// Gets or sets the starting byte offset of the span in the source file.
+    /// Gets or sets the starting byte offset of the span (inclusive).
     /// </summary>
     [Key("start_byte")]
     [JsonPropertyName("start_byte")]
-    public uint StartByte { get; set; }
+    public int StartByte { get; set; }
 
     /// <summary>
-    /// Gets or sets the ending byte offset of the span in the source file.
+    /// Gets or sets the ending byte offset of the span (exclusive).
     /// </summary>
     [Key("end_byte")]
     [JsonPropertyName("end_byte")]
-    public uint EndByte { get; set; }
+    public int EndByte { get; set; }
 
     /// <summary>
-    /// Gets or sets the starting line number (0-based) of the span.
+    /// Gets or sets the starting line number of the span. Line numbers are 1-based.
     /// </summary>
     [Key("start_line")]
     [JsonPropertyName("start_line")]
-    public uint StartLine { get; set; }
+    public int StartLine { get; set; }
 
     /// <summary>
-    /// Gets or sets the starting column number (0-based) of the span.
+    /// Gets or sets the starting column number of the span. Column numbers are 1-based Unicode scalar positions.
     /// </summary>
     [Key("start_column")]
     [JsonPropertyName("start_column")]
-    public uint StartColumn { get; set; }
+    public int StartColumn { get; set; }
 
     /// <summary>
-    /// Gets or sets the ending line number (0-based) of the span.
+    /// Gets or sets the ending line number of the span. Line numbers are 1-based.
     /// </summary>
     [Key("end_line")]
     [JsonPropertyName("end_line")]
-    public uint EndLine { get; set; }
+    public int EndLine { get; set; }
 
     /// <summary>
-    /// Gets or sets the ending column number (0-based) of the span.
+    /// Gets or sets the ending column number of the span. Column numbers are 1-based Unicode scalar positions.
     /// </summary>
     [Key("end_column")]
     [JsonPropertyName("end_column")]
-    public uint EndColumn { get; set; }
+    public int EndColumn { get; set; }
 }

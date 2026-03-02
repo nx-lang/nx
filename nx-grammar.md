@@ -7,6 +7,11 @@ generation, see [nx-grammar-spec.md](nx-grammar-spec.md).
 Note: The postfix "+" meta-operator denotes one-or-more repetitions.
 Notation: "{…}" means zero-or-more, "[…]" means optional, and "(…)" denotes grouping.
 
+Implementation note: The NX language specification itself does not place a maximum size limit on
+source files. The current implementation requires NX source files to remain under roughly 2 GB
+(currently enforced as less than 2 GiB) so source offsets fit within signed 32-bit values across
+language bindings. That is also a reasonable limit for other implementations.
+
 <a id="module-definition"></a>
 ## Module Definition
 

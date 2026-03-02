@@ -17,7 +17,7 @@ public class NxRuntimeBasicTests
 
         byte[] result = NxRuntime.EvaluateToMessagePack(source);
 
-        int value = MessagePackSerializer.Deserialize<int>(result);
+        int value = MessagePackSerializer.Deserialize<int>(result, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(42, value);
     }
 
@@ -76,7 +76,7 @@ public class NxRuntimeBasicTests
 
         byte[] result = NxRuntime.EvaluateToMessagePack(source, "test.nx");
 
-        int value = MessagePackSerializer.Deserialize<int>(result);
+        int value = MessagePackSerializer.Deserialize<int>(result, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(42, value);
     }
 

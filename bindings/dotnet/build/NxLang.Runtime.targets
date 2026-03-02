@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <PropertyGroup>
+    <NxRuntimeRepoRoot Condition="'$(NxRuntimeRepoRoot)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\..'))</NxRuntimeRepoRoot>
+    <NxRuntimeStageNativeLibrary Condition="'$(NxRuntimeStageNativeLibrary)' == ''">true</NxRuntimeStageNativeLibrary>
+    <NxRuntimeFailIfNativeLibraryMissing Condition="'$(NxRuntimeFailIfNativeLibraryMissing)' == ''">false</NxRuntimeFailIfNativeLibraryMissing>
+    <NxRuntimeNativeLibraryConfiguration Condition="'$(NxRuntimeNativeLibraryConfiguration)' == ''">Release</NxRuntimeNativeLibraryConfiguration>
+    <NxRuntimeNativeLibraryFile Condition="$([MSBuild]::IsOSPlatform('Windows'))">nx_ffi.dll</NxRuntimeNativeLibraryFile>
+    <NxRuntimeNativeLibraryFile Condition="'$(NxRuntimeNativeLibraryFile)' == '' and $([MSBuild]::IsOSPlatform('OSX'))">libnx_ffi.dylib</NxRuntimeNativeLibraryFile>
+    <NxRuntimeNativeLibraryFile Condition="'$(NxRuntimeNativeLibraryFile)' == ''">libnx_ffi.so</NxRuntimeNativeLibraryFile>
+    <_NxRuntimeDebugLibraryDir>$([System.IO.Path]::Combine('$(NxRuntimeRepoRoot)', 'target', 'debug'))</_NxRuntimeDebugLibraryDir>
+    <_NxRuntimeReleaseLibraryDir>$([System.IO.Path]::Combine('$(NxRuntimeRepoRoot)', 'target', 'release'))</_NxRuntimeReleaseLibraryDir>
+    <_NxRuntimeDebugLibraryPath>$([System.IO.Path]::Combine('$(_NxRuntimeDebugLibraryDir)', '$(NxRuntimeNativeLibraryFile)'))</_NxRuntimeDebugLibraryPath>
+    <_NxRuntimeReleaseLibraryPath>$([System.IO.Path]::Combine('$(_NxRuntimeReleaseLibraryDir)', '$(NxRuntimeNativeLibraryFile)'))</_NxRuntimeReleaseLibraryPath>
+  </PropertyGroup>
+
+  <Choose>
+    <When Condition="'$(NxRuntimeNativeLibraryDir)' == '' and '$(NxRuntimeNativeLibraryConfiguration)' == 'Release'">
+      <PropertyGroup>
+        <NxRuntimeNativeLibraryDir>$(_NxRuntimeReleaseLibraryDir)</NxRuntimeNativeLibraryDir>
+      </PropertyGroup>
+    </When>
+    <When Condition="'$(NxRuntimeNativeLibraryDir)' == '' and '$(NxRuntimeNativeLibraryConfiguration)' == 'Debug'">
+      <PropertyGroup>
+        <NxRuntimeNativeLibraryDir>$(_NxRuntimeDebugLibraryDir)</NxRuntimeNativeLibraryDir>
+      </PropertyGroup>
+    </When>
+  </Choose>
+
+  <Target Name="StageNxRuntimeNativeLibrary" AfterTargets="Build" Condition="'$(NxRuntimeStageNativeLibrary)' == 'true'">
+    <PropertyGroup>
+      <_NxRuntimeNativeLibraryPath>$([System.IO.Path]::Combine('$(NxRuntimeNativeLibraryDir)', '$(NxRuntimeNativeLibraryFile)'))</_NxRuntimeNativeLibraryPath>
+    </PropertyGroup>
+
+    <Error
+      Text="Invalid value for `NxRuntimeNativeLibraryConfiguration`: '$(NxRuntimeNativeLibraryConfiguration)'. Supported values are `Debug` and `Release`, or set `NxRuntimeNativeLibraryDir` explicitly."
+      Condition="'$(NxRuntimeNativeLibraryDir)' == '' and '$(NxRuntimeNativeLibraryConfiguration)' != 'Debug' and '$(NxRuntimeNativeLibraryConfiguration)' != 'Release'" />
+
+    <Warning
+      Text="NX native runtime was not found at '$(_NxRuntimeNativeLibraryPath)'. Build `cargo build -p nx-ffi` for `NxRuntimeNativeLibraryConfiguration=Debug`, or `cargo build --release -p nx-ffi` for `NxRuntimeNativeLibraryConfiguration=Release`, or set `NxRuntimeNativeLibraryDir` explicitly before running the managed project."
+      Condition="!Exists('$(_NxRuntimeNativeLibraryPath)') and '$(NxRuntimeFailIfNativeLibraryMissing)' != 'true'" />
+
+    <Error
+      Text="NX native runtime was not found at '$(_NxRuntimeNativeLibraryPath)'. Build `cargo build -p nx-ffi` for `NxRuntimeNativeLibraryConfiguration=Debug`, or `cargo build --release -p nx-ffi` for `NxRuntimeNativeLibraryConfiguration=Release`, or set `NxRuntimeNativeLibraryDir` explicitly before running the managed project."
+      Condition="!Exists('$(_NxRuntimeNativeLibraryPath)') and '$(NxRuntimeFailIfNativeLibraryMissing)' == 'true'" />
+
+    <Copy
+      SourceFiles="$(_NxRuntimeNativeLibraryPath)"
+      DestinationFolder="$(OutDir)"
+      SkipUnchangedFiles="true"
+      Condition="Exists('$(_NxRuntimeNativeLibraryPath)')" />
+  </Target>
+</Project>

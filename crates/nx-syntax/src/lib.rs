@@ -25,6 +25,12 @@ extern "C" {
     fn tree_sitter_nx() -> Language;
 }
 
+/// Maximum supported NX source size in bytes.
+///
+/// The limit is kept below 2 GiB so byte offsets and 1-based line/column positions remain
+/// representable as signed 32-bit values across language bindings.
+pub const MAX_SOURCE_BYTES: usize = (i32::MAX as usize) - 1;
+
 /// Returns the tree-sitter Language for NX.
 pub fn language() -> Language {
     unsafe { tree_sitter_nx() }
@@ -162,6 +168,14 @@ impl ParseResult {
 /// assert!(result.tree.is_some());
 /// ```
 pub fn parse_str(source: &str, file_name: &str) -> ParseResult {
+    if let Some(diagnostic) = validate_source_size(source.len(), file_name) {
+        return ParseResult {
+            tree: None,
+            errors: vec![diagnostic],
+            source_id: SourceId::new(0),
+        };
+    }
+
     // Validate UTF-8
     if !source.is_utf8() {
         return ParseResult {
@@ -261,6 +275,21 @@ pub fn parse_file(path: impl AsRef<Path>) -> io::Result<ParseResult> {
     Ok(parse_str(&source, file_name))
 }
 
+fn validate_source_size(source_len: usize, file_name: &str) -> Option<Diagnostic> {
+    if source_len <= MAX_SOURCE_BYTES {
+        return None;
+    }
+
+    Some(
+        Diagnostic::error("source-too-large")
+            .with_message(format!(
+                "NX source file '{file_name}' is too large ({source_len} bytes). NX source files must be <= {MAX_SOURCE_BYTES} bytes."
+            ))
+            .with_help("Split the source into smaller files before parsing or evaluation.")
+            .build(),
+    )
+}
+
 /// Extension trait for `&str` to check UTF-8 validity.
 trait Utf8Ext {
     fn is_utf8(&self) -> bool;
@@ -357,6 +386,22 @@ mod tests {
 
         assert!(!result.is_ok());
         assert!(result.has_errors());
+    }
+
+    #[test]
+    fn test_validate_source_size_accepts_limit() {
+        assert!(validate_source_size(MAX_SOURCE_BYTES, "test.nx").is_none());
+    }
+
+    #[test]
+    fn test_validate_source_size_rejects_sources_larger_than_limit() {
+        let diagnostic = validate_source_size(MAX_SOURCE_BYTES + 1, "too-large.nx")
+            .expect("Source larger than the NX limit should be rejected");
+
+        assert_eq!(diagnostic.code(), Some("source-too-large"));
+        assert_eq!(diagnostic.severity(), Severity::Error);
+        assert!(diagnostic.message().contains(&MAX_SOURCE_BYTES.to_string()));
+        assert!(diagnostic.message().contains("too-large.nx"));
     }
 
     #[test]

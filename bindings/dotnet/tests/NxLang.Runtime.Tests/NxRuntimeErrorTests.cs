@@ -1,7 +1,6 @@
 // Copyright (c) Bret Johnson. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
-using System;
 using NxLang.Nx;
 using Xunit;
 
@@ -18,7 +17,7 @@ public class NxRuntimeErrorTests
             () => NxRuntime.Evaluate<int>(source));
 
         Assert.NotEmpty(ex.Diagnostics);
-        Assert.All(ex.Diagnostics, d => Assert.Equal("error", d.Severity));
+        Assert.All(ex.Diagnostics, d => Assert.Equal(NxSeverity.Error, d.Severity));
     }
 
     [Fact]
@@ -43,7 +42,7 @@ public class NxRuntimeErrorTests
         Assert.NotEmpty(ex.Diagnostics);
         NxDiagnostic diagnostic = ex.Diagnostics[0];
 
-        Assert.NotNull(diagnostic.Severity);
+        Assert.Equal(NxSeverity.Error, diagnostic.Severity);
         Assert.NotEmpty(diagnostic.Message);
         Assert.NotNull(diagnostic.Labels);
     }
@@ -65,6 +64,8 @@ public class NxRuntimeErrorTests
 
             Assert.NotNull(label.File);
             Assert.NotNull(label.Span);
+            Assert.True(label.Span.StartLine >= 1);
+            Assert.True(label.Span.StartColumn >= 1);
         }
     }
 

@@ -230,8 +230,10 @@ fn walk_and_collect_errors(
     errors: &mut Vec<Diagnostic>,
 ) {
     if node.is_error() || node.is_missing() {
-        let start = node.start_byte() as u32;
-        let end = node.end_byte() as u32;
+        let start = u32::try_from(node.start_byte())
+            .expect("NX source size should be validated before collecting syntax diagnostics");
+        let end = u32::try_from(node.end_byte())
+            .expect("NX source size should be validated before collecting syntax diagnostics");
         let range = TextRange::new(start.into(), end.into());
 
         // Get the text of the error node for context

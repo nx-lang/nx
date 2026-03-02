@@ -1,7 +1,7 @@
 // Copyright (c) Bret Johnson. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
-namespace NxLang.Nx;
+namespace NxLang.Nx.Interop;
 
 internal enum NxEvalStatus : uint
 {
@@ -10,4 +10,3 @@ internal enum NxEvalStatus : uint
     InvalidArgument = 2,
     Panic = 255,
 }
-

@@ -62,7 +62,9 @@ pub fn eval_source(source: &str, file_name: &str) -> EvalResult {
         .iter()
         .any(|item| matches!(item, Item::Function(f) if f.name.as_str() == "root"));
     if !has_root {
-        let range = TextRange::new(TextSize::from(0), TextSize::from(source.len() as u32));
+        let source_len = u32::try_from(source.len())
+            .expect("NX source size should be validated before evaluation diagnostics are created");
+        let range = TextRange::new(TextSize::from(0), TextSize::from(source_len));
         let diag = Diagnostic::error("no-root")
             .with_message("No root element found in source")
             .with_label(Label::primary(file_name, range))

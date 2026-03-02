@@ -3,13 +3,16 @@
 
 using System.Runtime.InteropServices;
 
-namespace NxLang.Nx;
+namespace NxLang.Nx.Interop;
 
 internal static class NxNativeMethods
 {
-    private const string LibraryName = "nx_ffi";
+    internal const string LibraryName = "nx_ffi";
 
-    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern uint nx_ffi_abi_version();
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NxEvalStatus nx_eval_source_msgpack(
         byte[] sourcePtr,
         nuint sourceLen,
@@ -17,7 +20,7 @@ internal static class NxNativeMethods
         nuint fileNameLen,
         out NxBuffer outBuffer);
 
-    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NxEvalStatus nx_eval_source_json(
         byte[] sourcePtr,
         nuint sourceLen,
@@ -25,7 +28,6 @@ internal static class NxNativeMethods
         nuint fileNameLen,
         out NxBuffer outBuffer);
 
-    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern void nx_free_buffer(NxBuffer buffer);
 }
-

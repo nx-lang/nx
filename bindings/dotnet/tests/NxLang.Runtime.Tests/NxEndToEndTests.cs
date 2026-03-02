@@ -1,11 +1,10 @@
 // Copyright (c) Bret Johnson. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using MessagePack;
+using System;
+using System.IO;
 using NxLang.Nx;
+using NxLang.Nx.Interop;
 using Xunit;
 
 namespace NxLang.Nx.Tests;
@@ -39,18 +38,6 @@ public class NxEndToEndTests
     }
 
     [Fact]
-    public void Evaluate_WithCustomMessagePackOptions_UsesOptions()
-    {
-        string source = "let root() = { 42 }";
-        MessagePackSerializerOptions customOptions = MessagePackSerializerOptions.Standard
-            .WithSecurity(MessagePackSecurity.UntrustedData);
-
-        int result = NxRuntime.Evaluate<int>(source, null, customOptions);
-
-        Assert.Equal(42, result);
-    }
-
-    [Fact]
     public void Evaluate_ConcurrentEvaluations_AllSucceed()
     {
         string source = "let root() = { 42 }";
@@ -78,5 +65,15 @@ public class NxEndToEndTests
         string json = NxRuntime.EvaluateToJson(source);
 
         Assert.Equal("42", json);
+    }
+
+    [Fact]
+    public void NativeLibrary_IsStagedAlongsideTestOutput()
+    {
+        string nativeLibraryPath = Path.Combine(AppContext.BaseDirectory, NxNativeLibraryInfo.GetFileName());
+
+        Assert.True(
+            File.Exists(nativeLibraryPath),
+            $"Expected the staged NX native runtime at '{nativeLibraryPath}'. Build `cargo build --release -p nx-ffi` before running dotnet tests.");
     }
 }

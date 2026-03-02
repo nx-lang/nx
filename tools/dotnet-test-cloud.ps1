@@ -46,10 +46,12 @@ if ($x86) {
 
 $testBinLog = Join-Path $ArtifactStagingFolder (Join-Path build_logs test.binlog)
 $testDiagLog = Join-Path $ArtifactStagingFolder (Join-Path test_logs diag.log)
+$nativeLibraryConfiguration = if ($Configuration -eq 'Debug') { 'Debug' } else { 'Release' }
 
 & $dotnet test $RepoRoot `
     --no-build `
     -c $Configuration `
+    -p:NxRuntimeNativeLibraryConfiguration=$nativeLibraryConfiguration `
     --filter "TestCategory!=FailsInCloudTest" `
     --collect "Code Coverage;Format=cobertura" `
     --settings "$PSScriptRoot/test.runsettings" `

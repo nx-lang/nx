@@ -4,7 +4,7 @@
 using System;
 using System.Runtime.InteropServices;
 
-namespace NxLang.Nx;
+namespace NxLang.Nx.Interop;
 
 [StructLayout(LayoutKind.Sequential)]
 internal struct NxBuffer
@@ -13,4 +13,3 @@ internal struct NxBuffer
     public UIntPtr Len;
     public UIntPtr Cap;
 }
-

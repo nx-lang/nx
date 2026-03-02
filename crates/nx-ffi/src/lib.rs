@@ -3,6 +3,8 @@
 use nx_api::{eval_source, EvalResult, NxDiagnostic, NxSeverity};
 use std::panic;
 
+pub const NX_FFI_ABI_VERSION: u32 = 1;
+
 #[repr(C)]
 pub struct NxBuffer {
     pub ptr: *mut u8,
@@ -26,6 +28,11 @@ pub enum NxEvalStatus {
     Error = 1,
     InvalidArgument = 2,
     Panic = 255,
+}
+
+#[no_mangle]
+pub extern "C" fn nx_ffi_abi_version() -> u32 {
+    NX_FFI_ABI_VERSION
 }
 
 #[no_mangle]

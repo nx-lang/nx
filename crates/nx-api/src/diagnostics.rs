@@ -32,19 +32,19 @@ impl From<Severity> for NxSeverity {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NxTextSpan {
     /// Byte offset of the first byte in the span (inclusive).
-    pub start_byte: u32,
+    pub start_byte: i32,
     /// Byte offset one past the last byte in the span (exclusive).
-    pub end_byte: u32,
+    pub end_byte: i32,
 
     /// 1-based line number of the span start.
-    pub start_line: u32,
+    pub start_line: i32,
     /// 1-based column of the span start, counted in Unicode scalar values.
-    pub start_column: u32,
+    pub start_column: i32,
 
     /// 1-based line number of the span end.
-    pub end_line: u32,
+    pub end_line: i32,
     /// 1-based column of the span end, counted in Unicode scalar values.
-    pub end_column: u32,
+    pub end_column: i32,
 }
 
 /// A label pointing to a specific source location related to a diagnostic.
@@ -127,8 +127,12 @@ fn text_range_to_span(range: TextRange, source: &str, index: &LineIndex) -> NxTe
     let (end_line, end_col) = index.byte_offset_to_line_col(source, end);
 
     NxTextSpan {
-        start_byte: start as u32,
-        end_byte: end as u32,
+        start_byte: i32::try_from(start).expect(
+            "NX source size should be validated before converting diagnostics to the API model",
+        ),
+        end_byte: i32::try_from(end).expect(
+            "NX source size should be validated before converting diagnostics to the API model",
+        ),
         start_line,
         start_column: start_col,
         end_line,
@@ -152,7 +156,7 @@ impl LineIndex {
         Self { line_starts }
     }
 
-    fn byte_offset_to_line_col(&self, text: &str, offset: usize) -> (u32, u32) {
+    fn byte_offset_to_line_col(&self, text: &str, offset: usize) -> (i32, i32) {
         let offset = offset.min(text.len());
 
         let line_idx = match self.line_starts.binary_search(&offset) {
@@ -164,6 +168,13 @@ impl LineIndex {
         let slice = &text[line_start..offset];
         let col = slice.chars().count() + 1;
 
-        ((line_idx as u32) + 1, col as u32)
+        (
+            i32::try_from(line_idx + 1).expect(
+                "NX source size should be validated before converting diagnostics to the API model",
+            ),
+            i32::try_from(col).expect(
+                "NX source size should be validated before converting diagnostics to the API model",
+            ),
+        )
     }
 }

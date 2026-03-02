@@ -31,8 +31,14 @@ impl<'tree> SyntaxNode<'tree> {
 
     /// Returns the text range (span) of this node in the source.
     pub fn span(&self) -> TextRange {
-        let start = TextSize::from(self.node.start_byte() as u32);
-        let end = TextSize::from(self.node.end_byte() as u32);
+        let start = TextSize::from(
+            u32::try_from(self.node.start_byte())
+                .expect("NX source size should be validated before building syntax spans"),
+        );
+        let end = TextSize::from(
+            u32::try_from(self.node.end_byte())
+                .expect("NX source size should be validated before building syntax spans"),
+        );
         TextRange::new(start, end)
     }
 

@@ -26,4 +26,3 @@ public sealed class NxEvaluationException : Exception
     /// </summary>
     public NxDiagnostic[] Diagnostics { get; }
 }
-
