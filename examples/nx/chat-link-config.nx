@@ -1,0 +1,38 @@
+type Branding = {
+  logoUrl: string?
+  tagline: string?
+  accentColor: string?
+  pageBackgroundColor: string?
+}
+
+type Availability = {
+  isOnline: bool?
+  statusLabel: string?
+}
+
+
+type ChatLinkConfig = {
+  assistantDisplayName: string?
+  assistantAvatarUrl: string?
+  slug: string?
+
+  branding: Branding
+  welcome: ChatLinkConfigWelcome?
+  availability: ChatLinkConfigAvailability?
+}
+
+
+<ChatLinkConfig
+  assistantDisplayName="Plumber ReachMe"
+  assistantAvatarUrl="https://example.com/avatar.png"
+  slug="plumber-reachme"
+  branding= 
+    <Branding
+      logoUrl="https://example.com/logo.png"
+      tagline="Your plumbing assistant"
+      accentColor="#FF5733",
+      pageBackgroundColor="#F0F0F0" 
+    />
+  availability=
+    <Availability isOnline={true} statusLabel="Online" />
+/>

@@ -1,0 +1,469 @@
+type Foo = { val: string }
+
+<Foo val="abc" />
+
+
+
+enum Stage = intent_select | describe | clarify | collect_contact | ready | complete
+
+enum Urgency = emergency | urgent | flexible
+enum Intent = emergency_leak | toilet_issue | faucet_sink | shower_tub | water_heater | installation | other
+
+
+
+type SourcedValue<T> {
+    value: T
+    confidence: float
+    source: string
+    lock: boolean
+}
+
+
+type FlowState = {
+    intent: SourcedValue<Intent>
+    problemText: SourcedValue<string>
+    urgency: SourcedValue<Urgency>
+    leakActive: SourcedValue<bool>
+    photos: SourcedValue<Attachment[]>
+    address: SourcedValue<Address>
+    phone: SourcedValue<Phone>
+    name: SourcedValue<string>
+}
+
+
+let <ChooseIntent /> =
+  <ChoiceButtons prompt="What can we help with today?" bind={FlowState.intent}>
+    <Choice label="🚨 Emergency / leak" value={Intent.emergency_leak} />
+    <Choice label="🚽 Toilet issue" value={Intent.toilet_issue} />
+    <Choice label="🚰 Faucet / sink" value={Intent.faucet_sink} />
+    <Choice label="🚿 Shower / tub" value={Intent.shower_tub} />
+    <Choice label="🔥 Water heater" value={Intent.water_heater} />
+    <Choice label="🧰 Install / replace" value={Intent.installation} />
+    <Choice label="❓ Something else" value={Intent.other} />
+  </ChoiceButtons>
+
+
+
+
+  
+nextActions = (st) =>
+  if st.stage == "intent_select" then
+    [ { type: "ShowCard", card: cards.intent_buttons } ]
+
+  else if st.stage == "describe" then
+    [
+      { type: "Say", text: "Briefly describe what’s going on." },
+      { type: "ExpectUserMessage", hint: "free_text" }
+    ]
+
+
+
+
+
+  // ---------------------------------------------------------------------------
+  // Stage advancement as updates (optional convenience)
+  // ---------------------------------------------------------------------------
+  stageAdvanceUpdates = (st) =>
+    rules firstMatch {
+      rule { when: st.stage == "intent_select" && has(st, "intent", null)
+             then: [ update { stage := "describe" } ] }
+
+      rule { when: st.stage == "describe" && has(st, "problem_text", 0.5)
+             then: [ update { stage := "clarify" } ] }
+
+      // After clarify requirements are met, go collect contact
+      rule {
+        when: st.stage == "clarify"
+              && has(st, "urgency", 0.7)
+              && !(has(st,"intent",null) && get(st,"intent").v == "emergency_leak" && !has(st,"leak_active",0.7))
+        then: [ update { stage := "collect_contact" } ]
+      }
+
+      rule {
+        when: st.stage == "collect_contact"
+              && has(st, "address", 0.7)
+              && has(st, "phone", 0.7)
+        then: [ update { stage := "ready" } ]
+      }
+
+      rule { when: true then: [] }
+    }
+
+
+
+
+type Email = string where matches(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+type PositiveInt = int where between(12, 120)
+type EvenInt = int where Mod(2) == 0
+
+let <intent_buttons prop:SourcedValue<string is Email> /> =
+  <Buttons prompt="What can we help with today?" update=Update(prop, $)>
+    <Choice label="🚨 Emergency / leak" value=Intent.emergency_leak />
+    <Choice label="🚽 Toilet issue" value=Intent.toilet_issue />
+    <Choice label="🚰 Faucet / sink" value=Intent.faucet_sink />
+    <Choice label="🚿 Shower / tub" value=Intent.shower_tub />
+    <Choice label="🔥 Water heater" value=Intent.water_heater />
+    <Choice label="🧰 Install / replace" value=Intent.installation />
+    <Choice label="❓ Something else" value=Intent.other />
+  </Buttons>
+
+
+let <intent_buttons prop:SourcedValue<string> /> =
+  <Buttons prompt="What can we help with today?" update=Update(prop, $)>
+    <Choice label="🚨 Emergency / leak" value=Intent.emergency_leak />
+    <Choice label="🚽 Toilet issue" value=Intent.toilet_issue />
+    <Choice label="🚰 Faucet / sink" value=Intent.faucet_sink />
+    <Choice label="🚿 Shower / tub" value=Intent.shower_tub />
+    <Choice label="🔥 Water heater" value=Intent.water_heater />
+    <Choice label="🧰 Install / replace" value=Intent.installation />
+    <Choice label="❓ Something else" value=Intent.other />
+  </Buttons>
+
+
+let <intent_buttons prop:SourcedValue[string] /> =
+  <Buttons prompt="What can we help with today?" update=Update(prop, $)>
+    <Choice label="🚨 Emergency / leak" value=Intent.emergency_leak />
+    <Choice label="🚽 Toilet issue" value=Intent.toilet_issue />
+    <Choice label="🚰 Faucet / sink" value=Intent.faucet_sink />
+    <Choice label="🚿 Shower / tub" value=Intent.shower_tub />
+    <Choice label="🔥 Water heater" value=Intent.water_heater />
+    <Choice label="🧰 Install / replace" value=Intent.installation />
+    <Choice label="❓ Something else" value=Intent.other />
+  </Buttons>
+
+
+
+
+      type: "buttons",
+      prompt: "What can we help with today?",
+      options: [
+        { label: "🚨 Emergency / leak", value: "emergency_leak" },
+        { label: "🚽 Toilet issue",     value: "toilet_issue" },
+        { label: "🚰 Faucet / sink",    value: "faucet_sink" },
+        { label: "🚿 Shower / tub",     value: "shower_tub" },
+        { label: "🔥 Water heater",     value: "water_heater" },
+        { label: "🧰 Install / replace",value: "installation" },
+        { label: "❓ Something else",    value: "other" }
+      ],
+      // runtime converts selection -> FieldUpsert(intent, FieldValue{src:"button",...})
+      binds: ["intent"]
+    },
+
+    urgency_buttons: {
+      type: "buttons",
+      prompt: "How urgent is this?",
+      options: [
+        { label: "Emergency (right now)", value: "emergency" },
+        { label: "Urgent (today/tomorrow)", value: "urgent" },
+        { label: "Flexible", value: "flexible" }
+      ],
+      binds: ["urgency"]
+    },
+
+    leak_active_yes_no: {
+      type: "yes_no",
+      prompt: "Is water actively flowing/leaking right now?",
+      binds: ["leak_active"]
+    },
+
+    address_card: {
+      type: "address",
+      prompt: "What’s the service address?",
+      binds: ["address"]
+    },
+
+    phone_card: {
+      type: "phone",
+      prompt: "Best phone number for updates?",
+      binds: ["phone"]
+    }
+  }
+
+
+
+  ```nx
+flowTemplate {
+  meta = {
+    key: "svc/plumber-intake",
+    version: { major: 1, minor: 0 },
+    title: "Plumber Intake",
+    locale: "en-US",
+    capabilities: ["cards", "buttons", "address", "phone"]
+  }
+
+  // ---------------------------------------------------------------------------
+  // Types / enums (pick one convention; shown here as persisted-friendly)
+  // ---------------------------------------------------------------------------
+  types = {
+    stage: enum(["intent_select","describe","clarify","collect_contact","ready","complete"]),
+    urgency: enum(["emergency","urgent","flexible"]),
+    intent: enum([
+      "emergency_leak","toilet_issue","faucet_sink","shower_tub",
+      "water_heater","installation","other"
+    ])
+  }
+
+  // ---------------------------------------------------------------------------
+  // Field catalog (UI hints + conditional requirements)
+  // ---------------------------------------------------------------------------
+  fields = {
+    intent:       { type: "intent",   ui: "intent_buttons" },
+    problem_text: { type: "string",   ui: "free_text" },
+    urgency:      { type: "urgency",  ui: "urgency_buttons" },
+
+    leak_active:  {
+      type: "bool",
+      ui: "leak_active_yes_no",
+      requiredIf: (st) => st.fields.intent?.v == "emergency_leak"
+    },
+
+    address:      { type: "address", ui: "address_card" },
+    phone:        { type: "phone",   ui: "phone_card" },
+
+    photos:       { type: "attachments", ui: "photo_upload_optional" },
+    name:         { type: "string",      ui: "free_text_optional" }
+  }
+
+  // ---------------------------------------------------------------------------
+  // UI cards (runtime maps card answers -> FieldUpsert)
+  // ---------------------------------------------------------------------------
+  cards = {
+    intent_buttons: {
+      type: "buttons",
+      prompt: "What can we help with today?",
+      options: [
+        { label: "🚨 Emergency / leak", value: "emergency_leak" },
+        { label: "🚽 Toilet issue",     value: "toilet_issue" },
+        { label: "🚰 Faucet / sink",    value: "faucet_sink" },
+        { label: "🚿 Shower / tub",     value: "shower_tub" },
+        { label: "🔥 Water heater",     value: "water_heater" },
+        { label: "🧰 Install / replace",value: "installation" },
+        { label: "❓ Something else",    value: "other" }
+      ],
+      binds: ["intent"]
+    },
+
+    urgency_buttons: {
+      type: "buttons",
+      prompt: "How urgent is this?",
+      options: [
+        { label: "Emergency (right now)", value: "emergency" },
+        { label: "Urgent (today/tomorrow)", value: "urgent" },
+        { label: "Flexible", value: "flexible" }
+      ],
+      binds: ["urgency"]
+    },
+
+    leak_active_yes_no: {
+      type: "yes_no",
+      prompt: "Is water actively flowing/leaking right now?",
+      binds: ["leak_active"]
+    },
+
+    address_card: {
+      type: "address",
+      prompt: "What’s the service address?",
+      binds: ["address"]
+    },
+
+    phone_card: {
+      type: "phone",
+      prompt: "Best phone number for updates?",
+      binds: ["phone"]
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // State
+  // ---------------------------------------------------------------------------
+  initialState = {
+    stage: "intent_select",
+    fields: {},                // map fieldKey -> FieldValue (value+src+confidence+lock)
+    flags: { is_emergency: false },
+    asked: [],
+    counters: { clarifications: 0 }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+  get = (st, key) => st.fields[key]
+  has = (st, key, minC) =>
+    let fv = get(st, key) in
+    fv != null && (minC == null || fv.c == null || fv.c >= minC)
+
+  // Merge operator assumed:
+  //   st.fields[key] ⊕= incomingFieldValue
+  // This applies precedence/lock/confidence rules defined by the runtime.
+  mergeFieldUpdate = (fieldMap, key, incoming) =>
+    fieldMap + { [key]: (fieldMap[key] ⊕ incoming) }
+
+  derive = (st) =>
+    let isEmer =
+      (has(st, "urgency", null) && get(st, "urgency").v == "emergency")
+      || (has(st, "intent", null) && get(st, "intent").v == "emergency_leak")
+    in
+      st { flags: st.flags + { is_emergency: isEmer } }
+
+  missingInStage = (st) =>
+    if st.stage == "intent_select" then
+      filter(["intent"], (k) => !has(st, k, 0.7))
+    else if st.stage == "describe" then
+      filter(["problem_text"], (k) => !has(st, k, 0.5))
+    else if st.stage == "clarify" then
+      let base = filter(["urgency"], (k) => !has(st, k, 0.7)) in
+      if has(st, "intent", null) && get(st, "intent").v == "emergency_leak" then
+        base + filter(["leak_active"], (k) => !has(st, k, 0.7))
+      else base
+    else if st.stage == "collect_contact" then
+      filter(["address","phone"], (k) => !has(st, k, 0.7))
+    else []
+
+  // ---------------------------------------------------------------------------
+  // Updates: apply helper (runtime may provide applyUpdates; included here for completeness)
+  // ---------------------------------------------------------------------------
+  applyUpdates = (st, updates) =>
+    fold(updates, st, (acc, u) => applyUpdate(acc, u))
+
+  // ---------------------------------------------------------------------------
+  // Event handler -> Updates (no rule blocks)
+  // ---------------------------------------------------------------------------
+  onEvent = (st, ev) =>
+    if ev.type == "SessionStart" then
+      [ update { := initialState } ]
+
+    else if ev.type == "FieldUpsert" then
+      [ update { fields[ev.fieldKey] ⊕= ev.value } ]
+
+    else if ev.type == "QuestionAsked" then
+      [ update { asked += { key: ev.questionKey, ts: ev.ts } } ]
+
+    else if ev.type == "StageSet" then
+      [ update { stage := ev.stage } ]
+
+    else
+      []
+
+  // ---------------------------------------------------------------------------
+  // Stage advancement -> Updates (kept separate so it can run after onEvent updates)
+  // ---------------------------------------------------------------------------
+  advanceStage = (st) =>
+    if st.stage == "intent_select" && has(st, "intent", 0.7) then
+      [ update { stage := "describe" } ]
+
+    else if st.stage == "describe" && has(st, "problem_text", 0.5) then
+      [ update { stage := "clarify" } ]
+
+    else if st.stage == "clarify" then
+      let miss = missingInStage(st) in
+      if length(miss) == 0 then
+        [ update { stage := "collect_contact" } ]
+      else
+        []
+
+    else if st.stage == "collect_contact" then
+      let miss = missingInStage(st) in
+      if length(miss) == 0 then
+        [ update { stage := "ready" } ]
+      else
+        []
+
+    else
+      []
+
+  // ---------------------------------------------------------------------------
+  // Next actions (no rule blocks; nested if / simple pattern matching)
+  // ---------------------------------------------------------------------------
+  nextActions = (st) =>
+    if st.stage == "intent_select" then
+      [ { type: "ShowCard", card: cards.intent_buttons } ]
+
+    else if st.stage == "describe" then
+      [
+        { type: "Say", text: "Briefly describe what’s going on." },
+        { type: "ExpectUserMessage", hint: "free_text" }
+      ]
+
+    else if st.stage == "clarify" then
+      let miss = missingInStage(st) in
+
+      // Ask urgency first
+      if contains(miss, "urgency") then
+        [
+          { type: "ShowCard", card: cards.urgency_buttons },
+          { type: "Emit", event: { type: "QuestionAsked", questionKey: "urgency_buttons", ts: now } }
+        ]
+
+      // Emergency leak follow-up
+      else if contains(miss, "leak_active") then
+        [
+          { type: "Say", text: "If possible, shut off the nearest valve or your main water valve to reduce damage." },
+          { type: "ShowCard", card: cards.leak_active_yes_no },
+          { type: "Emit", event: { type: "QuestionAsked", questionKey: "leak_active_yes_no", ts: now } }
+        ]
+
+      // Otherwise, advance to contact collection (emit a StageSet so orchestration is uniform)
+      else
+        [ { type: "Emit", event: { type: "StageSet", stage: "collect_contact" } } ]
+
+    else if st.stage == "collect_contact" then
+      let miss = missingInStage(st) in
+      if contains(miss, "address") then
+        [
+          { type: "ShowCard", card: cards.address_card },
+          { type: "Emit", event: { type: "QuestionAsked", questionKey: "address_card", ts: now } }
+        ]
+      else if contains(miss, "phone") then
+        [
+          { type: "ShowCard", card: cards.phone_card },
+          { type: "Emit", event: { type: "QuestionAsked", questionKey: "phone_card", ts: now } }
+        ]
+      else
+        [ { type: "Emit", event: { type: "StageSet", stage: "ready" } } ]
+
+    else if st.stage == "ready" then
+      [
+        { type: "Say", text: "Thanks — we have what we need. Would you like to schedule a visit?" },
+        { type: "Action", key: "offer_schedule" },
+        { type: "Action", key: "notify_provider", payload: buildLeadSummary(st) }
+      ]
+
+    else
+      []
+
+  // ---------------------------------------------------------------------------
+  // Lead summary (deterministic)
+  // ---------------------------------------------------------------------------
+  buildLeadSummary = (st) => {
+    intent:       has(st,"intent",null)       ? get(st,"intent").v : null,
+    urgency:      has(st,"urgency",null)      ? get(st,"urgency").v : null,
+    leak_active:  has(st,"leak_active",null)  ? get(st,"leak_active").v : null,
+    problem_text: has(st,"problem_text",null) ? get(st,"problem_text").v : null,
+    address:      has(st,"address",null)      ? get(st,"address").v : null,
+    phone:        has(st,"phone",null)        ? get(st,"phone").v : null
+  }
+
+  // ---------------------------------------------------------------------------
+  // Orchestrator entry point (template convention)
+  // ---------------------------------------------------------------------------
+  handle = (st, ev) =>
+    let u1 = onEvent(st, ev) in
+    let st1 = applyUpdates(st, u1) in
+
+    // derive flags after event updates
+    let st1d = derive(st1) in
+
+    // stage advancement (deterministic)
+    let u2 = advanceStage(st1d) in
+    let st2 = applyUpdates(st1d, u2) in
+    let st2d = derive(st2) in
+
+    {
+      updates: u1 + u2,
+      state: st2d,
+      actions: nextActions(st2d)
+    }
+}
+```
+
+

@@ -1,0 +1,29 @@
+import "./ui/widgets.nx" as UiWidgets
+import "./data/models.nx" as DataModels
+
+type ChatLinkConfig = {
+  brandColor: Color
+  logo: Image
+  email: string
+}
+
+<ChatLinkConfig
+  brandColor = ""#FF5733"
+  logo = "https://example.com/logo.png"
+  email = "foo@bar.com"
+/>
+
+let <UserCard user:User className:string content:Element[]/> =
+  <section class="card {className}">
+    if isLoading {
+      <Spinner/>
+    } else {
+      <div>
+        {content}
+      </div>
+    }
+  </section>
+
+<UserCard user={user} className="primary">
+  <:>Hello, {user.name}!</>
+</UserCard>
