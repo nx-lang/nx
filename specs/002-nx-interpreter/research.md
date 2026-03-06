@@ -36,7 +36,7 @@
 **Question**: How should runtime values be represented in memory?
 
 **Research Findings**:
-- Need to support NX primitive types: int, float, string, boolean, null
+- Need to support NX primitive types: int, float, string, bool, null
 - May need to support arrays and objects in future
 - Values need type information for runtime checks
 - Values must be cloneable for variable bindings

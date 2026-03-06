@@ -29,7 +29,7 @@ A developer writes a simple NX function with basic arithmetic or string operatio
 
 1. **Given** an NX function with arithmetic operations, **When** the interpreter executes it with valid parameters, **Then** it returns the correct computed value
 2. **Given** an NX function with string concatenation, **When** executed with string parameters, **Then** it returns the concatenated result
-3. **Given** an NX function with boolean logic, **When** executed, **Then** it returns the correct boolean value
+3. **Given** an NX function with bool logic, **When** executed, **Then** it returns the correct bool value
 4. **Given** an NX function with local variables, **When** executed, **Then** variable assignments and references work correctly
 
 ---
@@ -132,7 +132,7 @@ A developer executes an NX function that encounters a runtime error (division by
 - **SC-006**: Interpreter executes functions with up to 1000 operations in under 100 milliseconds
 - **SC-007**: Interpreter supports recursive function calls up to depth of 1000 and reports stack overflow errors when exceeded
 - **SC-008**: Interpreter provides execution results in a format that can be easily tested and validated
-- **SC-009**: Interpreter handles all NX primitive types (int, float, string, boolean, null)
+- **SC-009**: Interpreter handles all NX primitive types (int, float, string, bool, null)
 - **SC-010**: Interpreter gracefully handles and reports malformed HIR input
 
 ## Assumptions

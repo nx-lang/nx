@@ -25,7 +25,7 @@ Create a production-ready interpreter for NX that executes HIR (High-level Inter
 - Must integrate with existing nx-diagnostics for consistent error reporting
 
 **Scale/Scope**: MVP interpreter supporting:
-- All NX primitive types (int, float, string, boolean, null)
+- All NX primitive types (int, float, string, bool, null)
 - Arithmetic, logical, comparison, string operations
 - Conditionals (if/else)
 - Loops (for, while) with break/continue

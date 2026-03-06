@@ -26,7 +26,7 @@ This document breaks down the NX Interpreter implementation into granular, execu
 ### Incremental Delivery
 
 Each phase after Setup delivers a complete, testable feature:
-- ✅ After Phase 3: Can execute arithmetic, string, boolean operations
+- ✅ After Phase 3: Can execute arithmetic, string, bool operations
 - ✅ After Phase 4: Production-ready error handling with beautiful diagnostics
 - ✅ After Phase 5: Can execute conditional logic (if/else)
 - ✅ After Phase 6: Can execute loops and complex algorithms
@@ -114,7 +114,7 @@ Can run in parallel after T044-T046 complete.
 
 ## Phase 3: User Story 1 - Execute Simple NX Functions (P1) 🎯 MVP
 
-**Goal**: Enable execution of NX functions with basic arithmetic, string, and boolean operations
+**Goal**: Enable execution of NX functions with basic arithmetic, string, and bool operations
 
 **Independent Test**: Execute `let <add a:int b:int /> = { a + b }` with args (5, 3) and verify result is 8
 
@@ -147,14 +147,14 @@ Can run in parallel after T044-T046 complete.
 - [X] T022 [US1] Implement public API in crates/nx-interpreter/src/lib.rs: re-export Interpreter, Value, RuntimeError, ResourceLimits
 - [X] T023 [US1] Create integration test (direct HIR): test arithmetic function execution
 - [X] T024 [US1] Add integration test (direct HIR) for string concatenation function
-- [X] T025 [US1] Add integration test (direct HIR) for boolean logic function with variable bindings
+- [X] T025 [US1] Add integration test (direct HIR) for bool logic function with variable bindings
 
 **Status Update (2025-10-30)**: Parser-driven integration tests (`tests/simple_functions.rs`) currently omit local variable bindings because the NX parser does not yet accept them. Coverage for bindings remains through the direct-HIR test suite (`tests/interpreter_direct_hir.rs`). Re-enable the parser-based scenarios once the grammar supports block `let` declarations.
 
 **Acceptance Criteria**:
 - ✅ Can execute function with arithmetic operations and return correct result
 - ✅ Can execute function with string concatenation
-- ✅ Can execute function with boolean operations
+- ✅ Can execute function with bool operations
 - ✅ Can handle local variable declarations and references (covered via direct HIR; parser coverage blocked pending grammar updates)
 - ✅ Parameter binding works correctly
 

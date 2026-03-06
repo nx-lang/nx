@@ -280,7 +280,7 @@ description: "Implementation tasks for Core NX Parsing and Validation"
 **Step 5: Type System**
 
 - [X] T094 [P] [US2] Implement Type enum with all variants in crates/nx-types/src/ty.rs
-- [X] T095 [P] [US2] Implement primitive type constants (String, Int, Float, Boolean, Void) - implemented as Primitive enum and Type::int(), Type::float(), etc. methods in crates/nx-types/src/ty.rs
+- [X] T095 [P] [US2] Implement primitive type constants (String, Int, Float, Bool, Void) - implemented as Primitive enum and Type::int(), Type::float(), etc. methods in crates/nx-types/src/ty.rs
 - [X] T096 [US2] Implement InferenceVar type for type variables - implemented as Type::Variable(TypeId) variant and InferenceContext::fresh_var() in crates/nx-types/src/infer.rs
 - [⏭] T097 [US2] **SKIPPED** - Constraint struct for unification not needed (using is_compatible_with compatibility-based type checking instead)
 - [~] T098 [US2] Implement TypeEnvironment with parent scopes - TypeEnvironment exists in crates/nx-types/src/env.rs but parent scopes not implemented (flat environment sufficient for current needs)

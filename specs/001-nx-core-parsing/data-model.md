@@ -288,7 +288,7 @@ pub enum Type {
     String,
     Int,
     Float,
-    Boolean,
+    Bool,
     Void,
 
     // Compound

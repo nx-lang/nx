@@ -92,7 +92,7 @@ Developers receive compile-time type checking that catches type errors, undefine
 
 - **Syntax Tree (CST)**: Concrete representation of parsed NX code preserving all tokens including whitespace and comments for tooling purposes
 - **Abstract Syntax Tree (AST)**: Simplified representation for semantic analysis and type checking, discarding formatting details
-- **Type**: Representation of NX types including primitives (string, int, float, boolean, void), sequences (T[]), functions ((T1, T2) => T3), nullable (T?), and user-defined types
+- **Type**: Representation of NX types including primitives (string, int, float, bool, void), sequences (T[]), functions ((T1, T2) => T3), nullable (T?), and user-defined types
 - **Diagnostic**: Error or warning message with source location (line, column, span), severity level, message text, and optional suggested fixes
 - **Symbol**: Named entity in NX code (function, type, variable) with location, type information, and scope
 - **Scope**: Context for identifier resolution, containing bindings and parent scope reference for nested scopes
