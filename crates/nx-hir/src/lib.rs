@@ -223,6 +223,39 @@ pub enum Item {
     Record(RecordDef),
 }
 
+/// Import kind.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImportKind {
+    /// `import "<path>" [as Alias]`
+    Wildcard {
+        /// Optional wildcard namespace alias (`import "<path>" as Alias`)
+        alias: Option<Name>,
+    },
+    /// `import { Name, Name as Alias } from "..."`
+    Selective {
+        /// Selective imports for `import { ... } ...`
+        entries: Vec<SelectiveImport>,
+    },
+}
+
+/// Individual selective import entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectiveImport {
+    /// Imported symbol name
+    pub name: Name,
+    /// Optional local alias
+    pub alias: Option<Name>,
+}
+
+/// Lowered import statement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Import {
+    /// Module path from `from "<path>"`
+    pub path: String,
+    /// Wildcard or selective import data
+    pub kind: ImportKind,
+}
+
 /// Arena index for expressions.
 pub type ExprId = Idx<ast::Expr>;
 
@@ -239,6 +272,10 @@ pub type ElementId = Idx<Element>;
 pub struct Module {
     /// Source file identifier
     pub source_id: SourceId,
+    /// Optional prelude/module content type path.
+    pub content_type: Option<String>,
+    /// Import statements in source order.
+    pub imports: Vec<Import>,
     /// Top-level items
     items: Vec<Item>,
     /// Arena for all expressions
@@ -252,6 +289,8 @@ impl Module {
     pub fn new(source_id: SourceId) -> Self {
         Self {
             source_id,
+            content_type: None,
+            imports: Vec::new(),
             items: Vec::new(),
             exprs: Arena::new(),
             elements: Arena::new(),

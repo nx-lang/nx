@@ -11,9 +11,11 @@ An NX module defines imports, local declarations, and an optional root element. 
 - A module may export a root element directly or expose named bindings.
 
 ```nx
-import * from "./components"
-import { Button, Input } from "./ui/controls"
-import { List } from "./collections" as Collections
+contenttype "./schemas/html5.nx"
+import "./components.nx"
+import { Button, Input } from "./ui/controls.nx"
+import "./collections.nx" as Collections
+import { List as CollectionsList } from "./collections/list.nx"
 
 private let WelcomeMessage = <span>Hello World</span>
 
@@ -23,9 +25,10 @@ private let WelcomeMessage = <span>Hello World</span>
 ```
 
 ## Imports
-- `import *` brings every exported symbol into scope.
-- Curly-brace imports target specific identifiers and support aliasing.
-- Namespace-style imports (`as Collections`) keep related components grouped.
+- `contenttype "<path>"` is optional, but when present it must be the first statement.
+- `import "<path>"` brings every exported symbol into scope.
+- `import "<path>" as Namespace` keeps imported symbols grouped under `Namespace`.
+- Selective imports (`import { ... } from "<path>"`) target specific identifiers and support inline aliasing (`Name as Alias`).
 
 ## Root Elements
 - A root element at the end of the file behaves like `main`. Tooling can render it immediately or expose it as the module default.

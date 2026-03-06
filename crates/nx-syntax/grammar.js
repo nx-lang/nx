@@ -61,6 +61,7 @@ module.exports = grammar({
   rules: {
     // ===== Module Definition =====
     module_definition: $ => seq(
+      optional($.contenttype_statement),
       repeat($.import_statement),
       repeat(choice(
         $.record_definition,
@@ -73,9 +74,54 @@ module.exports = grammar({
     ),
 
     // ===== Imports =====
-    import_statement: $ => seq(
-      'import',
-      $.qualified_name,
+    import_statement: $ => choice(
+      seq(
+        'import',
+        field('kind', $.wildcard_import),
+      ),
+      seq(
+        'import',
+        field('kind', $.selective_import_list),
+        'from',
+        field('path', $.module_path),
+      ),
+    ),
+
+    wildcard_import: $ => seq(
+      field('path', $.module_path),
+      optional(seq(
+        'as',
+        field('alias', $.identifier),
+      )),
+    ),
+
+    selective_import_list: $ => seq(
+      '{',
+      optional(seq(
+        $.selective_import,
+        repeat(seq(',', $.selective_import)),
+        optional(','),
+      )),
+      '}',
+    ),
+
+    selective_import: $ => seq(
+      field('name', $.identifier),
+      optional(seq(
+        'as',
+        field('alias', $.identifier),
+      )),
+    ),
+
+    contenttype_statement: $ => seq(
+      'contenttype',
+      field('path', $.module_path),
+    ),
+
+    // Semantic wrapper around string_literal so import/contenttype paths have
+    // a stable node kind for downstream lowering and queries.
+    module_path: $ => seq(
+      field('value', $.string_literal),
     ),
 
     // ===== Type Definitions =====

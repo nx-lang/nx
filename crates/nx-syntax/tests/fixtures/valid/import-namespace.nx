@@ -1,0 +1,3 @@
+import "./ui/controls.nx" as UI
+
+<UI.Root />

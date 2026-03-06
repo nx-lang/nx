@@ -15,6 +15,9 @@ Terminals are UPPER_SNAKE token kinds produced by the lexer. Lexeme hints are il
 
 Keywords
 - IMPORT ("import")
+- FROM ("from")
+- AS ("as")
+- CONTENTTYPE ("contenttype")
 - TYPE ("type")
 - ENUM ("enum")
 - LET ("let")
@@ -137,17 +140,46 @@ Grouping
 Nonterminals are CamelCase. Terminals are UPPER_SNAKE tokens.
 
 ModuleDefinition (AST: ModuleDefinitionSyntax)
-- ModuleDefinition → ImportStatement* ModuleMember* Element? EOF
-  - fields: imports: ImportStatementSyntax[], members: ModuleMemberSyntax[], moduleElement?: MarkupElementSyntax
+- ModuleDefinition → ContentTypeStatement? ImportStatement* ModuleMember* Element? EOF
+  - fields: contentType?: ContentTypeStatementSyntax, imports: ImportStatementSyntax[], members: ModuleMemberSyntax[], moduleElement?: MarkupElementSyntax
 
 ModuleMember (AST: ModuleMemberSyntax is a sum type)
 - ModuleMember → TypeDefinition
 - ModuleMember → ValueDefinition
 - ModuleMember → FunctionDefinition
 
+ContentTypeStatement (AST: ContentTypeStatementSyntax)
+- ContentTypeStatement → CONTENTTYPE ModulePath
+  - fields: path: ModulePathSyntax
+
 ImportStatement (AST: ImportStatementSyntax)
-- ImportStatement → IMPORT QualifiedName
-  - fields: name: QualifiedNameSyntax
+- ImportStatement → IMPORT WildcardImport
+- ImportStatement → IMPORT SelectiveImportList FROM ModulePath
+  - fields: kind: WildcardImportSyntax | SelectiveImportListSyntax, path?: ModulePathSyntax
+
+ImportClause (AST: ImportClauseSyntax is a sum type)
+- ImportClause → WildcardImport
+- ImportClause → SelectiveImportList
+
+WildcardImport (AST: WildcardImportSyntax)
+- WildcardImport → ModulePath (AS IDENTIFIER)?
+  - fields: path: ModulePathSyntax, alias?: string
+
+SelectiveImportList (AST: SelectiveImportListSyntax)
+- SelectiveImportList → LBRACE SelectiveImportListEntriesOpt RBRACE
+  - fields: entries: SelectiveImportSyntax[]
+
+SelectiveImportListEntriesOpt
+- SelectiveImportListEntriesOpt → SelectiveImport (COMMA SelectiveImport)* COMMA?
+- SelectiveImportListEntriesOpt → ε
+
+SelectiveImport (AST: SelectiveImportSyntax)
+- SelectiveImport → IDENTIFIER (AS IDENTIFIER)?
+  - fields: name: string, alias?: string
+
+ModulePath (AST: ModulePathSyntax)
+- ModulePath → STRING_LITERAL
+  - fields: value: string
 
 TypeDefinition (AST: TypeDefinitionSyntax is a sum type)
 - TypeDefinition → RecordDefinition (RecordDefinitionSyntax)
@@ -529,9 +561,14 @@ Pattern (AST: PatternSyntax)
 
 This section lists the AST node types with fields for implementers.
 
-- ModuleDefinitionSyntax: imports: ImportStatementSyntax[], members: ModuleMemberSyntax[], moduleElement?: MarkupElementSyntax (members and moduleElement can both be present)
+- ModuleDefinitionSyntax: contentType?: ContentTypeStatementSyntax, imports: ImportStatementSyntax[], members: ModuleMemberSyntax[], moduleElement?: MarkupElementSyntax (members and moduleElement can both be present)
 - ModuleMemberSyntax: TypeDefinitionSyntax | ValueDefinitionSyntax | FunctionDefinitionSyntax
-- ImportStatementSyntax: name: QualifiedNameSyntax
+- ContentTypeStatementSyntax: path: ModulePathSyntax
+- ImportStatementSyntax: kind: WildcardImportSyntax | SelectiveImportListSyntax, path?: ModulePathSyntax
+- WildcardImportSyntax: path: ModulePathSyntax, alias?: string
+- SelectiveImportListSyntax: entries: SelectiveImportSyntax[]
+- SelectiveImportSyntax: name: string, alias?: string
+- ModulePathSyntax: value: string
 - TypeDefinitionSyntax: TypeAliasDefinitionSyntax | EnumDefinitionSyntax | RecordDefinitionSyntax
 - TypeAliasDefinitionSyntax: name: string, type: TypeSyntax
 - EnumDefinitionSyntax: name: string, members: EnumMemberSyntax[]

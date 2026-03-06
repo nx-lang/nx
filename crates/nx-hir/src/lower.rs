@@ -5,8 +5,8 @@
 
 use crate::ast::{BinOp, Expr, Literal, OrderedFloat, Stmt, TypeRef, UnOp};
 use crate::{
-    Element, EnumDef, EnumMember, ExprId, Function, Item, Module, Name, Param, Property, RecordDef,
-    RecordField, SourceId, TypeAlias,
+    Element, EnumDef, EnumMember, ExprId, Function, Import, ImportKind, Item, Module, Name, Param,
+    Property, RecordDef, RecordField, SelectiveImport, SourceId, TypeAlias,
 };
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_syntax::{SyntaxKind, SyntaxNode};
@@ -135,6 +135,113 @@ impl LoweringContext {
             .unwrap_or(TypeTag::Unknown)
     }
 
+    fn unquote_string_literal(text: &str) -> String {
+        if text.len() >= 2 && text.starts_with('"') && text.ends_with('"') {
+            text[1..text.len() - 1].to_string()
+        } else {
+            text.to_string()
+        }
+    }
+
+    fn find_module_path_node<'tree>(
+        node: SyntaxNode<'tree>,
+        preferred_field: &str,
+    ) -> Option<SyntaxNode<'tree>> {
+        node.child_by_field(preferred_field).or_else(|| {
+            node.children().find(|child| {
+                child.kind() == SyntaxKind::MODULE_PATH
+                    || child.kind() == SyntaxKind::STRING_LITERAL
+            })
+        })
+    }
+
+    fn lower_module_path(node: SyntaxNode) -> Option<String> {
+        match node.kind() {
+            SyntaxKind::MODULE_PATH => {
+                Self::find_module_path_node(node, "value").and_then(Self::lower_module_path)
+            }
+            SyntaxKind::STRING_LITERAL => Some(Self::unquote_string_literal(node.text())),
+            _ => Self::find_module_path_node(node, "path").and_then(Self::lower_module_path),
+        }
+    }
+
+    fn lower_selective_import(&self, node: SyntaxNode) -> Option<SelectiveImport> {
+        if node.kind() != SyntaxKind::SELECTIVE_IMPORT {
+            return None;
+        }
+
+        let name = node
+            .child_by_field("name")
+            .map(|n| Name::new(n.text()))
+            .or_else(|| {
+                node.children()
+                    .find(|child| child.kind() == SyntaxKind::IDENTIFIER)
+                    .map(|n| Name::new(n.text()))
+            })?;
+
+        let alias = node
+            .child_by_field("alias")
+            .map(|alias_node| Name::new(alias_node.text()));
+
+        Some(SelectiveImport { name, alias })
+    }
+
+    fn lower_import_statement(&self, node: SyntaxNode) -> Option<Import> {
+        if node.kind() != SyntaxKind::IMPORT_STATEMENT {
+            return None;
+        }
+
+        let kind_node = node.child_by_field("kind").or_else(|| {
+            node.children().find(|child| {
+                matches!(
+                    child.kind(),
+                    SyntaxKind::WILDCARD_IMPORT | SyntaxKind::SELECTIVE_IMPORT_LIST
+                )
+            })
+        })?;
+
+        match kind_node.kind() {
+            SyntaxKind::WILDCARD_IMPORT => {
+                let path = Self::find_module_path_node(kind_node, "path")
+                    .and_then(Self::lower_module_path)?;
+
+                let alias = kind_node
+                    .child_by_field("alias")
+                    .map(|alias_node| Name::new(alias_node.text()));
+
+                Some(Import {
+                    path,
+                    kind: ImportKind::Wildcard { alias },
+                })
+            }
+            SyntaxKind::SELECTIVE_IMPORT_LIST => {
+                let path =
+                    Self::find_module_path_node(node, "path").and_then(Self::lower_module_path)?;
+
+                let selective_entries = kind_node
+                    .children()
+                    .filter_map(|entry| self.lower_selective_import(entry))
+                    .collect();
+
+                Some(Import {
+                    path,
+                    kind: ImportKind::Selective {
+                        entries: selective_entries,
+                    },
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn lower_contenttype_statement(&self, node: SyntaxNode) -> Option<String> {
+        if node.kind() != SyntaxKind::CONTENTTYPE_STATEMENT {
+            return None;
+        }
+
+        Self::find_module_path_node(node, "path").and_then(Self::lower_module_path)
+    }
+
     /// Lowers a SyntaxNode to an expression.
     pub fn lower_expr(&mut self, node: SyntaxNode) -> ExprId {
         if node.is_error() {
@@ -144,13 +251,7 @@ impl LoweringContext {
         match node.kind() {
             // Literals
             SyntaxKind::STRING_LITERAL | SyntaxKind::STRING_EXPRESSION => {
-                let text = node.text();
-                // Remove quotes
-                let s = if text.starts_with('"') && text.ends_with('"') && text.len() >= 2 {
-                    &text[1..text.len() - 1]
-                } else {
-                    text
-                };
+                let s = Self::unquote_string_literal(node.text());
                 let expr = self.alloc_expr(Expr::Literal(Literal::String(SmolStr::new(s))));
                 self.set_expr_type(expr, TypeTag::String);
                 expr
@@ -1037,6 +1138,16 @@ impl LoweringContext {
         // Process all top-level items
         for child in root.children() {
             match child.kind() {
+                SyntaxKind::CONTENTTYPE_STATEMENT => {
+                    if self.module.content_type.is_none() {
+                        self.module.content_type = self.lower_contenttype_statement(child);
+                    }
+                }
+                SyntaxKind::IMPORT_STATEMENT => {
+                    if let Some(import) = self.lower_import_statement(child) {
+                        self.module.imports.push(import);
+                    }
+                }
                 SyntaxKind::FUNCTION_DEFINITION => {
                     let func = self.lower_function(child);
                     self.module.add_item(Item::Function(func));
@@ -1101,6 +1212,86 @@ mod tests {
         let ctx = LoweringContext::new(SourceId::new(0));
         let module = ctx.finish();
         assert_eq!(module.items().len(), 0);
+        assert!(module.content_type.is_none());
+        assert!(module.imports.is_empty());
+    }
+
+    #[test]
+    fn test_lower_contenttype_statement() {
+        let source = r#"contenttype "./prelude"
+<App />"#;
+        let parse_result = parse_str(source, "contenttype.nx");
+
+        let tree = parse_result.tree.expect("Should parse contenttype module");
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        assert_eq!(module.content_type, Some("./prelude".to_string()));
+        assert!(module.imports.is_empty());
+    }
+
+    #[test]
+    fn test_lower_wildcard_imports() {
+        let source = r#"import "./ui.nx"
+import "./controls.nx" as UI
+<UI.Root />"#;
+        let parse_result = parse_str(source, "imports.nx");
+
+        let tree = parse_result.tree.expect("Should parse wildcard imports");
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        assert_eq!(module.imports.len(), 2);
+
+        let first = &module.imports[0];
+        assert_eq!(first.path, "./ui.nx");
+        match &first.kind {
+            ImportKind::Wildcard { alias } => {
+                assert!(alias.is_none());
+            }
+            other => panic!("Expected wildcard import, got {:?}", other),
+        }
+
+        let second = &module.imports[1];
+        assert_eq!(second.path, "./controls.nx");
+        match &second.kind {
+            ImportKind::Wildcard { alias } => {
+                assert_eq!(
+                    alias.as_ref().map(Name::as_str),
+                    Some("UI"),
+                    "Namespace alias should lower from wildcard import"
+                );
+            }
+            other => panic!("Expected wildcard import, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_lower_selective_imports() {
+        let source = r#"import { Button, Stack as LayoutStack } from "https://example.com/ui.nx"
+<Button />"#;
+        let parse_result = parse_str(source, "selective-imports.nx");
+
+        let tree = parse_result.tree.expect("Should parse selective imports");
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        assert_eq!(module.imports.len(), 1);
+        let import = &module.imports[0];
+        assert_eq!(import.path, "https://example.com/ui.nx");
+        match &import.kind {
+            ImportKind::Selective { entries } => {
+                assert_eq!(entries.len(), 2);
+                assert_eq!(entries[0].name.as_str(), "Button");
+                assert!(entries[0].alias.is_none());
+                assert_eq!(entries[1].name.as_str(), "Stack");
+                assert_eq!(
+                    entries[1].alias.as_ref().map(Name::as_str),
+                    Some("LayoutStack")
+                );
+            }
+            other => panic!("Expected selective import, got {:?}", other),
+        }
     }
 
     #[test]

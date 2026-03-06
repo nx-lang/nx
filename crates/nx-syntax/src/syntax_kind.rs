@@ -12,6 +12,11 @@ pub enum SyntaxKind {
 
     // === Imports ===
     IMPORT_STATEMENT,
+    CONTENTTYPE_STATEMENT,
+    WILDCARD_IMPORT,
+    SELECTIVE_IMPORT_LIST,
+    SELECTIVE_IMPORT,
+    MODULE_PATH,
 
     // === Type Definitions ===
     TYPE_DEFINITION,
@@ -138,6 +143,9 @@ pub enum SyntaxKind {
     TYPE_KW,
     ENUM,
     IMPORT,
+    FROM,
+    AS,
+    CONTENTTYPE,
     IF,
     ELSE,
     FOR,
@@ -204,6 +212,9 @@ impl SyntaxKind {
                 | SyntaxKind::LET
                 | SyntaxKind::TYPE_KW
                 | SyntaxKind::IMPORT
+                | SyntaxKind::FROM
+                | SyntaxKind::AS
+                | SyntaxKind::CONTENTTYPE
                 | SyntaxKind::ENUM
                 | SyntaxKind::IF
                 | SyntaxKind::ELSE
@@ -266,6 +277,9 @@ impl SyntaxKind {
             SyntaxKind::LET
                 | SyntaxKind::TYPE_KW
                 | SyntaxKind::IMPORT
+                | SyntaxKind::FROM
+                | SyntaxKind::AS
+                | SyntaxKind::CONTENTTYPE
                 | SyntaxKind::IF
                 | SyntaxKind::ELSE
                 | SyntaxKind::FOR
@@ -304,6 +318,11 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "module_definition" => SyntaxKind::MODULE_DEFINITION,
         "ERROR" => SyntaxKind::ERROR,
         "import_statement" => SyntaxKind::IMPORT_STATEMENT,
+        "contenttype_statement" => SyntaxKind::CONTENTTYPE_STATEMENT,
+        "wildcard_import" => SyntaxKind::WILDCARD_IMPORT,
+        "selective_import_list" => SyntaxKind::SELECTIVE_IMPORT_LIST,
+        "selective_import" => SyntaxKind::SELECTIVE_IMPORT,
+        "module_path" => SyntaxKind::MODULE_PATH,
         "type_definition" => SyntaxKind::TYPE_DEFINITION,
         "record_definition" => SyntaxKind::RECORD_DEFINITION,
         "enum_definition" => SyntaxKind::ENUM_DEFINITION,
@@ -398,6 +417,9 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "let" => SyntaxKind::LET,
         // Note: "type" already matched earlier as TYPE
         "import" => SyntaxKind::IMPORT,
+        "from" => SyntaxKind::FROM,
+        "as" => SyntaxKind::AS,
+        "contenttype" => SyntaxKind::CONTENTTYPE,
         "enum" => SyntaxKind::ENUM,
         "if" => SyntaxKind::IF,
         "else" => SyntaxKind::ELSE,

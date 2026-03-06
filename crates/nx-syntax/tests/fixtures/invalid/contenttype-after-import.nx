@@ -1,0 +1,4 @@
+import "./ui/controls.nx"
+contenttype "./schemas/html5"
+
+<App />

@@ -340,7 +340,7 @@ mod tests {
 
     #[test]
     fn test_syntax_tree_root() {
-        let source = "import foo";
+        let source = r#"import "./foo.nx""#;
         let result = parse_str(source, "test.nx");
 
         let tree = result.tree.unwrap();
@@ -352,7 +352,7 @@ mod tests {
 
     #[test]
     fn test_syntax_tree_source() {
-        let source = "import foo";
+        let source = r#"import "./foo.nx""#;
         let result = parse_str(source, "test.nx");
 
         let tree = result.tree.unwrap();
@@ -361,18 +361,18 @@ mod tests {
 
     #[test]
     fn test_syntax_tree_node_at() {
-        let source = "import foo";
+        let source = r#"import "./foo.nx""#;
         let result = parse_str(source, "test.nx");
 
         let tree = result.tree.unwrap();
-        let node = tree.node_at(7); // Middle of "foo"
+        let node = tree.node_at(16); // Middle of "./foo"
 
         assert!(node.is_some());
     }
 
     #[test]
     fn test_parse_result_is_ok() {
-        let source = "import foo";
+        let source = r#"import "./foo.nx""#;
         let result = parse_str(source, "test.nx");
 
         assert!(result.is_ok());

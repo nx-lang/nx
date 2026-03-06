@@ -1,0 +1,4 @@
+contenttype "./schemas/html5.nx"
+import "./ui/controls.nx" as UI
+
+<UI.App />

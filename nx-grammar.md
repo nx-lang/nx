@@ -17,15 +17,36 @@ language bindings. That is also a reasonable limit for other implementations.
 
 ```ebnf
 ModuleDefinition ::=
+    [ContentTypeStatement]
     {ImportStatement}
     { TypeDefinition | ValueDefinition | FunctionDefinition }
     [Element]
 
+ContentTypeStatement ::=
+    "contenttype" ModulePath
+
 ImportStatement ::=
-    "import" QualifiedName
+    WildcardImportStatement
+    | SelectiveImportStatement
+
+WildcardImportStatement ::=
+    "import" ModulePath ["as" Identifier]
+
+SelectiveImportStatement ::=
+    "import" SelectiveImportList "from" ModulePath
+
+SelectiveImportList ::=
+    "{" [SelectiveImport {"," SelectiveImport} [","]] "}"
+
+SelectiveImport ::=
+    Identifier ["as" Identifier]
+
+ModulePath ::=
+    StringLiteral
 ```
 
-A module can mix any number of definitions with an optional trailing root `Element`, which is present when the module defines rendered markup alongside its declarations.
+A module can include an optional `contenttype` directive, followed by any number of imports and
+definitions, with an optional trailing root `Element` for rendered markup.
 
 <a id="types"></a>
 ## Types

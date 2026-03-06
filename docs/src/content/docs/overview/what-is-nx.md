@@ -19,7 +19,7 @@ Traditional stacks force you to juggle two languages (HTML + JS, XML + C#, JSON 
 This is a complete module: imports, types, functions, markup, and logic all live together.
 
 ```nx
-import { Card, Avatar, Stack } from "./ui"
+import { Card, Avatar, Stack } from "./ui.nx"
 
 type <User id:string name:string email:string avatarUrl:string?/>
 

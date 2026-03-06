@@ -1,5 +1,3 @@
 // Missing closing angle bracket in function definition
-import core.html
-
 let <Calculate x:int =
   <span>{x * 2}</span>

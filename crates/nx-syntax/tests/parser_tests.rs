@@ -421,6 +421,190 @@ fn test_parse_module_with_definitions_and_element() {
 }
 
 #[test]
+fn test_parse_wildcard_and_namespace_imports() {
+    let source = r#"import "./tokens.nx"
+import "./ui/controls.nx" as UI"#;
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "Wildcard/namespace imports should parse. Errors: {:?}",
+        result.errors
+    );
+
+    let root = result.root().expect("Should have root node");
+    let imports: Vec<_> = root
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::IMPORT_STATEMENT)
+        .collect();
+    assert_eq!(imports.len(), 2);
+
+    let wildcard_kind = imports[0]
+        .child_by_field("kind")
+        .expect("Wildcard import should expose kind");
+    assert_eq!(wildcard_kind.kind(), SyntaxKind::WILDCARD_IMPORT);
+    assert!(
+        wildcard_kind.child_by_field("alias").is_none(),
+        "Bare wildcard import should not have alias"
+    );
+    assert_eq!(
+        wildcard_kind
+            .child_by_field("path")
+            .expect("Wildcard import should expose module path")
+            .child_by_field("value")
+            .expect("module_path should expose value")
+            .text(),
+        r#""./tokens.nx""#
+    );
+
+    let namespace_kind = imports[1]
+        .child_by_field("kind")
+        .expect("Namespace import should expose kind");
+    assert_eq!(namespace_kind.kind(), SyntaxKind::WILDCARD_IMPORT);
+    assert_eq!(
+        namespace_kind
+            .child_by_field("alias")
+            .expect("Namespace import should expose alias")
+            .text(),
+        "UI"
+    );
+}
+
+#[test]
+fn test_parse_selective_imports_with_aliases() {
+    let source = r#"import { Button, Stack as LayoutStack } from "https://example.com/ui.nx""#;
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "Selective imports should parse. Errors: {:?}",
+        result.errors
+    );
+
+    let root = result.root().expect("Should have root node");
+    let import = root
+        .children()
+        .find(|child| child.kind() == SyntaxKind::IMPORT_STATEMENT)
+        .expect("Expected import statement");
+
+    let kind = import
+        .child_by_field("kind")
+        .expect("Import should expose kind");
+    assert_eq!(kind.kind(), SyntaxKind::SELECTIVE_IMPORT_LIST);
+
+    let selective: Vec<_> = kind
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::SELECTIVE_IMPORT)
+        .collect();
+    assert_eq!(selective.len(), 2);
+    assert_eq!(
+        selective[0]
+            .child_by_field("name")
+            .expect("Selective import should expose name")
+            .text(),
+        "Button"
+    );
+    assert!(
+        selective[0].child_by_field("alias").is_none(),
+        "Button import should not have alias"
+    );
+    assert_eq!(
+        selective[1]
+            .child_by_field("name")
+            .expect("Selective import should expose name")
+            .text(),
+        "Stack"
+    );
+    assert_eq!(
+        selective[1]
+            .child_by_field("alias")
+            .expect("Aliased selective import should expose alias")
+            .text(),
+        "LayoutStack"
+    );
+
+    let module_path = import
+        .child_by_field("path")
+        .expect("Import should expose module path");
+    assert_eq!(
+        module_path
+            .child_by_field("value")
+            .expect("module_path should expose value")
+            .text(),
+        r#""https://example.com/ui.nx""#
+    );
+}
+
+#[test]
+fn test_parse_contenttype_then_imports() {
+    let source = r#"contenttype "./prelude"
+import "./tokens.nx"
+let title = "NX""#;
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "contenttype before imports should parse. Errors: {:?}",
+        result.errors
+    );
+
+    let root = result.root().expect("Should have root node");
+    let first = root.children().next().expect("Module should have children");
+    assert_eq!(first.kind(), SyntaxKind::CONTENTTYPE_STATEMENT);
+    assert_eq!(
+        first
+            .child_by_field("path")
+            .expect("contenttype should expose path")
+            .child_by_field("value")
+            .expect("module_path should expose value")
+            .text(),
+        r#""./prelude""#
+    );
+}
+
+#[test]
+fn test_parse_import_without_from_is_error() {
+    let source = "import ui.components";
+    let result = parse_str(source, "test.nx");
+
+    assert!(!result.is_ok(), "Import without from should fail");
+    assert!(
+        !result.errors.is_empty(),
+        "Import without from should produce parse errors"
+    );
+}
+
+#[test]
+fn test_parse_contenttype_after_import_is_error() {
+    let source = r#"import "./ui.nx"
+contenttype "./prelude""#;
+    let result = parse_str(source, "test.nx");
+
+    assert!(!result.is_ok(), "contenttype after import should fail");
+    assert!(
+        !result.errors.is_empty(),
+        "contenttype after import should produce parse errors"
+    );
+}
+
+#[test]
+fn test_parse_multiple_contenttype_is_error() {
+    let source = r#"contenttype "./prelude.nx"
+contenttype "./secondary.nx"
+let title = "NX""#;
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        !result.is_ok(),
+        "Multiple contenttype directives should fail"
+    );
+    assert!(
+        !result.errors.is_empty(),
+        "Multiple contenttype directives should produce parse errors"
+    );
+}
+
+#[test]
 fn test_parse_enum_definition() {
     let path = fixture_path("valid/enum-definition.nx");
     let result = parse_file(&path).unwrap();

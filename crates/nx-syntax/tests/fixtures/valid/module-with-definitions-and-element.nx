@@ -1,5 +1,5 @@
 // Module mixing declarations with a trailing root element
-import ui.components
+import "./ui/components.nx" as UiComponents
 
 type UserName = string
 

@@ -100,8 +100,8 @@
 ```
 
 
-import ui.widgets
-import data.models
+import "./ui/widgets.nx" as UiWidgets
+import "./data/models.nx" as DataModels
 
 let <DataGrid
   data:object[]

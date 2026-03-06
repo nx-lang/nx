@@ -1,0 +1,5 @@
+import { Stack as LayoutStack, Button } from "./layout.nx"
+
+<LayoutStack>
+  <Button />
+</LayoutStack>

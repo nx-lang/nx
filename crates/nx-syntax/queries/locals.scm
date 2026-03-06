@@ -31,6 +31,16 @@
 (value_definition
   name: (identifier) @local.definition)
 
+(wildcard_import
+  alias: (identifier) @local.definition)
+
+((selective_import
+   name: (identifier) @local.definition) @import.binding
+  (#not-match? @import.binding "\\bas\\b"))
+
+(selective_import
+  alias: (identifier) @local.definition)
+
 (value_for_expression
   item: (identifier) @local.definition)
 

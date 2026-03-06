@@ -8,13 +8,15 @@ Each NX file is a module. You can import symbols, declare locals, and end with a
 ## Imports
 
 ```nx
-import { Button, Input } from "./ui/controls"
-import * from "./tokens"
-import { Stack } from "./layout" as Layout
+contenttype "./schemas/html5.nx"
+import { Button, Input } from "./ui/controls.nx"
+import "./tokens.nx" as Tokens
+import { Stack as LayoutStack } from "./layout.nx"
 ```
 
-- `import *` brings all exports into scope.
-- Curly-brace imports target specific names; use `as` to alias.
+- `contenttype "<path>"` must come first and acts like a module prelude.
+- `import "<path>"` brings all exports into scope; `import "<path>" as Name` keeps them under a namespace.
+- Selective imports use braces (`import { Name } from "<path>"`) and support inline aliasing (`Name as Alias`).
 
 ## Declarations and visibility
 

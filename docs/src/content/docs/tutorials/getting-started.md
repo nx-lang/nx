@@ -24,7 +24,7 @@ Validation checkpoint: `cargo test --workspace` should pass; this confirms the p
 Make `examples/nx/hello.nx`:
 
 ```nx
-import * from "./ui"
+import "./ui.nx"
 
 type <User id:string name:string/>
 

@@ -1,5 +1,5 @@
-import ui.widgets
-import data.models
+import "./ui/widgets.nx" as UiWidgets
+import "./data/models.nx" as DataModels
 
 let <UserCard user:User className:string content:Element[]/> =
   <section class="card {className}">

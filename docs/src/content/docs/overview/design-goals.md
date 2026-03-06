@@ -34,7 +34,7 @@ NX’s design goals explain why the language looks and behaves the way it does. 
 This small example shows the goals working together: unified syntax, UI-first design, JSX/XAML familiarity, and typed data in one file.
 
 ```nx
-import { Button, Stack } from "./ui"
+import { Button, Stack } from "./ui.nx"
 
 type <Action label:string href:string? onClick:() => void/>
 type <Theme primary:string surface:string text:string/>

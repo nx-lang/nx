@@ -178,7 +178,8 @@ mod tests {
     #[test]
     fn test_syntax_node_children() {
         let mut parser = parser();
-        let source = "import foo\nimport bar";
+        let source = r#"import "./foo.nx"
+import { Bar } from "./bar.nx""#;
         let tree = parser.parse(source, None).unwrap();
         let root = SyntaxNode::new(tree.root_node(), source);
 
@@ -191,7 +192,7 @@ mod tests {
     #[test]
     fn test_syntax_node_span() {
         let mut parser = parser();
-        let source = "import foo";
+        let source = r#"import "./foo.nx""#;
         let tree = parser.parse(source, None).unwrap();
         let root = SyntaxNode::new(tree.root_node(), source);
 
@@ -209,5 +210,87 @@ mod tests {
 
         // The root might have errors in its subtree
         assert!(root.has_error());
+    }
+
+    #[test]
+    fn test_import_statement_cst_structure() {
+        let mut parser = parser();
+        let source = r#"import { Button as UiButton, Input } from "./ui/controls.nx""#;
+        let tree = parser.parse(source, None).unwrap();
+        let root = SyntaxNode::new(tree.root_node(), source);
+
+        let import = root
+            .children()
+            .find(|child| child.kind() == SyntaxKind::IMPORT_STATEMENT)
+            .expect("Expected import_statement");
+
+        let import_kind = import
+            .child_by_field("kind")
+            .expect("Import should expose kind field");
+        assert_eq!(import_kind.kind(), SyntaxKind::SELECTIVE_IMPORT_LIST);
+
+        let module_path = import
+            .child_by_field("path")
+            .expect("Import should expose module path field");
+        assert_eq!(module_path.kind(), SyntaxKind::MODULE_PATH);
+
+        let path_value = module_path
+            .child_by_field("value")
+            .expect("module_path should expose value field");
+        assert_eq!(path_value.kind(), SyntaxKind::STRING_LITERAL);
+        assert_eq!(path_value.text(), r#""./ui/controls.nx""#);
+
+        let selective_imports: Vec<_> = import_kind
+            .children()
+            .filter(|child| child.kind() == SyntaxKind::SELECTIVE_IMPORT)
+            .collect();
+        assert_eq!(selective_imports.len(), 2);
+
+        let first = selective_imports[0];
+        let first_name = first
+            .child_by_field("name")
+            .expect("selective_import should expose name field");
+        let first_alias = first
+            .child_by_field("alias")
+            .expect("selective_import should expose alias field");
+        assert_eq!(first_name.text(), "Button");
+        assert_eq!(first_alias.text(), "UiButton");
+
+        let second = selective_imports[1];
+        assert_eq!(
+            second
+                .child_by_field("name")
+                .expect("second selective import should expose name")
+                .text(),
+            "Input"
+        );
+        assert!(
+            second.child_by_field("alias").is_none(),
+            "Second selective import should not have alias"
+        );
+    }
+
+    #[test]
+    fn test_contenttype_cst_structure() {
+        let mut parser = parser();
+        let source = r#"contenttype "./prelude"
+import "./ui/controls.nx" as UI"#;
+        let tree = parser.parse(source, None).unwrap();
+        let root = SyntaxNode::new(tree.root_node(), source);
+
+        let first = root.children().next().expect("Expected first module child");
+        assert_eq!(first.kind(), SyntaxKind::CONTENTTYPE_STATEMENT);
+
+        let module_path = first
+            .child_by_field("path")
+            .expect("contenttype should expose path field");
+        assert_eq!(module_path.kind(), SyntaxKind::MODULE_PATH);
+        assert_eq!(
+            module_path
+                .child_by_field("value")
+                .expect("module_path should expose value")
+                .text(),
+            r#""./prelude""#
+        );
     }
 }
