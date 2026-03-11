@@ -144,6 +144,152 @@ fn test_parse_paren_function_without_return_type() {
 }
 
 #[test]
+fn test_parse_component_definition() {
+    let path = fixture_path("valid/component-minimal.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(result.is_ok(), "Component fixture should parse");
+    let root = result.root().expect("Should have root node");
+
+    let component = root
+        .children()
+        .find(|c| c.kind() == SyntaxKind::COMPONENT_DEFINITION)
+        .expect("Should find component_definition node");
+
+    let signature = component
+        .child_by_field("signature")
+        .expect("Component should expose signature field");
+    assert_eq!(signature.kind(), SyntaxKind::COMPONENT_SIGNATURE);
+
+    let name = signature
+        .child_by_field("name")
+        .expect("Component signature should expose name");
+    assert_eq!(name.text(), "Button");
+
+    let prop_count = signature
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::PROPERTY_DEFINITION)
+        .count();
+    assert_eq!(prop_count, 1, "Component should parse one prop");
+
+    let body = component
+        .child_by_field("body")
+        .expect("Component should expose body field");
+    assert_eq!(body.kind(), SyntaxKind::COMPONENT_BODY);
+
+    let body_expr = body
+        .child_by_field("body")
+        .expect("Component body should expose rendered expression");
+    assert!(
+        contains_kind(&body_expr, SyntaxKind::ELEMENT),
+        "Component body should contain the rendered element"
+    );
+}
+
+#[test]
+fn test_parse_component_with_emits() {
+    let path = fixture_path("valid/component-emits.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(result.is_ok(), "Component emits fixture should parse");
+    let root = result.root().expect("Should have root node");
+
+    let component = root
+        .children()
+        .find(|c| c.kind() == SyntaxKind::COMPONENT_DEFINITION)
+        .expect("Should find component_definition node");
+    let signature = component
+        .child_by_field("signature")
+        .expect("Component should expose signature field");
+
+    let emits = signature
+        .child_by_field("emits")
+        .expect("Component signature should expose emits group");
+    assert_eq!(emits.kind(), SyntaxKind::EMITS_GROUP);
+
+    let emit_defs: Vec<_> = emits
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::EMIT_DEFINITION)
+        .collect();
+    assert_eq!(
+        emit_defs.len(),
+        2,
+        "Expected two emitted action definitions"
+    );
+
+    let first = emit_defs[0];
+    assert_eq!(
+        first
+            .child_by_field("name")
+            .expect("Emit definition should expose name")
+            .text(),
+        "ValueChanged"
+    );
+    let first_fields: Vec<_> = first
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::PROPERTY_DEFINITION)
+        .collect();
+    assert_eq!(first_fields.len(), 2, "Expected two payload fields");
+}
+
+#[test]
+fn test_parse_component_with_state() {
+    let path = fixture_path("valid/component-state.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(result.is_ok(), "Component state fixture should parse");
+    let root = result.root().expect("Should have root node");
+
+    let top_level_kinds: Vec<_> = root.children().map(|child| child.kind()).collect();
+    assert!(
+        top_level_kinds.contains(&SyntaxKind::IMPORT_STATEMENT),
+        "Fixture should retain top-level imports"
+    );
+    assert!(
+        top_level_kinds.contains(&SyntaxKind::COMPONENT_DEFINITION),
+        "Fixture should contain a component definition"
+    );
+    assert!(
+        top_level_kinds.contains(&SyntaxKind::ELEMENT),
+        "Fixture should retain a trailing root element"
+    );
+
+    let component = root
+        .children()
+        .find(|c| c.kind() == SyntaxKind::COMPONENT_DEFINITION)
+        .expect("Should find component_definition node");
+    let body = component
+        .child_by_field("body")
+        .expect("Component should expose body field");
+
+    let state = body
+        .child_by_field("state")
+        .expect("Component body should expose state group");
+    assert_eq!(state.kind(), SyntaxKind::STATE_GROUP);
+
+    let state_fields: Vec<_> = state
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::PROPERTY_DEFINITION)
+        .collect();
+    assert_eq!(state_fields.len(), 1, "Expected one state field");
+    assert_eq!(
+        state_fields[0]
+            .child_by_field("name")
+            .expect("State property should expose name")
+            .text(),
+        "query"
+    );
+
+    let rendered = body
+        .child_by_field("body")
+        .expect("Component body should expose rendered expression");
+    assert!(
+        contains_kind(&rendered, SyntaxKind::VALUE_IF_SIMPLE_EXPRESSION),
+        "Component body should preserve the conditional render expression"
+    );
+}
+
+#[test]
 fn test_parse_nested_elements() {
     let path = fixture_path("valid/nested-elements.nx");
     let result = parse_file(&path).unwrap();
@@ -602,6 +748,46 @@ let title = "NX""#;
         !result.errors.is_empty(),
         "Multiple contenttype directives should produce parse errors"
     );
+}
+
+#[test]
+fn test_parse_invalid_component_emits_is_error() {
+    let path = fixture_path("invalid/component-invalid-emits.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(!result.is_ok(), "Malformed emits syntax should fail");
+    assert!(
+        !result.errors.is_empty(),
+        "Malformed emits syntax should produce parse errors"
+    );
+
+    if let Some(root) = result.root() {
+        assert!(
+            contains_kind(&root, SyntaxKind::COMPONENT_DEFINITION)
+                || contains_kind(&root, SyntaxKind::ERROR),
+            "Parser should either recover a component node or surface an error node"
+        );
+    }
+}
+
+#[test]
+fn test_parse_invalid_component_state_is_error() {
+    let path = fixture_path("invalid/component-invalid-state.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(!result.is_ok(), "Malformed state syntax should fail");
+    assert!(
+        !result.errors.is_empty(),
+        "Malformed state syntax should produce parse errors"
+    );
+
+    if let Some(root) = result.root() {
+        assert!(
+            contains_kind(&root, SyntaxKind::COMPONENT_DEFINITION)
+                || contains_kind(&root, SyntaxKind::ERROR),
+            "Parser should either recover a component node or surface an error node"
+        );
+    }
 }
 
 #[test]

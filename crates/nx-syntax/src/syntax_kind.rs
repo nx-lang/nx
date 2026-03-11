@@ -36,6 +36,14 @@ pub enum SyntaxKind {
     PARAM,
     PARAM_LIST,
 
+    // === Components ===
+    COMPONENT_DEFINITION,
+    COMPONENT_SIGNATURE,
+    COMPONENT_BODY,
+    EMITS_GROUP,
+    EMIT_DEFINITION,
+    STATE_GROUP,
+
     // === Elements ===
     ELEMENT,
     SELF_CLOSING_ELEMENT,
@@ -140,6 +148,9 @@ pub enum SyntaxKind {
 
     // === Keywords ===
     LET,
+    COMPONENT,
+    EMITS,
+    STATE,
     TYPE_KW,
     ENUM,
     IMPORT,
@@ -210,6 +221,9 @@ impl SyntaxKind {
                 | SyntaxKind::BOOLEAN_LITERAL
                 | SyntaxKind::NULL_LITERAL
                 | SyntaxKind::LET
+                | SyntaxKind::COMPONENT
+                | SyntaxKind::EMITS
+                | SyntaxKind::STATE
                 | SyntaxKind::TYPE_KW
                 | SyntaxKind::IMPORT
                 | SyntaxKind::FROM
@@ -275,6 +289,9 @@ impl SyntaxKind {
         matches!(
             self,
             SyntaxKind::LET
+                | SyntaxKind::COMPONENT
+                | SyntaxKind::EMITS
+                | SyntaxKind::STATE
                 | SyntaxKind::TYPE_KW
                 | SyntaxKind::IMPORT
                 | SyntaxKind::FROM
@@ -333,6 +350,12 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "primitive_type" => SyntaxKind::PRIMITIVE_TYPE,
         "user_defined_type" => SyntaxKind::USER_DEFINED_TYPE,
         "function_definition" => SyntaxKind::FUNCTION_DEFINITION,
+        "component_definition" => SyntaxKind::COMPONENT_DEFINITION,
+        "component_signature" => SyntaxKind::COMPONENT_SIGNATURE,
+        "component_body" => SyntaxKind::COMPONENT_BODY,
+        "emits_group" => SyntaxKind::EMITS_GROUP,
+        "emit_definition" => SyntaxKind::EMIT_DEFINITION,
+        "state_group" => SyntaxKind::STATE_GROUP,
         "function_signature" => SyntaxKind::FUNCTION_SIGNATURE,
         "markup_signature" => SyntaxKind::MARKUP_SIGNATURE,
         "param" => SyntaxKind::PARAM,
@@ -415,6 +438,9 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "block_comment" => SyntaxKind::BLOCK_COMMENT,
         "html_block_comment" => SyntaxKind::HTML_BLOCK_COMMENT,
         "let" => SyntaxKind::LET,
+        "component" => SyntaxKind::COMPONENT,
+        "emits" => SyntaxKind::EMITS,
+        "state" => SyntaxKind::STATE,
         // Note: "type" already matched earlier as TYPE
         "import" => SyntaxKind::IMPORT,
         "from" => SyntaxKind::FROM,
@@ -474,6 +500,7 @@ mod tests {
     #[test]
     fn test_is_keyword() {
         assert!(SyntaxKind::LET.is_keyword());
+        assert!(SyntaxKind::COMPONENT.is_keyword());
         assert!(SyntaxKind::IF.is_keyword());
         assert!(!SyntaxKind::IDENTIFIER.is_keyword());
     }
@@ -491,6 +518,11 @@ mod tests {
             syntax_kind_from_str("module_definition"),
             SyntaxKind::MODULE_DEFINITION
         );
+        assert_eq!(
+            syntax_kind_from_str("component_definition"),
+            SyntaxKind::COMPONENT_DEFINITION
+        );
+        assert_eq!(syntax_kind_from_str("component"), SyntaxKind::COMPONENT);
         assert_eq!(syntax_kind_from_str("identifier"), SyntaxKind::IDENTIFIER);
         assert_eq!(syntax_kind_from_str("unknown"), SyntaxKind::ERROR);
     }

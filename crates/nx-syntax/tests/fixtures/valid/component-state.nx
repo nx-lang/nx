@@ -1,0 +1,15 @@
+import "./ui/text-input.nx" as Ui
+
+component <SearchBox placeholder:string /> = {
+  state {
+    query:string
+  }
+
+  if isReady {
+    <Ui.TextInput value={query} placeholder={placeholder} />
+  } else {
+    <Spinner />
+  }
+}
+
+<SearchBox placeholder="Find docs" />

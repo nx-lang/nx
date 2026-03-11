@@ -4,6 +4,9 @@
 ;; Keywords
 [
   "let"
+  "component"
+  "emits"
+  "state"
   "type"
   "enum"
   "import"
@@ -42,8 +45,18 @@
 (function_definition
   name: (identifier) @function)
 
+(component_signature
+  name: (element_name) @function)
+
+(emit_definition
+  name: (identifier) @type)
+
 ;; Parameters
 (function_definition
+  (property_definition
+    name: (markup_identifier) @variable.parameter))
+
+(component_signature
   (property_definition
     name: (markup_identifier) @variable.parameter))
 

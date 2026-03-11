@@ -1,0 +1,4 @@
+component <SearchBox /> = {
+  state query:string
+  <TextInput />
+}

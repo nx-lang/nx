@@ -69,6 +69,7 @@ module.exports = grammar({
         $.enum_definition,
         $.value_definition,
         $.function_definition,
+        $.component_definition,
       )),
       optional($.element),
     ),
@@ -221,6 +222,65 @@ module.exports = grammar({
       )),
       '=',
       field('body', $.rhs_expression),
+    ),
+
+    component_definition: $ => seq(
+      'component',
+      field('signature', $.component_signature),
+      '=',
+      field('body', $.component_body),
+    ),
+
+    component_signature: $ => seq(
+      '<',
+      field('name', $.element_name),
+      repeat(field('properties', alias($._component_property_definition, $.property_definition))),
+      optional(field('emits', $.emits_group)),
+      '/',
+      '>',
+    ),
+
+    emits_group: $ => seq(
+      'emits',
+      '{',
+      repeat1(field('definitions', $.emit_definition)),
+      '}',
+    ),
+
+    emit_definition: $ => seq(
+      field('name', $.identifier),
+      '{',
+      repeat(field('properties', alias($._component_property_definition, $.property_definition))),
+      '}',
+    ),
+
+    component_body: $ => seq(
+      '{',
+      optional(field('state', $.state_group)),
+      field('body', $.value_expression),
+      '}',
+    ),
+
+    state_group: $ => seq(
+      'state',
+      '{',
+      repeat(field('properties', alias($._component_property_definition, $.property_definition))),
+      '}',
+    ),
+
+    _component_property_definition: $ => seq(
+      field('name', alias($._component_field_name, $.markup_identifier)),
+      ':',
+      field('type', $.type),
+      optional(seq(
+        '=',
+        field('default', $.rhs_expression),
+      )),
+    ),
+
+    _component_field_name: $ => choice(
+      $.identifier,
+      $.markup_identifier,
     ),
 
     property_definition: $ => seq(

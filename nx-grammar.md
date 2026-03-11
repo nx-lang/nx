@@ -19,7 +19,7 @@ language bindings. That is also a reasonable limit for other implementations.
 ModuleDefinition ::=
     [ContentTypeStatement]
     {ImportStatement}
-    { TypeDefinition | ValueDefinition | FunctionDefinition }
+    { TypeDefinition | ValueDefinition | FunctionDefinition | ComponentDefinition }
     [Element]
 
 ContentTypeStatement ::=
@@ -46,7 +46,8 @@ ModulePath ::=
 ```
 
 A module can include an optional `contenttype` directive, followed by any number of imports and
-definitions, with an optional trailing root `Element` for rendered markup.
+definitions, including `component` declarations, with an optional trailing root `Element` for
+rendered markup.
 
 <a id="types"></a>
 ## Types
@@ -112,6 +113,41 @@ ParenFunctionDefinition ::=
 PropertyDefinition ::=
     MarkupIdentifier ":" TypeDeclaration ["=" RhsExpression]
 ```
+
+## Components
+
+```ebnf
+ComponentDefinition ::=
+    "component" ComponentSignature "=" ComponentBody
+
+ComponentSignature ::=
+    "<" ElementName {PropertyDefinition} [EmitsGroup] "/>"
+
+EmitsGroup ::=
+    "emits" "{"
+        EmitDefinition+
+    "}"
+
+EmitDefinition ::=
+    Identifier "{"
+        {PropertyDefinition}
+    "}"
+
+ComponentBody ::=
+    "{"
+        [StateGroup]
+        ValueExpression
+    "}"
+
+StateGroup ::=
+    "state" "{"
+        {PropertyDefinition}
+    "}"
+```
+
+Components are distinct from `let` functions. They keep the element-shaped signature syntax, but
+they can also declare emitted action payloads in `emits` and persistent local state fields in
+`state`.
 
 <a id="expressions"></a>
 ## Expressions

@@ -1,0 +1,20 @@
+// Parser-only example for component syntax.
+// Lowering, emitted action record generation, and interpreter state support are deferred.
+
+component <SearchBox
+  placeholder:string
+  emits {
+    ValueChanged {
+      value:string
+    }
+    SearchRequested {
+      searchString:string
+    }
+  }
+/> = {
+  state {
+    query:string
+  }
+
+  <TextInput value={query} placeholder={placeholder} />
+}

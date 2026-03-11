@@ -3,6 +3,7 @@
 
 ;; Scopes
 (function_definition) @local.scope
+(component_definition) @local.scope
 (value_for_expression) @local.scope
 (elements_for_expression) @local.scope
 
@@ -15,7 +16,20 @@
 (function_definition
   name: (identifier) @local.definition)
 
+(component_signature
+  name: (element_name
+    (qualified_markup_name
+      (identifier) @local.definition)))
+
 (function_definition
+  (property_definition
+    name: (markup_identifier) @local.definition))
+
+(component_signature
+  (property_definition
+    name: (markup_identifier) @local.definition))
+
+(state_group
   (property_definition
     name: (markup_identifier) @local.definition))
 

@@ -137,9 +137,19 @@ fn validate_root_definitions(
     // Scan top-level children of the module
     for child in root.children() {
         match child.kind() {
-            SyntaxKind::FUNCTION_DEFINITION | SyntaxKind::VALUE_DEFINITION => {
+            SyntaxKind::FUNCTION_DEFINITION
+            | SyntaxKind::COMPONENT_DEFINITION
+            | SyntaxKind::VALUE_DEFINITION => {
                 // Check if this defines 'root'
-                if let Some(name_node) = child.child_by_field("name") {
+                let name_node = if child.kind() == SyntaxKind::COMPONENT_DEFINITION {
+                    child
+                        .child_by_field("signature")
+                        .and_then(|signature| signature.child_by_field("name"))
+                } else {
+                    child.child_by_field("name")
+                };
+
+                if let Some(name_node) = name_node {
                     if name_node.text() == "root" {
                         explicit_roots.push(name_node.span());
                     }
@@ -288,6 +298,14 @@ fn analyze_error_context(
                 return (
                     "Invalid function definition".to_string(),
                     Some("Expected function with format: fn name(params) { body }".to_string()),
+                );
+            }
+            "component_definition" => {
+                return (
+                    "Invalid component definition".to_string(),
+                    Some(
+                        "Expected format: component <Name props emits { Event { field:type } } /> = { state { field:type } <Element /> }".to_string(),
+                    ),
                 );
             }
             "let_declaration" => {

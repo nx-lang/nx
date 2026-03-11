@@ -115,6 +115,94 @@
     }
   },
   {
+    "type": "component_body",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "value_expression",
+            "named": true
+          }
+        ]
+      },
+      "state": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "state_group",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "component_definition",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "component_body",
+            "named": true
+          }
+        ]
+      },
+      "signature": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "component_signature",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "component_signature",
+    "named": true,
+    "fields": {
+      "emits": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "emits_group",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "element_name",
+            "named": true
+          }
+        ]
+      },
+      "properties": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "property_definition",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "conditional_expression",
     "named": true,
     "fields": {
@@ -554,6 +642,48 @@
     }
   },
   {
+    "type": "emit_definition",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "properties": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "property_definition",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "emits_group",
+    "named": true,
+    "fields": {
+      "definitions": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "emit_definition",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "enum_definition",
     "named": true,
     "fields": {
@@ -756,6 +886,25 @@
     }
   },
   {
+    "type": "markup_identifier",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "identifier",
+          "named": true
+        },
+        {
+          "type": "markup_identifier",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "member_access_expression",
     "named": true,
     "fields": {
@@ -784,11 +933,16 @@
   {
     "type": "module_definition",
     "named": true,
+    "root": true,
     "fields": {},
     "children": {
       "multiple": true,
       "required": false,
       "types": [
+        {
+          "type": "component_definition",
+          "named": true
+        },
         {
           "type": "contenttype_statement",
           "named": true
@@ -1293,6 +1447,22 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "state_group",
+    "named": true,
+    "fields": {
+      "properties": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "property_definition",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -1906,10 +2076,15 @@
   },
   {
     "type": "block_comment",
-    "named": true
+    "named": true,
+    "extra": true
   },
   {
     "type": "bool",
+    "named": false
+  },
+  {
+    "type": "component",
     "named": false
   },
   {
@@ -1923,6 +2098,10 @@
   {
     "type": "embed_text_chunk",
     "named": true
+  },
+  {
+    "type": "emits",
+    "named": false
   },
   {
     "type": "entity",
@@ -1974,7 +2153,8 @@
   },
   {
     "type": "html_block_comment",
-    "named": true
+    "named": true,
+    "extra": true
   },
   {
     "type": "i32",
@@ -2018,11 +2198,8 @@
   },
   {
     "type": "line_comment",
-    "named": true
-  },
-  {
-    "type": "markup_identifier",
-    "named": true
+    "named": true,
+    "extra": true
   },
   {
     "type": "null_literal",
@@ -2043,6 +2220,10 @@
   {
     "type": "real_literal",
     "named": true
+  },
+  {
+    "type": "state",
+    "named": false
   },
   {
     "type": "string",

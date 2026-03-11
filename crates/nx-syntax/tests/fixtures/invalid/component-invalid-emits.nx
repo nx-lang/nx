@@ -1,0 +1,7 @@
+component <SearchBox
+  emits ValueChanged {
+    value:string
+  }
+/> = {
+  <TextInput />
+}

@@ -1,9 +1,9 @@
 ---
 title: 'Functions & Bindings'
-description: 'Define reusable components and constants with `let`, using element or paren syntax.'
+description: 'Use `let` for functions and bindings, and `component` for declarations with emits or state.'
 ---
 
-Components and constants share the same `let` keyword. Signatures mirror how you invoke them, keeping APIs self-documenting.
+`let` still handles values and reusable functions. The new `component` keyword is for element-style declarations that need emitted actions or persistent local state.
 
 ## Element-style functions
 
@@ -19,6 +19,28 @@ let <UserCard user:User tone:string = "neutral"/> =
 
 - Attributes in the signature declare names, types, and defaults.
 - Invocation mirrors the signature: supply values instead of types.
+
+## Component declarations
+
+```nx
+component <SearchBox
+  placeholder:string
+  emits {
+    SearchRequested {
+      searchString:string
+    }
+  }
+/> = {
+  state {
+    query:string
+  }
+
+  <TextInput value={query} placeholder={placeholder} />
+}
+```
+
+- Use `component` when the declaration needs `emits` or `state`.
+- This grammar is parser-only for now; lowering and runtime behavior land in a later change.
 
 ## Paren-style functions
 
