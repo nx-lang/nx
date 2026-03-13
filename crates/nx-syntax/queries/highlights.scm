@@ -60,6 +60,14 @@
   (property_definition
     name: (markup_identifier) @variable.parameter))
 
+(emit_definition
+  (property_definition
+    name: (markup_identifier) @property))
+
+(state_group
+  (property_definition
+    name: (markup_identifier) @property))
+
 ;; Operators
 [
   "+"

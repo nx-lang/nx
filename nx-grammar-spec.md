@@ -274,6 +274,7 @@ EmitsGroup (AST: EmitsGroupSyntax)
 EmitDefinition (AST: EmitDefinitionSyntax)
 - EmitDefinition → IDENTIFIER LBRACE PropertyDefinition* RBRACE
   - fields: name: string, properties: PropertyDefinitionSyntax[]
+  - note: emit names are plain identifiers, so dotted or hyphenated names are not valid here
 
 ComponentBody (AST: ComponentBodySyntax)
 - ComponentBody → LBRACE StateGroupOpt ValueExpression RBRACE

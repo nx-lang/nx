@@ -147,7 +147,9 @@ StateGroup ::=
 
 Components are distinct from `let` functions. They keep the element-shaped signature syntax, but
 they can also declare emitted action payloads in `emits` and persistent local state fields in
-`state`.
+`state`. The `emits` block must contain at least one `EmitDefinition`, each emit name is a plain
+identifier, and each emit/state field uses the same `PropertyDefinition` shape as other record-like
+members.
 
 <a id="expressions"></a>
 ## Expressions

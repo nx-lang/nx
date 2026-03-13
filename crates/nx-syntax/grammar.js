@@ -240,6 +240,8 @@ module.exports = grammar({
       '>',
     ),
 
+    // Components require at least one emitted action when the emits block is
+    // present, but each action payload may be empty.
     emits_group: $ => seq(
       'emits',
       '{',
@@ -268,6 +270,10 @@ module.exports = grammar({
       '}',
     ),
 
+    // Reuse PROPERTY_DEFINITION nodes for components while accepting the token
+    // stream tree-sitter produces in component signatures and nested emits/state
+    // blocks. Using the shared property_definition rule directly regresses plain
+    // identifier props like `text:string` under `component`.
     _component_property_definition: $ => seq(
       field('name', alias($._component_field_name, $.markup_identifier)),
       ':',

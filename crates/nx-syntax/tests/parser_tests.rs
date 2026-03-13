@@ -230,6 +230,11 @@ fn test_parse_component_with_emits() {
         .filter(|c| c.kind() == SyntaxKind::PROPERTY_DEFINITION)
         .collect();
     assert_eq!(first_fields.len(), 2, "Expected two payload fields");
+
+    assert!(
+        root.children().any(|c| c.kind() == SyntaxKind::ELEMENT),
+        "Fixture should retain a component invocation after the definition"
+    );
 }
 
 #[test]
@@ -287,6 +292,54 @@ fn test_parse_component_with_state() {
         contains_kind(&rendered, SyntaxKind::VALUE_IF_SIMPLE_EXPRESSION),
         "Component body should preserve the conditional render expression"
     );
+}
+
+#[test]
+fn test_parse_component_full_syntax_with_default_prop() {
+    let path = fixture_path("valid/component-full.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(result.is_ok(), "Full component fixture should parse");
+    let root = result.root().expect("Should have root node");
+
+    let component = root
+        .children()
+        .find(|c| c.kind() == SyntaxKind::COMPONENT_DEFINITION)
+        .expect("Should find component_definition node");
+    let signature = component
+        .child_by_field("signature")
+        .expect("Component should expose signature field");
+    let body = component
+        .child_by_field("body")
+        .expect("Component should expose body field");
+
+    let props: Vec<_> = signature
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::PROPERTY_DEFINITION)
+        .collect();
+    assert_eq!(props.len(), 1, "Expected one prop definition");
+    assert!(
+        props[0].child_by_field("default").is_some(),
+        "Component prop default should be preserved"
+    );
+
+    let emits = signature
+        .child_by_field("emits")
+        .expect("Component should expose emits group");
+    let emit_defs: Vec<_> = emits
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::EMIT_DEFINITION)
+        .collect();
+    assert_eq!(emit_defs.len(), 2, "Expected two emit definitions");
+
+    let state = body
+        .child_by_field("state")
+        .expect("Component should expose state group");
+    let state_fields: Vec<_> = state
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::PROPERTY_DEFINITION)
+        .collect();
+    assert_eq!(state_fields.len(), 1, "Expected one state field");
 }
 
 #[test]

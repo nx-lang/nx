@@ -1,0 +1,15 @@
+component <SearchBox
+  placeholder:string = "Find docs"
+  emits {
+    SearchRequested {
+      query:string
+    }
+    Cleared {}
+  }
+/> = {
+  state {
+    query:string
+  }
+
+  <TextInput value={query} placeholder={placeholder} />
+}

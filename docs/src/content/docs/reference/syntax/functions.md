@@ -25,6 +25,37 @@ let <UserCard user:User className:string = "card"/> =
 - Default values use `=` just like standard attributes.
 - Invocation reuses the same structure but supplies values instead of types.
 
+## Advanced Parameters
+
+```nx
+let <DataGrid
+  data:object[]
+  columns:object[]
+  className:string? /> =
+  <table className={if className { className } else { "data-grid" }}>
+    <thead>
+      <tr>
+        for column in columns {
+          <th>{column.Header}</th>
+        }
+      </tr>
+    </thead>
+    <tbody>
+      for item in data {
+        <tr>
+          for column in columns {
+            <td>{column.Render(item)}</td>
+          }
+        </tr>
+      }
+    </tbody>
+  </table>
+```
+
+- Nullable types (`string?`) make optional props explicit.
+- Complex defaults can reference other parameters or inline expressions.
+- Iteration and conditionals in the body behave like any other expression.
+
 ## `component` Declarations
 
 ```nx
@@ -45,6 +76,8 @@ component <SearchBox
 
   <TextInput value={query} placeholder={placeholder} />
 }
+
+<SearchBox placeholder="Find docs" />
 ```
 
 - The signature keeps the element-style prop syntax.

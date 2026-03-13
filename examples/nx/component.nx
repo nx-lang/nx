@@ -18,3 +18,5 @@ component <SearchBox
 
   <TextInput value={query} placeholder={placeholder} />
 }
+
+<SearchBox placeholder="Find docs" />

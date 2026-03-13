@@ -12,3 +12,5 @@ component <SearchBox
 /> = {
   <TextInput placeholder={placeholder} />
 }
+
+<SearchBox placeholder="Find docs" />

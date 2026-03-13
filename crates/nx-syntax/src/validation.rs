@@ -137,19 +137,9 @@ fn validate_root_definitions(
     // Scan top-level children of the module
     for child in root.children() {
         match child.kind() {
-            SyntaxKind::FUNCTION_DEFINITION
-            | SyntaxKind::COMPONENT_DEFINITION
-            | SyntaxKind::VALUE_DEFINITION => {
+            SyntaxKind::FUNCTION_DEFINITION | SyntaxKind::VALUE_DEFINITION => {
                 // Check if this defines 'root'
-                let name_node = if child.kind() == SyntaxKind::COMPONENT_DEFINITION {
-                    child
-                        .child_by_field("signature")
-                        .and_then(|signature| signature.child_by_field("name"))
-                } else {
-                    child.child_by_field("name")
-                };
-
-                if let Some(name_node) = name_node {
+                if let Some(name_node) = child.child_by_field("name") {
                     if name_node.text() == "root" {
                         explicit_roots.push(name_node.span());
                     }
@@ -276,6 +266,8 @@ fn analyze_error_context(
     error_text: &str,
     _source: &str,
 ) -> (String, Option<String>) {
+    let trimmed_error = error_text.trim_start();
+
     // Check if this is a missing node
     if node.is_missing() {
         let message = format!("Expected {} here", node.kind());
@@ -283,8 +275,9 @@ fn analyze_error_context(
         return (message, suggestion);
     }
 
-    // Check parent context for better error messages
-    if let Some(parent) = node.parent() {
+    // Walk ancestor contexts for better error messages.
+    let mut ancestor = node.parent();
+    while let Some(parent) = ancestor {
         match parent.kind() {
             "element" => {
                 return (
@@ -297,14 +290,60 @@ fn analyze_error_context(
             "function_definition" => {
                 return (
                     "Invalid function definition".to_string(),
-                    Some("Expected function with format: fn name(params) { body }".to_string()),
+                    Some("Expected: let name(params) = { value }".to_string()),
+                );
+            }
+            "component_signature" => {
+                return (
+                    "Invalid component signature".to_string(),
+                    Some(
+                        "Expected: <Name prop:type emits { ActionName { prop:type } } />"
+                            .to_string(),
+                    ),
+                );
+            }
+            "emits_group" => {
+                return (
+                    "Invalid emits block".to_string(),
+                    Some("Expected: emits { ActionName { prop:type } }".to_string()),
+                );
+            }
+            "emit_definition" => {
+                return (
+                    "Invalid emitted action definition".to_string(),
+                    Some("Expected: ActionName { prop:type }".to_string()),
+                );
+            }
+            "component_body" => {
+                if trimmed_error.contains("state") {
+                    return (
+                        "Invalid state block".to_string(),
+                        Some(
+                            "Expected: { state { prop:type } <Element /> } or { <Element /> }"
+                                .to_string(),
+                        ),
+                    );
+                }
+
+                return (
+                    "Invalid component body".to_string(),
+                    Some(
+                        "Expected: { state { prop:type } <Element /> } or { <Element /> }"
+                            .to_string(),
+                    ),
+                );
+            }
+            "state_group" => {
+                return (
+                    "Invalid state block".to_string(),
+                    Some("Expected: state { prop:type }".to_string()),
                 );
             }
             "component_definition" => {
                 return (
                     "Invalid component definition".to_string(),
                     Some(
-                        "Expected format: component <Name props emits { Event { field:type } } /> = { state { field:type } <Element /> }".to_string(),
+                        "Expected: component <Name prop:type emits { ActionName { prop:type } } /> = { state { prop:type } <Element /> }".to_string(),
                     ),
                 );
             }
@@ -316,8 +355,28 @@ fn analyze_error_context(
                     ),
                 );
             }
-            _ => {}
+            _ => {
+                ancestor = parent.parent();
+            }
         }
+    }
+
+    if trimmed_error.starts_with("component ") {
+        if trimmed_error.contains("emits") {
+            return (
+                "Invalid component signature".to_string(),
+                Some(
+                    "Expected: component <Name prop:type emits { ActionName { prop:type } } /> = { state { prop:type } <Element /> }".to_string(),
+                ),
+            );
+        }
+
+        return (
+            "Invalid component definition".to_string(),
+            Some(
+                "Expected: component <Name prop:type emits { ActionName { prop:type } } /> = { state { prop:type } <Element /> }".to_string(),
+            ),
+        );
     }
 
     // Common error patterns
@@ -553,6 +612,30 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_component_named_root_does_not_define_entry_point() {
+        let source = r#"
+            component <root /> = {
+                <Reusable />
+            }
+
+            <App />
+        "#;
+        let result = parse_str(source, "test.nx");
+        let tree = result.tree.unwrap();
+
+        let diagnostics = validate(&tree, "test.nx");
+        let root_errors: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d.code() == Some("duplicate-root"))
+            .collect();
+
+        assert!(
+            root_errors.is_empty(),
+            "Components should not participate in root entry-point validation"
+        );
+    }
+
+    #[test]
     fn test_validate_multiple_explicit_root_functions() {
         // Two explicit root functions should produce error
         let source = r#"
@@ -599,6 +682,94 @@ mod tests {
             root_errors.len(),
             1,
             "Should detect duplicate root (value + function)"
+        );
+    }
+
+    #[test]
+    fn test_component_state_error_hint_uses_component_context() {
+        let source = "component <SearchBox /> = { state query:string <TextInput /> }";
+        let result = parse_str(source, "test.nx");
+
+        let messages = result
+            .errors
+            .iter()
+            .map(|diagnostic| diagnostic.message())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let notes = result
+            .errors
+            .iter()
+            .filter_map(|diagnostic| diagnostic.note())
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        assert!(
+            messages.contains("Invalid state block"),
+            "Expected component state error message, got: {messages}"
+        );
+        assert!(
+            notes.contains("Expected: { state { prop:type } <Element /> } or { <Element /> }"),
+            "Expected state-oriented component hint, got: {notes}"
+        );
+    }
+
+    #[test]
+    fn test_component_emits_error_hint_uses_signature_context() {
+        let source = "component <SearchBox emits Changed { value:string } /> = { <TextInput /> }";
+        let result = parse_str(source, "test.nx");
+
+        let messages = result
+            .errors
+            .iter()
+            .map(|diagnostic| diagnostic.message())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let notes = result
+            .errors
+            .iter()
+            .filter_map(|diagnostic| diagnostic.note())
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        assert!(
+            messages.contains("Invalid component signature"),
+            "Expected component signature error message, got: {messages}"
+        );
+        assert!(
+            notes.contains(
+                "Expected: component <Name prop:type emits { ActionName { prop:type } } /> = { state { prop:type } <Element /> }"
+            ),
+            "Expected signature-oriented component hint, got: {notes}"
+        );
+    }
+
+    #[test]
+    fn test_component_definition_fallback_hint_uses_canonical_component_shape() {
+        let source = "component <SearchBox /> = state { query:string }";
+        let result = parse_str(source, "test.nx");
+
+        let messages = result
+            .errors
+            .iter()
+            .map(|diagnostic| diagnostic.message())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let notes = result
+            .errors
+            .iter()
+            .filter_map(|diagnostic| diagnostic.note())
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        assert!(
+            messages.contains("Invalid component definition"),
+            "Expected generic component fallback message, got: {messages}"
+        );
+        assert!(
+            notes.contains(
+                "Expected: component <Name prop:type emits { ActionName { prop:type } } /> = { state { prop:type } <Element /> }"
+            ),
+            "Expected canonical component fallback hint, got: {notes}"
         );
     }
 }
