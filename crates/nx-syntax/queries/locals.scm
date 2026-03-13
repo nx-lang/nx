@@ -36,6 +36,9 @@
 (type_definition
   name: (identifier) @local.definition)
 
+(action_definition
+  name: (identifier) @local.definition)
+
 (enum_definition
   name: (identifier) @local.definition)
 
@@ -72,5 +75,9 @@
   (identifier) @local.reference)
 
 (user_defined_type
+  (qualified_name
+    (identifier) @local.reference))
+
+(emit_reference
   (qualified_name
     (identifier) @local.reference))

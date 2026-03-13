@@ -4,6 +4,7 @@
 ;; Keywords
 [
   "let"
+  "action"
   "component"
   "emits"
   "state"
@@ -34,6 +35,9 @@
 (record_definition
   name: (identifier) @type)
 
+(action_definition
+  name: (identifier) @type)
+
 ;; Variables
 (value_definition
   name: (identifier) @variable)
@@ -50,6 +54,10 @@
 
 (emit_definition
   name: (identifier) @type)
+
+(emit_reference
+  (qualified_name
+    (identifier) @type))
 
 ;; Parameters
 (function_definition
@@ -126,6 +134,10 @@
   name: (qualified_markup_name) @property)
 
 (record_definition
+  (property_definition
+    name: (markup_identifier) @property))
+
+(action_definition
   (property_definition
     name: (markup_identifier) @property))
 

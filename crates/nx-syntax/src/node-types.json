@@ -1,5 +1,31 @@
 [
   {
+    "type": "action_definition",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "properties": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "property_definition",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "binary_expression",
     "named": true,
     "fields": {
@@ -668,15 +694,35 @@
     }
   },
   {
+    "type": "emit_reference",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "qualified_name",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "emits_group",
     "named": true,
     "fields": {
-      "definitions": {
+      "entries": {
         "multiple": true,
         "required": true,
         "types": [
           {
             "type": "emit_definition",
+            "named": true
+          },
+          {
+            "type": "emit_reference",
             "named": true
           }
         ]
@@ -939,6 +985,10 @@
       "multiple": true,
       "required": false,
       "types": [
+        {
+          "type": "action_definition",
+          "named": true
+        },
         {
           "type": "component_definition",
           "named": true
@@ -2068,6 +2118,10 @@
   },
   {
     "type": "]",
+    "named": false
+  },
+  {
+    "type": "action",
     "named": false
   },
   {

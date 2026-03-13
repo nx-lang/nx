@@ -65,6 +65,7 @@ module.exports = grammar({
       repeat($.import_statement),
       repeat(choice(
         $.record_definition,
+        $.action_definition,
         $.type_definition,
         $.enum_definition,
         $.value_definition,
@@ -128,6 +129,15 @@ module.exports = grammar({
     // ===== Type Definitions =====
     record_definition: $ => seq(
       'type',
+      field('name', $.identifier),
+      '=',
+      '{',
+      repeat(field('properties', $.property_definition)),
+      '}',
+    ),
+
+    action_definition: $ => seq(
+      'action',
       field('name', $.identifier),
       '=',
       '{',
@@ -245,7 +255,10 @@ module.exports = grammar({
     emits_group: $ => seq(
       'emits',
       '{',
-      repeat1(field('definitions', $.emit_definition)),
+      repeat1(field('entries', choice(
+        $.emit_definition,
+        $.emit_reference,
+      ))),
       '}',
     ),
 
@@ -255,6 +268,8 @@ module.exports = grammar({
       repeat(field('properties', alias($._component_property_definition, $.property_definition))),
       '}',
     ),
+
+    emit_reference: $ => field('name', $.qualified_name),
 
     component_body: $ => seq(
       '{',

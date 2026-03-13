@@ -36,6 +36,10 @@
               },
               {
                 "type": "SYMBOL",
+                "name": "action_definition"
+              },
+              {
+                "type": "SYMBOL",
                 "name": "type_definition"
               },
               {
@@ -292,6 +296,46 @@
         {
           "type": "STRING",
           "value": "type"
+        },
+        {
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "="
+        },
+        {
+          "type": "STRING",
+          "value": "{"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "FIELD",
+            "name": "properties",
+            "content": {
+              "type": "SYMBOL",
+              "name": "property_definition"
+            }
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "}"
+        }
+      ]
+    },
+    "action_definition": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "action"
         },
         {
           "type": "FIELD",
@@ -818,10 +862,19 @@
           "type": "REPEAT1",
           "content": {
             "type": "FIELD",
-            "name": "definitions",
+            "name": "entries",
             "content": {
-              "type": "SYMBOL",
-              "name": "emit_definition"
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "SYMBOL",
+                  "name": "emit_definition"
+                },
+                {
+                  "type": "SYMBOL",
+                  "name": "emit_reference"
+                }
+              ]
             }
           }
         },
@@ -867,6 +920,14 @@
           "value": "}"
         }
       ]
+    },
+    "emit_reference": {
+      "type": "FIELD",
+      "name": "name",
+      "content": {
+        "type": "SYMBOL",
+        "name": "qualified_name"
+      }
     },
     "component_body": {
       "type": "SEQ",

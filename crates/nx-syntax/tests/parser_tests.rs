@@ -238,6 +238,132 @@ fn test_parse_component_with_emits() {
 }
 
 #[test]
+fn test_parse_component_with_emits_reference() {
+    let path = fixture_path("valid/component-emits-reference.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(
+        result.is_ok(),
+        "Component emits reference fixture should parse"
+    );
+    let root = result.root().expect("Should have root node");
+
+    let component = root
+        .children()
+        .find(|c| c.kind() == SyntaxKind::COMPONENT_DEFINITION)
+        .expect("Should find component_definition node");
+    let signature = component
+        .child_by_field("signature")
+        .expect("Component should expose signature field");
+    let emits = signature
+        .child_by_field("emits")
+        .expect("Component signature should expose emits group");
+
+    let emit_references: Vec<_> = emits
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::EMIT_REFERENCE)
+        .collect();
+    assert_eq!(
+        emit_references.len(),
+        1,
+        "Expected one emitted action reference"
+    );
+    assert_eq!(
+        emit_references[0]
+            .child_by_field("name")
+            .expect("Emit reference should expose name")
+            .text(),
+        "ActionSharedWithMultipleComponents"
+    );
+}
+
+#[test]
+fn test_parse_component_with_qualified_emits_reference() {
+    let path = fixture_path("valid/component-emits-qualified-reference.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(
+        result.is_ok(),
+        "Qualified component emits reference fixture should parse"
+    );
+    let root = result.root().expect("Should have root node");
+
+    let component = root
+        .children()
+        .find(|c| c.kind() == SyntaxKind::COMPONENT_DEFINITION)
+        .expect("Should find component_definition node");
+    let signature = component
+        .child_by_field("signature")
+        .expect("Component should expose signature field");
+    let emits = signature
+        .child_by_field("emits")
+        .expect("Component signature should expose emits group");
+
+    let emit_references: Vec<_> = emits
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::EMIT_REFERENCE)
+        .collect();
+    assert_eq!(
+        emit_references.len(),
+        1,
+        "Expected one qualified emitted action reference"
+    );
+    assert_eq!(
+        emit_references[0]
+            .child_by_field("name")
+            .expect("Emit reference should expose name")
+            .text(),
+        "SharedActions.SearchSubmitted"
+    );
+}
+
+#[test]
+fn test_parse_component_with_mixed_emits_entries() {
+    let path = fixture_path("valid/component-emits-mixed.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(result.is_ok(), "Mixed emits fixture should parse");
+    let root = result.root().expect("Should have root node");
+
+    let component = root
+        .children()
+        .find(|c| c.kind() == SyntaxKind::COMPONENT_DEFINITION)
+        .expect("Should find component_definition node");
+    let signature = component
+        .child_by_field("signature")
+        .expect("Component should expose signature field");
+    let emits = signature
+        .child_by_field("emits")
+        .expect("Component signature should expose emits group");
+
+    let emit_defs: Vec<_> = emits
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::EMIT_DEFINITION)
+        .collect();
+    let emit_refs: Vec<_> = emits
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::EMIT_REFERENCE)
+        .collect();
+
+    assert_eq!(emit_defs.len(), 1, "Expected one inline emitted action");
+    assert_eq!(emit_refs.len(), 1, "Expected one emitted action reference");
+    assert_eq!(
+        emit_defs[0]
+            .child_by_field("name")
+            .expect("Emit definition should expose name")
+            .text(),
+        "MyAction"
+    );
+    assert_eq!(
+        emit_refs[0]
+            .child_by_field("name")
+            .expect("Emit reference should expose name")
+            .text(),
+        "ActionSharedWithMultipleComponents"
+    );
+}
+
+#[test]
 fn test_parse_component_with_state() {
     let path = fixture_path("valid/component-state.nx");
     let result = parse_file(&path).unwrap();
@@ -387,6 +513,29 @@ fn test_parse_record_definition() {
         .filter(|c| c.kind() == SyntaxKind::PROPERTY_DEFINITION)
         .count();
     assert_eq!(prop_count, 3, "Should parse three record fields");
+}
+
+#[test]
+fn test_parse_action_definition() {
+    let path = fixture_path("valid/action-definition.nx");
+    let result = parse_file(&path).expect("action fixture should load");
+
+    assert!(result.is_ok(), "Action definition should parse");
+    let root = result.root().expect("Should have syntax tree root");
+    assert!(
+        contains_kind(&root, SyntaxKind::ACTION_DEFINITION),
+        "Should contain action_definition node"
+    );
+
+    let action_node = root
+        .children()
+        .find(|c| c.kind() == SyntaxKind::ACTION_DEFINITION)
+        .expect("Should find action_definition");
+    let prop_count = action_node
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::PROPERTY_DEFINITION)
+        .count();
+    assert_eq!(prop_count, 2, "Should parse two action fields");
 }
 
 #[test]
@@ -832,6 +981,49 @@ fn test_parse_invalid_component_state_is_error() {
     assert!(
         !result.errors.is_empty(),
         "Malformed state syntax should produce parse errors"
+    );
+
+    if let Some(root) = result.root() {
+        assert!(
+            contains_kind(&root, SyntaxKind::COMPONENT_DEFINITION)
+                || contains_kind(&root, SyntaxKind::ERROR),
+            "Parser should either recover a component node or surface an error node"
+        );
+    }
+}
+
+#[test]
+fn test_parse_invalid_action_definition_is_error() {
+    let path = fixture_path("invalid/action-invalid-declaration.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(!result.is_ok(), "Malformed action syntax should fail");
+    assert!(
+        !result.errors.is_empty(),
+        "Malformed action syntax should produce parse errors"
+    );
+
+    if let Some(root) = result.root() {
+        assert!(
+            contains_kind(&root, SyntaxKind::ACTION_DEFINITION)
+                || contains_kind(&root, SyntaxKind::ERROR),
+            "Parser should either recover an action node or surface an error node"
+        );
+    }
+}
+
+#[test]
+fn test_parse_invalid_component_emits_reference_is_error() {
+    let path = fixture_path("invalid/component-invalid-emits-reference.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(
+        !result.is_ok(),
+        "Malformed emits reference syntax should fail"
+    );
+    assert!(
+        !result.errors.is_empty(),
+        "Malformed emits reference syntax should produce parse errors"
     );
 
     if let Some(root) = result.root() {

@@ -1,0 +1,11 @@
+action ActionType = {
+  value: string
+}
+
+component <MyComponent
+  emits {
+    ActionType.
+  }
+/> = {
+  <button />
+}

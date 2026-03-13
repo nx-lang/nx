@@ -293,11 +293,17 @@ fn analyze_error_context(
                     Some("Expected: let name(params) = { value }".to_string()),
                 );
             }
+            "action_definition" => {
+                return (
+                    "Invalid action definition".to_string(),
+                    Some("Expected: action ActionType = { prop:type }".to_string()),
+                );
+            }
             "component_signature" => {
                 return (
                     "Invalid component signature".to_string(),
                     Some(
-                        "Expected: <Name prop:type emits { ActionName { prop:type } } />"
+                        "Expected: <Name prop:type emits { ActionName { prop:type } ActionType } />"
                             .to_string(),
                     ),
                 );
@@ -305,13 +311,19 @@ fn analyze_error_context(
             "emits_group" => {
                 return (
                     "Invalid emits block".to_string(),
-                    Some("Expected: emits { ActionName { prop:type } }".to_string()),
+                    Some("Expected: emits { ActionName { prop:type } ActionType }".to_string()),
                 );
             }
             "emit_definition" => {
                 return (
                     "Invalid emitted action definition".to_string(),
                     Some("Expected: ActionName { prop:type }".to_string()),
+                );
+            }
+            "emit_reference" => {
+                return (
+                    "Invalid action type reference".to_string(),
+                    Some("Expected: ActionType or Namespace.ActionType".to_string()),
                 );
             }
             "component_body" => {
@@ -343,7 +355,7 @@ fn analyze_error_context(
                 return (
                     "Invalid component definition".to_string(),
                     Some(
-                        "Expected: component <Name prop:type emits { ActionName { prop:type } } /> = { state { prop:type } <Element /> }".to_string(),
+                        "Expected: component <Name prop:type emits { ActionName { prop:type } ActionType } /> = { state { prop:type } <Element /> }".to_string(),
                     ),
                 );
             }
@@ -366,7 +378,7 @@ fn analyze_error_context(
             return (
                 "Invalid component signature".to_string(),
                 Some(
-                    "Expected: component <Name prop:type emits { ActionName { prop:type } } /> = { state { prop:type } <Element /> }".to_string(),
+                    "Expected: component <Name prop:type emits { ActionName { prop:type } ActionType } /> = { state { prop:type } <Element /> }".to_string(),
                 ),
             );
         }
@@ -374,8 +386,15 @@ fn analyze_error_context(
         return (
             "Invalid component definition".to_string(),
             Some(
-                "Expected: component <Name prop:type emits { ActionName { prop:type } } /> = { state { prop:type } <Element /> }".to_string(),
+                "Expected: component <Name prop:type emits { ActionName { prop:type } ActionType } /> = { state { prop:type } <Element /> }".to_string(),
             ),
+        );
+    }
+
+    if trimmed_error.starts_with("action ") {
+        return (
+            "Invalid action definition".to_string(),
+            Some("Expected: action ActionType = { prop:type }".to_string()),
         );
     }
 
@@ -731,15 +750,43 @@ mod tests {
             .collect::<Vec<_>>()
             .join(" ");
 
+        // Mixed emits entries now recover at the emits group, so validation reports the more
+        // specific emits-block fallback instead of the older signature-level diagnostic.
         assert!(
-            messages.contains("Invalid component signature"),
-            "Expected component signature error message, got: {messages}"
+            messages.contains("Invalid emits block"),
+            "Expected emits-block error message, got: {messages}"
         );
         assert!(
-            notes.contains(
-                "Expected: component <Name prop:type emits { ActionName { prop:type } } /> = { state { prop:type } <Element /> }"
-            ),
+            notes.contains("Expected: emits { ActionName { prop:type } ActionType }"),
             "Expected signature-oriented component hint, got: {notes}"
+        );
+    }
+
+    #[test]
+    fn test_action_definition_error_hint_uses_action_context() {
+        let source = "action SaveRequested { value:string }";
+        let result = parse_str(source, "test.nx");
+
+        let messages = result
+            .errors
+            .iter()
+            .map(|diagnostic| diagnostic.message())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let notes = result
+            .errors
+            .iter()
+            .filter_map(|diagnostic| diagnostic.note())
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        assert!(
+            messages.contains("Invalid action definition"),
+            "Expected action definition error message, got: {messages}"
+        );
+        assert!(
+            notes.contains("Expected: action ActionType = { prop:type }"),
+            "Expected action definition hint, got: {notes}"
         );
     }
 
@@ -767,7 +814,7 @@ mod tests {
         );
         assert!(
             notes.contains(
-                "Expected: component <Name prop:type emits { ActionName { prop:type } } /> = { state { prop:type } <Element /> }"
+                "Expected: component <Name prop:type emits { ActionName { prop:type } ActionType } /> = { state { prop:type } <Element /> }"
             ),
             "Expected canonical component fallback hint, got: {notes}"
         );

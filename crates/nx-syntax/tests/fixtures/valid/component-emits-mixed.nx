@@ -1,0 +1,17 @@
+action ActionSharedWithMultipleComponents = {
+  value: string
+}
+
+component <MyComponent
+  label: string
+  emits {
+    MyAction {
+      value: string
+    }
+    ActionSharedWithMultipleComponents
+  }
+/> = {
+  <button>{label}</button>
+}
+
+<MyComponent label="Save" />

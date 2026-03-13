@@ -6,7 +6,7 @@
 use crate::ast::{BinOp, Expr, Literal, OrderedFloat, Stmt, TypeRef, UnOp};
 use crate::{
     Element, EnumDef, EnumMember, ExprId, Function, Import, ImportKind, Item, Module, Name, Param,
-    Property, RecordDef, RecordField, SelectiveImport, SourceId, TypeAlias,
+    Property, RecordDef, RecordField, RecordKind, SelectiveImport, SourceId, TypeAlias,
 };
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_syntax::{SyntaxKind, SyntaxNode};
@@ -909,6 +909,15 @@ impl LoweringContext {
 
     /// Lowers a record definition node.
     pub fn lower_record_definition(&mut self, node: SyntaxNode) -> RecordDef {
+        self.lower_record_like_definition(node, RecordKind::Plain)
+    }
+
+    /// Lowers an action definition node into a record-compatible definition.
+    fn lower_action_definition(&mut self, node: SyntaxNode) -> RecordDef {
+        self.lower_record_like_definition(node, RecordKind::Action)
+    }
+
+    fn lower_record_like_definition(&mut self, node: SyntaxNode, kind: RecordKind) -> RecordDef {
         let name = node
             .child_by_field("name")
             .map(|n| Name::new(n.text()))
@@ -939,6 +948,7 @@ impl LoweringContext {
 
         RecordDef {
             name,
+            kind,
             properties,
             span: node.span(),
         }
@@ -1159,6 +1169,10 @@ impl LoweringContext {
                 SyntaxKind::RECORD_DEFINITION => {
                     let record = self.lower_record_definition(child);
                     self.module.add_item(Item::Record(record));
+                }
+                SyntaxKind::ACTION_DEFINITION => {
+                    let action = self.lower_action_definition(child);
+                    self.module.add_item(Item::Record(action));
                 }
                 SyntaxKind::ENUM_DEFINITION => {
                     let enum_def = self.lower_enum_definition(child);
@@ -1460,6 +1474,7 @@ import "./controls.nx" as UI
             .expect("Should lower record definition");
 
         assert_eq!(record.name.as_str(), "User");
+        assert_eq!(record.kind, RecordKind::Plain);
         assert_eq!(record.properties.len(), 2);
         let defaults = record
             .properties
@@ -1467,6 +1482,33 @@ import "./controls.nx" as UI
             .filter(|f| f.default.is_some())
             .count();
         assert_eq!(defaults, 1, "One field should carry a default value");
+    }
+
+    #[test]
+    fn test_lower_action_definition_as_action_record() {
+        let source = r#"
+            action SaveRequested = {
+              value: string
+            }
+        "#;
+        let parse_result = parse_str(source, "action.nx");
+        let tree = parse_result.tree.expect("Should parse action");
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        let action = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Record(def) => Some(def),
+                _ => None,
+            })
+            .expect("Should lower action definition");
+
+        assert_eq!(action.name.as_str(), "SaveRequested");
+        assert_eq!(action.kind, RecordKind::Action);
+        assert!(action.is_action());
+        assert_eq!(action.properties.len(), 1);
     }
 
     #[test]
@@ -1516,6 +1558,42 @@ import "./controls.nx" as UI
             },
             other => panic!("Expected nullable type, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_lower_action_literal_expression() {
+        let source = r#"
+            action SaveRequested = { value: string = "ready" }
+            let build(): SaveRequested = { <SaveRequested /> }
+        "#;
+        let parse_result = parse_str(source, "action-literal.nx");
+        let tree = parse_result.tree.expect("Should parse action literal");
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        let action = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Record(def) if def.name.as_str() == "SaveRequested" => Some(def),
+                _ => None,
+            })
+            .expect("Should lower action definition");
+        assert_eq!(action.kind, RecordKind::Action);
+
+        let build = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Function(func) if func.name.as_str() == "build" => Some(func),
+                _ => None,
+            })
+            .expect("Should lower build function");
+
+        let Expr::RecordLiteral { record, .. } = module.expr(build.body) else {
+            panic!("Expected action constructor to lower as record literal");
+        };
+        assert_eq!(record.as_str(), "SaveRequested");
     }
 
     #[test]

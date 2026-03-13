@@ -337,6 +337,54 @@ fn test_record_literal_defaults_and_overrides() {
 }
 
 #[test]
+fn test_action_record_literal_uses_defaults() {
+    let source = r#"
+        action SaveRequested = { value: string = "Anon" source: string? }
+        let getValue(): string = { <SaveRequested />.value }
+    "#;
+
+    let result = execute_function(source, "getValue", vec![])
+        .unwrap_or_else(|err| panic!("action record literal failed: {}", err));
+    assert_eq!(result, Value::String(SmolStr::new("Anon")));
+}
+
+#[test]
+fn test_action_record_defaults_instantiation() {
+    let source = r#"
+        action SaveRequested = { value: string = "Anon" source: string? }
+        let getValue(): string = { <SaveRequested />.value }
+    "#;
+
+    let parse_result = parse_str(source, "action-records.nx");
+    assert!(
+        parse_result.errors.is_empty(),
+        "Parse errors: {:?}",
+        parse_result.errors
+    );
+    let root = parse_result.root().expect("root");
+    let module = lower(root, SourceId::new(0));
+
+    let interpreter = Interpreter::new();
+    let action = interpreter
+        .instantiate_record_defaults(&module, "SaveRequested")
+        .expect("instantiate action defaults");
+
+    match action {
+        Value::Record { type_name, fields } => {
+            assert_eq!(type_name.as_str(), "SaveRequested");
+            assert_eq!(
+                fields.get("value"),
+                Some(&Value::String(SmolStr::new("Anon")))
+            );
+        }
+        other => panic!(
+            "Expected action defaults to produce a record, got {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
 fn test_nested_record_access() {
     let source = r#"
         type Address = { city: string = "SF" }

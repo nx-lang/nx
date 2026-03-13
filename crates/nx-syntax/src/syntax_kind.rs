@@ -21,6 +21,7 @@ pub enum SyntaxKind {
     // === Type Definitions ===
     TYPE_DEFINITION,
     RECORD_DEFINITION,
+    ACTION_DEFINITION,
     ENUM_DEFINITION,
     ENUM_MEMBER_LIST,
     ENUM_MEMBER,
@@ -42,6 +43,7 @@ pub enum SyntaxKind {
     COMPONENT_BODY,
     EMITS_GROUP,
     EMIT_DEFINITION,
+    EMIT_REFERENCE,
     STATE_GROUP,
 
     // === Elements ===
@@ -148,6 +150,7 @@ pub enum SyntaxKind {
 
     // === Keywords ===
     LET,
+    ACTION,
     COMPONENT,
     EMITS,
     STATE,
@@ -221,6 +224,7 @@ impl SyntaxKind {
                 | SyntaxKind::BOOLEAN_LITERAL
                 | SyntaxKind::NULL_LITERAL
                 | SyntaxKind::LET
+                | SyntaxKind::ACTION
                 | SyntaxKind::COMPONENT
                 | SyntaxKind::EMITS
                 | SyntaxKind::STATE
@@ -289,6 +293,7 @@ impl SyntaxKind {
         matches!(
             self,
             SyntaxKind::LET
+                | SyntaxKind::ACTION
                 | SyntaxKind::COMPONENT
                 | SyntaxKind::EMITS
                 | SyntaxKind::STATE
@@ -342,6 +347,7 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "module_path" => SyntaxKind::MODULE_PATH,
         "type_definition" => SyntaxKind::TYPE_DEFINITION,
         "record_definition" => SyntaxKind::RECORD_DEFINITION,
+        "action_definition" => SyntaxKind::ACTION_DEFINITION,
         "enum_definition" => SyntaxKind::ENUM_DEFINITION,
         "enum_member_list" => SyntaxKind::ENUM_MEMBER_LIST,
         "enum_member" => SyntaxKind::ENUM_MEMBER,
@@ -355,6 +361,7 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "component_body" => SyntaxKind::COMPONENT_BODY,
         "emits_group" => SyntaxKind::EMITS_GROUP,
         "emit_definition" => SyntaxKind::EMIT_DEFINITION,
+        "emit_reference" => SyntaxKind::EMIT_REFERENCE,
         "state_group" => SyntaxKind::STATE_GROUP,
         "function_signature" => SyntaxKind::FUNCTION_SIGNATURE,
         "markup_signature" => SyntaxKind::MARKUP_SIGNATURE,
@@ -438,6 +445,7 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "block_comment" => SyntaxKind::BLOCK_COMMENT,
         "html_block_comment" => SyntaxKind::HTML_BLOCK_COMMENT,
         "let" => SyntaxKind::LET,
+        "action" => SyntaxKind::ACTION,
         "component" => SyntaxKind::COMPONENT,
         "emits" => SyntaxKind::EMITS,
         "state" => SyntaxKind::STATE,
@@ -522,6 +530,11 @@ mod tests {
             syntax_kind_from_str("component_definition"),
             SyntaxKind::COMPONENT_DEFINITION
         );
+        assert_eq!(
+            syntax_kind_from_str("action_definition"),
+            SyntaxKind::ACTION_DEFINITION
+        );
+        assert_eq!(syntax_kind_from_str("action"), SyntaxKind::ACTION);
         assert_eq!(syntax_kind_from_str("component"), SyntaxKind::COMPONENT);
         assert_eq!(syntax_kind_from_str("identifier"), SyntaxKind::IDENTIFIER);
         assert_eq!(syntax_kind_from_str("unknown"), SyntaxKind::ERROR);

@@ -1,5 +1,8 @@
-// Parser-only example for component syntax.
-// Lowering, emitted action record generation, and interpreter state support are deferred.
+// Component syntax with both shared and inline actions.
+
+action SearchSubmitted = {
+  searchString: string
+}
 
 component <SearchBox
   placeholder:string
@@ -7,9 +10,7 @@ component <SearchBox
     ValueChanged {
       value:string
     }
-    SearchRequested {
-      searchString:string
-    }
+    SearchSubmitted
   }
 /> = {
   state {

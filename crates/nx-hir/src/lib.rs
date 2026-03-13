@@ -173,15 +173,33 @@ pub struct RecordField {
     pub span: TextSpan,
 }
 
+/// Distinguishes ordinary records from action records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordKind {
+    /// Standard `type Name = { ... }` record declaration.
+    Plain,
+    /// `action Name = { ... }` declaration.
+    Action,
+}
+
 /// Record type definition.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordDef {
     /// Record name
     pub name: Name,
+    /// Whether this record came from `type` or `action` syntax.
+    pub kind: RecordKind,
     /// Property definitions
     pub properties: Vec<RecordField>,
     /// Source span
     pub span: TextSpan,
+}
+
+impl RecordDef {
+    /// Returns true when this record was declared with the `action` keyword.
+    pub fn is_action(&self) -> bool {
+        self.kind == RecordKind::Action
+    }
 }
 
 /// Element property (key-value pair).

@@ -5,7 +5,7 @@ description: 'Use `let` for functions and bindings, and `component` for declarat
 
 NX separates `let` bindings from `component` declarations. Use `let` for values and reusable functions. Use `component` when a declaration needs an `emits` contract or persistent `state`.
 
-Parser note: this syntax currently parses and highlights, but lowering and interpreter support for emitted action types and component state are deferred.
+Parser note: `action` declarations now parse, lower, and behave like records. Component `emits` and `state` still parse and highlight as metadata, while component-specific runtime behavior remains deferred.
 
 ## `let` Definition Mirrors Invocation
 
@@ -59,15 +59,23 @@ let <DataGrid
 ## `component` Declarations
 
 ```nx
+action SearchSubmitted = {
+  searchString:string
+}
+```
+
+- `action` uses the same record-style field syntax as `type Name = { ... }`.
+- Actions remain record-compatible, so existing record construction paths keep working.
+- The distinction matters only for contexts that explicitly require actions.
+
+```nx
 component <SearchBox
   placeholder:string
   emits {
     ValueChanged {
       value:string
     }
-    SearchRequested {
-      searchString:string
-    }
+    SearchSubmitted
   }
 /> = {
   state {
@@ -81,7 +89,7 @@ component <SearchBox
 ```
 
 - The signature keeps the element-style prop syntax.
-- `emits` declares named action payload shapes attached to the component.
+- `emits` can mix inline action definitions (`ValueChanged { ... }`) with references to existing actions (`SearchSubmitted`).
 - `state` declares persistent local fields before the rendered body expression.
 
 ## Paren-style Functions

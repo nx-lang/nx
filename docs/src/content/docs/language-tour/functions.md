@@ -3,7 +3,7 @@ title: 'Functions & Bindings'
 description: 'Use `let` for functions and bindings, and `component` for declarations with emits or state.'
 ---
 
-`let` still handles values and reusable functions. The new `component` keyword is for element-style declarations that need emitted actions or persistent local state.
+`let` still handles values and reusable functions. The `action` keyword introduces reusable action-shaped records, and `component` is for element-style declarations that need emitted actions or persistent local state.
 
 ## Element-style functions
 
@@ -23,12 +23,17 @@ let <UserCard user:User tone:string = "neutral"/> =
 ## Component declarations
 
 ```nx
+action SearchSubmitted = {
+  searchString:string
+}
+
 component <SearchBox
   placeholder:string
   emits {
     SearchRequested {
       searchString:string
     }
+    SearchSubmitted
   }
 /> = {
   state {
@@ -39,8 +44,10 @@ component <SearchBox
 }
 ```
 
+- Use `action` for shared action contracts that multiple components can emit.
 - Use `component` when the declaration needs `emits` or `state`.
-- This grammar is parser-only for now; lowering and runtime behavior land in a later change.
+- `emits` can declare a new action inline or reference an existing `action` by name.
+- Actions lower like records today. Component-specific lowering and runtime behavior still land in a later change.
 
 ## Paren-style functions
 
