@@ -2,9 +2,7 @@
 
 ## Purpose
 Define the parser and HIR behavior for top-level `action` declarations and their record compatibility.
-
 ## Requirements
-
 ### Requirement: Action declaration syntax
 The parser SHALL support top-level action declarations introduced by the `action` keyword. An action
 declaration SHALL use the same `= { ... }` record-style property definition syntax as a normal record
@@ -33,3 +31,17 @@ records are accepted, while preserving that the declared record is an action.
 - **WHEN** a file contains `action SaveRequested = { value:string }` and `let save(message:string) = <SaveRequested value={message} />`
 - **THEN** lowering SHALL accept `SaveRequested` anywhere a normal record name is accepted and SHALL
   lower the element-shaped construction as a record literal targeting `SaveRequested`
+
+### Requirement: Inline emitted actions expose public action record names
+An inline emitted action definition inside a component `emits` group SHALL introduce a public action
+record whose name is `<ComponentName>.<ActionName>`. The public action record SHALL remain
+record-compatible everywhere normal action records are accepted.
+
+#### Scenario: Inline emitted action can be constructed through its public name
+- **WHEN** a file contains `component <SearchBox emits { ValueChanged { value:string } } /> = { <TextInput /> }` and `let makeChange(value:string) = <SearchBox.ValueChanged value={value} />`
+- **THEN** lowering SHALL accept `SearchBox.ValueChanged` in record construction position and SHALL lower the element-shaped construction as a record literal targeting `SearchBox.ValueChanged`
+
+#### Scenario: Inline emitted action can be referenced in type positions
+- **WHEN** a file contains `component <SearchBox emits { ValueChanged { value:string } } /> = { <TextInput /> }` and `let read(change:SearchBox.ValueChanged) = change.value`
+- **THEN** lowering SHALL accept `SearchBox.ValueChanged` anywhere a normal action or record type name is accepted
+

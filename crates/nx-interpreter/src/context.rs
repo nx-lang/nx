@@ -155,6 +155,17 @@ impl ExecutionContext {
         None
     }
 
+    /// Snapshot all currently visible variables with lexical shadowing preserved.
+    pub fn snapshot_visible_variables(&self) -> FxHashMap<SmolStr, Value> {
+        let mut variables = FxHashMap::default();
+        for scope in &self.scopes {
+            for (name, value) in &scope.variables {
+                variables.insert(name.clone(), value.clone());
+            }
+        }
+        variables
+    }
+
     /// Update a variable in the scope stack
     pub fn update_variable(&mut self, name: &str, value: Value) -> Result<(), RuntimeError> {
         // Search from innermost to outermost scope

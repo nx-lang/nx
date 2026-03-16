@@ -1,6 +1,5 @@
+use nx_api::to_nx_value;
 use nx_interpreter::Value;
-use nx_value::NxValue;
-use std::collections::BTreeMap;
 
 pub fn format_value_json_pretty(value: &Value) -> Result<String, String> {
     let nx_value = to_nx_value(value);
@@ -9,40 +8,48 @@ pub fn format_value_json_pretty(value: &Value) -> Result<String, String> {
         .map_err(|e| format!("Failed to serialize JSON: {}", e))
 }
 
-fn to_nx_value(value: &Value) -> NxValue {
-    match value {
-        Value::Null => NxValue::Null,
-        Value::Boolean(value) => NxValue::Bool(*value),
-        Value::Int32(value) => NxValue::Int32(*value),
-        Value::Int(value) => NxValue::Int(*value),
-        Value::Float32(value) => NxValue::Float32(*value),
-        Value::Float(value) => NxValue::Float(*value),
-        Value::String(value) => NxValue::String(value.to_string()),
-        Value::Array(elements) => NxValue::Array(elements.iter().map(to_nx_value).collect()),
-        Value::EnumVariant { type_name, variant } => NxValue::Record {
-            type_name: None,
-            properties: BTreeMap::from([
-                (
-                    "$enum".to_string(),
-                    NxValue::String(type_name.as_str().to_string()),
-                ),
-                ("$variant".to_string(), NxValue::String(variant.to_string())),
-            ]),
-        },
-        Value::Record { type_name, fields } => NxValue::Record {
-            type_name: Some(type_name.as_str().to_string()),
-            properties: fields_to_properties(fields),
-        },
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nx_hir::{Module, Name, SourceId};
+    use nx_value::NxValue;
+    use rustc_hash::FxHashMap;
+    use std::collections::BTreeMap;
 
-fn fields_to_properties(
-    fields: &rustc_hash::FxHashMap<smol_str::SmolStr, Value>,
-) -> BTreeMap<String, NxValue> {
-    let mut obj = BTreeMap::new();
-    for (key, value) in fields {
-        obj.insert(key.to_string(), to_nx_value(value));
-    }
+    #[test]
+    fn test_format_value_json_pretty_action_handler() {
+        let mut module = Module::new(SourceId::new(0));
+        let body = module.alloc_expr(nx_hir::ast::Expr::Literal(nx_hir::ast::Literal::Null));
+        let value = Value::ActionHandler {
+            component: Name::new("SearchBox"),
+            emit: Name::new("SearchSubmitted"),
+            action_name: Name::new("SearchSubmitted"),
+            body,
+            captured: FxHashMap::default(),
+        };
 
-    obj
+        let formatted = format_value_json_pretty(&value).expect("Action handler should serialize");
+        let parsed = NxValue::from_json_str(&formatted).expect("JSON output should parse");
+
+        assert_eq!(
+            parsed,
+            NxValue::Record {
+                type_name: Some("ActionHandler".to_string()),
+                properties: BTreeMap::from([
+                    (
+                        "action".to_string(),
+                        NxValue::String("SearchSubmitted".to_string()),
+                    ),
+                    (
+                        "component".to_string(),
+                        NxValue::String("SearchBox".to_string()),
+                    ),
+                    (
+                        "emit".to_string(),
+                        NxValue::String("SearchSubmitted".to_string()),
+                    ),
+                ]),
+            }
+        );
+    }
 }

@@ -49,6 +49,21 @@ fn format_value_inner(value: &Value, output: &mut String, indent: usize) {
         Value::Record { type_name, fields } => {
             format_record_with_name(type_name.as_str(), fields, output, indent);
         }
+        Value::ActionHandler {
+            component,
+            emit,
+            action_name,
+            ..
+        } => {
+            write!(
+                output,
+                "<ActionHandler component=\"{}\" emit=\"{}\" action=\"{}\" />",
+                component.as_str(),
+                emit.as_str(),
+                action_name.as_str()
+            )
+            .unwrap();
+        }
     }
 }
 
@@ -124,6 +139,22 @@ fn format_nested_element(tag_name: &str, value: &Value, output: &mut String, ind
             write!(output, "{:indent$}</{}>", "", tag_name, indent = indent).unwrap();
             output.push('\n');
         }
+        Value::ActionHandler {
+            component,
+            emit,
+            action_name,
+            ..
+        } => {
+            write!(
+                output,
+                "<{} component=\"{}\" emit=\"{}\" action=\"{}\" />\n",
+                tag_name,
+                component.as_str(),
+                emit.as_str(),
+                action_name.as_str()
+            )
+            .unwrap();
+        }
         _ => {
             // Simple value - shouldn't happen for complex values but handle gracefully
             write!(output, "<{}", tag_name).unwrap();
@@ -193,7 +224,7 @@ fn format_attribute_value(value: &Value, output: &mut String) {
         Value::EnumVariant { type_name, variant } => {
             write!(output, "\"{}.{}\"", type_name, variant).unwrap()
         }
-        Value::Array(_) | Value::Record { .. } => {
+        Value::ActionHandler { .. } | Value::Array(_) | Value::Record { .. } => {
             // Complex values shouldn't be formatted as attributes
             output.push_str("\"...\"");
         }
@@ -202,7 +233,7 @@ fn format_attribute_value(value: &Value, output: &mut String) {
 
 fn is_complex_value(value: &Value) -> bool {
     match value {
-        Value::Record { .. } => true,
+        Value::Record { .. } | Value::ActionHandler { .. } => true,
         Value::Array(elements) => !elements.is_empty(),
         _ => false,
     }
@@ -318,5 +349,23 @@ mod tests {
     fn test_format_string_with_special_chars() {
         let value = Value::String(SmolStr::new("Hello \"World\"\nNew line"));
         assert_eq!(format_value(&value), "Hello \"World\"\nNew line");
+    }
+
+    #[test]
+    fn test_format_action_handler() {
+        let mut module = nx_hir::Module::new(nx_hir::SourceId::new(0));
+        let body = module.alloc_expr(nx_hir::ast::Expr::Literal(nx_hir::ast::Literal::Null));
+        let value = Value::ActionHandler {
+            component: nx_hir::Name::new("SearchBox"),
+            emit: nx_hir::Name::new("SearchSubmitted"),
+            action_name: nx_hir::Name::new("SearchSubmitted"),
+            body,
+            captured: FxHashMap::default(),
+        };
+
+        assert_eq!(
+            format_value(&value),
+            "<ActionHandler component=\"SearchBox\" emit=\"SearchSubmitted\" action=\"SearchSubmitted\" />"
+        );
     }
 }

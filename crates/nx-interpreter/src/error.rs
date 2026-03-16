@@ -69,6 +69,13 @@ pub enum RuntimeErrorKind {
 
     /// Record field not found on the given record value
     RecordFieldNotFound { record: SmolStr, field: SmolStr },
+
+    /// Required record field omitted from an externally supplied typed record
+    MissingRequiredRecordField {
+        record: SmolStr,
+        field: SmolStr,
+        operation: String,
+    },
 }
 
 impl fmt::Display for RuntimeErrorKind {
@@ -117,6 +124,15 @@ impl fmt::Display for RuntimeErrorKind {
             RuntimeErrorKind::RecordFieldNotFound { record, field } => {
                 write!(f, "Record '{}' has no field named '{}'", record, field)
             }
+            RuntimeErrorKind::MissingRequiredRecordField {
+                record,
+                field,
+                operation,
+            } => write!(
+                f,
+                "Missing required field '{}' on record '{}' in {}",
+                field, record, operation
+            ),
         }
     }
 }
@@ -282,5 +298,12 @@ mod tests {
             name: SmolStr::new("x"),
         };
         assert!(err2.to_string().contains("Undefined variable"));
+
+        let err3 = RuntimeErrorKind::MissingRequiredRecordField {
+            record: SmolStr::new("User"),
+            field: SmolStr::new("name"),
+            operation: "function call parameter 'user'".to_string(),
+        };
+        assert!(err3.to_string().contains("Missing required field"));
     }
 }

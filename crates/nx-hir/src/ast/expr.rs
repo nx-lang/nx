@@ -217,6 +217,23 @@ pub enum Expr {
     /// Example: `<button class="primary" />`
     Element { element: ElementId, span: TextSpan },
 
+    /// Lazy component action handler callback.
+    ///
+    /// The body is lowered with an implicit `action` binding but is not evaluated
+    /// until the handler is invoked by the interpreter.
+    ActionHandler {
+        /// Component the handler belongs to
+        component: Name,
+        /// Local emitted action name used by the component
+        emit: Name,
+        /// Public action type name expected at invocation time
+        action_name: Name,
+        /// Handler body expression
+        body: ExprId,
+        /// Source span
+        span: TextSpan,
+    },
+
     /// For loop expression.
     ///
     /// Example: `for item in items { item * 2 }`
@@ -256,6 +273,7 @@ impl Expr {
             Expr::Member { span, .. } => *span,
             Expr::RecordLiteral { span, .. } => *span,
             Expr::Element { span, .. } => *span,
+            Expr::ActionHandler { span, .. } => *span,
             Expr::For { span, .. } => *span,
             Expr::Error(span) => *span,
         }

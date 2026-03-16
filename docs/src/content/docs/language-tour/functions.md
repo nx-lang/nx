@@ -27,11 +27,15 @@ action SearchSubmitted = {
   searchString:string
 }
 
+action DoSearch = {
+  search:string
+}
+
 component <SearchBox
   placeholder:string
   emits {
-    SearchRequested {
-      searchString:string
+    ValueChanged {
+      value:string
     }
     SearchSubmitted
   }
@@ -42,12 +46,26 @@ component <SearchBox
 
   <TextInput value={query} placeholder={placeholder} />
 }
+
+action TrackSearch = {
+  value:string
+}
+
+<SearchBox
+  placeholder="Find docs"
+  onSearchSubmitted=<DoSearch search={action.searchString}/>
+  onValueChanged=<TrackSearch value={action.value}/> />
+
+let makeValueChanged(value:string): SearchBox.ValueChanged =
+  <SearchBox.ValueChanged value={value} />
 ```
 
 - Use `action` for shared action contracts that multiple components can emit.
 - Use `component` when the declaration needs `emits` or `state`.
 - `emits` can declare a new action inline or reference an existing `action` by name.
-- Actions lower like records today. Component-specific lowering and runtime behavior still land in a later change.
+- Inline emitted actions become public action names such as `SearchBox.ValueChanged`.
+- Component invocation sites can bind emitted actions through `on<ActionName>` properties with an implicit `action` value inside the handler body.
+- Full component init/render/dispatch runtime behavior still lands in a later change.
 
 ## Paren-style functions
 

@@ -38,6 +38,28 @@ pub fn to_nx_value(value: &Value) -> NxValue {
             type_name: Some(type_name.as_str().to_string()),
             properties: fields_to_properties(fields),
         },
+        Value::ActionHandler {
+            component,
+            emit,
+            action_name,
+            ..
+        } => NxValue::Record {
+            type_name: Some("ActionHandler".to_string()),
+            properties: BTreeMap::from([
+                (
+                    "component".to_string(),
+                    NxValue::String(component.as_str().to_string()),
+                ),
+                (
+                    "emit".to_string(),
+                    NxValue::String(emit.as_str().to_string()),
+                ),
+                (
+                    "action".to_string(),
+                    NxValue::String(action_name.as_str().to_string()),
+                ),
+            ]),
+        },
     }
 }
 

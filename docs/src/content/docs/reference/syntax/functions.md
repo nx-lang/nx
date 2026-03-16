@@ -5,7 +5,7 @@ description: 'Use `let` for functions and bindings, and `component` for declarat
 
 NX separates `let` bindings from `component` declarations. Use `let` for values and reusable functions. Use `component` when a declaration needs an `emits` contract or persistent `state`.
 
-Parser note: `action` declarations now parse, lower, and behave like records. Component `emits` and `state` still parse and highlight as metadata, while component-specific runtime behavior remains deferred.
+Runtime note: `action` declarations parse, lower, and behave like records. Component action handler bindings now lower as lazy callbacks, while full component init/render/dispatch behavior remains deferred.
 
 ## `let` Definition Mirrors Invocation
 
@@ -90,7 +90,27 @@ component <SearchBox
 
 - The signature keeps the element-style prop syntax.
 - `emits` can mix inline action definitions (`ValueChanged { ... }`) with references to existing actions (`SearchSubmitted`).
+- Inline emitted actions become public action names such as `SearchBox.ValueChanged`.
+- Call sites can bind handlers with `on<ActionName>` and read the emitted payload through the implicit `action` value.
 - `state` declares persistent local fields before the rendered body expression.
+
+```nx
+action DoSearch = {
+  search:string
+}
+
+action TrackSearch = {
+  value:string
+}
+
+<SearchBox
+  placeholder="Find docs"
+  onSearchSubmitted=<DoSearch search={action.searchString}/>
+  onValueChanged=<TrackSearch value={action.value}/> />
+
+let makeValueChanged(value:string): SearchBox.ValueChanged =
+  <SearchBox.ValueChanged value={value} />
+```
 
 ## Paren-style Functions
 

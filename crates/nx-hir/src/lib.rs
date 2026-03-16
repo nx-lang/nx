@@ -202,6 +202,41 @@ impl RecordDef {
     }
 }
 
+/// Distinguishes inline emitted actions from shared emitted action references.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComponentEmitKind {
+    /// `ActionName { ... }` declared inline inside `emits`.
+    Inline,
+    /// `ActionName` or `Namespace.ActionName` referenced from `emits`.
+    Shared,
+}
+
+/// Metadata for a component-emitted action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComponentEmit {
+    /// Local emitted action name used for `on<ActionName>` bindings.
+    pub name: Name,
+    /// Public action type name. Inline emits use `<Component>.<Action>`.
+    pub action_name: Name,
+    /// Whether this emit was defined inline or referenced.
+    pub kind: ComponentEmitKind,
+    /// Source span
+    pub span: TextSpan,
+}
+
+/// Lightweight component declaration preserved in HIR for handler binding and lookup.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Component {
+    /// Component name
+    pub name: Name,
+    /// Declared props
+    pub props: Vec<Param>,
+    /// Declared emitted actions
+    pub emits: Vec<ComponentEmit>,
+    /// Source span
+    pub span: TextSpan,
+}
+
 /// Element property (key-value pair).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Property {
@@ -233,6 +268,8 @@ pub struct Element {
 pub enum Item {
     /// Function declaration
     Function(Function),
+    /// Component declaration
+    Component(Component),
     /// Type alias declaration
     TypeAlias(TypeAlias),
     /// Enum declaration
@@ -296,6 +333,8 @@ pub struct Module {
     pub imports: Vec<Import>,
     /// Top-level items
     items: Vec<Item>,
+    /// Lowering-time diagnostics
+    diagnostics: Vec<LoweringDiagnostic>,
     /// Arena for all expressions
     exprs: Arena<ast::Expr>,
     /// Arena for all elements
@@ -310,6 +349,7 @@ impl Module {
             content_type: None,
             imports: Vec::new(),
             items: Vec::new(),
+            diagnostics: Vec::new(),
             exprs: Arena::new(),
             elements: Arena::new(),
         }
@@ -320,10 +360,16 @@ impl Module {
         &self.items
     }
 
+    /// Get all lowering diagnostics.
+    pub fn diagnostics(&self) -> &[LoweringDiagnostic] {
+        &self.diagnostics
+    }
+
     /// Find an item by name.
     pub fn find_item(&self, name: &str) -> Option<&Item> {
         self.items.iter().find(|item| match item {
             Item::Function(func) => func.name.as_str() == name,
+            Item::Component(component) => component.name.as_str() == name,
             Item::TypeAlias(alias) => alias.name.as_str() == name,
             Item::Enum(enum_def) => enum_def.name.as_str() == name,
             Item::Record(record_def) => record_def.name.as_str() == name,
@@ -333,6 +379,11 @@ impl Module {
     /// Add a new item to the module.
     pub fn add_item(&mut self, item: Item) {
         self.items.push(item);
+    }
+
+    /// Add a lowering diagnostic.
+    pub fn add_diagnostic(&mut self, diagnostic: LoweringDiagnostic) {
+        self.diagnostics.push(diagnostic);
     }
 
     /// Allocate a new expression in the arena.
@@ -354,6 +405,15 @@ impl Module {
     pub fn element(&self, id: ElementId) -> &Element {
         &self.elements[id]
     }
+}
+
+/// Lowering diagnostic produced while converting syntax to HIR.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoweringDiagnostic {
+    /// Human-readable message
+    pub message: String,
+    /// Source span
+    pub span: TextSpan,
 }
 
 #[cfg(test)]

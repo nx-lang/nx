@@ -291,6 +291,82 @@ fn test_record_missing_field_errors() {
 }
 
 #[test]
+fn test_host_supplied_record_defaults_are_not_applied_during_argument_coercion() {
+    let source = r#"
+        type User = { name: string = "Anon" age: int }
+        let echo(user:User) = { user }
+    "#;
+
+    let mut record = FxHashMap::default();
+    record.insert(SmolStr::new("age"), Value::Int(32));
+
+    let result = execute_function(
+        source,
+        "echo",
+        vec![Value::Record {
+            type_name: nx_hir::Name::new("User"),
+            fields: record,
+        }],
+    )
+    .unwrap_or_else(|err| panic!("host-supplied record should pass through:\n{}", err));
+
+    match result {
+        Value::Record { type_name, fields } => {
+            assert_eq!(type_name.as_str(), "User");
+            assert_eq!(fields.get("age"), Some(&Value::Int(32)));
+            assert!(!fields.contains_key("name"));
+        }
+        other => panic!("expected Record, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_host_supplied_nullable_record_field_remains_absent() {
+    let source = r#"
+        type User = { email: string? }
+        let getEmail(user:User): string? = { user.email }
+    "#;
+
+    let result = execute_function(
+        source,
+        "getEmail",
+        vec![Value::Record {
+            type_name: nx_hir::Name::new("User"),
+            fields: FxHashMap::default(),
+        }],
+    );
+
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .contains("Record 'user' has no field named 'email'"),
+        "Expected missing optional field to remain absent on external records"
+    );
+}
+
+#[test]
+fn test_host_supplied_record_missing_required_field_does_not_fail_before_body() {
+    let source = r#"
+        type User = { name: string age: int }
+        let noop(user:User): int = { 0 }
+    "#;
+
+    let mut record = FxHashMap::default();
+    record.insert(SmolStr::new("name"), Value::String(SmolStr::new("Ada")));
+
+    let result = execute_function(
+        source,
+        "noop",
+        vec![Value::Record {
+            type_name: nx_hir::Name::new("User"),
+            fields: record,
+        }],
+    );
+    assert_eq!(result, Ok(Value::Int(0)));
+}
+
+#[test]
 fn test_record_defaults_instantiation() {
     let source = r#"
         type User = { name: string = "Anon" age: int = 30 }
@@ -487,6 +563,36 @@ fn test_record_all_fields_have_defaults() {
                 Some(&Value::String(SmolStr::new("localhost")))
             );
             assert_eq!(fields.get("port"), Some(&Value::Int(80)));
+        }
+        other => panic!("expected Record, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_external_record_argument_does_not_evaluate_definition_defaults() {
+    let source = r#"
+        let defaultTimeout = 30
+        type Config = { timeout:int = { defaultTimeout } }
+        let echo(config:Config) = { config }
+    "#;
+
+    let result = execute_function(
+        source,
+        "echo",
+        vec![Value::Record {
+            type_name: nx_hir::Name::new("Config"),
+            fields: FxHashMap::default(),
+        }],
+    )
+    .unwrap_or_else(|err| panic!("External record argument should pass through:\n{}", err));
+
+    match result {
+        Value::Record { type_name, fields } => {
+            assert_eq!(type_name.as_str(), "Config");
+            assert!(
+                fields.is_empty(),
+                "Expected external record fields to be preserved"
+            );
         }
         other => panic!("expected Record, got {:?}", other),
     }
