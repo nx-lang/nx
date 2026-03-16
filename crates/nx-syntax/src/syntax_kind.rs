@@ -66,7 +66,11 @@ pub enum SyntaxKind {
     VALUE_EXPRESSION,
     VALUE_EXPR,
     RHS_EXPRESSION,
+    VALUES_BRACED_EXPRESSION,
+    VALUE_LIST_ITEM_EXPRESSION,
+    ELEMENTS_BRACED_EXPRESSION,
     ELEMENTS_EXPRESSION,
+    EMBED_BRACED_EXPRESSION,
     IDENTIFIER_EXPRESSION,
     NUMBER_EXPRESSION,
     STRING_EXPRESSION,
@@ -81,8 +85,6 @@ pub enum SyntaxKind {
     TERNARY_EXPRESSION,
     CONDITIONAL_EXPRESSION,
     SEQUENCE_EXPRESSION,
-    INTERPOLATION_EXPRESSION,
-    EMBED_INTERPOLATION_EXPRESSION,
     PARENTHESIZED_EXPRESSION,
 
     // === Control Flow ===
@@ -362,7 +364,11 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "value_expression" => SyntaxKind::VALUE_EXPRESSION,
         "value_expr" => SyntaxKind::VALUE_EXPR,
         "rhs_expression" => SyntaxKind::RHS_EXPRESSION,
+        "values_braced_expression" => SyntaxKind::VALUES_BRACED_EXPRESSION,
+        "value_list_item_expression" => SyntaxKind::VALUE_LIST_ITEM_EXPRESSION,
+        "elements_braced_expression" => SyntaxKind::ELEMENTS_BRACED_EXPRESSION,
         "elements_expression" => SyntaxKind::ELEMENTS_EXPRESSION,
+        "embed_braced_expression" => SyntaxKind::EMBED_BRACED_EXPRESSION,
         "identifier_expression" => SyntaxKind::IDENTIFIER_EXPRESSION,
         "number_expression" => SyntaxKind::NUMBER_EXPRESSION,
         "string_expression" => SyntaxKind::STRING_EXPRESSION,
@@ -377,8 +383,6 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "ternary_expression" => SyntaxKind::TERNARY_EXPRESSION,
         "conditional_expression" => SyntaxKind::CONDITIONAL_EXPRESSION,
         "sequence_expression" => SyntaxKind::SEQUENCE_EXPRESSION,
-        "interpolation_expression" => SyntaxKind::INTERPOLATION_EXPRESSION,
-        "embed_interpolation_expression" => SyntaxKind::EMBED_INTERPOLATION_EXPRESSION,
         "parenthesized_expression" => SyntaxKind::PARENTHESIZED_EXPRESSION,
         "value_if_expression" => SyntaxKind::VALUE_IF_EXPRESSION,
         "value_if_simple_expression" => SyntaxKind::VALUE_IF_SIMPLE_EXPRESSION,
@@ -387,7 +391,21 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "value_if_condition_arm" => SyntaxKind::VALUE_IF_CONDITION_ARM,
         "value_if_match_arm" => SyntaxKind::VALUE_IF_MATCH_ARM,
         "elements_if_expression" => SyntaxKind::ELEMENTS_IF_EXPRESSION,
+        "elements_if_simple_expression" => SyntaxKind::ELEMENTS_IF_SIMPLE_EXPRESSION,
+        "elements_if_condition_list_expression" => {
+            SyntaxKind::ELEMENTS_IF_CONDITION_LIST_EXPRESSION
+        }
+        "elements_if_match_expression" => SyntaxKind::ELEMENTS_IF_MATCH_EXPRESSION,
+        "elements_if_condition_arm" => SyntaxKind::ELEMENTS_IF_CONDITION_ARM,
+        "elements_if_match_arm" => SyntaxKind::ELEMENTS_IF_MATCH_ARM,
         "property_list_if_expression" => SyntaxKind::PROPERTY_LIST_IF_EXPRESSION,
+        "property_list_if_simple_expression" => SyntaxKind::PROPERTY_LIST_IF_SIMPLE_EXPRESSION,
+        "property_list_if_condition_list_expression" => {
+            SyntaxKind::PROPERTY_LIST_IF_CONDITION_LIST_EXPRESSION
+        }
+        "property_list_if_match_expression" => SyntaxKind::PROPERTY_LIST_IF_MATCH_EXPRESSION,
+        "property_list_if_condition_arm" => SyntaxKind::PROPERTY_LIST_IF_CONDITION_ARM,
+        "property_list_if_match_arm" => SyntaxKind::PROPERTY_LIST_IF_MATCH_ARM,
         "value_for_expression" => SyntaxKind::VALUE_FOR_EXPRESSION,
         "elements_for_expression" => SyntaxKind::ELEMENTS_FOR_EXPRESSION,
         "value_match_expression" => SyntaxKind::VALUE_MATCH_EXPRESSION,

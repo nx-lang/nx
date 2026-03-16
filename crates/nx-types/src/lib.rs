@@ -115,10 +115,15 @@
 pub mod check;
 pub mod env;
 pub mod infer;
+pub mod semantics;
 pub mod ty;
 
 // Re-export main types
 pub use check::{check_file, check_str, TypeCheckResult, TypeCheckSession};
 pub use env::{TypeBinding, TypeEnvironment};
 pub use infer::{InferenceContext, TypeInference};
+pub use semantics::{
+    common_supertype, is_object_type, resolve_type_ref_with, resolve_type_ref_with_seen,
+    type_satisfies_expected, type_satisfies_expected_with_coercion,
+};
 pub use ty::{Primitive, Type, TypeId};

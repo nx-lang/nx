@@ -66,7 +66,7 @@ fn test_if_else_false_branch() {
 #[test]
 fn test_if_without_else() {
     let source = r#"
-        let maybe_double(x:int): int = { if x > 0 { x * 2 } }
+        let maybe_double(x:int): int? = { if x > 0 { x * 2 } }
     "#;
 
     // Condition true, returns x * 2
@@ -747,7 +747,7 @@ fn test_condition_list_basic() {
 #[test]
 fn test_condition_list_without_else() {
     let source = r#"
-        let sign(x:int): int = { 
+        let sign(x:int): int? = { 
             if { 
                 x > 0 => 1
                 x < 0 => -1
@@ -882,7 +882,7 @@ fn test_match_expression_integers() {
 #[test]
 fn test_match_expression_without_else() {
     let source = r#"
-        let special(x:int): string = { 
+        let special(x:int): string? = { 
             if x is { 
                 42 => "answer"
                 0 => "nothing"

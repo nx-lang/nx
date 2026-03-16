@@ -73,7 +73,7 @@ describe('NX TextMate text elements', function () {
     expect(scopesForSubstring(line, tokens, ':text')).to.include('support.type.text.nx');
   });
 
-  it('tokenizes @{ } interpolation inside typed text content', function () {
+  it('tokenizes @{ } embed braced expressions inside typed text content', function () {
     const lines = [
       '<markdown:text>',
       'Hello @{user}!',
@@ -86,11 +86,31 @@ describe('NX TextMate text elements', function () {
     const tokens = grammar.tokenizeLine(lines[1], ruleStack);
     ruleStack = tokens.ruleStack;
 
-    expect(scopesForSubstring(lines[1], tokens.tokens, '@{')).to.include('punctuation.section.interpolation.begin.nx');
-    expect(scopesForSubstring(lines[1], tokens.tokens, 'user')).to.include('meta.interpolation.nx');
+    expect(scopesForSubstring(lines[1], tokens.tokens, '@{')).to.include('punctuation.section.embed-braced-expression.begin.nx');
+    expect(scopesForSubstring(lines[1], tokens.tokens, 'user')).to.include('meta.embed-braced-expression.nx');
   });
 
-  it('treats <tag: ...> blocks without TextType as plain text content with { } interpolation', function () {
+  it('tokenizes multi-value @{ } regions with element items inside typed text content', function () {
+    const lines = [
+      '<markdown:text>',
+      'Hello @{user title <Badge/>}!',
+      '</markdown>'
+    ];
+
+    let ruleStack: StateStack | null = null;
+    const start = grammar.tokenizeLine(lines[0], ruleStack);
+    ruleStack = start.ruleStack;
+    const tokens = grammar.tokenizeLine(lines[1], ruleStack);
+    ruleStack = tokens.ruleStack;
+
+    expect(scopesForSubstring(lines[1], tokens.tokens, '@{')).to.include('punctuation.section.embed-braced-expression.begin.nx');
+    expect(scopesForSubstring(lines[1], tokens.tokens, 'user')).to.include('meta.embed-braced-expression.nx');
+    expect(scopesForSubstring(lines[1], tokens.tokens, 'title')).to.include('meta.embed-braced-expression.nx');
+    expect(scopesForSubstring(lines[1], tokens.tokens, '<Badge')).to.include('entity.name.tag.nx');
+    expect(scopesForSubstring(lines[1], tokens.tokens, '<Badge')).to.include('meta.tag.start.nx');
+  });
+
+  it('treats <tag: ...> blocks without TextType as plain text content with { } braced values', function () {
     const lines = [
       '<message: prop="one">',
       '  Plain text {name} \\{escaped\\}',
@@ -103,7 +123,7 @@ describe('NX TextMate text elements', function () {
     const tokens = grammar.tokenizeLine(lines[1], ruleStack);
     ruleStack = tokens.ruleStack;
 
-    expect(scopesForSubstring(lines[1], tokens.tokens, '{')).to.include('punctuation.section.interpolation.begin.nx');
+    expect(scopesForSubstring(lines[1], tokens.tokens, '{')).to.include('punctuation.section.values-braced-expression.begin.nx');
     expect(scopesForSubstring(lines[1], tokens.tokens, '\\{')).to.include('constant.character.escape.nx');
   });
 
@@ -216,13 +236,13 @@ describe('NX TextMate text elements', function () {
     expect(scopesForSubstring(line, tokens, '"link"')).to.include('string.quoted.double.nx');
   });
 
-  it('handles interpolation inside child elements in text content', function () {
+  it('handles braced value expressions inside child elements in text content', function () {
     const line = '<p:>Hello <b>{name}</b>!</p>';
     const { tokens } = grammar.tokenizeLine(line, null);
 
     // Interpolation should work inside child elements
-    expect(scopesForSubstring(line, tokens, '{')).to.include('punctuation.section.interpolation.begin.nx');
-    expect(scopesForSubstring(line, tokens, 'name')).to.include('meta.interpolation.nx');
+    expect(scopesForSubstring(line, tokens, '{')).to.include('punctuation.section.values-braced-expression.begin.nx');
+    expect(scopesForSubstring(line, tokens, 'name')).to.include('meta.values-braced-expression.nx');
   });
 
   it('highlights self-closing child elements with attributes in text content', function () {

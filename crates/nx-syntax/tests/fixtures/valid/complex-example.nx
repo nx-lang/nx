@@ -75,7 +75,12 @@ let <TodoItem
 
 let <TodoFilters
   current:string
-/> =
+/> = {
+  3
+  <abc/>
+  if true {
+    <DebugLabel />
+  }
   <div class="filters">
     for filter in statusTypes {
       <button
@@ -84,5 +89,7 @@ let <TodoFilters
       >
         {filter}
       </button>
+      <div/>
     }
   </div>
+}

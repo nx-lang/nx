@@ -1,6 +1,9 @@
 //! Type inference for expressions.
 
-use crate::{ty::EnumType, Type, TypeEnvironment};
+use crate::{
+    common_supertype, resolve_type_ref_with, resolve_type_ref_with_seen, ty::EnumType,
+    type_satisfies_expected_with_coercion, Type, TypeEnvironment,
+};
 use nx_diagnostics::{Diagnostic, Label, TextSpan};
 use nx_hir::{ast, ExprId, Module, Name};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -8,6 +11,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 struct TypeAliasInfo {
     target: ast::TypeRef,
     span: TextSpan,
+}
+
+struct ElementBindingSpec {
+    children: Option<Type>,
+    properties: FxHashMap<Name, Type>,
 }
 
 /// Type inference context.
@@ -125,23 +133,7 @@ impl<'a> InferenceContext<'a> {
                 if let Some(else_id) = else_branch {
                     let else_ty = self.infer_expr(*else_id);
 
-                    // Both branches must have compatible types
-                    if !then_ty.is_compatible_with(&else_ty)
-                        && !then_ty.is_error()
-                        && !else_ty.is_error()
-                    {
-                        self.error(
-                            "type-mismatch",
-                            format!(
-                                "If branches have incompatible types: {} vs {}",
-                                then_ty, else_ty
-                            ),
-                            *span,
-                        );
-                        Type::Error
-                    } else {
-                        then_ty
-                    }
+                    common_supertype(&then_ty, &else_ty)
                 } else {
                     // No else branch - type is void
                     Type::void()
@@ -149,33 +141,14 @@ impl<'a> InferenceContext<'a> {
             }
 
             // Arrays
-            ast::Expr::Array { elements, .. } => {
+            ast::Expr::Array { elements, span } => {
                 if elements.is_empty() {
                     // Empty array - need more context to infer element type
                     Type::array(self.fresh_var())
                 } else {
-                    // Infer element types
                     let elem_tys: Vec<_> = elements.iter().map(|e| self.infer_expr(*e)).collect();
-
-                    // All elements should have the same type
-                    let first_ty = &elem_tys[0];
-                    for (i, ty) in elem_tys.iter().enumerate().skip(1) {
-                        if !ty.is_compatible_with(first_ty)
-                            && !ty.is_error()
-                            && !first_ty.is_error()
-                        {
-                            self.error(
-                                "type-mismatch",
-                                format!(
-                                    "Array element {} has type {}, expected {}",
-                                    i, ty, first_ty
-                                ),
-                                expr.span(),
-                            );
-                        }
-                    }
-
-                    Type::array(first_ty.clone())
+                    let item_ty = self.common_sequence_item_type(&elem_tys, *span);
+                    Type::array(item_ty)
                 }
             }
 
@@ -232,12 +205,16 @@ impl<'a> InferenceContext<'a> {
                 }
             }
 
-            ast::Expr::Element { element, .. } => {
-                let element_ref = self.module.element(*element);
-                Type::named(element_ref.tag.clone())
+            ast::Expr::Element { element, span } => {
+                let element_ref = self.module.element(*element).clone();
+                self.infer_element_expression(&element_ref, *span)
             }
 
-            ast::Expr::RecordLiteral { record, .. } => Type::named(record.clone()),
+            ast::Expr::RecordLiteral {
+                record,
+                properties,
+                span,
+            } => self.infer_record_literal(record, properties, *span),
 
             // Block expressions
             ast::Expr::Block { stmts: _, expr, .. } => {
@@ -251,22 +228,36 @@ impl<'a> InferenceContext<'a> {
 
             // For loop expressions
             ast::Expr::For {
-                item: _,
-                index: _,
+                item,
+                index,
                 iterable,
                 body,
                 ..
             } => {
                 // Infer iterable type (should be array)
                 let iterable_ty = self.infer_expr(*iterable);
+                let item_ty = match iterable_ty.clone() {
+                    Type::Array(inner) => *inner,
+                    Type::Error => Type::Error,
+                    other => {
+                        self.error(
+                            "type-mismatch",
+                            format!("For iterable must be an array, found {}", other),
+                            expr.span(),
+                        );
+                        Type::Error
+                    }
+                };
 
-                // TODO: Add item and index to environment with proper types
-                // For now, just infer the body type
-                let _body_ty = self.infer_expr(*body);
+                self.env.push_scope();
+                self.env.bind(item.clone(), item_ty);
+                if let Some(index_name) = index {
+                    self.env.bind(index_name.clone(), Type::int());
+                }
+                let body_ty = self.infer_expr(*body);
+                self.env.pop_scope();
 
-                // For loops return arrays of the body type
-                // For simplicity, return the iterable type for now
-                iterable_ty
+                Type::array(body_ty)
             }
 
             // Let expressions (used for match lowering)
@@ -317,7 +308,15 @@ impl<'a> InferenceContext<'a> {
         }
 
         let return_ty = if let Some(ty) = func.return_type.as_ref() {
-            self.type_from_type_ref(ty)
+            let expected = self.type_from_type_ref(ty);
+            self.check_typed_binding(
+                &body_ty,
+                &expected,
+                func.span,
+                "return-type-mismatch",
+                format!("Return value for function '{}'", func.name),
+            );
+            expected
         } else {
             body_ty.clone()
         };
@@ -505,13 +504,13 @@ impl<'a> InferenceContext<'a> {
 
                 // Check argument types
                 for (i, (param_ty, arg_ty)) in params.iter().zip(arg_tys.iter()).enumerate() {
-                    if !arg_ty.is_compatible_with(param_ty) && !arg_ty.is_error() {
-                        self.error(
-                            "type-mismatch",
-                            format!("Argument {} has type {}, expected {}", i, arg_ty, param_ty),
-                            span,
-                        );
-                    }
+                    self.check_typed_binding(
+                        arg_ty,
+                        param_ty,
+                        span,
+                        "type-mismatch",
+                        format!("Argument {}", i),
+                    );
                 }
 
                 (**ret).clone()
@@ -524,6 +523,209 @@ impl<'a> InferenceContext<'a> {
                 );
                 Type::Error
             }
+        }
+    }
+
+    fn infer_record_literal(
+        &mut self,
+        record: &Name,
+        properties: &[(Name, ExprId)],
+        span: TextSpan,
+    ) -> Type {
+        if let Some(record_def) = self.resolve_record_definition(record) {
+            for (name, expr_id) in properties {
+                let actual = self.infer_expr(*expr_id);
+                if let Some(field) = record_def
+                    .properties
+                    .iter()
+                    .find(|field| field.name == *name)
+                {
+                    let expected = self.type_from_type_ref(&field.ty);
+                    self.check_typed_binding(
+                        &actual,
+                        &expected,
+                        span,
+                        "record-field-type-mismatch",
+                        format!("Record field '{}' on '{}'", name, record),
+                    );
+                }
+            }
+
+            Type::named(record_def.name)
+        } else {
+            Type::named(record.clone())
+        }
+    }
+
+    fn infer_element_expression(&mut self, element: &nx_hir::Element, span: TextSpan) -> Type {
+        if let Some(function) = self.resolve_function_definition(&element.tag) {
+            self.check_element_bindings_against_function(element, &function, span);
+            if let Some(func_ty) = self.env.lookup(&function.name) {
+                if let Type::Function { ret, .. } = func_ty {
+                    return (**ret).clone();
+                }
+            }
+            return function
+                .return_type
+                .as_ref()
+                .map(|ty| self.type_from_type_ref(ty))
+                .unwrap_or_else(|| Type::named(function.name));
+        }
+
+        if let Some(record_def) = self.resolve_record_definition(&element.tag) {
+            self.check_element_bindings_against_record(element, &record_def, span);
+            return Type::named(record_def.name);
+        }
+
+        Type::named(element.tag.clone())
+    }
+
+    fn check_element_bindings_against_function(
+        &mut self,
+        element: &nx_hir::Element,
+        function: &nx_hir::Function,
+        span: TextSpan,
+    ) {
+        let spec = self.build_element_binding_spec(
+            function.params.iter().map(|param| (&param.name, &param.ty)),
+        );
+        self.check_element_bindings(element, span, &spec);
+    }
+
+    fn check_element_bindings_against_record(
+        &mut self,
+        element: &nx_hir::Element,
+        record_def: &nx_hir::RecordDef,
+        span: TextSpan,
+    ) {
+        let spec = self.build_element_binding_spec(
+            record_def
+                .properties
+                .iter()
+                .map(|field| (&field.name, &field.ty)),
+        );
+        self.check_element_bindings(element, span, &spec);
+    }
+
+    fn build_element_binding_spec<'b, I>(&mut self, bindings: I) -> ElementBindingSpec
+    where
+        I: IntoIterator<Item = (&'b Name, &'b ast::TypeRef)>,
+    {
+        let mut children = None;
+        let mut properties = FxHashMap::default();
+
+        for (name, ty_ref) in bindings {
+            let ty = self.type_from_type_ref(ty_ref);
+            if name.as_str() == "children" {
+                children = Some(ty.clone());
+            }
+            properties.insert(name.clone(), ty);
+        }
+
+        ElementBindingSpec {
+            children,
+            properties,
+        }
+    }
+
+    fn check_element_bindings(
+        &mut self,
+        element: &nx_hir::Element,
+        span: TextSpan,
+        spec: &ElementBindingSpec,
+    ) {
+        if !element.children.is_empty() {
+            if element
+                .properties
+                .iter()
+                .any(|prop| prop.key.as_str() == "children")
+            {
+                self.error(
+                    "children-binding-conflict",
+                    format!(
+                        "Element '{}' passes children both as a property and as body content",
+                        element.tag
+                    ),
+                    span,
+                );
+            } else if let Some(expected) = spec.children.as_ref() {
+                let actual = self.normalized_sequence_type(&element.children, span);
+                self.check_typed_binding(
+                    &actual,
+                    expected,
+                    span,
+                    "children-type-mismatch",
+                    format!("Children for '{}'", element.tag),
+                );
+            }
+        }
+
+        for property in &element.properties {
+            if let Some(expected) = spec.properties.get(&property.key) {
+                let actual = self.infer_expr(property.value);
+                self.check_typed_binding(
+                    &actual,
+                    expected,
+                    property.span,
+                    "property-type-mismatch",
+                    format!("Property '{}' on '{}'", property.key, element.tag),
+                );
+            }
+        }
+    }
+
+    fn normalized_sequence_type(&mut self, exprs: &[ExprId], span: TextSpan) -> Type {
+        if exprs.is_empty() {
+            return Type::array(self.fresh_var());
+        }
+
+        if exprs.len() == 1 {
+            return self.infer_expr(exprs[0]);
+        }
+
+        let item_types: Vec<_> = exprs
+            .iter()
+            .map(|expr_id| match self.infer_expr(*expr_id) {
+                Type::Array(inner) => *inner,
+                other => other,
+            })
+            .collect();
+
+        Type::array(self.common_sequence_item_type(&item_types, span))
+    }
+
+    fn common_sequence_item_type(&self, item_types: &[Type], _span: TextSpan) -> Type {
+        let mut current = item_types
+            .first()
+            .cloned()
+            .unwrap_or_else(|| Type::named("object"));
+
+        for ty in item_types.iter().skip(1) {
+            current = common_supertype(&current, ty);
+        }
+
+        current
+    }
+
+    fn check_typed_binding(
+        &mut self,
+        actual: &Type,
+        expected: &Type,
+        span: TextSpan,
+        code: &str,
+        context: String,
+    ) -> bool {
+        if type_satisfies_expected_with_coercion(actual, expected) {
+            true
+        } else {
+            let message = if matches!(actual, Type::Array(_)) && !matches!(expected, Type::Array(_))
+            {
+                format!("{} expects {}, found list {}", context, expected, actual)
+            } else {
+                format!("{} expects {}, found {}", context, expected, actual)
+            };
+            self.error(code, message, span);
+            false
         }
     }
 
@@ -579,20 +781,13 @@ impl<'a> InferenceContext<'a> {
                         if let Some(default_expr) = prop.default {
                             let expected = self.type_from_type_ref(&prop.ty);
                             let actual = self.infer_expr(default_expr);
-
-                            if !actual.is_compatible_with(&expected)
-                                && !actual.is_error()
-                                && !expected.is_error()
-                            {
-                                self.error(
-                                    "record-default-type-mismatch",
-                                    format!(
-                                        "Default value for record property '{}' expects {}, found {}",
-                                        prop.name, expected, actual
-                                    ),
-                                    prop.span,
-                                );
-                            }
+                            self.check_typed_binding(
+                                &actual,
+                                &expected,
+                                prop.span,
+                                "record-default-type-mismatch",
+                                format!("Default value for record property '{}'", prop.name),
+                            );
                         }
                     }
                 }
@@ -616,6 +811,39 @@ impl<'a> InferenceContext<'a> {
                 self.bind_function_signature(func, return_type);
             }
         }
+    }
+
+    fn resolve_function_definition(&self, name: &Name) -> Option<nx_hir::Function> {
+        match self.module.find_item(name.as_str()) {
+            Some(nx_hir::Item::Function(func)) => Some(func.clone()),
+            _ => None,
+        }
+    }
+
+    fn resolve_record_definition(&self, name: &Name) -> Option<nx_hir::RecordDef> {
+        self.resolve_record_definition_inner(name, &mut FxHashSet::default())
+    }
+
+    fn resolve_record_definition_inner(
+        &self,
+        name: &Name,
+        seen: &mut FxHashSet<Name>,
+    ) -> Option<nx_hir::RecordDef> {
+        if !seen.insert(name.clone()) {
+            return None;
+        }
+
+        let result = match self.module.find_item(name.as_str()) {
+            Some(nx_hir::Item::Record(def)) => Some(def.clone()),
+            Some(nx_hir::Item::TypeAlias(alias)) => match &alias.ty {
+                ast::TypeRef::Name(target) => self.resolve_record_definition_inner(target, seen),
+                _ => None,
+            },
+            _ => None,
+        };
+
+        seen.remove(name);
+        result
     }
 
     fn enum_info_for_expr(&self, expr_id: ExprId) -> Option<&EnumType> {
@@ -653,64 +881,35 @@ impl<'a> InferenceContext<'a> {
     }
 
     fn type_from_type_ref(&mut self, type_ref: &ast::TypeRef) -> Type {
-        let mut seen = FxHashSet::default();
-        self.resolve_type_ref(type_ref, &mut seen)
-    }
-
-    fn resolve_type_ref(&mut self, type_ref: &ast::TypeRef, seen: &mut FxHashSet<Name>) -> Type {
-        match type_ref {
-            ast::TypeRef::Name(name) => self.resolve_named_type(name, seen),
-            ast::TypeRef::Array(inner) => Type::array(self.resolve_type_ref(inner, seen)),
-            ast::TypeRef::Nullable(inner) => Type::nullable(self.resolve_type_ref(inner, seen)),
-            ast::TypeRef::Function {
-                params,
-                return_type,
-            } => {
-                let param_types = params
-                    .iter()
-                    .map(|p| self.resolve_type_ref(p, seen))
-                    .collect();
-                let ret = self.resolve_type_ref(return_type, seen);
-                Type::function(param_types, ret)
-            }
-        }
+        resolve_type_ref_with(type_ref, &mut |name, seen| {
+            self.resolve_named_type(name, seen)
+        })
     }
 
     fn resolve_named_type(&mut self, name: &Name, seen: &mut FxHashSet<Name>) -> Type {
-        let lower = name.as_str().to_ascii_lowercase();
-        match lower.as_str() {
-            "string" => Type::string(),
-            "i32" => Type::i32(),
-            "i64" => Type::i64(),
-            "int" => Type::int(),
-            "f32" => Type::f32(),
-            "f64" => Type::f64(),
-            "float" => Type::float(),
-            "bool" => Type::bool(),
-            "void" => Type::void(),
-            _ => {
-                if let Some(alias) = self.type_aliases.get(name) {
-                    if !seen.insert(name.clone()) {
-                        self.error(
-                            "type-alias-cycle",
-                            format!("Type alias '{}' forms a cycle", name),
-                            alias.span,
-                        );
-                        return Type::Error;
-                    }
-                    let target = alias.target.clone();
-                    let ty = self.resolve_type_ref(&target, seen);
-                    seen.remove(name);
-                    return ty;
-                }
-
-                if let Some(enum_ty) = self.enum_defs.get(name) {
-                    return Type::Enum(enum_ty.clone());
-                }
-
-                Type::named(name.clone())
+        if let Some(alias) = self.type_aliases.get(name) {
+            if !seen.insert(name.clone()) {
+                self.error(
+                    "type-alias-cycle",
+                    format!("Type alias '{}' forms a cycle", name),
+                    alias.span,
+                );
+                return Type::Error;
             }
+
+            let target = alias.target.clone();
+            let ty = resolve_type_ref_with_seen(&target, seen, &mut |nested_name, nested_seen| {
+                self.resolve_named_type(nested_name, nested_seen)
+            });
+            seen.remove(name);
+            return ty;
         }
+
+        if let Some(enum_ty) = self.enum_defs.get(name) {
+            return Type::Enum(enum_ty.clone());
+        }
+
+        Type::named(name.clone())
     }
 
     fn function_param_types(&mut self, func: &nx_hir::Function) -> Vec<Type> {

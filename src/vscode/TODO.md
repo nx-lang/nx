@@ -4,7 +4,7 @@ This tracks near-term enhancements and future work. The LSP server will be imple
 
 ## Grammar Coverage
 - [x] Parse attribute values that can embed inline elements, e.g., `prop=<Start/>` and `content=<:uitext>…</>`.
-- [ ] Improve mixed content highlighting: interleave text, elements, and interpolations more accurately.
+- [ ] Improve mixed content highlighting: interleave text, elements, and braced value expressions more accurately.
 - [ ] Add explicit patterns for elements control forms: `ElementsIfExpression`, `ElementsForExpression`.
 - [ ] Recognize `raw` embed mode distinctly and treat inner content as unparsed text.
 - [ ] Consider injection of other grammars for typed embeds (e.g., `:markdown`, `:uitext`) via TextMate injections or `contentName` to piggyback existing scopes.

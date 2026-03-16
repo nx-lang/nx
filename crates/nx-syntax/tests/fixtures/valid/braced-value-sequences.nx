@@ -1,0 +1,16 @@
+let single = {item}
+let items = {first second third}
+let arithmetic = {a - b}
+let mixed = {(a - b) c <Badge />}
+
+<Root>
+  {content}
+
+  <message:>
+    Hello {first second}
+  </message>
+
+  <markdown:text>
+    Welcome @{user title}
+  </markdown>
+</Root>
