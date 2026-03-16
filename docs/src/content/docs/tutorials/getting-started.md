@@ -40,7 +40,7 @@ let <Hello user:User/> =
 This file shows imports, a typed object, a component with a child slot, and a root element.
 
 ## 3) Validate the file
-- If you have `tree-sitter` installed, run `cd crates/nx-syntax && tree-sitter parse ../../examples/nx/hello.nx` to confirm the syntax is accepted.
+- For a parser-only check, run `npm --prefix crates/nx-syntax ci` once and then `npm --prefix crates/nx-syntax run parse -- ../../examples/nx/hello.nx` so the repo-pinned Tree-sitter CLI is used.
 - For deeper checks, drop the snippet into a small Rust harness using `nx_types::check_str` (see README examples) to verify typing; the sample in `README.md` can be run from any Rust binary in your workspace.
 
 ## 4) Explore language fundamentals

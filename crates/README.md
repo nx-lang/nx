@@ -139,10 +139,16 @@ Example NX files for testing are available in [../examples/nx/](../examples/nx/)
 - `embed.nx` - Embedded content with text types
 - `complex.nx` - Real-world todo app example
 
-Test the parser with tree-sitter CLI:
+Install the pinned Tree-sitter CLI for `nx-syntax` once:
 ```bash
-cd crates/nx-syntax
-tree-sitter parse ../../examples/nx/function.nx
+npm --prefix crates/nx-syntax ci
+```
+
+Then use the repo-local scripts:
+```bash
+npm --prefix crates/nx-syntax run parse -- ../../examples/nx/function.nx
+npm --prefix crates/nx-syntax run generate
+npm --prefix crates/nx-syntax test
 ```
 
 ## Documentation
