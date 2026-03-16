@@ -114,11 +114,11 @@ describe('NX if-forms (scrutinee vs condition-list)', function () {
     expect(hasQualifier).to.equal(false);
   });
 
-  it('interpolation: value condition-list form carries interpolation and value-if meta', function () {
+  it('values braced expression: value condition-list form carries braced-expression and value-if meta', function () {
     const line = 'class="btn {if { active => \"on\" else => \"off\" }}"';
     const { tokens } = grammar.tokenizeLine(line, null);
-    expect(scopesForSubstring(line, tokens, '{')).to.include('punctuation.section.interpolation.begin.nx');
-    expect(scopesForSubstring(line, tokens, 'if')).to.include('meta.interpolation.nx');
+    expect(scopesForSubstring(line, tokens, '{')).to.include('punctuation.section.values-braced-expression.begin.nx');
+    expect(scopesForSubstring(line, tokens, 'if')).to.include('meta.values-braced-expression.nx');
     expect(scopesForSubstring(line, tokens, 'if')).to.include('meta.control.if.value.nx');
   });
 

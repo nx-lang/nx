@@ -271,6 +271,7 @@ impl TypeCheckSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nx_hir::{Item, Name};
 
     #[test]
     fn test_check_str_simple() {
@@ -345,5 +346,190 @@ mod tests {
         let diagnostics = session.diagnostics();
         // Should have at least one diagnostic from the parse error
         assert!(!diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_scalar_brace_return_coerces_to_list_annotation() {
+        let source = r#"
+            let wrap(): int[] = { 1 }
+        "#;
+        let result = check_str(source, "coerce-return.nx");
+
+        assert!(
+            result.errors().is_empty(),
+            "Expected no diagnostics, got {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn test_multi_value_brace_return_rejected_for_scalar_annotation() {
+        let source = r#"
+            let fail(): int = { 1 2 }
+        "#;
+        let result = check_str(source, "reject-return.nx");
+
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code() == Some("return-type-mismatch")),
+            "Expected return type mismatch diagnostic, got {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn test_unannotated_multi_value_element_brace_falls_back_to_object_array() {
+        let source = r#"
+            let root() = { <A /> <B /> }
+        "#;
+        let result = check_str(source, "object-fallback.nx");
+        let module = result.module.as_ref().expect("Expected lowered module");
+        let root = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Function(func) if func.name.as_str() == "root" => Some(func),
+                _ => None,
+            })
+            .expect("Expected root function");
+
+        let root_ty = result
+            .type_of(root.body)
+            .expect("Expected inferred body type")
+            .clone();
+        assert_eq!(root_ty, Type::array(Type::named("object")));
+
+        let func_ty = result
+            .type_env
+            .lookup(&Name::new("root"))
+            .expect("Expected root function type");
+        match func_ty {
+            Type::Function { ret, .. } => assert_eq!(**ret, Type::array(Type::named("object"))),
+            other => panic!("Expected function type, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_unannotated_multi_value_literal_brace_infers_int_array() {
+        let source = r#"
+            let root() = { 1 2 3 }
+        "#;
+        let result = check_str(source, "int-array.nx");
+        let module = result.module.as_ref().expect("Expected lowered module");
+        let root = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Function(func) if func.name.as_str() == "root" => Some(func),
+                _ => None,
+            })
+            .expect("Expected root function");
+
+        let root_ty = result
+            .type_of(root.body)
+            .expect("Expected inferred body type")
+            .clone();
+        assert_eq!(root_ty, Type::array(Type::int()));
+    }
+
+    #[test]
+    fn test_element_property_type_mismatch_reports_diagnostic() {
+        let source = r#"
+            let <Counter count:int />: int = { count }
+            let root(): int = { <Counter count="hello" /> }
+        "#;
+        let result = check_str(source, "property-type-mismatch.nx");
+
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code() == Some("property-type-mismatch")),
+            "Expected property type mismatch diagnostic, got {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn test_children_binding_conflict_reports_diagnostic() {
+        let source = r#"
+            let <Collect children: object[] />: object[] = { children }
+            let root(): object[] = { <Collect children={null}><div /></Collect> }
+        "#;
+        let result = check_str(source, "children-binding-conflict.nx");
+
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code() == Some("children-binding-conflict")),
+            "Expected children binding conflict diagnostic, got {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn test_children_scalar_coerces_to_list_annotation() {
+        let source = r#"
+            let <Collect children: object[] />: object[] = { children }
+            let root(): object[] = { <Collect><div /></Collect> }
+        "#;
+        let result = check_str(source, "children-coerce.nx");
+
+        assert!(
+            result.errors().is_empty(),
+            "Expected no diagnostics, got {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn test_scalar_value_child_satisfies_scalar_children_annotation() {
+        let source = r#"
+            let <Collect children: int />: int = { children }
+            let root(): int = { <Collect>{1}</Collect> }
+        "#;
+        let result = check_str(source, "children-scalar-value.nx");
+
+        assert!(
+            result.errors().is_empty(),
+            "Expected no diagnostics, got {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn test_scalar_value_child_coerces_to_list_children_annotation() {
+        let source = r#"
+            let <Collect children: int[] />: int[] = { children }
+            let root(): int[] = { <Collect>{1}</Collect> }
+        "#;
+        let result = check_str(source, "children-scalar-value-list.nx");
+
+        assert!(
+            result.errors().is_empty(),
+            "Expected no diagnostics, got {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn test_children_multi_value_rejected_for_scalar_annotation() {
+        let source = r#"
+            let <Single children: div />: div = { children }
+            let root(): div = { <Single><div /><span /></Single> }
+        "#;
+        let result = check_str(source, "children-reject.nx");
+
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code() == Some("children-type-mismatch")),
+            "Expected children type mismatch diagnostic, got {:?}",
+            result.diagnostics
+        );
     }
 }

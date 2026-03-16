@@ -568,6 +568,200 @@ fn test_element_call_children_injected_for_element_defined_function() {
 }
 
 #[test]
+fn test_element_call_single_child_coerces_to_scalar_children_parameter() {
+    let source = r#"
+        let <collect children: div />: div = { children }
+        let root(): div = { <collect><div /></collect> }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("Element call with scalar children failed:\n{}", err));
+
+    assert_eq!(
+        result,
+        Value::Record {
+            type_name: nx_hir::Name::new("div"),
+            fields: FxHashMap::default(),
+        }
+    );
+}
+
+#[test]
+fn test_element_call_scalar_value_child_passes_to_scalar_children_parameter() {
+    let source = r#"
+        let <collect children: int />: int = { children }
+        let root(): int = { <collect>{1}</collect> }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("Element call with scalar value child failed:\n{}", err));
+
+    assert_eq!(result, Value::Int(1));
+}
+
+#[test]
+fn test_element_call_scalar_value_child_coerces_to_list_children_parameter() {
+    let source = r#"
+        let <collect children: int[] />: int[] = { children }
+        let root(): int[] = { <collect>{1}</collect> }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("Element call with scalar value child list failed:\n{}", err));
+
+    assert_eq!(result, Value::Array(vec![Value::Int(1)]));
+}
+
+#[test]
+fn test_element_call_multi_children_rejected_for_scalar_children_parameter() {
+    let source = r#"
+        let <collect children: div />: div = { children }
+        let root(): div = { <collect><div /><span /></collect> }
+    "#;
+
+    let result = execute_function(source, "root", vec![]);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("return value") || err.contains("parameter") || err.contains("children"),
+        "Error should mention the scalar/list mismatch:\n{}",
+        err
+    );
+}
+
+#[test]
+fn test_element_call_braced_child_list_flattens_children_array() {
+    let source = r#"
+        let <collect children: object[] />: object[] = { children }
+        let root(): object[] = { <collect>{<div /> <span />}</collect> }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("Element call with braced child list failed:\n{}", err));
+
+    let expected = Value::Array(vec![
+        Value::Record {
+            type_name: nx_hir::Name::new("div"),
+            fields: FxHashMap::default(),
+        },
+        Value::Record {
+            type_name: nx_hir::Name::new("span"),
+            fields: FxHashMap::default(),
+        },
+    ]);
+
+    assert_eq!(result, expected);
+}
+
+#[test]
+fn test_element_call_conditional_child_expression_preserves_selected_element() {
+    let source = r#"
+        let <collect children: object[] />: object[] = { children }
+        let root(flag: bool): object[] = { <collect>if flag { <A /> } else { <B /> }</collect> }
+    "#;
+
+    let true_result = execute_function(source, "root", vec![Value::Boolean(true)])
+        .unwrap_or_else(|err| panic!("Element call with conditional children failed:\n{}", err));
+    assert_eq!(
+        true_result,
+        Value::Array(vec![Value::Record {
+            type_name: nx_hir::Name::new("A"),
+            fields: FxHashMap::default(),
+        }])
+    );
+
+    let false_result = execute_function(source, "root", vec![Value::Boolean(false)])
+        .unwrap_or_else(|err| panic!("Element call with conditional children failed:\n{}", err));
+    assert_eq!(
+        false_result,
+        Value::Array(vec![Value::Record {
+            type_name: nx_hir::Name::new("B"),
+            fields: FxHashMap::default(),
+        }])
+    );
+}
+
+#[test]
+fn test_element_call_for_child_expression_flattens_element_results() {
+    let source = r#"
+        let <collect children: object[] />: object[] = { children }
+        let root(items: object[]): object[] = { <collect>for item in items { <Row /> }</collect> }
+    "#;
+
+    let items = Value::Array(vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
+    let result = execute_function(source, "root", vec![items])
+        .unwrap_or_else(|err| panic!("Element call with for children failed:\n{}", err));
+
+    let expected = Value::Array(vec![
+        Value::Record {
+            type_name: nx_hir::Name::new("Row"),
+            fields: FxHashMap::default(),
+        },
+        Value::Record {
+            type_name: nx_hir::Name::new("Row"),
+            fields: FxHashMap::default(),
+        },
+        Value::Record {
+            type_name: nx_hir::Name::new("Row"),
+            fields: FxHashMap::default(),
+        },
+    ]);
+
+    assert_eq!(result, expected);
+}
+
+#[test]
+fn test_multi_value_element_brace_list_returns_array_runtime() {
+    let source = r#"
+        let root() = { <div /> <span /> }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("Element-valued brace list failed at runtime:\n{}", err));
+
+    let expected = Value::Array(vec![
+        Value::Record {
+            type_name: nx_hir::Name::new("div"),
+            fields: FxHashMap::default(),
+        },
+        Value::Record {
+            type_name: nx_hir::Name::new("span"),
+            fields: FxHashMap::default(),
+        },
+    ]);
+
+    assert_eq!(result, expected);
+}
+
+#[test]
+fn test_scalar_brace_return_is_wrapped_for_list_annotation_runtime() {
+    let source = r#"
+        let values(): int[] = { 1 }
+    "#;
+
+    let result = execute_function(source, "values", vec![])
+        .unwrap_or_else(|err| panic!("Scalar-to-list return coercion failed:\n{}", err));
+
+    assert_eq!(result, Value::Array(vec![Value::Int(1)]));
+}
+
+#[test]
+fn test_multi_value_brace_return_is_rejected_for_scalar_annotation_runtime() {
+    let source = r#"
+        let values(): int = { 1 2 }
+    "#;
+
+    let result = execute_function(source, "values", vec![]);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("return value"),
+        "Error should mention the return value mismatch:\n{}",
+        err
+    );
+}
+
+#[test]
 fn test_element_call_children_conflict_is_error_for_function() {
     let source = r#"
         let collect(children: object[]): object[] = { children }

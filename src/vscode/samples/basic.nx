@@ -13,5 +13,5 @@ let <UserCard user:User className:string content:Element[]/> =
   </section>
 
 <UserCard user={user} className="primary">
-  <:uitext>Hello, {user.name}!</>
+  <:uitext>Hello @{user.firstName} {user.lastName}!</>
 </UserCard>

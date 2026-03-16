@@ -85,9 +85,9 @@
       "}"
     ]
   },
-  "Interpolation": {
-    "prefix": "nxint",
-    "description": "Value interpolation",
+  "Braced Value": {
+    "prefix": "nxbrace",
+    "description": "Braced value expression or value list",
     "body": [
       "{${0:expr}}"
     ]

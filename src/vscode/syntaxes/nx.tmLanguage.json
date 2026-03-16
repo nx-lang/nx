@@ -21,7 +21,7 @@
     { "include": "#keywords-core" },
     { "include": "#types" },
     { "include": "#operators" },
-    { "include": "#interpolation" },
+    { "include": "#values-braced-expression" },
     { "include": "#entities" }
   ],
   "repository": {
@@ -61,7 +61,7 @@
           "end": "\"",
           "patterns": [
             { "include": "#entities" },
-            { "include": "#interpolation" },
+            { "include": "#values-braced-expression" },
             { "name": "constant.character.escape.nx", "match": "\\\\[\\\\\"nrt]" }
           ]
         },
@@ -71,7 +71,7 @@
           "end": "'",
           "patterns": [
             { "include": "#entities" },
-            { "include": "#interpolation" },
+            { "include": "#values-braced-expression" },
             { "name": "constant.character.escape.nx", "match": "\\\\[\\\\'nrt]" }
           ]
         }
@@ -191,7 +191,7 @@
         { "include": "#elements-if" },
         { "include": "#elements-for" },
         { "include": "#tags" },
-        { "include": "#interpolation" },
+        { "include": "#values-braced-expression" },
         { "include": "#keywords-core" },
         { "include": "#keywords-control" },
         { "include": "#types" },
@@ -229,7 +229,7 @@
             { "include": "#elements-if" },
             { "include": "#elements-for" },
             { "include": "#tags" },
-            { "include": "#interpolation" },
+            { "include": "#values-braced-expression" },
             { "include": "#keywords-core" },
             { "include": "#keywords-control" },
             { "include": "#types" },
@@ -248,12 +248,12 @@
         }
       ]
     },
-    "interpolation": {
+    "values-braced-expression": {
       "begin": "(?<!\\\\)\\{",
-      "beginCaptures": { "0": { "name": "punctuation.section.interpolation.begin.nx" } },
+      "beginCaptures": { "0": { "name": "punctuation.section.values-braced-expression.begin.nx" } },
       "end": "\\}",
-      "endCaptures": { "0": { "name": "punctuation.section.interpolation.end.nx" } },
-      "name": "meta.interpolation.nx",
+      "endCaptures": { "0": { "name": "punctuation.section.values-braced-expression.end.nx" } },
+      "name": "meta.values-braced-expression.nx",
       "patterns": [
         { "include": "#tags" },
         { "include": "#value-if" },
@@ -268,13 +268,14 @@
         { "include": "#qualifiers" }
       ]
     },
-    "embed-interpolation": {
+    "embed-braced-expression": {
       "begin": "(?<!\\\\)@\\{",
-      "beginCaptures": { "0": { "name": "punctuation.section.interpolation.begin.nx" } },
+      "beginCaptures": { "0": { "name": "punctuation.section.embed-braced-expression.begin.nx" } },
       "end": "\\}",
-      "endCaptures": { "0": { "name": "punctuation.section.interpolation.end.nx" } },
-      "name": "meta.interpolation.nx",
+      "endCaptures": { "0": { "name": "punctuation.section.embed-braced-expression.end.nx" } },
+      "name": "meta.embed-braced-expression.nx",
       "patterns": [
+        { "include": "#tags" },
         { "include": "#value-if" },
         { "include": "#value-for" },
         { "include": "#comments" },
@@ -290,7 +291,7 @@
     "attr-value": {
       "patterns": [
         { "include": "#strings" },
-        { "include": "#interpolation" },
+        { "include": "#values-braced-expression" },
         { "include": "#tags" },
         { "include": "#numbers" },
         { "include": "#keywords-core" },
@@ -310,7 +311,7 @@
         { "include": "#tags" },
         { "include": "#elements-if" },
         { "include": "#elements-for" },
-        { "include": "#interpolation" },
+        { "include": "#values-braced-expression" },
         { "include": "#strings" },
         { "include": "#entities" },
         { "include": "#comments" }
@@ -378,7 +379,7 @@
         { "include": "#strings" },
         { "include": "#comments" },
         { "name": "punctuation.definition.tag.end.nx", "match": ">" },
-        { "include": "#embed-interpolation" },
+        { "include": "#embed-braced-expression" },
         { "name": "constant.character.escape.nx", "match": "\\\\[@{}]" },
         { "include": "#entities" },
         { "name": "meta.text.typed.content.nx", "match": "[^@<\\\\{}]+" },
@@ -410,7 +411,7 @@
         { "include": "#comments" },
         { "name": "punctuation.definition.tag.end.nx", "match": ">" },
         { "include": "#text-child-element" },
-        { "include": "#interpolation" },
+        { "include": "#values-braced-expression" },
         { "name": "constant.character.escape.nx", "match": "\\\\[{}]" },
         { "include": "#entities" },
         { "name": "meta.text.plain.content.nx", "match": "[^<&{\\\\]+" },
@@ -431,7 +432,7 @@
         { "include": "#elements-if" },
         { "include": "#elements-for" },
         { "include": "#tags" },
-        { "include": "#interpolation" },
+        { "include": "#values-braced-expression" },
         { "include": "#strings" },
         { "include": "#entities" }
       ]
@@ -532,13 +533,13 @@
             { "include": "#tags" },
             { "include": "#value-if" },
             { "include": "#value-for" },
-            { "include": "#interpolation" },
+            { "include": "#values-braced-expression" },
             { "include": "#keywords-control" },
             { "include": "#types" },
             { "include": "#operators" }
           ]
         },
-        { "include": "#interpolation" },
+        { "include": "#values-braced-expression" },
         { "include": "#keywords-control" },
         { "include": "#types" },
         { "include": "#operators" }
@@ -572,13 +573,13 @@
             { "include": "#elements-if" },
             { "include": "#elements-for" },
             { "include": "#tags" },
-            { "include": "#interpolation" },
+            { "include": "#values-braced-expression" },
             { "include": "#keywords-control" },
             { "include": "#types" },
             { "include": "#operators" }
           ]
         },
-        { "include": "#interpolation" },
+        { "include": "#values-braced-expression" },
         { "include": "#keywords-control" },
         { "include": "#types" },
         { "include": "#operators" }
@@ -608,12 +609,12 @@
             { "include": "#elements-if" },
             { "include": "#elements-for" },
             { "include": "#tags" },
-            { "include": "#interpolation" },
+            { "include": "#values-braced-expression" },
             { "include": "#types" },
             { "include": "#operators" }
           ]
         },
-        { "include": "#interpolation" },
+        { "include": "#values-braced-expression" },
         { "include": "#types" },
         { "include": "#operators" },
         { "name": "keyword.control.loop.nx", "match": "\\bin\\b" }
@@ -647,12 +648,12 @@
             { "include": "#elements-if" },
             { "include": "#elements-for" },
             { "include": "#tags" },
-            { "include": "#interpolation" },
+            { "include": "#values-braced-expression" },
             { "include": "#types" },
             { "include": "#operators" }
           ]
         },
-        { "include": "#interpolation" },
+        { "include": "#values-braced-expression" },
         { "include": "#types" },
         { "include": "#operators" },
         { "name": "keyword.control.loop.nx", "match": "\\bin\\b" }
@@ -681,7 +682,7 @@
             },
             { "name": "keyword.operator.assignment.nx", "match": "=" },
             { "include": "#strings" },
-            { "include": "#interpolation" }
+            { "include": "#values-braced-expression" }
           ]
         },
         {
@@ -713,11 +714,11 @@
                 },
                 { "name": "keyword.operator.assignment.nx", "match": "=" },
                 { "include": "#strings" },
-                { "include": "#interpolation" }
+                { "include": "#values-braced-expression" }
               ]
             },
             { "include": "#text-child-element" },
-            { "include": "#interpolation" },
+            { "include": "#values-braced-expression" },
             { "name": "constant.character.escape.nx", "match": "\\\\[{}]" },
             { "include": "#entities" },
             { "name": "meta.text.plain.content.nx", "match": "[^<&{\\\\]+" },
@@ -756,13 +757,13 @@
             { "include": "#elements-for" },
             { "include": "#tags" },
             { "include": "#attributes" },
-            { "include": "#interpolation" },
+            { "include": "#values-braced-expression" },
             { "include": "#keywords-control" },
             { "include": "#types" },
             { "include": "#operators" }
           ]
         },
-        { "include": "#interpolation" },
+        { "include": "#values-braced-expression" },
         { "include": "#keywords-control" },
         { "include": "#types" },
         { "include": "#operators" }
