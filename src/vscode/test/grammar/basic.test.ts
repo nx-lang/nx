@@ -273,31 +273,42 @@ describe('NX TextMate grammar', function () {
     });
   });
 
-  it('highlights interpolation regions', function () {
+  it('highlights braced value expression regions', function () {
     const line = 'class="card {className}"';
     const { tokens } = grammar.tokenizeLine(line, null);
-    // Opening brace should be marked as interpolation begin
-    expect(scopesForSubstring(line, tokens, '{')).to.include('punctuation.section.interpolation.begin.nx');
-    // Inner identifier should carry the interpolation meta scope
-    expect(scopesForSubstring(line, tokens, 'className')).to.include('meta.interpolation.nx');
+    // Opening brace should be marked as a braced value expression opener.
+    expect(scopesForSubstring(line, tokens, '{')).to.include('punctuation.section.values-braced-expression.begin.nx');
+    // Inner identifier should carry the braced value expression meta scope.
+    expect(scopesForSubstring(line, tokens, 'className')).to.include('meta.values-braced-expression.nx');
   });
 
-  it('highlights interpolations between element children', function () {
+  it('keeps values-braced-expression scopes for multi-value brace sequences', function () {
+    const line = '<Button class="{baseClass accentClass <Badge/>}" />';
+    const { tokens } = grammar.tokenizeLine(line, null);
+
+    expect(scopesForSubstring(line, tokens, '{')).to.include('punctuation.section.values-braced-expression.begin.nx');
+    expect(scopesForSubstring(line, tokens, 'baseClass')).to.include('meta.values-braced-expression.nx');
+    expect(scopesForSubstring(line, tokens, 'accentClass')).to.include('meta.values-braced-expression.nx');
+    expect(scopesForSubstring(line, tokens, '<Badge')).to.include('entity.name.tag.nx');
+    expect(scopesForSubstring(line, tokens, '<Badge')).to.include('meta.tag.start.nx');
+  });
+
+  it('highlights braced value expressions between element children', function () {
     const line = '<Section><Header/>{content}<Footer/></Section>';
     const { tokens } = grammar.tokenizeLine(line, null);
-    expect(scopesForSubstring(line, tokens, '{')).to.include('punctuation.section.interpolation.begin.nx');
-    expect(scopesForSubstring(line, tokens, 'content')).to.include('meta.interpolation.nx');
+    expect(scopesForSubstring(line, tokens, '{')).to.include('punctuation.section.values-braced-expression.begin.nx');
+    expect(scopesForSubstring(line, tokens, 'content')).to.include('meta.values-braced-expression.nx');
     expect(scopesForSubstring(line, tokens, 'Footer')).to.include('entity.name.tag.nx');
   });
 
   it('treats escaped braces in markup text as literals', function () {
     const line = '<p>\\{ brace \\}</p>';
     const { tokens } = grammar.tokenizeLine(line, null);
-    expect(scopesForSubstring(line, tokens, '{')).to.not.include('punctuation.section.interpolation.begin.nx');
-    expect(scopesForSubstring(line, tokens, '}')).to.not.include('punctuation.section.interpolation.end.nx');
+    expect(scopesForSubstring(line, tokens, '{')).to.not.include('punctuation.section.values-braced-expression.begin.nx');
+    expect(scopesForSubstring(line, tokens, '}')).to.not.include('punctuation.section.values-braced-expression.end.nx');
   });
 
-  it('highlights elements inside interpolation value expressions', function () {
+  it('highlights elements inside braced value expressions', function () {
     const line = '<div>{ <Inner/> }</div>';
     const { tokens } = grammar.tokenizeLine(line, null);
 
@@ -315,7 +326,7 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(line, tokens, 'Start')).to.include('entity.name.tag.nx');
   });
 
-  it('highlights control blocks inside interpolations', function () {
+  it('highlights control blocks inside braced value expressions', function () {
     const line = '{if isActive { "active" } else { "inactive" }}';
     const { tokens } = grammar.tokenizeLine(line, null);
     expect(scopesForSubstring(line, tokens, 'if')).to.include('keyword.control.conditional.nx');
@@ -328,7 +339,7 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(line, tokens, '[]')).to.include('keyword.operator.type-modifier.nx');
   });
 
-  it('highlights match and for blocks inside interpolations', function () {
+  it('highlights match and for blocks inside braced value expressions', function () {
     const line = '{if state is { "active" => "A" else => "D" } for item in items { item }}';
     const { tokens } = grammar.tokenizeLine(line, null);
     expect(scopesForSubstring(line, tokens, 'if')).to.include('keyword.control.conditional.nx');

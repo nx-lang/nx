@@ -152,8 +152,8 @@ static bool scan_entity(TSLexer *lexer) {
  *
  * The scanner stops at:
  * - '<' (start of element or close tag)
- * - '{' / '}' (interpolation delimiters)
- * - '@{' (typed text interpolation delimiter)
+ * - '{' / '}' (value-brace delimiters)
+ * - '@{' (typed text braced-value delimiter)
  * - '&' (might be entity or part of text)
  * - '\' followed by '{', '}', or '@' (escaped delimiter)
  */
@@ -242,7 +242,7 @@ bool tree_sitter_nx_external_scanner_scan(void *payload, TSLexer *lexer, const b
     }
 
     if (embed_mode && lexer->lookahead == '@') {
-      // Check for interpolation opener "@{"
+      // Check for typed text braced-value opener "@{"
       TSLexer saved = *lexer;
       lexer->advance(lexer, false);
       if (lexer->lookahead == '{') {
@@ -256,7 +256,7 @@ bool tree_sitter_nx_external_scanner_scan(void *payload, TSLexer *lexer, const b
       *lexer = saved;
     }
 
-    // Stop at interpolation delimiters
+    // Stop at braced-value delimiters
     if (lexer->lookahead == '{' || lexer->lookahead == '}') {
       break;
     }

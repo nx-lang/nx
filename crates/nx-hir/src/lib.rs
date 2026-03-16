@@ -220,8 +220,8 @@ pub struct Element {
     pub tag: Name,
     /// Element properties
     pub properties: Vec<Property>,
-    /// Nested child elements
-    pub children: Vec<ElementId>,
+    /// Nested child expressions in source order
+    pub children: Vec<ExprId>,
     /// Closing tag name (must match opening tag)
     pub close_name: Option<Name>,
     /// Source location

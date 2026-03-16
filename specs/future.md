@@ -45,3 +45,46 @@ Even without full runtime 32-bit support, FFI calls should validate that values
 fit in the target width. Passing `i64::MAX` to a C# `int` parameter is silent
 data corruption. A narrowing check at FFI call sites (in nx-ffi) would catch
 this without adding complexity to the core interpreter.
+
+## Braced List Minus Ambiguity
+
+Braced value lists currently require prefix-unary expressions to be
+parenthesized, which avoids ambiguity between list items and subtraction. This
+may be worth revisiting for negative numeric literals, since users may expect
+forms like `{-2 3}` to work naturally.
+
+If this is revisited in the future:
+- Consider allowing signed numeric literals as list-safe atoms only under
+  constrained conditions, rather than allowing all prefix-unary expressions as
+  bare list items.
+- Do not let whitespace alone change `3-2` or `3 - 2` from subtraction into a
+  list split.
+- Consider a targeted warning or error for suspicious forms like `{3  -2}` to
+  reduce confusion, since users may read that as subtraction written with
+  uneven spacing and a binary minus operator normally should not have a space
+  before it and no space after it.
+
+## Type Inference HIR Clone Cleanup
+
+`nx-types::infer` currently clones some HIR nodes to satisfy borrow-checker
+constraints during inference. The most visible case is element inference, where
+the code clones an `nx_hir::Element` before calling the helper that needs
+`&mut self`, but similar clone-through-lookup patterns also exist for function
+and record definitions.
+
+This is not currently a correctness issue, and the element clone is shallower
+than it first appears because `Element.children` stores `ExprId`s rather than
+recursive child AST nodes. That makes this more of a cleanup and allocation
+reduction opportunity than an urgent performance problem.
+
+If this is revisited in the future:
+- Treat it as a broader "stop cloning HIR during inference" refactor rather
+  than a one-off fix for element expressions.
+- Consider reshaping element inference around `ElementId` or other short-lived
+  module lookups so `InferenceContext` can borrow the module briefly without
+  cloning full structs.
+- Review nearby definition resolution helpers at the same time, since function
+  and record inference currently clone their definitions for similar reasons.
+- Prioritize this work if profiling or editor latency shows element-heavy files
+  spending meaningful time in inference; otherwise keep it as low-priority
+  cleanup.

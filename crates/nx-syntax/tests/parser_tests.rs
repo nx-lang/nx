@@ -1,12 +1,15 @@
 //! Comprehensive parser tests for NX syntax.
 
+mod tree_helpers;
+
 use nx_diagnostics::render_diagnostics_cli;
-use nx_syntax::{parse_file, parse_str, SyntaxKind, SyntaxNode};
+use nx_syntax::{parse_file, parse_str, SyntaxKind};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
+use tree_helpers::{contains_kind, count_kind, find_first_kind};
 
 /// Helper to resolve test fixture paths (works from both crate and workspace root)
 fn fixture_path(relative: &str) -> PathBuf {
@@ -18,14 +21,6 @@ fn fixture_path(relative: &str) -> PathBuf {
     } else {
         from_workspace
     }
-}
-
-fn contains_kind(node: &SyntaxNode, kind: SyntaxKind) -> bool {
-    if node.kind() == kind {
-        return true;
-    }
-
-    node.children().any(|child| contains_kind(&child, kind))
 }
 
 // ============================================================================
@@ -559,7 +554,11 @@ fn test_parse_conditionals() {
         result.is_ok(),
         "Should parse conditional expressions without errors"
     );
-    assert!(result.tree.is_some());
+    let root = result.root().expect("Should have root node");
+    assert!(
+        contains_kind(&root, SyntaxKind::ELEMENTS_BRACED_EXPRESSION),
+        "Element conditionals should use elements braced expression nodes"
+    );
 }
 
 #[test]
@@ -574,8 +573,8 @@ fn test_parse_markup_interpolation_items() {
 
     let root = result.root().expect("Should have root node");
     assert!(
-        contains_kind(&root, SyntaxKind::INTERPOLATION_EXPRESSION),
-        "Interpolation expression should appear in the markup tree"
+        contains_kind(&root, SyntaxKind::VALUES_BRACED_EXPRESSION),
+        "Values braced expression should appear in the markup tree"
     );
 }
 
@@ -591,12 +590,279 @@ fn test_parse_text_elements_and_embed_interpolation() {
 
     let root = result.root().expect("Should have root node");
     assert!(
-        contains_kind(&root, SyntaxKind::EMBED_INTERPOLATION_EXPRESSION),
-        "Expected embed interpolation parsed from @{{...}}"
+        contains_kind(&root, SyntaxKind::EMBED_BRACED_EXPRESSION),
+        "Expected embed braced expression parsed from @{{...}}"
     );
     assert!(
         contains_kind(&root, SyntaxKind::RAW_TEXT_RUN),
         "Expected raw text run inside raw text elements"
+    );
+}
+
+#[test]
+fn test_parse_braced_value_sequence_fixture() {
+    let path = fixture_path("valid/braced-value-sequences.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(
+        result.is_ok(),
+        "Braced value sequence fixture should parse. Errors: {:?}",
+        result.errors
+    );
+
+    let root = result.root().expect("Should have root node");
+    assert!(
+        contains_kind(&root, SyntaxKind::VALUES_BRACED_EXPRESSION),
+        "Expected plain braced value sequences in the fixture"
+    );
+    assert!(
+        contains_kind(&root, SyntaxKind::EMBED_BRACED_EXPRESSION),
+        "Expected embed braced value sequences in the fixture"
+    );
+    assert!(
+        contains_kind(&root, SyntaxKind::VALUE_LIST_ITEM_EXPRESSION),
+        "Expected value list item nodes in the fixture"
+    );
+}
+
+#[test]
+fn test_parse_space_delimited_braced_lists() {
+    let source = r#"
+let single = {item}
+let items = {first second third}
+"#;
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "Space-delimited braced value lists should parse. Errors: {:?}",
+        result.errors
+    );
+
+    let root = result.root().expect("Should have root node");
+    let braced_count = count_kind(&root, SyntaxKind::VALUES_BRACED_EXPRESSION);
+    assert_eq!(
+        braced_count, 2,
+        "Expected both singleton and list braced expressions"
+    );
+
+    let list_item_count = count_kind(&root, SyntaxKind::VALUE_LIST_ITEM_EXPRESSION);
+    assert!(
+        list_item_count >= 4,
+        "Expected singleton and list brace items to be represented, found {}",
+        list_item_count
+    );
+}
+
+#[test]
+fn test_parse_text_and_embed_braced_lists() {
+    let source = r#"
+<Root>
+  <message:>
+    Hello {first second}
+  </message>
+
+  <markdown:text>
+    Welcome @{user title}
+  </markdown>
+</Root>
+"#;
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "Text/embed braced value lists should parse. Errors: {:?}",
+        result.errors
+    );
+
+    let root = result.root().expect("Should have root node");
+    assert!(
+        contains_kind(&root, SyntaxKind::VALUES_BRACED_EXPRESSION),
+        "Text content should include values braced expressions"
+    );
+    assert!(
+        contains_kind(&root, SyntaxKind::EMBED_BRACED_EXPRESSION),
+        "Embed text content should include embed braced expressions"
+    );
+}
+
+#[test]
+fn test_parse_singleton_binary_braced_expression() {
+    let source = "let arithmetic = {a - b}";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "Singleton binary braced expression should parse. Errors: {:?}",
+        result.errors
+    );
+
+    let root = result.root().expect("Should have root node");
+    let braced = find_first_kind(&root, SyntaxKind::VALUES_BRACED_EXPRESSION)
+        .expect("Expected values braced expression");
+    assert!(
+        contains_kind(&braced, SyntaxKind::BINARY_EXPRESSION),
+        "Singleton braces should still allow binary expressions without forcing list syntax"
+    );
+}
+
+#[test]
+fn test_parse_singleton_call_expression_braced_expression() {
+    let source = "let value = {double(add(n, 1))}";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "Singleton call expression in braces should parse. Errors: {:?}",
+        result.errors
+    );
+
+    let root = result.root().expect("Should have root node");
+    let braced = find_first_kind(&root, SyntaxKind::VALUES_BRACED_EXPRESSION)
+        .expect("Expected values braced expression");
+    assert!(
+        count_kind(&braced, SyntaxKind::CALL_EXPRESSION) >= 2,
+        "Singleton call braces should preserve both the outer and inner call expressions"
+    );
+}
+
+#[test]
+fn test_parse_parenthesized_binary_list_item() {
+    let source = "let items = {(a - b) c}";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "Parenthesized binary list items should parse. Errors: {:?}",
+        result.errors
+    );
+
+    let root = result.root().expect("Should have root node");
+    let braced = find_first_kind(&root, SyntaxKind::VALUES_BRACED_EXPRESSION)
+        .expect("Expected values braced expression");
+    let list_item_count = braced
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::VALUE_LIST_ITEM_EXPRESSION)
+        .count();
+    assert_eq!(
+        list_item_count, 2,
+        "Expected two list items in the parenthesized binary list"
+    );
+}
+
+#[test]
+fn test_parse_parenthesized_prefix_unary_list_item() {
+    let source = "let items = {(-x) y}";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "Parenthesized prefix-unary list items should parse. Errors: {:?}",
+        result.errors
+    );
+
+    let root = result.root().expect("Should have root node");
+    let braced = find_first_kind(&root, SyntaxKind::VALUES_BRACED_EXPRESSION)
+        .expect("Expected values braced expression");
+    let list_item_count = braced
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::VALUE_LIST_ITEM_EXPRESSION)
+        .count();
+    assert_eq!(
+        list_item_count, 2,
+        "Expected two list items in the parenthesized prefix-unary list"
+    );
+    assert!(
+        contains_kind(&braced, SyntaxKind::PREFIX_UNARY_EXPRESSION),
+        "Expected prefix unary expression to remain inside the parenthesized list item"
+    );
+}
+
+#[test]
+fn test_parse_rejects_unparenthesized_binary_list_item() {
+    let path = fixture_path("invalid/braced-value-sequence-requires-parens.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(
+        !result.is_ok(),
+        "Non-parenthesized binary list items should fail to parse"
+    );
+    assert!(
+        !result.errors.is_empty(),
+        "Expected parse errors for non-parenthesized binary list items"
+    );
+}
+
+#[test]
+fn test_parse_rejects_unparenthesized_prefix_unary_list_item() {
+    let source = "let items = {-x y}";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        !result.is_ok(),
+        "Non-parenthesized prefix-unary list items should fail to parse"
+    );
+    assert!(
+        !result.errors.is_empty(),
+        "Expected parse errors for non-parenthesized prefix-unary list items"
+    );
+}
+
+#[test]
+fn test_parse_embed_braced_element_list() {
+    let source = r#"
+<Root>
+  <markdown:text>@{<A/> <B/>}</markdown>
+</Root>
+"#;
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "Embed braced element lists should parse. Errors: {:?}",
+        result.errors
+    );
+
+    let root = result.root().expect("Should have root node");
+    let embed_braced = find_first_kind(&root, SyntaxKind::EMBED_BRACED_EXPRESSION)
+        .expect("Expected embed braced expression");
+    let list_item_count = embed_braced
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::VALUE_LIST_ITEM_EXPRESSION)
+        .count();
+    assert_eq!(
+        list_item_count, 2,
+        "Expected two list items in the embed braced element list"
+    );
+}
+
+#[test]
+fn test_parse_rejects_nested_braced_value_sequences() {
+    let source = "let items = {{a b} {c d}}";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        !result.is_ok(),
+        "Nested braced value sequences should fail to parse until the grammar allows them explicitly"
+    );
+    assert!(
+        !result.errors.is_empty(),
+        "Expected parse errors for nested braced value sequences"
+    );
+}
+
+#[test]
+fn test_parse_rejects_empty_braced_expression() {
+    let source = "let items = {}";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        !result.is_ok(),
+        "Empty braced expressions should fail to parse"
+    );
+    assert!(
+        !result.errors.is_empty(),
+        "Expected parse errors for empty braced expressions"
     );
 }
 
@@ -677,15 +943,6 @@ fn test_text_child_element_nested() {
     );
 
     let root = result.root().expect("Should have root node");
-
-    // Count text_child_element nodes - should have at least 2 (b and i)
-    fn count_kind(node: &SyntaxNode, kind: SyntaxKind) -> usize {
-        let mut count = if node.kind() == kind { 1 } else { 0 };
-        for child in node.children() {
-            count += count_kind(&child, kind);
-        }
-        count
-    }
 
     let text_child_count = count_kind(&root, SyntaxKind::TEXT_CHILD_ELEMENT);
     assert!(

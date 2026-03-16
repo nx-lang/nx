@@ -28,6 +28,8 @@ module.exports = grammar({
     [$.value_if_expression, $.elements_if_expression],
     [$.property_list_if_expression],
     [$.value_expression, $.elements_expression],
+    [$.value_expression, $.value_list_item_expression],
+    [$.value_expression, $._value_list_expression],
     [$.elements_expression],
     [$.property_list],
     [$.property_list_if_condition_arm],
@@ -318,38 +320,42 @@ module.exports = grammar({
     rhs_expression: $ => choice(
       $.element,
       $.literal,
-      $.interpolation_expression,
+      $.values_braced_expression,
     ),
 
-    interpolation_expression: $ => seq(
+    values_braced_expression: $ => seq(
       '{',
-      $.value_expression,
+      choice(
+        prec.dynamic(2, $.value_expression),
+        prec.dynamic(1, $._value_list_expression),
+      ),
       '}',
     ),
 
-    value_expression: $ => choice(
+    // Lists require at least two items so `{value}` stays on the singleton
+    // `value_expression` path instead of becoming an ambiguous one-item list.
+    _value_list_expression: $ => prec.dynamic(1, seq(
+      $.value_list_item_expression,
+      repeat1($.value_list_item_expression),
+    )),
+
+    value_list_item_expression: $ => choice(
       $.element,
       $.value_if_expression,
       $.value_for_expression,
-      $.value_expr,
-    ),
-
-    // Pratt-parsed expressions
-    value_expr: $ => choice(
-      // Primary expressions
+      $.call_expression,
+      $.member_access_expression,
       $.literal,
       $.identifier_expression,
       $.unit_literal,
       $.parenthesized_expression,
+    ),
 
-      // Binary expressions
+    value_expression: $ => choice(
+      $.value_list_item_expression,
       $.conditional_expression,
-      $.binary_expression,
       $.prefix_unary_expression,
-
-      // Postfix expressions
-      $.call_expression,
-      $.member_access_expression,
+      $.binary_expression,
     ),
 
     identifier_expression: $ => $.identifier,
@@ -403,7 +409,7 @@ module.exports = grammar({
 
     call_expression: $ => prec.left(140, seq(
       field('callee', $.value_expression),
-      '(',
+      token.immediate('('),
       optional(seq(
         $.value_expression,
         repeat(seq(',', $.value_expression)),
@@ -452,14 +458,10 @@ module.exports = grammar({
     value_if_simple_expression: $ => seq(
       'if',
       field('condition', $.value_expression),
-      '{',
-      field('then', $.value_expression),
-      '}',
+      field('then', $.values_braced_expression),
       optional(seq(
         'else',
-        '{',
-        field('else', $.value_expression),
-        '}',
+        field('else', $.values_braced_expression),
       )),
     ),
 
@@ -472,7 +474,10 @@ module.exports = grammar({
       optional(seq(
         'else',
         '=>',
-        field('else', $.value_expression),
+        field('else', choice(
+          $.value_expression,
+          $.values_braced_expression,
+        )),
       )),
       '}',
     ),
@@ -481,7 +486,10 @@ module.exports = grammar({
       $.pattern,
       repeat(seq(',', $.pattern)),
       '=>',
-      $.value_expression,
+      field('body', choice(
+        $.value_expression,
+        $.values_braced_expression,
+      )),
     ),
 
     value_if_condition_list_expression: $ => seq(
@@ -491,7 +499,10 @@ module.exports = grammar({
       optional(seq(
         'else',
         '=>',
-        field('else', $.value_expression),
+        field('else', choice(
+          $.value_expression,
+          $.values_braced_expression,
+        )),
       )),
       '}',
     ),
@@ -499,7 +510,10 @@ module.exports = grammar({
     value_if_condition_arm: $ => seq(
       field('condition', $.value_expression),
       '=>',
-      field('body', $.value_expression),
+      field('body', choice(
+        $.value_expression,
+        $.values_braced_expression,
+      )),
     ),
 
     // ===== Value For Expressions =====
@@ -509,9 +523,7 @@ module.exports = grammar({
       optional(seq(',', field('index', $.identifier))),
       'in',
       field('iterable', $.value_expression),
-      '{',
-      field('body', $.value_expression),
-      '}',
+      field('body', $.values_braced_expression),
     ),
 
     // ===== Elements Expression =====
@@ -519,8 +531,14 @@ module.exports = grammar({
       $.element,
       $.elements_if_expression,
       $.elements_for_expression,
-      $.interpolation_expression,
+      $.values_braced_expression,
     )),
+
+    elements_braced_expression: $ => seq(
+      '{',
+      $.elements_expression,
+      '}',
+    ),
 
     elements_if_expression: $ => choice(
       $.elements_if_simple_expression,
@@ -531,14 +549,10 @@ module.exports = grammar({
     elements_if_simple_expression: $ => seq(
       'if',
       field('condition', $.value_expression),
-      '{',
-      field('then', $.elements_expression),
-      '}',
+      field('then', $.elements_braced_expression),
       optional(seq(
         'else',
-        '{',
-        field('else', $.elements_expression),
-        '}',
+        field('else', $.elements_braced_expression),
       )),
     ),
 
@@ -551,7 +565,10 @@ module.exports = grammar({
       optional(seq(
         'else',
         '=>',
-        field('else', $.elements_expression),
+        field('else', choice(
+          $.element,
+          $.elements_braced_expression,
+        )),
       )),
       '}',
     ),
@@ -560,7 +577,10 @@ module.exports = grammar({
       $.pattern,
       repeat(seq(',', $.pattern)),
       '=>',
-      $.elements_expression,
+      field('body', choice(
+        $.element,
+        $.elements_braced_expression,
+      )),
     ),
 
     elements_if_condition_list_expression: $ => seq(
@@ -570,7 +590,10 @@ module.exports = grammar({
       optional(seq(
         'else',
         '=>',
-        field('else', $.elements_expression),
+        field('else', choice(
+          $.element,
+          $.elements_braced_expression,
+        )),
       )),
       '}',
     ),
@@ -578,7 +601,10 @@ module.exports = grammar({
     elements_if_condition_arm: $ => seq(
       field('condition', $.value_expression),
       '=>',
-      field('body', $.elements_expression),
+      field('body', choice(
+        $.element,
+        $.elements_braced_expression,
+      )),
     ),
 
     // ===== Elements For Expression =====
@@ -588,9 +614,7 @@ module.exports = grammar({
       optional(seq(',', field('index', $.identifier))),
       'in',
       field('iterable', $.value_expression),
-      '{',
-      field('body', $.elements_expression),
-      '}',
+      field('body', $.elements_braced_expression),
     ),
 
     // ===== Elements (Markup) =====
@@ -740,7 +764,7 @@ module.exports = grammar({
     text_content: $ => repeat1(choice(
       $.text_run,
       $.text_child_element,
-      $.interpolation_expression,
+      $.values_braced_expression,
     )),
 
     // TextChildElement allows nested elements inside text content
@@ -764,12 +788,15 @@ module.exports = grammar({
 
     embed_text_content: $ => repeat1(choice(
       $.embed_text_run,
-      $.embed_interpolation_expression,
+      $.embed_braced_expression,
     )),
 
-    embed_interpolation_expression: $ => seq(
+    embed_braced_expression: $ => seq(
       '@{',
-      $.value_expression,
+      choice(
+        prec.dynamic(2, $.value_expression),
+        prec.dynamic(1, $._value_list_expression),
+      ),
       '}',
     ),
 

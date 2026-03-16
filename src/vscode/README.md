@@ -10,7 +10,7 @@ Basic syntax highlighting and language configuration for the NX language using a
   - Primitive types: string, int, long, float, double, bool, void, object
   - Numbers, strings (single/double), entities, operators
   - Markup elements and attributes, closing/self-closing tags
-  - Interpolations: `{ expr }`
+  - Braced value regions: `{ expr }`, space-delimited `{first second}`, and typed-text `@{first second}`
 - Language configuration: comments, bracket/auto-closing, simple indentation rules
 - Starter snippets
 
@@ -42,7 +42,7 @@ Basic syntax highlighting and language configuration for the NX language using a
 - `package.json` — Extension manifest (publisher: `nx-lang`, id: `nx-language`).
 - `syntaxes/nx.tmLanguage.json` — TextMate grammar for NX.
 - `language-configuration.json` — Comments, brackets, pairs.
-- `snippets/nx.json` — Handy snippets for elements, control-flow, and interpolation.
+- `snippets/nx.json` — Handy snippets for elements, control-flow, and braced value expressions.
 - `samples/` — Example NX files.
 
 ## Roadmap
@@ -71,4 +71,4 @@ Set the publisher to `nx-lang` and the extension ID to `nx-language` (already co
 
 ## Limitations
 
-- TextMate text blocks: `text-raw-block` scopes regions like `<tag:text raw> ... </tag>` while `text-typed-block` scopes typed text elements so their bodies stay flat text except for the `@{ … }` interpolation delimiter. The grammar still can’t easily host other embedded languages inside these sections, and completely preventing nested NX markup inside raw blocks would require more invasive rule restructuring.
+- TextMate text blocks: `text-raw-block` scopes regions like `<tag:text raw> ... </tag>` while `text-typed-block` scopes typed text elements so their bodies stay flat text except for the `@{ … }` braced value delimiter. The grammar still can’t easily host other embedded languages inside these sections, and completely preventing nested NX markup inside raw blocks would require more invasive rule restructuring.

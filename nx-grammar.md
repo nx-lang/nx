@@ -159,24 +159,35 @@ members.
 RhsExpression ::=
     Element
     | Literal
-    | InterpolationExpression
+    | ValuesBracedExpression
 
-InterpolationExpression  ::=
-    "{" ValueExpression "}"
+(* A braced expression can be a single value or muliple, space delimited *)
+ValuesBracedExpression ::=
+    "{" ValueExpressions "}"
 
-ValueExpression ::=
+ValuesExpression ::=
+    ( ValueExpression | (ValueListItemExpression)+ )
+
+(* Expressions that can appear in a space delimited list; other expressions need to have parens *)
+ValueListItemExpression ::=
     Element
     | Literal
     | Identifier
     | ValueIfExpression
     | ValueForExpression
-    | ConditionalExpression
-    | PrefixUnaryExpression
-    | BinaryExpression
     | MemberAccess
     | ParenFunctionCall
     | Unit
     | ParenthesizedExpression
+
+ValueExpression ::=
+    ValueListItemExpression
+    | ConditionalExpression
+    | PrefixUnaryExpression
+    | BinaryExpression
+
+ValueOrValuesBracedExpression ::=
+    ( ValueExpression | ValuesBracedExpression )
 
 ConditionalExpression ::=
     ValueExpression "?" ValueExpression ":" ValueExpression    (* right-associative *)
@@ -190,23 +201,23 @@ ValueIfExpression ::=
     | ValueIfConditionListExpression
 
 ValueIfSimpleExpression ::=
-    "if" ValueExpression "{" ValueExpression "}" ["else" "{" ValueExpression "}"]
+    "if" ValueExpression ValuesBracedExpression ["else" ValuesBracedExpression]
 
 ValueIfMatchExpression ::=
     "if" ValueExpression "is" "{"
-    ( Pattern {"," Pattern} "=>" ValueExpression )+
-    ["else" "=>" ValueExpression]
+    ( Pattern {"," Pattern} "=>" ValueOrValuesBracedExpression )+
+    ["else" "=>" ValueOrValuesBracedExpression]
     "}"
 
 ValueIfConditionListExpression ::=
     "if" "{"
-    ( ValueExpression "=>" ValueExpression )+
-    ["else" "=>" ValueExpression]
+    ( ValueExpression "=>" ValueOrValuesBracedExpression )+
+    ["else" "=>" ValueOrValuesBracedExpression]
     "}"
 
 ValueForExpression ::=
-    "for" Identifier "in" ValueExpression "{" ValueExpression "}"
-    | "for" Identifier "," Identifier "in" ValueExpression "{" ValueExpression "}"  (* With index *)
+    "for" Identifier "in" ValueExpression ValuesBracedExpression
+    | "for" Identifier "," Identifier "in" ValueExpression ValuesBracedExpression  (* With index *)
 
 PrefixUnaryExpression ::=
     ( "-" | "!" ) ValueExpression
@@ -239,7 +250,13 @@ Literal ::=
 ```ebnf
 (* list of elements, with if/for and interpolations allowed *)
 ElementsExpression ::=
-    ( Element | ElementsIfExpression | ElementsForExpression | InterpolationExpression )+
+    ( Element | ElementsIfExpression | ElementsForExpression | ValuesBracedExpression )+
+
+ElementsBracedExpression ::=
+    "{" ElementsExpression "}"
+
+ElementOrElementsBracedExpression ::=
+    Element | ElementBracedExpression
 
 ElementsIfExpression ::=
     ElementsIfSimpleExpression
@@ -247,23 +264,23 @@ ElementsIfExpression ::=
     | ElementsIfConditionListExpression
 
 ElementsIfSimpleExpression ::=
-    "if" ValueExpression "{" ElementsExpression "}" ["else" "{" ElementsExpression "}"]
+    "if" ValueExpression ElementsBracedExpression ["else" ElementsBracedExpression]
 
 ElementsIfMatchExpression ::=
     "if" ValueExpression "is" "{"
-    ( Pattern {"," Pattern} "=>" ElementsExpression )+
-    ["else" "=>" ElementsExpression]
+    ( Pattern {"," Pattern} "=>" ElementOrElementsBracedExpression )+
+    ["else" "=>" ElementOrElementsBracedExpression]
     "}"
 
 ElementsIfConditionListExpression ::=
     "if" "{"
-    ( ValueExpression "=>" ElementsExpression )+
-    ["else" "=>" ElementsExpression]
+    ( ValueExpression "=>" ElementOrElementsBracedExpression )+
+    ["else" "=>" ElementOrElementsBracedExpression]
     "}"
 
 ElementsForExpression ::=
-    "for" Identifier "in" ValueExpression "{" ElementsExpression "}"
-    | "for" Identifier "," Identifier "in" ValueExpression "{" ElementsExpression "}"  (* With index *)
+    "for" Identifier "in" ValueExpression ElementsBracedExpression
+    | "for" Identifier "," Identifier "in" ValueExpression ElementsBracedExpression  (* With index *)
 
 Element ::=
     "<" ElementName PropertyList "/>"
@@ -301,7 +318,7 @@ PropertyListIfConditionList ::=
     "}"
 
 TextContent ::=
-    ( TextRun | TextChildElement | InterpolationExpression )+
+    ( TextRun | TextChildElement | ValuesBracedExpression )+
 
 (* Text allows other text elements as children, without needing the ":" *)
 TextChildElement ::=
@@ -309,10 +326,10 @@ TextChildElement ::=
     | "<" ElementName PropertyList ">" TextContent "</" ElementName ">"
 
 EmbedTextContent ::=
-    ( EmbedTextRun | EmbedInterpolationExpression )+
+    ( EmbedTextRun | EmbedBracedExpression )+
 
-EmbedInterpolationExpression ::=
-    "@{" ValueExpression "}"
+EmbedBracedExpression ::=
+    "@{" (ValueExpression)+ "}"
 
 TextType ::=
     Identifier

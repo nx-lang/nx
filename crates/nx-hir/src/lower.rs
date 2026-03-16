@@ -242,6 +242,24 @@ impl LoweringContext {
         Self::find_module_path_node(node, "path").and_then(Self::lower_module_path)
     }
 
+    fn lower_sequence_expr_from_children(&mut self, node: SyntaxNode) -> ExprId {
+        let children: Vec<_> = node.children().collect();
+        match children.len() {
+            0 => self.error_expr(node.span()),
+            1 => self.lower_expr(children[0]),
+            _ => {
+                let elements = children
+                    .into_iter()
+                    .map(|child| self.lower_expr(child))
+                    .collect();
+                self.alloc_expr(Expr::Array {
+                    elements,
+                    span: node.span(),
+                })
+            }
+        }
+    }
+
     /// Lowers a SyntaxNode to an expression.
     pub fn lower_expr(&mut self, node: SyntaxNode) -> ExprId {
         if node.is_error() {
@@ -507,7 +525,7 @@ impl LoweringContext {
                 })
             }
 
-            SyntaxKind::ELEMENT => {
+            SyntaxKind::ELEMENT | SyntaxKind::TEXT_CHILD_ELEMENT => {
                 let span = node.span();
                 let element = self.lower_element(node);
 
@@ -578,19 +596,23 @@ impl LoweringContext {
                     .unwrap_or_else(|| self.error_expr(node.span()))
             }
 
-            SyntaxKind::INTERPOLATION_EXPRESSION => node
+            SyntaxKind::VALUES_BRACED_EXPRESSION | SyntaxKind::EMBED_BRACED_EXPRESSION => {
+                self.lower_sequence_expr_from_children(node)
+            }
+            SyntaxKind::ELEMENTS_BRACED_EXPRESSION => node
                 .children()
-                .find(|n| !matches!(n.kind(), SyntaxKind::LBRACE | SyntaxKind::RBRACE))
-                .map(|n| self.lower_expr(n))
+                .next()
+                .map(|child| self.lower_sequence_expr_from_children(child))
                 .unwrap_or_else(|| self.error_expr(node.span())),
-            SyntaxKind::EMBED_INTERPOLATION_EXPRESSION => node
+
+            SyntaxKind::VALUE_LIST_ITEM_EXPRESSION => node
                 .children()
-                .find(|n| !matches!(n.kind(), SyntaxKind::LBRACE | SyntaxKind::RBRACE))
+                .next()
                 .map(|n| self.lower_expr(n))
                 .unwrap_or_else(|| self.error_expr(node.span())),
 
             // For loop expression
-            SyntaxKind::VALUE_FOR_EXPRESSION => {
+            SyntaxKind::VALUE_FOR_EXPRESSION | SyntaxKind::ELEMENTS_FOR_EXPRESSION => {
                 // Get item identifier
                 let item = node
                     .child_by_field("item")
@@ -646,14 +668,14 @@ impl LoweringContext {
             }
 
             // Value if expression wrapper
-            SyntaxKind::VALUE_IF_EXPRESSION => node
+            SyntaxKind::VALUE_IF_EXPRESSION | SyntaxKind::ELEMENTS_IF_EXPRESSION => node
                 .children()
                 .next()
                 .map(|n| self.lower_expr(n))
                 .unwrap_or_else(|| self.error_expr(node.span())),
 
             // If-else expression: if condition { then } else { else }
-            SyntaxKind::VALUE_IF_SIMPLE_EXPRESSION => {
+            SyntaxKind::VALUE_IF_SIMPLE_EXPRESSION | SyntaxKind::ELEMENTS_IF_SIMPLE_EXPRESSION => {
                 let condition = node
                     .child_by_field("condition")
                     .map(|n| self.lower_expr(n))
@@ -676,14 +698,16 @@ impl LoweringContext {
 
             // Condition list expression: if { cond1 => expr1, cond2 => expr2, else => default }
             // We lower this to nested if-else expressions
-            SyntaxKind::VALUE_IF_CONDITION_LIST_EXPRESSION => {
+            SyntaxKind::VALUE_IF_CONDITION_LIST_EXPRESSION
+            | SyntaxKind::ELEMENTS_IF_CONDITION_LIST_EXPRESSION => {
                 // Collect all condition arms
                 let mut arms: Vec<(ExprId, ExprId)> = Vec::new();
                 let mut else_expr: Option<ExprId> = None;
 
                 for child in node.children() {
                     match child.kind() {
-                        SyntaxKind::VALUE_IF_CONDITION_ARM => {
+                        SyntaxKind::VALUE_IF_CONDITION_ARM
+                        | SyntaxKind::ELEMENTS_IF_CONDITION_ARM => {
                             let condition = child
                                 .child_by_field("condition")
                                 .map(|n| self.lower_expr(n))
@@ -721,7 +745,7 @@ impl LoweringContext {
             // Match expression: if scrutinee is { pattern => expr, ... }
             // We lower this to: let $match = scrutinee in (nested if-else with equality checks)
             // This ensures the scrutinee is evaluated only once.
-            SyntaxKind::VALUE_IF_MATCH_EXPRESSION => {
+            SyntaxKind::VALUE_IF_MATCH_EXPRESSION | SyntaxKind::ELEMENTS_IF_MATCH_EXPRESSION => {
                 // Get the scrutinee expression
                 let scrutinee_expr = node
                     .child_by_field("scrutinee")
@@ -737,7 +761,10 @@ impl LoweringContext {
                 let mut else_expr: Option<ExprId> = None;
 
                 for child in node.children() {
-                    if child.kind() == SyntaxKind::VALUE_IF_MATCH_ARM {
+                    if matches!(
+                        child.kind(),
+                        SyntaxKind::VALUE_IF_MATCH_ARM | SyntaxKind::ELEMENTS_IF_MATCH_ARM
+                    ) {
                         // Each arm can have multiple patterns (comma-separated)
                         let mut patterns: Vec<ExprId> = Vec::new();
                         let mut body: Option<ExprId> = None;
@@ -1052,22 +1079,38 @@ impl LoweringContext {
 
     /// Recursively extracts element children from content nodes.
     ///
-    /// Content can be wrapped in MIXED_CONTENT, ELEMENTS_EXPRESSION, etc.
-    /// This recursively searches for actual ELEMENT nodes.
-    fn lower_element_children(&mut self, node: SyntaxNode, children: &mut Vec<crate::ElementId>) {
+    /// Content can be wrapped in element/text containers. This preserves expression-producing
+    /// children instead of only literal nested elements.
+    fn lower_element_children(&mut self, node: SyntaxNode, children: &mut Vec<ExprId>) {
         match node.kind() {
-            SyntaxKind::ELEMENT => {
-                let child_element = self.lower_element(node);
-                let child_id = self.module.alloc_element(child_element);
-                children.push(child_id);
+            SyntaxKind::ELEMENT
+            | SyntaxKind::TEXT_CHILD_ELEMENT
+            | SyntaxKind::VALUES_BRACED_EXPRESSION
+            | SyntaxKind::ELEMENTS_BRACED_EXPRESSION
+            | SyntaxKind::EMBED_BRACED_EXPRESSION
+            | SyntaxKind::VALUE_IF_EXPRESSION
+            | SyntaxKind::VALUE_IF_SIMPLE_EXPRESSION
+            | SyntaxKind::VALUE_IF_MATCH_EXPRESSION
+            | SyntaxKind::VALUE_IF_CONDITION_LIST_EXPRESSION
+            | SyntaxKind::VALUE_FOR_EXPRESSION
+            | SyntaxKind::ELEMENTS_IF_EXPRESSION
+            | SyntaxKind::ELEMENTS_IF_SIMPLE_EXPRESSION
+            | SyntaxKind::ELEMENTS_IF_MATCH_EXPRESSION
+            | SyntaxKind::ELEMENTS_IF_CONDITION_LIST_EXPRESSION
+            | SyntaxKind::ELEMENTS_FOR_EXPRESSION => {
+                children.push(self.lower_expr(node));
             }
             // These are container nodes - recurse into their children
-            SyntaxKind::MIXED_CONTENT | SyntaxKind::ELEMENTS_EXPRESSION | SyntaxKind::CONTENT => {
+            SyntaxKind::MIXED_CONTENT
+            | SyntaxKind::ELEMENTS_EXPRESSION
+            | SyntaxKind::CONTENT
+            | SyntaxKind::TEXT_CONTENT
+            | SyntaxKind::EMBED_TEXT_CONTENT => {
                 for child in node.children() {
                     self.lower_element_children(child, children);
                 }
             }
-            // Skip other nodes (text, interpolations, etc.)
+            // Intentionally skip plain text runs until HIR grows a first-class text child model.
             _ => {}
         }
     }
@@ -1098,15 +1141,18 @@ impl LoweringContext {
 
                     // The value can be various expression types
                     let value = child
-                        .children()
-                        .find(|n| {
-                            matches!(
-                                n.kind(),
-                                SyntaxKind::STRING_LITERAL
-                                    | SyntaxKind::INTERPOLATION_EXPRESSION
-                                    | SyntaxKind::VALUE_EXPRESSION
-                                    | SyntaxKind::RHS_EXPRESSION
-                            )
+                        .child_by_field("value")
+                        .or_else(|| {
+                            child.children().find(|n| {
+                                matches!(
+                                    n.kind(),
+                                    SyntaxKind::STRING_LITERAL
+                                        | SyntaxKind::VALUES_BRACED_EXPRESSION
+                                        | SyntaxKind::ELEMENT
+                                        | SyntaxKind::VALUE_EXPRESSION
+                                        | SyntaxKind::RHS_EXPRESSION
+                                )
+                            })
                         })
                         .map(|n| self.lower_expr(n))
                         .unwrap_or_else(|| self.error_expr(child.span()));
@@ -1220,6 +1266,13 @@ pub fn lower(root: SyntaxNode, source_id: SourceId) -> Module {
 mod tests {
     use super::*;
     use nx_syntax::parse_str;
+    mod tree_helpers {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../nx-syntax/tests/tree_helpers.rs"
+        ));
+    }
+    use tree_helpers::{collect_kinds, find_first_kind};
 
     #[test]
     fn test_lowering_context_creation() {
@@ -1695,20 +1748,8 @@ import "./controls.nx" as UI
         let tree = parse_result.tree.expect("Should parse typed text element");
         let root = tree.root();
 
-        fn find_kind(node: SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {
-            if node.kind() == kind {
-                return Some(node);
-            }
-            for child in node.children() {
-                if let Some(found) = find_kind(child, kind) {
-                    return Some(found);
-                }
-            }
-            None
-        }
-
-        let embed_interp = find_kind(root, SyntaxKind::EMBED_INTERPOLATION_EXPRESSION)
-            .expect("expected embed interpolation node");
+        let embed_interp = find_first_kind(&root, SyntaxKind::EMBED_BRACED_EXPRESSION)
+            .expect("expected embed brace node");
 
         let mut ctx = LoweringContext::new(SourceId::new(0));
         let expr_id = ctx.lower_expr(embed_interp);
@@ -1716,8 +1757,116 @@ import "./controls.nx" as UI
 
         match expr {
             Expr::Ident(name) => assert_eq!(name.as_str(), "user"),
+            other => panic!("Expected identifier from embed brace, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_lower_multi_item_embed_braced_expression_to_array() {
+        let source = r#"
+            <Root>
+              <markdown:text>@{user title}</markdown:text>
+            </Root>
+        "#;
+        let parse_result = parse_str(source, "text-list.nx");
+        let tree = parse_result.tree.expect("Should parse typed text element");
+        let root = tree.root();
+
+        let embed_braced = find_first_kind(&root, SyntaxKind::EMBED_BRACED_EXPRESSION)
+            .expect("expected embed brace node");
+
+        let mut ctx = LoweringContext::new(SourceId::new(0));
+        let expr_id = ctx.lower_expr(embed_braced);
+        let expr = ctx.module.expr(expr_id);
+
+        match expr {
+            Expr::Array { elements, .. } => assert_eq!(elements.len(), 2),
             other => panic!(
-                "Expected identifier from embed interpolation, got {:?}",
+                "Expected array from multi-item embed brace, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn test_lower_multi_item_embed_braced_expression_with_elements_to_array() {
+        let source = r#"
+            <Root>
+              <markdown:text>@{<A/> <B/>}</markdown>
+            </Root>
+        "#;
+        let parse_result = parse_str(source, "text-elements.nx");
+        assert!(
+            parse_result.errors.is_empty(),
+            "Expected element-valued embed brace to parse, got {:?}",
+            parse_result.errors
+        );
+        let tree = parse_result.tree.expect("Should parse typed text element");
+        let root = tree.root();
+
+        let embed_braced = find_first_kind(&root, SyntaxKind::EMBED_BRACED_EXPRESSION)
+            .expect("expected embed brace node");
+
+        let mut ctx = LoweringContext::new(SourceId::new(0));
+        let expr_id = ctx.lower_expr(embed_braced);
+        let expr = ctx.module.expr(expr_id);
+
+        match expr {
+            Expr::Array { elements, .. } => {
+                assert_eq!(elements.len(), 2);
+                for element in elements {
+                    assert!(
+                        matches!(ctx.module.expr(*element), Expr::Element { .. }),
+                        "Expected embed brace element item, got {:?}",
+                        ctx.module.expr(*element)
+                    );
+                }
+            }
+            other => panic!(
+                "Expected array from element-valued embed brace, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn test_lower_values_braced_expression_preserves_source_arity() {
+        let source = r#"
+            let single = {item}
+            let many = {first second}
+        "#;
+        let parse_result = parse_str(source, "values-braces.nx");
+        let tree = parse_result.tree.expect("Should parse braced values");
+        let root = tree.root();
+
+        let mut braced_nodes = Vec::new();
+        collect_kinds(
+            &root,
+            SyntaxKind::VALUES_BRACED_EXPRESSION,
+            &mut braced_nodes,
+        );
+        assert_eq!(
+            braced_nodes.len(),
+            2,
+            "Expected singleton and multi-item brace nodes"
+        );
+
+        let mut ctx = LoweringContext::new(SourceId::new(0));
+        let single_expr = ctx.lower_expr(braced_nodes[0]);
+        let many_expr = ctx.lower_expr(braced_nodes[1]);
+
+        match ctx.module.expr(single_expr) {
+            Expr::Ident(name) => assert_eq!(name.as_str(), "item"),
+            other => panic!(
+                "Expected singleton brace to lower to inner expression, got {:?}",
+                other
+            ),
+        }
+
+        match ctx.module.expr(many_expr) {
+            Expr::Array { elements, .. } => assert_eq!(elements.len(), 2),
+            other => panic!(
+                "Expected multi-item brace to lower to array, got {:?}",
                 other
             ),
         }
@@ -1779,13 +1928,119 @@ import "./controls.nx" as UI
                         assert_eq!(elem.children.len(), 1);
 
                         // Check nested button element
-                        let child = module.element(elem.children[0]);
-                        assert_eq!(child.tag.as_str(), "button");
+                        match module.expr(elem.children[0]) {
+                            Expr::Element { element, .. } => {
+                                let child = module.element(*element);
+                                assert_eq!(child.tag.as_str(), "button");
+                            }
+                            other => {
+                                panic!("Expected nested element child expression, got {:?}", other)
+                            }
+                        }
                     }
                     _ => panic!("Expected Element expression as body"),
                 }
             }
             _ => panic!("Expected Function item for implicit root"),
+        }
+    }
+
+    #[test]
+    fn test_lower_dynamic_element_children_are_preserved() {
+        let source = r#"
+            let <Panel flag:bool items:object /> = <div>
+              {<A /> <B />}
+              if flag { <Shown /> } else { <Hidden /> }
+              for item in items { <Row /> }
+            </div>
+        "#;
+        let parse_result = parse_str(source, "dynamic-children.nx");
+        let tree = parse_result.tree.expect("Should parse dynamic children");
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        let func = match &module.items()[0] {
+            Item::Function(func) => func,
+            other => panic!("Expected function item, got {:?}", other),
+        };
+
+        let body_expr = module.expr(func.body);
+        let Expr::Element { element, .. } = body_expr else {
+            panic!("Expected element body, got {:?}", body_expr);
+        };
+
+        let element = module.element(*element);
+        assert_eq!(element.children.len(), 3);
+
+        match module.expr(element.children[0]) {
+            Expr::Array { elements, .. } => {
+                assert_eq!(elements.len(), 2);
+                for child in elements {
+                    assert!(
+                        matches!(module.expr(*child), Expr::Element { .. }),
+                        "Expected element in braced child list, got {:?}",
+                        module.expr(*child)
+                    );
+                }
+            }
+            other => panic!(
+                "Expected braced child list to lower to array, got {:?}",
+                other
+            ),
+        }
+
+        match module.expr(element.children[1]) {
+            Expr::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                assert!(matches!(module.expr(*then_branch), Expr::Element { .. }));
+                let else_branch = else_branch.as_ref().expect("Expected else branch");
+                assert!(matches!(module.expr(*else_branch), Expr::Element { .. }));
+            }
+            other => panic!("Expected conditional child expression, got {:?}", other),
+        }
+
+        match module.expr(element.children[2]) {
+            Expr::For { body, .. } => {
+                assert!(matches!(module.expr(*body), Expr::Element { .. }));
+            }
+            other => panic!("Expected for child expression, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_lower_scalar_braced_child_expression_is_preserved() {
+        let source = r#"
+            let <Panel count:int /> = <div>{count}</div>
+        "#;
+        let parse_result = parse_str(source, "scalar-child.nx");
+        let tree = parse_result
+            .tree
+            .expect("Should parse scalar child content");
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        let func = match &module.items()[0] {
+            Item::Function(func) => func,
+            other => panic!("Expected function item, got {:?}", other),
+        };
+
+        let body_expr = module.expr(func.body);
+        let Expr::Element { element, .. } = body_expr else {
+            panic!("Expected element body, got {:?}", body_expr);
+        };
+
+        let element = module.element(*element);
+        assert_eq!(element.children.len(), 1);
+
+        match module.expr(element.children[0]) {
+            Expr::Ident(name) => assert_eq!(name.as_str(), "count"),
+            other => panic!(
+                "Expected scalar child expression to be preserved, got {:?}",
+                other
+            ),
         }
     }
 

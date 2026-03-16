@@ -4,6 +4,10 @@ use crate::context::{ExecutionContext, ResourceLimits};
 use crate::error::{RuntimeError, RuntimeErrorKind};
 use crate::value::Value;
 use nx_hir::{ast, ElementId, ExprId, Function, Item, Module, Name};
+use nx_types::{
+    common_supertype, is_object_type, resolve_type_ref_with, resolve_type_ref_with_seen,
+    type_satisfies_expected, Type,
+};
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 use smol_str::SmolStr;
@@ -116,13 +120,26 @@ impl Interpreter {
         // T011: Create execution context
         let mut ctx = ExecutionContext::with_limits(limits);
 
+        let coerced_args =
+            self.coerce_arguments_for_params(module, args, &function.params, "function call")?;
+
         // T012: Bind parameters to argument values
-        for (param, arg) in function.params.iter().zip(args.iter()) {
+        for (param, arg) in function.params.iter().zip(coerced_args.iter()) {
             ctx.define_variable(SmolStr::new(param.name.as_str()), arg.clone());
         }
 
         // Execute the function body
-        self.eval_expr(module, &mut ctx, function.body)
+        let result = self.eval_expr(module, &mut ctx, function.body)?;
+        if let Some(return_type) = function.return_type.as_ref() {
+            self.coerce_value_to_type(
+                module,
+                result,
+                return_type,
+                &format!("return value for '{}'", function.name.as_str()),
+            )
+        } else {
+            Ok(result)
+        }
     }
 
     /// Find a function by name in the module
@@ -508,12 +525,32 @@ impl Interpreter {
         let call_frame = crate::error::CallFrame::new(SmolStr::new(func_name), None);
         ctx.push_call_frame(call_frame)?;
 
+        let coerced_args = self.coerce_arguments_for_params(
+            module,
+            arg_values,
+            &function.params,
+            "function call",
+        )?;
+
         ctx.push_scope();
-        for (param, arg) in function.params.iter().zip(arg_values.iter()) {
+        for (param, arg) in function.params.iter().zip(coerced_args.iter()) {
             ctx.define_variable(SmolStr::new(param.name.as_str()), arg.clone());
         }
 
-        let result = self.eval_expr(module, ctx, function.body);
+        let result = self
+            .eval_expr(module, ctx, function.body)
+            .and_then(|value| {
+                if let Some(return_type) = function.return_type.as_ref() {
+                    self.coerce_value_to_type(
+                        module,
+                        value,
+                        return_type,
+                        &format!("return value for '{}'", function.name.as_str()),
+                    )
+                } else {
+                    Ok(value)
+                }
+            });
 
         ctx.pop_scope();
         ctx.pop_call_frame();
@@ -541,6 +578,12 @@ impl Interpreter {
 
         let mut overrides = FxHashMap::default();
         for (field, value) in record_def.properties.iter().zip(arg_values.into_iter()) {
+            let value = self.coerce_value_to_type(
+                module,
+                value,
+                &field.ty,
+                &format!("record field '{}'", field.name.as_str()),
+            )?;
             overrides.insert(SmolStr::new(field.name.as_str()), value);
         }
 
@@ -562,37 +605,20 @@ impl Interpreter {
             fields.insert(SmolStr::new(prop.key.as_str()), value);
         }
 
-        let mut child_values = Vec::with_capacity(element.children.len());
-        for child_id in &element.children {
-            child_values.push(self.eval_element_expr(module, ctx, *child_id)?);
-        }
+        let child_values = self.eval_child_expressions(module, ctx, &element.children)?;
+        let normalized_children = self.normalize_child_values(child_values);
 
         if let Some(Item::Function(function)) = module.find_item(tag_name) {
-            let has_children_param = function
-                .params
-                .iter()
-                .any(|p| p.name.as_str() == "children");
-
-            if fields.contains_key("children") && !child_values.is_empty() {
-                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                    expected: "children passed either as a named property or as element body"
-                        .to_string(),
-                    actual: "both a children property and element body".to_string(),
-                    operation: "element function call".to_string(),
-                }));
-            }
-
-            if !has_children_param && !child_values.is_empty() {
-                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                    expected: "function without 'children' parameter".to_string(),
-                    actual: "element body content".to_string(),
-                    operation: "element function call".to_string(),
-                }));
-            }
-
-            if has_children_param && !fields.contains_key("children") {
-                fields.insert(SmolStr::new("children"), Value::Array(child_values));
-            }
+            self.inject_element_children_field(
+                &mut fields,
+                normalized_children,
+                function
+                    .params
+                    .iter()
+                    .any(|p| p.name.as_str() == "children"),
+                "function without 'children' parameter",
+                "element function call",
+            )?;
 
             if fields.len() != function.params.len() {
                 return Err(RuntimeError::new(
@@ -608,7 +634,12 @@ impl Interpreter {
             for param in &function.params {
                 match fields.remove(param.name.as_str()) {
                     Some(value) => {
-                        arg_values.push(value);
+                        arg_values.push(self.coerce_value_to_type(
+                            module,
+                            value,
+                            &param.ty,
+                            &format!("parameter '{}'", param.name.as_str()),
+                        )?);
                     }
                     None => {
                         return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
@@ -632,46 +663,235 @@ impl Interpreter {
         }
 
         if let Some(record_def) = self.resolve_record_definition(module, tag_name) {
-            let record_has_children_field = record_def
-                .properties
-                .iter()
-                .any(|p| p.name.as_str() == "children");
-
-            if fields.contains_key("children") && !child_values.is_empty() {
-                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                    expected: "children passed either as a named property or as element body"
-                        .to_string(),
-                    actual: "both a children property and element body".to_string(),
-                    operation: "element record call".to_string(),
-                }));
-            }
-
-            if !record_has_children_field && !child_values.is_empty() {
-                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                    expected: "record without 'children' field".to_string(),
-                    actual: "element body content".to_string(),
-                    operation: "element record call".to_string(),
-                }));
-            }
-
-            if record_has_children_field
-                && !fields.contains_key("children")
-                && !child_values.is_empty()
-            {
-                fields.insert(SmolStr::new("children"), Value::Array(child_values));
-            }
+            self.inject_element_children_field(
+                &mut fields,
+                normalized_children,
+                record_def
+                    .properties
+                    .iter()
+                    .any(|p| p.name.as_str() == "children"),
+                "record without 'children' field",
+                "element record call",
+            )?;
 
             return self.build_record_value(module, ctx, record_def.name.as_str(), fields);
         }
 
-        if !child_values.is_empty() && !fields.contains_key("children") {
-            fields.insert(SmolStr::new("children"), Value::Array(child_values));
+        if !fields.contains_key("children") {
+            if let Some(children_value) = normalized_children {
+                fields.insert(SmolStr::new("children"), children_value);
+            }
         }
 
         Ok(Value::Record {
             type_name: element.tag.clone(),
             fields,
         })
+    }
+
+    fn inject_element_children_field(
+        &self,
+        fields: &mut FxHashMap<SmolStr, Value>,
+        normalized_children: Option<Value>,
+        accepts_children: bool,
+        missing_children_expected: &str,
+        operation: &str,
+    ) -> Result<(), RuntimeError> {
+        let has_children = normalized_children.is_some();
+
+        if fields.contains_key("children") && has_children {
+            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: "children passed either as a named property or as element body"
+                    .to_string(),
+                actual: "both a children property and element body".to_string(),
+                operation: operation.to_string(),
+            }));
+        }
+
+        if !accepts_children && has_children {
+            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: missing_children_expected.to_string(),
+                actual: "element body content".to_string(),
+                operation: operation.to_string(),
+            }));
+        }
+
+        if accepts_children && !fields.contains_key("children") {
+            if let Some(children_value) = normalized_children {
+                fields.insert(SmolStr::new("children"), children_value);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn eval_child_expressions(
+        &self,
+        module: &Module,
+        ctx: &mut ExecutionContext,
+        child_exprs: &[ExprId],
+    ) -> Result<Vec<Value>, RuntimeError> {
+        let mut values = Vec::new();
+        for child_expr in child_exprs {
+            let value = self.eval_expr(module, ctx, *child_expr)?;
+            match value {
+                // Child arrays represent sibling child results from multi-item braces and
+                // element-producing control flow, so splice them into the parent child list.
+                Value::Array(items) => values.extend(items),
+                other => values.push(other),
+            }
+        }
+        Ok(values)
+    }
+
+    fn normalize_child_values(&self, child_values: Vec<Value>) -> Option<Value> {
+        match child_values.len() {
+            0 => None,
+            1 => child_values.into_iter().next(),
+            _ => Some(Value::Array(child_values)),
+        }
+    }
+
+    fn coerce_arguments_for_params(
+        &self,
+        module: &Module,
+        arg_values: Vec<Value>,
+        params: &[nx_hir::Param],
+        operation: &str,
+    ) -> Result<Vec<Value>, RuntimeError> {
+        let mut coerced = Vec::with_capacity(arg_values.len());
+        for (param, value) in params.iter().zip(arg_values.into_iter()) {
+            coerced.push(self.coerce_value_to_type(
+                module,
+                value,
+                &param.ty,
+                &format!("{} parameter '{}'", operation, param.name.as_str()),
+            )?);
+        }
+        Ok(coerced)
+    }
+
+    fn coerce_value_to_type(
+        &self,
+        module: &Module,
+        value: Value,
+        expected: &ast::TypeRef,
+        operation: &str,
+    ) -> Result<Value, RuntimeError> {
+        let expected_ty = self.runtime_type_from_type_ref(module, expected);
+        self.coerce_value_to_resolved_type(value, &expected_ty, operation)
+    }
+
+    fn coerce_value_to_resolved_type(
+        &self,
+        value: Value,
+        expected: &Type,
+        operation: &str,
+    ) -> Result<Value, RuntimeError> {
+        if let Type::Array(expected_item) = expected {
+            return match value {
+                Value::Array(values) => {
+                    let mut coerced = Vec::with_capacity(values.len());
+                    for item in values {
+                        coerced.push(self.coerce_value_to_resolved_type(
+                            item,
+                            expected_item,
+                            operation,
+                        )?);
+                    }
+                    Ok(Value::Array(coerced))
+                }
+                other => Ok(Value::Array(vec![self.coerce_value_to_resolved_type(
+                    other,
+                    expected_item,
+                    operation,
+                )?])),
+            };
+        }
+
+        if matches!(value, Value::Array(_)) && !is_object_type(expected) {
+            let actual_ty = self.runtime_type_of_value(&value);
+            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: expected.to_string(),
+                actual: format!("list {}", actual_ty),
+                operation: operation.to_string(),
+            }));
+        }
+
+        if self.value_matches_expected_type(&value, expected) {
+            Ok(value)
+        } else {
+            let actual_ty = self.runtime_type_of_value(&value);
+            Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: expected.to_string(),
+                actual: actual_ty.to_string(),
+                operation: operation.to_string(),
+            }))
+        }
+    }
+
+    fn value_matches_expected_type(&self, value: &Value, expected: &Type) -> bool {
+        if matches!(value, Value::Null) {
+            return matches!(expected, Type::Nullable(_)) || is_object_type(expected);
+        }
+
+        let actual_ty = self.runtime_type_of_value(value);
+        type_satisfies_expected(&actual_ty, expected)
+    }
+
+    fn runtime_type_of_value(&self, value: &Value) -> Type {
+        match value {
+            Value::Int32(_) => Type::i32(),
+            Value::Int(_) => Type::int(),
+            Value::Float32(_) => Type::f32(),
+            Value::Float(_) => Type::float(),
+            Value::String(_) => Type::string(),
+            Value::Boolean(_) => Type::bool(),
+            Value::Null => Type::nullable(Type::named("object")),
+            Value::Array(values) => {
+                if values.is_empty() {
+                    Type::array(Type::named("object"))
+                } else {
+                    let mut current = self.runtime_type_of_value(&values[0]);
+                    for value in values.iter().skip(1) {
+                        let value_ty = self.runtime_type_of_value(value);
+                        current = common_supertype(&current, &value_ty);
+                    }
+                    Type::array(current)
+                }
+            }
+            Value::EnumVariant { type_name, .. } => Type::named(type_name.clone()),
+            Value::Record { type_name, .. } => Type::named(type_name.clone()),
+        }
+    }
+
+    fn runtime_type_from_type_ref(&self, module: &Module, type_ref: &ast::TypeRef) -> Type {
+        resolve_type_ref_with(type_ref, &mut |name, seen| {
+            self.resolve_runtime_named_type(module, name, seen)
+        })
+    }
+
+    fn resolve_runtime_named_type(
+        &self,
+        module: &Module,
+        name: &Name,
+        seen: &mut FxHashSet<Name>,
+    ) -> Type {
+        if !seen.insert(name.clone()) {
+            return Type::named(name.clone());
+        }
+
+        let resolved = match module.find_item(name.as_str()) {
+            Some(Item::TypeAlias(alias)) => {
+                resolve_type_ref_with_seen(&alias.ty, seen, &mut |nested_name, nested_seen| {
+                    self.resolve_runtime_named_type(module, nested_name, nested_seen)
+                })
+            }
+            _ => Type::named(name.clone()),
+        };
+
+        seen.remove(name);
+        resolved
     }
 
     fn eval_member(
@@ -912,15 +1132,20 @@ impl Interpreter {
         };
 
         for prop in &record_def.properties {
-            if overrides.contains_key(prop.name.as_str()) {
-                continue;
-            }
-
-            let value = if let Some(default_expr) = prop.default {
+            let value = if let Some(value) = overrides.remove(prop.name.as_str()) {
+                value
+            } else if let Some(default_expr) = prop.default {
                 self.eval_expr(module, ctx, default_expr)?
             } else {
                 Value::Null
             };
+
+            let value = self.coerce_value_to_type(
+                module,
+                value,
+                &prop.ty,
+                &format!("record field '{}'", prop.name.as_str()),
+            )?;
             overrides.insert(SmolStr::new(prop.name.as_str()), value);
         }
 

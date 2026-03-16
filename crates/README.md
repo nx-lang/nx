@@ -132,7 +132,7 @@ See [../nx-rust-plan.md](../nx-rust-plan.md) for the complete implementation roa
 Example NX files for testing are available in [../examples/nx/](../examples/nx/):
 - `hello.nx` - Basic markup
 - `function.nx` - Function definitions with properties
-- `expressions.nx` - Binary, conditional, and interpolation expressions
+- `expressions.nx` - Binary, conditional, and braced value expressions
 - `conditionals.nx` - If/match/condition list expressions
 - `loops.nx` - For loops with indexing
 - `types.nx` - Type definitions and nullable/list types

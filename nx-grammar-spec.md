@@ -318,22 +318,44 @@ PropertyDefinition (AST: PropertyDefinitionSyntax)
 RhsExpression (AST: ExpressionSyntax; see mappings below)
 - RhsExpression → Element
 - RhsExpression → Literal
-- RhsExpression → InterpolationExpression
+- RhsExpression → ValuesBracedExpression
 
-InterpolationExpression (AST: InterpolationExpressionSyntax)
-- InterpolationExpression → LBRACE ValueExpression RBRACE
-  - fields: expr: ExpressionSyntax
+ValuesBracedExpression (AST: ValuesBracedExpressionSyntax)
+- ValuesBracedExpression → LBRACE ValueExpressions RBRACE
+  - fields: items: ExpressionSyntax[]
+
+ValueExpressions
+- ValueExpressions → ValueExpression
+- ValueExpressions → ValueListExpression
+
+ValueListExpression
+- ValueListExpression → ValueListItemExpression ValueListItemExpression+
+  - fields (on ValuesBracedExpressionSyntax): items: ExpressionSyntax[]
+
+ValueListItemExpression (AST: ExpressionSyntax)
+- ValueListItemExpression → Element
+- ValueListItemExpression → ValueIfExpression
+- ValueListItemExpression → ValueForExpression
+- ValueListItemExpression → ParenFunctionCall
+- ValueListItemExpression → MemberAccess
+- ValueListItemExpression → Literal
+- ValueListItemExpression → IDENTIFIER
+- ValueListItemExpression → Unit
+- ValueListItemExpression → ParenthesizedExpression
 
 ValueExpression (AST: ExpressionSyntax; Pratt-parsed for operators)
-- ValueExpression → Element
-- ValueExpression → ValueIfExpression
-- ValueExpression → ValueForExpression
-- ValueExpression → ParenFunctionCall
-- ValueExpression → ValueExpr
+- ValueExpression → ValueListItemExpression
+- ValueExpression → ConditionalExpression
+- ValueExpression → PrefixUnaryExpression
+- ValueExpression → BinaryExpression
 
 ValueExpr (parsed by Pratt; not a standalone AST node)
 - Primaries (nud): Literal | IDENTIFIER | Unit | ParenthesizedExpression
 - Postfix/infix handled via the operator table (including the conditional operator `?:` at precedence 20)
+
+ValueOrValuesBracedExpression
+- ValueOrValuesBracedExpression → ValueExpression
+- ValueOrValuesBracedExpression → ValuesBracedExpression
 
 ParenFunctionCall (AST: ParenFunctionCallExpressionSyntax)
 - ParenFunctionCall → ValueExpression LPAREN ParenFunctionCallArgumentListOpt RPAREN   (* parsed via Pratt entry at precedence 140; left-recursive form shown for clarity *)
@@ -368,43 +390,43 @@ ValueIfExpression (AST: ExpressionSyntax is a sum type)
 - ValueIfExpression → ValueIfConditionListExpression (ValueIfConditionListExpressionSyntax)
 
 ValueIfSimpleExpression (AST: ValueIfSimpleExpressionSyntax)
-- ValueIfSimpleExpression → IF ValueExpression LBRACE ValueExpression RBRACE ValueIfElseClauseOpt
-  - fields: condition: ExpressionSyntax, thenExpr: ExpressionSyntax, elseExpr?: ExpressionSyntax
+- ValueIfSimpleExpression → IF ValueExpression ValuesBracedExpression ValueIfElseClauseOpt
+  - fields: condition: ExpressionSyntax, thenExpr: ValuesBracedExpressionSyntax, elseExpr?: ValuesBracedExpressionSyntax
 
 ValueIfElseClauseOpt
-- ValueIfElseClauseOpt → ELSE LBRACE ValueExpression RBRACE
+- ValueIfElseClauseOpt → ELSE ValuesBracedExpression
 - ValueIfElseClauseOpt → ε
-  - fields (on ValueIfSimpleExpressionSyntax): elseExpr?: ExpressionSyntax
+  - fields (on ValueIfSimpleExpressionSyntax): elseExpr?: ValuesBracedExpressionSyntax
 
 ValueIfMatchExpression (AST: ValueIfMatchExpressionSyntax)
 - ValueIfMatchExpression → IF ValueExpression IS LBRACE ValueIfMatchArm+ ValueIfMatchElseOpt RBRACE
   - fields: scrutinee: ExpressionSyntax, arms: ValueIfMatchArmSyntax[], elseExpr?: ExpressionSyntax
 
 ValueIfMatchArm (AST: ValueIfMatchArmSyntax)
-- ValueIfMatchArm → Pattern (COMMA Pattern)* FAT_ARROW ValueExpression
-  - fields: patterns: PatternSyntax[], expr: ExpressionSyntax
+- ValueIfMatchArm → Pattern (COMMA Pattern)* FAT_ARROW ValueOrValuesBracedExpression
+  - fields: patterns: PatternSyntax[], expr: ExpressionSyntax | ValuesBracedExpressionSyntax
 
 ValueIfMatchElseOpt
-- ValueIfMatchElseOpt → ELSE FAT_ARROW ValueExpression
+- ValueIfMatchElseOpt → ELSE FAT_ARROW ValueOrValuesBracedExpression
 - ValueIfMatchElseOpt → ε
-  - fields (on ValueIfMatchExpressionSyntax): elseExpr?: ExpressionSyntax
+  - fields (on ValueIfMatchExpressionSyntax): elseExpr?: ExpressionSyntax | ValuesBracedExpressionSyntax
 
 ValueIfConditionListExpression (AST: ValueIfConditionListExpressionSyntax)
 - ValueIfConditionListExpression → IF LBRACE ValueIfConditionArm+ ValueIfConditionElseOpt RBRACE
   - fields: arms: ValueIfConditionArmSyntax[], elseExpr?: ExpressionSyntax
 
 ValueIfConditionArm (AST: ValueIfConditionArmSyntax)
-- ValueIfConditionArm → ValueExpression FAT_ARROW ValueExpression
-  - fields: condition: ExpressionSyntax, expr: ExpressionSyntax
+- ValueIfConditionArm → ValueExpression FAT_ARROW ValueOrValuesBracedExpression
+  - fields: condition: ExpressionSyntax, expr: ExpressionSyntax | ValuesBracedExpressionSyntax
 
 ValueIfConditionElseOpt
-- ValueIfConditionElseOpt → ELSE FAT_ARROW ValueExpression
+- ValueIfConditionElseOpt → ELSE FAT_ARROW ValueOrValuesBracedExpression
 - ValueIfConditionElseOpt → ε
-  - fields (on ValueIfConditionListExpressionSyntax): elseExpr?: ExpressionSyntax
+  - fields (on ValueIfConditionListExpressionSyntax): elseExpr?: ExpressionSyntax | ValuesBracedExpressionSyntax
 
 ValueForExpression (AST: ValueForExpressionSyntax)
-- ValueForExpression → FOR IDENTIFIER ForIndexOpt IN ValueExpression LBRACE ValueExpression RBRACE
-  - fields: itemVar: string, indexVar?: string, iterable: ExpressionSyntax, body: ExpressionSyntax
+- ValueForExpression → FOR IDENTIFIER ForIndexOpt IN ValueExpression ValuesBracedExpression
+  - fields: itemVar: string, indexVar?: string, iterable: ExpressionSyntax, body: ValuesBracedExpressionSyntax
 
 ForIndexOpt
 - ForIndexOpt → COMMA IDENTIFIER | ε
@@ -417,7 +439,15 @@ ElementsExpression (AST: MarkupListSyntax)
 - ElementsExpressionItem → Element                     (MarkupElementSyntax)
 - ElementsExpressionItem → ElementsIfExpression        (MarkupIfSimpleExpressionSyntax | MarkupIfMatchExpressionSyntax | MarkupIfConditionListExpressionSyntax)
 - ElementsExpressionItem → ElementsForExpression       (MarkupForExpressionSyntax)
-- ElementsExpressionItem → InterpolationExpression     (InterpolationExpressionSyntax)
+- ElementsExpressionItem → ValuesBracedExpression      (ValuesBracedExpressionSyntax)
+
+ElementsBracedExpression (AST: ElementsBracedExpressionSyntax)
+- ElementsBracedExpression → LBRACE ElementsExpression RBRACE
+  - fields: items: MarkupItemSyntax[]
+
+ElementOrElementsBracedExpression
+- ElementOrElementsBracedExpression → Element
+- ElementOrElementsBracedExpression → ElementsBracedExpression
 
 ElementsIfExpression (AST: MarkupItemSyntax is a sum type)
 - ElementsIfExpression → ElementsIfSimpleExpression        (MarkupIfSimpleExpressionSyntax)
@@ -425,43 +455,43 @@ ElementsIfExpression (AST: MarkupItemSyntax is a sum type)
 - ElementsIfExpression → ElementsIfConditionListExpression (MarkupIfConditionListExpressionSyntax)
 
 ElementsIfSimpleExpression (AST: MarkupIfSimpleExpressionSyntax)
-- ElementsIfSimpleExpression → IF ValueExpression LBRACE ElementsExpression RBRACE ElementsIfElseClauseOpt
-  - fields: condition: ExpressionSyntax, thenElements: MarkupListSyntax, elseElements?: MarkupListSyntax
+- ElementsIfSimpleExpression → IF ValueExpression ElementsBracedExpression ElementsIfElseClauseOpt
+  - fields: condition: ExpressionSyntax, thenElements: ElementsBracedExpressionSyntax, elseElements?: ElementsBracedExpressionSyntax
 
 ElementsIfElseClauseOpt
-- ElementsIfElseClauseOpt → ELSE LBRACE ElementsExpression RBRACE
+- ElementsIfElseClauseOpt → ELSE ElementsBracedExpression
 - ElementsIfElseClauseOpt → ε
-  - fields (on MarkupIfSimpleExpressionSyntax): elseElements?: MarkupListSyntax
+  - fields (on MarkupIfSimpleExpressionSyntax): elseElements?: ElementsBracedExpressionSyntax
 
 ElementsIfMatchExpression (AST: MarkupIfMatchExpressionSyntax)
 - ElementsIfMatchExpression → IF ValueExpression IS LBRACE ElementsIfMatchArm+ ElementsIfMatchElseOpt RBRACE
   - fields: scrutinee: ExpressionSyntax, arms: MarkupIfMatchArmSyntax[], elseElements?: MarkupListSyntax
 
 ElementsIfMatchArm (AST: MarkupIfMatchArmSyntax)
-- ElementsIfMatchArm → Pattern (COMMA Pattern)* FAT_ARROW ElementsExpression
-  - fields: patterns: PatternSyntax[], elements: MarkupListSyntax
+- ElementsIfMatchArm → Pattern (COMMA Pattern)* FAT_ARROW ElementOrElementsBracedExpression
+  - fields: patterns: PatternSyntax[], elements: MarkupElementSyntax | ElementsBracedExpressionSyntax
 
 ElementsIfMatchElseOpt
-- ElementsIfMatchElseOpt → ELSE FAT_ARROW ElementsExpression
+- ElementsIfMatchElseOpt → ELSE FAT_ARROW ElementOrElementsBracedExpression
 - ElementsIfMatchElseOpt → ε
-  - fields (on MarkupIfMatchExpressionSyntax): elseElements?: MarkupListSyntax
+  - fields (on MarkupIfMatchExpressionSyntax): elseElements?: MarkupElementSyntax | ElementsBracedExpressionSyntax
 
 ElementsIfConditionListExpression (AST: MarkupIfConditionListExpressionSyntax)
 - ElementsIfConditionListExpression → IF LBRACE ElementsIfConditionArm+ ElementsIfConditionElseOpt RBRACE
   - fields: arms: MarkupIfConditionArmSyntax[], elseElements?: MarkupListSyntax
 
 ElementsIfConditionArm (AST: MarkupIfConditionArmSyntax)
-- ElementsIfConditionArm → ValueExpression FAT_ARROW ElementsExpression
-  - fields: condition: ExpressionSyntax, elements: MarkupListSyntax
+- ElementsIfConditionArm → ValueExpression FAT_ARROW ElementOrElementsBracedExpression
+  - fields: condition: ExpressionSyntax, elements: MarkupElementSyntax | ElementsBracedExpressionSyntax
 
 ElementsIfConditionElseOpt
-- ElementsIfConditionElseOpt → ELSE FAT_ARROW ElementsExpression
+- ElementsIfConditionElseOpt → ELSE FAT_ARROW ElementOrElementsBracedExpression
 - ElementsIfConditionElseOpt → ε
-  - fields (on MarkupIfConditionListExpressionSyntax): elseElements?: MarkupListSyntax
+  - fields (on MarkupIfConditionListExpressionSyntax): elseElements?: MarkupElementSyntax | ElementsBracedExpressionSyntax
 
 ElementsForExpression (AST: MarkupForExpressionSyntax)
-- ElementsForExpression → FOR IDENTIFIER ForIndexOpt IN ValueExpression LBRACE ElementsExpression RBRACE
-  - fields: itemVar: string, indexVar?: string, iterable: ExpressionSyntax, body: MarkupListSyntax
+- ElementsForExpression → FOR IDENTIFIER ForIndexOpt IN ValueExpression ElementsBracedExpression
+  - fields: itemVar: string, indexVar?: string, iterable: ExpressionSyntax, body: ElementsBracedExpressionSyntax
 
 Element (AST: MarkupElementSyntax is a sum type)
 - Element → LT ElementName ElementSuffix
@@ -549,7 +579,7 @@ TextContent (AST: TextContentSyntax)
 TextItem (AST: TextItemSyntax is a sum type)
 - TextItem → TextRun                       (TextRunSyntax)
 - TextItem → TextChildElement              (TextChildElementSyntax)
-- TextItem → InterpolationExpression       (InterpolationExpressionSyntax)
+- TextItem → ValuesBracedExpression        (ValuesBracedExpressionSyntax)
 
 TextChildElement (AST: TextChildElementSyntax)
 - TextChildElement → LT ElementName PropertyList SLASH GT
@@ -563,11 +593,11 @@ EmbedTextContent (AST: EmbedTextContentSyntax)
 
 EmbedTextItem (AST: EmbedTextItemSyntax is a sum type)
 - EmbedTextItem → EmbedTextRun                     (EmbedTextRunSyntax)
-- EmbedTextItem → EmbedInterpolationExpression     (EmbedInterpolationExpressionSyntax)
+- EmbedTextItem → EmbedBracedExpression            (EmbedBracedExpressionSyntax)
 
-EmbedInterpolationExpression (AST: EmbedInterpolationExpressionSyntax)
-- EmbedInterpolationExpression → "@{" ValueExpression "}"
-  - fields: expression: ExpressionSyntax
+EmbedBracedExpression (AST: EmbedBracedExpressionSyntax)
+- EmbedBracedExpression → "@{" ValueExpressions RBRACE
+  - fields: items: ExpressionSyntax[]
 
 RawTextRun (AST: RawTextRunSyntax)
 - RawTextRun → RAW_TEXT_CHUNK+
@@ -619,7 +649,7 @@ This section lists the AST node types with fields for implementers.
  - ElementFunctionDefinitionSyntax: elementName: QualifiedMarkupNameSyntax, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
  - ParenFunctionDefinitionSyntax: name: string, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
  - PropertyDefinitionSyntax: name: string, type: TypeSyntax, default?: ExpressionSyntax
-- ExpressionSyntax: union of MarkupElementSyntax | InterpolationExpressionSyntax | LiteralExpressionSyntax | IdentifierNameSyntax | ValueIfSimpleExpressionSyntax | ValueIfMatchExpressionSyntax | ValueIfConditionListExpressionSyntax | ValueForExpressionSyntax | ConditionalExpressionSyntax | ParenFunctionCallExpressionSyntax | MemberAccessExpressionSyntax | BinaryExpressionSyntax | PrefixUnaryExpressionSyntax | ParenthesizedExpressionSyntax | UnitLiteralSyntax
+- ExpressionSyntax: union of MarkupElementSyntax | ValuesBracedExpressionSyntax | LiteralExpressionSyntax | IdentifierNameSyntax | ValueIfSimpleExpressionSyntax | ValueIfMatchExpressionSyntax | ValueIfConditionListExpressionSyntax | ValueForExpressionSyntax | ConditionalExpressionSyntax | ParenFunctionCallExpressionSyntax | MemberAccessExpressionSyntax | BinaryExpressionSyntax | PrefixUnaryExpressionSyntax | ParenthesizedExpressionSyntax | UnitLiteralSyntax
  - ParenFunctionCallExpressionSyntax: callee: ExpressionSyntax, args: ExpressionSyntax[]
  - MemberAccessExpressionSyntax: target: ExpressionSyntax, name: string (includes both property access and enum member access; distinguished during semantic analysis)
  - ConditionalExpressionSyntax: condition: ExpressionSyntax, whenTrue: ExpressionSyntax, whenFalse: ExpressionSyntax
@@ -636,7 +666,8 @@ This section lists the AST node types with fields for implementers.
 - ValueIfConditionArmSyntax: condition: ExpressionSyntax, expr: ExpressionSyntax
 - ValueForExpressionSyntax: itemVar: string, indexVar?: string, iterable: ExpressionSyntax, body: ExpressionSyntax
 - MarkupListSyntax: items: MarkupItemSyntax[]
-- MarkupItemSyntax: MarkupElementSyntax | MarkupIfSimpleExpressionSyntax | MarkupIfMatchExpressionSyntax | MarkupIfConditionListExpressionSyntax | MarkupForExpressionSyntax | InterpolationExpressionSyntax
+- MarkupItemSyntax: MarkupElementSyntax | MarkupIfSimpleExpressionSyntax | MarkupIfMatchExpressionSyntax | MarkupIfConditionListExpressionSyntax | MarkupForExpressionSyntax | ValuesBracedExpressionSyntax
+- ElementsBracedExpressionSyntax: items: MarkupItemSyntax[]
 - MarkupIfSimpleExpressionSyntax: condition: ExpressionSyntax, thenElements: MarkupListSyntax, elseElements?: MarkupListSyntax
 - MarkupIfMatchExpressionSyntax: scrutinee: ExpressionSyntax, arms: MarkupIfMatchArmSyntax[], elseElements?: MarkupListSyntax
 - MarkupIfMatchArmSyntax: patterns: PatternSyntax[], elements: MarkupListSyntax
@@ -654,15 +685,16 @@ This section lists the AST node types with fields for implementers.
 - PropertyIfConditionListSyntax: arms: PropertyIfConditionArmSyntax[], elseProps?: PropertyListSyntax
 - PropertyIfConditionArmSyntax: condition: ExpressionSyntax, props: PropertyListSyntax
 - TextContentSyntax: items: TextItemSyntax[]
-- TextItemSyntax: kind: "text"|"element"|"interpolation", value: TextRunSyntax|TextChildElementSyntax|InterpolationExpressionSyntax
+- TextItemSyntax: kind: "text"|"element"|"values-braced", value: TextRunSyntax|TextChildElementSyntax|ValuesBracedExpressionSyntax
 - TextChildElementSyntax: name: QualifiedMarkupNameSyntax, props: PropertyListSyntax, children: TextContentSyntax
 - EmbedTextContentSyntax: items: EmbedTextItemSyntax[]
-- EmbedTextItemSyntax: kind: "text"|"interpolation", value: EmbedTextRunSyntax|EmbedInterpolationExpressionSyntax
-- EmbedInterpolationExpressionSyntax: expr: ExpressionSyntax
+- EmbedTextItemSyntax: kind: "text"|"values-braced", value: EmbedTextRunSyntax|EmbedBracedExpressionSyntax
+- EmbedBracedExpressionSyntax: items: ExpressionSyntax[]
 - EmbedTextRunSyntax: text: string
 - RawTextRunSyntax: text: string
 - TextRunSyntax: text: string
-- InterpolationExpressionSyntax: expr: ExpressionSyntax
+- ValuesBracedExpressionSyntax: items: ExpressionSyntax[]
+- ValueListItemExpressionSyntax: expr: ExpressionSyntax
 - QualifiedNameSyntax: parts: string[]
 - QualifiedMarkupNameSyntax: parts: string[]
 - PatternSyntax: kind: "literal"|"name", value: LiteralExpressionSyntax|QualifiedNameSyntax
@@ -674,9 +706,14 @@ This section lists the AST node types with fields for implementers.
   - If next token is IF → ValueIfExpression
   - If next token is FOR → ValueForExpression
   - Otherwise → ValueExpr (Pratt)
+- ValuesBracedExpression branch selection:
+  - If the braced content parses as a single `ValueExpression` before RBRACE → singleton value form
+  - Otherwise parse a space-delimited list of `ValueListItemExpression` entries
+  - Non-list-safe expressions such as binary or prefix-unary forms must be parenthesized when they
+    appear as list items
 - ElementsExpression item selection:
   - If next token is LT → Element
-  - If next token is LBRACE → InterpolationExpression
+  - If next token is LBRACE → ValuesBracedExpression
   - If next token ∈ {IF, FOR} → the corresponding Elements* form
 - IfMatch scrutinee (value/elements/property variants):
   - After IF, parse a required ValueExpression before IS as the scrutinee

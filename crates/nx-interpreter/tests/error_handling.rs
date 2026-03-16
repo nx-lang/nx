@@ -113,9 +113,9 @@ fn test_paren_function_argument_type_mismatch() {
 
     match err.kind() {
         RuntimeErrorKind::TypeMismatch { operation, .. } => {
-            assert_eq!(operation, "addition");
+            assert_eq!(operation, "function call parameter 'a'");
         }
-        other => panic!("Expected TypeMismatch during addition, got {:?}", other),
+        other => panic!("Expected TypeMismatch during parameter binding, got {:?}", other),
     }
 }
 
