@@ -3,6 +3,7 @@
 use crate::context::{ExecutionContext, ResourceLimits};
 use crate::error::{RuntimeError, RuntimeErrorKind};
 use crate::value::Value;
+use la_arena::RawIdx;
 use nx_hir::{ast, ElementId, ExprId, Function, Item, Module, Name, RecordKind};
 use nx_types::{
     common_supertype, is_object_type, resolve_type_ref_with, resolve_type_ref_with_seen,
@@ -10,12 +11,76 @@ use nx_types::{
 };
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
+use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
+use std::collections::BTreeMap;
+
+const COMPONENT_SNAPSHOT_VERSION: u32 = 1;
 
 /// Tree-walking interpreter for NX HIR
 #[derive(Debug)]
 pub struct Interpreter {
     // The interpreter is stateless; all state is in ExecutionContext
+}
+
+/// Result of component initialization.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ComponentInitResult {
+    /// Rendered component body value
+    pub rendered: Value,
+    /// Opaque serialized component state snapshot owned by the host
+    pub state_snapshot: Vec<u8>,
+}
+
+/// Result of component action dispatch.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ComponentDispatchResult {
+    /// Effect actions returned by bound handlers in dispatch order
+    pub effects: Vec<Value>,
+    /// Opaque serialized component state snapshot owned by the host
+    pub state_snapshot: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct SerializedComponentSnapshot {
+    version: u32,
+    component: String,
+    props: BTreeMap<String, SerializedValue>,
+    state: BTreeMap<String, SerializedValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+enum SerializedValue {
+    Int32(i32),
+    Int(i64),
+    Float32(f32),
+    Float(f64),
+    String(String),
+    Boolean(bool),
+    Null,
+    Array(Vec<SerializedValue>),
+    EnumVariant {
+        type_name: String,
+        variant: String,
+    },
+    Record {
+        type_name: String,
+        fields: BTreeMap<String, SerializedValue>,
+    },
+    ActionHandler {
+        component: String,
+        emit: String,
+        action_name: String,
+        body: u32,
+        captured: BTreeMap<String, SerializedValue>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct DecodedComponentSnapshot {
+    component: Name,
+    props: FxHashMap<SmolStr, Value>,
+    state: FxHashMap<SmolStr, Value>,
 }
 
 impl Interpreter {
@@ -73,6 +138,36 @@ impl Interpreter {
         action: Value,
     ) -> Result<Vec<Value>, RuntimeError> {
         self.invoke_action_handler_with_limits(module, handler, action, ResourceLimits::default())
+    }
+
+    /// Initialize a named component instance from input props.
+    pub fn initialize_component(
+        &self,
+        module: &Module,
+        component_name: &str,
+        props: Value,
+    ) -> Result<ComponentInitResult, RuntimeError> {
+        self.initialize_component_with_limits(
+            module,
+            component_name,
+            props,
+            ResourceLimits::default(),
+        )
+    }
+
+    /// Dispatch a batch of actions against an opaque component state snapshot.
+    pub fn dispatch_component_actions(
+        &self,
+        module: &Module,
+        state_snapshot: &[u8],
+        actions: Vec<Value>,
+    ) -> Result<ComponentDispatchResult, RuntimeError> {
+        self.dispatch_component_actions_with_limits(
+            module,
+            state_snapshot,
+            actions,
+            ResourceLimits::default(),
+        )
     }
 
     /// Execute a function with custom resource limits
@@ -189,6 +284,82 @@ impl Interpreter {
         self.normalize_handler_result(module, result, component, emit)
     }
 
+    /// Initialize a named component instance from input props with custom resource limits.
+    pub fn initialize_component_with_limits(
+        &self,
+        module: &Module,
+        component_name: &str,
+        props: Value,
+        limits: ResourceLimits,
+    ) -> Result<ComponentInitResult, RuntimeError> {
+        let component = self.find_component(module, component_name)?;
+        let mut ctx = ExecutionContext::with_limits(limits);
+        let normalized_props =
+            self.normalize_component_props(module, &mut ctx, component, props)?;
+        let normalized_state =
+            self.materialize_component_state(module, &mut ctx, component, FxHashMap::default())?;
+        let rendered = self.eval_expr(module, &mut ctx, component.body)?;
+        let state_snapshot =
+            self.encode_component_snapshot(&component.name, &normalized_props, &normalized_state)?;
+
+        Ok(ComponentInitResult {
+            rendered,
+            state_snapshot,
+        })
+    }
+
+    /// Dispatch a batch of actions against an opaque component state snapshot with custom limits.
+    pub fn dispatch_component_actions_with_limits(
+        &self,
+        module: &Module,
+        state_snapshot: &[u8],
+        actions: Vec<Value>,
+        limits: ResourceLimits,
+    ) -> Result<ComponentDispatchResult, RuntimeError> {
+        let decoded_snapshot = self.decode_component_snapshot(module, state_snapshot)?;
+        let component = self.find_component(module, decoded_snapshot.component.as_str())?;
+        let mut effects = Vec::new();
+
+        for action in actions {
+            let emit = self.validate_component_action(component, &action)?;
+            let handler_name = Self::component_handler_prop_name(emit.name.as_str());
+
+            if let Some(handler) = decoded_snapshot.props.get(handler_name.as_str()) {
+                match handler {
+                    Value::ActionHandler { .. } => {
+                        effects.extend(self.invoke_action_handler_with_limits(
+                            module,
+                            handler,
+                            action.clone(),
+                            limits,
+                        )?);
+                    }
+                    _ => {
+                        return Err(RuntimeError::new(
+                            RuntimeErrorKind::InvalidComponentStateSnapshot {
+                                reason: format!(
+                                    "handler prop '{}' is not an action handler",
+                                    handler_name
+                                ),
+                            },
+                        ));
+                    }
+                }
+            }
+        }
+
+        let next_state_snapshot = self.encode_component_snapshot(
+            &decoded_snapshot.component,
+            &decoded_snapshot.props,
+            &decoded_snapshot.state,
+        )?;
+
+        Ok(ComponentDispatchResult {
+            effects,
+            state_snapshot: next_state_snapshot,
+        })
+    }
+
     /// Find a function by name in the module
     fn find_function<'a>(
         &self,
@@ -200,6 +371,403 @@ impl Interpreter {
             _ => Err(RuntimeError::new(RuntimeErrorKind::FunctionNotFound {
                 name: SmolStr::new(name),
             })),
+        }
+    }
+
+    fn find_component<'a>(
+        &self,
+        module: &'a Module,
+        name: &str,
+    ) -> Result<&'a nx_hir::Component, RuntimeError> {
+        match module.find_item(name) {
+            Some(Item::Component(component)) => Ok(component),
+            _ => Err(RuntimeError::new(RuntimeErrorKind::ComponentNotFound {
+                name: SmolStr::new(name),
+            })),
+        }
+    }
+
+    fn component_handler_prop_name(emit_name: &str) -> SmolStr {
+        SmolStr::new(format!("on{}", emit_name))
+    }
+
+    fn input_fields_from_value(
+        &self,
+        value: Value,
+        operation: &str,
+    ) -> Result<FxHashMap<SmolStr, Value>, RuntimeError> {
+        match value {
+            Value::Null => Ok(FxHashMap::default()),
+            Value::Record { fields, .. } => Ok(fields),
+            other => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: "record".to_string(),
+                actual: other.type_name().to_string(),
+                operation: operation.to_string(),
+            })),
+        }
+    }
+
+    fn missing_required_component_field_error(
+        &self,
+        component_name: &Name,
+        field_name: &Name,
+        phase: &str,
+    ) -> RuntimeError {
+        RuntimeError::new(RuntimeErrorKind::MissingRequiredComponentField {
+            component: SmolStr::new(component_name.as_str()),
+            field: SmolStr::new(field_name.as_str()),
+            phase: phase.to_string(),
+        })
+    }
+
+    fn materialize_component_fields(
+        &self,
+        module: &Module,
+        ctx: &mut ExecutionContext,
+        component: &nx_hir::Component,
+        fields: &[nx_hir::RecordField],
+        overrides: &mut FxHashMap<SmolStr, Value>,
+        phase: &str,
+    ) -> Result<FxHashMap<SmolStr, Value>, RuntimeError> {
+        let mut normalized = FxHashMap::default();
+
+        for field in fields {
+            let value = if let Some(value) = overrides.remove(field.name.as_str()) {
+                value
+            } else if let Some(default_expr) = field.default {
+                self.eval_expr(module, ctx, default_expr)?
+            } else if matches!(&field.ty, ast::TypeRef::Nullable(_)) {
+                Value::Null
+            } else {
+                return Err(self.missing_required_component_field_error(
+                    &component.name,
+                    &field.name,
+                    phase,
+                ));
+            };
+
+            let value = self.coerce_value_to_type(
+                module,
+                value,
+                &field.ty,
+                &format!(
+                    "component {} '{}.{}'",
+                    phase,
+                    component.name.as_str(),
+                    field.name.as_str()
+                ),
+            )?;
+            ctx.define_variable(SmolStr::new(field.name.as_str()), value.clone());
+            normalized.insert(SmolStr::new(field.name.as_str()), value);
+        }
+
+        Ok(normalized)
+    }
+
+    fn normalize_component_props(
+        &self,
+        module: &Module,
+        ctx: &mut ExecutionContext,
+        component: &nx_hir::Component,
+        props: Value,
+    ) -> Result<FxHashMap<SmolStr, Value>, RuntimeError> {
+        let mut overrides = self.input_fields_from_value(
+            props,
+            &format!("component props for '{}'", component.name.as_str()),
+        )?;
+        let mut normalized = self.materialize_component_fields(
+            module,
+            ctx,
+            component,
+            &component.props,
+            &mut overrides,
+            "prop initialization",
+        )?;
+
+        for (name, value) in overrides {
+            if let Some(emit) = component
+                .emits
+                .iter()
+                .find(|emit| Self::component_handler_prop_name(emit.name.as_str()) == name)
+            {
+                match &value {
+                    Value::ActionHandler {
+                        component: handler_component,
+                        emit: handler_emit,
+                        action_name,
+                        ..
+                    } if handler_component == &component.name
+                        && handler_emit == &emit.name
+                        && action_name == &emit.action_name => {}
+                    Value::ActionHandler { .. } => {
+                        return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                            expected: format!(
+                                "handler for {}.{}",
+                                component.name.as_str(),
+                                emit.name.as_str()
+                            ),
+                            actual: "different action handler".to_string(),
+                            operation: "component prop initialization".to_string(),
+                        }));
+                    }
+                    other => {
+                        return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                            expected: "action_handler".to_string(),
+                            actual: other.type_name().to_string(),
+                            operation: "component prop initialization".to_string(),
+                        }));
+                    }
+                }
+
+                normalized.insert(name, value);
+            } else {
+                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                    expected: "declared component prop".to_string(),
+                    actual: format!("unknown prop '{}'", name),
+                    operation: format!(
+                        "component prop initialization for '{}'",
+                        component.name.as_str()
+                    ),
+                }));
+            }
+        }
+
+        Ok(normalized)
+    }
+
+    fn materialize_component_state(
+        &self,
+        module: &Module,
+        ctx: &mut ExecutionContext,
+        component: &nx_hir::Component,
+        mut overrides: FxHashMap<SmolStr, Value>,
+    ) -> Result<FxHashMap<SmolStr, Value>, RuntimeError> {
+        self.materialize_component_fields(
+            module,
+            ctx,
+            component,
+            &component.state,
+            &mut overrides,
+            "state initialization",
+        )
+    }
+
+    fn validate_component_action<'a>(
+        &self,
+        component: &'a nx_hir::Component,
+        action: &Value,
+    ) -> Result<&'a nx_hir::ComponentEmit, RuntimeError> {
+        let Value::Record { type_name, .. } = action else {
+            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: "action".to_string(),
+                actual: action.type_name().to_string(),
+                operation: format!("component dispatch for '{}'", component.name.as_str()),
+            }));
+        };
+
+        component
+            .emits
+            .iter()
+            .find(|emit| emit.action_name == *type_name)
+            .ok_or_else(|| {
+                RuntimeError::new(RuntimeErrorKind::UnsupportedComponentAction {
+                    component: SmolStr::new(component.name.as_str()),
+                    action: SmolStr::new(type_name.as_str()),
+                })
+            })
+    }
+
+    fn encode_component_snapshot(
+        &self,
+        component_name: &Name,
+        props: &FxHashMap<SmolStr, Value>,
+        state: &FxHashMap<SmolStr, Value>,
+    ) -> Result<Vec<u8>, RuntimeError> {
+        let snapshot = SerializedComponentSnapshot {
+            version: COMPONENT_SNAPSHOT_VERSION,
+            component: component_name.as_str().to_string(),
+            props: props
+                .iter()
+                .map(|(name, value)| (name.to_string(), Self::serialize_runtime_value(value)))
+                .collect(),
+            state: state
+                .iter()
+                .map(|(name, value)| (name.to_string(), Self::serialize_runtime_value(value)))
+                .collect(),
+        };
+
+        rmp_serde::to_vec_named(&snapshot).map_err(|e| {
+            RuntimeError::new(RuntimeErrorKind::InvalidComponentStateSnapshot {
+                reason: format!("snapshot serialization failed: {e}"),
+            })
+        })
+    }
+
+    fn decode_component_snapshot(
+        &self,
+        module: &Module,
+        bytes: &[u8],
+    ) -> Result<DecodedComponentSnapshot, RuntimeError> {
+        let snapshot: SerializedComponentSnapshot = rmp_serde::from_slice(bytes).map_err(|e| {
+            RuntimeError::new(RuntimeErrorKind::InvalidComponentStateSnapshot {
+                reason: format!("snapshot deserialization failed: {e}"),
+            })
+        })?;
+
+        if snapshot.version != COMPONENT_SNAPSHOT_VERSION {
+            return Err(RuntimeError::new(
+                RuntimeErrorKind::InvalidComponentStateSnapshot {
+                    reason: format!(
+                        "unsupported snapshot version {}, expected {}",
+                        snapshot.version, COMPONENT_SNAPSHOT_VERSION
+                    ),
+                },
+            ));
+        }
+
+        let props = snapshot
+            .props
+            .into_iter()
+            .map(|(name, value)| {
+                Ok((
+                    SmolStr::new(name.as_str()),
+                    self.deserialize_runtime_value(module, value)?,
+                ))
+            })
+            .collect::<Result<FxHashMap<_, _>, RuntimeError>>()?;
+        let state = snapshot
+            .state
+            .into_iter()
+            .map(|(name, value)| {
+                Ok((
+                    SmolStr::new(name.as_str()),
+                    self.deserialize_runtime_value(module, value)?,
+                ))
+            })
+            .collect::<Result<FxHashMap<_, _>, RuntimeError>>()?;
+
+        Ok(DecodedComponentSnapshot {
+            component: Name::new(&snapshot.component),
+            props,
+            state,
+        })
+    }
+
+    fn serialize_runtime_value(value: &Value) -> SerializedValue {
+        match value {
+            Value::Int32(value) => SerializedValue::Int32(*value),
+            Value::Int(value) => SerializedValue::Int(*value),
+            Value::Float32(value) => SerializedValue::Float32(*value),
+            Value::Float(value) => SerializedValue::Float(*value),
+            Value::String(value) => SerializedValue::String(value.to_string()),
+            Value::Boolean(value) => SerializedValue::Boolean(*value),
+            Value::Null => SerializedValue::Null,
+            Value::Array(values) => {
+                SerializedValue::Array(values.iter().map(Self::serialize_runtime_value).collect())
+            }
+            Value::EnumVariant { type_name, variant } => SerializedValue::EnumVariant {
+                type_name: type_name.as_str().to_string(),
+                variant: variant.to_string(),
+            },
+            Value::Record { type_name, fields } => SerializedValue::Record {
+                type_name: type_name.as_str().to_string(),
+                fields: fields
+                    .iter()
+                    .map(|(name, value)| (name.to_string(), Self::serialize_runtime_value(value)))
+                    .collect(),
+            },
+            Value::ActionHandler {
+                component,
+                emit,
+                action_name,
+                body,
+                captured,
+            } => SerializedValue::ActionHandler {
+                component: component.as_str().to_string(),
+                emit: emit.as_str().to_string(),
+                action_name: action_name.as_str().to_string(),
+                body: body.into_raw().into_u32(),
+                captured: captured
+                    .iter()
+                    .map(|(name, value)| (name.to_string(), Self::serialize_runtime_value(value)))
+                    .collect(),
+            },
+        }
+    }
+
+    fn deserialize_runtime_value(
+        &self,
+        module: &Module,
+        value: SerializedValue,
+    ) -> Result<Value, RuntimeError> {
+        match value {
+            SerializedValue::Int32(value) => Ok(Value::Int32(value)),
+            SerializedValue::Int(value) => Ok(Value::Int(value)),
+            SerializedValue::Float32(value) => Ok(Value::Float32(value)),
+            SerializedValue::Float(value) => Ok(Value::Float(value)),
+            SerializedValue::String(value) => Ok(Value::String(SmolStr::new(value.as_str()))),
+            SerializedValue::Boolean(value) => Ok(Value::Boolean(value)),
+            SerializedValue::Null => Ok(Value::Null),
+            SerializedValue::Array(values) => Ok(Value::Array(
+                values
+                    .into_iter()
+                    .map(|value| self.deserialize_runtime_value(module, value))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
+            SerializedValue::EnumVariant { type_name, variant } => Ok(Value::EnumVariant {
+                type_name: Name::new(&type_name),
+                variant: SmolStr::new(variant.as_str()),
+            }),
+            SerializedValue::Record { type_name, fields } => Ok(Value::Record {
+                type_name: Name::new(&type_name),
+                fields: fields
+                    .into_iter()
+                    .map(|(name, value)| {
+                        Ok((
+                            SmolStr::new(name.as_str()),
+                            self.deserialize_runtime_value(module, value)?,
+                        ))
+                    })
+                    .collect::<Result<FxHashMap<_, _>, RuntimeError>>()?,
+            }),
+            SerializedValue::ActionHandler {
+                component,
+                emit,
+                action_name,
+                body,
+                captured,
+            } => {
+                if usize::try_from(body)
+                    .ok()
+                    .filter(|body| *body < module.expr_count())
+                    .is_none()
+                {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorKind::InvalidComponentStateSnapshot {
+                            reason: format!(
+                                "handler body expression id '{}' is out of bounds",
+                                body
+                            ),
+                        },
+                    ));
+                }
+
+                Ok(Value::ActionHandler {
+                    component: Name::new(&component),
+                    emit: Name::new(&emit),
+                    action_name: Name::new(&action_name),
+                    body: ExprId::from_raw(RawIdx::from_u32(body)),
+                    captured: captured
+                        .into_iter()
+                        .map(|(name, value)| {
+                            Ok((
+                                SmolStr::new(name.as_str()),
+                                self.deserialize_runtime_value(module, value)?,
+                            ))
+                        })
+                        .collect::<Result<FxHashMap<_, _>, RuntimeError>>()?,
+                })
+            }
         }
     }
 
@@ -1516,6 +2084,16 @@ mod tests {
             .unwrap_or_else(|| panic!("Expected field '{}'", field))
     }
 
+    fn extract_record_field<'a>(value: &'a Value, field: &str) -> &'a Value {
+        let Value::Record { fields, .. } = value else {
+            panic!("Expected record value, got {:?}", value);
+        };
+
+        fields
+            .get(field)
+            .unwrap_or_else(|| panic!("Expected field '{}'", field))
+    }
+
     fn span(start: u32, end: u32) -> TextSpan {
         TextSpan::new(TextSize::from(start), TextSize::from(end))
     }
@@ -2045,6 +2623,389 @@ mod tests {
             error.kind(),
             RuntimeErrorKind::TypeMismatch { expected, actual, .. }
                 if expected == "action" && actual == "SearchResult"
+        ));
+    }
+
+    #[test]
+    fn test_initialize_component_applies_prop_and_state_defaults_once() {
+        let source = r#"
+            component <SearchBox placeholder:string = "Find docs" /> = {
+              state {
+                query:string = {placeholder}
+                preview:string = {query}
+              }
+              <TextInput value={preview} placeholder={placeholder} />
+            }
+        "#;
+
+        let module = lower_module(source);
+        let interpreter = Interpreter::new();
+        let init = interpreter
+            .initialize_component(
+                &module,
+                "SearchBox",
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::default(),
+                },
+            )
+            .expect("Expected component initialization to succeed");
+
+        let rendered_value = extract_record_field(&init.rendered, "value");
+        assert_eq!(rendered_value, &Value::String(SmolStr::new("Find docs")));
+        let rendered_placeholder = extract_record_field(&init.rendered, "placeholder");
+        assert_eq!(
+            rendered_placeholder,
+            &Value::String(SmolStr::new("Find docs"))
+        );
+
+        let snapshot = interpreter
+            .decode_component_snapshot(&module, &init.state_snapshot)
+            .expect("Expected snapshot to decode");
+        assert_eq!(
+            snapshot.props.get("placeholder"),
+            Some(&Value::String(SmolStr::new("Find docs")))
+        );
+        assert_eq!(
+            snapshot.state.get("query"),
+            Some(&Value::String(SmolStr::new("Find docs")))
+        );
+        assert_eq!(
+            snapshot.state.get("preview"),
+            Some(&Value::String(SmolStr::new("Find docs")))
+        );
+    }
+
+    #[test]
+    fn test_initialize_component_succeeds_without_state_group() {
+        let source = r#"
+            component <Button text:string /> = {
+              <button>{text}</button>
+            }
+        "#;
+
+        let module = lower_module(source);
+        let interpreter = Interpreter::new();
+        let mut props = FxHashMap::default();
+        props.insert(SmolStr::new("text"), Value::String(SmolStr::new("Save")));
+
+        let init = interpreter
+            .initialize_component(
+                &module,
+                "Button",
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: props,
+                },
+            )
+            .expect("Expected stateless component initialization to succeed");
+
+        let snapshot = interpreter
+            .decode_component_snapshot(&module, &init.state_snapshot)
+            .expect("Expected snapshot to decode");
+        assert!(snapshot.state.is_empty(), "Expected empty component state");
+        assert_eq!(
+            extract_record_field(&init.rendered, "children"),
+            &Value::String(SmolStr::new("Save"))
+        );
+    }
+
+    #[test]
+    fn test_initialize_component_rejects_missing_required_state_initializer() {
+        let source = r#"
+            component <SearchBox /> = {
+              state { query:string }
+              <TextInput value={query} />
+            }
+        "#;
+
+        let module = lower_module(source);
+        let interpreter = Interpreter::new();
+        let error = interpreter
+            .initialize_component(
+                &module,
+                "SearchBox",
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::default(),
+                },
+            )
+            .expect_err("Expected missing required state field to fail");
+
+        assert!(matches!(
+            error.kind(),
+            RuntimeErrorKind::MissingRequiredComponentField {
+                component,
+                field,
+                phase,
+            } if component == "SearchBox"
+                && field == "query"
+                && phase == "state initialization"
+        ));
+    }
+
+    #[test]
+    fn test_dispatch_component_actions_preserves_state_snapshot_without_reevaluating_defaults() {
+        let source = r#"
+            component <SearchBox placeholder:string = "Find docs" emits { SearchSubmitted } /> = {
+              state { query:string = {placeholder} }
+              <TextInput value={query} placeholder={placeholder} />
+            }
+        "#;
+
+        let module = lower_module(source);
+        let interpreter = Interpreter::new();
+        let init = interpreter
+            .initialize_component(
+                &module,
+                "SearchBox",
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::default(),
+                },
+            )
+            .expect("Expected initialization to succeed");
+        let mut snapshot = interpreter
+            .decode_component_snapshot(&module, &init.state_snapshot)
+            .expect("Expected snapshot to decode");
+        snapshot.state.insert(
+            SmolStr::new("query"),
+            Value::String(SmolStr::new("persisted")),
+        );
+        let mutated_snapshot = interpreter
+            .encode_component_snapshot(&snapshot.component, &snapshot.props, &snapshot.state)
+            .expect("Expected snapshot to encode");
+
+        let dispatch = interpreter
+            .dispatch_component_actions(&module, &mutated_snapshot, vec![])
+            .expect("Expected empty dispatch to succeed");
+        let next_snapshot = interpreter
+            .decode_component_snapshot(&module, &dispatch.state_snapshot)
+            .expect("Expected next snapshot to decode");
+
+        assert_eq!(
+            next_snapshot.state.get("query"),
+            Some(&Value::String(SmolStr::new("persisted")))
+        );
+    }
+
+    #[test]
+    fn test_dispatch_component_actions_orders_host_actions_and_handler_effects() {
+        let source = r#"
+            action SearchSubmitted = { searchString:string }
+            action LogSearch = { search:string }
+            action DoSearch = { search:string }
+            action TrackSearch = { value:string }
+
+            component <SearchBox placeholder:string emits {
+                SearchSubmitted
+                ValueChanged { value:string }
+            } /> = {
+              state { query:string = {placeholder} }
+              <TextInput value={query} placeholder={placeholder} />
+            }
+
+            let withHandlers() = <SearchBox
+                placeholder="Find docs"
+                onSearchSubmitted={<LogSearch search={action.searchString} /> <DoSearch search={action.searchString} />}
+                onValueChanged=<TrackSearch value={action.value} />
+            />
+            let withoutHandlers() = <SearchBox placeholder="Find docs" />
+        "#;
+
+        let module = lower_module(source);
+        let interpreter = Interpreter::new();
+
+        let props_with_handlers = interpreter
+            .execute_function(&module, "withHandlers", vec![])
+            .expect("Expected handler-bound props to evaluate");
+        let init = interpreter
+            .initialize_component(&module, "SearchBox", props_with_handlers)
+            .expect("Expected component initialization with handlers to succeed");
+        let dispatch = interpreter
+            .dispatch_component_actions(
+                &module,
+                &init.state_snapshot,
+                vec![
+                    Value::Record {
+                        type_name: Name::new("SearchSubmitted"),
+                        fields: FxHashMap::from_iter([(
+                            SmolStr::new("searchString"),
+                            Value::String(SmolStr::new("docs")),
+                        )]),
+                    },
+                    Value::Record {
+                        type_name: Name::new("SearchBox.ValueChanged"),
+                        fields: FxHashMap::from_iter([(
+                            SmolStr::new("value"),
+                            Value::String(SmolStr::new("docs")),
+                        )]),
+                    },
+                ],
+            )
+            .expect("Expected ordered dispatch to succeed");
+
+        let effect_names: Vec<_> = dispatch
+            .effects
+            .iter()
+            .map(|effect| match effect {
+                Value::Record { type_name, .. } => type_name.as_str().to_string(),
+                other => panic!("Expected effect action record, got {:?}", other),
+            })
+            .collect();
+        assert_eq!(effect_names, vec!["LogSearch", "DoSearch", "TrackSearch"]);
+
+        let props_without_handlers = interpreter
+            .execute_function(&module, "withoutHandlers", vec![])
+            .expect("Expected handler-free props to evaluate");
+        let init_without_handlers = interpreter
+            .initialize_component(&module, "SearchBox", props_without_handlers)
+            .expect("Expected component initialization without handlers to succeed");
+        let empty_dispatch = interpreter
+            .dispatch_component_actions(
+                &module,
+                &init_without_handlers.state_snapshot,
+                vec![Value::Record {
+                    type_name: Name::new("SearchSubmitted"),
+                    fields: FxHashMap::from_iter([(
+                        SmolStr::new("searchString"),
+                        Value::String(SmolStr::new("docs")),
+                    )]),
+                }],
+            )
+            .expect("Expected dispatch without handlers to succeed");
+        assert!(empty_dispatch.effects.is_empty());
+    }
+
+    #[test]
+    fn test_dispatch_component_actions_rejects_undeclared_action_types() {
+        let source = r#"
+            action SearchSubmitted = { searchString:string }
+            action ValueChanged = { value:string }
+
+            component <SearchBox emits { SearchSubmitted } /> = {
+              <TextInput />
+            }
+        "#;
+
+        let module = lower_module(source);
+        let interpreter = Interpreter::new();
+        let init = interpreter
+            .initialize_component(
+                &module,
+                "SearchBox",
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::default(),
+                },
+            )
+            .expect("Expected component initialization to succeed");
+
+        let error = interpreter
+            .dispatch_component_actions(
+                &module,
+                &init.state_snapshot,
+                vec![Value::Record {
+                    type_name: Name::new("ValueChanged"),
+                    fields: FxHashMap::from_iter([(
+                        SmolStr::new("value"),
+                        Value::String(SmolStr::new("docs")),
+                    )]),
+                }],
+            )
+            .expect_err("Expected undeclared action type to fail");
+
+        assert!(matches!(
+            error.kind(),
+            RuntimeErrorKind::UnsupportedComponentAction { component, action }
+                if component == "SearchBox" && action == "ValueChanged"
+        ));
+    }
+
+    #[test]
+    fn test_dispatch_component_actions_rejects_non_record_action_values() {
+        let source = r#"
+            action SearchSubmitted = { searchString:string }
+
+            component <SearchBox emits { SearchSubmitted } /> = {
+              <TextInput />
+            }
+        "#;
+
+        let module = lower_module(source);
+        let interpreter = Interpreter::new();
+        let init = interpreter
+            .initialize_component(
+                &module,
+                "SearchBox",
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::default(),
+                },
+            )
+            .expect("Expected component initialization to succeed");
+
+        let error = interpreter
+            .dispatch_component_actions(
+                &module,
+                &init.state_snapshot,
+                vec![Value::String(SmolStr::new("docs"))],
+            )
+            .expect_err("Expected non-record action input to fail");
+
+        assert!(matches!(
+            error.kind(),
+            RuntimeErrorKind::TypeMismatch { expected, actual, .. }
+                if expected == "action" && actual == "string"
+        ));
+    }
+
+    #[test]
+    fn test_dispatch_component_actions_rejects_invalid_or_incompatible_snapshots() {
+        let source = r#"
+            action SearchSubmitted = { searchString:string }
+            action DoSearch = { search:string }
+
+            component <SearchBox emits { SearchSubmitted } /> = {
+              <TextInput />
+            }
+
+            let withHandler() = <SearchBox onSearchSubmitted=<DoSearch search={action.searchString} /> />
+        "#;
+        let other_module_source = r#"
+            component <OtherButton text:string /> = {
+              <button>{text}</button>
+            }
+        "#;
+
+        let module = lower_module(source);
+        let other_module = lower_module(other_module_source);
+        let interpreter = Interpreter::new();
+
+        let malformed_error = interpreter
+            .dispatch_component_actions(&module, b"not-a-valid-snapshot", vec![])
+            .expect_err("Expected malformed snapshot to fail");
+        assert!(matches!(
+            malformed_error.kind(),
+            RuntimeErrorKind::InvalidComponentStateSnapshot { .. }
+        ));
+
+        let init = interpreter
+            .initialize_component(
+                &module,
+                "SearchBox",
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::default(),
+                },
+            )
+            .expect("Expected component initialization to succeed");
+        let incompatible_error = interpreter
+            .dispatch_component_actions(&other_module, &init.state_snapshot, vec![])
+            .expect_err("Expected incompatible snapshot to fail");
+        assert!(matches!(
+            incompatible_error.kind(),
+            RuntimeErrorKind::ComponentNotFound { name } if name == "SearchBox"
         ));
     }
 }

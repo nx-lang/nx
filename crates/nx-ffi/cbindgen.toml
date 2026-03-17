@@ -26,8 +26,13 @@ include = [
     "NxBuffer",
     "NxEvalStatus",
     "nx_ffi_abi_version",
-    "nx_eval_source_json",
-    "nx_eval_source_msgpack",
+    "nx_eval_source",
+    "nx_component_init",
+    "nx_component_dispatch_actions",
+    "nx_value_msgpack_to_json",
+    "nx_diagnostics_msgpack_to_json",
+    "nx_component_init_result_msgpack_to_json",
+    "nx_component_dispatch_result_msgpack_to_json",
     "nx_free_buffer",
 ]
 

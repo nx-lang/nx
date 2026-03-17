@@ -426,10 +426,13 @@ mod tests {
     fn test_build_scopes_registers_component_symbols() {
         let mut module = Module::new(crate::SourceId::new(0));
         let span = TextSpan::new(TextSize::from(0), TextSize::from(9));
+        let body = module.alloc_expr(crate::ast::Expr::Error(span));
         module.add_item(crate::Item::Component(crate::Component {
             name: Name::new("SearchBox"),
             props: Vec::new(),
             emits: Vec::new(),
+            state: Vec::new(),
+            body,
             span,
         }));
 

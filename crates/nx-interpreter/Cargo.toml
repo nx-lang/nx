@@ -16,6 +16,8 @@ smol_str.workspace = true
 ariadne.workspace = true
 text-size.workspace = true
 rustc-hash.workspace = true
+serde.workspace = true
+rmp-serde.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

@@ -5,7 +5,7 @@ description: 'Use `let` for functions and bindings, and `component` for declarat
 
 NX separates `let` bindings from `component` declarations. Use `let` for values and reusable functions. Use `component` when a declaration needs an `emits` contract or persistent `state`.
 
-Runtime note: `action` declarations parse, lower, and behave like records. Component action handler bindings now lower as lazy callbacks, while full component init/render/dispatch behavior remains deferred.
+Runtime note: `action` declarations parse, lower, and behave like records. Component init now returns rendered output plus an opaque host-owned state snapshot, and dispatch consumes that snapshot together with host-ordered actions to produce effect actions and the next snapshot. Declarative state-update actions are still deferred to a follow-up change.
 
 ## `let` Definition Mirrors Invocation
 
@@ -79,7 +79,7 @@ component <SearchBox
   }
 /> = {
   state {
-    query:string
+    query:string = {placeholder}
   }
 
   <TextInput value={query} placeholder={placeholder} />
@@ -93,6 +93,9 @@ component <SearchBox
 - Inline emitted actions become public action names such as `SearchBox.ValueChanged`.
 - Call sites can bind handlers with `on<ActionName>` and read the emitted payload through the implicit `action` value.
 - `state` declares persistent local fields before the rendered body expression.
+- State defaults are evaluated once during initialization.
+- Hosts own the serialized snapshot returned by initialization and must pass it back into later dispatch calls.
+- Dispatch preserves host action order and returns effect actions in the same order handlers produce them.
 
 ```nx
 action DoSearch = {

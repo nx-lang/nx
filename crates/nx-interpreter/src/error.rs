@@ -51,6 +51,11 @@ pub enum RuntimeErrorKind {
     /// Triggered when attempting to call a non-existent function
     FunctionNotFound { name: SmolStr },
 
+    /// Component not found
+    ///
+    /// Triggered when attempting to initialize or dispatch a missing component
+    ComponentNotFound { name: SmolStr },
+
     /// Operation limit exceeded (infinite loop protection)
     ///
     /// Triggered when execution exceeds the configured operation count limit
@@ -76,6 +81,19 @@ pub enum RuntimeErrorKind {
         field: SmolStr,
         operation: String,
     },
+
+    /// Required component prop or state field was not provided and has no default
+    MissingRequiredComponentField {
+        component: SmolStr,
+        field: SmolStr,
+        phase: String,
+    },
+
+    /// Malformed or incompatible component state snapshot
+    InvalidComponentStateSnapshot { reason: String },
+
+    /// Dispatched action is not declared by the target component
+    UnsupportedComponentAction { component: SmolStr, action: SmolStr },
 }
 
 impl fmt::Display for RuntimeErrorKind {
@@ -109,6 +127,9 @@ impl fmt::Display for RuntimeErrorKind {
             RuntimeErrorKind::FunctionNotFound { name } => {
                 write!(f, "Function not found: {}", name)
             }
+            RuntimeErrorKind::ComponentNotFound { name } => {
+                write!(f, "Component not found: {}", name)
+            }
             RuntimeErrorKind::OperationLimitExceeded { limit } => {
                 write!(f, "Operation limit exceeded: {} operations", limit)
             }
@@ -132,6 +153,23 @@ impl fmt::Display for RuntimeErrorKind {
                 f,
                 "Missing required field '{}' on record '{}' in {}",
                 field, record, operation
+            ),
+            RuntimeErrorKind::MissingRequiredComponentField {
+                component,
+                field,
+                phase,
+            } => write!(
+                f,
+                "Missing required component field '{}' on '{}' during {}",
+                field, component, phase
+            ),
+            RuntimeErrorKind::InvalidComponentStateSnapshot { reason } => {
+                write!(f, "Invalid component state snapshot: {}", reason)
+            }
+            RuntimeErrorKind::UnsupportedComponentAction { component, action } => write!(
+                f,
+                "Component '{}' does not declare emitted action '{}'",
+                component, action
             ),
         }
     }

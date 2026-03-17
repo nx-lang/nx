@@ -77,7 +77,10 @@ enum HandlerPropResolution {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PredeclaredComponent {
-    component: Component,
+    name: Name,
+    props: Vec<RecordField>,
+    emits: Vec<ComponentEmit>,
+    span: TextSpan,
     handler_props: FxHashMap<Name, HandlerPropResolution>,
 }
 
@@ -341,30 +344,32 @@ impl LoweringContext {
         self.predeclared_action_records.get(&Name::new(name))
     }
 
-    fn lower_component_props(&self, signature: SyntaxNode) -> Vec<Param> {
-        let mut params = Vec::new();
-        for child in signature.children() {
-            if child.kind() != SyntaxKind::PROPERTY_DEFINITION {
-                continue;
-            }
-
-            let param_name = child
+    fn lower_component_state_fields(&mut self, node: SyntaxNode) -> Vec<RecordField> {
+        let mut fields = Vec::new();
+        for prop in node
+            .children()
+            .filter(|child| child.kind() == SyntaxKind::PROPERTY_DEFINITION)
+        {
+            let field_name = prop
                 .child_by_field("name")
                 .map(|n| Name::new(n.text()))
                 .unwrap_or_else(|| Name::new("_"));
+            let ty_node = prop.child_by_field("type").unwrap_or(prop);
+            let ty = self.lower_type(ty_node);
+            let default = prop
+                .child_by_field("default")
+                .map(|default_node| self.lower_expr(default_node));
 
-            let type_node = child
-                .child_by_field("type")
-                .or_else(|| child.children().find(|n| n.kind() == SyntaxKind::TYPE));
-
-            let param_type = type_node
-                .map(|n| self.lower_type(n))
-                .unwrap_or_else(|| TypeRef::name("unknown"));
-
-            params.push(Param::new(param_name, param_type, child.span()));
+            self.define_name(&field_name, TypeTag::from_type_ref(&ty));
+            fields.push(RecordField {
+                name: field_name,
+                ty,
+                default,
+                span: prop.span(),
+            });
         }
 
-        params
+        fields
     }
 
     fn lower_record_fields_from_node(&mut self, node: SyntaxNode) -> Vec<RecordField> {
@@ -403,7 +408,7 @@ impl LoweringContext {
             .child_by_field("name")
             .map(|n| Name::new(n.text()))
             .unwrap_or_else(|| Name::new("unknown"));
-        let props = self.lower_component_props(signature);
+        let props = self.lower_record_fields_from_node(signature);
 
         let mut emits = Vec::new();
         let mut inline_records = Vec::new();
@@ -451,20 +456,13 @@ impl LoweringContext {
             }
         }
 
-        let component = Component {
-            name: name.clone(),
-            props,
-            emits,
-            span: node.span(),
-        };
-
         let mut handler_props = FxHashMap::default();
         let mut seen_handler_props: FxHashMap<Name, TextSpan> = FxHashMap::default();
-        for emit in &component.emits {
+        for emit in &emits {
             let handler_name = Name::new(&Self::handler_prop_name(emit.name.as_str()));
             let mut has_collision = false;
 
-            if component.props.iter().any(|prop| prop.name == handler_name) {
+            if props.iter().any(|prop| prop.name == handler_name) {
                 self.add_diagnostic(
                     format!(
                         "Component '{}' declares prop '{}' which collides with emitted action handler '{}'",
@@ -505,7 +503,10 @@ impl LoweringContext {
         self.predeclared_components.insert(
             name.clone(),
             PredeclaredComponent {
-                component,
+                name,
+                props,
+                emits,
+                span: node.span(),
                 handler_props,
             },
         );
@@ -526,17 +527,35 @@ impl LoweringContext {
             .map(|n| Name::new(n.text()))
             .unwrap_or_else(|| Name::new("unknown"));
 
-        // Components currently preserve only signature metadata. Lowering the render body is
-        // intentionally deferred to the follow-up component runtime work.
-        self.predeclared_components
-            .get(&name)
-            .map(|predeclared| predeclared.component.clone())
-            .unwrap_or(Component {
-                name,
-                props: Vec::new(),
-                emits: Vec::new(),
-                span: node.span(),
-            })
+        let body_node = node.child_by_field("body");
+        let predeclared = self.predeclared_components.get(&name).cloned();
+        let (props, emits, span) = predeclared
+            .map(|component| (component.props, component.emits, component.span))
+            .unwrap_or_else(|| (Vec::new(), Vec::new(), node.span()));
+
+        self.push_scope();
+        for prop in &props {
+            self.define_name(&prop.name, TypeTag::from_type_ref(&prop.ty));
+        }
+
+        let state = body_node
+            .and_then(|body| body.child_by_field("state"))
+            .map(|state_node| self.lower_component_state_fields(state_node))
+            .unwrap_or_default();
+        let body = body_node
+            .and_then(|body| body.child_by_field("body"))
+            .map(|body_expr| self.lower_expr(body_expr))
+            .unwrap_or_else(|| self.error_expr(node.span()));
+        self.pop_scope();
+
+        Component {
+            name,
+            props,
+            emits,
+            state,
+            body,
+            span,
+        }
     }
     /// Lowers a SyntaxNode to an expression.
     pub fn lower_expr(&mut self, node: SyntaxNode) -> ExprId {
@@ -1403,9 +1422,8 @@ impl LoweringContext {
 
                     let value_node = Self::property_value_node(child);
                     let value = if let Some(component) = component.as_ref() {
-                        let signature = &component.component;
                         let prop_name = key.as_str();
-                        let is_declared_prop = signature.props.iter().any(|prop| prop.name == key);
+                        let is_declared_prop = component.props.iter().any(|prop| prop.name == key);
 
                         if !is_declared_prop && Self::is_handler_binding_candidate(prop_name) {
                             if let Some(HandlerPropResolution::Emit(emit)) =
@@ -1423,7 +1441,7 @@ impl LoweringContext {
                                 };
 
                                 self.alloc_expr(Expr::ActionHandler {
-                                    component: signature.name.clone(),
+                                    component: component.name.clone(),
                                     emit: emit.name.clone(),
                                     action_name: emit.action_name.clone(),
                                     body,
@@ -1436,7 +1454,7 @@ impl LoweringContext {
                                 self.add_diagnostic(
                                     format!(
                                         "Component '{}' cannot use '{}' because it collides with a declared prop or duplicate emitted action",
-                                        signature.name.as_str(),
+                                        component.name.as_str(),
                                         prop_name
                                     ),
                                     child.span(),
@@ -1446,7 +1464,7 @@ impl LoweringContext {
                                 self.add_diagnostic(
                                     format!(
                                         "Component '{}' does not emit '{}' required by handler '{}'",
-                                        signature.name.as_str(),
+                                        component.name.as_str(),
                                         &prop_name[2..],
                                         prop_name
                                     ),
@@ -2852,6 +2870,56 @@ import "./controls.nx" as UI
                 other
             ),
         }
+    }
+
+    #[test]
+    fn test_lower_component_preserves_prop_defaults_state_and_body() {
+        let source = r#"
+            component <SearchBox placeholder:string = "Find docs" /> = {
+              state {
+                query:string = {placeholder}
+              }
+              <TextInput value={query} placeholder={placeholder} />
+            }
+        "#;
+
+        let parse_result = parse_str(source, "component-runtime.nx");
+        let tree = parse_result
+            .tree
+            .expect("Component runtime source should parse");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let component = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Component(component) if component.name.as_str() == "SearchBox" => {
+                    Some(component)
+                }
+                _ => None,
+            })
+            .expect("Expected lowered component item");
+
+        assert_eq!(component.props.len(), 1);
+        assert_eq!(component.props[0].name.as_str(), "placeholder");
+        assert!(
+            component.props[0].default.is_some(),
+            "Expected component prop default expression"
+        );
+
+        assert_eq!(component.state.len(), 1);
+        assert_eq!(component.state[0].name.as_str(), "query");
+        assert!(
+            component.state.iter().all(|field| field.default.is_some()),
+            "Expected state defaults to be preserved"
+        );
+
+        let Expr::Element { element, .. } = module.expr(component.body) else {
+            panic!("Expected lowered component body expression");
+        };
+        let element = module.element(*element);
+        assert_eq!(element.tag.as_str(), "TextInput");
+        assert_eq!(element.properties.len(), 2);
     }
 
     #[test]

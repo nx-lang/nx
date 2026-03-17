@@ -14,7 +14,7 @@ pub mod eval;
 
 pub use context::{ExecutionContext, ResourceLimits};
 pub use error::{RuntimeError, RuntimeErrorKind};
-pub use interpreter::Interpreter;
+pub use interpreter::{ComponentDispatchResult, ComponentInitResult, Interpreter};
 pub use value::Value;
 
 #[cfg(test)]

@@ -24,7 +24,7 @@ use smol_str::SmolStr;
 ///     max_recursion_depth: 100,
 /// };
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ResourceLimits {
     /// Maximum number of operations allowed per execution
     ///

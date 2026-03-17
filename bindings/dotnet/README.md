@@ -111,6 +111,7 @@ The managed runtime looks for the native library in the application base directo
 ### Basic Evaluation
 
 ```csharp
+using MessagePack;
 using NxLang.Nx;
 
 int result = NxRuntime.Evaluate<int>("let root() = { 42 }");
@@ -118,14 +119,73 @@ string text = NxRuntime.Evaluate<string>("let root() = { \"Hello, NX!\" }");
 bool flag = NxRuntime.Evaluate<bool>("let root() = { true }");
 ```
 
-### MessagePack and JSON Output
+### Canonical Raw Bytes
+
+```csharp
+using MessagePack;
+using NxLang.Nx;
+
+byte[] resultBytes = NxRuntime.EvaluateBytes("let root() = { 42 }");
+
+int value = MessagePackSerializer.Deserialize<int>(resultBytes);
+```
+
+### Optional JSON Debug Output
 
 ```csharp
 using NxLang.Nx;
 
-byte[] msgpackBytes = NxRuntime.EvaluateToMessagePack("let root() = { 42 }");
-string json = NxRuntime.EvaluateToJson("let root() = { 42 }");
+byte[] resultBytes = NxRuntime.EvaluateBytes("let root() = { 42 }");
+string json = NxRuntime.ValueBytesToJson(resultBytes);
 ```
+
+The native NX host interface uses MessagePack as its canonical wire format. `ValueBytesToJson`,
+`DiagnosticsBytesToJson`, `ComponentInitResultBytesToJson`, and `ComponentDispatchResultBytesToJson`
+convert canonical byte payloads into JSON for debugging or logging.
+
+### Component Lifecycle
+
+```csharp
+using NxLang.Nx;
+
+string source = """
+    action SearchSubmitted = { searchString:string }
+
+    component <SearchBox placeholder:string emits { SearchSubmitted } /> = {
+      state { query:string = {placeholder} }
+      <TextInput value={query} placeholder={placeholder} />
+    }
+    """;
+
+NxComponentInitResult<TextInputElement> init =
+    NxRuntime.InitializeComponent<SearchBoxProps, TextInputElement>(
+        source,
+        "SearchBox",
+        new SearchBoxProps { Placeholder = "Find docs" });
+
+byte[] savedSnapshot = init.StateSnapshot;
+
+NxComponentDispatchResult<SearchSubmittedAction> dispatch =
+    NxRuntime.DispatchComponentActions<SearchSubmittedAction[], SearchSubmittedAction>(
+        source,
+        savedSnapshot,
+        new[]
+        {
+            new SearchSubmittedAction
+            {
+                Type = "SearchSubmitted",
+                SearchString = "docs"
+            }
+        });
+```
+
+- Initialization returns the rendered element plus an opaque `StateSnapshot` byte array that the host owns.
+- Dispatch consumes that saved snapshot and an ordered action list, then returns effect actions plus the next snapshot.
+- State defaults run only during initialization in this change. Declarative state-update actions are still a follow-up, so dispatch currently preserves state values while still producing effect actions from bound handlers.
+- Component lifecycle APIs in the managed binding use canonical NX bytes. Persist the returned `StateSnapshot`
+  bytes and pass them back on later dispatch calls.
+- The native Rust FFI exposes separate MessagePack-to-JSON debug helpers for tooling and logging, but
+  JSON is no longer a primary transport for init/dispatch.
 
 ### Error Handling
 
@@ -165,6 +225,15 @@ Build `crates/nx-ffi` and stage the native library next to the application outpu
 ### Native runtime ABI mismatch
 
 Rebuild both the managed and native pieces from the same NX source revision. `NxLang.Runtime.dll` and `nx_ffi` must come from the same checkout.
+
+### Entry point not found for new component lifecycle methods
+
+Build or rebuild the native `nx_ffi` library for the same configuration as your managed output. For example:
+
+```bash
+cargo build -p nx-ffi
+dotnet test bindings/dotnet/NxLang.sln -p:NxRuntimeNativeLibraryConfiguration=Debug
+```
 
 ## Project Structure
 

@@ -1,4 +1,6 @@
 // Component syntax with both shared and inline actions.
+// Hosts initialize the component, store the returned opaque state snapshot,
+// and later redispatch emitted actions with that saved snapshot.
 
 action SearchSubmitted = {
   searchString: string
@@ -22,7 +24,7 @@ component <SearchBox
   }
 /> = {
   state {
-    query:string
+    query:string = {placeholder}
   }
 
   <TextInput value={query} placeholder={placeholder} />

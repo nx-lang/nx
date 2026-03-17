@@ -41,7 +41,7 @@ component <SearchBox
   }
 /> = {
   state {
-    query:string
+    query:string = {placeholder}
   }
 
   <TextInput value={query} placeholder={placeholder} />
@@ -65,7 +65,8 @@ let makeValueChanged(value:string): SearchBox.ValueChanged =
 - `emits` can declare a new action inline or reference an existing `action` by name.
 - Inline emitted actions become public action names such as `SearchBox.ValueChanged`.
 - Component invocation sites can bind emitted actions through `on<ActionName>` properties with an implicit `action` value inside the handler body.
-- Full component init/render/dispatch runtime behavior still lands in a later change.
+- Hosts initialize components by name, receive the rendered output plus an opaque state snapshot, and later dispatch ordered action batches with that saved snapshot.
+- State defaults run only during initialization. Declarative state-update actions still land in a follow-up change, so dispatch currently returns effect actions plus the next snapshot without mutating state.
 
 ## Paren-style functions
 

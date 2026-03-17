@@ -224,15 +224,19 @@ pub struct ComponentEmit {
     pub span: TextSpan,
 }
 
-/// Lightweight component declaration preserved in HIR for handler binding and lookup.
+/// Executable component declaration preserved in HIR.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Component {
     /// Component name
     pub name: Name,
-    /// Declared props
-    pub props: Vec<Param>,
+    /// Declared props, including optional default expressions
+    pub props: Vec<RecordField>,
     /// Declared emitted actions
     pub emits: Vec<ComponentEmit>,
+    /// Declared state fields, including optional default expressions
+    pub state: Vec<RecordField>,
+    /// Lowered component body expression
+    pub body: ExprId,
     /// Source span
     pub span: TextSpan,
 }
@@ -394,6 +398,11 @@ impl Module {
     /// Get an expression by ID.
     pub fn expr(&self, id: ExprId) -> &ast::Expr {
         &self.exprs[id]
+    }
+
+    /// Get the number of lowered expressions in the arena.
+    pub fn expr_count(&self) -> usize {
+        self.exprs.len()
     }
 
     /// Allocate a new element in the arena.
