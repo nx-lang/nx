@@ -51,6 +51,10 @@ NxEvalStatus nx_eval_source(const uint8_t *source_ptr,
                             struct NxBuffer *out_buffer);
 
 NX_FFI_EXPORT
+/* Initializes a named component from source. The returned state snapshot is opaque host-owned
+ * data and is only valid with the exact same source text revision that produced it. Reusing the
+ * snapshot with different source text is undefined behavior.
+ */
 NxEvalStatus nx_component_init(const uint8_t *source_ptr,
                                size_t source_len,
                                const uint8_t *file_name_ptr,
@@ -62,6 +66,10 @@ NxEvalStatus nx_component_init(const uint8_t *source_ptr,
                                struct NxBuffer *out_buffer);
 
 NX_FFI_EXPORT
+/* Dispatches actions against a previously returned state snapshot. The snapshot must come from
+ * nx_component_init or an earlier nx_component_dispatch_actions call using the exact same source
+ * text revision. Reusing a snapshot with different source text is undefined behavior.
+ */
 NxEvalStatus nx_component_dispatch_actions(const uint8_t *source_ptr,
                                            size_t source_len,
                                            const uint8_t *file_name_ptr,

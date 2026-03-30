@@ -181,6 +181,8 @@ NxComponentDispatchResult<SearchSubmittedAction> dispatch =
 
 - Initialization returns the rendered element plus an opaque `StateSnapshot` byte array that the host owns.
 - Dispatch consumes that saved snapshot and an ordered action list, then returns effect actions plus the next snapshot.
+- Reuse a saved `StateSnapshot` only with the exact same NX source text that produced it. Mixing
+  snapshots across source revisions is undefined behavior.
 - State defaults run only during initialization in this change. Declarative state-update actions are still a follow-up, so dispatch currently preserves state values while still producing effect actions from bound handlers.
 - Component lifecycle APIs in the managed binding use canonical NX bytes. Persist the returned `StateSnapshot`
   bytes and pass them back on later dispatch calls.

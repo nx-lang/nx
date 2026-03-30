@@ -344,35 +344,11 @@ impl LoweringContext {
         self.predeclared_action_records.get(&Name::new(name))
     }
 
-    fn lower_component_state_fields(&mut self, node: SyntaxNode) -> Vec<RecordField> {
-        let mut fields = Vec::new();
-        for prop in node
-            .children()
-            .filter(|child| child.kind() == SyntaxKind::PROPERTY_DEFINITION)
-        {
-            let field_name = prop
-                .child_by_field("name")
-                .map(|n| Name::new(n.text()))
-                .unwrap_or_else(|| Name::new("_"));
-            let ty_node = prop.child_by_field("type").unwrap_or(prop);
-            let ty = self.lower_type(ty_node);
-            let default = prop
-                .child_by_field("default")
-                .map(|default_node| self.lower_expr(default_node));
-
-            self.define_name(&field_name, TypeTag::from_type_ref(&ty));
-            fields.push(RecordField {
-                name: field_name,
-                ty,
-                default,
-                span: prop.span(),
-            });
-        }
-
-        fields
-    }
-
-    fn lower_record_fields_from_node(&mut self, node: SyntaxNode) -> Vec<RecordField> {
+    fn lower_record_fields_from_node(
+        &mut self,
+        node: SyntaxNode,
+        define_names: bool,
+    ) -> Vec<RecordField> {
         let mut properties = Vec::new();
         for prop in node
             .children()
@@ -387,6 +363,10 @@ impl LoweringContext {
             let default = prop
                 .child_by_field("default")
                 .map(|default_node| self.lower_expr(default_node));
+
+            if define_names {
+                self.define_name(&field_name, TypeTag::from_type_ref(&ty));
+            }
 
             properties.push(RecordField {
                 name: field_name,
@@ -408,7 +388,7 @@ impl LoweringContext {
             .child_by_field("name")
             .map(|n| Name::new(n.text()))
             .unwrap_or_else(|| Name::new("unknown"));
-        let props = self.lower_record_fields_from_node(signature);
+        let props = self.lower_record_fields_from_node(signature, false);
 
         let mut emits = Vec::new();
         let mut inline_records = Vec::new();
@@ -425,7 +405,7 @@ impl LoweringContext {
                         let record = RecordDef {
                             name: action_name.clone(),
                             kind: RecordKind::Action,
-                            properties: self.lower_record_fields_from_node(emit_node),
+                            properties: self.lower_record_fields_from_node(emit_node, false),
                             span: emit_node.span(),
                         };
                         self.predeclared_action_records
@@ -540,7 +520,7 @@ impl LoweringContext {
 
         let state = body_node
             .and_then(|body| body.child_by_field("state"))
-            .map(|state_node| self.lower_component_state_fields(state_node))
+            .map(|state_node| self.lower_record_fields_from_node(state_node, true))
             .unwrap_or_default();
         let body = body_node
             .and_then(|body| body.child_by_field("body"))
@@ -1256,7 +1236,7 @@ impl LoweringContext {
         RecordDef {
             name,
             kind,
-            properties: self.lower_record_fields_from_node(node),
+            properties: self.lower_record_fields_from_node(node, false),
             span: node.span(),
         }
     }

@@ -12,6 +12,8 @@ pub struct ComponentInitResult {
     /// Rendered component body converted to the public value model.
     pub rendered: NxValue,
     /// Opaque host-owned component state snapshot.
+    ///
+    /// Reuse this snapshot only with the exact same source text revision that produced it.
     #[serde(with = "serde_bytes")]
     pub state_snapshot: Vec<u8>,
 }
@@ -22,6 +24,8 @@ pub struct ComponentDispatchResult {
     /// Effect actions returned in dispatch order.
     pub effects: Vec<NxValue>,
     /// Opaque host-owned component state snapshot.
+    ///
+    /// Reuse this snapshot only with the exact same source text revision that produced it.
     #[serde(with = "serde_bytes")]
     pub state_snapshot: Vec<u8>,
 }
@@ -43,6 +47,9 @@ pub enum ComponentDispatchEvalResult {
 }
 
 /// Parses, lowers, and initializes a named component from source text.
+///
+/// The returned state snapshot is opaque host-owned data and is only valid with the exact same
+/// source text revision that produced it.
 pub fn initialize_component_source(
     source: &str,
     file_name: &str,
@@ -74,6 +81,9 @@ pub fn initialize_component_source(
 }
 
 /// Parses, lowers, and dispatches a batch of actions against a component state snapshot.
+///
+/// The provided snapshot must come from [`initialize_component_source`] or an earlier dispatch
+/// against the exact same source text revision.
 pub fn dispatch_component_actions_source(
     source: &str,
     file_name: &str,
@@ -87,7 +97,7 @@ pub fn dispatch_component_actions_source(
 
     for (index, action) in actions.iter().enumerate() {
         if let Err(message) =
-            validate_host_input_value_at_path(&module, action, &format!("$[{index}]"))
+            validate_dispatch_action_input(&module, action, &format!("$[{index}]"))
         {
             return ComponentDispatchEvalResult::Err(invalid_input_diagnostics(message));
         }
@@ -124,6 +134,21 @@ fn invalid_input_diagnostics(message: impl ToString) -> Vec<NxDiagnostic> {
 
 fn validate_host_input_value(module: &Module, value: &NxValue) -> Result<(), String> {
     validate_host_input_value_at_path(module, value, "$")
+}
+
+fn validate_dispatch_action_input(
+    module: &Module,
+    value: &NxValue,
+    path: &str,
+) -> Result<(), String> {
+    if let NxValue::Record {
+        type_name: None, ..
+    } = value
+    {
+        return Err(format!("action record at {path} must have a '$type' field"));
+    }
+
+    validate_host_input_value_at_path(module, value, path)
 }
 
 fn validate_host_input_value_at_path(
@@ -373,5 +398,44 @@ mod tests {
         assert_eq!(diagnostics[0].code.as_deref(), Some("invalid-input"));
         assert!(diagnostics[0].message.contains("SearchBox"));
         assert!(diagnostics[0].message.contains("$[0].payload"));
+    }
+
+    #[test]
+    fn dispatch_component_actions_source_rejects_untyped_action_records() {
+        let source = r#"
+            action SearchSubmitted = { searchString:string }
+
+            component <SearchBox emits { SearchSubmitted } /> = {
+              <TextInput />
+            }
+        "#;
+
+        let init =
+            initialize_component_source(source, "untyped-action.nx", "SearchBox", &empty_record());
+        let ComponentInitEvalResult::Ok(init) = init else {
+            panic!("Expected component initialization to succeed");
+        };
+
+        let action = NxValue::Record {
+            type_name: None,
+            properties: BTreeMap::from([(
+                "searchString".to_string(),
+                NxValue::String("docs".to_string()),
+            )]),
+        };
+
+        let result = dispatch_component_actions_source(
+            source,
+            "untyped-action.nx",
+            &init.state_snapshot,
+            &[action],
+        );
+        let ComponentDispatchEvalResult::Err(diagnostics) = result else {
+            panic!("Expected untyped action records to be rejected");
+        };
+
+        assert_eq!(diagnostics[0].code.as_deref(), Some("invalid-input"));
+        assert!(diagnostics[0].message.contains("$[0]"));
+        assert!(diagnostics[0].message.contains("$type"));
     }
 }

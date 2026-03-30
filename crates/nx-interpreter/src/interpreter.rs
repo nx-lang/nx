@@ -327,12 +327,11 @@ impl Interpreter {
             if let Some(handler) = decoded_snapshot.props.get(handler_name.as_str()) {
                 match handler {
                     Value::ActionHandler { .. } => {
-                        effects.extend(self.invoke_action_handler_with_limits(
-                            module,
-                            handler,
-                            action.clone(),
-                            limits,
-                        )?);
+                        effects.extend(
+                            self.invoke_action_handler_with_limits(
+                                module, handler, action, limits,
+                            )?,
+                        );
                     }
                     _ => {
                         return Err(RuntimeError::new(

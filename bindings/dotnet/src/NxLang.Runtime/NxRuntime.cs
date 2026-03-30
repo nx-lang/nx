@@ -90,6 +90,10 @@ public static class NxRuntime
     /// <param name="componentName">The component name to initialize.</param>
     /// <param name="propsBytes">Optional canonical NX bytes for component props encoded using the NX value model.</param>
     /// <param name="fileName">Optional file name used for diagnostics.</param>
+    /// <remarks>
+    /// Any returned state snapshot is source-revision-specific and must only be reused with the exact same
+    /// NX source text that produced it.
+    /// </remarks>
     /// <returns>The initialization result serialized as canonical NX bytes.</returns>
     public static byte[] InitializeComponentBytes(
         string source,
@@ -175,9 +179,14 @@ public static class NxRuntime
     /// MessagePack wire format.
     /// </summary>
     /// <param name="source">The NX source code containing the component definition.</param>
-    /// <param name="stateSnapshot">The opaque state snapshot returned by initialization or a prior dispatch.</param>
+    /// <param name="stateSnapshot">
+    /// The opaque state snapshot returned by initialization or a prior dispatch for the exact same NX source text.
+    /// </param>
     /// <param name="actionsBytes">Optional canonical NX bytes for the action list encoded using the NX value model.</param>
     /// <param name="fileName">Optional file name used for diagnostics.</param>
+    /// <remarks>
+    /// Reusing a component snapshot with different source text is undefined behavior.
+    /// </remarks>
     /// <returns>The dispatch result serialized as canonical NX bytes.</returns>
     public static byte[] DispatchComponentActionsBytes(
         string source,
