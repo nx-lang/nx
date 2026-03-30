@@ -173,13 +173,70 @@ pub struct RecordField {
     pub span: TextSpan,
 }
 
+/// Distinguishes ordinary records from action records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordKind {
+    /// Standard `type Name = { ... }` record declaration.
+    Plain,
+    /// `action Name = { ... }` declaration.
+    Action,
+}
+
 /// Record type definition.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordDef {
     /// Record name
     pub name: Name,
+    /// Whether this record came from `type` or `action` syntax.
+    pub kind: RecordKind,
     /// Property definitions
     pub properties: Vec<RecordField>,
+    /// Source span
+    pub span: TextSpan,
+}
+
+impl RecordDef {
+    /// Returns true when this record was declared with the `action` keyword.
+    pub fn is_action(&self) -> bool {
+        self.kind == RecordKind::Action
+    }
+}
+
+/// Distinguishes inline emitted actions from shared emitted action references.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComponentEmitKind {
+    /// `ActionName { ... }` declared inline inside `emits`.
+    Inline,
+    /// `ActionName` or `Namespace.ActionName` referenced from `emits`.
+    Shared,
+}
+
+/// Metadata for a component-emitted action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComponentEmit {
+    /// Local emitted action name used for `on<ActionName>` bindings.
+    pub name: Name,
+    /// Public action type name. Inline emits use `<Component>.<Action>`.
+    pub action_name: Name,
+    /// Whether this emit was defined inline or referenced.
+    pub kind: ComponentEmitKind,
+    /// Source span
+    pub span: TextSpan,
+}
+
+/// Executable component declaration preserved in HIR.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Component {
+    /// Component name
+    pub name: Name,
+    /// Declared props, including optional default expressions
+    pub props: Vec<RecordField>,
+    /// Declared emitted actions
+    pub emits: Vec<ComponentEmit>,
+    /// Declared state fields, including optional default expressions
+    pub state: Vec<RecordField>,
+    /// Lowered component body expression
+    pub body: ExprId,
     /// Source span
     pub span: TextSpan,
 }
@@ -215,6 +272,8 @@ pub struct Element {
 pub enum Item {
     /// Function declaration
     Function(Function),
+    /// Component declaration
+    Component(Component),
     /// Type alias declaration
     TypeAlias(TypeAlias),
     /// Enum declaration
@@ -278,6 +337,8 @@ pub struct Module {
     pub imports: Vec<Import>,
     /// Top-level items
     items: Vec<Item>,
+    /// Lowering-time diagnostics
+    diagnostics: Vec<LoweringDiagnostic>,
     /// Arena for all expressions
     exprs: Arena<ast::Expr>,
     /// Arena for all elements
@@ -292,6 +353,7 @@ impl Module {
             content_type: None,
             imports: Vec::new(),
             items: Vec::new(),
+            diagnostics: Vec::new(),
             exprs: Arena::new(),
             elements: Arena::new(),
         }
@@ -302,10 +364,16 @@ impl Module {
         &self.items
     }
 
+    /// Get all lowering diagnostics.
+    pub fn diagnostics(&self) -> &[LoweringDiagnostic] {
+        &self.diagnostics
+    }
+
     /// Find an item by name.
     pub fn find_item(&self, name: &str) -> Option<&Item> {
         self.items.iter().find(|item| match item {
             Item::Function(func) => func.name.as_str() == name,
+            Item::Component(component) => component.name.as_str() == name,
             Item::TypeAlias(alias) => alias.name.as_str() == name,
             Item::Enum(enum_def) => enum_def.name.as_str() == name,
             Item::Record(record_def) => record_def.name.as_str() == name,
@@ -315,6 +383,11 @@ impl Module {
     /// Add a new item to the module.
     pub fn add_item(&mut self, item: Item) {
         self.items.push(item);
+    }
+
+    /// Add a lowering diagnostic.
+    pub fn add_diagnostic(&mut self, diagnostic: LoweringDiagnostic) {
+        self.diagnostics.push(diagnostic);
     }
 
     /// Allocate a new expression in the arena.
@@ -327,6 +400,11 @@ impl Module {
         &self.exprs[id]
     }
 
+    /// Get the number of lowered expressions in the arena.
+    pub fn expr_count(&self) -> usize {
+        self.exprs.len()
+    }
+
     /// Allocate a new element in the arena.
     pub fn alloc_element(&mut self, element: Element) -> ElementId {
         self.elements.alloc(element)
@@ -336,6 +414,15 @@ impl Module {
     pub fn element(&self, id: ElementId) -> &Element {
         &self.elements[id]
     }
+}
+
+/// Lowering diagnostic produced while converting syntax to HIR.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoweringDiagnostic {
+    /// Human-readable message
+    pub message: String,
+    /// Source span
+    pub span: TextSpan,
 }
 
 #[cfg(test)]

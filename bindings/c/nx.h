@@ -13,7 +13,7 @@
 #endif
 
 
-#define NX_FFI_ABI_VERSION 1
+#define NX_FFI_ABI_VERSION 2
 
 enum NxEvalStatus
 #ifdef __cplusplus
@@ -44,18 +44,61 @@ NX_FFI_EXPORT uint32_t nx_ffi_abi_version(void);
 NX_FFI_EXPORT void nx_free_buffer(struct NxBuffer buffer);
 
 NX_FFI_EXPORT
-NxEvalStatus nx_eval_source_msgpack(const uint8_t *source_ptr,
-                                    size_t source_len,
-                                    const uint8_t *file_name_ptr,
-                                    size_t file_name_len,
-                                    struct NxBuffer *out_buffer);
+NxEvalStatus nx_eval_source(const uint8_t *source_ptr,
+                            size_t source_len,
+                            const uint8_t *file_name_ptr,
+                            size_t file_name_len,
+                            struct NxBuffer *out_buffer);
 
 NX_FFI_EXPORT
-NxEvalStatus nx_eval_source_json(const uint8_t *source_ptr,
-                                 size_t source_len,
-                                 const uint8_t *file_name_ptr,
-                                 size_t file_name_len,
-                                 struct NxBuffer *out_buffer);
+/* Initializes a named component from source. The returned state snapshot is opaque host-owned
+ * data and is only valid with the exact same source text revision that produced it. Reusing the
+ * snapshot with different source text is undefined behavior.
+ */
+NxEvalStatus nx_component_init(const uint8_t *source_ptr,
+                               size_t source_len,
+                               const uint8_t *file_name_ptr,
+                               size_t file_name_len,
+                               const uint8_t *component_name_ptr,
+                               size_t component_name_len,
+                               const uint8_t *props_ptr,
+                               size_t props_len,
+                               struct NxBuffer *out_buffer);
+
+NX_FFI_EXPORT
+/* Dispatches actions against a previously returned state snapshot. The snapshot must come from
+ * nx_component_init or an earlier nx_component_dispatch_actions call using the exact same source
+ * text revision. Reusing a snapshot with different source text is undefined behavior.
+ */
+NxEvalStatus nx_component_dispatch_actions(const uint8_t *source_ptr,
+                                           size_t source_len,
+                                           const uint8_t *file_name_ptr,
+                                           size_t file_name_len,
+                                           const uint8_t *state_snapshot_ptr,
+                                           size_t state_snapshot_len,
+                                           const uint8_t *actions_ptr,
+                                           size_t actions_len,
+                                           struct NxBuffer *out_buffer);
+
+NX_FFI_EXPORT
+NxEvalStatus nx_value_msgpack_to_json(const uint8_t *payload_ptr,
+                                      size_t payload_len,
+                                      struct NxBuffer *out_buffer);
+
+NX_FFI_EXPORT
+NxEvalStatus nx_diagnostics_msgpack_to_json(const uint8_t *payload_ptr,
+                                            size_t payload_len,
+                                            struct NxBuffer *out_buffer);
+
+NX_FFI_EXPORT
+NxEvalStatus nx_component_init_result_msgpack_to_json(const uint8_t *payload_ptr,
+                                                      size_t payload_len,
+                                                      struct NxBuffer *out_buffer);
+
+NX_FFI_EXPORT
+NxEvalStatus nx_component_dispatch_result_msgpack_to_json(const uint8_t *payload_ptr,
+                                                          size_t payload_len,
+                                                          struct NxBuffer *out_buffer);
 
 #ifdef __cplusplus
 }  // extern "C"

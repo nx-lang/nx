@@ -747,8 +747,8 @@ fn test_condition_list_basic() {
 #[test]
 fn test_condition_list_without_else() {
     let source = r#"
-        let sign(x:int): int? = { 
-            if { 
+        let sign(x:int): int? = {
+            if {
                 x > 0 => 1
                 x < 0 => -1
             }
@@ -776,8 +776,8 @@ fn test_condition_list_without_else() {
 #[test]
 fn test_condition_list_complex_conditions() {
     let source = r#"
-        let classify(a:int, b:int): string = { 
-            if { 
+        let classify(a:int, b:int): string = {
+            if {
                 a > 0 && b > 0 => "both_positive"
                 a > 0 || b > 0 => "one_positive"
                 else => "neither_positive"
@@ -810,8 +810,8 @@ fn test_condition_list_complex_conditions() {
 #[test]
 fn test_condition_list_with_arithmetic() {
     let source = r#"
-        let transform(x:int): int = { 
-            if { 
+        let transform(x:int): int = {
+            if {
                 x > 10 => x * 2
                 x > 0 => x + 10
                 else => 0 - x
@@ -847,8 +847,8 @@ fn test_condition_list_with_arithmetic() {
 #[test]
 fn test_match_expression_integers() {
     let source = r#"
-        let describe(x:int): string = { 
-            if x is { 
+        let describe(x:int): string = {
+            if x is {
                 0 => "zero"
                 1 => "one"
                 2 => "two"
@@ -882,8 +882,8 @@ fn test_match_expression_integers() {
 #[test]
 fn test_match_expression_without_else() {
     let source = r#"
-        let special(x:int): string? = { 
-            if x is { 
+        let special(x:int): string? = {
+            if x is {
                 42 => "answer"
                 0 => "nothing"
             }

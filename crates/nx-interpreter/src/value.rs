@@ -80,6 +80,20 @@ pub enum Value {
         /// Field values.
         fields: FxHashMap<SmolStr, Value>,
     },
+
+    /// Lazy component action handler callback with captured lexical values.
+    ActionHandler {
+        /// Component name
+        component: Name,
+        /// Local emitted action name
+        emit: Name,
+        /// Public action type name expected for invocation
+        action_name: Name,
+        /// Lowered handler body expression
+        body: nx_hir::ExprId,
+        /// Captured lexical variables from the handler definition site
+        captured: FxHashMap<SmolStr, Value>,
+    },
 }
 
 impl Value {
@@ -137,6 +151,7 @@ impl Value {
             Value::Array(_) => "array",
             Value::EnumVariant { .. } => "enum",
             Value::Record { .. } => "record",
+            Value::ActionHandler { .. } => "action_handler",
         }
     }
 }
@@ -172,6 +187,12 @@ impl std::fmt::Display for Value {
                 }
                 write!(f, " }}")
             }
+            Value::ActionHandler {
+                component,
+                emit,
+                action_name,
+                ..
+            } => write!(f, "<action-handler {} {} {}>", component, emit, action_name),
         }
     }
 }

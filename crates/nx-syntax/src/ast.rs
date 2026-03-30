@@ -154,7 +154,10 @@ pub struct RecordDef<'tree> {
 
 impl<'tree> AstNode<'tree> for RecordDef<'tree> {
     fn can_cast(kind: SyntaxKind) -> bool {
-        kind == SyntaxKind::RECORD_DEFINITION
+        matches!(
+            kind,
+            SyntaxKind::RECORD_DEFINITION | SyntaxKind::ACTION_DEFINITION
+        )
     }
 
     fn cast(node: SyntaxNode<'tree>) -> Option<Self> {
@@ -171,6 +174,11 @@ impl<'tree> AstNode<'tree> for RecordDef<'tree> {
 }
 
 impl<'tree> RecordDef<'tree> {
+    /// Returns true when this record node was declared with the `action` keyword.
+    pub fn is_action(&self) -> bool {
+        self.syntax.kind() == SyntaxKind::ACTION_DEFINITION
+    }
+
     /// Returns the record name.
     pub fn name(&self) -> Option<SyntaxNode<'tree>> {
         self.syntax.child_by_field("name")
@@ -240,7 +248,24 @@ mod tests {
         assert!(RecordDef::can_cast(record_node.kind()));
 
         let record_def = RecordDef::cast(record_node).expect("Should cast to RecordDef");
+        assert!(!record_def.is_action());
         let props: Vec<_> = record_def.properties().collect();
         assert_eq!(props.len(), 2);
+    }
+
+    #[test]
+    fn test_action_def_casts_as_record_def() {
+        let mut parser = parser();
+        let source = "action SaveRequested = { value: string }";
+        let tree = parser.parse(source, None).unwrap();
+        let root = SyntaxNode::new(tree.root_node(), source);
+
+        let action_node = root.children().next().unwrap();
+        assert!(RecordDef::can_cast(action_node.kind()));
+
+        let action_def = RecordDef::cast(action_node).expect("Should cast to RecordDef");
+        assert!(action_def.is_action());
+        let props: Vec<_> = action_def.properties().collect();
+        assert_eq!(props.len(), 1);
     }
 }

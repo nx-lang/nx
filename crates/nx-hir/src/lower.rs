@@ -5,8 +5,9 @@
 
 use crate::ast::{BinOp, Expr, Literal, OrderedFloat, Stmt, TypeRef, UnOp};
 use crate::{
-    Element, EnumDef, EnumMember, ExprId, Function, Import, ImportKind, Item, Module, Name, Param,
-    Property, RecordDef, RecordField, SelectiveImport, SourceId, TypeAlias,
+    Component, ComponentEmit, ComponentEmitKind, Element, EnumDef, EnumMember, ExprId, Function,
+    Import, ImportKind, Item, LoweringDiagnostic, Module, Name, Param, Property, RecordDef,
+    RecordField, RecordKind, SelectiveImport, SourceId, TypeAlias,
 };
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_syntax::{SyntaxKind, SyntaxNode};
@@ -68,10 +69,28 @@ impl TypeTag {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum HandlerPropResolution {
+    Emit(ComponentEmit),
+    Collision,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PredeclaredComponent {
+    name: Name,
+    props: Vec<RecordField>,
+    emits: Vec<ComponentEmit>,
+    span: TextSpan,
+    handler_props: FxHashMap<Name, HandlerPropResolution>,
+}
+
 pub struct LoweringContext {
     module: Module,
     expr_types: FxHashMap<ExprId, TypeTag>,
     scope_stack: Vec<FxHashMap<Name, TypeTag>>,
+    predeclared_components: FxHashMap<Name, PredeclaredComponent>,
+    component_emit_records: FxHashMap<Name, Vec<RecordDef>>,
+    predeclared_action_records: FxHashMap<Name, RecordDef>,
 }
 
 impl LoweringContext {
@@ -81,6 +100,9 @@ impl LoweringContext {
             module: Module::new(source_id),
             expr_types: FxHashMap::default(),
             scope_stack: vec![FxHashMap::default()],
+            predeclared_components: FxHashMap::default(),
+            component_emit_records: FxHashMap::default(),
+            predeclared_action_records: FxHashMap::default(),
         }
     }
 
@@ -107,6 +129,13 @@ impl LoweringContext {
 
     fn pop_scope(&mut self) {
         self.scope_stack.pop();
+    }
+
+    fn add_diagnostic(&mut self, message: impl Into<String>, span: TextSpan) {
+        self.module.add_diagnostic(LoweringDiagnostic {
+            message: message.into(),
+            span,
+        });
     }
 
     fn define_name(&mut self, name: &Name, ty: TypeTag) {
@@ -260,6 +289,254 @@ impl LoweringContext {
         }
     }
 
+    fn property_value_node<'tree>(node: SyntaxNode<'tree>) -> Option<SyntaxNode<'tree>> {
+        node.child_by_field("value").or_else(|| {
+            node.children().find(|n| {
+                matches!(
+                    n.kind(),
+                    SyntaxKind::STRING_LITERAL
+                        | SyntaxKind::VALUES_BRACED_EXPRESSION
+                        | SyntaxKind::ELEMENT
+                        | SyntaxKind::VALUE_EXPRESSION
+                        | SyntaxKind::RHS_EXPRESSION
+                )
+            })
+        })
+    }
+
+    fn lower_value_or_error<'tree>(
+        &mut self,
+        value_node: Option<SyntaxNode<'tree>>,
+        span: TextSpan,
+    ) -> ExprId {
+        if let Some(value_node) = value_node {
+            self.lower_expr(value_node)
+        } else {
+            self.error_expr(span)
+        }
+    }
+
+    fn handler_prop_name(emit_name: &str) -> String {
+        format!("on{}", emit_name)
+    }
+
+    fn local_emit_name(action_name: &str) -> &str {
+        action_name.rsplit('.').next().unwrap_or(action_name)
+    }
+
+    fn is_handler_binding_candidate(prop_name: &str) -> bool {
+        if !prop_name.starts_with("on") || prop_name.len() <= 2 {
+            return false;
+        }
+
+        prop_name
+            .as_bytes()
+            .get(2)
+            .map(|ch| ch.is_ascii_uppercase())
+            .unwrap_or(false)
+    }
+
+    fn find_predeclared_component(&self, name: &str) -> Option<&PredeclaredComponent> {
+        self.predeclared_components.get(&Name::new(name))
+    }
+
+    fn find_predeclared_record(&self, name: &str) -> Option<&RecordDef> {
+        self.predeclared_action_records.get(&Name::new(name))
+    }
+
+    fn lower_record_fields_from_node(
+        &mut self,
+        node: SyntaxNode,
+        define_names: bool,
+    ) -> Vec<RecordField> {
+        let mut properties = Vec::new();
+        for prop in node
+            .children()
+            .filter(|child| child.kind() == SyntaxKind::PROPERTY_DEFINITION)
+        {
+            let field_name = prop
+                .child_by_field("name")
+                .map(|n| Name::new(n.text()))
+                .unwrap_or_else(|| Name::new("_"));
+            let ty_node = prop.child_by_field("type").unwrap_or(prop);
+            let ty = self.lower_type(ty_node);
+            let default = prop
+                .child_by_field("default")
+                .map(|default_node| self.lower_expr(default_node));
+
+            if define_names {
+                self.define_name(&field_name, TypeTag::from_type_ref(&ty));
+            }
+
+            properties.push(RecordField {
+                name: field_name,
+                ty,
+                default,
+                span: prop.span(),
+            });
+        }
+
+        properties
+    }
+
+    fn predeclare_component(&mut self, node: SyntaxNode) {
+        let Some(signature) = node.child_by_field("signature") else {
+            return;
+        };
+
+        let name = signature
+            .child_by_field("name")
+            .map(|n| Name::new(n.text()))
+            .unwrap_or_else(|| Name::new("unknown"));
+        let props = self.lower_record_fields_from_node(signature, false);
+
+        let mut emits = Vec::new();
+        let mut inline_records = Vec::new();
+        if let Some(emits_group) = signature.child_by_field("emits") {
+            for emit_node in emits_group.children() {
+                match emit_node.kind() {
+                    SyntaxKind::EMIT_DEFINITION => {
+                        let emit_name = emit_node
+                            .child_by_field("name")
+                            .map(|n| Name::new(n.text()))
+                            .unwrap_or_else(|| Name::new("unknown"));
+                        let action_name =
+                            Name::new(&format!("{}.{}", name.as_str(), emit_name.as_str()));
+                        let record = RecordDef {
+                            name: action_name.clone(),
+                            kind: RecordKind::Action,
+                            properties: self.lower_record_fields_from_node(emit_node, false),
+                            span: emit_node.span(),
+                        };
+                        self.predeclared_action_records
+                            .insert(action_name.clone(), record.clone());
+                        inline_records.push(record);
+                        emits.push(ComponentEmit {
+                            name: emit_name,
+                            action_name,
+                            kind: ComponentEmitKind::Inline,
+                            span: emit_node.span(),
+                        });
+                    }
+                    SyntaxKind::EMIT_REFERENCE => {
+                        let action_name = emit_node
+                            .child_by_field("name")
+                            .map(|n| Name::new(n.text()))
+                            .unwrap_or_else(|| Name::new("unknown"));
+                        let local_name = Name::new(Self::local_emit_name(action_name.as_str()));
+                        emits.push(ComponentEmit {
+                            name: local_name,
+                            action_name,
+                            kind: ComponentEmitKind::Shared,
+                            span: emit_node.span(),
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        let mut handler_props = FxHashMap::default();
+        let mut seen_handler_props: FxHashMap<Name, TextSpan> = FxHashMap::default();
+        for emit in &emits {
+            let handler_name = Name::new(&Self::handler_prop_name(emit.name.as_str()));
+            let mut has_collision = false;
+
+            if props.iter().any(|prop| prop.name == handler_name) {
+                self.add_diagnostic(
+                    format!(
+                        "Component '{}' declares prop '{}' which collides with emitted action handler '{}'",
+                        name.as_str(),
+                        handler_name.as_str(),
+                        handler_name.as_str()
+                    ),
+                    emit.span,
+                );
+                has_collision = true;
+            }
+
+            if let Some(previous_span) = seen_handler_props.insert(handler_name.clone(), emit.span)
+            {
+                self.add_diagnostic(
+                    format!(
+                        "Component '{}' emits multiple actions that map to handler '{}'",
+                        name.as_str(),
+                        handler_name.as_str()
+                    ),
+                    previous_span,
+                );
+                has_collision = true;
+            }
+
+            handler_props.insert(
+                handler_name,
+                if has_collision {
+                    HandlerPropResolution::Collision
+                } else {
+                    HandlerPropResolution::Emit(emit.clone())
+                },
+            );
+        }
+
+        self.component_emit_records
+            .insert(name.clone(), inline_records);
+        self.predeclared_components.insert(
+            name.clone(),
+            PredeclaredComponent {
+                name,
+                props,
+                emits,
+                span: node.span(),
+                handler_props,
+            },
+        );
+    }
+
+    fn predeclare_components(&mut self, root: SyntaxNode) {
+        for child in root.children() {
+            if child.kind() == SyntaxKind::COMPONENT_DEFINITION {
+                self.predeclare_component(child);
+            }
+        }
+    }
+
+    fn lower_component_definition(&mut self, node: SyntaxNode) -> Component {
+        let name = node
+            .child_by_field("signature")
+            .and_then(|signature| signature.child_by_field("name"))
+            .map(|n| Name::new(n.text()))
+            .unwrap_or_else(|| Name::new("unknown"));
+
+        let body_node = node.child_by_field("body");
+        let predeclared = self.predeclared_components.get(&name).cloned();
+        let (props, emits, span) = predeclared
+            .map(|component| (component.props, component.emits, component.span))
+            .unwrap_or_else(|| (Vec::new(), Vec::new(), node.span()));
+
+        self.push_scope();
+        for prop in &props {
+            self.define_name(&prop.name, TypeTag::from_type_ref(&prop.ty));
+        }
+
+        let state = body_node
+            .and_then(|body| body.child_by_field("state"))
+            .map(|state_node| self.lower_record_fields_from_node(state_node, true))
+            .unwrap_or_default();
+        let body = body_node
+            .and_then(|body| body.child_by_field("body"))
+            .map(|body_expr| self.lower_expr(body_expr))
+            .unwrap_or_else(|| self.error_expr(node.span()));
+        self.pop_scope();
+
+        Component {
+            name,
+            props,
+            emits,
+            state,
+            body,
+            span,
+        }
+    }
     /// Lowers a SyntaxNode to an expression.
     pub fn lower_expr(&mut self, node: SyntaxNode) -> ExprId {
         if node.is_error() {
@@ -530,8 +807,14 @@ impl LoweringContext {
                 let element = self.lower_element(node);
 
                 if element.children.is_empty() {
-                    if let Some(Item::Record(record_def)) =
-                        self.module.find_item(element.tag.as_str())
+                    if let Some(record_def) = self
+                        .module
+                        .find_item(element.tag.as_str())
+                        .and_then(|item| match item {
+                            Item::Record(record_def) => Some(record_def),
+                            _ => None,
+                        })
+                        .or_else(|| self.find_predeclared_record(element.tag.as_str()))
                     {
                         let props = element
                             .properties
@@ -936,37 +1219,24 @@ impl LoweringContext {
 
     /// Lowers a record definition node.
     pub fn lower_record_definition(&mut self, node: SyntaxNode) -> RecordDef {
+        self.lower_record_like_definition(node, RecordKind::Plain)
+    }
+
+    /// Lowers an action definition node into a record-compatible definition.
+    fn lower_action_definition(&mut self, node: SyntaxNode) -> RecordDef {
+        self.lower_record_like_definition(node, RecordKind::Action)
+    }
+
+    fn lower_record_like_definition(&mut self, node: SyntaxNode, kind: RecordKind) -> RecordDef {
         let name = node
             .child_by_field("name")
             .map(|n| Name::new(n.text()))
             .unwrap_or_else(|| Name::new("unknown"));
 
-        let mut properties = Vec::new();
-        for prop in node
-            .children()
-            .filter(|child| child.kind() == SyntaxKind::PROPERTY_DEFINITION)
-        {
-            let field_name = prop
-                .child_by_field("name")
-                .map(|n| Name::new(n.text()))
-                .unwrap_or_else(|| Name::new("_"));
-            let ty_node = prop.child_by_field("type").unwrap_or(prop);
-            let ty = self.lower_type(ty_node);
-            let default = prop
-                .child_by_field("default")
-                .map(|default_node| self.lower_expr(default_node));
-
-            properties.push(RecordField {
-                name: field_name,
-                ty,
-                default,
-                span: prop.span(),
-            });
-        }
-
         RecordDef {
             name,
-            properties,
+            kind,
+            properties: self.lower_record_fields_from_node(node, false),
             span: node.span(),
         }
     }
@@ -1117,6 +1387,7 @@ impl LoweringContext {
             .child_by_field("name")
             .map(|n| Name::new(n.text()))
             .unwrap_or_else(|| Name::new("unknown"));
+        let component = self.find_predeclared_component(tag.as_str()).cloned();
 
         // Parse properties from property_list
         let mut properties = Vec::new();
@@ -1129,23 +1400,64 @@ impl LoweringContext {
                         .map(|n| Name::new(n.text()))
                         .unwrap_or_else(|| Name::new("_"));
 
-                    // The value can be various expression types
-                    let value = child
-                        .child_by_field("value")
-                        .or_else(|| {
-                            child.children().find(|n| {
-                                matches!(
-                                    n.kind(),
-                                    SyntaxKind::STRING_LITERAL
-                                        | SyntaxKind::VALUES_BRACED_EXPRESSION
-                                        | SyntaxKind::ELEMENT
-                                        | SyntaxKind::VALUE_EXPRESSION
-                                        | SyntaxKind::RHS_EXPRESSION
-                                )
-                            })
-                        })
-                        .map(|n| self.lower_expr(n))
-                        .unwrap_or_else(|| self.error_expr(child.span()));
+                    let value_node = Self::property_value_node(child);
+                    let value = if let Some(component) = component.as_ref() {
+                        let prop_name = key.as_str();
+                        let is_declared_prop = component.props.iter().any(|prop| prop.name == key);
+
+                        if !is_declared_prop && Self::is_handler_binding_candidate(prop_name) {
+                            if let Some(HandlerPropResolution::Emit(emit)) =
+                                component.handler_props.get(&key)
+                            {
+                                let body = if let Some(value_node) = value_node {
+                                    self.push_scope();
+                                    let action_name = Name::new("action");
+                                    self.define_name(&action_name, TypeTag::Unknown);
+                                    let body = self.lower_expr(value_node);
+                                    self.pop_scope();
+                                    body
+                                } else {
+                                    self.error_expr(child.span())
+                                };
+
+                                self.alloc_expr(Expr::ActionHandler {
+                                    component: component.name.clone(),
+                                    emit: emit.name.clone(),
+                                    action_name: emit.action_name.clone(),
+                                    body,
+                                    span: child.span(),
+                                })
+                            } else if matches!(
+                                component.handler_props.get(&key),
+                                Some(HandlerPropResolution::Collision)
+                            ) {
+                                self.add_diagnostic(
+                                    format!(
+                                        "Component '{}' cannot use '{}' because it collides with a declared prop or duplicate emitted action",
+                                        component.name.as_str(),
+                                        prop_name
+                                    ),
+                                    child.span(),
+                                );
+                                self.lower_value_or_error(value_node, child.span())
+                            } else {
+                                self.add_diagnostic(
+                                    format!(
+                                        "Component '{}' does not emit '{}' required by handler '{}'",
+                                        component.name.as_str(),
+                                        &prop_name[2..],
+                                        prop_name
+                                    ),
+                                    child.span(),
+                                );
+                                self.lower_value_or_error(value_node, child.span())
+                            }
+                        } else {
+                            self.lower_value_or_error(value_node, child.span())
+                        }
+                    } else {
+                        self.lower_value_or_error(value_node, child.span())
+                    };
 
                     let prop_span = child.span();
                     properties.push(Property {
@@ -1181,6 +1493,8 @@ impl LoweringContext {
 
     /// Lowers a module (source file).
     pub fn lower_module(&mut self, root: SyntaxNode) {
+        self.predeclare_components(root);
+
         // Process all top-level items
         for child in root.children() {
             match child.kind() {
@@ -1198,6 +1512,18 @@ impl LoweringContext {
                     let func = self.lower_function(child);
                     self.module.add_item(Item::Function(func));
                 }
+                SyntaxKind::COMPONENT_DEFINITION => {
+                    let component = self.lower_component_definition(child);
+                    let inline_emit_records = self
+                        .component_emit_records
+                        .get(&component.name)
+                        .cloned()
+                        .unwrap_or_default();
+                    self.module.add_item(Item::Component(component));
+                    for record in inline_emit_records {
+                        self.module.add_item(Item::Record(record));
+                    }
+                }
                 SyntaxKind::TYPE_DEFINITION => {
                     let alias = self.lower_type_alias(child);
                     self.module.add_item(Item::TypeAlias(alias));
@@ -1205,6 +1531,10 @@ impl LoweringContext {
                 SyntaxKind::RECORD_DEFINITION => {
                     let record = self.lower_record_definition(child);
                     self.module.add_item(Item::Record(record));
+                }
+                SyntaxKind::ACTION_DEFINITION => {
+                    let action = self.lower_action_definition(child);
+                    self.module.add_item(Item::Record(action));
                 }
                 SyntaxKind::ENUM_DEFINITION => {
                     let enum_def = self.lower_enum_definition(child);
@@ -1513,6 +1843,7 @@ import "./controls.nx" as UI
             .expect("Should lower record definition");
 
         assert_eq!(record.name.as_str(), "User");
+        assert_eq!(record.kind, RecordKind::Plain);
         assert_eq!(record.properties.len(), 2);
         let defaults = record
             .properties
@@ -1520,6 +1851,33 @@ import "./controls.nx" as UI
             .filter(|f| f.default.is_some())
             .count();
         assert_eq!(defaults, 1, "One field should carry a default value");
+    }
+
+    #[test]
+    fn test_lower_action_definition_as_action_record() {
+        let source = r#"
+            action SaveRequested = {
+              value: string
+            }
+        "#;
+        let parse_result = parse_str(source, "action.nx");
+        let tree = parse_result.tree.expect("Should parse action");
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        let action = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Record(def) => Some(def),
+                _ => None,
+            })
+            .expect("Should lower action definition");
+
+        assert_eq!(action.name.as_str(), "SaveRequested");
+        assert_eq!(action.kind, RecordKind::Action);
+        assert!(action.is_action());
+        assert_eq!(action.properties.len(), 1);
     }
 
     #[test]
@@ -1569,6 +1927,42 @@ import "./controls.nx" as UI
             },
             other => panic!("Expected nullable type, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_lower_action_literal_expression() {
+        let source = r#"
+            action SaveRequested = { value: string = "ready" }
+            let build(): SaveRequested = { <SaveRequested /> }
+        "#;
+        let parse_result = parse_str(source, "action-literal.nx");
+        let tree = parse_result.tree.expect("Should parse action literal");
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        let action = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Record(def) if def.name.as_str() == "SaveRequested" => Some(def),
+                _ => None,
+            })
+            .expect("Should lower action definition");
+        assert_eq!(action.kind, RecordKind::Action);
+
+        let build = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Function(func) if func.name.as_str() == "build" => Some(func),
+                _ => None,
+            })
+            .expect("Should lower build function");
+
+        let Expr::RecordLiteral { record, .. } = module.expr(build.body) else {
+            panic!("Expected action constructor to lower as record literal");
+        };
+        assert_eq!(record.as_str(), "SaveRequested");
     }
 
     #[test]
@@ -2349,5 +2743,302 @@ import "./controls.nx" as UI
             }
             _ => panic!("Expected Function item"),
         }
+    }
+
+    #[test]
+    fn test_lower_component_inline_emit_public_name_and_handler_forward_references() {
+        let source = r#"
+            action TrackSearch = { value: string }
+
+            let makeChange(value:string): SearchBox.ValueChanged = { <SearchBox.ValueChanged value={value} /> }
+            let render() = <SearchBox onValueChanged=<TrackSearch value={action.value} /> />
+
+            component <SearchBox emits { ValueChanged { value:string } } /> = {
+              <TextInput />
+            }
+        "#;
+
+        let parse_result = parse_str(source, "component-actions.nx");
+        let tree = parse_result
+            .tree
+            .expect("Component action handler source should parse");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let component = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Component(component) => Some(component),
+                _ => None,
+            })
+            .expect("Expected lowered component item");
+        assert_eq!(component.name.as_str(), "SearchBox");
+        assert_eq!(component.emits.len(), 1);
+        assert_eq!(component.emits[0].name.as_str(), "ValueChanged");
+        assert_eq!(
+            component.emits[0].action_name.as_str(),
+            "SearchBox.ValueChanged"
+        );
+        assert_eq!(component.emits[0].kind, ComponentEmitKind::Inline);
+
+        let inline_action = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Record(record) if record.name.as_str() == "SearchBox.ValueChanged" => {
+                    Some(record)
+                }
+                _ => None,
+            })
+            .expect("Expected synthesized inline emitted action record");
+        assert_eq!(inline_action.kind, RecordKind::Action);
+
+        let make_change = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Function(function) if function.name.as_str() == "makeChange" => {
+                    Some(function)
+                }
+                _ => None,
+            })
+            .expect("Expected makeChange function");
+
+        match make_change
+            .return_type
+            .as_ref()
+            .expect("Expected explicit return type")
+        {
+            TypeRef::Name(name) => assert_eq!(name.as_str(), "SearchBox.ValueChanged"),
+            other => panic!("Expected named return type, got {:?}", other),
+        }
+
+        match module.expr(make_change.body) {
+            Expr::RecordLiteral { record, .. } => {
+                assert_eq!(record.as_str(), "SearchBox.ValueChanged");
+            }
+            other => panic!("Expected record literal in makeChange, got {:?}", other),
+        }
+
+        let render = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Function(function) if function.name.as_str() == "render" => Some(function),
+                _ => None,
+            })
+            .expect("Expected render function");
+
+        let render_element = match module.expr(render.body) {
+            Expr::Element { element, .. } => *element,
+            other => panic!("Expected component invocation element, got {:?}", other),
+        };
+        let property = &module.element(render_element).properties[0];
+        match module.expr(property.value) {
+            Expr::ActionHandler {
+                component,
+                emit,
+                action_name,
+                ..
+            } => {
+                assert_eq!(component.as_str(), "SearchBox");
+                assert_eq!(emit.as_str(), "ValueChanged");
+                assert_eq!(action_name.as_str(), "SearchBox.ValueChanged");
+            }
+            other => panic!(
+                "Expected lowered action handler expression, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn test_lower_component_preserves_prop_defaults_state_and_body() {
+        let source = r#"
+            component <SearchBox placeholder:string = "Find docs" /> = {
+              state {
+                query:string = {placeholder}
+              }
+              <TextInput value={query} placeholder={placeholder} />
+            }
+        "#;
+
+        let parse_result = parse_str(source, "component-runtime.nx");
+        let tree = parse_result
+            .tree
+            .expect("Component runtime source should parse");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let component = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Component(component) if component.name.as_str() == "SearchBox" => {
+                    Some(component)
+                }
+                _ => None,
+            })
+            .expect("Expected lowered component item");
+
+        assert_eq!(component.props.len(), 1);
+        assert_eq!(component.props[0].name.as_str(), "placeholder");
+        assert!(
+            component.props[0].default.is_some(),
+            "Expected component prop default expression"
+        );
+
+        assert_eq!(component.state.len(), 1);
+        assert_eq!(component.state[0].name.as_str(), "query");
+        assert!(
+            component.state.iter().all(|field| field.default.is_some()),
+            "Expected state defaults to be preserved"
+        );
+
+        let Expr::Element { element, .. } = module.expr(component.body) else {
+            panic!("Expected lowered component body expression");
+        };
+        let element = module.element(*element);
+        assert_eq!(element.tag.as_str(), "TextInput");
+        assert_eq!(element.properties.len(), 2);
+    }
+
+    #[test]
+    fn test_lower_component_handler_diagnostics_for_collision_and_unknown_emit() {
+        let source = r#"
+            component <SearchBox onSearchSubmitted:string emits { SearchSubmitted } /> = {
+              <TextInput />
+            }
+
+            let render() = <SearchBox onSearchRequested=<DoSearch search={action.searchString} /> />
+        "#;
+
+        let parse_result = parse_str(source, "component-handler-errors.nx");
+        let tree = parse_result
+            .tree
+            .expect("Component handler error source should parse");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let messages: Vec<_> = module
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect();
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("collides with emitted action handler")),
+            "Expected prop collision diagnostic, got {:?}",
+            messages
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("does not emit 'SearchRequested'")),
+            "Expected unknown emitted action diagnostic, got {:?}",
+            messages
+        );
+    }
+
+    #[test]
+    fn test_lower_component_shared_emit_preserves_shared_action_name() {
+        let source = r#"
+            action SearchSubmitted = { searchString:string }
+
+            component <SearchBox emits { SearchSubmitted } /> = {
+              <TextInput />
+            }
+        "#;
+
+        let parse_result = parse_str(source, "component-shared-emit.nx");
+        let tree = parse_result.tree.expect("Shared emit source should parse");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let component = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Component(component) if component.name.as_str() == "SearchBox" => {
+                    Some(component)
+                }
+                _ => None,
+            })
+            .expect("Expected component item");
+
+        assert_eq!(component.emits.len(), 1);
+        assert_eq!(component.emits[0].kind, ComponentEmitKind::Shared);
+        assert_eq!(component.emits[0].action_name.as_str(), "SearchSubmitted");
+    }
+
+    #[test]
+    fn test_lower_component_duplicate_emit_handler_name_diagnostic() {
+        let source = r#"
+            action SearchSubmitted = { searchString:string }
+
+            component <SearchBox emits { SearchSubmitted SearchSubmitted } /> = {
+              <TextInput />
+            }
+        "#;
+
+        let parse_result = parse_str(source, "component-duplicate-handler-prop.nx");
+        let tree = parse_result
+            .tree
+            .expect("Duplicate emit source should parse");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let messages: Vec<_> = module
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect();
+        assert!(
+            messages.iter().any(|message| {
+                message.contains("emits multiple actions that map to handler 'onSearchSubmitted'")
+            }),
+            "Expected duplicate handler mapping diagnostic, got {:?}",
+            messages
+        );
+    }
+
+    #[test]
+    fn test_lower_non_matching_on_property_as_regular_component_prop() {
+        let source = r#"
+            component <SearchBox onClick:string /> = {
+              <button />
+            }
+
+            let render() = <SearchBox onClick="primary" />
+        "#;
+
+        let parse_result = parse_str(source, "component-on-prop.nx");
+        let tree = parse_result
+            .tree
+            .expect("Regular on-prop source should parse");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        assert!(
+            module.diagnostics().is_empty(),
+            "Expected no lowering diagnostics, got {:?}",
+            module.diagnostics()
+        );
+
+        let render = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Function(function) if function.name.as_str() == "render" => Some(function),
+                _ => None,
+            })
+            .expect("Expected render function");
+
+        let render_element = match module.expr(render.body) {
+            Expr::Element { element, .. } => *element,
+            other => panic!("Expected component invocation element, got {:?}", other),
+        };
+        let property = &module.element(render_element).properties[0];
+        assert_eq!(property.key.as_str(), "onClick");
+        assert!(
+            !matches!(module.expr(property.value), Expr::ActionHandler { .. }),
+            "Expected onClick to remain a normal prop"
+        );
     }
 }

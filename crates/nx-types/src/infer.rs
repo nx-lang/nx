@@ -215,6 +215,9 @@ impl<'a> InferenceContext<'a> {
                 properties,
                 span,
             } => self.infer_record_literal(record, properties, *span),
+            // TODO: Action handlers are lowered as lazy runtime callbacks. Wire them into
+            // expression-level type inference once the language has a first-class handler type.
+            ast::Expr::ActionHandler { .. } => Type::Error,
 
             // Block expressions
             ast::Expr::Block { stmts: _, expr, .. } => {
@@ -791,6 +794,7 @@ impl<'a> InferenceContext<'a> {
                         }
                     }
                 }
+                nx_hir::Item::Component(_) => {}
                 _ => {}
             }
         }

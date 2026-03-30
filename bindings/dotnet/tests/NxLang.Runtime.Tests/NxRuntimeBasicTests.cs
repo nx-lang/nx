@@ -11,24 +11,25 @@ namespace NxLang.Nx.Tests;
 public class NxRuntimeBasicTests
 {
     [Fact]
-    public void EvaluateToMessagePack_SimpleInteger_ReturnsCorrectBytes()
+    public void EvaluateBytes_SimpleInteger_ReturnsCorrectBytes()
     {
         string source = "let root() = { 42 }";
 
-        byte[] result = NxRuntime.EvaluateToMessagePack(source);
+        byte[] result = NxRuntime.EvaluateBytes(source);
 
         int value = MessagePackSerializer.Deserialize<int>(result, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(42, value);
     }
 
     [Fact]
-    public void EvaluateToJson_SimpleInteger_ReturnsCorrectJson()
+    public void ValueBytesToJson_SimpleInteger_ReturnsCorrectJson()
     {
         string source = "let root() = { 42 }";
 
-        string result = NxRuntime.EvaluateToJson(source);
+        byte[] result = NxRuntime.EvaluateBytes(source);
+        string json = NxRuntime.ValueBytesToJson(result);
 
-        Assert.Equal("42", result);
+        Assert.Equal("42", json);
     }
 
     [Fact]
@@ -52,15 +53,9 @@ public class NxRuntimeBasicTests
     }
 
     [Fact]
-    public void EvaluateToMessagePack_NullSource_ThrowsArgumentNullException()
+    public void EvaluateBytes_NullSource_ThrowsArgumentNullException()
     {
-        Assert.Throws<ArgumentNullException>(() => NxRuntime.EvaluateToMessagePack(null!));
-    }
-
-    [Fact]
-    public void EvaluateToJson_NullSource_ThrowsArgumentNullException()
-    {
-        Assert.Throws<ArgumentNullException>(() => NxRuntime.EvaluateToJson(null!));
+        Assert.Throws<ArgumentNullException>(() => NxRuntime.EvaluateBytes(null!));
     }
 
     [Fact]
@@ -70,22 +65,23 @@ public class NxRuntimeBasicTests
     }
 
     [Fact]
-    public void EvaluateToMessagePack_WithFileName_DoesNotThrow()
+    public void EvaluateBytes_WithFileName_DoesNotThrow()
     {
         string source = "let root() = { 42 }";
 
-        byte[] result = NxRuntime.EvaluateToMessagePack(source, "test.nx");
+        byte[] result = NxRuntime.EvaluateBytes(source, "test.nx");
 
         int value = MessagePackSerializer.Deserialize<int>(result, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(42, value);
     }
 
     [Fact]
-    public void EvaluateToJson_WithFileName_DoesNotThrow()
+    public void ValueBytesToJson_WithFileName_DoesNotThrow()
     {
         string source = "let root() = { 42 }";
 
-        string result = NxRuntime.EvaluateToJson(source, "test.nx");
+        byte[] resultBytes = NxRuntime.EvaluateBytes(source, "test.nx");
+        string result = NxRuntime.ValueBytesToJson(resultBytes);
 
         Assert.Equal("42", result);
     }

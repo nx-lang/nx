@@ -12,8 +12,14 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 nx-api = { path = "../nx-api" }
+nx-value = { path = "../nx-value" }
 rmp-serde.workspace = true
 serde_json.workspace = true
+serde.workspace = true
+base64 = "0.22"
 
 [dev-dependencies]
+nx-hir = { path = "../nx-hir" }
+nx-interpreter = { path = "../nx-interpreter" }
+nx-syntax = { path = "../nx-syntax" }
 nx-value = { path = "../nx-value" }

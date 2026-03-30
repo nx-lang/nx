@@ -18,6 +18,9 @@ Keywords
 - FROM ("from")
 - AS ("as")
 - CONTENTTYPE ("contenttype")
+- COMPONENT ("component")
+- EMITS ("emits")
+- STATE ("state")
 - TYPE ("type")
 - ENUM ("enum")
 - LET ("let")
@@ -147,6 +150,7 @@ ModuleMember (AST: ModuleMemberSyntax is a sum type)
 - ModuleMember → TypeDefinition
 - ModuleMember → ValueDefinition
 - ModuleMember → FunctionDefinition
+- ModuleMember → ComponentDefinition
 
 ContentTypeStatement (AST: ContentTypeStatementSyntax)
 - ContentTypeStatement → CONTENTTYPE ModulePath
@@ -250,6 +254,39 @@ UserDefinedType (AST: UserTypeSyntax)
 FunctionDefinition (AST: FunctionDefinitionSyntax is a sum type)
 - FunctionDefinition → ElementFunctionDefinition        (ElementFunctionDefinitionSyntax)
 - FunctionDefinition → ParenFunctionDefinition          (ParenFunctionDefinitionSyntax)
+
+ComponentDefinition (AST: ComponentDefinitionSyntax)
+- ComponentDefinition → COMPONENT ComponentSignature EQ ComponentBody
+  - fields: signature: ComponentSignatureSyntax, body: ComponentBodySyntax
+
+ComponentSignature (AST: ComponentSignatureSyntax)
+- ComponentSignature → LT ElementName PropertyDefinition* EmitsGroupOpt SLASH GT
+  - fields: name: QualifiedMarkupNameSyntax, parameters: PropertyDefinitionSyntax[], emits?: EmitsGroupSyntax
+
+EmitsGroupOpt
+- EmitsGroupOpt → EmitsGroup
+- EmitsGroupOpt → ε
+
+EmitsGroup (AST: EmitsGroupSyntax)
+- EmitsGroup → EMITS LBRACE EmitDefinition+ RBRACE
+  - fields: definitions: EmitDefinitionSyntax[]
+
+EmitDefinition (AST: EmitDefinitionSyntax)
+- EmitDefinition → IDENTIFIER LBRACE PropertyDefinition* RBRACE
+  - fields: name: string, properties: PropertyDefinitionSyntax[]
+  - note: emit names are plain identifiers, so dotted or hyphenated names are not valid here
+
+ComponentBody (AST: ComponentBodySyntax)
+- ComponentBody → LBRACE StateGroupOpt ValueExpression RBRACE
+  - fields: state?: StateGroupSyntax, body: ExpressionSyntax
+
+StateGroupOpt
+- StateGroupOpt → StateGroup
+- StateGroupOpt → ε
+
+StateGroup (AST: StateGroupSyntax)
+- StateGroup → STATE LBRACE PropertyDefinition* RBRACE
+  - fields: properties: PropertyDefinitionSyntax[]
 
 ElementFunctionDefinition (AST: ElementFunctionDefinitionSyntax)
 - ElementFunctionDefinition → LET LT ElementName PropertyDefinition* SLASH GT FunctionReturnTypeOpt EQ RhsExpression

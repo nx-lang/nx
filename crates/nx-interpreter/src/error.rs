@@ -51,6 +51,11 @@ pub enum RuntimeErrorKind {
     /// Triggered when attempting to call a non-existent function
     FunctionNotFound { name: SmolStr },
 
+    /// Component not found
+    ///
+    /// Triggered when attempting to initialize or dispatch a missing component
+    ComponentNotFound { name: SmolStr },
+
     /// Operation limit exceeded (infinite loop protection)
     ///
     /// Triggered when execution exceeds the configured operation count limit
@@ -69,6 +74,26 @@ pub enum RuntimeErrorKind {
 
     /// Record field not found on the given record value
     RecordFieldNotFound { record: SmolStr, field: SmolStr },
+
+    /// Required record field omitted from an externally supplied typed record
+    MissingRequiredRecordField {
+        record: SmolStr,
+        field: SmolStr,
+        operation: String,
+    },
+
+    /// Required component prop or state field was not provided and has no default
+    MissingRequiredComponentField {
+        component: SmolStr,
+        field: SmolStr,
+        phase: String,
+    },
+
+    /// Malformed or incompatible component state snapshot
+    InvalidComponentStateSnapshot { reason: String },
+
+    /// Dispatched action is not declared by the target component
+    UnsupportedComponentAction { component: SmolStr, action: SmolStr },
 }
 
 impl fmt::Display for RuntimeErrorKind {
@@ -102,6 +127,9 @@ impl fmt::Display for RuntimeErrorKind {
             RuntimeErrorKind::FunctionNotFound { name } => {
                 write!(f, "Function not found: {}", name)
             }
+            RuntimeErrorKind::ComponentNotFound { name } => {
+                write!(f, "Component not found: {}", name)
+            }
             RuntimeErrorKind::OperationLimitExceeded { limit } => {
                 write!(f, "Operation limit exceeded: {} operations", limit)
             }
@@ -117,6 +145,32 @@ impl fmt::Display for RuntimeErrorKind {
             RuntimeErrorKind::RecordFieldNotFound { record, field } => {
                 write!(f, "Record '{}' has no field named '{}'", record, field)
             }
+            RuntimeErrorKind::MissingRequiredRecordField {
+                record,
+                field,
+                operation,
+            } => write!(
+                f,
+                "Missing required field '{}' on record '{}' in {}",
+                field, record, operation
+            ),
+            RuntimeErrorKind::MissingRequiredComponentField {
+                component,
+                field,
+                phase,
+            } => write!(
+                f,
+                "Missing required component field '{}' on '{}' during {}",
+                field, component, phase
+            ),
+            RuntimeErrorKind::InvalidComponentStateSnapshot { reason } => {
+                write!(f, "Invalid component state snapshot: {}", reason)
+            }
+            RuntimeErrorKind::UnsupportedComponentAction { component, action } => write!(
+                f,
+                "Component '{}' does not declare emitted action '{}'",
+                component, action
+            ),
         }
     }
 }
@@ -282,5 +336,12 @@ mod tests {
             name: SmolStr::new("x"),
         };
         assert!(err2.to_string().contains("Undefined variable"));
+
+        let err3 = RuntimeErrorKind::MissingRequiredRecordField {
+            record: SmolStr::new("User"),
+            field: SmolStr::new("name"),
+            operation: "function call parameter 'user'".to_string(),
+        };
+        assert!(err3.to_string().contains("Missing required field"));
     }
 }

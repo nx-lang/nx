@@ -16,6 +16,8 @@ pub type ScopeId = Idx<Scope>;
 pub enum SymbolKind {
     /// A function definition
     Function,
+    /// A component definition
+    Component,
     /// A variable (from let bindings)
     Variable,
     /// A function parameter
@@ -31,6 +33,7 @@ impl SymbolKind {
     pub fn as_str(&self) -> &'static str {
         match self {
             SymbolKind::Function => "function",
+            SymbolKind::Component => "component",
             SymbolKind::Variable => "variable",
             SymbolKind::Parameter => "parameter",
             SymbolKind::Type => "type",
@@ -227,6 +230,14 @@ pub fn build_scopes(module: &Module) -> (ScopeManager, Vec<Diagnostic>) {
                 let symbol = Symbol::new(func.name.clone(), SymbolKind::Function, func.span);
                 manager.define(manager.root(), symbol);
             }
+            crate::Item::Component(component) => {
+                let symbol = Symbol::new(
+                    component.name.clone(),
+                    SymbolKind::Component,
+                    component.span,
+                );
+                manager.define(manager.root(), symbol);
+            }
             crate::Item::TypeAlias(alias) => {
                 let symbol = Symbol::new(alias.name.clone(), SymbolKind::Type, alias.span);
                 manager.define(manager.root(), symbol);
@@ -276,6 +287,7 @@ mod tests {
     #[test]
     fn test_symbol_kind_str() {
         assert_eq!(SymbolKind::Function.as_str(), "function");
+        assert_eq!(SymbolKind::Component.as_str(), "component");
         assert_eq!(SymbolKind::Variable.as_str(), "variable");
         assert_eq!(SymbolKind::Parameter.as_str(), "parameter");
         assert_eq!(SymbolKind::Type.as_str(), "type");
@@ -407,6 +419,30 @@ mod tests {
         let (manager, diagnostics) = build_scopes(&module);
 
         assert!(manager.get(manager.root()).is_empty());
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_build_scopes_registers_component_symbols() {
+        let mut module = Module::new(crate::SourceId::new(0));
+        let span = TextSpan::new(TextSize::from(0), TextSize::from(9));
+        let body = module.alloc_expr(crate::ast::Expr::Error(span));
+        module.add_item(crate::Item::Component(crate::Component {
+            name: Name::new("SearchBox"),
+            props: Vec::new(),
+            emits: Vec::new(),
+            state: Vec::new(),
+            body,
+            span,
+        }));
+
+        let (manager, diagnostics) = build_scopes(&module);
+        let symbol = manager
+            .resolve(&Name::new("SearchBox"), manager.root())
+            .expect("Expected component symbol in root scope");
+
+        assert_eq!(symbol.kind, SymbolKind::Component);
+        assert_eq!(symbol.name.as_str(), "SearchBox");
         assert!(diagnostics.is_empty());
     }
 }

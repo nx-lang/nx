@@ -1,6 +1,7 @@
 // Copyright (c) Bret Johnson. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
+using MessagePack;
 using NxLang.Nx;
 using Xunit;
 
@@ -89,24 +90,35 @@ public class NxRuntimeErrorTests
     }
 
     [Fact]
-    public void EvaluateToJson_SyntaxError_ThrowsNxEvaluationException()
+    public void EvaluateBytes_SyntaxError_ThrowsNxEvaluationException()
     {
         string source = "let x = ";
 
         NxEvaluationException ex = Assert.Throws<NxEvaluationException>(
-            () => NxRuntime.EvaluateToJson(source));
+            () => NxRuntime.EvaluateBytes(source));
 
         Assert.NotEmpty(ex.Diagnostics);
     }
 
     [Fact]
-    public void EvaluateToMessagePack_SyntaxError_ThrowsNxEvaluationException()
+    public void DiagnosticsBytesToJson_ManualPayload_ReturnsCorrectJson()
     {
-        string source = "let x = ";
+        NxDiagnostic[] diagnostics =
+        {
+            new()
+            {
+                Severity = NxSeverity.Error,
+                Code = "test-error",
+                Message = "Expected a root function."
+            }
+        };
 
-        NxEvaluationException ex = Assert.Throws<NxEvaluationException>(
-            () => NxRuntime.EvaluateToMessagePack(source));
+        byte[] payload = MessagePackSerializer.Serialize(
+            diagnostics,
+            cancellationToken: TestContext.Current.CancellationToken);
+        string json = NxRuntime.DiagnosticsBytesToJson(payload);
 
-        Assert.NotEmpty(ex.Diagnostics);
+        Assert.Contains("\"code\":\"test-error\"", json);
+        Assert.Contains("\"message\":\"Expected a root function.\"", json);
     }
 }

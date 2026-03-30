@@ -58,11 +58,12 @@ public class NxEndToEndTests
     }
 
     [Fact]
-    public void EvaluateToJson_ComplexExpression_ReturnsValidJson()
+    public void ValueBytesToJson_ComplexExpression_ReturnsValidJson()
     {
         string source = "let root() = { 10 + 32 }";
 
-        string json = NxRuntime.EvaluateToJson(source);
+        byte[] resultBytes = NxRuntime.EvaluateBytes(source);
+        string json = NxRuntime.ValueBytesToJson(resultBytes);
 
         Assert.Equal("42", json);
     }

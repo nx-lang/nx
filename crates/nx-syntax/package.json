@@ -11,9 +11,11 @@
     "nan": "^2.12.1"
   },
   "devDependencies": {
-    "tree-sitter-cli": "^0.25.10"
+    "tree-sitter-cli": "0.25.10"
   },
   "scripts": {
+    "generate": "tree-sitter generate",
+    "parse": "tree-sitter parse",
     "test": "tree-sitter test"
   }
 }

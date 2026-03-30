@@ -1,0 +1,4 @@
+action ActionSharedWithMultipleComponents = {
+  value: string
+  source: string?
+}

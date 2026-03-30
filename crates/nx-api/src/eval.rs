@@ -2,8 +2,8 @@ use crate::diagnostics::diagnostics_to_api;
 use crate::value::to_nx_value;
 use crate::NxDiagnostic;
 use nx_diagnostics::{Diagnostic, Label, Severity};
-use nx_hir::{lower, Item, SourceId};
-use nx_interpreter::Interpreter;
+use nx_hir::{lower, Item, Module, SourceId};
+use nx_interpreter::{Interpreter, RuntimeError};
 use nx_syntax::parse_str;
 use nx_value::NxValue;
 use text_size::{TextRange, TextSize};
@@ -17,6 +17,41 @@ pub enum EvalResult {
     Ok(NxValue),
     /// Evaluation failed with one or more diagnostics (parse errors, missing root, runtime errors).
     Err(Vec<NxDiagnostic>),
+}
+
+pub(crate) fn lower_source_module(
+    source: &str,
+    file_name: &str,
+) -> Result<Module, Vec<NxDiagnostic>> {
+    let parse_result = parse_str(source, file_name);
+
+    if parse_result
+        .errors
+        .iter()
+        .any(|d| d.severity() == Severity::Error)
+    {
+        return Err(diagnostics_to_api(&parse_result.errors, source));
+    }
+
+    let tree = match parse_result.tree {
+        Some(t) => t,
+        None => {
+            let diag = Diagnostic::error("parse-failed")
+                .with_message("Failed to parse source")
+                .build();
+            return Err(diagnostics_to_api(&[diag], source));
+        }
+    };
+
+    let source_id = SourceId::new(parse_result.source_id.as_u32());
+    Ok(lower(tree.root(), source_id))
+}
+
+pub(crate) fn runtime_error_diagnostics(source: &str, error: RuntimeError) -> Vec<NxDiagnostic> {
+    let diag = Diagnostic::error("runtime-error")
+        .with_message(error.to_string())
+        .build();
+    diagnostics_to_api(&[diag], source)
 }
 
 /// Parses and evaluates a self-contained NX source string, returning the result as an [`NxValue`].
@@ -34,28 +69,10 @@ pub enum EvalResult {
 /// - No `root()` function is defined
 /// - A runtime error occurs during evaluation
 pub fn eval_source(source: &str, file_name: &str) -> EvalResult {
-    let parse_result = parse_str(source, file_name);
-
-    if parse_result
-        .errors
-        .iter()
-        .any(|d| d.severity() == Severity::Error)
-    {
-        return EvalResult::Err(diagnostics_to_api(&parse_result.errors, source));
-    }
-
-    let tree = match parse_result.tree {
-        Some(t) => t,
-        None => {
-            let diag = Diagnostic::error("parse-failed")
-                .with_message("Failed to parse source")
-                .build();
-            return EvalResult::Err(diagnostics_to_api(&[diag], source));
-        }
+    let module = match lower_source_module(source, file_name) {
+        Ok(module) => module,
+        Err(diagnostics) => return EvalResult::Err(diagnostics),
     };
-
-    let source_id = SourceId::new(parse_result.source_id.as_u32());
-    let module = lower(tree.root(), source_id);
 
     let has_root = module
         .items()
@@ -76,11 +93,6 @@ pub fn eval_source(source: &str, file_name: &str) -> EvalResult {
     let interpreter = Interpreter::new();
     match interpreter.execute_function(&module, "root", vec![]) {
         Ok(value) => EvalResult::Ok(to_nx_value(&value)),
-        Err(e) => {
-            let diag = Diagnostic::error("runtime-error")
-                .with_message(e.to_string())
-                .build();
-            EvalResult::Err(diagnostics_to_api(&[diag], source))
-        }
+        Err(e) => EvalResult::Err(runtime_error_diagnostics(source, e)),
     }
 }

@@ -1,0 +1,40 @@
+// Component syntax with both shared and inline actions.
+// Hosts initialize the component, store the returned opaque state snapshot,
+// and later redispatch emitted actions with that saved snapshot.
+
+action SearchSubmitted = {
+  searchString: string
+}
+
+action DoSearch = {
+  search: string
+}
+
+action TrackSearch = {
+  value: string
+}
+
+component <SearchBox
+  placeholder:string
+  emits {
+    ValueChanged {
+      value:string
+    }
+    SearchSubmitted
+  }
+/> = {
+  state {
+    query:string = {placeholder}
+  }
+
+  <TextInput value={query} placeholder={placeholder} />
+}
+
+let makeValueChanged(value:string): SearchBox.ValueChanged = {
+  <SearchBox.ValueChanged value={value} />
+}
+
+<SearchBox
+  placeholder="Find docs"
+  onSearchSubmitted=<DoSearch search={action.searchString}/>
+  onValueChanged=<TrackSearch value={action.value}/> />

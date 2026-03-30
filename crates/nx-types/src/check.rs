@@ -93,6 +93,7 @@ pub fn check_str(source: &str, file_name: &str) -> TypeCheckResult {
                     // For now, infer the body
                     ctx.infer_function(func);
                 }
+                nx_hir::Item::Component(_) => {}
                 nx_hir::Item::TypeAlias(_) => {
                     // Processed during type registration
                 }
@@ -167,6 +168,7 @@ pub fn check_file(path: impl AsRef<Path>) -> io::Result<TypeCheckResult> {
                 nx_hir::Item::Function(func) => {
                     ctx.infer_function(func);
                 }
+                nx_hir::Item::Component(_) => {}
                 nx_hir::Item::TypeAlias(_) => {}
                 nx_hir::Item::Record(_) => {}
                 nx_hir::Item::Enum(_) => {}

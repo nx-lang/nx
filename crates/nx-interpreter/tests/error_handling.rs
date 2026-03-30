@@ -115,7 +115,10 @@ fn test_paren_function_argument_type_mismatch() {
         RuntimeErrorKind::TypeMismatch { operation, .. } => {
             assert_eq!(operation, "function call parameter 'a'");
         }
-        other => panic!("Expected TypeMismatch during parameter binding, got {:?}", other),
+        other => panic!(
+            "Expected TypeMismatch during parameter binding, got {:?}",
+            other
+        ),
     }
 }
 

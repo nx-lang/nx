@@ -1,0 +1,9 @@
+component <MyComponent
+  emits {
+    SharedActions.SearchSubmitted
+  }
+/> = {
+  <button />
+}
+
+<MyComponent />

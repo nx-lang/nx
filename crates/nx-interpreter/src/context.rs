@@ -24,7 +24,7 @@ use smol_str::SmolStr;
 ///     max_recursion_depth: 100,
 /// };
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct ResourceLimits {
     /// Maximum number of operations allowed per execution
     ///
@@ -153,6 +153,17 @@ impl ExecutionContext {
             }
         }
         None
+    }
+
+    /// Snapshot all currently visible variables with lexical shadowing preserved.
+    pub fn snapshot_visible_variables(&self) -> FxHashMap<SmolStr, Value> {
+        let mut variables = FxHashMap::default();
+        for scope in &self.scopes {
+            for (name, value) in &scope.variables {
+                variables.insert(name.clone(), value.clone());
+            }
+        }
+        variables
     }
 
     /// Update a variable in the scope stack

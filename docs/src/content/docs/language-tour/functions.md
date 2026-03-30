@@ -1,9 +1,9 @@
 ---
 title: 'Functions & Bindings'
-description: 'Define reusable components and constants with `let`, using element or paren syntax.'
+description: 'Use `let` for functions and bindings, and `component` for declarations with emits or state.'
 ---
 
-Components and constants share the same `let` keyword. Signatures mirror how you invoke them, keeping APIs self-documenting.
+`let` still handles values and reusable functions. The `action` keyword introduces reusable action-shaped records, and `component` is for element-style declarations that need emitted actions or persistent local state.
 
 ## Element-style functions
 
@@ -19,6 +19,54 @@ let <UserCard user:User tone:string = "neutral"/> =
 
 - Attributes in the signature declare names, types, and defaults.
 - Invocation mirrors the signature: supply values instead of types.
+
+## Component declarations
+
+```nx
+action SearchSubmitted = {
+  searchString:string
+}
+
+action DoSearch = {
+  search:string
+}
+
+component <SearchBox
+  placeholder:string
+  emits {
+    ValueChanged {
+      value:string
+    }
+    SearchSubmitted
+  }
+/> = {
+  state {
+    query:string = {placeholder}
+  }
+
+  <TextInput value={query} placeholder={placeholder} />
+}
+
+action TrackSearch = {
+  value:string
+}
+
+<SearchBox
+  placeholder="Find docs"
+  onSearchSubmitted=<DoSearch search={action.searchString}/>
+  onValueChanged=<TrackSearch value={action.value}/> />
+
+let makeValueChanged(value:string): SearchBox.ValueChanged =
+  <SearchBox.ValueChanged value={value} />
+```
+
+- Use `action` for shared action contracts that multiple components can emit.
+- Use `component` when the declaration needs `emits` or `state`.
+- `emits` can declare a new action inline or reference an existing `action` by name.
+- Inline emitted actions become public action names such as `SearchBox.ValueChanged`.
+- Component invocation sites can bind emitted actions through `on<ActionName>` properties with an implicit `action` value inside the handler body.
+- Hosts initialize components by name, receive the rendered output plus an opaque state snapshot, and later dispatch ordered action batches with that saved snapshot.
+- State defaults run only during initialization. Declarative state-update actions still land in a follow-up change, so dispatch currently returns effect actions plus the next snapshot without mutating state.
 
 ## Paren-style functions
 

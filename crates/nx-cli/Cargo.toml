@@ -12,6 +12,7 @@ name = "nxlang"
 path = "src/main.rs"
 
 [dependencies]
+nx-api = { path = "../nx-api" }
 nx-syntax = { path = "../nx-syntax" }
 nx-hir = { path = "../nx-hir" }
 nx-types = { path = "../nx-types" }

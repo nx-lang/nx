@@ -67,10 +67,12 @@ module.exports = grammar({
       repeat($.import_statement),
       repeat(choice(
         $.record_definition,
+        $.action_definition,
         $.type_definition,
         $.enum_definition,
         $.value_definition,
         $.function_definition,
+        $.component_definition,
       )),
       optional($.element),
     ),
@@ -129,6 +131,15 @@ module.exports = grammar({
     // ===== Type Definitions =====
     record_definition: $ => seq(
       'type',
+      field('name', $.identifier),
+      '=',
+      '{',
+      repeat(field('properties', $.property_definition)),
+      '}',
+    ),
+
+    action_definition: $ => seq(
+      'action',
       field('name', $.identifier),
       '=',
       '{',
@@ -223,6 +234,76 @@ module.exports = grammar({
       )),
       '=',
       field('body', $.rhs_expression),
+    ),
+
+    component_definition: $ => seq(
+      'component',
+      field('signature', $.component_signature),
+      '=',
+      field('body', $.component_body),
+    ),
+
+    component_signature: $ => seq(
+      '<',
+      field('name', $.element_name),
+      repeat(field('properties', alias($._component_property_definition, $.property_definition))),
+      optional(field('emits', $.emits_group)),
+      '/',
+      '>',
+    ),
+
+    // Components require at least one emitted action when the emits block is
+    // present, but each action payload may be empty.
+    emits_group: $ => seq(
+      'emits',
+      '{',
+      repeat1(field('entries', choice(
+        $.emit_definition,
+        $.emit_reference,
+      ))),
+      '}',
+    ),
+
+    emit_definition: $ => seq(
+      field('name', $.identifier),
+      '{',
+      repeat(field('properties', alias($._component_property_definition, $.property_definition))),
+      '}',
+    ),
+
+    emit_reference: $ => field('name', $.qualified_name),
+
+    component_body: $ => seq(
+      '{',
+      optional(field('state', $.state_group)),
+      field('body', $.value_expression),
+      '}',
+    ),
+
+    state_group: $ => seq(
+      'state',
+      '{',
+      repeat(field('properties', alias($._component_property_definition, $.property_definition))),
+      '}',
+    ),
+
+    // Reuse PROPERTY_DEFINITION nodes for components while accepting the token
+    // stream tree-sitter produces in component signatures and nested emits/state
+    // blocks. Using the shared property_definition rule directly regresses plain
+    // identifier props like `text:string` under `component`.
+    _component_property_definition: $ => seq(
+      field('name', alias($._component_field_name, $.markup_identifier)),
+      ':',
+      field('type', $.type),
+      optional(seq(
+        '=',
+        field('default', $.rhs_expression),
+      )),
+    ),
+
+    _component_field_name: $ => choice(
+      $.identifier,
+      $.markup_identifier,
     ),
 
     property_definition: $ => seq(

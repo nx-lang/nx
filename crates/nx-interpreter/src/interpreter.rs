@@ -3,19 +3,84 @@
 use crate::context::{ExecutionContext, ResourceLimits};
 use crate::error::{RuntimeError, RuntimeErrorKind};
 use crate::value::Value;
-use nx_hir::{ast, ElementId, ExprId, Function, Item, Module, Name};
+use la_arena::RawIdx;
+use nx_hir::{ast, ElementId, ExprId, Function, Item, Module, Name, RecordKind};
 use nx_types::{
     common_supertype, is_object_type, resolve_type_ref_with, resolve_type_ref_with_seen,
     type_satisfies_expected, Type,
 };
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
+use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
+use std::collections::BTreeMap;
+
+const COMPONENT_SNAPSHOT_VERSION: u32 = 1;
 
 /// Tree-walking interpreter for NX HIR
 #[derive(Debug)]
 pub struct Interpreter {
     // The interpreter is stateless; all state is in ExecutionContext
+}
+
+/// Result of component initialization.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ComponentInitResult {
+    /// Rendered component body value
+    pub rendered: Value,
+    /// Opaque serialized component state snapshot owned by the host
+    pub state_snapshot: Vec<u8>,
+}
+
+/// Result of component action dispatch.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ComponentDispatchResult {
+    /// Effect actions returned by bound handlers in dispatch order
+    pub effects: Vec<Value>,
+    /// Opaque serialized component state snapshot owned by the host
+    pub state_snapshot: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct SerializedComponentSnapshot {
+    version: u32,
+    component: String,
+    props: BTreeMap<String, SerializedValue>,
+    state: BTreeMap<String, SerializedValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+enum SerializedValue {
+    Int32(i32),
+    Int(i64),
+    Float32(f32),
+    Float(f64),
+    String(String),
+    Boolean(bool),
+    Null,
+    Array(Vec<SerializedValue>),
+    EnumVariant {
+        type_name: String,
+        variant: String,
+    },
+    Record {
+        type_name: String,
+        fields: BTreeMap<String, SerializedValue>,
+    },
+    ActionHandler {
+        component: String,
+        emit: String,
+        action_name: String,
+        body: u32,
+        captured: BTreeMap<String, SerializedValue>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct DecodedComponentSnapshot {
+    component: Name,
+    props: FxHashMap<SmolStr, Value>,
+    state: FxHashMap<SmolStr, Value>,
 }
 
 impl Interpreter {
@@ -63,6 +128,46 @@ impl Interpreter {
         args: Vec<Value>,
     ) -> Result<Value, RuntimeError> {
         self.execute_function_with_limits(module, function_name, args, ResourceLimits::default())
+    }
+
+    /// Invoke a lowered component action handler with a concrete action value.
+    pub fn invoke_action_handler(
+        &self,
+        module: &Module,
+        handler: &Value,
+        action: Value,
+    ) -> Result<Vec<Value>, RuntimeError> {
+        self.invoke_action_handler_with_limits(module, handler, action, ResourceLimits::default())
+    }
+
+    /// Initialize a named component instance from input props.
+    pub fn initialize_component(
+        &self,
+        module: &Module,
+        component_name: &str,
+        props: Value,
+    ) -> Result<ComponentInitResult, RuntimeError> {
+        self.initialize_component_with_limits(
+            module,
+            component_name,
+            props,
+            ResourceLimits::default(),
+        )
+    }
+
+    /// Dispatch a batch of actions against an opaque component state snapshot.
+    pub fn dispatch_component_actions(
+        &self,
+        module: &Module,
+        state_snapshot: &[u8],
+        actions: Vec<Value>,
+    ) -> Result<ComponentDispatchResult, RuntimeError> {
+        self.dispatch_component_actions_with_limits(
+            module,
+            state_snapshot,
+            actions,
+            ResourceLimits::default(),
+        )
     }
 
     /// Execute a function with custom resource limits
@@ -142,6 +247,118 @@ impl Interpreter {
         }
     }
 
+    /// Invoke a lowered component action handler with custom resource limits.
+    pub fn invoke_action_handler_with_limits(
+        &self,
+        module: &Module,
+        handler: &Value,
+        action: Value,
+        limits: ResourceLimits,
+    ) -> Result<Vec<Value>, RuntimeError> {
+        let (component, emit, action_name, body, captured) = match handler {
+            Value::ActionHandler {
+                component,
+                emit,
+                action_name,
+                body,
+                captured,
+            } => (component, emit, action_name, *body, captured),
+            other => {
+                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                    expected: "action handler".to_string(),
+                    actual: other.type_name().to_string(),
+                    operation: "action handler invocation".to_string(),
+                }))
+            }
+        };
+
+        let action = self.validate_handler_input(module, action, action_name, component, emit)?;
+
+        let mut ctx = ExecutionContext::with_limits(limits);
+        for (name, value) in captured {
+            ctx.define_variable(name.clone(), value.clone());
+        }
+        ctx.define_variable(SmolStr::new("action"), action);
+
+        let result = self.eval_expr(module, &mut ctx, body)?;
+        self.normalize_handler_result(module, result, component, emit)
+    }
+
+    /// Initialize a named component instance from input props with custom resource limits.
+    pub fn initialize_component_with_limits(
+        &self,
+        module: &Module,
+        component_name: &str,
+        props: Value,
+        limits: ResourceLimits,
+    ) -> Result<ComponentInitResult, RuntimeError> {
+        let component = self.find_component(module, component_name)?;
+        let mut ctx = ExecutionContext::with_limits(limits);
+        let normalized_props =
+            self.normalize_component_props(module, &mut ctx, component, props)?;
+        let normalized_state =
+            self.materialize_component_state(module, &mut ctx, component, FxHashMap::default())?;
+        let rendered = self.eval_expr(module, &mut ctx, component.body)?;
+        let state_snapshot =
+            self.encode_component_snapshot(&component.name, &normalized_props, &normalized_state)?;
+
+        Ok(ComponentInitResult {
+            rendered,
+            state_snapshot,
+        })
+    }
+
+    /// Dispatch a batch of actions against an opaque component state snapshot with custom limits.
+    pub fn dispatch_component_actions_with_limits(
+        &self,
+        module: &Module,
+        state_snapshot: &[u8],
+        actions: Vec<Value>,
+        limits: ResourceLimits,
+    ) -> Result<ComponentDispatchResult, RuntimeError> {
+        let decoded_snapshot = self.decode_component_snapshot(module, state_snapshot)?;
+        let component = self.find_component(module, decoded_snapshot.component.as_str())?;
+        let mut effects = Vec::new();
+
+        for action in actions {
+            let emit = self.validate_component_action(component, &action)?;
+            let handler_name = Self::component_handler_prop_name(emit.name.as_str());
+
+            if let Some(handler) = decoded_snapshot.props.get(handler_name.as_str()) {
+                match handler {
+                    Value::ActionHandler { .. } => {
+                        effects.extend(
+                            self.invoke_action_handler_with_limits(
+                                module, handler, action, limits,
+                            )?,
+                        );
+                    }
+                    _ => {
+                        return Err(RuntimeError::new(
+                            RuntimeErrorKind::InvalidComponentStateSnapshot {
+                                reason: format!(
+                                    "handler prop '{}' is not an action handler",
+                                    handler_name
+                                ),
+                            },
+                        ));
+                    }
+                }
+            }
+        }
+
+        let next_state_snapshot = self.encode_component_snapshot(
+            &decoded_snapshot.component,
+            &decoded_snapshot.props,
+            &decoded_snapshot.state,
+        )?;
+
+        Ok(ComponentDispatchResult {
+            effects,
+            state_snapshot: next_state_snapshot,
+        })
+    }
+
     /// Find a function by name in the module
     fn find_function<'a>(
         &self,
@@ -153,6 +370,403 @@ impl Interpreter {
             _ => Err(RuntimeError::new(RuntimeErrorKind::FunctionNotFound {
                 name: SmolStr::new(name),
             })),
+        }
+    }
+
+    fn find_component<'a>(
+        &self,
+        module: &'a Module,
+        name: &str,
+    ) -> Result<&'a nx_hir::Component, RuntimeError> {
+        match module.find_item(name) {
+            Some(Item::Component(component)) => Ok(component),
+            _ => Err(RuntimeError::new(RuntimeErrorKind::ComponentNotFound {
+                name: SmolStr::new(name),
+            })),
+        }
+    }
+
+    fn component_handler_prop_name(emit_name: &str) -> SmolStr {
+        SmolStr::new(format!("on{}", emit_name))
+    }
+
+    fn input_fields_from_value(
+        &self,
+        value: Value,
+        operation: &str,
+    ) -> Result<FxHashMap<SmolStr, Value>, RuntimeError> {
+        match value {
+            Value::Null => Ok(FxHashMap::default()),
+            Value::Record { fields, .. } => Ok(fields),
+            other => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: "record".to_string(),
+                actual: other.type_name().to_string(),
+                operation: operation.to_string(),
+            })),
+        }
+    }
+
+    fn missing_required_component_field_error(
+        &self,
+        component_name: &Name,
+        field_name: &Name,
+        phase: &str,
+    ) -> RuntimeError {
+        RuntimeError::new(RuntimeErrorKind::MissingRequiredComponentField {
+            component: SmolStr::new(component_name.as_str()),
+            field: SmolStr::new(field_name.as_str()),
+            phase: phase.to_string(),
+        })
+    }
+
+    fn materialize_component_fields(
+        &self,
+        module: &Module,
+        ctx: &mut ExecutionContext,
+        component: &nx_hir::Component,
+        fields: &[nx_hir::RecordField],
+        overrides: &mut FxHashMap<SmolStr, Value>,
+        phase: &str,
+    ) -> Result<FxHashMap<SmolStr, Value>, RuntimeError> {
+        let mut normalized = FxHashMap::default();
+
+        for field in fields {
+            let value = if let Some(value) = overrides.remove(field.name.as_str()) {
+                value
+            } else if let Some(default_expr) = field.default {
+                self.eval_expr(module, ctx, default_expr)?
+            } else if matches!(&field.ty, ast::TypeRef::Nullable(_)) {
+                Value::Null
+            } else {
+                return Err(self.missing_required_component_field_error(
+                    &component.name,
+                    &field.name,
+                    phase,
+                ));
+            };
+
+            let value = self.coerce_value_to_type(
+                module,
+                value,
+                &field.ty,
+                &format!(
+                    "component {} '{}.{}'",
+                    phase,
+                    component.name.as_str(),
+                    field.name.as_str()
+                ),
+            )?;
+            ctx.define_variable(SmolStr::new(field.name.as_str()), value.clone());
+            normalized.insert(SmolStr::new(field.name.as_str()), value);
+        }
+
+        Ok(normalized)
+    }
+
+    fn normalize_component_props(
+        &self,
+        module: &Module,
+        ctx: &mut ExecutionContext,
+        component: &nx_hir::Component,
+        props: Value,
+    ) -> Result<FxHashMap<SmolStr, Value>, RuntimeError> {
+        let mut overrides = self.input_fields_from_value(
+            props,
+            &format!("component props for '{}'", component.name.as_str()),
+        )?;
+        let mut normalized = self.materialize_component_fields(
+            module,
+            ctx,
+            component,
+            &component.props,
+            &mut overrides,
+            "prop initialization",
+        )?;
+
+        for (name, value) in overrides {
+            if let Some(emit) = component
+                .emits
+                .iter()
+                .find(|emit| Self::component_handler_prop_name(emit.name.as_str()) == name)
+            {
+                match &value {
+                    Value::ActionHandler {
+                        component: handler_component,
+                        emit: handler_emit,
+                        action_name,
+                        ..
+                    } if handler_component == &component.name
+                        && handler_emit == &emit.name
+                        && action_name == &emit.action_name => {}
+                    Value::ActionHandler { .. } => {
+                        return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                            expected: format!(
+                                "handler for {}.{}",
+                                component.name.as_str(),
+                                emit.name.as_str()
+                            ),
+                            actual: "different action handler".to_string(),
+                            operation: "component prop initialization".to_string(),
+                        }));
+                    }
+                    other => {
+                        return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                            expected: "action_handler".to_string(),
+                            actual: other.type_name().to_string(),
+                            operation: "component prop initialization".to_string(),
+                        }));
+                    }
+                }
+
+                normalized.insert(name, value);
+            } else {
+                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                    expected: "declared component prop".to_string(),
+                    actual: format!("unknown prop '{}'", name),
+                    operation: format!(
+                        "component prop initialization for '{}'",
+                        component.name.as_str()
+                    ),
+                }));
+            }
+        }
+
+        Ok(normalized)
+    }
+
+    fn materialize_component_state(
+        &self,
+        module: &Module,
+        ctx: &mut ExecutionContext,
+        component: &nx_hir::Component,
+        mut overrides: FxHashMap<SmolStr, Value>,
+    ) -> Result<FxHashMap<SmolStr, Value>, RuntimeError> {
+        self.materialize_component_fields(
+            module,
+            ctx,
+            component,
+            &component.state,
+            &mut overrides,
+            "state initialization",
+        )
+    }
+
+    fn validate_component_action<'a>(
+        &self,
+        component: &'a nx_hir::Component,
+        action: &Value,
+    ) -> Result<&'a nx_hir::ComponentEmit, RuntimeError> {
+        let Value::Record { type_name, .. } = action else {
+            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: "action".to_string(),
+                actual: action.type_name().to_string(),
+                operation: format!("component dispatch for '{}'", component.name.as_str()),
+            }));
+        };
+
+        component
+            .emits
+            .iter()
+            .find(|emit| emit.action_name == *type_name)
+            .ok_or_else(|| {
+                RuntimeError::new(RuntimeErrorKind::UnsupportedComponentAction {
+                    component: SmolStr::new(component.name.as_str()),
+                    action: SmolStr::new(type_name.as_str()),
+                })
+            })
+    }
+
+    fn encode_component_snapshot(
+        &self,
+        component_name: &Name,
+        props: &FxHashMap<SmolStr, Value>,
+        state: &FxHashMap<SmolStr, Value>,
+    ) -> Result<Vec<u8>, RuntimeError> {
+        let snapshot = SerializedComponentSnapshot {
+            version: COMPONENT_SNAPSHOT_VERSION,
+            component: component_name.as_str().to_string(),
+            props: props
+                .iter()
+                .map(|(name, value)| (name.to_string(), Self::serialize_runtime_value(value)))
+                .collect(),
+            state: state
+                .iter()
+                .map(|(name, value)| (name.to_string(), Self::serialize_runtime_value(value)))
+                .collect(),
+        };
+
+        rmp_serde::to_vec_named(&snapshot).map_err(|e| {
+            RuntimeError::new(RuntimeErrorKind::InvalidComponentStateSnapshot {
+                reason: format!("snapshot serialization failed: {e}"),
+            })
+        })
+    }
+
+    fn decode_component_snapshot(
+        &self,
+        module: &Module,
+        bytes: &[u8],
+    ) -> Result<DecodedComponentSnapshot, RuntimeError> {
+        let snapshot: SerializedComponentSnapshot = rmp_serde::from_slice(bytes).map_err(|e| {
+            RuntimeError::new(RuntimeErrorKind::InvalidComponentStateSnapshot {
+                reason: format!("snapshot deserialization failed: {e}"),
+            })
+        })?;
+
+        if snapshot.version != COMPONENT_SNAPSHOT_VERSION {
+            return Err(RuntimeError::new(
+                RuntimeErrorKind::InvalidComponentStateSnapshot {
+                    reason: format!(
+                        "unsupported snapshot version {}, expected {}",
+                        snapshot.version, COMPONENT_SNAPSHOT_VERSION
+                    ),
+                },
+            ));
+        }
+
+        let props = snapshot
+            .props
+            .into_iter()
+            .map(|(name, value)| {
+                Ok((
+                    SmolStr::new(name.as_str()),
+                    self.deserialize_runtime_value(module, value)?,
+                ))
+            })
+            .collect::<Result<FxHashMap<_, _>, RuntimeError>>()?;
+        let state = snapshot
+            .state
+            .into_iter()
+            .map(|(name, value)| {
+                Ok((
+                    SmolStr::new(name.as_str()),
+                    self.deserialize_runtime_value(module, value)?,
+                ))
+            })
+            .collect::<Result<FxHashMap<_, _>, RuntimeError>>()?;
+
+        Ok(DecodedComponentSnapshot {
+            component: Name::new(&snapshot.component),
+            props,
+            state,
+        })
+    }
+
+    fn serialize_runtime_value(value: &Value) -> SerializedValue {
+        match value {
+            Value::Int32(value) => SerializedValue::Int32(*value),
+            Value::Int(value) => SerializedValue::Int(*value),
+            Value::Float32(value) => SerializedValue::Float32(*value),
+            Value::Float(value) => SerializedValue::Float(*value),
+            Value::String(value) => SerializedValue::String(value.to_string()),
+            Value::Boolean(value) => SerializedValue::Boolean(*value),
+            Value::Null => SerializedValue::Null,
+            Value::Array(values) => {
+                SerializedValue::Array(values.iter().map(Self::serialize_runtime_value).collect())
+            }
+            Value::EnumVariant { type_name, variant } => SerializedValue::EnumVariant {
+                type_name: type_name.as_str().to_string(),
+                variant: variant.to_string(),
+            },
+            Value::Record { type_name, fields } => SerializedValue::Record {
+                type_name: type_name.as_str().to_string(),
+                fields: fields
+                    .iter()
+                    .map(|(name, value)| (name.to_string(), Self::serialize_runtime_value(value)))
+                    .collect(),
+            },
+            Value::ActionHandler {
+                component,
+                emit,
+                action_name,
+                body,
+                captured,
+            } => SerializedValue::ActionHandler {
+                component: component.as_str().to_string(),
+                emit: emit.as_str().to_string(),
+                action_name: action_name.as_str().to_string(),
+                body: body.into_raw().into_u32(),
+                captured: captured
+                    .iter()
+                    .map(|(name, value)| (name.to_string(), Self::serialize_runtime_value(value)))
+                    .collect(),
+            },
+        }
+    }
+
+    fn deserialize_runtime_value(
+        &self,
+        module: &Module,
+        value: SerializedValue,
+    ) -> Result<Value, RuntimeError> {
+        match value {
+            SerializedValue::Int32(value) => Ok(Value::Int32(value)),
+            SerializedValue::Int(value) => Ok(Value::Int(value)),
+            SerializedValue::Float32(value) => Ok(Value::Float32(value)),
+            SerializedValue::Float(value) => Ok(Value::Float(value)),
+            SerializedValue::String(value) => Ok(Value::String(SmolStr::new(value.as_str()))),
+            SerializedValue::Boolean(value) => Ok(Value::Boolean(value)),
+            SerializedValue::Null => Ok(Value::Null),
+            SerializedValue::Array(values) => Ok(Value::Array(
+                values
+                    .into_iter()
+                    .map(|value| self.deserialize_runtime_value(module, value))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
+            SerializedValue::EnumVariant { type_name, variant } => Ok(Value::EnumVariant {
+                type_name: Name::new(&type_name),
+                variant: SmolStr::new(variant.as_str()),
+            }),
+            SerializedValue::Record { type_name, fields } => Ok(Value::Record {
+                type_name: Name::new(&type_name),
+                fields: fields
+                    .into_iter()
+                    .map(|(name, value)| {
+                        Ok((
+                            SmolStr::new(name.as_str()),
+                            self.deserialize_runtime_value(module, value)?,
+                        ))
+                    })
+                    .collect::<Result<FxHashMap<_, _>, RuntimeError>>()?,
+            }),
+            SerializedValue::ActionHandler {
+                component,
+                emit,
+                action_name,
+                body,
+                captured,
+            } => {
+                if usize::try_from(body)
+                    .ok()
+                    .filter(|body| *body < module.expr_count())
+                    .is_none()
+                {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorKind::InvalidComponentStateSnapshot {
+                            reason: format!(
+                                "handler body expression id '{}' is out of bounds",
+                                body
+                            ),
+                        },
+                    ));
+                }
+
+                Ok(Value::ActionHandler {
+                    component: Name::new(&component),
+                    emit: Name::new(&emit),
+                    action_name: Name::new(&action_name),
+                    body: ExprId::from_raw(RawIdx::from_u32(body)),
+                    captured: captured
+                        .into_iter()
+                        .map(|(name, value)| {
+                            Ok((
+                                SmolStr::new(name.as_str()),
+                                self.deserialize_runtime_value(module, value)?,
+                            ))
+                        })
+                        .collect::<Result<FxHashMap<_, _>, RuntimeError>>()?,
+                })
+            }
         }
     }
 
@@ -201,6 +815,13 @@ impl Interpreter {
                 }
                 Ok(Value::Array(values))
             }
+            ast::Expr::ActionHandler {
+                component,
+                emit,
+                action_name,
+                body,
+                ..
+            } => self.eval_action_handler_expr(ctx, component, emit, action_name, *body),
             ast::Expr::Element { element, .. } => self.eval_element_expr(module, ctx, *element),
             ast::Expr::RecordLiteral {
                 record, properties, ..
@@ -223,6 +844,26 @@ impl Interpreter {
             ast::Literal::Null => Value::Null,
         };
         Ok(value)
+    }
+
+    fn eval_action_handler_expr(
+        &self,
+        ctx: &ExecutionContext,
+        component: &Name,
+        emit: &Name,
+        action_name: &Name,
+        body: ExprId,
+    ) -> Result<Value, RuntimeError> {
+        let mut captured = ctx.snapshot_visible_variables();
+        captured.remove("action");
+
+        Ok(Value::ActionHandler {
+            component: component.clone(),
+            emit: emit.clone(),
+            action_name: action_name.clone(),
+            body,
+            captured,
+        })
     }
 
     /// Evaluate an identifier (T016 - placeholder)
@@ -779,21 +1420,32 @@ impl Interpreter {
         operation: &str,
     ) -> Result<Value, RuntimeError> {
         let expected_ty = self.runtime_type_from_type_ref(module, expected);
-        self.coerce_value_to_resolved_type(value, &expected_ty, operation)
+        self.coerce_value_to_resolved_type(module, value, &expected_ty, operation)
     }
 
     fn coerce_value_to_resolved_type(
         &self,
+        module: &Module,
         value: Value,
         expected: &Type,
         operation: &str,
     ) -> Result<Value, RuntimeError> {
+        if let Type::Nullable(expected_inner) = expected {
+            return match value {
+                Value::Null => Ok(Value::Null),
+                other => {
+                    self.coerce_value_to_resolved_type(module, other, expected_inner, operation)
+                }
+            };
+        }
+
         if let Type::Array(expected_item) = expected {
             return match value {
                 Value::Array(values) => {
                     let mut coerced = Vec::with_capacity(values.len());
                     for item in values {
                         coerced.push(self.coerce_value_to_resolved_type(
+                            module,
                             item,
                             expected_item,
                             operation,
@@ -802,6 +1454,7 @@ impl Interpreter {
                     Ok(Value::Array(coerced))
                 }
                 other => Ok(Value::Array(vec![self.coerce_value_to_resolved_type(
+                    module,
                     other,
                     expected_item,
                     operation,
@@ -809,6 +1462,25 @@ impl Interpreter {
             };
         }
 
+        // Ordinary record-typed parameters preserve the caller-supplied object shape. Typed record
+        // construction is reserved for explicit external input boundaries such as handler
+        // invocation so defaults and required-field validation do not run on every function call.
+        match value {
+            Value::Record { type_name, fields } => self.coerce_non_record_value(
+                Value::Record { type_name, fields },
+                expected,
+                operation,
+            ),
+            other => self.coerce_non_record_value(other, expected, operation),
+        }
+    }
+
+    fn coerce_non_record_value(
+        &self,
+        value: Value,
+        expected: &Type,
+        operation: &str,
+    ) -> Result<Value, RuntimeError> {
         if matches!(value, Value::Array(_)) && !is_object_type(expected) {
             let actual_ty = self.runtime_type_of_value(&value);
             return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
@@ -862,6 +1534,8 @@ impl Interpreter {
             }
             Value::EnumVariant { type_name, .. } => Type::named(type_name.clone()),
             Value::Record { type_name, .. } => Type::named(type_name.clone()),
+            // Handlers are opaque runtime callback objects rather than first-class typed functions.
+            Value::ActionHandler { .. } => Type::named("action_handler"),
         }
     }
 
@@ -1095,6 +1769,189 @@ impl Interpreter {
         seen.remove(&key);
         result
     }
+
+    // Construct a typed record object from an externally supplied record-shaped value. This is
+    // intentionally scoped to explicit input boundaries rather than general parameter coercion.
+    fn construct_external_record_value(
+        &self,
+        module: &Module,
+        actual_type_name: &Name,
+        fields: FxHashMap<SmolStr, Value>,
+        expected_type_name: &Name,
+        operation: &str,
+    ) -> Result<Value, RuntimeError> {
+        let expected_def = self.resolve_record_definition(module, expected_type_name.as_str());
+        let actual_def = self.resolve_record_definition(module, actual_type_name.as_str());
+        let (Some(expected_def), Some(actual_def)) = (expected_def, actual_def) else {
+            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: expected_type_name.as_str().to_string(),
+                actual: actual_type_name.as_str().to_string(),
+                operation: operation.to_string(),
+            }));
+        };
+
+        if actual_def.name != expected_def.name {
+            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: expected_type_name.as_str().to_string(),
+                actual: actual_type_name.as_str().to_string(),
+                operation: operation.to_string(),
+            }));
+        }
+
+        let mut ctx = ExecutionContext::new();
+        self.build_record_value_from_definition(
+            module,
+            &mut ctx,
+            expected_def,
+            fields,
+            Some(operation),
+        )
+    }
+
+    fn missing_required_record_field_error(
+        &self,
+        record_name: &Name,
+        field_name: &Name,
+        operation: &str,
+    ) -> RuntimeError {
+        RuntimeError::new(RuntimeErrorKind::MissingRequiredRecordField {
+            record: SmolStr::new(record_name.as_str()),
+            field: SmolStr::new(field_name.as_str()),
+            operation: operation.to_string(),
+        })
+    }
+
+    fn validate_handler_input(
+        &self,
+        module: &Module,
+        action: Value,
+        expected_action_name: &Name,
+        component: &Name,
+        emit: &Name,
+    ) -> Result<Value, RuntimeError> {
+        let operation = format!(
+            "action handler input for {}.{}",
+            component.as_str(),
+            emit.as_str()
+        );
+        let expected_def = self
+            .resolve_record_definition(module, expected_action_name.as_str())
+            .ok_or_else(|| {
+                RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                    expected: expected_action_name.as_str().to_string(),
+                    actual: "unknown".to_string(),
+                    operation: operation.clone(),
+                })
+            })?;
+        if expected_def.kind != RecordKind::Action {
+            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: expected_action_name.as_str().to_string(),
+                actual: "non-action record".to_string(),
+                operation,
+            }));
+        }
+
+        // Handler invocation constructs the typed action record before executing the handler body,
+        // so defaults, nullable fields, and required-field diagnostics are applied at the input
+        // boundary.
+        match action {
+            Value::Record { type_name, fields } => self.construct_external_record_value(
+                module,
+                &type_name,
+                fields,
+                expected_action_name,
+                &operation,
+            ),
+            other => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: expected_action_name.as_str().to_string(),
+                actual: other.type_name().to_string(),
+                operation,
+            })),
+        }
+    }
+
+    fn normalize_handler_result(
+        &self,
+        module: &Module,
+        result: Value,
+        component: &Name,
+        emit: &Name,
+    ) -> Result<Vec<Value>, RuntimeError> {
+        match result {
+            Value::Record { .. } => {
+                self.ensure_action_result_value(module, &result, component, emit)?;
+                Ok(vec![result])
+            }
+            Value::Array(values) => {
+                if values.is_empty() {
+                    return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                        expected: "one or more actions".to_string(),
+                        actual: "empty array".to_string(),
+                        operation: format!(
+                            "action handler result for {}.{}",
+                            component.as_str(),
+                            emit.as_str()
+                        ),
+                    }));
+                }
+
+                for value in &values {
+                    self.ensure_action_result_value(module, value, component, emit)?;
+                }
+
+                Ok(values)
+            }
+            other => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: "action or action array".to_string(),
+                actual: other.type_name().to_string(),
+                operation: format!(
+                    "action handler result for {}.{}",
+                    component.as_str(),
+                    emit.as_str()
+                ),
+            })),
+        }
+    }
+
+    fn ensure_action_result_value(
+        &self,
+        module: &Module,
+        value: &Value,
+        component: &Name,
+        emit: &Name,
+    ) -> Result<(), RuntimeError> {
+        match value {
+            Value::Record { type_name, .. } => {
+                let is_action = self
+                    .resolve_record_definition(module, type_name.as_str())
+                    .map(|record| record.kind == RecordKind::Action)
+                    .unwrap_or(false);
+
+                if is_action {
+                    Ok(())
+                } else {
+                    Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                        expected: "action".to_string(),
+                        actual: type_name.as_str().to_string(),
+                        operation: format!(
+                            "action handler result for {}.{}",
+                            component.as_str(),
+                            emit.as_str()
+                        ),
+                    }))
+                }
+            }
+            other => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: "action".to_string(),
+                actual: other.type_name().to_string(),
+                operation: format!(
+                    "action handler result for {}.{}",
+                    component.as_str(),
+                    emit.as_str()
+                ),
+            })),
+        }
+    }
 }
 
 impl Interpreter {
@@ -1119,11 +1976,10 @@ impl Interpreter {
         module: &Module,
         ctx: &mut ExecutionContext,
         record_name: &str,
-        mut overrides: FxHashMap<SmolStr, Value>,
+        overrides: FxHashMap<SmolStr, Value>,
     ) -> Result<Value, RuntimeError> {
-        let record_def = module.find_item(record_name);
-        let record_def = match record_def {
-            Some(nx_hir::Item::Record(def)) => def,
+        let record_def = match self.resolve_record_definition(module, record_name) {
+            Some(def) => def,
             _ => {
                 return Err(RuntimeError::new(RuntimeErrorKind::UndefinedVariable {
                     name: SmolStr::new(record_name),
@@ -1131,11 +1987,30 @@ impl Interpreter {
             }
         };
 
+        self.build_record_value_from_definition(module, ctx, record_def, overrides, None)
+    }
+
+    fn build_record_value_from_definition(
+        &self,
+        module: &Module,
+        ctx: &mut ExecutionContext,
+        record_def: &nx_hir::RecordDef,
+        mut overrides: FxHashMap<SmolStr, Value>,
+        missing_operation: Option<&str>,
+    ) -> Result<Value, RuntimeError> {
         for prop in &record_def.properties {
             let value = if let Some(value) = overrides.remove(prop.name.as_str()) {
                 value
             } else if let Some(default_expr) = prop.default {
                 self.eval_expr(module, ctx, default_expr)?
+            } else if matches!(&prop.ty, ast::TypeRef::Nullable(_)) {
+                Value::Null
+            } else if let Some(operation) = missing_operation {
+                return Err(self.missing_required_record_field_error(
+                    &record_def.name,
+                    &prop.name,
+                    operation,
+                ));
             } else {
                 Value::Null
             };
@@ -1150,7 +2025,7 @@ impl Interpreter {
         }
 
         Ok(Value::Record {
-            type_name: Name::new(record_name),
+            type_name: record_def.name.clone(),
             fields: overrides,
         })
     }
@@ -1165,7 +2040,9 @@ impl Default for Interpreter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nx_hir::SourceId;
+    use nx_diagnostics::{TextSize, TextSpan};
+    use nx_hir::{lower as lower_hir, SourceId};
+    use nx_syntax::parse_str;
 
     #[test]
     fn test_interpreter_creation() {
@@ -1179,5 +2056,955 @@ mod tests {
         let module = Module::new(SourceId::new(0));
         let result = interpreter.execute_function(&module, "nonexistent", vec![]);
         assert!(result.is_err());
+    }
+
+    fn lower_module(source: &str) -> Module {
+        let parse_result = parse_str(source, "handler-test.nx");
+        assert!(
+            parse_result.errors.is_empty(),
+            "Expected handler test source to parse without errors, got {:?}",
+            parse_result.errors
+        );
+        let tree = parse_result
+            .tree
+            .expect("Expected handler test source to parse");
+        lower_hir(tree.root(), SourceId::new(0))
+    }
+
+    fn extract_handler<'a>(value: &'a Value, field: &str) -> &'a Value {
+        let Value::Record { fields, .. } = value else {
+            panic!(
+                "Expected component invocation result record, got {:?}",
+                value
+            );
+        };
+        fields
+            .get(field)
+            .unwrap_or_else(|| panic!("Expected field '{}'", field))
+    }
+
+    fn extract_record_field<'a>(value: &'a Value, field: &str) -> &'a Value {
+        let Value::Record { fields, .. } = value else {
+            panic!("Expected record value, got {:?}", value);
+        };
+
+        fields
+            .get(field)
+            .unwrap_or_else(|| panic!("Expected field '{}'", field))
+    }
+
+    fn span(start: u32, end: u32) -> TextSpan {
+        TextSpan::new(TextSize::from(start), TextSize::from(end))
+    }
+
+    #[test]
+    fn test_invoke_action_handler_captures_values_and_returns_single_action() {
+        let source = r#"
+            action SearchSubmitted = { searchString:string }
+            action DoSearch = { userId:string search:string }
+
+            component <SearchBox emits { SearchSubmitted } /> = {
+              <TextInput />
+            }
+
+            let render(userId:string) = <SearchBox onSearchSubmitted=<DoSearch userId={userId} search={action.searchString} /> />
+        "#;
+
+        let module = lower_module(source);
+        let interpreter = Interpreter::new();
+        let render_result = interpreter
+            .execute_function(&module, "render", vec![Value::String(SmolStr::new("u1"))])
+            .expect("Expected render to succeed");
+
+        let handler = extract_handler(&render_result, "onSearchSubmitted");
+        match handler {
+            Value::ActionHandler {
+                component,
+                emit,
+                action_name,
+                captured,
+                ..
+            } => {
+                assert_eq!(component.as_str(), "SearchBox");
+                assert_eq!(emit.as_str(), "SearchSubmitted");
+                assert_eq!(action_name.as_str(), "SearchSubmitted");
+                assert_eq!(
+                    captured.get("userId"),
+                    Some(&Value::String(SmolStr::new("u1")))
+                );
+            }
+            other => panic!("Expected action handler value, got {:?}", other),
+        }
+
+        let mut input_fields = FxHashMap::default();
+        input_fields.insert(
+            SmolStr::new("searchString"),
+            Value::String(SmolStr::new("docs")),
+        );
+        let actions = interpreter
+            .invoke_action_handler(
+                &module,
+                handler,
+                Value::Record {
+                    type_name: Name::new("SearchSubmitted"),
+                    fields: input_fields,
+                },
+            )
+            .expect("Expected shared action handler invocation to succeed");
+
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            Value::Record { type_name, fields } => {
+                assert_eq!(type_name.as_str(), "DoSearch");
+                assert_eq!(
+                    fields.get("userId"),
+                    Some(&Value::String(SmolStr::new("u1")))
+                );
+                assert_eq!(
+                    fields.get("search"),
+                    Some(&Value::String(SmolStr::new("docs")))
+                );
+            }
+            other => panic!("Expected action record result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_invoke_action_handler_shadows_outer_action_and_captures_other_values() {
+        let source = r#"
+            action SearchSubmitted = { searchString:string }
+            action DoSearch = { source:string search:string }
+
+            component <SearchBox emits { SearchSubmitted } /> = {
+              <TextInput />
+            }
+
+            let render(action:string, source:string) = <SearchBox onSearchSubmitted=<DoSearch source={source} search={action.searchString} /> />
+        "#;
+
+        let module = lower_module(source);
+        let interpreter = Interpreter::new();
+        let render_result = interpreter
+            .execute_function(
+                &module,
+                "render",
+                vec![
+                    Value::String(SmolStr::new("outer-action")),
+                    Value::String(SmolStr::new("captured-source")),
+                ],
+            )
+            .expect("Expected render to succeed");
+
+        let handler = extract_handler(&render_result, "onSearchSubmitted");
+        match handler {
+            Value::ActionHandler { captured, .. } => {
+                assert_eq!(
+                    captured.get("source"),
+                    Some(&Value::String(SmolStr::new("captured-source")))
+                );
+                assert!(
+                    !captured.contains_key("action"),
+                    "Implicit handler bindings should shadow any outer 'action' variable"
+                );
+            }
+            other => panic!("Expected action handler value, got {:?}", other),
+        }
+
+        let mut input_fields = FxHashMap::default();
+        input_fields.insert(
+            SmolStr::new("searchString"),
+            Value::String(SmolStr::new("docs")),
+        );
+        let actions = interpreter
+            .invoke_action_handler(
+                &module,
+                handler,
+                Value::Record {
+                    type_name: Name::new("SearchSubmitted"),
+                    fields: input_fields,
+                },
+            )
+            .expect("Expected shared action handler invocation to succeed");
+
+        match &actions[0] {
+            Value::Record { type_name, fields } => {
+                assert_eq!(type_name.as_str(), "DoSearch");
+                assert_eq!(
+                    fields.get("source"),
+                    Some(&Value::String(SmolStr::new("captured-source")))
+                );
+                assert_eq!(
+                    fields.get("search"),
+                    Some(&Value::String(SmolStr::new("docs")))
+                );
+            }
+            other => panic!("Expected action record result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_action_handler_captures_snapshot_not_live_reference() {
+        let source = r#"
+            action SearchSubmitted = { searchString:string }
+            action DoSearch = { userId:string search:string }
+        "#;
+
+        let mut module = lower_module(source);
+        let user_id_expr = module.alloc_expr(ast::Expr::Ident(Name::new("userId")));
+        let action_ident = module.alloc_expr(ast::Expr::Ident(Name::new("action")));
+        let search_expr = module.alloc_expr(ast::Expr::Member {
+            base: action_ident,
+            member: Name::new("searchString"),
+            span: span(0, 0),
+        });
+        let body = module.alloc_expr(ast::Expr::RecordLiteral {
+            record: Name::new("DoSearch"),
+            properties: vec![
+                (Name::new("userId"), user_id_expr),
+                (Name::new("search"), search_expr),
+            ],
+            span: span(0, 0),
+        });
+        let handler_expr = module.alloc_expr(ast::Expr::ActionHandler {
+            component: Name::new("SearchBox"),
+            emit: Name::new("SearchSubmitted"),
+            action_name: Name::new("SearchSubmitted"),
+            body,
+            span: span(0, 0),
+        });
+
+        let interpreter = Interpreter::new();
+        let mut ctx = ExecutionContext::new();
+        ctx.define_variable(SmolStr::new("userId"), Value::String(SmolStr::new("u1")));
+        ctx.define_variable(
+            SmolStr::new("action"),
+            Value::String(SmolStr::new("outer-action")),
+        );
+
+        let handler = interpreter
+            .eval_expr(&module, &mut ctx, handler_expr)
+            .expect("Expected handler expression to evaluate");
+        ctx.update_variable("userId", Value::String(SmolStr::new("u2")))
+            .expect("Expected outer variable update to succeed");
+
+        let mut input_fields = FxHashMap::default();
+        input_fields.insert(
+            SmolStr::new("searchString"),
+            Value::String(SmolStr::new("docs")),
+        );
+        let actions = interpreter
+            .invoke_action_handler(
+                &module,
+                &handler,
+                Value::Record {
+                    type_name: Name::new("SearchSubmitted"),
+                    fields: input_fields,
+                },
+            )
+            .expect("Expected handler invocation to use captured snapshot");
+
+        match &actions[0] {
+            Value::Record { type_name, fields } => {
+                assert_eq!(type_name.as_str(), "DoSearch");
+                assert_eq!(
+                    fields.get("userId"),
+                    Some(&Value::String(SmolStr::new("u1")))
+                );
+                assert_eq!(
+                    fields.get("search"),
+                    Some(&Value::String(SmolStr::new("docs")))
+                );
+            }
+            other => panic!("Expected action record result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_invoke_action_handler_normalizes_host_supplied_action_defaults_and_nullable_fields() {
+        let source = r#"
+            action SearchSubmitted = { searchString:string = "docs" source:string? }
+            action DoSearch = { search:string source:string? }
+
+            component <SearchBox emits { SearchSubmitted } /> = {
+              <TextInput />
+            }
+
+            let render() = <SearchBox onSearchSubmitted=<DoSearch search={action.searchString} source={action.source} /> />
+        "#;
+
+        let module = lower_module(source);
+        let interpreter = Interpreter::new();
+        let render_result = interpreter
+            .execute_function(&module, "render", vec![])
+            .expect("Expected render to succeed");
+        let handler = extract_handler(&render_result, "onSearchSubmitted");
+
+        let actions = interpreter
+            .invoke_action_handler(
+                &module,
+                handler,
+                Value::Record {
+                    type_name: Name::new("SearchSubmitted"),
+                    fields: FxHashMap::default(),
+                },
+            )
+            .expect("Expected handler input defaults to be normalized");
+
+        match &actions[0] {
+            Value::Record { type_name, fields } => {
+                assert_eq!(type_name.as_str(), "DoSearch");
+                assert_eq!(
+                    fields.get("search"),
+                    Some(&Value::String(SmolStr::new("docs")))
+                );
+                assert_eq!(fields.get("source"), Some(&Value::Null));
+            }
+            other => panic!("Expected action record result, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_invoke_action_handler_rejects_missing_required_action_input_fields() {
+        let source = r#"
+            action SearchSubmitted = { searchString:string source:string? }
+            action DoSearch = { search:string }
+
+            component <SearchBox emits { SearchSubmitted } /> = {
+              <TextInput />
+            }
+
+            let render() = <SearchBox onSearchSubmitted=<DoSearch search="ok" /> />
+        "#;
+
+        let module = lower_module(source);
+        let interpreter = Interpreter::new();
+        let render_result = interpreter
+            .execute_function(&module, "render", vec![])
+            .expect("Expected render to succeed");
+        let handler = extract_handler(&render_result, "onSearchSubmitted");
+
+        let error = interpreter
+            .invoke_action_handler(
+                &module,
+                handler,
+                Value::Record {
+                    type_name: Name::new("SearchSubmitted"),
+                    fields: FxHashMap::default(),
+                },
+            )
+            .expect_err("Expected missing required action field to fail before body evaluation");
+
+        assert!(matches!(
+            error.kind(),
+            RuntimeErrorKind::MissingRequiredRecordField {
+                record,
+                field,
+                operation,
+            } if record == "SearchSubmitted"
+                && field == "searchString"
+                && operation == "action handler input for SearchBox.SearchSubmitted"
+        ));
+    }
+
+    #[test]
+    fn test_invoke_action_handler_supports_inline_emit_public_names_and_multiple_actions() {
+        let source = r#"
+            action LogSearch = { value:string }
+            action TrackSearch = { value:string }
+
+            component <SearchBox emits { ValueChanged { value:string } } /> = {
+              <TextInput />
+            }
+
+            let render() = <SearchBox onValueChanged={<LogSearch value={action.value} /> <TrackSearch value={action.value} />} />
+        "#;
+
+        let module = lower_module(source);
+        let interpreter = Interpreter::new();
+        let render_result = interpreter
+            .execute_function(&module, "render", vec![])
+            .expect("Expected render to succeed");
+        let handler = extract_handler(&render_result, "onValueChanged");
+        match handler {
+            Value::ActionHandler {
+                component,
+                emit,
+                action_name,
+                ..
+            } => {
+                assert_eq!(component.as_str(), "SearchBox");
+                assert_eq!(emit.as_str(), "ValueChanged");
+                assert_eq!(action_name.as_str(), "SearchBox.ValueChanged");
+            }
+            other => panic!("Expected action handler value, got {:?}", other),
+        }
+
+        let mut input_fields = FxHashMap::default();
+        input_fields.insert(SmolStr::new("value"), Value::String(SmolStr::new("docs")));
+
+        let actions = interpreter
+            .invoke_action_handler(
+                &module,
+                &handler,
+                Value::Record {
+                    type_name: Name::new("SearchBox.ValueChanged"),
+                    fields: input_fields,
+                },
+            )
+            .expect("Expected inline action handler invocation to succeed");
+
+        assert_eq!(actions.len(), 2);
+        match &actions[0] {
+            Value::Record { type_name, fields } => {
+                assert_eq!(type_name.as_str(), "LogSearch");
+                assert_eq!(
+                    fields.get("value"),
+                    Some(&Value::String(SmolStr::new("docs")))
+                );
+            }
+            other => panic!("Expected first action record, got {:?}", other),
+        }
+        match &actions[1] {
+            Value::Record { type_name, fields } => {
+                assert_eq!(type_name.as_str(), "TrackSearch");
+                assert_eq!(
+                    fields.get("value"),
+                    Some(&Value::String(SmolStr::new("docs")))
+                );
+            }
+            other => panic!("Expected second action record, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_invoke_action_handler_rejects_empty_and_non_action_results() {
+        let source = r#"
+            action SearchSubmitted = { queries:string[] }
+            action DoSearch = { search:string }
+
+            component <SearchBox emits { SearchSubmitted } /> = {
+              <TextInput />
+            }
+
+            let renderEmpty() = <SearchBox onSearchSubmitted={for query in action.queries { <DoSearch search={query} /> }} />
+            let renderWrong() = <SearchBox onSearchSubmitted="docs" />
+        "#;
+
+        let module = lower_module(source);
+        let interpreter = Interpreter::new();
+        let empty_render_result = interpreter
+            .execute_function(&module, "renderEmpty", vec![])
+            .expect("Expected empty-result render to succeed");
+        let empty_handler = extract_handler(&empty_render_result, "onSearchSubmitted");
+
+        let wrong_render_result = interpreter
+            .execute_function(&module, "renderWrong", vec![])
+            .expect("Expected wrong-result render to succeed");
+        let wrong_handler = extract_handler(&wrong_render_result, "onSearchSubmitted");
+
+        let mut empty_input_fields = FxHashMap::default();
+        empty_input_fields.insert(SmolStr::new("queries"), Value::Array(vec![]));
+        let empty_action_input = Value::Record {
+            type_name: Name::new("SearchSubmitted"),
+            fields: empty_input_fields,
+        };
+
+        let empty_error = interpreter
+            .invoke_action_handler(&module, empty_handler, empty_action_input)
+            .expect_err("Expected empty handler result to fail");
+        assert!(matches!(
+            empty_error.kind(),
+            RuntimeErrorKind::TypeMismatch { expected, actual, .. }
+                if expected == "one or more actions" && actual == "empty array"
+        ));
+
+        let mut wrong_input_fields = FxHashMap::default();
+        wrong_input_fields.insert(
+            SmolStr::new("queries"),
+            Value::Array(vec![Value::String(SmolStr::new("docs"))]),
+        );
+        let wrong_action_input = Value::Record {
+            type_name: Name::new("SearchSubmitted"),
+            fields: wrong_input_fields,
+        };
+
+        let wrong_error = interpreter
+            .invoke_action_handler(&module, wrong_handler, wrong_action_input)
+            .expect_err("Expected non-action handler result to fail");
+        assert!(matches!(
+            wrong_error.kind(),
+            RuntimeErrorKind::TypeMismatch { expected, actual, .. }
+                if expected == "action or action array" && actual == "string"
+        ));
+    }
+
+    #[test]
+    fn test_invoke_action_handler_rejects_wrong_action_type_name() {
+        let source = r#"
+            action SearchSubmitted = { searchString:string }
+            action ValueChanged = { searchString:string }
+            action DoSearch = { search:string }
+
+            component <SearchBox emits { SearchSubmitted } /> = {
+              <TextInput />
+            }
+
+            let render() = <SearchBox onSearchSubmitted=<DoSearch search={action.searchString} /> />
+        "#;
+
+        let module = lower_module(source);
+        let interpreter = Interpreter::new();
+        let render_result = interpreter
+            .execute_function(&module, "render", vec![])
+            .expect("Expected render to succeed");
+        let handler = extract_handler(&render_result, "onSearchSubmitted");
+
+        let mut input_fields = FxHashMap::default();
+        input_fields.insert(
+            SmolStr::new("searchString"),
+            Value::String(SmolStr::new("docs")),
+        );
+        let error = interpreter
+            .invoke_action_handler(
+                &module,
+                handler,
+                Value::Record {
+                    type_name: Name::new("ValueChanged"),
+                    fields: input_fields,
+                },
+            )
+            .expect_err("Expected wrong action type name to fail");
+
+        assert!(matches!(
+            error.kind(),
+            RuntimeErrorKind::TypeMismatch { expected, actual, .. }
+                if expected == "SearchSubmitted" && actual == "ValueChanged"
+        ));
+    }
+
+    #[test]
+    fn test_invoke_action_handler_rejects_non_action_record_results() {
+        let source = r#"
+            action SearchSubmitted = { searchString:string }
+            type SearchResult = { search:string }
+
+            component <SearchBox emits { SearchSubmitted } /> = {
+              <TextInput />
+            }
+
+            let renderRecord() = <SearchBox onSearchSubmitted=<SearchResult search={action.searchString} /> />
+        "#;
+
+        let module = lower_module(source);
+        let interpreter = Interpreter::new();
+        let render_result = interpreter
+            .execute_function(&module, "renderRecord", vec![])
+            .expect("Expected non-action render to succeed");
+        let handler = extract_handler(&render_result, "onSearchSubmitted");
+
+        let mut input_fields = FxHashMap::default();
+        input_fields.insert(
+            SmolStr::new("searchString"),
+            Value::String(SmolStr::new("docs")),
+        );
+        let error = interpreter
+            .invoke_action_handler(
+                &module,
+                handler,
+                Value::Record {
+                    type_name: Name::new("SearchSubmitted"),
+                    fields: input_fields,
+                },
+            )
+            .expect_err("Expected non-action record handler result to fail");
+
+        assert!(matches!(
+            error.kind(),
+            RuntimeErrorKind::TypeMismatch { expected, actual, .. }
+                if expected == "action" && actual == "SearchResult"
+        ));
+    }
+
+    #[test]
+    fn test_initialize_component_applies_prop_and_state_defaults_once() {
+        let source = r#"
+            component <SearchBox placeholder:string = "Find docs" /> = {
+              state {
+                query:string = {placeholder}
+                preview:string = {query}
+              }
+              <TextInput value={preview} placeholder={placeholder} />
+            }
+        "#;
+
+        let module = lower_module(source);
+        let interpreter = Interpreter::new();
+        let init = interpreter
+            .initialize_component(
+                &module,
+                "SearchBox",
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::default(),
+                },
+            )
+            .expect("Expected component initialization to succeed");
+
+        let rendered_value = extract_record_field(&init.rendered, "value");
+        assert_eq!(rendered_value, &Value::String(SmolStr::new("Find docs")));
+        let rendered_placeholder = extract_record_field(&init.rendered, "placeholder");
+        assert_eq!(
+            rendered_placeholder,
+            &Value::String(SmolStr::new("Find docs"))
+        );
+
+        let snapshot = interpreter
+            .decode_component_snapshot(&module, &init.state_snapshot)
+            .expect("Expected snapshot to decode");
+        assert_eq!(
+            snapshot.props.get("placeholder"),
+            Some(&Value::String(SmolStr::new("Find docs")))
+        );
+        assert_eq!(
+            snapshot.state.get("query"),
+            Some(&Value::String(SmolStr::new("Find docs")))
+        );
+        assert_eq!(
+            snapshot.state.get("preview"),
+            Some(&Value::String(SmolStr::new("Find docs")))
+        );
+    }
+
+    #[test]
+    fn test_initialize_component_succeeds_without_state_group() {
+        let source = r#"
+            component <Button text:string /> = {
+              <button>{text}</button>
+            }
+        "#;
+
+        let module = lower_module(source);
+        let interpreter = Interpreter::new();
+        let mut props = FxHashMap::default();
+        props.insert(SmolStr::new("text"), Value::String(SmolStr::new("Save")));
+
+        let init = interpreter
+            .initialize_component(
+                &module,
+                "Button",
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: props,
+                },
+            )
+            .expect("Expected stateless component initialization to succeed");
+
+        let snapshot = interpreter
+            .decode_component_snapshot(&module, &init.state_snapshot)
+            .expect("Expected snapshot to decode");
+        assert!(snapshot.state.is_empty(), "Expected empty component state");
+        assert_eq!(
+            extract_record_field(&init.rendered, "children"),
+            &Value::String(SmolStr::new("Save"))
+        );
+    }
+
+    #[test]
+    fn test_initialize_component_rejects_missing_required_state_initializer() {
+        let source = r#"
+            component <SearchBox /> = {
+              state { query:string }
+              <TextInput value={query} />
+            }
+        "#;
+
+        let module = lower_module(source);
+        let interpreter = Interpreter::new();
+        let error = interpreter
+            .initialize_component(
+                &module,
+                "SearchBox",
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::default(),
+                },
+            )
+            .expect_err("Expected missing required state field to fail");
+
+        assert!(matches!(
+            error.kind(),
+            RuntimeErrorKind::MissingRequiredComponentField {
+                component,
+                field,
+                phase,
+            } if component == "SearchBox"
+                && field == "query"
+                && phase == "state initialization"
+        ));
+    }
+
+    #[test]
+    fn test_dispatch_component_actions_preserves_state_snapshot_without_reevaluating_defaults() {
+        let source = r#"
+            component <SearchBox placeholder:string = "Find docs" emits { SearchSubmitted } /> = {
+              state { query:string = {placeholder} }
+              <TextInput value={query} placeholder={placeholder} />
+            }
+        "#;
+
+        let module = lower_module(source);
+        let interpreter = Interpreter::new();
+        let init = interpreter
+            .initialize_component(
+                &module,
+                "SearchBox",
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::default(),
+                },
+            )
+            .expect("Expected initialization to succeed");
+        let mut snapshot = interpreter
+            .decode_component_snapshot(&module, &init.state_snapshot)
+            .expect("Expected snapshot to decode");
+        snapshot.state.insert(
+            SmolStr::new("query"),
+            Value::String(SmolStr::new("persisted")),
+        );
+        let mutated_snapshot = interpreter
+            .encode_component_snapshot(&snapshot.component, &snapshot.props, &snapshot.state)
+            .expect("Expected snapshot to encode");
+
+        let dispatch = interpreter
+            .dispatch_component_actions(&module, &mutated_snapshot, vec![])
+            .expect("Expected empty dispatch to succeed");
+        let next_snapshot = interpreter
+            .decode_component_snapshot(&module, &dispatch.state_snapshot)
+            .expect("Expected next snapshot to decode");
+
+        assert_eq!(
+            next_snapshot.state.get("query"),
+            Some(&Value::String(SmolStr::new("persisted")))
+        );
+    }
+
+    #[test]
+    fn test_dispatch_component_actions_orders_host_actions_and_handler_effects() {
+        let source = r#"
+            action SearchSubmitted = { searchString:string }
+            action LogSearch = { search:string }
+            action DoSearch = { search:string }
+            action TrackSearch = { value:string }
+
+            component <SearchBox placeholder:string emits {
+                SearchSubmitted
+                ValueChanged { value:string }
+            } /> = {
+              state { query:string = {placeholder} }
+              <TextInput value={query} placeholder={placeholder} />
+            }
+
+            let withHandlers() = <SearchBox
+                placeholder="Find docs"
+                onSearchSubmitted={<LogSearch search={action.searchString} /> <DoSearch search={action.searchString} />}
+                onValueChanged=<TrackSearch value={action.value} />
+            />
+            let withoutHandlers() = <SearchBox placeholder="Find docs" />
+        "#;
+
+        let module = lower_module(source);
+        let interpreter = Interpreter::new();
+
+        let props_with_handlers = interpreter
+            .execute_function(&module, "withHandlers", vec![])
+            .expect("Expected handler-bound props to evaluate");
+        let init = interpreter
+            .initialize_component(&module, "SearchBox", props_with_handlers)
+            .expect("Expected component initialization with handlers to succeed");
+        let dispatch = interpreter
+            .dispatch_component_actions(
+                &module,
+                &init.state_snapshot,
+                vec![
+                    Value::Record {
+                        type_name: Name::new("SearchSubmitted"),
+                        fields: FxHashMap::from_iter([(
+                            SmolStr::new("searchString"),
+                            Value::String(SmolStr::new("docs")),
+                        )]),
+                    },
+                    Value::Record {
+                        type_name: Name::new("SearchBox.ValueChanged"),
+                        fields: FxHashMap::from_iter([(
+                            SmolStr::new("value"),
+                            Value::String(SmolStr::new("docs")),
+                        )]),
+                    },
+                ],
+            )
+            .expect("Expected ordered dispatch to succeed");
+
+        let effect_names: Vec<_> = dispatch
+            .effects
+            .iter()
+            .map(|effect| match effect {
+                Value::Record { type_name, .. } => type_name.as_str().to_string(),
+                other => panic!("Expected effect action record, got {:?}", other),
+            })
+            .collect();
+        assert_eq!(effect_names, vec!["LogSearch", "DoSearch", "TrackSearch"]);
+
+        let props_without_handlers = interpreter
+            .execute_function(&module, "withoutHandlers", vec![])
+            .expect("Expected handler-free props to evaluate");
+        let init_without_handlers = interpreter
+            .initialize_component(&module, "SearchBox", props_without_handlers)
+            .expect("Expected component initialization without handlers to succeed");
+        let empty_dispatch = interpreter
+            .dispatch_component_actions(
+                &module,
+                &init_without_handlers.state_snapshot,
+                vec![Value::Record {
+                    type_name: Name::new("SearchSubmitted"),
+                    fields: FxHashMap::from_iter([(
+                        SmolStr::new("searchString"),
+                        Value::String(SmolStr::new("docs")),
+                    )]),
+                }],
+            )
+            .expect("Expected dispatch without handlers to succeed");
+        assert!(empty_dispatch.effects.is_empty());
+    }
+
+    #[test]
+    fn test_dispatch_component_actions_rejects_undeclared_action_types() {
+        let source = r#"
+            action SearchSubmitted = { searchString:string }
+            action ValueChanged = { value:string }
+
+            component <SearchBox emits { SearchSubmitted } /> = {
+              <TextInput />
+            }
+        "#;
+
+        let module = lower_module(source);
+        let interpreter = Interpreter::new();
+        let init = interpreter
+            .initialize_component(
+                &module,
+                "SearchBox",
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::default(),
+                },
+            )
+            .expect("Expected component initialization to succeed");
+
+        let error = interpreter
+            .dispatch_component_actions(
+                &module,
+                &init.state_snapshot,
+                vec![Value::Record {
+                    type_name: Name::new("ValueChanged"),
+                    fields: FxHashMap::from_iter([(
+                        SmolStr::new("value"),
+                        Value::String(SmolStr::new("docs")),
+                    )]),
+                }],
+            )
+            .expect_err("Expected undeclared action type to fail");
+
+        assert!(matches!(
+            error.kind(),
+            RuntimeErrorKind::UnsupportedComponentAction { component, action }
+                if component == "SearchBox" && action == "ValueChanged"
+        ));
+    }
+
+    #[test]
+    fn test_dispatch_component_actions_rejects_non_record_action_values() {
+        let source = r#"
+            action SearchSubmitted = { searchString:string }
+
+            component <SearchBox emits { SearchSubmitted } /> = {
+              <TextInput />
+            }
+        "#;
+
+        let module = lower_module(source);
+        let interpreter = Interpreter::new();
+        let init = interpreter
+            .initialize_component(
+                &module,
+                "SearchBox",
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::default(),
+                },
+            )
+            .expect("Expected component initialization to succeed");
+
+        let error = interpreter
+            .dispatch_component_actions(
+                &module,
+                &init.state_snapshot,
+                vec![Value::String(SmolStr::new("docs"))],
+            )
+            .expect_err("Expected non-record action input to fail");
+
+        assert!(matches!(
+            error.kind(),
+            RuntimeErrorKind::TypeMismatch { expected, actual, .. }
+                if expected == "action" && actual == "string"
+        ));
+    }
+
+    #[test]
+    fn test_dispatch_component_actions_rejects_invalid_or_incompatible_snapshots() {
+        let source = r#"
+            action SearchSubmitted = { searchString:string }
+            action DoSearch = { search:string }
+
+            component <SearchBox emits { SearchSubmitted } /> = {
+              <TextInput />
+            }
+
+            let withHandler() = <SearchBox onSearchSubmitted=<DoSearch search={action.searchString} /> />
+        "#;
+        let other_module_source = r#"
+            component <OtherButton text:string /> = {
+              <button>{text}</button>
+            }
+        "#;
+
+        let module = lower_module(source);
+        let other_module = lower_module(other_module_source);
+        let interpreter = Interpreter::new();
+
+        let malformed_error = interpreter
+            .dispatch_component_actions(&module, b"not-a-valid-snapshot", vec![])
+            .expect_err("Expected malformed snapshot to fail");
+        assert!(matches!(
+            malformed_error.kind(),
+            RuntimeErrorKind::InvalidComponentStateSnapshot { .. }
+        ));
+
+        let init = interpreter
+            .initialize_component(
+                &module,
+                "SearchBox",
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::default(),
+                },
+            )
+            .expect("Expected component initialization to succeed");
+        let incompatible_error = interpreter
+            .dispatch_component_actions(&other_module, &init.state_snapshot, vec![])
+            .expect_err("Expected incompatible snapshot to fail");
+        assert!(matches!(
+            incompatible_error.kind(),
+            RuntimeErrorKind::ComponentNotFound { name } if name == "SearchBox"
+        ));
     }
 }

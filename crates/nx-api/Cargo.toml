@@ -17,3 +17,4 @@ serde.workspace = true
 smol_str.workspace = true
 rustc-hash.workspace = true
 text-size.workspace = true
+serde_bytes = "0.11"

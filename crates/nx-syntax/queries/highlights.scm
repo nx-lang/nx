@@ -4,6 +4,10 @@
 ;; Keywords
 [
   "let"
+  "action"
+  "component"
+  "emits"
+  "state"
   "type"
   "enum"
   "import"
@@ -31,6 +35,9 @@
 (record_definition
   name: (identifier) @type)
 
+(action_definition
+  name: (identifier) @type)
+
 ;; Variables
 (value_definition
   name: (identifier) @variable)
@@ -42,10 +49,32 @@
 (function_definition
   name: (identifier) @function)
 
+(component_signature
+  name: (element_name) @function)
+
+(emit_definition
+  name: (identifier) @type)
+
+(emit_reference
+  (qualified_name
+    (identifier) @type))
+
 ;; Parameters
 (function_definition
   (property_definition
     name: (markup_identifier) @variable.parameter))
+
+(component_signature
+  (property_definition
+    name: (markup_identifier) @variable.parameter))
+
+(emit_definition
+  (property_definition
+    name: (markup_identifier) @property))
+
+(state_group
+  (property_definition
+    name: (markup_identifier) @property))
 
 ;; Operators
 [
@@ -105,6 +134,10 @@
   name: (qualified_markup_name) @property)
 
 (record_definition
+  (property_definition
+    name: (markup_identifier) @property))
+
+(action_definition
   (property_definition
     name: (markup_identifier) @property))
 

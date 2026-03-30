@@ -1,0 +1,16 @@
+component <SearchBox
+  placeholder:string
+  emits {
+    ValueChanged {
+      value:string
+      source:string
+    }
+    SearchRequested {
+      searchString:string
+    }
+  }
+/> = {
+  <TextInput placeholder={placeholder} />
+}
+
+<SearchBox placeholder="Find docs" />
