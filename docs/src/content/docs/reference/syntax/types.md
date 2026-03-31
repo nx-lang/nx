@@ -13,41 +13,61 @@ type UserId = string
 type EventHandler = (string) => void
 ```
 
-## Object Types
-Object types reuse element syntax so the shape of your data looks identical to the elements that consume it.
+## Record Types
+Record types use `type Name = { ... }` declarations. Record inheritance is limited to single-base
+inheritance from abstract records.
 
 ```nx
-type <User id:UserId name:string email:string avatarUrl:string?/>
-type <Point x:int y:int/>
-type <ComponentProps data:object className:string? children:Element?/>
+abstract type Entity = {
+  id: UserId
+}
+
+abstract type UserBase extends Entity = {
+  name: string
+  email: string?
+}
+
+type User extends UserBase = {
+  isAdmin: bool = false
+}
 ```
 
-- Attributes represent required fields.
-- `?` marks optional members.
-- Default values can appear where it improves readability.
+- Fields use `name: Type` and can optionally declare defaults with `=`.
+- `abstract type` records can appear in annotations but cannot be instantiated directly.
+- `extends Base` is valid only when `Base` resolves to an abstract record declaration.
 
-## Nested Objects
+## Nested records
 
 ```nx
-type <Address street:string city:string state:string zip:string/>
-type <Person name:string email:string address:Address/>
+type Address = {
+  street: string
+  city: string
+  state: string
+  zip: string
+}
+
+type Person = {
+  name: string
+  email: string
+  address: Address
+}
 ```
 
-Combining object types allows you to describe complex domain models without leaving the markup syntax.
+Combining record types allows you to describe complex domain models while keeping named shapes explicit.
 
-## Object Creation
-Create instances with the same syntax and pass them as expressions.
+## Record creation
+Concrete records are instantiated with the same element-style syntax used elsewhere in NX.
 
 ```nx
 let user =
   <User
-    id="123"
-    name="John Doe"
-    email="john@example.com"
-    avatarUrl="/avatars/john.jpg"
+    id={123}
+    name={"John Doe"}
+    email={"john@example.com"}
   />
 
-let origin = <Point x=0 y=0/>
+let entityName(user: UserBase) = user.name
+let result = entityName(user)
 ```
 
 ## Function Types

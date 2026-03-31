@@ -266,6 +266,75 @@ fn test_record_field_access() {
 }
 
 #[test]
+fn test_derived_record_argument_satisfies_abstract_ancestor_parameter() {
+    let source = r#"
+        abstract type Entity = {
+          id: int
+        }
+
+        abstract type UserBase extends Entity = {
+          name: string
+        }
+
+        type User extends UserBase = {
+          isAdmin: bool = false
+        }
+
+        let consume(entity:Entity): int = { 1 }
+    "#;
+
+    let mut record = FxHashMap::default();
+    record.insert(SmolStr::new("id"), Value::Int(1));
+    record.insert(SmolStr::new("name"), Value::String(SmolStr::new("Ada")));
+
+    let result = execute_function(
+        source,
+        "consume",
+        vec![Value::Record {
+            type_name: nx_hir::Name::new("User"),
+            fields: record,
+        }],
+    )
+    .unwrap_or_else(|err| panic!("derived record argument failed:\n{}", err));
+
+    assert_eq!(result, Value::Int(1));
+}
+
+#[test]
+fn test_derived_record_return_satisfies_abstract_ancestor_return_type() {
+    let source = r#"
+        abstract type Entity = {
+          id: int
+        }
+
+        abstract type UserBase extends Entity = {
+          name: string
+        }
+
+        type User extends UserBase = {
+          isAdmin: bool = false
+        }
+
+        let make(): UserBase = { <User id={1} name={"Ada"} /> }
+    "#;
+
+    let result = execute_function(source, "make", vec![])
+        .unwrap_or_else(|err| panic!("derived record return failed:\n{}", err));
+
+    match result {
+        Value::Record { type_name, fields } => {
+            assert_eq!(type_name.as_str(), "User");
+            assert_eq!(fields.get("id"), Some(&Value::Int(1)));
+            assert_eq!(
+                fields.get("name"),
+                Some(&Value::String(SmolStr::new("Ada")))
+            );
+        }
+        other => panic!("Expected derived record return, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_record_missing_field_errors() {
     let source = r#"
         type User = { name: string }
@@ -396,6 +465,50 @@ fn test_record_defaults_instantiation() {
 }
 
 #[test]
+fn test_record_inheritance_applies_inherited_defaults() {
+    let source = r#"
+        abstract type UserBase = {
+          name: string = "Anon"
+          age: int = 18
+        }
+
+        type User extends UserBase = {
+          isAdmin: bool = false
+        }
+    "#;
+
+    let parse_result = parse_str(source, "record-inheritance-defaults.nx");
+    assert!(
+        parse_result.errors.is_empty(),
+        "Parse errors: {:?}",
+        parse_result.errors
+    );
+    let root = parse_result.root().expect("root");
+    let module = lower(root, SourceId::new(0));
+
+    let interpreter = Interpreter::new();
+    let record = interpreter
+        .instantiate_record_defaults(&module, "User")
+        .expect("instantiate inherited defaults");
+
+    match record {
+        Value::Record { type_name, fields } => {
+            assert_eq!(type_name.as_str(), "User");
+            assert_eq!(
+                fields.get("name"),
+                Some(&Value::String(SmolStr::new("Anon")))
+            );
+            assert_eq!(fields.get("age"), Some(&Value::Int(18)));
+            assert_eq!(fields.get("isAdmin"), Some(&Value::Boolean(false)));
+        }
+        other => panic!(
+            "Expected inherited defaults to produce a record, got {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
 fn test_record_literal_defaults_and_overrides() {
     let source = r#"
         type User = { name: string = "Anon" age: int = 30 }
@@ -458,6 +571,26 @@ fn test_action_record_defaults_instantiation() {
             other
         ),
     }
+}
+
+#[test]
+fn test_abstract_record_instantiation_fails_at_runtime() {
+    let source = r#"
+        abstract type UserBase = {
+          name: string
+        }
+
+        let make(): UserBase = { <UserBase name={"Ada"} /> }
+    "#;
+
+    let result = execute_function(source, "make", vec![]);
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .contains("Cannot instantiate abstract record 'UserBase'"),
+        "Expected abstract instantiation runtime error"
+    );
 }
 
 #[test]

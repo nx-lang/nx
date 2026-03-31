@@ -130,8 +130,13 @@ module.exports = grammar({
 
     // ===== Type Definitions =====
     record_definition: $ => seq(
+      optional(field('abstract', 'abstract')),
       'type',
       field('name', $.identifier),
+      optional(seq(
+        'extends',
+        field('base', $.qualified_name),
+      )),
       '=',
       '{',
       repeat(field('properties', $.property_definition)),

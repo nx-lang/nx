@@ -9,6 +9,8 @@
   "emits"
   "state"
   "type"
+  "abstract"
+  "extends"
   "enum"
   "import"
   "from"
@@ -34,6 +36,10 @@
 
 (record_definition
   name: (identifier) @type)
+
+(record_definition
+  base: (qualified_name
+    (identifier) @type))
 
 (action_definition
   name: (identifier) @type)

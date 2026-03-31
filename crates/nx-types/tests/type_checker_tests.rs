@@ -139,6 +139,194 @@ fn test_empty_record_definition_parses() {
     assert!(result.is_ok(), "empty record definition should type check");
 }
 
+#[test]
+fn test_abstract_record_instantiation_is_rejected() {
+    let source = r#"
+        abstract type UserBase = {
+          name: string
+        }
+
+        let root(): UserBase = { <UserBase name={"Ada"} /> }
+    "#;
+
+    let result = check_str(source, "abstract-record-instantiation.nx");
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code() == Some("abstract-record-instantiation")),
+        "Expected abstract-record-instantiation diagnostic, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_record_inheritance_accepts_concrete_leaf_for_abstract_ancestor() {
+    let source = r#"
+        abstract type Entity = {
+          id: int
+        }
+
+        abstract type UserBase extends Entity = {
+          name: string
+        }
+
+        type User extends UserBase = {
+          isAdmin: bool = false
+        }
+
+        let consume(entity: Entity): int = { 1 }
+        let root(): int = { consume(<User id={1} name={"Ada"} />) }
+    "#;
+
+    let result = check_str(source, "record-inheritance-subtyping.nx");
+    assert!(
+        result.errors().is_empty(),
+        "Expected abstract ancestor substitution to type check, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_record_inheritance_accepts_concrete_leaf_for_abstract_return_type() {
+    let source = r#"
+        abstract type Entity = {
+          id: int
+        }
+
+        abstract type UserBase extends Entity = {
+          name: string
+        }
+
+        type User extends UserBase = {
+          isAdmin: bool = false
+        }
+
+        let make(): UserBase = { <User id={1} name={"Ada"} /> }
+    "#;
+
+    let result = check_str(source, "record-inheritance-return-subtyping.nx");
+    assert!(
+        result.errors().is_empty(),
+        "Expected abstract return type substitution to type check, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_record_inheritance_uses_shared_abstract_supertype_for_branches() {
+    let source = r#"
+        abstract type Entity = {
+          id: int
+        }
+
+        abstract type UserBase extends Entity = {
+          name: string
+        }
+
+        type User extends UserBase = {
+          isAdmin: bool = false
+        }
+
+        type StaffUser extends UserBase = {
+          department: string
+        }
+
+        let choose(flag: bool): UserBase = {
+          if flag {
+            <User id={1} name={"Ada"} />
+          } else {
+            <StaffUser id={2} name={"Sam"} department={"Ops"} />
+          }
+        }
+    "#;
+
+    let result = check_str(source, "record-inheritance-branch-supertype.nx");
+    assert!(
+        result.errors().is_empty(),
+        "Expected sibling derived records to infer their shared abstract supertype, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_duplicate_inherited_field_reports_diagnostic() {
+    let source = r#"
+        abstract type UserBase = {
+          name: string
+        }
+
+        type User extends UserBase = {
+          name: string
+          email: string
+        }
+    "#;
+
+    let result = check_str(source, "duplicate-inherited-field.nx");
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.message().contains("redeclares inherited field 'name'")),
+        "Expected duplicate inherited field diagnostic, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_concrete_record_cannot_be_used_as_base() {
+    let source = r#"
+        abstract type Entity = {
+          id: int
+        }
+
+        type User extends Entity = {
+          name: string
+        }
+
+        type Admin extends User = {
+          level: int
+        }
+    "#;
+
+    let result = check_str(source, "concrete-record-base.nx");
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code() == Some("lowering-error")
+                && diag
+                    .message()
+                    .contains("only abstract records may be extended")),
+        "Expected concrete-base diagnostic, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
 // ============================================================================
 // Type Mismatch Detection Tests (T132)
 // ============================================================================

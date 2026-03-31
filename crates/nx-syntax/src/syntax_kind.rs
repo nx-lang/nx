@@ -162,6 +162,8 @@ pub enum SyntaxKind {
     FROM,
     AS,
     CONTENTTYPE,
+    ABSTRACT,
+    EXTENDS,
     IF,
     ELSE,
     FOR,
@@ -235,6 +237,8 @@ impl SyntaxKind {
                 | SyntaxKind::FROM
                 | SyntaxKind::AS
                 | SyntaxKind::CONTENTTYPE
+                | SyntaxKind::ABSTRACT
+                | SyntaxKind::EXTENDS
                 | SyntaxKind::ENUM
                 | SyntaxKind::IF
                 | SyntaxKind::ELSE
@@ -304,6 +308,8 @@ impl SyntaxKind {
                 | SyntaxKind::FROM
                 | SyntaxKind::AS
                 | SyntaxKind::CONTENTTYPE
+                | SyntaxKind::ABSTRACT
+                | SyntaxKind::EXTENDS
                 | SyntaxKind::IF
                 | SyntaxKind::ELSE
                 | SyntaxKind::FOR
@@ -472,6 +478,8 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "from" => SyntaxKind::FROM,
         "as" => SyntaxKind::AS,
         "contenttype" => SyntaxKind::CONTENTTYPE,
+        "abstract" => SyntaxKind::ABSTRACT,
+        "extends" => SyntaxKind::EXTENDS,
         "enum" => SyntaxKind::ENUM,
         "if" => SyntaxKind::IF,
         "else" => SyntaxKind::ELSE,

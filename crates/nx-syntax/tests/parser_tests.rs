@@ -511,6 +511,44 @@ fn test_parse_record_definition() {
 }
 
 #[test]
+fn test_parse_record_inheritance_definition() {
+    let path = fixture_path("valid/record-inheritance.nx");
+    let result = parse_file(&path).expect("record inheritance fixture should load");
+
+    assert!(result.is_ok(), "Record inheritance fixture should parse");
+    let root = result.root().expect("Should have syntax tree root");
+
+    let records: Vec<_> = root
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::RECORD_DEFINITION)
+        .collect();
+    assert_eq!(records.len(), 3, "Expected three record definitions");
+
+    let entity = records[0];
+    assert!(entity.child_by_field("abstract").is_some());
+    assert!(entity.child_by_field("base").is_none());
+
+    let user_base = records[1];
+    assert!(user_base.child_by_field("abstract").is_some());
+    assert_eq!(
+        user_base
+            .child_by_field("base")
+            .expect("Expected base field")
+            .text(),
+        "Entity"
+    );
+
+    let user = records[2];
+    assert!(user.child_by_field("abstract").is_none());
+    assert_eq!(
+        user.child_by_field("base")
+            .expect("Expected concrete base field")
+            .text(),
+        "UserBase"
+    );
+}
+
+#[test]
 fn test_parse_action_definition() {
     let path = fixture_path("valid/action-definition.nx");
     let result = parse_file(&path).expect("action fixture should load");
@@ -1267,6 +1305,21 @@ fn test_parse_invalid_action_definition_is_error() {
             "Parser should either recover an action node or surface an error node"
         );
     }
+}
+
+#[test]
+fn test_parse_multiple_record_bases_is_error() {
+    let path = fixture_path("invalid/record-inheritance-multiple-bases.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(
+        !result.is_ok(),
+        "Malformed multiple-base record syntax should fail"
+    );
+    assert!(
+        !result.errors.is_empty(),
+        "Malformed multiple-base record syntax should produce parse errors"
+    );
 }
 
 #[test]

@@ -62,7 +62,7 @@ EnumDefinition ::=
     "enum" Identifier "=" ["|"] Identifier { "|" Identifier }
 
 RecordDefinition ::=
-    "type" Identifier "=" "{"
+    ["abstract"] "type" Identifier ["extends" QualifiedName] "=" "{"
         {PropertyDefinition}
     "}"
 
@@ -87,6 +87,11 @@ PrimitiveType ::=
 UserDefinedType ::=
     QualifiedName
 ```
+
+Record declarations reserve the `abstract` and `extends` keywords. `abstract type Name = { ... }`
+declares a non-instantiable record root, `abstract type Name extends Base = { ... }` declares an
+abstract derived record, and `type Name extends Base = { ... }` declares a concrete derived record.
+Only abstract records may appear in the `extends` clause.
 
 <a id="values"></a>
 ## Values

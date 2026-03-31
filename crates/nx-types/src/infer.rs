@@ -1,11 +1,15 @@
 //! Type inference for expressions.
 
 use crate::{
-    common_supertype, resolve_type_ref_with, resolve_type_ref_with_seen, ty::EnumType,
-    type_satisfies_expected_with_coercion, Type, TypeEnvironment,
+    common_supertype as generic_common_supertype, is_object_type, resolve_type_ref_with,
+    resolve_type_ref_with_seen, ty::EnumType,
+    type_satisfies_expected as generic_type_satisfies_expected, Type, TypeEnvironment,
 };
 use nx_diagnostics::{Diagnostic, Label, TextSpan};
-use nx_hir::{ast, ExprId, Module, Name};
+use nx_hir::{
+    ast, effective_record_shape_for_name, is_record_subtype,
+    resolve_record_definition as resolve_hir_record_definition, ExprId, Module, Name,
+};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 struct TypeAliasInfo {
@@ -133,7 +137,7 @@ impl<'a> InferenceContext<'a> {
                 if let Some(else_id) = else_branch {
                     let else_ty = self.infer_expr(*else_id);
 
-                    common_supertype(&then_ty, &else_ty)
+                    self.common_supertype(&then_ty, &else_ty)
                 } else {
                     // No else branch - type is void
                     Type::void()
@@ -536,10 +540,21 @@ impl<'a> InferenceContext<'a> {
         span: TextSpan,
     ) -> Type {
         if let Some(record_def) = self.resolve_record_definition(record) {
+            if record_def.is_abstract {
+                self.error(
+                    "abstract-record-instantiation",
+                    format!("Cannot instantiate abstract record '{}'", record_def.name),
+                    span,
+                );
+            }
+
+            let effective_shape = self.effective_record_shape(record).ok().flatten();
             for (name, expr_id) in properties {
                 let actual = self.infer_expr(*expr_id);
-                if let Some(field) = record_def
-                    .properties
+                if let Some(field) = effective_shape
+                    .as_ref()
+                    .map(|shape| shape.fields.as_slice())
+                    .unwrap_or(record_def.properties.as_slice())
                     .iter()
                     .find(|field| field.name == *name)
                 {
@@ -576,6 +591,13 @@ impl<'a> InferenceContext<'a> {
         }
 
         if let Some(record_def) = self.resolve_record_definition(&element.tag) {
+            if record_def.is_abstract {
+                self.error(
+                    "abstract-record-instantiation",
+                    format!("Cannot instantiate abstract record '{}'", record_def.name),
+                    span,
+                );
+            }
             self.check_element_bindings_against_record(element, &record_def, span);
             return Type::named(record_def.name);
         }
@@ -601,9 +623,12 @@ impl<'a> InferenceContext<'a> {
         record_def: &nx_hir::RecordDef,
         span: TextSpan,
     ) {
+        let effective_shape = self.effective_record_shape(&record_def.name).ok().flatten();
         let spec = self.build_element_binding_spec(
-            record_def
-                .properties
+            effective_shape
+                .as_ref()
+                .map(|shape| shape.fields.as_slice())
+                .unwrap_or(record_def.properties.as_slice())
                 .iter()
                 .map(|field| (&field.name, &field.ty)),
         );
@@ -704,7 +729,7 @@ impl<'a> InferenceContext<'a> {
             .unwrap_or_else(|| Type::named("object"));
 
         for ty in item_types.iter().skip(1) {
-            current = common_supertype(&current, ty);
+            current = self.common_supertype(&current, ty);
         }
 
         current
@@ -718,7 +743,7 @@ impl<'a> InferenceContext<'a> {
         code: &str,
         context: String,
     ) -> bool {
-        if type_satisfies_expected_with_coercion(actual, expected) {
+        if self.type_satisfies_expected_with_coercion(actual, expected) {
             true
         } else {
             let message = if matches!(actual, Type::Array(_)) && !matches!(expected, Type::Array(_))
@@ -825,29 +850,7 @@ impl<'a> InferenceContext<'a> {
     }
 
     fn resolve_record_definition(&self, name: &Name) -> Option<nx_hir::RecordDef> {
-        self.resolve_record_definition_inner(name, &mut FxHashSet::default())
-    }
-
-    fn resolve_record_definition_inner(
-        &self,
-        name: &Name,
-        seen: &mut FxHashSet<Name>,
-    ) -> Option<nx_hir::RecordDef> {
-        if !seen.insert(name.clone()) {
-            return None;
-        }
-
-        let result = match self.module.find_item(name.as_str()) {
-            Some(nx_hir::Item::Record(def)) => Some(def.clone()),
-            Some(nx_hir::Item::TypeAlias(alias)) => match &alias.ty {
-                ast::TypeRef::Name(target) => self.resolve_record_definition_inner(target, seen),
-                _ => None,
-            },
-            _ => None,
-        };
-
-        seen.remove(name);
-        result
+        resolve_hir_record_definition(self.module, name)
     }
 
     fn enum_info_for_expr(&self, expr_id: ExprId) -> Option<&EnumType> {
@@ -927,6 +930,84 @@ impl<'a> InferenceContext<'a> {
         let param_types = self.function_param_types(func);
         self.env
             .bind(func.name.clone(), Type::function(param_types, return_type));
+    }
+
+    fn effective_record_shape(
+        &self,
+        name: &Name,
+    ) -> Result<Option<nx_hir::EffectiveRecordShape>, nx_hir::RecordResolutionError> {
+        effective_record_shape_for_name(self.module, name)
+    }
+
+    fn record_type_satisfies_expected(&self, actual: &Name, expected: &Name) -> bool {
+        is_record_subtype(self.module, actual, expected).unwrap_or(false)
+    }
+
+    fn type_satisfies_expected(&self, actual: &Type, expected: &Type) -> bool {
+        if generic_type_satisfies_expected(actual, expected) {
+            return true;
+        }
+
+        match (actual, expected) {
+            (Type::Named(actual_name), Type::Named(expected_name)) => {
+                self.record_type_satisfies_expected(actual_name, expected_name)
+            }
+            (Type::Named(_), Type::Nullable(expected_inner)) => {
+                self.type_satisfies_expected(actual, expected_inner)
+            }
+            (Type::Nullable(actual_inner), Type::Nullable(expected_inner)) => {
+                self.type_satisfies_expected(actual_inner, expected_inner)
+            }
+            (Type::Array(actual_inner), Type::Array(expected_inner)) => {
+                self.type_satisfies_expected(actual_inner, expected_inner)
+            }
+            _ => false,
+        }
+    }
+
+    fn type_satisfies_expected_with_coercion(&self, actual: &Type, expected: &Type) -> bool {
+        match (actual, expected) {
+            (Type::Array(actual_inner), Type::Array(expected_inner)) => {
+                self.type_satisfies_expected(actual_inner, expected_inner)
+            }
+            (Type::Array(_), _) if is_object_type(expected) => true,
+            (Type::Array(_), _) => false,
+            (_, Type::Array(expected_inner)) => {
+                self.type_satisfies_expected(actual, expected_inner)
+            }
+            _ => self.type_satisfies_expected(actual, expected),
+        }
+    }
+
+    fn common_supertype(&self, lhs: &Type, rhs: &Type) -> Type {
+        match (lhs, rhs) {
+            (Type::Array(lhs_inner), Type::Array(rhs_inner)) => {
+                Type::array(self.common_supertype(lhs_inner, rhs_inner))
+            }
+            (Type::Nullable(lhs_inner), Type::Nullable(rhs_inner)) => {
+                Type::nullable(self.common_supertype(lhs_inner, rhs_inner))
+            }
+            (Type::Named(lhs_name), Type::Named(rhs_name)) => self
+                .common_record_supertype(lhs_name, rhs_name)
+                .unwrap_or_else(|| generic_common_supertype(lhs, rhs)),
+            _ => generic_common_supertype(lhs, rhs),
+        }
+    }
+
+    fn common_record_supertype(&self, lhs: &Name, rhs: &Name) -> Option<Type> {
+        let lhs_shape = self.effective_record_shape(lhs).ok().flatten()?;
+        let rhs_shape = self.effective_record_shape(rhs).ok().flatten()?;
+
+        let mut lhs_lineage = vec![lhs_shape.record.name];
+        lhs_lineage.extend(lhs_shape.ancestors);
+
+        let mut rhs_lineage = vec![rhs_shape.record.name];
+        rhs_lineage.extend(rhs_shape.ancestors);
+
+        lhs_lineage
+            .into_iter()
+            .find(|candidate| rhs_lineage.iter().any(|other| other == candidate))
+            .map(Type::named)
     }
 }
 

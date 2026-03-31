@@ -23,6 +23,7 @@
 pub mod ast;
 pub mod db;
 pub mod lower;
+pub mod records;
 pub mod scope;
 
 use la_arena::{Arena, Idx};
@@ -36,6 +37,11 @@ pub use lower::lower;
 pub use db::{DatabaseImpl, NxDatabase};
 
 // Re-export scope and symbol types
+pub use records::{
+    effective_record_shape, effective_record_shape_for_name, is_record_subtype,
+    resolve_record_definition, validate_record_definitions, EffectiveRecordShape,
+    InvalidBaseReason, RecordResolutionError,
+};
 pub use scope::{
     build_scopes, check_undefined_identifiers, Scope, ScopeId, ScopeManager, Symbol, SymbolKind,
 };
@@ -189,6 +195,10 @@ pub struct RecordDef {
     pub name: Name,
     /// Whether this record came from `type` or `action` syntax.
     pub kind: RecordKind,
+    /// Whether the record was declared with the `abstract` modifier.
+    pub is_abstract: bool,
+    /// Optional abstract base record or alias name.
+    pub base: Option<Name>,
     /// Property definitions
     pub properties: Vec<RecordField>,
     /// Source span
@@ -199,6 +209,11 @@ impl RecordDef {
     /// Returns true when this record was declared with the `action` keyword.
     pub fn is_action(&self) -> bool {
         self.kind == RecordKind::Action
+    }
+
+    /// Returns true when this record is declared as abstract.
+    pub fn is_abstract(&self) -> bool {
+        self.is_abstract
     }
 }
 

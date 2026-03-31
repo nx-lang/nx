@@ -127,6 +127,34 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(lines[4], end.tokens, '}')).to.include('punctuation.section.block.end.nx');
   });
 
+  it('highlights abstract and inherited record definitions', function () {
+    const lines = [
+      'abstract type Entity = {',
+      '  id: int',
+      '}',
+      'type User extends Entity = {',
+      '  name: string',
+      '}'
+    ];
+
+    let ruleStack: StateStack | null = null;
+
+    const root = grammar.tokenizeLine(lines[0], ruleStack);
+    ruleStack = root.ruleStack;
+    expect(scopesForSubstring(lines[0], root.tokens, 'abstract')).to.include('storage.modifier.abstract.nx');
+    expect(scopesForSubstring(lines[0], root.tokens, 'type')).to.include('keyword.declaration.type.nx');
+    expect(scopesForSubstring(lines[0], root.tokens, 'Entity')).to.include('entity.name.type.nx');
+
+    grammar.tokenizeLine(lines[1], ruleStack);
+    grammar.tokenizeLine(lines[2], ruleStack);
+
+    const derived = grammar.tokenizeLine(lines[3], null);
+    expect(scopesForSubstring(lines[3], derived.tokens, 'type')).to.include('keyword.declaration.type.nx');
+    expect(scopesForSubstring(lines[3], derived.tokens, 'User')).to.include('entity.name.type.nx');
+    expect(scopesForSubstring(lines[3], derived.tokens, 'extends')).to.include('keyword.declaration.extends.nx');
+    expect(scopesForSubstring(lines[3], derived.tokens, 'Entity')).to.include('entity.name.type.nx');
+  });
+
   it('highlights inline else within control block', function () {
     const line = 'if user.isAuthenticated { 2 } else { 2 }';
     const { tokens } = grammar.tokenizeLine(line, null);

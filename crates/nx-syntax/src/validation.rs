@@ -299,6 +299,15 @@ fn analyze_error_context(
                     Some("Expected: action ActionType = { prop:type }".to_string()),
                 );
             }
+            "record_definition" => {
+                return (
+                    "Invalid record definition".to_string(),
+                    Some(
+                        "Expected: [abstract] type RecordName [extends BaseRecord] = { prop:type }"
+                            .to_string(),
+                    ),
+                );
+            }
             "component_signature" => {
                 return (
                     "Invalid component signature".to_string(),
@@ -395,6 +404,20 @@ fn analyze_error_context(
         return (
             "Invalid action definition".to_string(),
             Some("Expected: action ActionType = { prop:type }".to_string()),
+        );
+    }
+
+    if trimmed_error.starts_with("abstract type ")
+        || (trimmed_error.starts_with("type ")
+            && trimmed_error.contains('{')
+            && (trimmed_error.contains("extends") || trimmed_error.contains("= {")))
+    {
+        return (
+            "Invalid record definition".to_string(),
+            Some(
+                "Expected: [abstract] type RecordName [extends BaseRecord] = { prop:type }"
+                    .to_string(),
+            ),
         );
     }
 

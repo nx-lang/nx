@@ -5,9 +5,9 @@
 
 use crate::ast::{BinOp, Expr, Literal, OrderedFloat, Stmt, TypeRef, UnOp};
 use crate::{
-    Component, ComponentEmit, ComponentEmitKind, Element, EnumDef, EnumMember, ExprId, Function,
-    Import, ImportKind, Item, LoweringDiagnostic, Module, Name, Param, Property, RecordDef,
-    RecordField, RecordKind, SelectiveImport, SourceId, TypeAlias,
+    validate_record_definitions, Component, ComponentEmit, ComponentEmitKind, Element, EnumDef,
+    EnumMember, ExprId, Function, Import, ImportKind, Item, LoweringDiagnostic, Module, Name,
+    Param, Property, RecordDef, RecordField, RecordKind, SelectiveImport, SourceId, TypeAlias,
 };
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_syntax::{SyntaxKind, SyntaxNode};
@@ -405,6 +405,8 @@ impl LoweringContext {
                         let record = RecordDef {
                             name: action_name.clone(),
                             kind: RecordKind::Action,
+                            is_abstract: false,
+                            base: None,
                             properties: self.lower_record_fields_from_node(emit_node, false),
                             span: emit_node.span(),
                         };
@@ -1236,6 +1238,10 @@ impl LoweringContext {
         RecordDef {
             name,
             kind,
+            is_abstract: node.child_by_field("abstract").is_some(),
+            base: node
+                .child_by_field("base")
+                .map(|base| Name::new(base.text())),
             properties: self.lower_record_fields_from_node(node, false),
             span: node.span(),
         }
@@ -1568,6 +1574,10 @@ impl LoweringContext {
                 }
             }
         }
+
+        for error in validate_record_definitions(&self.module) {
+            self.add_diagnostic(error.message(), error.span());
+        }
     }
 }
 
@@ -1851,6 +1861,175 @@ import "./controls.nx" as UI
             .filter(|f| f.default.is_some())
             .count();
         assert_eq!(defaults, 1, "One field should carry a default value");
+    }
+
+    #[test]
+    fn test_lower_record_inheritance_metadata() {
+        let source = r#"
+            abstract type Entity = {
+              id: int
+            }
+
+            abstract type UserBase extends Entity = {
+              name: string
+            }
+
+            type User extends UserBase = {
+              email: string?
+            }
+        "#;
+        let parse_result = parse_str(source, "record-inheritance.nx");
+        let tree = parse_result.tree.expect("Should parse record inheritance");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let records: Vec<_> = module
+            .items()
+            .iter()
+            .filter_map(|item| match item {
+                Item::Record(def) => Some(def),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0].name.as_str(), "Entity");
+        assert!(records[0].is_abstract);
+        assert!(records[0].base.is_none());
+
+        assert_eq!(records[1].name.as_str(), "UserBase");
+        assert!(records[1].is_abstract);
+        assert_eq!(
+            records[1].base.as_ref().map(|name| name.as_str()),
+            Some("Entity")
+        );
+
+        assert_eq!(records[2].name.as_str(), "User");
+        assert!(!records[2].is_abstract);
+        assert_eq!(
+            records[2].base.as_ref().map(|name| name.as_str()),
+            Some("UserBase")
+        );
+    }
+
+    #[test]
+    fn test_lower_record_inheritance_validation_diagnostics() {
+        let source = r#"
+            abstract type Entity = {
+              id: int
+            }
+
+            type User extends Entity = {
+              name: string
+            }
+
+            type Admin extends User = {
+              level: int
+            }
+
+            abstract type DuplicateBase = {
+              name: string
+            }
+
+            type DuplicateUser extends DuplicateBase = {
+              name: string
+            }
+        "#;
+        let parse_result = parse_str(source, "record-inheritance-errors.nx");
+        let tree = parse_result
+            .tree
+            .expect("Should parse record inheritance error source");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let messages: Vec<_> = module
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect();
+
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("only abstract records may be extended")),
+            "Expected concrete-base diagnostic, got {:?}",
+            messages
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("redeclares inherited field 'name'")),
+            "Expected duplicate inherited field diagnostic, got {:?}",
+            messages
+        );
+    }
+
+    #[test]
+    fn test_lower_record_inheritance_cycle_diagnostic() {
+        let source = r#"
+            abstract type Entity extends UserBase = {
+              id: int
+            }
+
+            abstract type UserBase extends Entity = {
+              name: string
+            }
+        "#;
+        let parse_result = parse_str(source, "record-cycle.nx");
+        let tree = parse_result
+            .tree
+            .expect("Should parse record inheritance cycle");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let messages: Vec<_> = module
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect();
+
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("Record inheritance cycle detected")),
+            "Expected inheritance cycle diagnostic, got {:?}",
+            messages
+        );
+    }
+
+    #[test]
+    fn test_lower_record_inheritance_reports_invalid_mid_chain_base_once() {
+        let source = r#"
+            abstract type BrokenBase extends MissingBase = {
+              id: int
+            }
+
+            type User extends BrokenBase = {
+              name: string
+            }
+
+            type Admin extends BrokenBase = {
+              level: int
+            }
+        "#;
+        let parse_result = parse_str(source, "record-mid-chain-invalid-base.nx");
+        let tree = parse_result
+            .tree
+            .expect("Should parse record inheritance error source");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let messages: Vec<_> = module
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect();
+        let missing_base_messages = messages
+            .iter()
+            .filter(|message| message.contains("BrokenBase") && message.contains("MissingBase"))
+            .count();
+
+        assert_eq!(
+            missing_base_messages, 1,
+            "Expected invalid mid-chain base to be reported once, got {:?}",
+            messages
+        );
     }
 
     #[test]

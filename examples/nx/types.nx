@@ -2,8 +2,8 @@
 type UserId = int
 type Username = string
 type MaybeUser = User?
-type UserList = User[]
-type User = object
+type UserList = UserBase[]
+type EntityList = Entity[]
 
 // Enums
 enum Foo = Abc | Def | Ghi
@@ -13,26 +13,48 @@ enum Bar =
   | Ghi
 
 // Records
-type User = {
+abstract type Entity = {
   id: UserId
-  name: Username = "Anonymous"
+}
+
+abstract type UserBase extends Entity = {
+  name: Username
   email: string?
-  age: int
+  age: int = 18
+}
+
+type User extends UserBase = {
+  isAdmin: bool = false
+}
+
+type StaffUser extends UserBase = {
+  department: string
+}
+
+type UserCard = {
+  user: UserBase
 }
 
 let <UserCard
-  foo: int
-  id: UserId
-  name: Username
-  email: string?
-  age: int
+  user: UserBase
 /> =
   <div class="user-card">
-    <h3>{name}</h3>
-    <p:>ID: {id}</p>
-    if email is {
+    <h3>{user.name}</h3>
+    <p:>ID: {user.id}</p>
+    if user.email is {
       null => <p:>No email</p>
-      else => <p:>Email: {email}</p>
+      else => <p:>Email: {user.email}</p>
     }
-    <p:>Age: {age}</p>
+    <p:>Age: {user.age}</p>
   </div>
+
+let describe(user: UserBase) = user.name
+
+let currentUser: User =
+  <User id={1} name={"Ada"} email={"ada@example.com"} />
+
+let currentStaff: StaffUser =
+  <StaffUser id={2} name={"Sam"} department={"Support"} />
+
+let labels: UserList =
+  { currentUser currentStaff }

@@ -44,7 +44,22 @@ pub(crate) fn lower_source_module(
     };
 
     let source_id = SourceId::new(parse_result.source_id.as_u32());
-    Ok(lower(tree.root(), source_id))
+    let module = lower(tree.root(), source_id);
+    if !module.diagnostics().is_empty() {
+        let diagnostics: Vec<_> = module
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| {
+                Diagnostic::error("lowering-error")
+                    .with_message(diagnostic.message.clone())
+                    .with_label(Label::primary(file_name, diagnostic.span))
+                    .build()
+            })
+            .collect();
+        return Err(diagnostics_to_api(&diagnostics, source));
+    }
+
+    Ok(module)
 }
 
 pub(crate) fn runtime_error_diagnostics(source: &str, error: RuntimeError) -> Vec<NxDiagnostic> {

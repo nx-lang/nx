@@ -22,6 +22,8 @@ Keywords
 - EMITS ("emits")
 - STATE ("state")
 - TYPE ("type")
+- ABSTRACT ("abstract")
+- EXTENDS ("extends")
 - ENUM ("enum")
 - LET ("let")
 - IF ("if"), ELSE ("else"), IS ("is")
@@ -191,8 +193,12 @@ TypeDefinition (AST: TypeDefinitionSyntax is a sum type)
 - TypeDefinition → TypeAliasDefinition (TypeAliasDefinitionSyntax)
 
 RecordDefinition (AST: RecordDefinitionSyntax)
-- RecordDefinition → TYPE IDENTIFIER EQ LBRACE RecordPropertyDefinition* RBRACE
-  - fields: name: string, properties: RecordPropertyDefinitionSyntax[]
+- RecordDefinition → ABSTRACT? TYPE IDENTIFIER RecordExtendsClauseOpt EQ LBRACE RecordPropertyDefinition* RBRACE
+  - fields: isAbstract: bool, name: string, base?: QualifiedNameSyntax, properties: RecordPropertyDefinitionSyntax[]
+
+RecordExtendsClauseOpt
+- RecordExtendsClauseOpt → EXTENDS QualifiedName
+- RecordExtendsClauseOpt → ε
 
 RecordPropertyDefinition (AST: RecordPropertyDefinitionSyntax)
 - RecordPropertyDefinition → MARKUP_IDENTIFIER COLON Type RecordPropertyDefaultOpt

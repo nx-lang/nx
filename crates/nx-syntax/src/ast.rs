@@ -179,9 +179,19 @@ impl<'tree> RecordDef<'tree> {
         self.syntax.kind() == SyntaxKind::ACTION_DEFINITION
     }
 
+    /// Returns true when this record node was declared with the `abstract` modifier.
+    pub fn is_abstract(&self) -> bool {
+        self.syntax.child_by_field("abstract").is_some()
+    }
+
     /// Returns the record name.
     pub fn name(&self) -> Option<SyntaxNode<'tree>> {
         self.syntax.child_by_field("name")
+    }
+
+    /// Returns the base record name when this record extends another record.
+    pub fn base(&self) -> Option<SyntaxNode<'tree>> {
+        self.syntax.child_by_field("base")
     }
 
     /// Returns an iterator over record property definitions.
@@ -240,7 +250,7 @@ mod tests {
     #[test]
     fn test_record_def_cast() {
         let mut parser = parser();
-        let source = "type User = { name: string age: int }";
+        let source = "abstract type User extends models.Entity = { name: string age: int }";
         let tree = parser.parse(source, None).unwrap();
         let root = SyntaxNode::new(tree.root_node(), source);
 
@@ -249,6 +259,11 @@ mod tests {
 
         let record_def = RecordDef::cast(record_node).expect("Should cast to RecordDef");
         assert!(!record_def.is_action());
+        assert!(record_def.is_abstract());
+        assert_eq!(
+            record_def.base().expect("Should expose base").text(),
+            "models.Entity"
+        );
         let props: Vec<_> = record_def.properties().collect();
         assert_eq!(props.len(), 2);
     }

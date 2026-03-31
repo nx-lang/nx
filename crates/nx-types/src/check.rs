@@ -1,8 +1,8 @@
 //! High-level type checking API.
 
 use crate::{InferenceContext, Type, TypeEnvironment};
-use nx_diagnostics::Diagnostic;
-use nx_hir::{lower, ExprId, Module, SourceId};
+use nx_diagnostics::{Diagnostic, Label};
+use nx_hir::{lower, ExprId, LoweringDiagnostic, Module, SourceId};
 use nx_syntax::{parse_file as syntax_parse_file, parse_str as syntax_parse_str};
 use rustc_hash::FxHashMap;
 use std::io;
@@ -76,6 +76,7 @@ pub fn check_str(source: &str, file_name: &str) -> TypeCheckResult {
         // Lower to HIR
         let root = tree.root();
         let module = lower(root, source_id);
+        diagnostics.extend(lowering_diagnostics(module.diagnostics()));
 
         // Build scopes
         let (_scope_manager, scope_diagnostics) = nx_hir::build_scopes(&module);
@@ -154,6 +155,7 @@ pub fn check_file(path: impl AsRef<Path>) -> io::Result<TypeCheckResult> {
         // Lower to HIR
         let root = tree.root();
         let module = lower(root, source_id);
+        diagnostics.extend(lowering_diagnostics(module.diagnostics()));
 
         // Build scopes
         let (_scope_manager, scope_diagnostics) = nx_hir::build_scopes(&module);
@@ -192,6 +194,18 @@ pub fn check_file(path: impl AsRef<Path>) -> io::Result<TypeCheckResult> {
             source_id,
         })
     }
+}
+
+fn lowering_diagnostics(diagnostics: &[LoweringDiagnostic]) -> Vec<Diagnostic> {
+    diagnostics
+        .iter()
+        .map(|diagnostic| {
+            Diagnostic::error("lowering-error")
+                .with_message(diagnostic.message.clone())
+                .with_label(Label::primary("", diagnostic.span))
+                .build()
+        })
+        .collect()
 }
 
 /// A session for batch type checking multiple files.

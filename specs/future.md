@@ -88,3 +88,32 @@ If this is revisited in the future:
 - Prioritize this work if profiling or editor latency shows element-heavy files
   spending meaningful time in inference; otherwise keep it as low-priority
   cleanup.
+
+## Source Analysis Pipeline For nx-api
+
+`nx-api` currently exposes source-driven runtime entry points such as
+`eval_source`, `initialize_component_source`, and
+`dispatch_component_actions_source`. Those helpers currently parse and lower
+source, then either return early on lowering diagnostics or proceed directly to
+interpreter execution.
+
+This keeps the runtime path simple, but it also means `nx-api` is not using the
+same full analysis pipeline as `nx-types::check_str`. As a result, API callers
+can miss downstream scope/type diagnostics whenever lowering already produced an
+error.
+
+If this is revisited in the future:
+- Add a shared "analyze source" entry point that owns parse, lowering, scope
+  building, and type checking, rather than extending `lower_source_module` to
+  do more than lowering.
+- Put that shared analysis entry point at the analysis boundary, ideally beside
+  `nx-types::check_str`, so `nx-api` can reuse it without duplicating compiler
+  pipeline logic.
+- Keep runtime execution as a second phase: if static analysis returns any
+  error diagnostics, return them all and do not interpret.
+- Preserve the lowered `Module` from the analysis result so `nx-api` does not
+  need to reparse or relower before interpretation.
+- Keep file-name and span fidelity intact in the shared path; do not reuse
+  helper layers that discard the caller-provided `file_name` in diagnostics.
+- Narrow or remove `lower_source_module` afterward so its name once again means
+  true parse/lower work rather than a partial analysis pipeline.

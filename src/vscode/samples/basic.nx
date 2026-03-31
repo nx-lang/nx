@@ -1,6 +1,18 @@
 import "./ui/widgets.nx" as UiWidgets
 import "./data/models.nx" as DataModels
 
+abstract type Entity = {
+  id: int
+}
+
+abstract type UserBase extends Entity = {
+  name: string
+}
+
+type User extends UserBase = {
+  isAdmin: bool = false
+}
+
 let <UserCard user:User className:string content:Element[]/> =
   <section class="card {className}">
     if isLoading {

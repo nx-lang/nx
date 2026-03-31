@@ -4,7 +4,11 @@ use crate::context::{ExecutionContext, ResourceLimits};
 use crate::error::{RuntimeError, RuntimeErrorKind};
 use crate::value::Value;
 use la_arena::RawIdx;
-use nx_hir::{ast, ElementId, ExprId, Function, Item, Module, Name, RecordKind};
+use nx_hir::{
+    ast, effective_record_shape_for_name, is_record_subtype,
+    resolve_record_definition as resolve_hir_record_definition, ElementId, ExprId, Function, Item,
+    Module, Name, RecordKind,
+};
 use nx_types::{
     common_supertype, is_object_type, resolve_type_ref_with, resolve_type_ref_with_seen,
     type_satisfies_expected, Type,
@@ -1131,7 +1135,11 @@ impl Interpreter {
             Some(Item::TypeAlias(_)) => {
                 if let Some(record_def) = self.resolve_record_definition(module, func_name) {
                     self.eval_record_constructor_call(
-                        module, ctx, func_name, record_def, arg_values,
+                        module,
+                        ctx,
+                        func_name,
+                        &record_def,
+                        arg_values,
                     )
                 } else {
                     Err(RuntimeError::new(RuntimeErrorKind::FunctionNotFound {
@@ -1207,10 +1215,12 @@ impl Interpreter {
         record_def: &nx_hir::RecordDef,
         arg_values: Vec<Value>,
     ) -> Result<Value, RuntimeError> {
-        if arg_values.len() > record_def.properties.len() {
+        let record_shape = self.effective_record_shape(module, &record_def.name)?;
+
+        if arg_values.len() > record_shape.fields.len() {
             return Err(RuntimeError::new(
                 RuntimeErrorKind::ParameterCountMismatch {
-                    expected: record_def.properties.len(),
+                    expected: record_shape.fields.len(),
                     actual: arg_values.len(),
                     function: SmolStr::new(func_name),
                 },
@@ -1218,7 +1228,7 @@ impl Interpreter {
         }
 
         let mut overrides = FxHashMap::default();
-        for (field, value) in record_def.properties.iter().zip(arg_values.into_iter()) {
+        for (field, value) in record_shape.fields.iter().zip(arg_values.into_iter()) {
             let value = self.coerce_value_to_type(
                 module,
                 value,
@@ -1228,7 +1238,7 @@ impl Interpreter {
             overrides.insert(SmolStr::new(field.name.as_str()), value);
         }
 
-        self.build_record_value(module, ctx, record_def.name.as_str(), overrides)
+        self.build_record_value_from_shape(module, ctx, record_shape, overrides, None)
     }
 
     fn eval_element_expr(
@@ -1304,18 +1314,19 @@ impl Interpreter {
         }
 
         if let Some(record_def) = self.resolve_record_definition(module, tag_name) {
+            let record_shape = self.effective_record_shape(module, &record_def.name)?;
             self.inject_element_children_field(
                 &mut fields,
                 normalized_children,
-                record_def
-                    .properties
+                record_shape
+                    .fields
                     .iter()
                     .any(|p| p.name.as_str() == "children"),
                 "record without 'children' field",
                 "element record call",
             )?;
 
-            return self.build_record_value(module, ctx, record_def.name.as_str(), fields);
+            return self.build_record_value_from_shape(module, ctx, record_shape, fields, None);
         }
 
         if !fields.contains_key("children") {
@@ -1466,11 +1477,17 @@ impl Interpreter {
         // construction is reserved for explicit external input boundaries such as handler
         // invocation so defaults and required-field validation do not run on every function call.
         match value {
-            Value::Record { type_name, fields } => self.coerce_non_record_value(
-                Value::Record { type_name, fields },
-                expected,
-                operation,
-            ),
+            Value::Record { type_name, fields } => {
+                if self.record_value_matches_expected_type(module, &type_name, expected) {
+                    Ok(Value::Record { type_name, fields })
+                } else {
+                    Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                        expected: expected.to_string(),
+                        actual: type_name.as_str().to_string(),
+                        operation: operation.to_string(),
+                    }))
+                }
+            }
             other => self.coerce_non_record_value(other, expected, operation),
         }
     }
@@ -1710,12 +1727,8 @@ impl Interpreter {
         self.resolve_enum_definition_inner(module, name, &mut FxHashSet::default())
     }
 
-    fn resolve_record_definition<'a>(
-        &self,
-        module: &'a Module,
-        name: &str,
-    ) -> Option<&'a nx_hir::RecordDef> {
-        self.resolve_record_definition_inner(module, name, &mut FxHashSet::default())
+    fn resolve_record_definition(&self, module: &Module, name: &str) -> Option<nx_hir::RecordDef> {
+        resolve_hir_record_definition(module, &Name::new(name))
     }
 
     fn resolve_enum_definition_inner<'a>(
@@ -1744,30 +1757,71 @@ impl Interpreter {
         result
     }
 
-    fn resolve_record_definition_inner<'a>(
+    fn effective_record_shape(
         &self,
-        module: &'a Module,
-        name: &str,
-        seen: &mut FxHashSet<SmolStr>,
-    ) -> Option<&'a nx_hir::RecordDef> {
-        let key = SmolStr::new(name);
-        if !seen.insert(key.clone()) {
-            return None;
-        }
+        module: &Module,
+        name: &Name,
+    ) -> Result<nx_hir::EffectiveRecordShape, RuntimeError> {
+        let shape = effective_record_shape_for_name(module, name)
+            .map_err(|error| self.record_resolution_runtime_error(error))?;
 
-        let result = match module.find_item(name) {
-            Some(Item::Record(def)) => Some(def),
-            Some(Item::TypeAlias(alias)) => match &alias.ty {
-                ast::TypeRef::Name(target) => {
-                    self.resolve_record_definition_inner(module, target.as_str(), seen)
+        shape.ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorKind::RecordTypeNotFound {
+                name: SmolStr::new(name.as_str()),
+            })
+        })
+    }
+
+    fn record_resolution_runtime_error(
+        &self,
+        error: nx_hir::RecordResolutionError,
+    ) -> RuntimeError {
+        RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+            expected: "valid record definition".to_string(),
+            actual: error.message(),
+            operation: "record resolution".to_string(),
+        })
+    }
+
+    fn record_type_satisfies_expected(
+        &self,
+        module: &Module,
+        actual: &Name,
+        expected: &Name,
+    ) -> bool {
+        is_record_subtype(module, actual, expected).unwrap_or(false)
+    }
+
+    fn record_value_matches_expected_type(
+        &self,
+        module: &Module,
+        actual_type_name: &Name,
+        expected: &Type,
+    ) -> bool {
+        let actual = Type::named(actual_type_name.clone());
+        type_satisfies_expected(&actual, expected)
+            || match expected {
+                Type::Named(expected_name) => {
+                    self.record_type_satisfies_expected(module, actual_type_name, expected_name)
                 }
-                _ => None,
-            },
-            _ => None,
-        };
+                Type::Nullable(expected_inner) => self.record_value_matches_expected_type(
+                    module,
+                    actual_type_name,
+                    expected_inner,
+                ),
+                _ => false,
+            }
+    }
 
-        seen.remove(&key);
-        result
+    fn abstract_record_instantiation_error(
+        &self,
+        record_name: &Name,
+        operation: &str,
+    ) -> RuntimeError {
+        RuntimeError::new(RuntimeErrorKind::AbstractRecordInstantiation {
+            record: SmolStr::new(record_name.as_str()),
+            operation: operation.to_string(),
+        })
     }
 
     // Construct a typed record object from an externally supplied record-shaped value. This is
@@ -1790,7 +1844,7 @@ impl Interpreter {
             }));
         };
 
-        if actual_def.name != expected_def.name {
+        if !self.record_type_satisfies_expected(module, &actual_def.name, &expected_def.name) {
             return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
                 expected: expected_type_name.as_str().to_string(),
                 actual: actual_type_name.as_str().to_string(),
@@ -1799,13 +1853,8 @@ impl Interpreter {
         }
 
         let mut ctx = ExecutionContext::new();
-        self.build_record_value_from_definition(
-            module,
-            &mut ctx,
-            expected_def,
-            fields,
-            Some(operation),
-        )
+        let actual_shape = self.effective_record_shape(module, &actual_def.name)?;
+        self.build_record_value_from_shape(module, &mut ctx, actual_shape, fields, Some(operation))
     }
 
     fn missing_required_record_field_error(
@@ -1978,27 +2027,28 @@ impl Interpreter {
         record_name: &str,
         overrides: FxHashMap<SmolStr, Value>,
     ) -> Result<Value, RuntimeError> {
-        let record_def = match self.resolve_record_definition(module, record_name) {
-            Some(def) => def,
-            _ => {
-                return Err(RuntimeError::new(RuntimeErrorKind::UndefinedVariable {
-                    name: SmolStr::new(record_name),
-                }))
-            }
-        };
-
-        self.build_record_value_from_definition(module, ctx, record_def, overrides, None)
+        let record_shape = self.effective_record_shape(module, &Name::new(record_name))?;
+        self.build_record_value_from_shape(module, ctx, record_shape, overrides, None)
     }
 
-    fn build_record_value_from_definition(
+    fn build_record_value_from_shape(
         &self,
         module: &Module,
         ctx: &mut ExecutionContext,
-        record_def: &nx_hir::RecordDef,
+        record_shape: nx_hir::EffectiveRecordShape,
         mut overrides: FxHashMap<SmolStr, Value>,
         missing_operation: Option<&str>,
     ) -> Result<Value, RuntimeError> {
-        for prop in &record_def.properties {
+        let record_def = &record_shape.record;
+
+        if record_def.is_abstract {
+            return Err(self.abstract_record_instantiation_error(
+                &record_def.name,
+                missing_operation.unwrap_or("record construction"),
+            ));
+        }
+
+        for prop in &record_shape.fields {
             let value = if let Some(value) = overrides.remove(prop.name.as_str()) {
                 value
             } else if let Some(default_expr) = prop.default {
@@ -2025,7 +2075,7 @@ impl Interpreter {
         }
 
         Ok(Value::Record {
-            type_name: record_def.name.clone(),
+            type_name: record_shape.record.name,
             fields: overrides,
         })
     }
@@ -2317,6 +2367,35 @@ mod tests {
             }
             other => panic!("Expected action record result, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_record_literal_reports_missing_record_type() {
+        let mut module = Module::new(SourceId::new(0));
+        let body = module.alloc_expr(ast::Expr::RecordLiteral {
+            record: Name::new("MissingRecord"),
+            properties: vec![],
+            span: span(0, 0),
+        });
+        module.add_item(Item::Function(Function {
+            name: Name::new("make"),
+            params: vec![],
+            return_type: None,
+            body,
+            span: span(0, 0),
+        }));
+
+        let interpreter = Interpreter::new();
+        let error = interpreter
+            .execute_function(&module, "make", vec![])
+            .expect_err("Expected missing record type to fail");
+
+        assert_eq!(
+            error.kind(),
+            &RuntimeErrorKind::RecordTypeNotFound {
+                name: SmolStr::new("MissingRecord"),
+            }
+        );
     }
 
     #[test]

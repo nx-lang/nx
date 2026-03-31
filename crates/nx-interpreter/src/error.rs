@@ -75,12 +75,18 @@ pub enum RuntimeErrorKind {
     /// Record field not found on the given record value
     RecordFieldNotFound { record: SmolStr, field: SmolStr },
 
+    /// Record type referenced at runtime could not be found
+    RecordTypeNotFound { name: SmolStr },
+
     /// Required record field omitted from an externally supplied typed record
     MissingRequiredRecordField {
         record: SmolStr,
         field: SmolStr,
         operation: String,
     },
+
+    /// Attempted to instantiate an abstract record
+    AbstractRecordInstantiation { record: SmolStr, operation: String },
 
     /// Required component prop or state field was not provided and has no default
     MissingRequiredComponentField {
@@ -145,6 +151,9 @@ impl fmt::Display for RuntimeErrorKind {
             RuntimeErrorKind::RecordFieldNotFound { record, field } => {
                 write!(f, "Record '{}' has no field named '{}'", record, field)
             }
+            RuntimeErrorKind::RecordTypeNotFound { name } => {
+                write!(f, "Record type not found: {}", name)
+            }
             RuntimeErrorKind::MissingRequiredRecordField {
                 record,
                 field,
@@ -153,6 +162,11 @@ impl fmt::Display for RuntimeErrorKind {
                 f,
                 "Missing required field '{}' on record '{}' in {}",
                 field, record, operation
+            ),
+            RuntimeErrorKind::AbstractRecordInstantiation { record, operation } => write!(
+                f,
+                "Cannot instantiate abstract record '{}' in {}",
+                record, operation
             ),
             RuntimeErrorKind::MissingRequiredComponentField {
                 component,
@@ -337,11 +351,16 @@ mod tests {
         };
         assert!(err2.to_string().contains("Undefined variable"));
 
-        let err3 = RuntimeErrorKind::MissingRequiredRecordField {
+        let err3 = RuntimeErrorKind::RecordTypeNotFound {
+            name: SmolStr::new("User"),
+        };
+        assert!(err3.to_string().contains("Record type not found"));
+
+        let err4 = RuntimeErrorKind::MissingRequiredRecordField {
             record: SmolStr::new("User"),
             field: SmolStr::new("name"),
             operation: "function call parameter 'user'".to_string(),
         };
-        assert!(err3.to_string().contains("Missing required field"));
+        assert!(err4.to_string().contains("Missing required field"));
     }
 }

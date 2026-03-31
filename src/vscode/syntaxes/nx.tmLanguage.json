@@ -89,6 +89,8 @@
       "patterns": [
         { "name": "keyword.control.import.nx", "match": "\\bimport\\b" },
         { "name": "keyword.declaration.type.nx", "match": "\\b(?:type|enum)\\b" },
+        { "name": "storage.modifier.abstract.nx", "match": "\\babstract\\b" },
+        { "name": "keyword.declaration.extends.nx", "match": "\\bextends\\b" },
         { "name": "keyword.declaration.let.nx", "match": "\\blet\\b" },
         { "name": "keyword.other.raw.nx", "match": "\\braw\\b" },
         { "name": "constant.language.boolean.nx", "match": "\\b(?:true|false)\\b" },
@@ -156,12 +158,15 @@
       "patterns": [
         {
           "name": "meta.definition.type.record.nx",
-          "begin": "^(\\s*)(type)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(=)\\s*(\\{)",
+          "begin": "^(\\s*)((abstract)\\s+)?(type)\\s+([A-Za-z_][A-Za-z0-9_]*)(?:\\s+(extends)\\s+([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*))?\\s*(=)\\s*(\\{)",
           "beginCaptures": {
-            "2": { "name": "keyword.declaration.type.nx" },
-            "3": { "name": "entity.name.type.nx" },
-            "4": { "name": "keyword.operator.assignment.nx" },
-            "5": { "name": "punctuation.section.block.begin.nx" }
+            "3": { "name": "storage.modifier.abstract.nx" },
+            "4": { "name": "keyword.declaration.type.nx" },
+            "5": { "name": "entity.name.type.nx" },
+            "6": { "name": "keyword.declaration.extends.nx" },
+            "7": { "name": "entity.name.type.nx" },
+            "8": { "name": "keyword.operator.assignment.nx" },
+            "9": { "name": "punctuation.section.block.begin.nx" }
           },
           "end": "\\}",
           "endCaptures": { "0": { "name": "punctuation.section.block.end.nx" } },

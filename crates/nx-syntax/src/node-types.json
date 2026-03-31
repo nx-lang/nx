@@ -1440,6 +1440,26 @@
     "type": "record_definition",
     "named": true,
     "fields": {
+      "abstract": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "abstract",
+            "named": false
+          }
+        ]
+      },
+      "base": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "qualified_name",
+            "named": true
+          }
+        ]
+      },
       "name": {
         "multiple": false,
         "required": true,
@@ -2190,6 +2210,10 @@
     "named": false
   },
   {
+    "type": "abstract",
+    "named": false
+  },
+  {
     "type": "action",
     "named": false
   },
@@ -2245,6 +2269,10 @@
   {
     "type": "escaped_rbrace",
     "named": true
+  },
+  {
+    "type": "extends",
+    "named": false
   },
   {
     "type": "f32",

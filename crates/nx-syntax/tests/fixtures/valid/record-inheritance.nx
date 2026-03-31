@@ -1,0 +1,11 @@
+abstract type Entity = {
+  id: int
+}
+
+abstract type UserBase extends Entity = {
+  name: string
+}
+
+type User extends UserBase = {
+  email: string?
+}
