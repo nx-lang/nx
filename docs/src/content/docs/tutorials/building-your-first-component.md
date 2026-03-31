@@ -70,7 +70,7 @@ let currentUser = <User id="42" name="Kai" title="Designer"/>
 
 ## 5) Validate and iterate
 - Run `cargo test --workspace` to confirm the NX toolchain still builds.
-- For a parser-only sanity check, run `npm --prefix crates/nx-syntax ci` once and then `npm --prefix crates/nx-syntax run parse -- ../../examples/nx/profile-card.nx`.
+- For a parser-only sanity check, run `pnpm --dir crates/nx-syntax install` once and then `pnpm --dir crates/nx-syntax run parse -- ../../examples/nx/profile-card.nx`.
 - Use the patterns from the Reference (especially [Functions & Components](/reference/syntax/functions) and [if](/reference/syntax/if)) to refactor as the component grows.
 
 ## 6) Extend the pattern

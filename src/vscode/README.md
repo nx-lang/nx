@@ -27,8 +27,8 @@ Basic syntax highlighting and language configuration for the NX language using a
    ```
 3. From `src/vscode`, install dependencies and build the VSIX package when needed:
    ```bash
-   npm install
-   npm run package
+   pnpm install
+   pnpm run package
    ```
 4. Launch VS Code with the extension loaded and pointing at the repo root (from `src/vscode`):
    ```bash
@@ -58,8 +58,8 @@ You can package with `vsce` or publish to Open VSX with `ovsx`.
 Example commands (install tools globally or as dev dependencies):
 
 ```
-vsce package
-ovsx publish
+pnpm exec vsce package
+pnpm exec ovsx publish
 ```
 
 Set the publisher to `nx-lang` and the extension ID to `nx-language` (already configured).

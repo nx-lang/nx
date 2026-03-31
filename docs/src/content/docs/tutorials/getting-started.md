@@ -15,7 +15,7 @@ From the repo root:
 
 ```bash
 cargo build --workspace
-npm install --prefix docs
+pnpm --dir docs install
 ```
 
 Validation checkpoint: `cargo test --workspace` should pass; this confirms the parser/type checker build cleanly.
@@ -40,7 +40,7 @@ let <Hello user:User/> =
 This file shows imports, a typed object, a component with a child slot, and a root element.
 
 ## 3) Validate the file
-- For a parser-only check, run `npm --prefix crates/nx-syntax ci` once and then `npm --prefix crates/nx-syntax run parse -- ../../examples/nx/hello.nx` so the repo-pinned Tree-sitter CLI is used.
+- For a parser-only check, run `pnpm --dir crates/nx-syntax install` once and then `pnpm --dir crates/nx-syntax run parse -- ../../examples/nx/hello.nx` so the repo-pinned Tree-sitter CLI is used.
 - For deeper checks, drop the snippet into a small Rust harness using `nx_types::check_str` (see README examples) to verify typing; the sample in `README.md` can be run from any Rust binary in your workspace.
 
 ## 4) Explore language fundamentals

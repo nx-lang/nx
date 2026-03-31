@@ -4,9 +4,9 @@ This directory contains the Astro Starlight documentation site for the NX langua
 
 ### Getting Started
 
-1. `npm install` – install the documentation dependencies (run from `docs/`).
-2. `npm run dev` – start the local docs server.
-3. `npm run build` – create the production build in `docs/dist/`.
+1. `pnpm install` – install the documentation dependencies (run from `docs/`).
+2. `pnpm run dev` – start the local docs server.
+3. `pnpm run build` – create the production build in `docs/dist/`.
 
 ### Syntax Highlighting
 

@@ -23,18 +23,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.1
+          run_install: false
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: src/vscode/package-lock.json
+          cache: 'pnpm'
+          cache-dependency-path: src/vscode/pnpm-lock.yaml
 
       - name: Install dependencies
-        run: npm ci --no-audit --no-fund
+        run: pnpm install --frozen-lockfile
 
       - name: Run tests
-        run: npm test
+        run: pnpm test
 
   package:
     runs-on: ubuntu-latest
@@ -47,18 +53,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.1
+          run_install: false
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: src/vscode/package-lock.json
+          cache: 'pnpm'
+          cache-dependency-path: src/vscode/pnpm-lock.yaml
 
       - name: Install dependencies
-        run: npm ci --no-audit --no-fund
+        run: pnpm install --frozen-lockfile
 
       - name: Package .vsix
-        run: npx vsce package
+        run: pnpm run package
 
       - name: Upload .vsix artifact
         uses: actions/upload-artifact@v4
@@ -66,4 +78,3 @@ jobs:
           name: nx-language-vsix
           path: src/vscode/*.vsix
           if-no-files-found: error
-

@@ -4,6 +4,7 @@
   "publisher": "nx-lang",
   "version": "0.1.0",
   "description": "Syntax highlighting and language basics for the NX language (TextMate grammar only).",
+  "packageManager": "pnpm@10.28.1",
   "license": "MIT",
   "keywords": [
     "nx",

@@ -141,14 +141,14 @@ Example NX files for testing are available in [../examples/nx/](../examples/nx/)
 
 Install the pinned Tree-sitter CLI for `nx-syntax` once:
 ```bash
-npm --prefix crates/nx-syntax ci
+pnpm --dir crates/nx-syntax install
 ```
 
 Then use the repo-local scripts:
 ```bash
-npm --prefix crates/nx-syntax run parse -- ../../examples/nx/function.nx
-npm --prefix crates/nx-syntax run generate
-npm --prefix crates/nx-syntax test
+pnpm --dir crates/nx-syntax run parse -- ../../examples/nx/function.nx
+pnpm --dir crates/nx-syntax run generate
+pnpm --dir crates/nx-syntax run test
 ```
 
 ## Documentation

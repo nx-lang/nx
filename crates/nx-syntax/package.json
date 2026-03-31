@@ -2,6 +2,7 @@
   "name": "tree-sitter-nx",
   "version": "0.0.1",
   "description": "nx grammar for tree-sitter",
+  "packageManager": "pnpm@10.28.1",
   "main": "bindings/node",
   "keywords": [
     "parsing",

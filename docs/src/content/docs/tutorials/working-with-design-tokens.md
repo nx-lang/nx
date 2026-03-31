@@ -80,7 +80,7 @@ Drop in an alternate `Theme` instance to re-skin the UI without touching compone
 
 ## 5) Validate usage
 - Run `cargo test --workspace` to ensure changes build.
-- For a parser-only check, run `npm --prefix crates/nx-syntax ci` once and then `npm --prefix crates/nx-syntax run parse -- ../../examples/nx/tokens.nx`.
+- For a parser-only check, run `pnpm --dir crates/nx-syntax install` once and then `pnpm --dir crates/nx-syntax run parse -- ../../examples/nx/tokens.nx`.
 - When you pass tokens through props, the type checker flags missing or mistyped fields—no separate JSON/YAML schema required.
 
 ## 6) Extend the pattern

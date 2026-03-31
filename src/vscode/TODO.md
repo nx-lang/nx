@@ -29,7 +29,7 @@ This tracks near-term enhancements and future work. The LSP server will be imple
 - [ ] Add a JSON validation step for grammar/config (`jq` or `jsonlint`).
 
 ## Tooling / Packaging
-- [ ] Add npm scripts: `package` (vsce), `publish:vsce`, `publish:ovsx`, `test:grammar`.
+- [ ] Add pnpm scripts: `package` (vsce), `publish:vsce`, `publish:ovsx`, `test:grammar`.
 - [ ] Keep package lean (whitelist already added). Optionally include a tiny sample if desired.
 - [ ] Add an icon (`icon.png`) and branding.
 - [ ] Document Publisher setup for Marketplace and Open VSX (tokens, 2FA).
@@ -37,7 +37,7 @@ This tracks near-term enhancements and future work. The LSP server will be imple
 ## CI
 - [ ] GitHub Actions: validate JSON, run grammar tests, package on tag.
 - [ ] Dual publish (Marketplace via `vsce`, Open VSX via `ovsx`) gated by secrets.
-- [ ] Cache Node/npm for faster CI runs.
+- [ ] Cache Node/pnpm for faster CI runs.
 
 ## Documentation
 - [ ] Expand README with language overview, scopes list, and screenshots (light/dark themes).
@@ -64,4 +64,4 @@ This tracks near-term enhancements and future work. The LSP server will be imple
 
 ---
 
-If you want, I can start by adding test scaffolding and npm scripts next.
+If you want, I can start by adding test scaffolding and pnpm scripts next.
