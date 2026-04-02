@@ -1,4 +1,4 @@
-use crate::eval::{lower_source_module, runtime_error_diagnostics};
+use crate::eval::{analyze_source_module, runtime_error_diagnostics};
 use crate::value::{from_nx_value, to_nx_value};
 use crate::{NxDiagnostic, NxSeverity};
 use nx_hir::{Item, Module};
@@ -46,7 +46,7 @@ pub enum ComponentDispatchEvalResult {
     Err(Vec<NxDiagnostic>),
 }
 
-/// Parses, lowers, and initializes a named component from source text.
+/// Runs shared static analysis and then initializes a named component from source text.
 ///
 /// The returned state snapshot is opaque host-owned data and is only valid with the exact same
 /// source text revision that produced it.
@@ -56,7 +56,7 @@ pub fn initialize_component_source(
     component_name: &str,
     props: &NxValue,
 ) -> ComponentInitEvalResult {
-    let module = match lower_source_module(source, file_name) {
+    let module = match analyze_source_module(source, file_name) {
         Ok(module) => module,
         Err(diagnostics) => return ComponentInitEvalResult::Err(diagnostics),
     };
@@ -80,7 +80,8 @@ pub fn initialize_component_source(
     }
 }
 
-/// Parses, lowers, and dispatches a batch of actions against a component state snapshot.
+/// Runs shared static analysis and then dispatches a batch of actions against a component state
+/// snapshot.
 ///
 /// The provided snapshot must come from [`initialize_component_source`] or an earlier dispatch
 /// against the exact same source text revision.
@@ -90,7 +91,7 @@ pub fn dispatch_component_actions_source(
     state_snapshot: &[u8],
     actions: &[NxValue],
 ) -> ComponentDispatchEvalResult {
-    let module = match lower_source_module(source, file_name) {
+    let module = match analyze_source_module(source, file_name) {
         Ok(module) => module,
         Err(diagnostics) => return ComponentDispatchEvalResult::Err(diagnostics),
     };
@@ -195,7 +196,7 @@ fn validate_host_input_value_at_path(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nx_hir::{lower as lower_hir, SourceId};
+    use nx_types::analyze_str;
     use std::collections::BTreeMap;
 
     fn empty_record() -> NxValue {
@@ -203,6 +204,37 @@ mod tests {
             type_name: None,
             properties: BTreeMap::new(),
         }
+    }
+
+    fn static_analysis_failure_source() -> &'static str {
+        r#"
+            abstract type Entity = {
+              id: int
+            }
+
+            type User extends Entity = {
+              name: string
+            }
+
+            type Admin extends User = {
+              level: int
+            }
+
+            let broken(): int = "oops"
+
+            component <SearchBox /> = {
+              <TextInput />
+            }
+        "#
+    }
+
+    fn assert_static_analysis_diagnostics(diagnostics: &[NxDiagnostic]) {
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code.as_deref() == Some("lowering-error")));
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code.as_deref() == Some("return-type-mismatch")));
     }
 
     #[test]
@@ -252,11 +284,13 @@ mod tests {
             let withHandler() = <SearchBox onSearchSubmitted=<DoSearch search={action.searchString} /> />
         "#;
 
-        let parse_result = nx_syntax::parse_str(source, "component-dispatch.nx");
-        let tree = parse_result
-            .tree
-            .expect("Expected dispatch source to parse");
-        let module = lower_hir(tree.root(), SourceId::new(0));
+        let analysis = analyze_str(source, "component-dispatch.nx");
+        assert!(
+            analysis.is_ok(),
+            "Expected shared analysis to succeed, got {:?}",
+            analysis.diagnostics
+        );
+        let module = analysis.module.expect("Expected analyzed module");
         let interpreter = Interpreter::new();
         let props = interpreter
             .execute_function(&module, "withHandler", vec![])
@@ -319,6 +353,42 @@ mod tests {
                 .map(|diagnostic| diagnostic.message.as_str())
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn initialize_component_source_returns_aggregated_static_diagnostics_before_runtime_work() {
+        let result = initialize_component_source(
+            static_analysis_failure_source(),
+            "component-static-errors.nx",
+            "SearchBox",
+            &empty_record(),
+        );
+        let ComponentInitEvalResult::Err(diagnostics) = result else {
+            panic!("Expected initialization to stop on static analysis diagnostics");
+        };
+
+        assert_static_analysis_diagnostics(&diagnostics);
+        assert!(!diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code.as_deref() == Some("runtime-error")));
+    }
+
+    #[test]
+    fn dispatch_component_actions_source_returns_static_diagnostics_before_snapshot_validation() {
+        let result = dispatch_component_actions_source(
+            static_analysis_failure_source(),
+            "component-static-errors.nx",
+            b"nope",
+            &[],
+        );
+        let ComponentDispatchEvalResult::Err(diagnostics) = result else {
+            panic!("Expected dispatch to stop on static analysis diagnostics");
+        };
+
+        assert_static_analysis_diagnostics(&diagnostics);
+        assert!(!diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("Invalid component state snapshot")));
     }
 
     #[test]

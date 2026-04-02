@@ -210,6 +210,10 @@ catch (NxEvaluationException ex)
 }
 ```
 
+All source-driven APIs run the shared NX static-analysis pipeline before any runtime execution.
+If parsing, lowering, scope building, or type checking reports errors, the call returns the full
+diagnostic set and does not execute `root`, component initialization, or component dispatch.
+
 ### Generated Types
 
 NX type generation remains C#-first:

@@ -1,7 +1,7 @@
-//! High-level type checking API.
+//! High-level type checking and source-analysis API.
 
 use crate::{InferenceContext, Type, TypeEnvironment};
-use nx_diagnostics::{Diagnostic, Label};
+use nx_diagnostics::{Diagnostic, Label, Severity, TextSize, TextSpan};
 use nx_hir::{link_local_libraries, lower, ExprId, LoweringDiagnostic, Module, SourceId};
 use nx_syntax::{parse_file as syntax_parse_file, parse_str as syntax_parse_str};
 use rustc_hash::FxHashMap;
@@ -9,24 +9,24 @@ use std::io;
 use std::path::Path;
 use std::sync::Arc;
 
-/// Result of type checking a module.
+/// Result of analyzing NX source.
 ///
-/// Contains the typed module, type environment, and any diagnostics
-/// (errors, warnings) discovered during type checking.
+/// Contains the lowered module, inferred type environment, and any static-analysis diagnostics
+/// (errors or warnings) discovered while parsing, lowering, building scopes, and type checking.
 #[derive(Debug, Clone)]
-pub struct TypeCheckResult {
-    /// The module that was type-checked (None if parsing failed)
+pub struct SourceAnalysisResult {
+    /// The lowered module produced during analysis (None if parsing failed fatally)
     pub module: Option<Arc<Module>>,
-    /// Type environment with all bindings
+    /// Type environment with all inferred bindings
     pub type_env: TypeEnvironment,
-    /// Diagnostics (parse errors + type errors)
+    /// Diagnostics from parsing, lowering, scope building, and type checking
     pub diagnostics: Vec<Diagnostic>,
     /// Source file ID
     pub source_id: SourceId,
 }
 
-impl TypeCheckResult {
-    /// Returns true if type checking succeeded (no errors).
+impl SourceAnalysisResult {
+    /// Returns true if analysis succeeded without any error diagnostics.
     pub fn is_ok(&self) -> bool {
         self.errors().is_empty()
     }
@@ -50,6 +50,31 @@ impl TypeCheckResult {
     }
 }
 
+/// Backward-compatible alias for callers that still think of the shared analysis result as the
+/// outcome of type checking.
+pub type TypeCheckResult = SourceAnalysisResult;
+
+/// Analyzes NX source code from a string.
+///
+/// This performs parsing, lowering, scope building, and type checking in one pass. If parsing
+/// produces a syntax tree, the returned analysis result preserves the lowered module even when
+/// later phases report diagnostics.
+pub fn analyze_str(source: &str, file_name: &str) -> SourceAnalysisResult {
+    let parse_result = syntax_parse_str(source, file_name);
+    analyze_string_parse_result(parse_result, source, file_name, None)
+}
+
+/// Analyzes NX source code from a string while resolving local library imports from an on-disk
+/// source path.
+pub fn analyze_str_with_path(
+    source: &str,
+    file_name: &str,
+    source_path: impl AsRef<Path>,
+) -> SourceAnalysisResult {
+    let parse_result = syntax_parse_str(source, file_name);
+    analyze_string_parse_result(parse_result, source, file_name, Some(source_path.as_ref()))
+}
+
 /// Type checks NX source code from a string.
 ///
 /// # Example
@@ -66,62 +91,7 @@ impl TypeCheckResult {
 /// assert!(result.module.is_some());
 /// ```
 pub fn check_str(source: &str, file_name: &str) -> TypeCheckResult {
-    let source_id = SourceId::new(0); // Simple ID for single-file checking
-
-    // Parse
-    let parse_result = syntax_parse_str(source, file_name);
-    let mut diagnostics = parse_result.errors.clone();
-
-    if let Some(tree) = parse_result.tree {
-        // Lower to HIR
-        let root = tree.root();
-        let module = lower(root, source_id);
-        diagnostics.extend(lowering_diagnostics(module.diagnostics()));
-
-        // Build scopes
-        let (_scope_manager, scope_diagnostics) = nx_hir::build_scopes(&module);
-        diagnostics.extend(scope_diagnostics);
-
-        // Type check
-        let mut ctx = InferenceContext::new(&module);
-
-        // Infer types for all items
-        for item in module.items() {
-            match item {
-                nx_hir::Item::Function(func) => {
-                    // Add function to environment
-                    // TODO: Build function type from params and return type
-                    // For now, infer the body
-                    ctx.infer_function(func);
-                }
-                nx_hir::Item::Value(_) => {}
-                nx_hir::Item::Component(_) => {}
-                nx_hir::Item::TypeAlias(_) => {
-                    // Processed during type registration
-                }
-                nx_hir::Item::Record(_) => {}
-                nx_hir::Item::Enum(_) => {}
-            }
-        }
-
-        let (type_env, type_diagnostics) = ctx.finish();
-        diagnostics.extend(type_diagnostics);
-
-        TypeCheckResult {
-            module: Some(Arc::new(module)),
-            type_env,
-            diagnostics,
-            source_id,
-        }
-    } else {
-        // Parse failed - return error result
-        TypeCheckResult {
-            module: None,
-            type_env: TypeEnvironment::new(),
-            diagnostics,
-            source_id,
-        }
-    }
+    analyze_str(source, file_name)
 }
 
 /// Type checks an NX source file.
@@ -146,67 +116,198 @@ pub fn check_str(source: &str, file_name: &str) -> TypeCheckResult {
 /// Returns an error if the file cannot be read or is not valid UTF-8.
 pub fn check_file(path: impl AsRef<Path>) -> io::Result<TypeCheckResult> {
     let path = path.as_ref();
-    let source_id = SourceId::new(0);
-
-    // Parse file
     let parse_result = syntax_parse_file(path)?;
-    let mut diagnostics = parse_result.errors.clone();
+    let file_name = path.display().to_string();
+    analyze_parse_result(parse_result, &file_name, Some(path))
+}
 
-    if let Some(tree) = parse_result.tree {
-        // Lower to HIR
-        let root = tree.root();
-        let mut module = lower(root, source_id);
-        module = link_local_libraries(module, path)?;
-        diagnostics.extend(lowering_diagnostics(module.diagnostics()));
+fn analyze_string_parse_result(
+    parse_result: nx_syntax::ParseResult,
+    source: &str,
+    file_name: &str,
+    source_path: Option<&Path>,
+) -> SourceAnalysisResult {
+    let source_id = SourceId::new(parse_result.source_id.as_u32());
+    let mut diagnostics = normalize_diagnostics_file_name(parse_result.errors, file_name);
 
-        // Build scopes
-        let (_scope_manager, scope_diagnostics) = nx_hir::build_scopes(&module);
-        diagnostics.extend(scope_diagnostics);
-
-        // Type check
-        let mut ctx = InferenceContext::new(&module);
-
-        // Infer types for all items
-        for item in module.items() {
-            match item {
-                nx_hir::Item::Function(func) => {
-                    ctx.infer_function(func);
-                }
-                nx_hir::Item::Value(_) => {}
-                nx_hir::Item::Component(_) => {}
-                nx_hir::Item::TypeAlias(_) => {}
-                nx_hir::Item::Record(_) => {}
-                nx_hir::Item::Enum(_) => {}
-            }
-        }
-
-        let (type_env, type_diagnostics) = ctx.finish();
-        diagnostics.extend(type_diagnostics);
-
-        Ok(TypeCheckResult {
-            module: Some(Arc::new(module)),
-            type_env,
-            diagnostics,
-            source_id,
-        })
-    } else {
-        Ok(TypeCheckResult {
+    let Some(tree) = parse_result.tree else {
+        return SourceAnalysisResult {
             module: None,
             type_env: TypeEnvironment::new(),
             diagnostics,
             source_id,
-        })
+        };
+    };
+
+    let mut module = lower(tree.root(), source_id);
+
+    if let Some(path) = source_path {
+        module = match link_local_libraries(module.clone(), path) {
+            Ok(module) => module,
+            Err(error) => {
+                diagnostics.push(library_load_error_diagnostic(source, file_name, &error));
+                return SourceAnalysisResult {
+                    module: Some(Arc::new(module)),
+                    type_env: TypeEnvironment::new(),
+                    diagnostics,
+                    source_id,
+                };
+            }
+        };
+    } else if !module.imports.is_empty() {
+        diagnostics.push(library_imports_require_path_diagnostic(source, file_name));
+        return SourceAnalysisResult {
+            module: Some(Arc::new(module)),
+            type_env: TypeEnvironment::new(),
+            diagnostics,
+            source_id,
+        };
+    }
+
+    analyze_lowered_module(module, diagnostics, file_name, source_id)
+}
+
+fn analyze_parse_result(
+    parse_result: nx_syntax::ParseResult,
+    file_name: &str,
+    source_path: Option<&Path>,
+) -> io::Result<SourceAnalysisResult> {
+    let source_id = SourceId::new(parse_result.source_id.as_u32());
+    let diagnostics = normalize_diagnostics_file_name(parse_result.errors, file_name);
+
+    let Some(tree) = parse_result.tree else {
+        return Ok(SourceAnalysisResult {
+            module: None,
+            type_env: TypeEnvironment::new(),
+            diagnostics,
+            source_id,
+        });
+    };
+
+    let mut module = lower(tree.root(), source_id);
+    if let Some(path) = source_path {
+        module = link_local_libraries(module, path)?;
+    }
+
+    Ok(analyze_lowered_module(
+        module,
+        diagnostics,
+        file_name,
+        source_id,
+    ))
+}
+
+fn analyze_lowered_module(
+    module: Module,
+    mut diagnostics: Vec<Diagnostic>,
+    file_name: &str,
+    source_id: SourceId,
+) -> SourceAnalysisResult {
+    diagnostics.extend(lowering_diagnostics(module.diagnostics(), file_name));
+
+    let (_scope_manager, scope_diagnostics) = nx_hir::build_scopes(&module);
+    diagnostics.extend(normalize_diagnostics_file_name(
+        scope_diagnostics,
+        file_name,
+    ));
+
+    let mut ctx = InferenceContext::with_file_name(&module, file_name);
+
+    for item in module.items() {
+        match item {
+            nx_hir::Item::Function(func) => {
+                ctx.infer_function(func);
+            }
+            nx_hir::Item::Value(_) => {}
+            nx_hir::Item::Component(_) => {}
+            nx_hir::Item::TypeAlias(_) => {}
+            nx_hir::Item::Record(_) => {}
+            nx_hir::Item::Enum(_) => {}
+        }
+    }
+
+    let (type_env, type_diagnostics) = ctx.finish();
+    diagnostics.extend(normalize_diagnostics_file_name(type_diagnostics, file_name));
+
+    SourceAnalysisResult {
+        module: Some(Arc::new(module)),
+        type_env,
+        diagnostics,
+        source_id,
     }
 }
 
-fn lowering_diagnostics(diagnostics: &[LoweringDiagnostic]) -> Vec<Diagnostic> {
+fn lowering_diagnostics(diagnostics: &[LoweringDiagnostic], file_name: &str) -> Vec<Diagnostic> {
     diagnostics
         .iter()
         .map(|diagnostic| {
             Diagnostic::error("lowering-error")
                 .with_message(diagnostic.message.clone())
-                .with_label(Label::primary("", diagnostic.span))
+                .with_label(Label::primary(file_name, diagnostic.span))
                 .build()
+        })
+        .collect()
+}
+
+fn full_source_span(source: &str) -> TextSpan {
+    let source_len = u32::try_from(source.len())
+        .expect("NX source size should be validated before creating source diagnostics");
+    TextSpan::new(TextSize::from(0), TextSize::from(source_len))
+}
+
+fn library_load_error_diagnostic(source: &str, file_name: &str, error: &io::Error) -> Diagnostic {
+    Diagnostic::error("library-load-error")
+        .with_message(format!("Failed to load library imports: {}", error))
+        .with_label(Label::primary(file_name, full_source_span(source)))
+        .build()
+}
+
+fn library_imports_require_path_diagnostic(source: &str, file_name: &str) -> Diagnostic {
+    Diagnostic::error("library-imports-require-path")
+        .with_message("Library imports require an on-disk source path")
+        .with_label(Label::primary(file_name, full_source_span(source)))
+        .with_help("Pass a real file path as file_name or use a file-based entry point.")
+        .build()
+}
+
+fn normalize_diagnostics_file_name(
+    diagnostics: Vec<Diagnostic>,
+    file_name: &str,
+) -> Vec<Diagnostic> {
+    diagnostics
+        .into_iter()
+        .map(|diagnostic| {
+            let labels = diagnostic
+                .labels()
+                .iter()
+                .cloned()
+                .map(|mut label| {
+                    if label.file.is_empty() {
+                        label.file = file_name.to_string();
+                    }
+                    label
+                })
+                .collect::<Vec<_>>();
+
+            let code = diagnostic.code().unwrap_or("diagnostic");
+            let mut builder = match diagnostic.severity() {
+                Severity::Error => Diagnostic::error(code),
+                Severity::Warning => Diagnostic::warning(code),
+                Severity::Info => Diagnostic::info(code),
+                Severity::Hint => Diagnostic::hint(code),
+            }
+            .with_message(diagnostic.message())
+            .with_labels(labels);
+
+            if let Some(help) = diagnostic.help() {
+                builder = builder.with_help(help);
+            }
+
+            if let Some(note) = diagnostic.note() {
+                builder = builder.with_note(note);
+            }
+
+            builder.build()
         })
         .collect()
 }
@@ -291,6 +392,66 @@ impl TypeCheckSession {
 mod tests {
     use super::*;
     use nx_hir::{Item, Name};
+
+    #[test]
+    fn test_analyze_str_reports_library_imports_require_path_without_source_path() {
+        let source = r#"
+            import { Button as Layout.Button } from "../ui"
+            let root() = { <Layout.Button /> }
+        "#;
+
+        let result = analyze_str(source, "virtual/main.nx");
+
+        assert!(
+            result.module.is_some(),
+            "Expected lowered module to be preserved"
+        );
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code() == Some("library-imports-require-path")));
+    }
+
+    #[test]
+    fn test_analyze_str_aggregates_lowering_and_type_diagnostics_with_file_name() {
+        let file_name = "widgets/search-box.nx";
+        let source = r#"
+            abstract type Entity = {
+              id: int
+            }
+
+            type User extends Entity = {
+              name: string
+            }
+
+            type Admin extends User = {
+              level: int
+            }
+
+            let root(): int = "oops"
+        "#;
+
+        let result = analyze_str(source, file_name);
+
+        assert!(
+            result.module.is_some(),
+            "Expected lowered module to be preserved"
+        );
+
+        let lowering = result
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code() == Some("lowering-error"))
+            .expect("Expected lowering diagnostic");
+        let return_type = result
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code() == Some("return-type-mismatch"))
+            .expect("Expected return type diagnostic");
+
+        assert_eq!(lowering.labels()[0].file, file_name);
+        assert_eq!(return_type.labels()[0].file, file_name);
+    }
 
     #[test]
     fn test_check_str_simple() {

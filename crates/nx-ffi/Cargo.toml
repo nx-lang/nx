@@ -22,4 +22,5 @@ base64 = "0.22"
 nx-hir = { path = "../nx-hir" }
 nx-interpreter = { path = "../nx-interpreter" }
 nx-syntax = { path = "../nx-syntax" }
+nx-types = { path = "../nx-types" }
 nx-value = { path = "../nx-value" }

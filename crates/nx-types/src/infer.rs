@@ -29,6 +29,8 @@ struct ElementBindingSpec {
 pub struct InferenceContext<'a> {
     /// The module being type-checked
     module: &'a Module,
+    /// Original caller-provided file name for diagnostics.
+    file_name: String,
     /// Type environment (name → type, expr → type)
     env: TypeEnvironment,
     /// Type errors collected during inference
@@ -46,8 +48,14 @@ pub struct InferenceContext<'a> {
 impl<'a> InferenceContext<'a> {
     /// Creates a new inference context for a module.
     pub fn new(module: &'a Module) -> Self {
+        Self::with_file_name(module, "")
+    }
+
+    /// Creates a new inference context for a module with a diagnostic file name.
+    pub fn with_file_name(module: &'a Module, file_name: impl Into<String>) -> Self {
         let mut ctx = Self {
             module,
+            file_name: file_name.into(),
             env: TypeEnvironment::new(),
             diagnostics: Vec::new(),
             next_var_id: 0,
@@ -805,7 +813,7 @@ impl<'a> InferenceContext<'a> {
     fn error(&mut self, code: &str, message: String, span: nx_diagnostics::TextSpan) {
         let diag = Diagnostic::error(code)
             .with_message(message)
-            .with_label(Label::primary("", span))
+            .with_label(Label::primary(self.file_name.clone(), span))
             .build();
         self.diagnostics.push(diag);
     }

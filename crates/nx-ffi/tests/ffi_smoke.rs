@@ -7,15 +7,14 @@ use nx_ffi::{
     nx_ffi_abi_version, nx_free_buffer, nx_value_msgpack_to_json, NxBuffer, NxEvalStatus,
     NX_FFI_ABI_VERSION,
 };
-use nx_hir::{lower as lower_hir, SourceId};
 use nx_interpreter::Interpreter;
-use nx_syntax::parse_str;
+use nx_types::analyze_str;
 use nx_value::NxValue;
 use serde::Deserialize;
 
-fn eval_msgpack(source: &str) -> (NxEvalStatus, Vec<u8>) {
+fn eval_msgpack_with_file_name(source: &str, file_name: &str) -> (NxEvalStatus, Vec<u8>) {
     let source_bytes = source.as_bytes();
-    let file_name = b"test.nx";
+    let file_name_bytes = file_name.as_bytes();
     let mut out = NxBuffer {
         ptr: std::ptr::null_mut(),
         len: 0,
@@ -25,14 +24,18 @@ fn eval_msgpack(source: &str) -> (NxEvalStatus, Vec<u8>) {
     let status = nx_eval_source(
         source_bytes.as_ptr(),
         source_bytes.len(),
-        file_name.as_ptr(),
-        file_name.len(),
+        file_name_bytes.as_ptr(),
+        file_name_bytes.len(),
         &mut out as *mut NxBuffer,
     );
 
     let bytes = unsafe { std::slice::from_raw_parts(out.ptr, out.len) }.to_vec();
     nx_free_buffer(out);
     (status, bytes)
+}
+
+fn eval_msgpack(source: &str) -> (NxEvalStatus, Vec<u8>) {
+    eval_msgpack_with_file_name(source, "test.nx")
 }
 
 fn component_init_msgpack(
@@ -116,10 +119,14 @@ fn json_from_msgpack(
     (status, String::from_utf8(bytes).unwrap())
 }
 
-fn lower_module(source: &str) -> nx_hir::Module {
-    let parse_result = parse_str(source, "ffi-smoke.nx");
-    let tree = parse_result.tree.expect("Expected FFI fixture to parse");
-    lower_hir(tree.root(), SourceId::new(0))
+fn analyze_module(source: &str) -> std::sync::Arc<nx_hir::Module> {
+    let analysis = analyze_str(source, "ffi-smoke.nx");
+    assert!(
+        analysis.is_ok(),
+        "Expected FFI fixture analysis to succeed, got {:?}",
+        analysis.diagnostics
+    );
+    analysis.module.expect("Expected analyzed module")
 }
 
 #[derive(Deserialize)]
@@ -166,6 +173,72 @@ fn ffi_msgpack_error_returns_diagnostics() {
     assert!(matches!(json_status, NxEvalStatus::Ok));
     let diagnostics: Vec<NxDiagnostic> = serde_json::from_str(&json).unwrap();
     assert!(!diagnostics.is_empty());
+}
+
+#[test]
+fn ffi_static_analysis_diagnostics_preserve_file_name_and_phase_coverage() {
+    let file_name = "ffi/widgets/search-box.nx";
+    let source = r#"
+        abstract type Entity = {
+          id: int
+        }
+
+        type User extends Entity = {
+          name: string
+        }
+
+        type Admin extends User = {
+          level: int
+        }
+
+        let broken(): int = "oops"
+        let root(): int = { 1 / 0 }
+    "#;
+
+    let (status, bytes) = eval_msgpack_with_file_name(source, file_name);
+    assert!(matches!(status, NxEvalStatus::Error));
+
+    let diagnostics: Vec<NxDiagnostic> = rmp_serde::from_slice(&bytes).unwrap();
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code.as_deref() == Some("lowering-error")));
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code.as_deref() == Some("return-type-mismatch")));
+    assert!(!diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code.as_deref() == Some("runtime-error")));
+
+    let labeled = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            matches!(
+                diagnostic.code.as_deref(),
+                Some("lowering-error") | Some("return-type-mismatch")
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(!labeled.is_empty());
+    assert!(labeled.iter().all(|diagnostic| diagnostic
+        .labels
+        .first()
+        .is_some_and(|label| label.file == file_name)));
+
+    let (json_status, json) = json_from_msgpack(&bytes, nx_diagnostics_msgpack_to_json);
+    assert!(matches!(json_status, NxEvalStatus::Ok));
+    let diagnostics: Vec<NxDiagnostic> = serde_json::from_str(&json).unwrap();
+    assert!(diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            matches!(
+                diagnostic.code.as_deref(),
+                Some("lowering-error") | Some("return-type-mismatch")
+            )
+        })
+        .all(|diagnostic| diagnostic
+            .labels
+            .first()
+            .is_some_and(|label| label.file == file_name)));
 }
 
 #[test]
@@ -245,7 +318,7 @@ fn ffi_component_dispatch_round_trips_effect_payloads_in_msgpack_and_debug_json(
         let withHandler() = <SearchBox onSearchSubmitted=<DoSearch search={action.searchString} /> />
     "#;
 
-    let module = lower_module(source);
+    let module = analyze_module(source);
     let interpreter = Interpreter::new();
     let props = interpreter
         .execute_function(&module, "withHandler", vec![])

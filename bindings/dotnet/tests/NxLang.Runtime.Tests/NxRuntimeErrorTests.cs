@@ -1,6 +1,7 @@
 // Copyright (c) Bret Johnson. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
+using System.Linq;
 using MessagePack;
 using NxLang.Nx;
 using Xunit;
@@ -87,6 +88,43 @@ public class NxRuntimeErrorTests
             NxDiagnosticLabel label = diagnostic.Labels[0];
             Assert.Equal(fileName, label.File);
         }
+    }
+
+    [Fact]
+    public void Evaluate_StaticAnalysisDiagnostics_AreAggregated_AndKeepFileName()
+    {
+        string source = """
+            abstract type Entity = {
+              id: int
+            }
+
+            type User extends Entity = {
+              name: string
+            }
+
+            type Admin extends User = {
+              level: int
+            }
+
+            let broken(): int = "oops"
+            let root(): int = { 1 / 0 }
+            """;
+        string fileName = "widgets/search-box.nx";
+
+        NxEvaluationException ex = Assert.Throws<NxEvaluationException>(
+            () => NxRuntime.Evaluate<int>(source, fileName));
+
+        Assert.Contains(ex.Diagnostics, d => d.Code == "lowering-error");
+        Assert.Contains(ex.Diagnostics, d => d.Code == "return-type-mismatch");
+        Assert.DoesNotContain(ex.Diagnostics, d => d.Code == "runtime-error");
+
+        NxDiagnostic[] staticDiagnostics = ex.Diagnostics
+            .Where(d => d.Code == "lowering-error" || d.Code == "return-type-mismatch")
+            .ToArray();
+        Assert.NotEmpty(staticDiagnostics);
+        Assert.All(
+            staticDiagnostics,
+            diagnostic => Assert.Equal(fileName, diagnostic.Labels[0].File));
     }
 
     [Fact]

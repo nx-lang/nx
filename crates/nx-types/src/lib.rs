@@ -38,6 +38,20 @@
 //! }
 //! ```
 //!
+//! If you need the lowered module and aggregated static diagnostics for reuse in another layer,
+//! call [`analyze_str`] directly:
+//!
+//! ```
+//! use nx_types::analyze_str;
+//!
+//! let result = analyze_str("let root(): int = \"oops\"", "example.nx");
+//! assert!(result.module.is_some());
+//! assert!(!result.is_ok());
+//! ```
+//!
+//! When the source depends on local `import` statements, use [`analyze_str_with_path`] so the
+//! analysis pipeline can resolve those imports from disk.
+//!
 //! For checking files:
 //!
 //! ```no_run
@@ -119,7 +133,10 @@ pub mod semantics;
 pub mod ty;
 
 // Re-export main types
-pub use check::{check_file, check_str, TypeCheckResult, TypeCheckSession};
+pub use check::{
+    analyze_str, analyze_str_with_path, check_file, check_str, SourceAnalysisResult,
+    TypeCheckResult, TypeCheckSession,
+};
 pub use env::{TypeBinding, TypeEnvironment};
 pub use infer::{InferenceContext, TypeInference};
 pub use semantics::{
