@@ -2,7 +2,7 @@
 
 use crate::{InferenceContext, Type, TypeEnvironment};
 use nx_diagnostics::{Diagnostic, Label};
-use nx_hir::{lower, ExprId, LoweringDiagnostic, Module, SourceId};
+use nx_hir::{link_local_libraries, lower, ExprId, LoweringDiagnostic, Module, SourceId};
 use nx_syntax::{parse_file as syntax_parse_file, parse_str as syntax_parse_str};
 use rustc_hash::FxHashMap;
 use std::io;
@@ -94,6 +94,7 @@ pub fn check_str(source: &str, file_name: &str) -> TypeCheckResult {
                     // For now, infer the body
                     ctx.infer_function(func);
                 }
+                nx_hir::Item::Value(_) => {}
                 nx_hir::Item::Component(_) => {}
                 nx_hir::Item::TypeAlias(_) => {
                     // Processed during type registration
@@ -154,7 +155,8 @@ pub fn check_file(path: impl AsRef<Path>) -> io::Result<TypeCheckResult> {
     if let Some(tree) = parse_result.tree {
         // Lower to HIR
         let root = tree.root();
-        let module = lower(root, source_id);
+        let mut module = lower(root, source_id);
+        module = link_local_libraries(module, path)?;
         diagnostics.extend(lowering_diagnostics(module.diagnostics()));
 
         // Build scopes
@@ -170,6 +172,7 @@ pub fn check_file(path: impl AsRef<Path>) -> io::Result<TypeCheckResult> {
                 nx_hir::Item::Function(func) => {
                     ctx.infer_function(func);
                 }
+                nx_hir::Item::Value(_) => {}
                 nx_hir::Item::Component(_) => {}
                 nx_hir::Item::TypeAlias(_) => {}
                 nx_hir::Item::Record(_) => {}

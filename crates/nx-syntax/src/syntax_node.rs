@@ -178,8 +178,8 @@ mod tests {
     #[test]
     fn test_syntax_node_children() {
         let mut parser = parser();
-        let source = r#"import "./foo.nx"
-import { Bar } from "./bar.nx""#;
+        let source = r#"import "./foo"
+import { Bar } from "./bar""#;
         let tree = parser.parse(source, None).unwrap();
         let root = SyntaxNode::new(tree.root_node(), source);
 
@@ -192,7 +192,7 @@ import { Bar } from "./bar.nx""#;
     #[test]
     fn test_syntax_node_span() {
         let mut parser = parser();
-        let source = r#"import "./foo.nx""#;
+        let source = r#"import "./foo""#;
         let tree = parser.parse(source, None).unwrap();
         let root = SyntaxNode::new(tree.root_node(), source);
 
@@ -215,7 +215,7 @@ import { Bar } from "./bar.nx""#;
     #[test]
     fn test_import_statement_cst_structure() {
         let mut parser = parser();
-        let source = r#"import { Button as UiButton, Input } from "./ui/controls.nx""#;
+        let source = r#"import { Button as Ui.Button, Input } from "./ui""#;
         let tree = parser.parse(source, None).unwrap();
         let root = SyntaxNode::new(tree.root_node(), source);
 
@@ -229,16 +229,16 @@ import { Bar } from "./bar.nx""#;
             .expect("Import should expose kind field");
         assert_eq!(import_kind.kind(), SyntaxKind::SELECTIVE_IMPORT_LIST);
 
-        let module_path = import
+        let library_path = import
             .child_by_field("path")
-            .expect("Import should expose module path field");
-        assert_eq!(module_path.kind(), SyntaxKind::MODULE_PATH);
+            .expect("Import should expose library path field");
+        assert_eq!(library_path.kind(), SyntaxKind::LIBRARY_PATH);
 
-        let path_value = module_path
+        let path_value = library_path
             .child_by_field("value")
-            .expect("module_path should expose value field");
+            .expect("library_path should expose value field");
         assert_eq!(path_value.kind(), SyntaxKind::STRING_LITERAL);
-        assert_eq!(path_value.text(), r#""./ui/controls.nx""#);
+        assert_eq!(path_value.text(), r#""./ui""#);
 
         let selective_imports: Vec<_> = import_kind
             .children()
@@ -254,7 +254,8 @@ import { Bar } from "./bar.nx""#;
             .child_by_field("alias")
             .expect("selective_import should expose alias field");
         assert_eq!(first_name.text(), "Button");
-        assert_eq!(first_alias.text(), "UiButton");
+        assert_eq!(first_alias.kind(), SyntaxKind::QUALIFIED_NAME);
+        assert_eq!(first_alias.text(), "Ui.Button");
 
         let second = selective_imports[1];
         assert_eq!(
@@ -271,26 +272,34 @@ import { Bar } from "./bar.nx""#;
     }
 
     #[test]
-    fn test_contenttype_cst_structure() {
+    fn test_visibility_modifier_cst_structure() {
         let mut parser = parser();
-        let source = r#"contenttype "./prelude"
-import "./ui/controls.nx" as UI"#;
+        let source = r#"private let title = "NX"
+internal component <Button/> = { <button/> }"#;
         let tree = parser.parse(source, None).unwrap();
         let root = SyntaxNode::new(tree.root_node(), source);
 
         let first = root.children().next().expect("Expected first module child");
-        assert_eq!(first.kind(), SyntaxKind::CONTENTTYPE_STATEMENT);
-
-        let module_path = first
-            .child_by_field("path")
-            .expect("contenttype should expose path field");
-        assert_eq!(module_path.kind(), SyntaxKind::MODULE_PATH);
+        assert_eq!(first.kind(), SyntaxKind::VALUE_DEFINITION);
         assert_eq!(
-            module_path
-                .child_by_field("value")
-                .expect("module_path should expose value")
+            first
+                .child_by_field("visibility")
+                .expect("value_definition should expose visibility")
                 .text(),
-            r#""./prelude""#
+            "private"
+        );
+
+        let second = root
+            .children()
+            .nth(1)
+            .expect("Expected second module child");
+        assert_eq!(second.kind(), SyntaxKind::COMPONENT_DEFINITION);
+        assert_eq!(
+            second
+                .child_by_field("visibility")
+                .expect("component_definition should expose visibility")
+                .text(),
+            "internal"
         );
     }
 }

@@ -100,8 +100,8 @@
 ```
 
 
-import "./ui/widgets.nx" as UiWidgets
-import "./data/models.nx" as DataModels
+import "./ui" as Ui
+import { User as Data.User } from "./data"
 
 let <DataGrid
   data:object[]
@@ -129,17 +129,17 @@ let <DataGrid
   </table>
 
 // Simple user component
-let <UserDisplay user:User /> =
+let <UserDisplay user:Data.User /> =
   <div>
     <img src={user.avatarUrl}/>
     <h3>{user.name}</h3>
     <span>{user.email}</span>
   </div>
 
-let <UserCard user:User className:string content:Element[]/> =
+let <UserCard user:Data.User className:string content:Element[]/> =
   <section value=<MyValue value={user.name}/> class="card {className}">
     if isLoading {
-      <Spinner/>
+      <Ui.Spinner/>
       if error {
         <ErrorPanel/>
       }

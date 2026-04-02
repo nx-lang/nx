@@ -12,11 +12,11 @@ pub enum SyntaxKind {
 
     // === Imports ===
     IMPORT_STATEMENT,
-    CONTENTTYPE_STATEMENT,
     WILDCARD_IMPORT,
     SELECTIVE_IMPORT_LIST,
     SELECTIVE_IMPORT,
-    MODULE_PATH,
+    LIBRARY_PATH,
+    VISIBILITY_MODIFIER,
 
     // === Type Definitions ===
     TYPE_DEFINITION,
@@ -161,7 +161,8 @@ pub enum SyntaxKind {
     IMPORT,
     FROM,
     AS,
-    CONTENTTYPE,
+    PRIVATE,
+    INTERNAL,
     ABSTRACT,
     EXTENDS,
     IF,
@@ -236,7 +237,8 @@ impl SyntaxKind {
                 | SyntaxKind::IMPORT
                 | SyntaxKind::FROM
                 | SyntaxKind::AS
-                | SyntaxKind::CONTENTTYPE
+                | SyntaxKind::PRIVATE
+                | SyntaxKind::INTERNAL
                 | SyntaxKind::ABSTRACT
                 | SyntaxKind::EXTENDS
                 | SyntaxKind::ENUM
@@ -307,7 +309,8 @@ impl SyntaxKind {
                 | SyntaxKind::IMPORT
                 | SyntaxKind::FROM
                 | SyntaxKind::AS
-                | SyntaxKind::CONTENTTYPE
+                | SyntaxKind::PRIVATE
+                | SyntaxKind::INTERNAL
                 | SyntaxKind::ABSTRACT
                 | SyntaxKind::EXTENDS
                 | SyntaxKind::IF
@@ -348,11 +351,11 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "module_definition" => SyntaxKind::MODULE_DEFINITION,
         "ERROR" => SyntaxKind::ERROR,
         "import_statement" => SyntaxKind::IMPORT_STATEMENT,
-        "contenttype_statement" => SyntaxKind::CONTENTTYPE_STATEMENT,
         "wildcard_import" => SyntaxKind::WILDCARD_IMPORT,
         "selective_import_list" => SyntaxKind::SELECTIVE_IMPORT_LIST,
         "selective_import" => SyntaxKind::SELECTIVE_IMPORT,
-        "module_path" => SyntaxKind::MODULE_PATH,
+        "library_path" => SyntaxKind::LIBRARY_PATH,
+        "visibility_modifier" => SyntaxKind::VISIBILITY_MODIFIER,
         "type_definition" => SyntaxKind::TYPE_DEFINITION,
         "record_definition" => SyntaxKind::RECORD_DEFINITION,
         "action_definition" => SyntaxKind::ACTION_DEFINITION,
@@ -477,7 +480,8 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "import" => SyntaxKind::IMPORT,
         "from" => SyntaxKind::FROM,
         "as" => SyntaxKind::AS,
-        "contenttype" => SyntaxKind::CONTENTTYPE,
+        "private" => SyntaxKind::PRIVATE,
+        "internal" => SyntaxKind::INTERNAL,
         "abstract" => SyntaxKind::ABSTRACT,
         "extends" => SyntaxKind::EXTENDS,
         "enum" => SyntaxKind::ENUM,

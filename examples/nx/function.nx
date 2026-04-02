@@ -1,13 +1,10 @@
 // Function definition with properties
-import "./core/html.nx" as CoreHtml
+import "./core" as CoreHtml
 
 let <Button
   text:string
   disabled:bool=false
 /> =
-  <button
-    class="btn"
-    disabled={disabled}
-  >
+  <CoreHtml.ButtonShell disabled={disabled}>
     {text}
-  </button>
+  </CoreHtml.ButtonShell>

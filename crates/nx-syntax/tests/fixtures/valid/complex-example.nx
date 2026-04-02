@@ -1,6 +1,6 @@
 // Complex example combining multiple features
-import "./ui/components.nx" as UiComponents
-import "./utils/formatting.nx" as UtilsFormatting
+import "./ui" as UiComponents
+import "./utils" as UtilsFormatting
 
 type TodoItem = object
 type TodoList = TodoItem[]

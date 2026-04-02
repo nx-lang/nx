@@ -12,12 +12,11 @@ mod format;
 mod json;
 
 use clap::{Parser, Subcommand};
-use nx_diagnostics::{render_diagnostics_cli, Severity};
-use nx_hir::{lower, Item, SourceId};
+use nx_diagnostics::render_diagnostics_cli;
+use nx_hir::{lower_source_module, Item, Module};
 use nx_interpreter::{Interpreter, Value};
-use nx_syntax::parse_str;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 #[derive(Parser)]
@@ -154,40 +153,10 @@ fn run_file(path: &PathBuf, format: OutputFormat, output: Option<&PathBuf>) -> E
         .and_then(|n| n.to_str())
         .unwrap_or("unknown");
 
-    // Parse the source (using the already-read content to ensure consistency)
-    let parse_result = parse_str(&source, file_name);
-
-    // Check for parse errors
-    let errors: Vec<_> = parse_result
-        .errors
-        .iter()
-        .filter(|d| d.severity() == Severity::Error)
-        .cloned()
-        .collect();
-
-    if !errors.is_empty() {
-        // Build a sources map for error rendering
-        let mut sources = HashMap::new();
-        sources.insert(file_name.to_string(), source);
-
-        // Render errors with line numbers and context
-        let rendered = render_diagnostics_cli(&errors, &sources);
-        eprint!("{}", rendered);
-        return ExitCode::from(1);
-    }
-
-    // Get the syntax tree
-    let tree = match parse_result.tree {
-        Some(t) => t,
-        None => {
-            eprintln!("Error: Failed to parse file");
-            return ExitCode::from(1);
-        }
+    let module = match load_source_module(&source, file_name, path.as_path()) {
+        Ok(module) => module,
+        Err(exit_code) => return exit_code,
     };
-
-    // Lower to HIR using the same source_id from parsing for consistency
-    let source_id = SourceId::new(parse_result.source_id.as_u32());
-    let module = lower(tree.root(), source_id);
 
     // Check if there's a root function
     let has_root = module
@@ -263,34 +232,10 @@ fn generate_types(
         .and_then(|n| n.to_str())
         .unwrap_or("unknown");
 
-    let parse_result = parse_str(&source, file_name);
-
-    let errors: Vec<_> = parse_result
-        .errors
-        .iter()
-        .filter(|d| d.severity() == Severity::Error)
-        .cloned()
-        .collect();
-
-    if !errors.is_empty() {
-        let mut sources = HashMap::new();
-        sources.insert(file_name.to_string(), source);
-
-        let rendered = render_diagnostics_cli(&errors, &sources);
-        eprint!("{}", rendered);
-        return ExitCode::from(1);
-    }
-
-    let tree = match parse_result.tree {
-        Some(t) => t,
-        None => {
-            eprintln!("Error: Failed to parse file");
-            return ExitCode::from(1);
-        }
+    let module = match load_source_module(&source, file_name, path.as_path()) {
+        Ok(module) => module,
+        Err(exit_code) => return exit_code,
     };
-
-    let source_id = SourceId::new(parse_result.source_id.as_u32());
-    let module = lower(tree.root(), source_id);
 
     let (language, default_target_name, ns) = match language {
         GenLanguage::Typescript => (codegen::TargetLanguage::TypeScript, "types.ts", None),
@@ -351,12 +296,33 @@ fn format_output(value: &Value, format: OutputFormat) -> Result<String, String> 
     }
 }
 
+fn load_source_module(source: &str, file_name: &str, path: &Path) -> Result<Module, ExitCode> {
+    match lower_source_module(source, file_name, Some(path)) {
+        Ok(module) => Ok(module),
+        Err(diagnostics) => Err(render_source_diagnostics(file_name, source, &diagnostics)),
+    }
+}
+
+fn render_source_diagnostics(
+    file_name: &str,
+    source: &str,
+    diagnostics: &[nx_diagnostics::Diagnostic],
+) -> ExitCode {
+    let mut sources = HashMap::new();
+    sources.insert(file_name.to_string(), source.to_string());
+    let rendered = render_diagnostics_cli(diagnostics, &sources);
+    eprint!("{}", rendered);
+    ExitCode::from(1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nx_hir::{link_local_libraries, lower, SourceId};
     use nx_syntax::parse_file;
     use nx_value::NxValue;
     use std::fs;
+    use std::path::Path;
     use tempfile::TempDir;
 
     fn create_temp_nx_file(content: &str) -> (TempDir, PathBuf) {
@@ -364,6 +330,13 @@ mod tests {
         let file_path = dir.path().join("test.nx");
         fs::write(&file_path, content).unwrap();
         (dir, file_path)
+    }
+
+    fn lower_linked_file(path: &Path) -> nx_hir::Module {
+        let parse_result = parse_file(path).expect("file should load");
+        let tree = parse_result.tree.expect("file should parse");
+        let module = lower(tree.root(), SourceId::new(parse_result.source_id.as_u32()));
+        link_local_libraries(module, path).expect("linking should succeed")
     }
 
     #[test]
@@ -381,6 +354,57 @@ mod tests {
         let result = interpreter.execute_function(&module, "root", vec![]);
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_run_namespace_imported_function() {
+        let dir = TempDir::new().expect("temp dir");
+        let app_dir = dir.path().join("app");
+        let math_dir = dir.path().join("math");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&math_dir).expect("math dir");
+
+        fs::write(math_dir.join("add.nx"), r#"let addOne(n:int) = { n + 1 }"#)
+            .expect("math library");
+        fs::write(
+            app_dir.join("main.nx"),
+            r#"import "../math" as Math
+let root() = { Math.addOne(41) }"#,
+        )
+        .expect("root file");
+
+        let module = lower_linked_file(&app_dir.join("main.nx"));
+        let interpreter = Interpreter::new();
+        let result = interpreter
+            .execute_function(&module, "root", vec![])
+            .expect("qualified imported function should execute");
+
+        assert_eq!(format_output(&result, OutputFormat::Nx).unwrap(), "42");
+    }
+
+    #[test]
+    fn test_run_qualified_selective_imported_value() {
+        let dir = TempDir::new().expect("temp dir");
+        let app_dir = dir.path().join("app");
+        let ui_dir = dir.path().join("ui");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(ui_dir.join("theme.nx"), r#"let Title: string = "Hello""#).expect("ui library");
+        fs::write(
+            app_dir.join("main.nx"),
+            r#"import { Title as Ui.Title } from "../ui"
+let root() = { Ui.Title }"#,
+        )
+        .expect("root file");
+
+        let module = lower_linked_file(&app_dir.join("main.nx"));
+        let interpreter = Interpreter::new();
+        let result = interpreter
+            .execute_function(&module, "root", vec![])
+            .expect("qualified imported value should evaluate");
+
+        assert_eq!(format_output(&result, OutputFormat::Nx).unwrap(), "Hello");
     }
 
     #[test]

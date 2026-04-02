@@ -3,32 +3,49 @@ title: 'Modules & Imports'
 description: 'Organize NX files with imports, local declarations, and a root element.'
 ---
 
-Each NX file is a module. You can import symbols, declare locals, and end with an optional root element.
+Each NX file is a module. Imports now target libraries, where a library is a directory of `.nx`
+files. Every `.nx` file under that directory contributes declarations recursively, so there is no
+barrel file to maintain.
 
 ## Imports
 
 ```nx
-contenttype "./schemas/html5.nx"
-import { Button, Input } from "./ui/controls.nx"
-import "./tokens.nx" as Tokens
-import { Stack as LayoutStack } from "./layout.nx"
+import "./tokens"
+import "./icons" as Icons
+import { Button, Stack as Layout.Stack } from "./ui"
 ```
 
-- `contenttype "<path>"` must come first and acts like a module prelude.
-- `import "<path>"` brings all exports into scope; `import "<path>" as Name` keeps them under a namespace.
-- Selective imports use braces (`import { Name } from "<path>"`) and support inline aliasing (`Name as Alias`).
+- `import "<library>"` brings exports into scope unqualified.
+- `import "<library>" as Name` keeps imported declarations under `Name`.
+- `import { Name } from "<library>"` imports a specific declaration.
+- `import { Name as Prefix.Name } from "<library>"` adds a qualification prefix without renaming the
+  imported declaration itself.
+- Imports are unqualified by default. You only get qualification when you use `as`.
+- Importing the same library path more than once in a file is a compile error.
+- Local directories resolve today. Git directory URLs and HTTP zip URLs are reserved for future
+  work and currently produce explicit diagnostics.
 
 ## Declarations and visibility
 
 ```nx
-private let footerText = "Built with NX"
+internal let footerText = "Built with NX"
+private let copyright = "2026"
 
 let <Footer text:string = footerText/> =
-  <footer>{text}</footer>
+  <footer>{text} @{copyright}</footer>
 ```
 
-- `private` keeps bindings inside the module.
+- Visibility defaults to public.
+- `private` keeps a binding inside the current file.
+- `internal` makes a binding visible to other files in the same library, but not to external
+  consumers.
 - Use `let` and `type` as needed before the root element.
+
+| Keyword | Same file | Other library files | Consumers |
+| --- | --- | --- | --- |
+| `private` | Yes | No | No |
+| `internal` | Yes | Yes | No |
+| default | Yes | Yes | Yes |
 
 ## Root element
 

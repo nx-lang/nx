@@ -1,11 +1,7 @@
-import "./ui/widgets.nx" as UiWidgets
-import "./data/models.nx" as DataModels
+import "./ui" as Ui
+import { Entity as Models.Entity } from "./data"
 
-abstract type Entity = {
-  id: int
-}
-
-abstract type UserBase extends Entity = {
+abstract type UserBase extends Models.Entity = {
   name: string
 }
 
@@ -13,10 +9,17 @@ type User extends UserBase = {
   isAdmin: bool = false
 }
 
-let <UserCard user:User className:string content:Element[]/> =
+private let titleFontSize = 14
+
+let <UserCard
+    user:User
+    className:string = "primary"
+    content:Element[]
+    isLoading:bool = false
+    /> =
   <section class="card {className}">
     if isLoading {
-      <Spinner/>
+      <Ui.Spinner/>
     } else {
       <div>
         {content}
@@ -24,6 +27,6 @@ let <UserCard user:User className:string content:Element[]/> =
     }
   </section>
 
-<UserCard user={user} className="primary">
+<UserCard user={user}>
   <:uitext>Hello @{user.firstName} {user.lastName}!</>
 </UserCard>

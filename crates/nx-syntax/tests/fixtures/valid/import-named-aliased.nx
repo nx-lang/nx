@@ -1,5 +1,5 @@
-import { Stack as LayoutStack, Button } from "./layout.nx"
+import { Stack as Layout.Stack, Button } from "./layout"
 
-<LayoutStack>
+<Layout.Stack>
   <Button />
-</LayoutStack>
+</Layout.Stack>

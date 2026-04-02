@@ -1,11 +1,11 @@
 use crate::diagnostics::diagnostics_to_api;
 use crate::value::to_nx_value;
 use crate::NxDiagnostic;
-use nx_diagnostics::{Diagnostic, Label, Severity};
-use nx_hir::{lower, Item, Module, SourceId};
+use nx_diagnostics::{Diagnostic, Label};
+use nx_hir::{lower_source_module as lower_hir_source_module, Item, Module};
 use nx_interpreter::{Interpreter, RuntimeError};
-use nx_syntax::parse_str;
 use nx_value::NxValue;
+use std::path::Path;
 use text_size::{TextRange, TextSize};
 
 /// The result of evaluating NX source code.
@@ -23,43 +23,13 @@ pub(crate) fn lower_source_module(
     source: &str,
     file_name: &str,
 ) -> Result<Module, Vec<NxDiagnostic>> {
-    let parse_result = parse_str(source, file_name);
-
-    if parse_result
-        .errors
-        .iter()
-        .any(|d| d.severity() == Severity::Error)
-    {
-        return Err(diagnostics_to_api(&parse_result.errors, source));
+    let source_path = Path::new(file_name)
+        .exists()
+        .then_some(Path::new(file_name));
+    match lower_hir_source_module(source, file_name, source_path) {
+        Ok(module) => Ok(module),
+        Err(diagnostics) => Err(diagnostics_to_api(&diagnostics, source)),
     }
-
-    let tree = match parse_result.tree {
-        Some(t) => t,
-        None => {
-            let diag = Diagnostic::error("parse-failed")
-                .with_message("Failed to parse source")
-                .build();
-            return Err(diagnostics_to_api(&[diag], source));
-        }
-    };
-
-    let source_id = SourceId::new(parse_result.source_id.as_u32());
-    let module = lower(tree.root(), source_id);
-    if !module.diagnostics().is_empty() {
-        let diagnostics: Vec<_> = module
-            .diagnostics()
-            .iter()
-            .map(|diagnostic| {
-                Diagnostic::error("lowering-error")
-                    .with_message(diagnostic.message.clone())
-                    .with_label(Label::primary(file_name, diagnostic.span))
-                    .build()
-            })
-            .collect();
-        return Err(diagnostics_to_api(&diagnostics, source));
-    }
-
-    Ok(module)
 }
 
 pub(crate) fn runtime_error_diagnostics(source: &str, error: RuntimeError) -> Vec<NxDiagnostic> {

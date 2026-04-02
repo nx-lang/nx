@@ -1,0 +1,6 @@
+let todoLabel(count:int): string =
+  if count == 1 {
+    "todo"
+  } else {
+    "todos"
+  }

@@ -1,6 +1,6 @@
 // Complex example combining multiple features
-import "./ui/components.nx" as UiComponents
-import "./utils/formatting.nx" as UtilsFormatting
+import "./ui" as UiComponents
+import "./utils" as UtilsFormatting
 
 type TodoItem = object
 type TodoList = TodoItem[]
@@ -9,7 +9,7 @@ let <TodoApp
   todos:TodoList
   filter:string="all"
 /> =
-  <div class="todo-app">
+  <UiComponents.AppShell class="todo-app">
     <header>
       <h1:>Todo List</h1>
       <TodoStats items={todos} />
@@ -22,7 +22,7 @@ let <TodoApp
     <footer>
       <TodoFilters current={filter} />
     </footer>
-  </div>
+  </UiComponents.AppShell>
 
 let <TodoStats
   items:TodoItem[]
@@ -31,7 +31,7 @@ let <TodoStats
     if {
       items.length == 0 => <p:>No todos yet</p>
       items.length == 1 => <p:>1 todo</p>
-      else              => <p:>{items.length} todos</p>
+      else              => <p:>{items.length} {UtilsFormatting.todoLabel(items.length)}</p>
     }
   </div>
 

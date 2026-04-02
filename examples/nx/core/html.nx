@@ -1,0 +1,4 @@
+let <ButtonShell disabled:bool=false content:Element[]/> =
+  <button disabled={disabled}>
+    {content}
+  </button>

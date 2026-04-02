@@ -22,19 +22,22 @@
 
 pub mod ast;
 pub mod db;
+pub mod link;
 pub mod lower;
 pub mod records;
 pub mod scope;
 
 use la_arena::{Arena, Idx};
-use nx_diagnostics::TextSpan;
+use nx_diagnostics::{Diagnostic, Label, Severity, TextSize, TextSpan};
 use smol_str::SmolStr;
+use std::path::Path;
 
 // Re-export lowering function
 pub use lower::lower;
 
 // Re-export database types
 pub use db::{DatabaseImpl, NxDatabase};
+pub use link::link_local_libraries;
 
 // Re-export scope and symbol types
 pub use records::{
@@ -45,6 +48,87 @@ pub use records::{
 pub use scope::{
     build_scopes, check_undefined_identifiers, Scope, ScopeId, ScopeManager, Symbol, SymbolKind,
 };
+
+/// Parses, lowers, links, and validates a module from source text.
+///
+/// `file_name` is used for diagnostic labels. Pass `source_path` when library imports should be
+/// resolved from disk; if imports are present and no path is provided, the function returns a
+/// diagnostic explaining that linking requires an on-disk source path.
+pub fn lower_source_module(
+    source: &str,
+    file_name: &str,
+    source_path: Option<&Path>,
+) -> Result<Module, Vec<Diagnostic>> {
+    let parse_result = nx_syntax::parse_str(source, file_name);
+
+    if parse_result
+        .errors
+        .iter()
+        .any(|diagnostic| diagnostic.severity() == Severity::Error)
+    {
+        return Err(parse_result.errors);
+    }
+
+    let tree = match parse_result.tree {
+        Some(tree) => tree,
+        None => {
+            let diagnostic = Diagnostic::error("parse-failed")
+                .with_message("Failed to parse source")
+                .build();
+            return Err(vec![diagnostic]);
+        }
+    };
+
+    let source_id = SourceId::new(parse_result.source_id.as_u32());
+    let mut module = lower(tree.root(), source_id);
+
+    if let Some(path) = source_path {
+        module = match link_local_libraries(module, path) {
+            Ok(module) => module,
+            Err(error) => {
+                let source_len = u32::try_from(source.len()).expect(
+                    "NX source size should be validated before linking diagnostics are created",
+                );
+                let diagnostic = Diagnostic::error("library-load-error")
+                    .with_message(format!("Failed to load library imports: {}", error))
+                    .with_label(Label::primary(
+                        file_name,
+                        TextSpan::new(TextSize::from(0), TextSize::from(source_len)),
+                    ))
+                    .build();
+                return Err(vec![diagnostic]);
+            }
+        };
+    } else if !module.imports.is_empty() {
+        let source_len = u32::try_from(source.len())
+            .expect("NX source size should be validated before linking diagnostics are created");
+        let diagnostic = Diagnostic::error("library-imports-require-path")
+            .with_message("Library imports require an on-disk source path")
+            .with_label(Label::primary(
+                file_name,
+                TextSpan::new(TextSize::from(0), TextSize::from(source_len)),
+            ))
+            .with_help("Pass a real file path as file_name or use a file-based entry point.")
+            .build();
+        return Err(vec![diagnostic]);
+    }
+
+    if !module.diagnostics().is_empty() {
+        let diagnostics = module
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| {
+                Diagnostic::error("lowering-error")
+                    .with_message(diagnostic.message.clone())
+                    .with_label(Label::primary(file_name, diagnostic.span))
+                    .build()
+            })
+            .collect();
+        return Err(diagnostics);
+    }
+
+    Ok(module)
+}
 
 /// Interned string identifier for names.
 ///
@@ -80,6 +164,23 @@ impl From<String> for Name {
 impl std::fmt::Display for Name {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+/// Visibility for top-level declarations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Visibility {
+    /// Visible to the declaring file, peer library files, and consumers.
+    Public,
+    /// Visible only within the declaring library.
+    Internal,
+    /// Visible only within the declaring source file.
+    Private,
+}
+
+impl Default for Visibility {
+    fn default() -> Self {
+        Self::Public
     }
 }
 
@@ -125,6 +226,8 @@ impl Param {
 pub struct Function {
     /// Function name
     pub name: Name,
+    /// Declaration visibility
+    pub visibility: Visibility,
     /// Parameter list
     pub params: Vec<Param>,
     /// Return type annotation (None means inferred)
@@ -135,11 +238,28 @@ pub struct Function {
     pub span: TextSpan,
 }
 
+/// Top-level value declaration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValueDef {
+    /// Bound name
+    pub name: Name,
+    /// Declaration visibility
+    pub visibility: Visibility,
+    /// Optional type annotation
+    pub ty: Option<ast::TypeRef>,
+    /// Initializer expression
+    pub value: ExprId,
+    /// Source location
+    pub span: TextSpan,
+}
+
 /// Type alias definition.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeAlias {
     /// Alias name
     pub name: Name,
+    /// Declaration visibility
+    pub visibility: Visibility,
     /// Target type reference
     pub ty: ast::TypeRef,
     /// Source span
@@ -160,6 +280,8 @@ pub struct EnumMember {
 pub struct EnumDef {
     /// Enum name
     pub name: Name,
+    /// Declaration visibility
+    pub visibility: Visibility,
     /// Members for the enum
     pub members: Vec<EnumMember>,
     /// Source span
@@ -193,6 +315,8 @@ pub enum RecordKind {
 pub struct RecordDef {
     /// Record name
     pub name: Name,
+    /// Declaration visibility
+    pub visibility: Visibility,
     /// Whether this record came from `type` or `action` syntax.
     pub kind: RecordKind,
     /// Whether the record was declared with the `abstract` modifier.
@@ -244,6 +368,8 @@ pub struct ComponentEmit {
 pub struct Component {
     /// Component name
     pub name: Name,
+    /// Declaration visibility
+    pub visibility: Visibility,
     /// Declared props, including optional default expressions
     pub props: Vec<RecordField>,
     /// Declared emitted actions
@@ -287,6 +413,8 @@ pub struct Element {
 pub enum Item {
     /// Function declaration
     Function(Function),
+    /// Top-level value declaration
+    Value(ValueDef),
     /// Component declaration
     Component(Component),
     /// Type alias declaration
@@ -295,6 +423,32 @@ pub enum Item {
     Enum(EnumDef),
     /// Record declaration
     Record(RecordDef),
+}
+
+impl Item {
+    /// Returns the declared item name.
+    pub fn name(&self) -> &Name {
+        match self {
+            Item::Function(func) => &func.name,
+            Item::Value(value) => &value.name,
+            Item::Component(component) => &component.name,
+            Item::TypeAlias(alias) => &alias.name,
+            Item::Enum(enum_def) => &enum_def.name,
+            Item::Record(record_def) => &record_def.name,
+        }
+    }
+
+    /// Returns the declared item visibility.
+    pub fn visibility(&self) -> Visibility {
+        match self {
+            Item::Function(func) => func.visibility,
+            Item::Value(value) => value.visibility,
+            Item::Component(component) => component.visibility,
+            Item::TypeAlias(alias) => alias.visibility,
+            Item::Enum(enum_def) => enum_def.visibility,
+            Item::Record(record_def) => record_def.visibility,
+        }
+    }
 }
 
 /// Import kind.
@@ -317,17 +471,21 @@ pub enum ImportKind {
 pub struct SelectiveImport {
     /// Imported symbol name
     pub name: Name,
-    /// Optional local alias
-    pub alias: Option<Name>,
+    /// Optional qualifier prefix introduced by `as Prefix.Name`.
+    pub qualifier: Option<Name>,
+    /// Source span for this selective import entry.
+    pub span: TextSpan,
 }
 
 /// Lowered import statement.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Import {
-    /// Module path from `from "<path>"`
-    pub path: String,
+    /// Library path from the import statement.
+    pub library_path: String,
     /// Wildcard or selective import data
     pub kind: ImportKind,
+    /// Source span for the full import statement.
+    pub span: TextSpan,
 }
 
 /// Arena index for expressions.
@@ -346,8 +504,6 @@ pub type ElementId = Idx<Element>;
 pub struct Module {
     /// Source file identifier
     pub source_id: SourceId,
-    /// Optional prelude/module content type path.
-    pub content_type: Option<String>,
     /// Import statements in source order.
     pub imports: Vec<Import>,
     /// Top-level items
@@ -365,7 +521,6 @@ impl Module {
     pub fn new(source_id: SourceId) -> Self {
         Self {
             source_id,
-            content_type: None,
             imports: Vec::new(),
             items: Vec::new(),
             diagnostics: Vec::new(),
@@ -386,13 +541,7 @@ impl Module {
 
     /// Find an item by name.
     pub fn find_item(&self, name: &str) -> Option<&Item> {
-        self.items.iter().find(|item| match item {
-            Item::Function(func) => func.name.as_str() == name,
-            Item::Component(component) => component.name.as_str() == name,
-            Item::TypeAlias(alias) => alias.name.as_str() == name,
-            Item::Enum(enum_def) => enum_def.name.as_str() == name,
-            Item::Record(record_def) => record_def.name.as_str() == name,
-        })
+        self.items.iter().find(|item| item.name().as_str() == name)
     }
 
     /// Add a new item to the module.
@@ -478,6 +627,7 @@ mod tests {
 
         let func = Function {
             name: Name::new("test"),
+            visibility: Visibility::Public,
             params: Vec::new(),
             return_type: None,
             body: module.alloc_expr(ast::Expr::Literal(ast::Literal::Null)),

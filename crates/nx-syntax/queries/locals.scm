@@ -56,7 +56,8 @@
   (#not-match? @import.binding "\\bas\\b"))
 
 (selective_import
-  alias: (identifier) @local.definition)
+  alias: (qualified_name
+    (identifier) @local.definition))
 
 (value_for_expression
   item: (identifier) @local.definition)

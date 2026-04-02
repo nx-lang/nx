@@ -14,10 +14,12 @@ Source of truth for language shape: nx-grammar.md. This spec re-expresses it in 
 Terminals are UPPER_SNAKE token kinds produced by the lexer. Lexeme hints are illustrative; actual lexing rules are defined by the lexer.
 
 Keywords
+- PRIVATE ("private")
+- INTERNAL ("internal")
 - IMPORT ("import")
 - FROM ("from")
 - AS ("as")
-- CONTENTTYPE ("contenttype")
+- ACTION ("action")
 - COMPONENT ("component")
 - EMITS ("emits")
 - STATE ("state")
@@ -145,31 +147,28 @@ Grouping
 Nonterminals are CamelCase. Terminals are UPPER_SNAKE tokens.
 
 ModuleDefinition (AST: ModuleDefinitionSyntax)
-- ModuleDefinition → ContentTypeStatement? ImportStatement* ModuleMember* Element? EOF
-  - fields: contentType?: ContentTypeStatementSyntax, imports: ImportStatementSyntax[], members: ModuleMemberSyntax[], moduleElement?: MarkupElementSyntax
+- ModuleDefinition → ImportStatement* ModuleMember* Element? EOF
+  - fields: imports: ImportStatementSyntax[], members: ModuleMemberSyntax[], moduleElement?: MarkupElementSyntax
 
 ModuleMember (AST: ModuleMemberSyntax is a sum type)
+- ModuleMember → ActionDefinition
 - ModuleMember → TypeDefinition
 - ModuleMember → ValueDefinition
 - ModuleMember → FunctionDefinition
 - ModuleMember → ComponentDefinition
 
-ContentTypeStatement (AST: ContentTypeStatementSyntax)
-- ContentTypeStatement → CONTENTTYPE ModulePath
-  - fields: path: ModulePathSyntax
-
 ImportStatement (AST: ImportStatementSyntax)
 - ImportStatement → IMPORT WildcardImport
-- ImportStatement → IMPORT SelectiveImportList FROM ModulePath
-  - fields: kind: WildcardImportSyntax | SelectiveImportListSyntax, path?: ModulePathSyntax
+- ImportStatement → IMPORT SelectiveImportList FROM LibraryPath
+  - fields: kind: WildcardImportSyntax | SelectiveImportListSyntax, path?: LibraryPathSyntax
 
 ImportClause (AST: ImportClauseSyntax is a sum type)
 - ImportClause → WildcardImport
 - ImportClause → SelectiveImportList
 
 WildcardImport (AST: WildcardImportSyntax)
-- WildcardImport → ModulePath (AS IDENTIFIER)?
-  - fields: path: ModulePathSyntax, alias?: string
+- WildcardImport → LibraryPath (AS IDENTIFIER)?
+  - fields: path: LibraryPathSyntax, alias?: string
 
 SelectiveImportList (AST: SelectiveImportListSyntax)
 - SelectiveImportList → LBRACE SelectiveImportListEntriesOpt RBRACE
@@ -180,12 +179,16 @@ SelectiveImportListEntriesOpt
 - SelectiveImportListEntriesOpt → ε
 
 SelectiveImport (AST: SelectiveImportSyntax)
-- SelectiveImport → IDENTIFIER (AS IDENTIFIER)?
-  - fields: name: string, alias?: string
+- SelectiveImport → IDENTIFIER (AS QualifiedName)?
+  - fields: name: string, alias?: QualifiedNameSyntax
 
-ModulePath (AST: ModulePathSyntax)
-- ModulePath → STRING_LITERAL
+LibraryPath (AST: LibraryPathSyntax)
+- LibraryPath → STRING_LITERAL
   - fields: value: string
+
+VisibilityModifier
+- VisibilityModifier → PRIVATE
+- VisibilityModifier → INTERNAL
 
 TypeDefinition (AST: TypeDefinitionSyntax is a sum type)
 - TypeDefinition → RecordDefinition (RecordDefinitionSyntax)
@@ -193,8 +196,12 @@ TypeDefinition (AST: TypeDefinitionSyntax is a sum type)
 - TypeDefinition → TypeAliasDefinition (TypeAliasDefinitionSyntax)
 
 RecordDefinition (AST: RecordDefinitionSyntax)
-- RecordDefinition → ABSTRACT? TYPE IDENTIFIER RecordExtendsClauseOpt EQ LBRACE RecordPropertyDefinition* RBRACE
-  - fields: isAbstract: bool, name: string, base?: QualifiedNameSyntax, properties: RecordPropertyDefinitionSyntax[]
+- RecordDefinition → VisibilityModifier? ABSTRACT? TYPE IDENTIFIER RecordExtendsClauseOpt EQ LBRACE RecordPropertyDefinition* RBRACE
+  - fields: visibility?: "private"|"internal", isAbstract: bool, name: string, base?: QualifiedNameSyntax, properties: RecordPropertyDefinitionSyntax[]
+
+ActionDefinition (AST: ActionDefinitionSyntax)
+- ActionDefinition → VisibilityModifier? ACTION IDENTIFIER EQ LBRACE RecordPropertyDefinition* RBRACE
+  - fields: visibility?: "private"|"internal", name: string, properties: RecordPropertyDefinitionSyntax[]
 
 RecordExtendsClauseOpt
 - RecordExtendsClauseOpt → EXTENDS QualifiedName
@@ -209,12 +216,12 @@ RecordPropertyDefaultOpt
 - RecordPropertyDefaultOpt → ε
 
 TypeAliasDefinition (AST: TypeAliasDefinitionSyntax)
-- TypeAliasDefinition → TYPE IDENTIFIER EQ Type
-  - fields: name: string, type: TypeSyntax
+- TypeAliasDefinition → VisibilityModifier? TYPE IDENTIFIER EQ Type
+  - fields: visibility?: "private"|"internal", name: string, type: TypeSyntax
 
 EnumDefinition (AST: EnumDefinitionSyntax)
-- EnumDefinition → ENUM IDENTIFIER EQ EnumMemberList
-  - fields: name: string, members: EnumMemberSyntax[]
+- EnumDefinition → VisibilityModifier? ENUM IDENTIFIER EQ EnumMemberList
+  - fields: visibility?: "private"|"internal", name: string, members: EnumMemberSyntax[]
 
 EnumMemberList
 - EnumMemberList → EnumMemberListLead EnumMemberListTail
@@ -232,8 +239,8 @@ EnumMember (AST: EnumMemberSyntax)
   - fields: name: string
 
 ValueDefinition (AST: ValueDefinitionSyntax)
-- ValueDefinition → LET IDENTIFIER ValueDefinitionTypeOpt EQ RhsExpression
-  - fields: name: string, type?: TypeSyntax, value: ExpressionSyntax
+- ValueDefinition → VisibilityModifier? LET IDENTIFIER ValueDefinitionTypeOpt EQ RhsExpression
+  - fields: visibility?: "private"|"internal", name: string, type?: TypeSyntax, value: ExpressionSyntax
 
 ValueDefinitionTypeOpt
 - ValueDefinitionTypeOpt → COLON Type
@@ -262,8 +269,8 @@ FunctionDefinition (AST: FunctionDefinitionSyntax is a sum type)
 - FunctionDefinition → ParenFunctionDefinition          (ParenFunctionDefinitionSyntax)
 
 ComponentDefinition (AST: ComponentDefinitionSyntax)
-- ComponentDefinition → COMPONENT ComponentSignature EQ ComponentBody
-  - fields: signature: ComponentSignatureSyntax, body: ComponentBodySyntax
+- ComponentDefinition → VisibilityModifier? COMPONENT ComponentSignature EQ ComponentBody
+  - fields: visibility?: "private"|"internal", signature: ComponentSignatureSyntax, body: ComponentBodySyntax
 
 ComponentSignature (AST: ComponentSignatureSyntax)
 - ComponentSignature → LT ElementName PropertyDefinition* EmitsGroupOpt SLASH GT
@@ -295,12 +302,12 @@ StateGroup (AST: StateGroupSyntax)
   - fields: properties: PropertyDefinitionSyntax[]
 
 ElementFunctionDefinition (AST: ElementFunctionDefinitionSyntax)
-- ElementFunctionDefinition → LET LT ElementName PropertyDefinition* SLASH GT FunctionReturnTypeOpt EQ RhsExpression
-  - fields: elementName: QualifiedMarkupNameSyntax, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
+- ElementFunctionDefinition → VisibilityModifier? LET LT ElementName PropertyDefinition* SLASH GT FunctionReturnTypeOpt EQ RhsExpression
+  - fields: visibility?: "private"|"internal", elementName: QualifiedMarkupNameSyntax, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
 
 ParenFunctionDefinition (AST: ParenFunctionDefinitionSyntax)
-- ParenFunctionDefinition → LET IDENTIFIER LPAREN ParenParameterListOpt RPAREN FunctionReturnTypeOpt EQ RhsExpression
-  - fields: name: string, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
+- ParenFunctionDefinition → VisibilityModifier? LET IDENTIFIER LPAREN ParenParameterListOpt RPAREN FunctionReturnTypeOpt EQ RhsExpression
+  - fields: visibility?: "private"|"internal", name: string, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
 
 ParenParameterListOpt
 - ParenParameterListOpt → ParenParameterList
@@ -634,27 +641,28 @@ Pattern (AST: PatternSyntax)
 
 This section lists the AST node types with fields for implementers.
 
-- ModuleDefinitionSyntax: contentType?: ContentTypeStatementSyntax, imports: ImportStatementSyntax[], members: ModuleMemberSyntax[], moduleElement?: MarkupElementSyntax (members and moduleElement can both be present)
-- ModuleMemberSyntax: TypeDefinitionSyntax | ValueDefinitionSyntax | FunctionDefinitionSyntax
-- ContentTypeStatementSyntax: path: ModulePathSyntax
-- ImportStatementSyntax: kind: WildcardImportSyntax | SelectiveImportListSyntax, path?: ModulePathSyntax
-- WildcardImportSyntax: path: ModulePathSyntax, alias?: string
+- ModuleDefinitionSyntax: imports: ImportStatementSyntax[], members: ModuleMemberSyntax[], moduleElement?: MarkupElementSyntax (members and moduleElement can both be present)
+- ModuleMemberSyntax: ActionDefinitionSyntax | TypeDefinitionSyntax | ValueDefinitionSyntax | FunctionDefinitionSyntax | ComponentDefinitionSyntax
+- ImportStatementSyntax: kind: WildcardImportSyntax | SelectiveImportListSyntax, path?: LibraryPathSyntax
+- WildcardImportSyntax: path: LibraryPathSyntax, alias?: string
 - SelectiveImportListSyntax: entries: SelectiveImportSyntax[]
-- SelectiveImportSyntax: name: string, alias?: string
-- ModulePathSyntax: value: string
+- SelectiveImportSyntax: name: string, alias?: QualifiedNameSyntax
+- LibraryPathSyntax: value: string
 - TypeDefinitionSyntax: TypeAliasDefinitionSyntax | EnumDefinitionSyntax | RecordDefinitionSyntax
-- TypeAliasDefinitionSyntax: name: string, type: TypeSyntax
-- EnumDefinitionSyntax: name: string, members: EnumMemberSyntax[]
-- RecordDefinitionSyntax: name: string, properties: RecordPropertyDefinitionSyntax[]
+- TypeAliasDefinitionSyntax: visibility?: "private"|"internal", name: string, type: TypeSyntax
+- EnumDefinitionSyntax: visibility?: "private"|"internal", name: string, members: EnumMemberSyntax[]
+- RecordDefinitionSyntax: visibility?: "private"|"internal", name: string, properties: RecordPropertyDefinitionSyntax[]
+- ActionDefinitionSyntax: visibility?: "private"|"internal", name: string, properties: RecordPropertyDefinitionSyntax[]
 - RecordPropertyDefinitionSyntax: name: string, type: TypeSyntax, default?: ExpressionSyntax
-- ValueDefinitionSyntax: name: string, type?: TypeSyntax, value: ExpressionSyntax
+- ValueDefinitionSyntax: visibility?: "private"|"internal", name: string, type?: TypeSyntax, value: ExpressionSyntax
 - TypeSyntax: kind: "primitive"|"user", name: string (qualified), modifier?: "nullable"|"sequence"
 - PrimitiveTypeSyntax: name: string
 - UserTypeSyntax: name: QualifiedNameSyntax
- - FunctionDefinitionSyntax: ElementFunctionDefinitionSyntax | ParenFunctionDefinitionSyntax
- - ElementFunctionDefinitionSyntax: elementName: QualifiedMarkupNameSyntax, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
- - ParenFunctionDefinitionSyntax: name: string, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
- - PropertyDefinitionSyntax: name: string, type: TypeSyntax, default?: ExpressionSyntax
+- FunctionDefinitionSyntax: ElementFunctionDefinitionSyntax | ParenFunctionDefinitionSyntax
+- ElementFunctionDefinitionSyntax: visibility?: "private"|"internal", elementName: QualifiedMarkupNameSyntax, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
+- ParenFunctionDefinitionSyntax: visibility?: "private"|"internal", name: string, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
+- ComponentDefinitionSyntax: visibility?: "private"|"internal", signature: ComponentSignatureSyntax, body: ComponentBodySyntax
+- PropertyDefinitionSyntax: name: string, type: TypeSyntax, default?: ExpressionSyntax
 - ExpressionSyntax: union of MarkupElementSyntax | ValuesBracedExpressionSyntax | LiteralExpressionSyntax | IdentifierNameSyntax | ValueIfSimpleExpressionSyntax | ValueIfMatchExpressionSyntax | ValueIfConditionListExpressionSyntax | ValueForExpressionSyntax | ConditionalExpressionSyntax | ParenFunctionCallExpressionSyntax | MemberAccessExpressionSyntax | BinaryExpressionSyntax | PrefixUnaryExpressionSyntax | ParenthesizedExpressionSyntax | UnitLiteralSyntax
  - ParenFunctionCallExpressionSyntax: callee: ExpressionSyntax, args: ExpressionSyntax[]
  - MemberAccessExpressionSyntax: target: ExpressionSyntax, name: string (includes both property access and enum member access; distinguished during semantic analysis)
@@ -737,6 +745,8 @@ This section lists the AST node types with fields for implementers.
 - Element closing tag name must match opening ElementName.
 - TextElement closing tag name must match opening ElementName.
 - PropertyDefinition names within a single FunctionDefinition should be unique.
+- SelectiveImport aliases must contain exactly one DOT and the final identifier must match the imported name.
+- Omitted visibility on top-level declarations defaults to public; `private` is file-scoped and `internal` is library-scoped.
 - Type modifiers: at most one of QMARK or LBRACK RBRACK.
 - Switch expressions (property variants): at least one case; patterns per case must be non-empty.
 - ValueIfMatchExpression / ElementsIfMatchExpression / PropertyListIfMatchExpression: at least one pattern arm; each arm requires ≥1 pattern.

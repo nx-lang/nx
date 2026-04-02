@@ -1,4 +1,4 @@
-contenttype "./schemas/html5.nx"
-import "./ui/controls.nx" as UI
+import "./ui" as UI
+internal let title = "NX"
 
-<UI.App />
+<UI.App title={title} />
