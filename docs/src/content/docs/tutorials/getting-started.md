@@ -24,7 +24,7 @@ Validation checkpoint: `cargo test --workspace` should pass; this confirms the p
 Make `examples/nx/hello.nx`:
 
 ```nx
-import "./ui.nx"
+import "./ui"
 
 type <User id:string name:string/>
 
@@ -37,7 +37,8 @@ let <Hello user:User/> =
 <Hello user=<User id="123" name="Ada"/>> </Hello>
 ```
 
-This file shows imports, a typed object, a component with a child slot, and a root element.
+This file shows imports, a typed object, a component with a child slot, and a root element. In NX,
+`"./ui"` refers to a library directory: every `.nx` file under that folder contributes exports.
 
 ## 3) Validate the file
 - For a parser-only check, run `pnpm --dir crates/nx-syntax install` once and then `pnpm --dir crates/nx-syntax run parse -- ../../examples/nx/hello.nx` so the repo-pinned Tree-sitter CLI is used.

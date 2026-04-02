@@ -1,0 +1,9 @@
+let <AppShell class:string content:Element[]/> =
+  <div class={class}>
+    {content}
+  </div>
+
+let <Spinner/> =
+  <div class="spinner">
+    Loading...
+  </div>

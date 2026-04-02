@@ -8,6 +8,7 @@ use crate::{
     validate_record_definitions, Component, ComponentEmit, ComponentEmitKind, Element, EnumDef,
     EnumMember, ExprId, Function, Import, ImportKind, Item, LoweringDiagnostic, Module, Name,
     Param, Property, RecordDef, RecordField, RecordKind, SelectiveImport, SourceId, TypeAlias,
+    ValueDef, Visibility,
 };
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_syntax::{SyntaxKind, SyntaxNode};
@@ -78,6 +79,7 @@ enum HandlerPropResolution {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PredeclaredComponent {
     name: Name,
+    visibility: Visibility,
     props: Vec<RecordField>,
     emits: Vec<ComponentEmit>,
     span: TextSpan,
@@ -172,29 +174,37 @@ impl LoweringContext {
         }
     }
 
-    fn find_module_path_node<'tree>(
+    fn lower_visibility(node: SyntaxNode) -> Visibility {
+        match node.child_by_field("visibility").map(|child| child.text()) {
+            Some("private") => Visibility::Private,
+            Some("internal") => Visibility::Internal,
+            _ => Visibility::Public,
+        }
+    }
+
+    fn find_library_path_node<'tree>(
         node: SyntaxNode<'tree>,
         preferred_field: &str,
     ) -> Option<SyntaxNode<'tree>> {
         node.child_by_field(preferred_field).or_else(|| {
             node.children().find(|child| {
-                child.kind() == SyntaxKind::MODULE_PATH
+                child.kind() == SyntaxKind::LIBRARY_PATH
                     || child.kind() == SyntaxKind::STRING_LITERAL
             })
         })
     }
 
-    fn lower_module_path(node: SyntaxNode) -> Option<String> {
+    fn lower_library_path(node: SyntaxNode) -> Option<String> {
         match node.kind() {
-            SyntaxKind::MODULE_PATH => {
-                Self::find_module_path_node(node, "value").and_then(Self::lower_module_path)
+            SyntaxKind::LIBRARY_PATH => {
+                Self::find_library_path_node(node, "value").and_then(Self::lower_library_path)
             }
             SyntaxKind::STRING_LITERAL => Some(Self::unquote_string_literal(node.text())),
-            _ => Self::find_module_path_node(node, "path").and_then(Self::lower_module_path),
+            _ => Self::find_library_path_node(node, "path").and_then(Self::lower_library_path),
         }
     }
 
-    fn lower_selective_import(&self, node: SyntaxNode) -> Option<SelectiveImport> {
+    fn lower_selective_import(&mut self, node: SyntaxNode) -> Option<SelectiveImport> {
         if node.kind() != SyntaxKind::SELECTIVE_IMPORT {
             return None;
         }
@@ -208,14 +218,58 @@ impl LoweringContext {
                     .map(|n| Name::new(n.text()))
             })?;
 
-        let alias = node
-            .child_by_field("alias")
-            .map(|alias_node| Name::new(alias_node.text()));
+        let qualifier = node.child_by_field("alias").and_then(|alias_node| {
+            let alias_text = alias_node.text();
+            let mut parts = alias_text.split('.');
+            let Some(prefix) = parts.next() else {
+                return None;
+            };
+            let Some(imported_suffix) = parts.next() else {
+                self.add_diagnostic(
+                    format!(
+                        "Selective import alias '{}' must be a qualified name of the form Prefix.{}",
+                        alias_text,
+                        name.as_str()
+                    ),
+                    alias_node.span(),
+                );
+                return None;
+            };
 
-        Some(SelectiveImport { name, alias })
+            if parts.next().is_some() {
+                self.add_diagnostic(
+                    format!(
+                        "Selective import alias '{}' must contain exactly one dot",
+                        alias_text
+                    ),
+                    alias_node.span(),
+                );
+                return None;
+            }
+
+            if imported_suffix != name.as_str() {
+                self.add_diagnostic(
+                    format!(
+                        "Selective import alias '{}' must end with '{}'",
+                        alias_text,
+                        name.as_str()
+                    ),
+                    alias_node.span(),
+                );
+                return None;
+            }
+
+            Some(Name::new(prefix))
+        });
+
+        Some(SelectiveImport {
+            name,
+            qualifier,
+            span: node.span(),
+        })
     }
 
-    fn lower_import_statement(&self, node: SyntaxNode) -> Option<Import> {
+    fn lower_import_statement(&mut self, node: SyntaxNode) -> Option<Import> {
         if node.kind() != SyntaxKind::IMPORT_STATEMENT {
             return None;
         }
@@ -231,21 +285,22 @@ impl LoweringContext {
 
         match kind_node.kind() {
             SyntaxKind::WILDCARD_IMPORT => {
-                let path = Self::find_module_path_node(kind_node, "path")
-                    .and_then(Self::lower_module_path)?;
+                let path = Self::find_library_path_node(kind_node, "path")
+                    .and_then(Self::lower_library_path)?;
 
                 let alias = kind_node
                     .child_by_field("alias")
                     .map(|alias_node| Name::new(alias_node.text()));
 
                 Some(Import {
-                    path,
+                    library_path: path,
                     kind: ImportKind::Wildcard { alias },
+                    span: node.span(),
                 })
             }
             SyntaxKind::SELECTIVE_IMPORT_LIST => {
-                let path =
-                    Self::find_module_path_node(node, "path").and_then(Self::lower_module_path)?;
+                let path = Self::find_library_path_node(node, "path")
+                    .and_then(Self::lower_library_path)?;
 
                 let selective_entries = kind_node
                     .children()
@@ -253,22 +308,15 @@ impl LoweringContext {
                     .collect();
 
                 Some(Import {
-                    path,
+                    library_path: path,
                     kind: ImportKind::Selective {
                         entries: selective_entries,
                     },
+                    span: node.span(),
                 })
             }
             _ => None,
         }
-    }
-
-    fn lower_contenttype_statement(&self, node: SyntaxNode) -> Option<String> {
-        if node.kind() != SyntaxKind::CONTENTTYPE_STATEMENT {
-            return None;
-        }
-
-        Self::find_module_path_node(node, "path").and_then(Self::lower_module_path)
     }
 
     fn lower_sequence_expr_from_children(&mut self, node: SyntaxNode) -> ExprId {
@@ -388,6 +436,7 @@ impl LoweringContext {
             .child_by_field("name")
             .map(|n| Name::new(n.text()))
             .unwrap_or_else(|| Name::new("unknown"));
+        let visibility = Self::lower_visibility(node);
         let props = self.lower_record_fields_from_node(signature, false);
 
         let mut emits = Vec::new();
@@ -404,6 +453,7 @@ impl LoweringContext {
                             Name::new(&format!("{}.{}", name.as_str(), emit_name.as_str()));
                         let record = RecordDef {
                             name: action_name.clone(),
+                            visibility,
                             kind: RecordKind::Action,
                             is_abstract: false,
                             base: None,
@@ -486,6 +536,7 @@ impl LoweringContext {
             name.clone(),
             PredeclaredComponent {
                 name,
+                visibility,
                 props,
                 emits,
                 span: node.span(),
@@ -511,9 +562,23 @@ impl LoweringContext {
 
         let body_node = node.child_by_field("body");
         let predeclared = self.predeclared_components.get(&name).cloned();
-        let (props, emits, span) = predeclared
-            .map(|component| (component.props, component.emits, component.span))
-            .unwrap_or_else(|| (Vec::new(), Vec::new(), node.span()));
+        let (visibility, props, emits, span) = predeclared
+            .map(|component| {
+                (
+                    component.visibility,
+                    component.props,
+                    component.emits,
+                    component.span,
+                )
+            })
+            .unwrap_or_else(|| {
+                (
+                    Self::lower_visibility(node),
+                    Vec::new(),
+                    Vec::new(),
+                    node.span(),
+                )
+            });
 
         self.push_scope();
         for prop in &props {
@@ -532,6 +597,7 @@ impl LoweringContext {
 
         Component {
             name,
+            visibility,
             props,
             emits,
             state,
@@ -1214,7 +1280,38 @@ impl LoweringContext {
 
         TypeAlias {
             name,
+            visibility: Self::lower_visibility(node),
             ty,
+            span: node.span(),
+        }
+    }
+
+    /// Lowers a top-level value definition.
+    pub fn lower_value_definition(&mut self, node: SyntaxNode) -> ValueDef {
+        let name = node
+            .child_by_field("name")
+            .map(|n| Name::new(n.text()))
+            .unwrap_or_else(|| Name::new("unknown"));
+        let ty = node
+            .child_by_field("type")
+            .map(|type_node| self.lower_type(type_node));
+        let value = node
+            .child_by_field("value")
+            .map(|value_node| self.lower_expr(value_node))
+            .unwrap_or_else(|| self.error_expr(node.span()));
+        let visibility = Self::lower_visibility(node);
+
+        let value_ty = ty
+            .as_ref()
+            .map(TypeTag::from_type_ref)
+            .unwrap_or_else(|| self.expr_type(value));
+        self.define_name(&name, value_ty);
+
+        ValueDef {
+            name,
+            visibility,
+            ty,
+            value,
             span: node.span(),
         }
     }
@@ -1237,6 +1334,7 @@ impl LoweringContext {
 
         RecordDef {
             name,
+            visibility: Self::lower_visibility(node),
             kind,
             is_abstract: node.child_by_field("abstract").is_some(),
             base: node
@@ -1269,6 +1367,7 @@ impl LoweringContext {
 
         EnumDef {
             name,
+            visibility: Self::lower_visibility(node),
             members,
             span: node.span(),
         }
@@ -1336,6 +1435,7 @@ impl LoweringContext {
 
         Function {
             name,
+            visibility: Self::lower_visibility(node),
             params,
             return_type,
             body,
@@ -1504,11 +1604,6 @@ impl LoweringContext {
         // Process all top-level items
         for child in root.children() {
             match child.kind() {
-                SyntaxKind::CONTENTTYPE_STATEMENT => {
-                    if self.module.content_type.is_none() {
-                        self.module.content_type = self.lower_contenttype_statement(child);
-                    }
-                }
                 SyntaxKind::IMPORT_STATEMENT => {
                     if let Some(import) = self.lower_import_statement(child) {
                         self.module.imports.push(import);
@@ -1517,6 +1612,10 @@ impl LoweringContext {
                 SyntaxKind::FUNCTION_DEFINITION => {
                     let func = self.lower_function(child);
                     self.module.add_item(Item::Function(func));
+                }
+                SyntaxKind::VALUE_DEFINITION => {
+                    let value = self.lower_value_definition(child);
+                    self.module.add_item(Item::Value(value));
                 }
                 SyntaxKind::COMPONENT_DEFINITION => {
                     let component = self.lower_component_definition(child);
@@ -1561,6 +1660,7 @@ impl LoweringContext {
                     // Create the implicit 'root' function
                     let root_func = Function {
                         name: Name::new("root"),
+                        visibility: Visibility::Public,
                         params: vec![],
                         return_type: None,
                         body,
@@ -1605,28 +1705,13 @@ mod tests {
         let ctx = LoweringContext::new(SourceId::new(0));
         let module = ctx.finish();
         assert_eq!(module.items().len(), 0);
-        assert!(module.content_type.is_none());
-        assert!(module.imports.is_empty());
-    }
-
-    #[test]
-    fn test_lower_contenttype_statement() {
-        let source = r#"contenttype "./prelude"
-<App />"#;
-        let parse_result = parse_str(source, "contenttype.nx");
-
-        let tree = parse_result.tree.expect("Should parse contenttype module");
-        let root = tree.root();
-        let module = lower(root, SourceId::new(0));
-
-        assert_eq!(module.content_type, Some("./prelude".to_string()));
         assert!(module.imports.is_empty());
     }
 
     #[test]
     fn test_lower_wildcard_imports() {
-        let source = r#"import "./ui.nx"
-import "./controls.nx" as UI
+        let source = r#"import "./ui"
+import "./controls" as UI
 <UI.Root />"#;
         let parse_result = parse_str(source, "imports.nx");
 
@@ -1637,7 +1722,7 @@ import "./controls.nx" as UI
         assert_eq!(module.imports.len(), 2);
 
         let first = &module.imports[0];
-        assert_eq!(first.path, "./ui.nx");
+        assert_eq!(first.library_path, "./ui");
         match &first.kind {
             ImportKind::Wildcard { alias } => {
                 assert!(alias.is_none());
@@ -1646,7 +1731,7 @@ import "./controls.nx" as UI
         }
 
         let second = &module.imports[1];
-        assert_eq!(second.path, "./controls.nx");
+        assert_eq!(second.library_path, "./controls");
         match &second.kind {
             ImportKind::Wildcard { alias } => {
                 assert_eq!(
@@ -1661,7 +1746,7 @@ import "./controls.nx" as UI
 
     #[test]
     fn test_lower_selective_imports() {
-        let source = r#"import { Button, Stack as LayoutStack } from "https://example.com/ui.nx"
+        let source = r#"import { Button, Stack as Layout.Stack } from "https://example.com/ui.zip"
 <Button />"#;
         let parse_result = parse_str(source, "selective-imports.nx");
 
@@ -1671,20 +1756,119 @@ import "./controls.nx" as UI
 
         assert_eq!(module.imports.len(), 1);
         let import = &module.imports[0];
-        assert_eq!(import.path, "https://example.com/ui.nx");
+        assert_eq!(import.library_path, "https://example.com/ui.zip");
         match &import.kind {
             ImportKind::Selective { entries } => {
                 assert_eq!(entries.len(), 2);
                 assert_eq!(entries[0].name.as_str(), "Button");
-                assert!(entries[0].alias.is_none());
+                assert!(entries[0].qualifier.is_none());
                 assert_eq!(entries[1].name.as_str(), "Stack");
                 assert_eq!(
-                    entries[1].alias.as_ref().map(Name::as_str),
-                    Some("LayoutStack")
+                    entries[1].qualifier.as_ref().map(Name::as_str),
+                    Some("Layout")
                 );
             }
             other => panic!("Expected selective import, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_lower_invalid_selective_import_alias_reports_diagnostic() {
+        let source = r#"import { Stack as Layout.Panel } from "../layout"
+<Stack />"#;
+        let parse_result = parse_str(source, "invalid-selective-import.nx");
+
+        let tree = parse_result
+            .tree
+            .expect("Invalid selective alias should still parse");
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        assert_eq!(module.imports.len(), 1);
+        let import = &module.imports[0];
+        match &import.kind {
+            ImportKind::Selective { entries } => {
+                assert_eq!(entries.len(), 1);
+                assert_eq!(entries[0].name.as_str(), "Stack");
+                assert!(entries[0].qualifier.is_none());
+            }
+            other => panic!("Expected selective import, got {:?}", other),
+        }
+
+        assert!(
+            module
+                .diagnostics()
+                .iter()
+                .any(|diag| diag.message.contains("must end with 'Stack'")),
+            "Expected invalid selective alias diagnostic, got {:?}",
+            module.diagnostics()
+        );
+    }
+
+    #[test]
+    fn test_lower_visibility_modifiers() {
+        let source = r#"private let footerText: string = "Built with NX"
+private action SaveRequested = {}
+internal component <SearchBox /> = { <input /> }
+type Theme = string
+private let <Render /> = <div />
+internal enum Mode = Light | Dark"#;
+        let parse_result = parse_str(source, "visibility.nx");
+
+        let tree = parse_result.tree.expect("Visibility source should parse");
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        let save_requested = module
+            .find_item("SaveRequested")
+            .expect("Expected lowered action record");
+        assert_eq!(save_requested.visibility(), Visibility::Private);
+
+        let footer_text = module
+            .find_item("footerText")
+            .expect("Expected lowered top-level value");
+        assert_eq!(footer_text.visibility(), Visibility::Private);
+
+        let search_box = module
+            .find_item("SearchBox")
+            .expect("Expected lowered component");
+        assert_eq!(search_box.visibility(), Visibility::Internal);
+
+        let theme = module
+            .find_item("Theme")
+            .expect("Expected lowered type alias");
+        assert_eq!(theme.visibility(), Visibility::Public);
+
+        let render = module
+            .find_item("Render")
+            .expect("Expected lowered function");
+        assert_eq!(render.visibility(), Visibility::Private);
+
+        let mode = module.find_item("Mode").expect("Expected lowered enum");
+        assert_eq!(mode.visibility(), Visibility::Internal);
+    }
+
+    #[test]
+    fn test_lower_top_level_value_definition() {
+        let source = r#"internal let title: string = "NX""#;
+        let parse_result = parse_str(source, "value.nx");
+        let tree = parse_result.tree.expect("Value source should parse");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let value = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Value(value) => Some(value),
+                _ => None,
+            })
+            .expect("Expected lowered top-level value");
+
+        assert_eq!(value.name.as_str(), "title");
+        assert_eq!(value.visibility, Visibility::Internal);
+        assert!(
+            matches!(value.ty.as_ref(), Some(TypeRef::Name(name)) if name.as_str() == "string")
+        );
     }
 
     #[test]

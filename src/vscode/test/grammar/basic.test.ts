@@ -82,6 +82,37 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(line, tokens, '=')).to.include('keyword.operator.assignment.nx');
   });
 
+  it('highlights import keywords and visibility modifiers', function () {
+    const importLine = 'import { Button as Ui.Button, Input } from "../ui"';
+    const importTokens = grammar.tokenizeLine(importLine, null).tokens;
+    expect(scopesForSubstring(importLine, importTokens, 'import')).to.include('keyword.control.import.nx');
+    expect(scopesForSubstring(importLine, importTokens, 'as')).to.include('keyword.control.import.nx');
+    expect(scopesForSubstring(importLine, importTokens, 'from')).to.include('keyword.control.import.nx');
+
+    const typeLine = 'internal type Entity = {';
+    const typeTokens = grammar.tokenizeLine(typeLine, null).tokens;
+    expect(scopesForSubstring(typeLine, typeTokens, 'internal')).to.include('storage.modifier.visibility.nx');
+    expect(scopesForSubstring(typeLine, typeTokens, 'type')).to.include('keyword.declaration.type.nx');
+
+    const valueLine = 'private let totalCount: int = 42';
+    const valueTokens = grammar.tokenizeLine(valueLine, null).tokens;
+    expect(scopesForSubstring(valueLine, valueTokens, 'private')).to.include('storage.modifier.visibility.nx');
+    expect(scopesForSubstring(valueLine, valueTokens, 'let')).to.include('keyword.declaration.let.nx');
+    expect(scopesForSubstring(valueLine, valueTokens, 'totalCount')).to.include('entity.name.variable.nx');
+
+    const actionLine = 'action Save = {';
+    const actionTokens = grammar.tokenizeLine(actionLine, null).tokens;
+    expect(scopesForSubstring(actionLine, actionTokens, 'action')).to.include('keyword.declaration.type.nx');
+  });
+
+  it('highlights component definitions with visibility modifiers', function () {
+    const line = 'private component <SearchBox placeholder:string /> = {';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    expect(scopesForSubstring(line, tokens, 'private')).to.include('storage.modifier.visibility.nx');
+    expect(scopesForSubstring(line, tokens, 'component')).to.include('keyword.declaration.component.nx');
+    expect(scopesForSubstring(line, tokens, 'SearchBox')).to.include('entity.name.type.nx');
+  });
+
   it('highlights enum definitions with leading pipe', function () {
     const line = 'enum Status = | Active | Pending | Disabled';
     const { tokens } = grammar.tokenizeLine(line, null);

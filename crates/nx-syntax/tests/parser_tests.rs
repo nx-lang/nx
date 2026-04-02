@@ -1065,8 +1065,8 @@ fn test_parse_module_with_definitions_and_element() {
 
 #[test]
 fn test_parse_wildcard_and_namespace_imports() {
-    let source = r#"import "./tokens.nx"
-import "./ui/controls.nx" as UI"#;
+    let source = r#"import "./tokens"
+import "../ui" as UI"#;
     let result = parse_str(source, "test.nx");
 
     assert!(
@@ -1093,11 +1093,11 @@ import "./ui/controls.nx" as UI"#;
     assert_eq!(
         wildcard_kind
             .child_by_field("path")
-            .expect("Wildcard import should expose module path")
+            .expect("Wildcard import should expose library path")
             .child_by_field("value")
-            .expect("module_path should expose value")
+            .expect("library_path should expose value")
             .text(),
-        r#""./tokens.nx""#
+        r#""./tokens""#
     );
 
     let namespace_kind = imports[1]
@@ -1115,7 +1115,7 @@ import "./ui/controls.nx" as UI"#;
 
 #[test]
 fn test_parse_selective_imports_with_aliases() {
-    let source = r#"import { Button, Stack as LayoutStack } from "https://example.com/ui.nx""#;
+    let source = r#"import { Button, Stack as Layout.Stack } from "https://example.com/ui.zip""#;
     let result = parse_str(source, "test.nx");
 
     assert!(
@@ -1163,46 +1163,56 @@ fn test_parse_selective_imports_with_aliases() {
             .child_by_field("alias")
             .expect("Aliased selective import should expose alias")
             .text(),
-        "LayoutStack"
+        "Layout.Stack"
     );
 
-    let module_path = import
+    let library_path = import
         .child_by_field("path")
-        .expect("Import should expose module path");
+        .expect("Import should expose library path");
     assert_eq!(
-        module_path
+        library_path
             .child_by_field("value")
-            .expect("module_path should expose value")
+            .expect("library_path should expose value")
             .text(),
-        r#""https://example.com/ui.nx""#
+        r#""https://example.com/ui.zip""#
     );
 }
 
 #[test]
-fn test_parse_contenttype_then_imports() {
-    let source = r#"contenttype "./prelude"
-import "./tokens.nx"
-let title = "NX""#;
+fn test_parse_visibility_modifiers() {
+    let source = r#"private let title = "NX"
+internal component <Button/> = { <button/> }
+let subtitle = "Runtime""#;
     let result = parse_str(source, "test.nx");
 
     assert!(
         result.is_ok(),
-        "contenttype before imports should parse. Errors: {:?}",
+        "Visibility modifiers should parse. Errors: {:?}",
         result.errors
     );
 
     let root = result.root().expect("Should have root node");
-    let first = root.children().next().expect("Module should have children");
-    assert_eq!(first.kind(), SyntaxKind::CONTENTTYPE_STATEMENT);
+    let children: Vec<_> = root.children().collect();
+    assert_eq!(children[0].kind(), SyntaxKind::VALUE_DEFINITION);
     assert_eq!(
-        first
-            .child_by_field("path")
-            .expect("contenttype should expose path")
-            .child_by_field("value")
-            .expect("module_path should expose value")
+        children[0]
+            .child_by_field("visibility")
+            .expect("private value should expose visibility")
             .text(),
-        r#""./prelude""#
+        "private"
     );
+    assert_eq!(
+        children[1]
+            .child_by_field("visibility")
+            .expect("internal component should expose visibility")
+            .text(),
+        "internal"
+    );
+    assert!(
+        children[2].child_by_field("visibility").is_none(),
+        "public declaration should omit visibility field"
+    );
+    assert_eq!(children[2].kind(), SyntaxKind::VALUE_DEFINITION);
 }
 
 #[test]
@@ -1218,32 +1228,14 @@ fn test_parse_import_without_from_is_error() {
 }
 
 #[test]
-fn test_parse_contenttype_after_import_is_error() {
-    let source = r#"import "./ui.nx"
-contenttype "./prelude""#;
+fn test_parse_removed_contenttype_is_error() {
+    let source = r#"contenttype "./prelude""#;
     let result = parse_str(source, "test.nx");
 
-    assert!(!result.is_ok(), "contenttype after import should fail");
+    assert!(!result.is_ok(), "Removed contenttype should fail");
     assert!(
         !result.errors.is_empty(),
-        "contenttype after import should produce parse errors"
-    );
-}
-
-#[test]
-fn test_parse_multiple_contenttype_is_error() {
-    let source = r#"contenttype "./prelude.nx"
-contenttype "./secondary.nx"
-let title = "NX""#;
-    let result = parse_str(source, "test.nx");
-
-    assert!(
-        !result.is_ok(),
-        "Multiple contenttype directives should fail"
-    );
-    assert!(
-        !result.errors.is_empty(),
-        "Multiple contenttype directives should produce parse errors"
+        "Removed contenttype should produce parse errors"
     );
 }
 

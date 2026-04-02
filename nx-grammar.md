@@ -17,37 +17,46 @@ language bindings. That is also a reasonable limit for other implementations.
 
 ```ebnf
 ModuleDefinition ::=
-    [ContentTypeStatement]
     {ImportStatement}
-    { TypeDefinition | ValueDefinition | FunctionDefinition | ComponentDefinition }
+    { ActionDefinition | TypeDefinition | ValueDefinition | FunctionDefinition | ComponentDefinition }
     [Element]
-
-ContentTypeStatement ::=
-    "contenttype" ModulePath
 
 ImportStatement ::=
     WildcardImportStatement
     | SelectiveImportStatement
 
 WildcardImportStatement ::=
-    "import" ModulePath ["as" Identifier]
+    "import" LibraryPath ["as" Identifier]
 
 SelectiveImportStatement ::=
-    "import" SelectiveImportList "from" ModulePath
+    "import" SelectiveImportList "from" LibraryPath
 
 SelectiveImportList ::=
     "{" [SelectiveImport {"," SelectiveImport} [","]] "}"
 
 SelectiveImport ::=
-    Identifier ["as" Identifier]
+    Identifier ["as" QualifiedImportAlias]
 
-ModulePath ::=
+QualifiedImportAlias ::=
+    Identifier "." Identifier
+
+LibraryPath ::=
     StringLiteral
 ```
 
-A module can include an optional `contenttype` directive, followed by any number of imports and
-definitions, including `component` declarations, with an optional trailing root `Element` for
-rendered markup.
+A module can include any number of imports, followed by top-level declarations and an optional
+trailing root `Element` for rendered markup. Imports target libraries rather than individual source
+files. A local library is a directory containing `.nx` files, and every `.nx` file under that
+directory contributes declarations to the imported library recursively.
+
+Imports introduce unqualified names by default. `import "<library>" as Prefix` keeps imported names
+under `Prefix.Name`, while `import { Name as Prefix.Name } from "<library>"` adds a qualified
+prefix for just that imported declaration. The qualified selective alias must contain exactly one
+dot, and its final identifier must match the imported declaration name.
+
+Declarations are public by default. `private` restricts a declaration to its defining file, and
+`internal` makes it visible to other files in the same library while hiding it from external
+consumers.
 
 <a id="types"></a>
 ## Types
@@ -59,15 +68,24 @@ TypeDefinition ::=
     | TypeAliasDefinition
 
 EnumDefinition ::=
-    "enum" Identifier "=" ["|"] Identifier { "|" Identifier }
+    [VisibilityModifier] "enum" Identifier "=" ["|"] Identifier { "|" Identifier }
 
 RecordDefinition ::=
-    ["abstract"] "type" Identifier ["extends" QualifiedName] "=" "{"
+    [VisibilityModifier] ["abstract"] "type" Identifier ["extends" QualifiedName] "=" "{"
         {PropertyDefinition}
     "}"
 
 TypeAliasDefinition ::=
-    "type" Identifier "=" TypeDeclaration
+    [VisibilityModifier] "type" Identifier "=" TypeDeclaration
+
+ActionDefinition ::=
+    [VisibilityModifier] "action" Identifier "=" "{"
+        {PropertyDefinition}
+    "}"
+
+VisibilityModifier ::=
+    "private"
+    | "internal"
 
 TypeDeclaration ::=
     PrimitiveType [TypeModifier]
@@ -98,7 +116,7 @@ Only abstract records may appear in the `extends` clause.
 
 ```ebnf
 ValueDefinition ::=
-    "let" Identifier [":" TypeDeclaration] "=" RhsExpression
+    [VisibilityModifier] "let" Identifier [":" TypeDeclaration] "=" RhsExpression
 ```
 
 <a id="functions"></a>
@@ -110,10 +128,10 @@ FunctionDefinition ::=
     | ParenFunctionDefinition
 
 ElementFunctionDefinition ::=
-    "let" "<" ElementName {PropertyDefinition} "/>" [":" TypeDeclaration] "=" RhsExpression
+    [VisibilityModifier] "let" "<" ElementName {PropertyDefinition} "/>" [":" TypeDeclaration] "=" RhsExpression
 
 ParenFunctionDefinition ::=
-    "let" Identifier "(" [PropertyDefinition {"," PropertyDefinition}] ")" [":" TypeDeclaration] "=" RhsExpression
+    [VisibilityModifier] "let" Identifier "(" [PropertyDefinition {"," PropertyDefinition}] ")" [":" TypeDeclaration] "=" RhsExpression
 
 PropertyDefinition ::=
     MarkupIdentifier ":" TypeDeclaration ["=" RhsExpression]
@@ -123,7 +141,7 @@ PropertyDefinition ::=
 
 ```ebnf
 ComponentDefinition ::=
-    "component" ComponentSignature "=" ComponentBody
+    [VisibilityModifier] "component" ComponentSignature "=" ComponentBody
 
 ComponentSignature ::=
     "<" ElementName {PropertyDefinition} [EmitsGroup] "/>"

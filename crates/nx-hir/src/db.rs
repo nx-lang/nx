@@ -96,7 +96,7 @@ fn lower_to_hir(db: &dyn NxDatabase, file: SourceId) -> Arc<Module> {
 ///
 /// // Lower to HIR (derived query - automatically cached)
 /// let module = db.lower_to_hir(file);
-/// assert_eq!(module.items().len(), 0); // No top-level items in "let x = 42;"
+/// assert_eq!(module.items().len(), 1); // Top-level value declaration
 /// ```
 #[salsa::database(NxDatabaseStorage)]
 #[derive(Default)]

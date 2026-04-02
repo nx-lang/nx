@@ -57,6 +57,7 @@ impl<'a> InferenceContext<'a> {
         };
         ctx.register_type_definitions();
         ctx.register_function_signatures();
+        ctx.register_value_bindings();
         ctx
     }
 
@@ -65,6 +66,19 @@ impl<'a> InferenceContext<'a> {
         let id = self.next_var_id;
         self.next_var_id += 1;
         Type::var(id)
+    }
+
+    fn flattened_expr_name(&self, expr_id: ExprId) -> Option<Name> {
+        match self.module.expr(expr_id) {
+            ast::Expr::Ident(name) => Some(name.clone()),
+            ast::Expr::Member { base, member, .. } => {
+                let mut name = self.flattened_expr_name(*base)?.as_str().to_string();
+                name.push('.');
+                name.push_str(member.as_str());
+                Some(Name::new(&name))
+            }
+            _ => None,
+        }
     }
 
     /// Infers the type of an expression.
@@ -187,7 +201,37 @@ impl<'a> InferenceContext<'a> {
 
             // Member access
             ast::Expr::Member { base, member, span } => {
-                if let Some(enum_info) = self.enum_info_for_expr(*base) {
+                if let Some(name) = self.flattened_expr_name(expr_id) {
+                    if let Some(ty) = self.env.lookup(&name) {
+                        ty.clone()
+                    } else if let Some(enum_info) =
+                        self.enum_info_from_name(&name, &mut FxHashSet::default())
+                    {
+                        Type::Enum(enum_info.clone())
+                    } else if let Some(enum_info) = self.enum_info_for_expr(*base) {
+                        if enum_info.members.iter().any(|m| m == member) {
+                            Type::Enum(enum_info.clone())
+                        } else {
+                            self.error(
+                                "undefined-enum-member",
+                                format!(
+                                    "Enum '{}' has no member named '{}'",
+                                    enum_info.name, member
+                                ),
+                                *span,
+                            );
+                            Type::Error
+                        }
+                    } else {
+                        let _base_ty = self.infer_expr(*base);
+                        self.error(
+                            "not-implemented",
+                            format!("Member access not yet implemented: .{}", member),
+                            *span,
+                        );
+                        Type::Error
+                    }
+                } else if let Some(enum_info) = self.enum_info_for_expr(*base) {
                     if enum_info.members.iter().any(|m| m == member) {
                         Type::Enum(enum_info.clone())
                     } else {
@@ -842,6 +886,29 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
+    fn register_value_bindings(&mut self) {
+        for item in self.module.items() {
+            if let nx_hir::Item::Value(value) = item {
+                let actual = self.infer_expr(value.value);
+                let binding_ty = if let Some(ty_ref) = value.ty.as_ref() {
+                    let expected = self.type_from_type_ref(ty_ref);
+                    self.check_typed_binding(
+                        &actual,
+                        &expected,
+                        value.span,
+                        "value-type-mismatch",
+                        format!("Initializer for value '{}'", value.name),
+                    );
+                    expected
+                } else {
+                    actual
+                };
+
+                self.env.bind(value.name.clone(), binding_ty);
+            }
+        }
+    }
+
     fn resolve_function_definition(&self, name: &Name) -> Option<nx_hir::Function> {
         match self.module.find_item(name.as_str()) {
             Some(nx_hir::Item::Function(func)) => Some(func.clone()),
@@ -1079,6 +1146,7 @@ mod tests {
 
         let function = Function {
             name: Name::new("Button"),
+            visibility: nx_hir::Visibility::Public,
             params: vec![param],
             return_type: None,
             body,
@@ -1109,6 +1177,7 @@ mod tests {
         let body = module.alloc_expr(Expr::Ident(Name::new("value")));
         let function = Function {
             name: Name::new("identity"),
+            visibility: nx_hir::Visibility::Public,
             params: vec![Param::new(Name::new("value"), TypeRef::name("int"), span)],
             return_type: None,
             body,
@@ -1157,6 +1226,7 @@ mod tests {
         });
         let add_fn = Function {
             name: Name::new("add"),
+            visibility: nx_hir::Visibility::Public,
             params: vec![
                 Param::new(Name::new("a"), TypeRef::name("int"), span),
                 Param::new(Name::new("b"), TypeRef::name("int"), span),
@@ -1178,6 +1248,7 @@ mod tests {
         });
         let double_fn = Function {
             name: Name::new("double"),
+            visibility: nx_hir::Visibility::Public,
             params: vec![Param::new(Name::new("value"), TypeRef::name("int"), span)],
             return_type: Some(TypeRef::name("int")),
             body: double_body,
@@ -1202,6 +1273,7 @@ mod tests {
         });
         let compute_fn = Function {
             name: Name::new("compute"),
+            visibility: nx_hir::Visibility::Public,
             params: vec![Param::new(Name::new("n"), TypeRef::name("int"), span)],
             return_type: Some(TypeRef::name("int")),
             body: compute_body,
@@ -1241,6 +1313,7 @@ mod tests {
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
         let enum_def = EnumDef {
             name: Name::new("Direction"),
+            visibility: nx_hir::Visibility::Public,
             members: vec![
                 EnumMember {
                     name: Name::new("North"),
@@ -1281,6 +1354,7 @@ mod tests {
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
         let enum_def = EnumDef {
             name: Name::new("Status"),
+            visibility: nx_hir::Visibility::Public,
             members: vec![EnumMember {
                 name: Name::new("Active"),
                 span,
@@ -1309,6 +1383,7 @@ mod tests {
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
         let enum_def = EnumDef {
             name: Name::new("Status"),
+            visibility: nx_hir::Visibility::Public,
             members: vec![EnumMember {
                 name: Name::new("Active"),
                 span,
@@ -1318,6 +1393,7 @@ mod tests {
         module.add_item(Item::Enum(enum_def));
         let alias = TypeAlias {
             name: Name::new("State"),
+            visibility: nx_hir::Visibility::Public,
             ty: ast::TypeRef::name("Status"),
             span,
         };
@@ -1346,6 +1422,7 @@ mod tests {
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
         let enum_def = EnumDef {
             name: Name::new("Direction"),
+            visibility: nx_hir::Visibility::Public,
             members: vec![EnumMember {
                 name: Name::new("North"),
                 span,
@@ -1362,6 +1439,7 @@ mod tests {
         });
         let func = Function {
             name: Name::new("north"),
+            visibility: nx_hir::Visibility::Public,
             params: vec![],
             return_type: None,
             body: member,

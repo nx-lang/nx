@@ -3,6 +3,8 @@
 
 ;; Keywords
 [
+  "private"
+  "internal"
   "let"
   "action"
   "component"
@@ -15,7 +17,6 @@
   "import"
   "from"
   "as"
-  "contenttype"
   "if"
   "else"
   "for"

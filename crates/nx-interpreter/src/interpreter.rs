@@ -228,6 +228,7 @@ impl Interpreter {
 
         // T011: Create execution context
         let mut ctx = ExecutionContext::with_limits(limits);
+        self.bind_top_level_values(module, &mut ctx)?;
 
         let coerced_args =
             self.coerce_arguments_for_params(module, args, &function.params, "function call")?;
@@ -279,6 +280,7 @@ impl Interpreter {
         let action = self.validate_handler_input(module, action, action_name, component, emit)?;
 
         let mut ctx = ExecutionContext::with_limits(limits);
+        self.bind_top_level_values(module, &mut ctx)?;
         for (name, value) in captured {
             ctx.define_variable(name.clone(), value.clone());
         }
@@ -298,6 +300,7 @@ impl Interpreter {
     ) -> Result<ComponentInitResult, RuntimeError> {
         let component = self.find_component(module, component_name)?;
         let mut ctx = ExecutionContext::with_limits(limits);
+        self.bind_top_level_values(module, &mut ctx)?;
         let normalized_props =
             self.normalize_component_props(module, &mut ctx, component, props)?;
         let normalized_state =
@@ -387,6 +390,42 @@ impl Interpreter {
             _ => Err(RuntimeError::new(RuntimeErrorKind::ComponentNotFound {
                 name: SmolStr::new(name),
             })),
+        }
+    }
+
+    fn bind_top_level_values(
+        &self,
+        module: &Module,
+        ctx: &mut ExecutionContext,
+    ) -> Result<(), RuntimeError> {
+        for item in module.items() {
+            if let Item::Value(value) = item {
+                let mut evaluated = self.eval_expr(module, ctx, value.value)?;
+                if let Some(ty) = value.ty.as_ref() {
+                    evaluated = self.coerce_value_to_type(
+                        module,
+                        evaluated,
+                        ty,
+                        &format!("initializer for '{}'", value.name.as_str()),
+                    )?;
+                }
+                ctx.define_variable(SmolStr::new(value.name.as_str()), evaluated);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn flattened_expr_name(&self, module: &Module, expr_id: ExprId) -> Option<String> {
+        match module.expr(expr_id) {
+            ast::Expr::Ident(name) => Some(name.as_str().to_string()),
+            ast::Expr::Member { base, member, .. } => {
+                let mut name = self.flattened_expr_name(module, *base)?;
+                name.push('.');
+                name.push_str(member.as_str());
+                Some(name)
+            }
+            _ => None,
         }
     }
 
@@ -1108,47 +1147,48 @@ impl Interpreter {
         func_expr: ExprId,
         args: &[ExprId],
     ) -> Result<Value, RuntimeError> {
-        // Evaluate the function expression (should be an identifier)
-        let func_name = match module.expr(func_expr) {
-            ast::Expr::Ident(name) => name.as_str(),
-            _ => {
-                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                    expected: "function name".to_string(),
-                    actual: "complex expression".to_string(),
-                    operation: "function call".to_string(),
-                }))
-            }
-        };
+        let func_name = self.flattened_expr_name(module, func_expr).ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: "function name".to_string(),
+                actual: "complex expression".to_string(),
+                operation: "function call".to_string(),
+            })
+        })?;
 
         let mut arg_values = Vec::with_capacity(args.len());
         for arg_expr in args {
             arg_values.push(self.eval_expr(module, ctx, *arg_expr)?);
         }
 
-        match module.find_item(func_name) {
+        match module.find_item(func_name.as_str()) {
             Some(Item::Function(function)) => {
-                self.eval_function_call(module, ctx, func_name, function, arg_values)
+                self.eval_function_call(module, ctx, func_name.as_str(), function, arg_values)
             }
-            Some(Item::Record(record_def)) => {
-                self.eval_record_constructor_call(module, ctx, func_name, record_def, arg_values)
-            }
+            Some(Item::Record(record_def)) => self.eval_record_constructor_call(
+                module,
+                ctx,
+                func_name.as_str(),
+                record_def,
+                arg_values,
+            ),
             Some(Item::TypeAlias(_)) => {
-                if let Some(record_def) = self.resolve_record_definition(module, func_name) {
+                if let Some(record_def) = self.resolve_record_definition(module, func_name.as_str())
+                {
                     self.eval_record_constructor_call(
                         module,
                         ctx,
-                        func_name,
+                        func_name.as_str(),
                         &record_def,
                         arg_values,
                     )
                 } else {
                     Err(RuntimeError::new(RuntimeErrorKind::FunctionNotFound {
-                        name: SmolStr::new(func_name),
+                        name: SmolStr::new(func_name.as_str()),
                     }))
                 }
             }
             _ => Err(RuntimeError::new(RuntimeErrorKind::FunctionNotFound {
-                name: SmolStr::new(func_name),
+                name: SmolStr::new(func_name.as_str()),
             })),
         }
     }
@@ -1592,6 +1632,14 @@ impl Interpreter {
         base_expr: ExprId,
         member: &Name,
     ) -> Result<Value, RuntimeError> {
+        if let Some(mut qualified_name) = self.flattened_expr_name(module, base_expr) {
+            qualified_name.push('.');
+            qualified_name.push_str(member.as_str());
+            if let Some(value) = ctx.try_lookup_variable(&qualified_name) {
+                return Ok(value);
+            }
+        }
+
         if let ast::Expr::Ident(base_name) = module.expr(base_expr) {
             // Prefer runtime value if variable exists
             if let Some(var_value) = ctx.try_lookup_variable(base_name.as_str()) {
@@ -1617,6 +1665,27 @@ impl Interpreter {
             } else {
                 return Err(RuntimeError::new(RuntimeErrorKind::EnumNotFound {
                     name: SmolStr::new(base_name.as_str()),
+                }));
+            }
+        }
+
+        if let Some(base_name) = self.flattened_expr_name(module, base_expr) {
+            let base_name = Name::new(&base_name);
+            if let Some(enum_def) = self.resolve_enum_definition(module, &base_name) {
+                if enum_def
+                    .members
+                    .iter()
+                    .any(|m| m.name.as_str() == member.as_str())
+                {
+                    return Ok(Value::EnumVariant {
+                        type_name: enum_def.name.clone(),
+                        variant: SmolStr::new(member.as_str()),
+                    });
+                }
+
+                return Err(RuntimeError::new(RuntimeErrorKind::EnumMemberNotFound {
+                    enum_name: SmolStr::new(enum_def.name.as_str()),
+                    member: SmolStr::new(member.as_str()),
                 }));
             }
         }
@@ -2379,6 +2448,7 @@ mod tests {
         });
         module.add_item(Item::Function(Function {
             name: Name::new("make"),
+            visibility: nx_hir::Visibility::Public,
             params: vec![],
             return_type: None,
             body,

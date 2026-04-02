@@ -230,6 +230,10 @@ pub fn build_scopes(module: &Module) -> (ScopeManager, Vec<Diagnostic>) {
                 let symbol = Symbol::new(func.name.clone(), SymbolKind::Function, func.span);
                 manager.define(manager.root(), symbol);
             }
+            crate::Item::Value(value) => {
+                let symbol = Symbol::new(value.name.clone(), SymbolKind::Variable, value.span);
+                manager.define(manager.root(), symbol);
+            }
             crate::Item::Component(component) => {
                 let symbol = Symbol::new(
                     component.name.clone(),
@@ -429,6 +433,7 @@ mod tests {
         let body = module.alloc_expr(crate::ast::Expr::Error(span));
         module.add_item(crate::Item::Component(crate::Component {
             name: Name::new("SearchBox"),
+            visibility: crate::Visibility::Public,
             props: Vec::new(),
             emits: Vec::new(),
             state: Vec::new(),
@@ -443,6 +448,29 @@ mod tests {
 
         assert_eq!(symbol.kind, SymbolKind::Component);
         assert_eq!(symbol.name.as_str(), "SearchBox");
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_build_scopes_registers_top_level_value_symbols() {
+        let mut module = Module::new(crate::SourceId::new(0));
+        let span = TextSpan::new(TextSize::from(0), TextSize::from(5));
+        let value = module.alloc_expr(crate::ast::Expr::Literal(crate::ast::Literal::Int(42)));
+        module.add_item(crate::Item::Value(crate::ValueDef {
+            name: Name::new("answer"),
+            visibility: crate::Visibility::Public,
+            ty: Some(crate::ast::TypeRef::name("int")),
+            value,
+            span,
+        }));
+
+        let (manager, diagnostics) = build_scopes(&module);
+        let symbol = manager
+            .resolve(&Name::new("answer"), manager.root())
+            .expect("Expected top-level value symbol in root scope");
+
+        assert_eq!(symbol.kind, SymbolKind::Variable);
+        assert_eq!(symbol.name.as_str(), "answer");
         assert!(diagnostics.is_empty());
     }
 }

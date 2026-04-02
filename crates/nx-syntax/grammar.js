@@ -63,7 +63,6 @@ module.exports = grammar({
   rules: {
     // ===== Module Definition =====
     module_definition: $ => seq(
-      optional($.contenttype_statement),
       repeat($.import_statement),
       repeat(choice(
         $.record_definition,
@@ -87,12 +86,12 @@ module.exports = grammar({
         'import',
         field('kind', $.selective_import_list),
         'from',
-        field('path', $.module_path),
+        field('path', $.library_path),
       ),
     ),
 
     wildcard_import: $ => seq(
-      field('path', $.module_path),
+      field('path', $.library_path),
       optional(seq(
         'as',
         field('alias', $.identifier),
@@ -113,23 +112,24 @@ module.exports = grammar({
       field('name', $.identifier),
       optional(seq(
         'as',
-        field('alias', $.identifier),
+        field('alias', $.qualified_name),
       )),
     ),
 
-    contenttype_statement: $ => seq(
-      'contenttype',
-      field('path', $.module_path),
+    // Semantic wrapper around string_literal so import paths have
+    // a stable node kind for downstream lowering and queries.
+    library_path: $ => seq(
+      field('value', $.string_literal),
     ),
 
-    // Semantic wrapper around string_literal so import/contenttype paths have
-    // a stable node kind for downstream lowering and queries.
-    module_path: $ => seq(
-      field('value', $.string_literal),
+    visibility_modifier: $ => choice(
+      'private',
+      'internal',
     ),
 
     // ===== Type Definitions =====
     record_definition: $ => seq(
+      optional(field('visibility', $.visibility_modifier)),
       optional(field('abstract', 'abstract')),
       'type',
       field('name', $.identifier),
@@ -144,6 +144,7 @@ module.exports = grammar({
     ),
 
     action_definition: $ => seq(
+      optional(field('visibility', $.visibility_modifier)),
       'action',
       field('name', $.identifier),
       '=',
@@ -153,6 +154,7 @@ module.exports = grammar({
     ),
 
     type_definition: $ => seq(
+      optional(field('visibility', $.visibility_modifier)),
       'type',
       field('name', $.identifier),
       '=',
@@ -160,6 +162,7 @@ module.exports = grammar({
     ),
 
     enum_definition: $ => seq(
+      optional(field('visibility', $.visibility_modifier)),
       'enum',
       field('name', $.identifier),
       '=',
@@ -176,6 +179,7 @@ module.exports = grammar({
 
     // ===== Value Definitions =====
     value_definition: $ => seq(
+      optional(field('visibility', $.visibility_modifier)),
       'let',
       field('name', $.identifier),
       optional(seq(
@@ -214,6 +218,7 @@ module.exports = grammar({
 
     // ===== Function Definitions =====
     function_definition: $ => seq(
+      optional(field('visibility', $.visibility_modifier)),
       'let',
       choice(
         seq(
@@ -242,6 +247,7 @@ module.exports = grammar({
     ),
 
     component_definition: $ => seq(
+      optional(field('visibility', $.visibility_modifier)),
       'component',
       field('signature', $.component_signature),
       '=',

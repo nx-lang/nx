@@ -1,4 +1,4 @@
-import "./ui/controls.nx"
+import "./ui"
 contenttype "./schemas/html5"
 
 <App />

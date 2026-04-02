@@ -19,7 +19,7 @@ Traditional stacks force you to juggle two languages (HTML + JS, XML + C#, JSON 
 This is a complete module: imports, types, functions, markup, and logic all live together.
 
 ```nx
-import { Card, Avatar, Stack } from "./ui.nx"
+import { Card, Avatar, Stack } from "./ui"
 
 type <User id:string name:string email:string avatarUrl:string?/>
 
@@ -40,6 +40,8 @@ let <UserCard user:User tone:string = "neutral"/> =
 - The same angle-bracket syntax defines types, values, and components.
 - `if` returns values, so you can branch inline without leaving the expression model.
 - Attributes accept markup, objects, or expressions—no stringly-typed gaps.
+- Imports target library directories, so `./ui` can be a folder of reusable NX files instead of a
+  single barrel module.
 
 ## Where NX Fits
 - **UI composition and design systems**: Define tokens, themes, and components that share one syntax and type system.

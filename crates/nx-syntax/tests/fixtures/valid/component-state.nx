@@ -1,4 +1,4 @@
-import "./ui/text-input.nx" as Ui
+import "./ui" as Ui
 
 component <SearchBox placeholder:string /> = {
   state {

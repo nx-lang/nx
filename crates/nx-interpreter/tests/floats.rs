@@ -544,6 +544,7 @@ fn test_float_in_conditional() {
 
     let func = Function {
         name: Name::new("maxf"),
+        visibility: nx_hir::Visibility::Public,
         params,
         return_type: None,
         body: if_expr,
