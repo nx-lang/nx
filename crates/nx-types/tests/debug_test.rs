@@ -11,13 +11,13 @@ fn debug_undefined_identifier() {
     let result = check_str(source, "undefined.nx");
 
     println!("=== MODULE ===");
-    if let Some(module) = &result.module {
+    if let Some(module) = &result.lowered_module {
         println!("Items: {}", module.items().len());
         for (i, item) in module.items().iter().enumerate() {
             println!("  Item {}: {:?}", i, item);
         }
     } else {
-        println!("Module is None");
+        println!("LoweredModule is None");
     }
 
     println!("\n=== DIAGNOSTICS ===");
@@ -44,7 +44,7 @@ fn debug_type_mismatch() {
     let result = check_str(source, "mismatch.nx");
 
     println!("=== MODULE ===");
-    if let Some(module) = &result.module {
+    if let Some(module) = &result.lowered_module {
         println!("Items: {}", module.items().len());
         for (i, item) in module.items().iter().enumerate() {
             match item {

@@ -353,9 +353,10 @@ mod tests {
 
     #[test]
     fn test_format_action_handler() {
-        let mut module = nx_hir::Module::new(nx_hir::SourceId::new(0));
+        let mut module = nx_hir::LoweredModule::new(nx_hir::SourceId::new(0));
         let body = module.alloc_expr(nx_hir::ast::Expr::Literal(nx_hir::ast::Literal::Null));
         let value = Value::ActionHandler {
+            module_id: nx_interpreter::RuntimeModuleId::new(0),
             component: nx_hir::Name::new("SearchBox"),
             emit: nx_hir::Name::new("SearchSubmitted"),
             action_name: nx_hir::Name::new("SearchSubmitted"),

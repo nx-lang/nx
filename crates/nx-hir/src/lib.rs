@@ -22,7 +22,7 @@
 
 pub mod ast;
 pub mod db;
-pub mod link;
+pub mod import_resolution;
 pub mod lower;
 pub mod records;
 pub mod scope;
@@ -37,7 +37,7 @@ pub use lower::lower;
 
 // Re-export database types
 pub use db::{DatabaseImpl, NxDatabase};
-pub use link::link_local_libraries;
+pub use import_resolution::resolve_local_library_imports;
 
 // Re-export scope and symbol types
 pub use records::{
@@ -49,16 +49,16 @@ pub use scope::{
     build_scopes, check_undefined_identifiers, Scope, ScopeId, ScopeManager, Symbol, SymbolKind,
 };
 
-/// Parses, lowers, links, and validates a module from source text.
+/// Parses, lowers, resolves local imports, and validates a module from source text.
 ///
 /// `file_name` is used for diagnostic labels. Pass `source_path` when library imports should be
 /// resolved from disk; if imports are present and no path is provided, the function returns a
-/// diagnostic explaining that linking requires an on-disk source path.
+/// diagnostic explaining that import resolution requires an on-disk source path.
 pub fn lower_source_module(
     source: &str,
     file_name: &str,
     source_path: Option<&Path>,
-) -> Result<Module, Vec<Diagnostic>> {
+) -> Result<LoweredModule, Vec<Diagnostic>> {
     let parse_result = nx_syntax::parse_str(source, file_name);
 
     if parse_result
@@ -83,11 +83,11 @@ pub fn lower_source_module(
     let mut module = lower(tree.root(), source_id);
 
     if let Some(path) = source_path {
-        module = match link_local_libraries(module, path) {
+        module = match resolve_local_library_imports(module, path) {
             Ok(module) => module,
             Err(error) => {
                 let source_len = u32::try_from(source.len()).expect(
-                    "NX source size should be validated before linking diagnostics are created",
+                    "NX source size should be validated before import-resolution diagnostics are created",
                 );
                 let diagnostic = Diagnostic::error("library-load-error")
                     .with_message(format!("Failed to load library imports: {}", error))
@@ -100,8 +100,9 @@ pub fn lower_source_module(
             }
         };
     } else if !module.imports.is_empty() {
-        let source_len = u32::try_from(source.len())
-            .expect("NX source size should be validated before linking diagnostics are created");
+        let source_len = u32::try_from(source.len()).expect(
+            "NX source size should be validated before import-resolution diagnostics are created",
+        );
         let diagnostic = Diagnostic::error("library-imports-require-path")
             .with_message("Library imports require an on-disk source path")
             .with_label(Label::primary(
@@ -501,7 +502,7 @@ pub type ElementId = Idx<Element>;
 /// and element arenas. Top-level elements are represented as implicit 'root'
 /// functions rather than as separate items.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Module {
+pub struct LoweredModule {
     /// Source file identifier
     pub source_id: SourceId,
     /// Import statements in source order.
@@ -516,7 +517,7 @@ pub struct Module {
     elements: Arena<Element>,
 }
 
-impl Module {
+impl LoweredModule {
     /// Create a new empty module.
     pub fn new(source_id: SourceId) -> Self {
         Self {
@@ -617,13 +618,13 @@ mod tests {
 
     #[test]
     fn test_module_creation() {
-        let module = Module::new(SourceId::new(0));
+        let module = LoweredModule::new(SourceId::new(0));
         assert_eq!(module.items().len(), 0);
     }
 
     #[test]
     fn test_module_find_item() {
-        let mut module = Module::new(SourceId::new(0));
+        let mut module = LoweredModule::new(SourceId::new(0));
 
         let func = Function {
             name: Name::new("test"),

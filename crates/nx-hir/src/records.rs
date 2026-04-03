@@ -1,4 +1,4 @@
-use crate::{ast, Item, Module, Name, RecordDef, RecordField, RecordKind};
+use crate::{ast, Item, LoweredModule, Name, RecordDef, RecordField, RecordKind};
 use nx_diagnostics::TextSpan;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -133,12 +133,12 @@ enum RecordValidationStatus {
     Invalid,
 }
 
-pub fn resolve_record_definition(module: &Module, name: &Name) -> Option<RecordDef> {
+pub fn resolve_record_definition(module: &LoweredModule, name: &Name) -> Option<RecordDef> {
     resolve_record_definition_inner(module, name, &mut FxHashSet::default())
 }
 
 pub fn effective_record_shape_for_name(
-    module: &Module,
+    module: &LoweredModule,
     name: &Name,
 ) -> Result<Option<EffectiveRecordShape>, RecordResolutionError> {
     let Some(record) = resolve_record_definition(module, name) else {
@@ -149,7 +149,7 @@ pub fn effective_record_shape_for_name(
 }
 
 pub fn effective_record_shape(
-    module: &Module,
+    module: &LoweredModule,
     record: &RecordDef,
 ) -> Result<EffectiveRecordShape, RecordResolutionError> {
     let resolved = resolve_record_shape_inner(module, record, &mut Vec::new())?;
@@ -165,7 +165,7 @@ pub fn effective_record_shape(
 }
 
 pub fn is_record_subtype(
-    module: &Module,
+    module: &LoweredModule,
     actual: &Name,
     expected: &Name,
 ) -> Result<bool, RecordResolutionError> {
@@ -187,7 +187,7 @@ pub fn is_record_subtype(
         .any(|ancestor| ancestor == &expected_record.name))
 }
 
-pub fn validate_record_definitions(module: &Module) -> Vec<RecordResolutionError> {
+pub fn validate_record_definitions(module: &LoweredModule) -> Vec<RecordResolutionError> {
     let mut errors = Vec::new();
     let mut statuses = FxHashMap::default();
     let mut stack = Vec::new();
@@ -203,7 +203,7 @@ pub fn validate_record_definitions(module: &Module) -> Vec<RecordResolutionError
 }
 
 fn validate_record_definition(
-    module: &Module,
+    module: &LoweredModule,
     record: &RecordDef,
     statuses: &mut FxHashMap<Name, RecordValidationStatus>,
     stack: &mut Vec<Name>,
@@ -257,7 +257,7 @@ fn validate_record_definition(
 }
 
 fn validate_record_shape(
-    module: &Module,
+    module: &LoweredModule,
     record: &RecordDef,
     errors: &mut Vec<RecordResolutionError>,
 ) -> RecordValidationStatus {
@@ -277,7 +277,7 @@ fn push_unique_record_error(errors: &mut Vec<RecordResolutionError>, error: Reco
 }
 
 fn resolve_record_definition_inner(
-    module: &Module,
+    module: &LoweredModule,
     name: &Name,
     seen: &mut FxHashSet<Name>,
 ) -> Option<RecordDef> {
@@ -299,7 +299,7 @@ fn resolve_record_definition_inner(
 }
 
 fn resolve_record_shape_inner(
-    module: &Module,
+    module: &LoweredModule,
     record: &RecordDef,
     stack: &mut Vec<Name>,
 ) -> Result<ResolvedRecordShape, RecordResolutionError> {
@@ -368,7 +368,7 @@ fn resolve_record_shape_inner(
 }
 
 fn resolve_base_record(
-    module: &Module,
+    module: &LoweredModule,
     record: &RecordDef,
 ) -> Result<Option<RecordDef>, RecordResolutionError> {
     let Some(base_name) = record.base.as_ref() else {
@@ -380,7 +380,7 @@ fn resolve_base_record(
 }
 
 fn resolve_base_record_inner(
-    module: &Module,
+    module: &LoweredModule,
     record: &RecordDef,
     base_name: &Name,
     seen: &mut FxHashSet<Name>,

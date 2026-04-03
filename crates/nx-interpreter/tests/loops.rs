@@ -4,7 +4,7 @@
 
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_hir::ast::{BinOp, Expr, Literal, OrderedFloat};
-use nx_hir::{lower, Function, Item, Module, Name, Param, SourceId};
+use nx_hir::{lower, Function, Item, LoweredModule, Name, Param, SourceId};
 use nx_interpreter::{Interpreter, Value};
 use nx_syntax::parse_str;
 use rustc_hash::FxHashMap;
@@ -34,7 +34,7 @@ fn execute_function(source: &str, function_name: &str, args: Vec<Value>) -> Resu
 /// T047: Test simple for loop
 #[test]
 fn test_for_loop_simple() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
 
     // Create function: double_all(items) = for item in items { item * 2 }
     let params = vec![Param::new(
@@ -92,7 +92,7 @@ fn test_for_loop_simple() {
 /// T048: Test for loop with index
 #[test]
 fn test_for_loop_with_index() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
 
     // Create function: add_index(items) = for item, index in items { item + index }
     let params = vec![Param::new(
@@ -149,7 +149,7 @@ fn test_for_loop_with_index() {
 /// T049: Test nested for loops
 #[test]
 fn test_nested_for_loops() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
 
     // Create function: flatten(matrix) = for row in matrix { for cell in row { cell } }
     // This is a simplified version - real nested loops would need proper handling
@@ -200,7 +200,7 @@ fn test_nested_for_loops() {
 /// T050: Test for loop with empty array
 #[test]
 fn test_for_loop_empty_array() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
 
     let params = vec![Param::new(
         Name::new("items"),
@@ -243,7 +243,7 @@ fn test_for_loop_empty_array() {
 /// T051: Test for loop with type error (non-array iterable)
 #[test]
 fn test_for_loop_type_error() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
 
     let params = vec![Param::new(
         Name::new("value"),
@@ -358,7 +358,7 @@ fn test_for_loop_record_array() {
 /// Test for loop index arithmetic via direct HIR
 #[test]
 fn test_for_loop_index_arithmetic() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
 
     // Function: index_times_two(items) = for item, index in items { index * 2 }
     let params = vec![Param::new(
@@ -499,7 +499,7 @@ fn test_for_loop_boolean_array() {
 /// Test for loop with float array via direct HIR
 #[test]
 fn test_for_loop_float_array() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
 
     // Function: double_floats(items) = for item in items { item * 2.0 }
     let params = vec![Param::new(

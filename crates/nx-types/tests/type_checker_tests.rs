@@ -18,7 +18,7 @@ fn test_infer_literal_types() {
     "#;
 
     let result = check_str(source, "literals.nx");
-    assert!(result.module.is_some());
+    assert!(result.lowered_module.is_some());
 
     // Should parse without errors
     // Type inference happens but we don't have let statements fully working yet
@@ -31,7 +31,7 @@ fn test_infer_binary_operations() {
     "#;
 
     let result = check_str(source, "binop.nx");
-    assert!(result.module.is_some());
+    assert!(result.lowered_module.is_some());
 }
 
 #[test]
@@ -42,7 +42,7 @@ fn test_infer_function_call() {
     "#;
 
     let result = check_str(source, "call.nx");
-    assert!(result.module.is_some());
+    assert!(result.lowered_module.is_some());
 }
 
 #[test]
@@ -52,7 +52,7 @@ fn test_infer_array_types() {
     "#;
 
     let result = check_str(source, "array.nx");
-    assert!(result.module.is_some());
+    assert!(result.lowered_module.is_some());
 }
 
 #[test]
@@ -342,7 +342,7 @@ fn test_type_mismatch_in_binary_op() {
     let result = check_str(source, "mismatch.nx");
 
     // May have parse or type errors - the important thing is we detect issues
-    assert!(result.module.is_some());
+    assert!(result.lowered_module.is_some());
 }
 
 #[test]
@@ -355,7 +355,7 @@ fn test_type_mismatch_in_comparison() {
     let result = check_str(source, "comparison_mismatch.nx");
 
     // Should parse successfully
-    assert!(result.module.is_some());
+    assert!(result.lowered_module.is_some());
 }
 
 #[test]
@@ -369,7 +369,7 @@ fn test_type_mismatch_in_array() {
     let result = check_str(source, "array_ok.nx");
 
     // Should parse successfully with homogeneous array
-    assert!(result.module.is_some());
+    assert!(result.lowered_module.is_some());
     assert!(result.errors().is_empty() || result.errors().len() < 2);
 }
 
@@ -388,7 +388,7 @@ fn test_undefined_identifier() {
     let result = check_str(source, "defined.nx");
 
     // Should parse successfully - 'name' is defined as a parameter
-    assert!(result.module.is_some());
+    assert!(result.lowered_module.is_some());
 }
 
 #[test]
@@ -401,7 +401,7 @@ fn test_undefined_function() {
 
     // Elements are allowed to reference undefined components (they might be HTML tags)
     // So this shouldn't error
-    assert!(result.module.is_some());
+    assert!(result.lowered_module.is_some());
 }
 
 // ============================================================================
@@ -416,9 +416,9 @@ fn test_function_with_parameters() {
     "#;
 
     let result = check_str(source, "function_params.nx");
-    assert!(result.module.is_some());
+    assert!(result.lowered_module.is_some());
 
-    if let Some(module) = &result.module {
+    if let Some(module) = &result.lowered_module {
         // Should have one function with two parameters
         assert_eq!(module.items().len(), 1);
     }
@@ -431,7 +431,7 @@ fn test_function_parameter_reference() {
     "#;
 
     let result = check_str(source, "param_ref.nx");
-    assert!(result.module.is_some());
+    assert!(result.lowered_module.is_some());
 
     // Parameter 'name' should be in scope within the function body
 }
@@ -443,7 +443,7 @@ fn test_function_with_default_params() {
     "#;
 
     let result = check_str(source, "default_params.nx");
-    assert!(result.module.is_some());
+    assert!(result.lowered_module.is_some());
 }
 
 // ============================================================================
@@ -457,7 +457,7 @@ fn test_element_with_properties() {
     "#;
 
     let result = check_str(source, "element_props.nx");
-    assert!(result.module.is_some());
+    assert!(result.lowered_module.is_some());
 }
 
 #[test]
@@ -470,7 +470,7 @@ fn test_nested_elements() {
     "#;
 
     let result = check_str(source, "nested.nx");
-    assert!(result.module.is_some());
+    assert!(result.lowered_module.is_some());
 }
 
 #[test]
@@ -480,7 +480,7 @@ fn test_element_with_interpolation() {
     "#;
 
     let result = check_str(source, "interpolation.nx");
-    assert!(result.module.is_some());
+    assert!(result.lowered_module.is_some());
 }
 
 // ============================================================================
@@ -495,7 +495,7 @@ fn test_nested_function_calls() {
     "#;
 
     let result = check_str(source, "nested_calls.nx");
-    assert!(result.module.is_some());
+    assert!(result.lowered_module.is_some());
 }
 
 #[test]
@@ -535,7 +535,11 @@ fn test_session_multiple_files() {
     assert_eq!(results.len(), 2);
 
     for (name, result) in &results {
-        assert!(result.module.is_some(), "File {} should parse", name);
+        assert!(
+            result.lowered_module.is_some(),
+            "File {} should parse",
+            name
+        );
     }
 }
 
@@ -604,10 +608,10 @@ fn test_error_recovery_continues_checking() {
     let result = check_str(source, "recovery.nx");
 
     // Should parse and continue checking even with errors
-    assert!(result.module.is_some());
+    assert!(result.lowered_module.is_some());
 
     // Should have processed both functions
-    if let Some(module) = &result.module {
+    if let Some(module) = &result.lowered_module {
         assert_eq!(module.items().len(), 2);
     }
 }
@@ -627,7 +631,7 @@ fn test_realistic_component() {
     "#;
 
     let result = check_str(source, "card.nx");
-    assert!(result.module.is_some());
+    assert!(result.lowered_module.is_some());
     assert!(result.errors().is_empty() || result.errors().len() < 3);
 }
 
@@ -646,7 +650,7 @@ fn test_form_component() {
     "#;
 
     let result = check_str(source, "form.nx");
-    assert!(result.module.is_some());
+    assert!(result.lowered_module.is_some());
 }
 
 // ============================================================================
@@ -660,5 +664,5 @@ fn test_readme_example() {
     "#;
 
     let result = check_str(source, "readme.nx");
-    assert!(result.module.is_some());
+    assert!(result.lowered_module.is_some());
 }

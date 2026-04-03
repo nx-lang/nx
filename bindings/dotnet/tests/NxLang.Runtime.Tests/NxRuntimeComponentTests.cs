@@ -185,4 +185,107 @@ public class NxRuntimeComponentTests
             error.Diagnostics,
             diagnostic => diagnostic.Message.Contains("does not declare emitted action 'ValueChanged'"));
     }
+
+    [Fact]
+    public void InitializeComponent_WithProgramArtifact_ReusesImportedComponentDefinition()
+    {
+        string tempPath = Path.Combine(Path.GetTempPath(), $"nx-prepared-component-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempPath);
+
+        try
+        {
+            string appRoot = Path.Combine(tempPath, "app");
+            string libraryRoot = Path.Combine(tempPath, "question-flow");
+            Directory.CreateDirectory(appRoot);
+            Directory.CreateDirectory(libraryRoot);
+            File.WriteAllText(
+                Path.Combine(libraryRoot, "QuestionFlow.nx"),
+                """
+                action SearchSubmitted = { searchString:string }
+
+                component <SearchBox placeholder:string = "Find docs" emits { SearchSubmitted } /> = {
+                  state { query:string = {placeholder} }
+                  <TextInput value={query} placeholder={placeholder} />
+                }
+                """);
+
+            string source = """
+                import "../question-flow"
+                let root() = { 0 }
+                """;
+            string mainPath = Path.Combine(appRoot, "main.nx");
+            File.WriteAllText(mainPath, source);
+            using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, mainPath);
+
+            NxComponentInitResult<TextInputElement> result =
+                NxRuntime.InitializeComponent<SearchBoxProps, TextInputElement>(
+                    programArtifact,
+                    "SearchBox",
+                    new SearchBoxProps { Placeholder = "From library" });
+
+            Assert.Equal("From library", result.Rendered.Value);
+            Assert.Equal("From library", result.Rendered.Placeholder);
+            Assert.NotEmpty(result.StateSnapshot);
+        }
+        finally
+        {
+            Directory.Delete(tempPath, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DispatchComponentActions_WithProgramArtifact_ReusesImportedComponentDefinition()
+    {
+        string tempPath = Path.Combine(Path.GetTempPath(), $"nx-prepared-component-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempPath);
+
+        try
+        {
+            string appRoot = Path.Combine(tempPath, "app");
+            string libraryRoot = Path.Combine(tempPath, "question-flow");
+            Directory.CreateDirectory(appRoot);
+            Directory.CreateDirectory(libraryRoot);
+            File.WriteAllText(
+                Path.Combine(libraryRoot, "QuestionFlow.nx"),
+                """
+                action SearchSubmitted = { searchString:string }
+
+                component <SearchBox placeholder:string = "Find docs" emits { SearchSubmitted } /> = {
+                  state { query:string = {placeholder} }
+                  <TextInput value={query} placeholder={placeholder} />
+                }
+                """);
+
+            string source = """
+                import "../question-flow"
+                let root() = { 0 }
+                """;
+            string mainPath = Path.Combine(appRoot, "main.nx");
+            File.WriteAllText(mainPath, source);
+            using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, mainPath);
+            NxComponentInitResult<TextInputElement> initResult =
+                NxRuntime.InitializeComponent<TextInputElement>(
+                    programArtifact,
+                    "SearchBox");
+
+            NxComponentDispatchResult<SearchSubmittedAction> dispatchResult =
+                NxRuntime.DispatchComponentActions<SearchSubmittedAction[], SearchSubmittedAction>(
+                    programArtifact,
+                    initResult.StateSnapshot,
+                    new[]
+                    {
+                        new SearchSubmittedAction
+                        {
+                            SearchString = "docs"
+                        }
+                    });
+
+            Assert.Empty(dispatchResult.Effects);
+            Assert.NotEmpty(dispatchResult.StateSnapshot);
+        }
+        finally
+        {
+            Directory.Delete(tempPath, recursive: true);
+        }
+    }
 }

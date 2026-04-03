@@ -130,6 +130,23 @@ byte[] resultBytes = NxRuntime.EvaluateBytes("let root() = { 42 }");
 int value = MessagePackSerializer.Deserialize<int>(resultBytes);
 ```
 
+### Reusable Program Artifacts
+
+```csharp
+using NxLang.Nx;
+
+string source = """
+    import "../question-flow"
+    let root() = { answer() }
+    """;
+
+using NxProgramArtifact program = NxProgramArtifact.Build(source, "/app/main.nx");
+int value = NxRuntime.Evaluate<int>(program);
+```
+
+Build a `NxProgramArtifact` when you want to reuse the same resolved program across evaluation or
+component lifecycle calls, especially when the source imports local NX libraries.
+
 ### Optional JSON Debug Output
 
 ```csharp
@@ -181,8 +198,8 @@ NxComponentDispatchResult<SearchSubmittedAction> dispatch =
 
 - Initialization returns the rendered element plus an opaque `StateSnapshot` byte array that the host owns.
 - Dispatch consumes that saved snapshot and an ordered action list, then returns effect actions plus the next snapshot.
-- Reuse a saved `StateSnapshot` only with the exact same NX source text that produced it. Mixing
-  snapshots across source revisions is undefined behavior.
+- Reuse a saved `StateSnapshot` only with the exact same `NxProgramArtifact` revision that produced it.
+  Mixing snapshots across program revisions is rejected.
 - State defaults run only during initialization in this change. Declarative state-update actions are still a follow-up, so dispatch currently preserves state values while still producing effect actions from bound handlers.
 - Component lifecycle APIs in the managed binding use canonical NX bytes. Persist the returned `StateSnapshot`
   bytes and pass them back on later dispatch calls.

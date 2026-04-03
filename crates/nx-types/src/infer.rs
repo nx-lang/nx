@@ -8,7 +8,7 @@ use crate::{
 use nx_diagnostics::{Diagnostic, Label, TextSpan};
 use nx_hir::{
     ast, effective_record_shape_for_name, is_record_subtype,
-    resolve_record_definition as resolve_hir_record_definition, ExprId, Module, Name,
+    resolve_record_definition as resolve_hir_record_definition, ExprId, LoweredModule, Name,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -28,7 +28,7 @@ struct ElementBindingSpec {
 /// of expressions within a module.
 pub struct InferenceContext<'a> {
     /// The module being type-checked
-    module: &'a Module,
+    module: &'a LoweredModule,
     /// Original caller-provided file name for diagnostics.
     file_name: String,
     /// Type environment (name → type, expr → type)
@@ -47,12 +47,12 @@ pub struct InferenceContext<'a> {
 
 impl<'a> InferenceContext<'a> {
     /// Creates a new inference context for a module.
-    pub fn new(module: &'a Module) -> Self {
+    pub fn new(module: &'a LoweredModule) -> Self {
         Self::with_file_name(module, "")
     }
 
     /// Creates a new inference context for a module with a diagnostic file name.
-    pub fn with_file_name(module: &'a Module, file_name: impl Into<String>) -> Self {
+    pub fn with_file_name(module: &'a LoweredModule, file_name: impl Into<String>) -> Self {
         let mut ctx = Self {
             module,
             file_name: file_name.into(),
@@ -1091,7 +1091,7 @@ pub struct TypeInference;
 
 impl TypeInference {
     /// Infers types for all expressions in a module.
-    pub fn infer_module(module: &Module) -> (TypeEnvironment, Vec<Diagnostic>) {
+    pub fn infer_module(module: &LoweredModule) -> (TypeEnvironment, Vec<Diagnostic>) {
         let ctx = InferenceContext::new(module);
 
         // TODO: Process all items and their expressions
@@ -1112,7 +1112,7 @@ mod tests {
 
     #[test]
     fn test_infer_int_literal() {
-        let mut module = Module::new(SourceId::new(0));
+        let mut module = LoweredModule::new(SourceId::new(0));
         let expr_id = module.alloc_expr(Expr::Literal(Literal::Int(42)));
 
         let mut ctx = InferenceContext::new(&module);
@@ -1124,7 +1124,7 @@ mod tests {
 
     #[test]
     fn test_infer_string_literal() {
-        let mut module = Module::new(SourceId::new(0));
+        let mut module = LoweredModule::new(SourceId::new(0));
         let expr_id = module.alloc_expr(Expr::Literal(Literal::String("hello".into())));
 
         let mut ctx = InferenceContext::new(&module);
@@ -1135,7 +1135,7 @@ mod tests {
 
     #[test]
     fn test_infer_bool_literal() {
-        let mut module = Module::new(SourceId::new(0));
+        let mut module = LoweredModule::new(SourceId::new(0));
         let expr_id = module.alloc_expr(Expr::Literal(Literal::Boolean(true)));
 
         let mut ctx = InferenceContext::new(&module);
@@ -1146,7 +1146,7 @@ mod tests {
 
     #[test]
     fn test_infer_function_parameter_reference() {
-        let mut module = Module::new(SourceId::new(0));
+        let mut module = LoweredModule::new(SourceId::new(0));
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
 
         let body = module.alloc_expr(Expr::Ident(Name::new("text")));
@@ -1179,7 +1179,7 @@ mod tests {
 
     #[test]
     fn test_infers_return_type_for_unannotated_function() {
-        let mut module = Module::new(SourceId::new(0));
+        let mut module = LoweredModule::new(SourceId::new(0));
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
 
         let body = module.alloc_expr(Expr::Ident(Name::new("value")));
@@ -1220,7 +1220,7 @@ mod tests {
 
     #[test]
     fn test_infer_paren_function_call() {
-        let mut module = Module::new(SourceId::new(0));
+        let mut module = LoweredModule::new(SourceId::new(0));
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
 
         // add(a:int, b:int): int = a + b
@@ -1317,7 +1317,7 @@ mod tests {
 
     #[test]
     fn test_infer_enum_member_access() {
-        let mut module = Module::new(SourceId::new(0));
+        let mut module = LoweredModule::new(SourceId::new(0));
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
         let enum_def = EnumDef {
             name: Name::new("Direction"),
@@ -1358,7 +1358,7 @@ mod tests {
 
     #[test]
     fn test_infer_enum_invalid_member() {
-        let mut module = Module::new(SourceId::new(0));
+        let mut module = LoweredModule::new(SourceId::new(0));
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
         let enum_def = EnumDef {
             name: Name::new("Status"),
@@ -1387,7 +1387,7 @@ mod tests {
 
     #[test]
     fn test_enum_member_access_via_alias() {
-        let mut module = Module::new(SourceId::new(0));
+        let mut module = LoweredModule::new(SourceId::new(0));
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
         let enum_def = EnumDef {
             name: Name::new("Status"),
@@ -1426,7 +1426,7 @@ mod tests {
 
     #[test]
     fn test_function_signature_uses_enum_type() {
-        let mut module = Module::new(SourceId::new(0));
+        let mut module = LoweredModule::new(SourceId::new(0));
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
         let enum_def = EnumDef {
             name: Name::new("Direction"),

@@ -3,9 +3,13 @@
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use nx_api::{
-    dispatch_component_actions_source, eval_source, initialize_component_source,
-    ComponentDispatchEvalResult, ComponentDispatchResult, ComponentInitEvalResult,
-    ComponentInitResult, EvalResult, NxDiagnostic, NxSeverity,
+    dispatch_component_actions_program_artifact as api_dispatch_component_actions_program_artifact,
+    dispatch_component_actions_source, eval_program_artifact as api_eval_program_artifact,
+    eval_source,
+    initialize_component_program_artifact as api_initialize_component_program_artifact,
+    initialize_component_source, load_program_artifact_from_source, ComponentDispatchEvalResult,
+    ComponentDispatchResult, ComponentInitEvalResult, ComponentInitResult, EvalResult,
+    NxDiagnostic, NxSeverity, ProgramArtifact,
 };
 use nx_value::NxValue;
 use serde::de::DeserializeOwned;
@@ -13,13 +17,17 @@ use serde::Serialize;
 use std::any::Any;
 use std::panic;
 
-pub const NX_FFI_ABI_VERSION: u32 = 2;
+pub const NX_FFI_ABI_VERSION: u32 = 4;
 
 #[repr(C)]
 pub struct NxBuffer {
     pub ptr: *mut u8,
     pub len: usize,
     pub cap: usize,
+}
+
+pub struct NxProgramArtifactHandle {
+    program_artifact: ProgramArtifact,
 }
 
 impl NxBuffer {
@@ -102,6 +110,20 @@ fn prepare_out_buffer(out_buffer: *mut NxBuffer) -> Result<(), NxEvalStatus> {
     Ok(())
 }
 
+fn prepare_out_program_artifact_handle(
+    out_handle: *mut *mut NxProgramArtifactHandle,
+) -> Result<(), NxEvalStatus> {
+    unsafe {
+        if out_handle.is_null() {
+            return Err(NxEvalStatus::InvalidArgument);
+        }
+
+        *out_handle = std::ptr::null_mut();
+    }
+
+    Ok(())
+}
+
 fn finish_msgpack_entry(
     out_buffer: *mut NxBuffer,
     result: Result<Result<(NxEvalStatus, Vec<u8>), String>, Box<dyn Any + Send>>,
@@ -147,6 +169,18 @@ fn parse_file_name(file_name_ptr: *const u8, file_name_len: usize) -> Result<Str
     } else {
         Ok(file_name.to_string())
     }
+}
+
+fn with_program_artifact<T>(
+    handle_ptr: *const NxProgramArtifactHandle,
+    f: impl FnOnce(&ProgramArtifact) -> Result<T, String>,
+) -> Result<T, String> {
+    if handle_ptr.is_null() {
+        return Err("program artifact handle is null".to_string());
+    }
+
+    let handle = unsafe { &*handle_ptr };
+    f(&handle.program_artifact)
 }
 
 fn empty_record() -> NxValue {
@@ -220,6 +254,88 @@ pub extern "C" fn nx_eval_source(
 }
 
 #[no_mangle]
+pub extern "C" fn nx_build_program_artifact(
+    source_ptr: *const u8,
+    source_len: usize,
+    file_name_ptr: *const u8,
+    file_name_len: usize,
+    out_handle: *mut *mut NxProgramArtifactHandle,
+    out_buffer: *mut NxBuffer,
+) -> NxEvalStatus {
+    if let Err(status) = prepare_out_program_artifact_handle(out_handle) {
+        return status;
+    }
+
+    if let Err(status) = prepare_out_buffer(out_buffer) {
+        return status;
+    }
+
+    let result = panic::catch_unwind(|| {
+        let source = unsafe { slice_to_str(source_ptr, source_len) }?;
+        let file_name = parse_file_name(file_name_ptr, file_name_len)?;
+
+        match load_program_artifact_from_source(source, &file_name) {
+            Ok(program_artifact) => {
+                let handle = Box::new(NxProgramArtifactHandle { program_artifact });
+                unsafe {
+                    *out_handle = Box::into_raw(handle);
+                }
+                Ok((NxEvalStatus::Ok, Vec::new()))
+            }
+            Err(diagnostics) => {
+                let payload = rmp_serde::to_vec_named(&diagnostics)
+                    .map_err(|e| format!("messagepack serialize failed: {e}"))?;
+                Ok((NxEvalStatus::Error, payload))
+            }
+        }
+    });
+
+    finish_msgpack_entry(out_buffer, result)
+}
+
+#[no_mangle]
+pub extern "C" fn nx_free_program_artifact(handle: *mut NxProgramArtifactHandle) {
+    if handle.is_null() {
+        return;
+    }
+
+    unsafe {
+        let _ = Box::from_raw(handle);
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn nx_eval_program_artifact(
+    program_artifact_ptr: *const NxProgramArtifactHandle,
+    out_buffer: *mut NxBuffer,
+) -> NxEvalStatus {
+    if let Err(status) = prepare_out_buffer(out_buffer) {
+        return status;
+    }
+
+    let result = panic::catch_unwind(|| {
+        let bytes = with_program_artifact(program_artifact_ptr, |program_artifact| {
+            match api_eval_program_artifact(program_artifact) {
+                EvalResult::Ok(value) => {
+                    let payload = rmp_serde::to_vec(&value)
+                        .map_err(|e| format!("messagepack serialize failed: {e}"))?;
+                    Ok((NxEvalStatus::Ok, payload))
+                }
+                EvalResult::Err(diagnostics) => {
+                    let payload = rmp_serde::to_vec_named(&diagnostics)
+                        .map_err(|e| format!("messagepack serialize failed: {e}"))?;
+                    Ok((NxEvalStatus::Error, payload))
+                }
+            }
+        })?;
+
+        Ok(bytes)
+    });
+
+    finish_msgpack_entry(out_buffer, result)
+}
+
+#[no_mangle]
 pub extern "C" fn nx_component_init(
     source_ptr: *const u8,
     source_len: usize,
@@ -258,6 +374,53 @@ pub extern "C" fn nx_component_init(
                 Ok((NxEvalStatus::Error, payload))
             }
         }
+    });
+
+    finish_msgpack_entry(out_buffer, result)
+}
+
+#[no_mangle]
+pub extern "C" fn nx_component_init_program_artifact(
+    program_artifact_ptr: *const NxProgramArtifactHandle,
+    component_name_ptr: *const u8,
+    component_name_len: usize,
+    props_ptr: *const u8,
+    props_len: usize,
+    out_buffer: *mut NxBuffer,
+) -> NxEvalStatus {
+    if let Err(status) = prepare_out_buffer(out_buffer) {
+        return status;
+    }
+
+    let result = panic::catch_unwind(|| {
+        let component_name = unsafe { slice_to_str(component_name_ptr, component_name_len) }?;
+        let props = if props_len == 0 {
+            empty_record()
+        } else {
+            let bytes = unsafe { slice_to_bytes(props_ptr, props_len) }?;
+            parse_msgpack_value(bytes)?
+        };
+
+        let bytes = with_program_artifact(program_artifact_ptr, |program_artifact| {
+            match api_initialize_component_program_artifact(
+                program_artifact,
+                component_name,
+                &props,
+            ) {
+                ComponentInitEvalResult::Ok(result) => {
+                    let payload = rmp_serde::to_vec_named(&result)
+                        .map_err(|e| format!("messagepack serialize failed: {e}"))?;
+                    Ok((NxEvalStatus::Ok, payload))
+                }
+                ComponentInitEvalResult::Err(diagnostics) => {
+                    let payload = rmp_serde::to_vec_named(&diagnostics)
+                        .map_err(|e| format!("messagepack serialize failed: {e}"))?;
+                    Ok((NxEvalStatus::Error, payload))
+                }
+            }
+        })?;
+
+        Ok(bytes)
     });
 
     finish_msgpack_entry(out_buffer, result)
@@ -306,6 +469,57 @@ pub extern "C" fn nx_component_dispatch_actions(
                 Ok((NxEvalStatus::Error, payload))
             }
         }
+    });
+
+    finish_msgpack_entry(out_buffer, result)
+}
+
+#[no_mangle]
+pub extern "C" fn nx_component_dispatch_actions_program_artifact(
+    program_artifact_ptr: *const NxProgramArtifactHandle,
+    state_snapshot_ptr: *const u8,
+    state_snapshot_len: usize,
+    actions_ptr: *const u8,
+    actions_len: usize,
+    out_buffer: *mut NxBuffer,
+) -> NxEvalStatus {
+    if let Err(status) = prepare_out_buffer(out_buffer) {
+        return status;
+    }
+
+    let result = panic::catch_unwind(|| {
+        let state_snapshot = if state_snapshot_len == 0 {
+            &[][..]
+        } else {
+            unsafe { slice_to_bytes(state_snapshot_ptr, state_snapshot_len) }?
+        };
+        let actions = if actions_len == 0 {
+            Vec::new()
+        } else {
+            let bytes = unsafe { slice_to_bytes(actions_ptr, actions_len) }?;
+            parse_msgpack_actions(bytes)?
+        };
+
+        let bytes = with_program_artifact(program_artifact_ptr, |program_artifact| {
+            match api_dispatch_component_actions_program_artifact(
+                program_artifact,
+                state_snapshot,
+                &actions,
+            ) {
+                ComponentDispatchEvalResult::Ok(result) => {
+                    let payload = rmp_serde::to_vec_named(&result)
+                        .map_err(|e| format!("messagepack serialize failed: {e}"))?;
+                    Ok((NxEvalStatus::Ok, payload))
+                }
+                ComponentDispatchEvalResult::Err(diagnostics) => {
+                    let payload = rmp_serde::to_vec_named(&diagnostics)
+                        .map_err(|e| format!("messagepack serialize failed: {e}"))?;
+                    Ok((NxEvalStatus::Error, payload))
+                }
+            }
+        })?;
+
+        Ok(bytes)
     });
 
     finish_msgpack_entry(out_buffer, result)

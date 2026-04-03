@@ -1,10 +1,18 @@
-use crate::eval::{analyze_source_module, runtime_error_diagnostics};
+use crate::artifacts::ProgramArtifact;
+use crate::eval::{
+    analyze_source_artifact, build_source_program_artifact, program_artifact_error_diagnostics,
+    program_root_source, runtime_error_diagnostics,
+};
 use crate::value::{from_nx_value, to_nx_value};
 use crate::{NxDiagnostic, NxSeverity};
-use nx_hir::{Item, Module};
 use nx_interpreter::Interpreter;
 use nx_value::NxValue;
 use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy)]
+enum ComponentLookup<'a> {
+    Program(&'a ProgramArtifact),
+}
 
 /// The result of initializing a component from source.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -56,12 +64,39 @@ pub fn initialize_component_source(
     component_name: &str,
     props: &NxValue,
 ) -> ComponentInitEvalResult {
-    let module = match analyze_source_module(source, file_name) {
-        Ok(module) => module,
+    if let Err(diagnostics) = analyze_source_artifact(source, file_name) {
+        return ComponentInitEvalResult::Err(diagnostics);
+    }
+
+    let program = match build_source_program_artifact(source, file_name) {
+        Ok(program) => program,
         Err(diagnostics) => return ComponentInitEvalResult::Err(diagnostics),
     };
 
-    if let Err(message) = validate_host_input_value(&module, props) {
+    initialize_component_program_artifact_with_source(&program, source, component_name, props)
+}
+
+/// Initializes a named component from a resolved [`ProgramArtifact`].
+pub fn initialize_component_program_artifact(
+    program: &ProgramArtifact,
+    component_name: &str,
+    props: &NxValue,
+) -> ComponentInitEvalResult {
+    let source = program_root_source(program);
+    initialize_component_program_artifact_with_source(program, &source, component_name, props)
+}
+
+fn initialize_component_program_artifact_with_source(
+    program: &ProgramArtifact,
+    source: &str,
+    component_name: &str,
+    props: &NxValue,
+) -> ComponentInitEvalResult {
+    if let Some(diagnostics) = program_artifact_error_diagnostics(program, source) {
+        return ComponentInitEvalResult::Err(diagnostics);
+    }
+
+    if let Err(message) = validate_host_input_value(ComponentLookup::Program(program), props) {
         return ComponentInitEvalResult::Err(invalid_input_diagnostics(message));
     }
 
@@ -70,8 +105,8 @@ pub fn initialize_component_source(
         Err(error) => return ComponentInitEvalResult::Err(invalid_input_diagnostics(error)),
     };
 
-    let interpreter = Interpreter::new();
-    match interpreter.initialize_component(&module, component_name, props) {
+    let interpreter = Interpreter::from_resolved_program(program.resolved_program.clone());
+    match interpreter.initialize_resolved_component(component_name, props) {
         Ok(result) => ComponentInitEvalResult::Ok(ComponentInitResult {
             rendered: to_nx_value(&result.rendered),
             state_snapshot: result.state_snapshot,
@@ -91,20 +126,59 @@ pub fn dispatch_component_actions_source(
     state_snapshot: &[u8],
     actions: &[NxValue],
 ) -> ComponentDispatchEvalResult {
-    let module = match analyze_source_module(source, file_name) {
-        Ok(module) => module,
+    if let Err(diagnostics) = analyze_source_artifact(source, file_name) {
+        return ComponentDispatchEvalResult::Err(diagnostics);
+    }
+
+    let program = match build_source_program_artifact(source, file_name) {
+        Ok(program) => program,
         Err(diagnostics) => return ComponentDispatchEvalResult::Err(diagnostics),
     };
 
+    dispatch_component_actions_program_artifact_with_source(
+        &program,
+        source,
+        state_snapshot,
+        actions,
+    )
+}
+
+/// Dispatches actions against a component snapshot produced by a resolved [`ProgramArtifact`].
+pub fn dispatch_component_actions_program_artifact(
+    program: &ProgramArtifact,
+    state_snapshot: &[u8],
+    actions: &[NxValue],
+) -> ComponentDispatchEvalResult {
+    let source = program_root_source(program);
+    dispatch_component_actions_program_artifact_with_source(
+        program,
+        &source,
+        state_snapshot,
+        actions,
+    )
+}
+
+fn dispatch_component_actions_program_artifact_with_source(
+    program: &ProgramArtifact,
+    source: &str,
+    state_snapshot: &[u8],
+    actions: &[NxValue],
+) -> ComponentDispatchEvalResult {
+    if let Some(diagnostics) = program_artifact_error_diagnostics(program, source) {
+        return ComponentDispatchEvalResult::Err(diagnostics);
+    }
+
     for (index, action) in actions.iter().enumerate() {
-        if let Err(message) =
-            validate_dispatch_action_input(&module, action, &format!("$[{index}]"))
-        {
+        if let Err(message) = validate_dispatch_action_input(
+            ComponentLookup::Program(program),
+            action,
+            &format!("$[{index}]"),
+        ) {
             return ComponentDispatchEvalResult::Err(invalid_input_diagnostics(message));
         }
     }
 
-    let interpreter = Interpreter::new();
+    let interpreter = Interpreter::from_resolved_program(program.resolved_program.clone());
     let actions = match actions
         .iter()
         .map(from_nx_value)
@@ -113,7 +187,8 @@ pub fn dispatch_component_actions_source(
         Ok(actions) => actions,
         Err(error) => return ComponentDispatchEvalResult::Err(invalid_input_diagnostics(error)),
     };
-    match interpreter.dispatch_component_actions(&module, state_snapshot, actions) {
+
+    match interpreter.dispatch_resolved_component_actions(state_snapshot, actions) {
         Ok(result) => ComponentDispatchEvalResult::Ok(ComponentDispatchResult {
             effects: result.effects.iter().map(to_nx_value).collect(),
             state_snapshot: result.state_snapshot,
@@ -122,7 +197,7 @@ pub fn dispatch_component_actions_source(
     }
 }
 
-fn invalid_input_diagnostics(message: impl ToString) -> Vec<NxDiagnostic> {
+pub(crate) fn invalid_input_diagnostics(message: impl ToString) -> Vec<NxDiagnostic> {
     vec![NxDiagnostic {
         severity: NxSeverity::Error,
         code: Some("invalid-input".to_string()),
@@ -133,12 +208,12 @@ fn invalid_input_diagnostics(message: impl ToString) -> Vec<NxDiagnostic> {
     }]
 }
 
-fn validate_host_input_value(module: &Module, value: &NxValue) -> Result<(), String> {
-    validate_host_input_value_at_path(module, value, "$")
+fn validate_host_input_value(lookup: ComponentLookup<'_>, value: &NxValue) -> Result<(), String> {
+    validate_host_input_value_at_path(lookup, value, "$")
 }
 
 fn validate_dispatch_action_input(
-    module: &Module,
+    lookup: ComponentLookup<'_>,
     value: &NxValue,
     path: &str,
 ) -> Result<(), String> {
@@ -149,11 +224,11 @@ fn validate_dispatch_action_input(
         return Err(format!("action record at {path} must have a '$type' field"));
     }
 
-    validate_host_input_value_at_path(module, value, path)
+    validate_host_input_value_at_path(lookup, value, path)
 }
 
 fn validate_host_input_value_at_path(
-    module: &Module,
+    lookup: ComponentLookup<'_>,
     value: &NxValue,
     path: &str,
 ) -> Result<(), String> {
@@ -167,7 +242,7 @@ fn validate_host_input_value_at_path(
         | NxValue::String(_) => Ok(()),
         NxValue::Array(values) => {
             for (index, value) in values.iter().enumerate() {
-                validate_host_input_value_at_path(module, value, &format!("{path}[{index}]"))?;
+                validate_host_input_value_at_path(lookup, value, &format!("{path}[{index}]"))?;
             }
             Ok(())
         }
@@ -176,7 +251,7 @@ fn validate_host_input_value_at_path(
             properties,
         } => {
             if let Some(type_name) = type_name {
-                if matches!(module.find_item(type_name), Some(Item::Component(_))) {
+                if lookup_contains_component(lookup, type_name) {
                     return Err(format!(
                         "NxValue at {path} uses component type '{type_name}', but component values \
                          are output-only and cannot be provided as host input"
@@ -185,7 +260,7 @@ fn validate_host_input_value_at_path(
             }
 
             for (key, value) in properties {
-                validate_host_input_value_at_path(module, value, &format!("{path}.{key}"))?;
+                validate_host_input_value_at_path(lookup, value, &format!("{path}.{key}"))?;
             }
 
             Ok(())
@@ -193,11 +268,22 @@ fn validate_host_input_value_at_path(
     }
 }
 
+fn lookup_contains_component(lookup: ComponentLookup<'_>, type_name: &str) -> bool {
+    match lookup {
+        ComponentLookup::Program(program) => program
+            .resolved_program
+            .entry_component(type_name)
+            .is_some(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nx_types::analyze_str;
+    use crate::artifacts::build_program_artifact_from_source;
     use std::collections::BTreeMap;
+    use std::fs;
+    use tempfile::TempDir;
 
     fn empty_record() -> NxValue {
         NxValue::Record {
@@ -284,19 +370,19 @@ mod tests {
             let withHandler() = <SearchBox onSearchSubmitted=<DoSearch search={action.searchString} /> />
         "#;
 
-        let analysis = analyze_str(source, "component-dispatch.nx");
-        assert!(
-            analysis.is_ok(),
-            "Expected shared analysis to succeed, got {:?}",
-            analysis.diagnostics
-        );
-        let module = analysis.module.expect("Expected analyzed module");
-        let interpreter = Interpreter::new();
+        let program = build_program_artifact_from_source(source, "component-dispatch.nx")
+            .expect("Expected program artifact");
+        let root_module = program
+            .root_modules
+            .first()
+            .and_then(|artifact| artifact.lowered_module.clone())
+            .expect("Expected preserved root module");
+        let interpreter = Interpreter::from_resolved_program(program.resolved_program.clone());
         let props = interpreter
-            .execute_function(&module, "withHandler", vec![])
+            .execute_resolved_program_function("withHandler", vec![])
             .expect("Expected props function to succeed");
         let init = interpreter
-            .initialize_component(&module, "SearchBox", props)
+            .initialize_component(root_module.as_ref(), "SearchBox", props)
             .expect("Expected interpreter initialization to succeed");
 
         let action = NxValue::Record {
@@ -507,5 +593,112 @@ mod tests {
         assert_eq!(diagnostics[0].code.as_deref(), Some("invalid-input"));
         assert!(diagnostics[0].message.contains("$[0]"));
         assert!(diagnostics[0].message.contains("$type"));
+    }
+
+    #[test]
+    fn initialize_component_program_artifact_resolves_imported_library_component() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("search-box.nx"),
+            r#"
+                component <SearchBox placeholder:string = "Find docs" /> = {
+                  state { query:string = {placeholder} }
+                  <TextInput value={query} placeholder={placeholder} />
+                }
+            "#,
+        )
+        .expect("ui file");
+        let main_path = app_dir.join("main.nx");
+        let source = r#"import "../ui"
+let root() = { 0 }"#;
+        fs::write(&main_path, source).expect("main file");
+
+        let program = build_program_artifact_from_source(source, &main_path.display().to_string())
+            .expect("Expected program artifact");
+        let result = initialize_component_program_artifact(&program, "SearchBox", &empty_record());
+        let ComponentInitEvalResult::Ok(result) = result else {
+            panic!("Expected imported component initialization to succeed");
+        };
+
+        let NxValue::Record {
+            type_name,
+            properties,
+        } = result.rendered
+        else {
+            panic!("Expected rendered element record");
+        };
+        assert_eq!(type_name.as_deref(), Some("TextInput"));
+        assert_eq!(
+            properties.get("value"),
+            Some(&NxValue::String("Find docs".to_string()))
+        );
+        assert!(!result.state_snapshot.is_empty());
+    }
+
+    #[test]
+    fn dispatch_component_actions_source_rejects_snapshots_from_other_program_revisions() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        let library_path = ui_dir.join("search-box.nx");
+        fs::write(
+            &library_path,
+            r#"
+                action SearchSubmitted = { searchString:string }
+
+                component <SearchBox emits { SearchSubmitted } /> = {
+                  <TextInput />
+                }
+            "#,
+        )
+        .expect("ui file");
+        let main_path = app_dir.join("main.nx");
+        let source = r#"import "../ui"
+let root() = { 0 }"#;
+        fs::write(&main_path, source).expect("main file");
+
+        let init = initialize_component_source(
+            source,
+            &main_path.display().to_string(),
+            "SearchBox",
+            &empty_record(),
+        );
+        let ComponentInitEvalResult::Ok(init) = init else {
+            panic!("Expected imported component initialization to succeed");
+        };
+
+        fs::write(
+            &library_path,
+            r#"
+                action SearchSubmitted = { searchString:string }
+
+                component <SearchBox placeholder:string = "Updated" emits { SearchSubmitted } /> = {
+                  <TextInput placeholder={placeholder} />
+                }
+            "#,
+        )
+        .expect("ui file update");
+
+        let result = dispatch_component_actions_source(
+            source,
+            &main_path.display().to_string(),
+            &init.state_snapshot,
+            &[],
+        );
+        let ComponentDispatchEvalResult::Err(diagnostics) = result else {
+            panic!("Expected cross-program snapshot dispatch to fail");
+        };
+
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("snapshot fingerprint")));
     }
 }

@@ -11,16 +11,18 @@ pub fn format_value_json_pretty(value: &Value) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nx_hir::{Module, Name, SourceId};
+    use nx_hir::{LoweredModule, Name, SourceId};
+    use nx_interpreter::RuntimeModuleId;
     use nx_value::NxValue;
     use rustc_hash::FxHashMap;
     use std::collections::BTreeMap;
 
     #[test]
     fn test_format_value_json_pretty_action_handler() {
-        let mut module = Module::new(SourceId::new(0));
+        let mut module = LoweredModule::new(SourceId::new(0));
         let body = module.alloc_expr(nx_hir::ast::Expr::Literal(nx_hir::ast::Literal::Null));
         let value = Value::ActionHandler {
+            module_id: RuntimeModuleId::new(0),
             component: Name::new("SearchBox"),
             emit: Name::new("SearchSubmitted"),
             action_name: Name::new("SearchSubmitted"),

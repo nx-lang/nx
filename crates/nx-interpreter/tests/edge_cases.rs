@@ -7,7 +7,7 @@
 
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_hir::ast::{Expr, Literal};
-use nx_hir::{lower, Function, Item, Module, Name, Param, SourceId};
+use nx_hir::{lower, Function, Item, LoweredModule, Name, Param, SourceId};
 use nx_interpreter::{Interpreter, Value};
 use nx_syntax::parse_str;
 use smol_str::SmolStr;
@@ -42,7 +42,7 @@ fn execute_function(source: &str, function_name: &str, args: Vec<Value>) -> Resu
 /// Test that inner scope variables shadow outer scope using direct HIR
 #[test]
 fn test_variable_shadowing_in_block() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
 
     // Build: { let y = x * 2; { let y = x * 3; y } }
     // The inner y should be returned (x * 3)
@@ -188,7 +188,7 @@ fn test_deeply_nested_function_calls() {
 /// Test deeply nested blocks via direct HIR
 #[test]
 fn test_deeply_nested_blocks() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
 
     // Build: x * 2 (deeply nested blocks not supported in parser)
     let x_expr = module.alloc_expr(Expr::Ident(Name::new("x")));
@@ -337,7 +337,7 @@ fn test_complex_boolean_expression() {
 #[test]
 fn test_boolean_double_negation() {
     // Uses direct HIR since unary ! isn't in the parser
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
 
     // Build: !!x (double negation)
     let x_expr = module.alloc_expr(Expr::Ident(Name::new("x")));

@@ -5,7 +5,7 @@
 
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_hir::ast::{BinOp, Expr, Literal};
-use nx_hir::{lower, Function, Item, Module, Name, Param, SourceId};
+use nx_hir::{lower, Function, Item, LoweredModule, Name, Param, SourceId};
 use nx_interpreter::{Interpreter, RuntimeErrorKind, Value};
 use nx_syntax::parse_str;
 
@@ -15,7 +15,7 @@ fn span(start: u32, end: u32) -> TextSpan {
 }
 
 /// Parses NX source and lowers it into a module for interpreter tests.
-fn module_from_source(source: &str) -> Module {
+fn module_from_source(source: &str) -> LoweredModule {
     let parse_result = parse_str(source, "error-handling.nx");
     assert!(
         parse_result.is_ok(),
@@ -28,7 +28,7 @@ fn module_from_source(source: &str) -> Module {
 
 #[test]
 fn test_division_by_zero_int() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
 
     // Create: 10 / 0
     let ten = module.alloc_expr(Expr::Literal(Literal::Int(10)));
@@ -61,7 +61,7 @@ fn test_division_by_zero_int() {
 
 #[test]
 fn test_function_not_found() {
-    let module = Module::new(SourceId::new(0));
+    let module = LoweredModule::new(SourceId::new(0));
     let interpreter = Interpreter::new();
     let result = interpreter.execute_function(&module, "nonexistent", vec![]);
 
@@ -125,7 +125,7 @@ fn test_paren_function_argument_type_mismatch() {
 
 #[test]
 fn test_paren_function_invalid_return_type_usage() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
     let param = Param::new(
         Name::new("value"),
         nx_hir::ast::TypeRef::name("int"),
@@ -168,7 +168,7 @@ fn test_paren_function_invalid_return_type_usage() {
 
 #[test]
 fn test_enum_not_found_runtime_error() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
     let span = span(0, 5);
 
     let base = module.alloc_expr(Expr::Ident(Name::new("Direction")));

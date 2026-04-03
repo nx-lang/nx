@@ -45,7 +45,7 @@
 //! use nx_types::analyze_str;
 //!
 //! let result = analyze_str("let root(): int = \"oops\"", "example.nx");
-//! assert!(result.module.is_some());
+//! assert!(result.lowered_module.is_some());
 //! assert!(!result.is_ok());
 //! ```
 //!
@@ -134,8 +134,8 @@ pub mod ty;
 
 // Re-export main types
 pub use check::{
-    analyze_str, analyze_str_with_path, check_file, check_str, SourceAnalysisResult,
-    TypeCheckResult, TypeCheckSession,
+    analyze_str, analyze_str_with_path, check_file, check_str, ModuleArtifact,
+    SourceAnalysisResult, TypeCheckResult, TypeCheckSession,
 };
 pub use env::{TypeBinding, TypeEnvironment};
 pub use infer::{InferenceContext, TypeInference};

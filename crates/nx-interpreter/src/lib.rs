@@ -8,6 +8,7 @@
 mod context;
 mod error;
 mod interpreter;
+mod resolved_program;
 mod value;
 
 pub mod eval;
@@ -15,6 +16,10 @@ pub mod eval;
 pub use context::{ExecutionContext, ResourceLimits};
 pub use error::{RuntimeError, RuntimeErrorKind};
 pub use interpreter::{ComponentDispatchResult, ComponentInitResult, Interpreter};
+pub use resolved_program::{
+    ModuleQualifiedExprRef, ModuleQualifiedItemRef, ResolvedItemKind, ResolvedModule,
+    ResolvedProgram, RuntimeModuleId,
+};
 pub use value::Value;
 
 #[cfg(test)]

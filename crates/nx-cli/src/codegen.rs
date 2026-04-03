@@ -6,7 +6,7 @@ mod writer;
 
 use crate::codegen::options::FormatOptions;
 use crate::codegen::writer::CodeWriter;
-use nx_hir::Module;
+use nx_hir::LoweredModule;
 use std::path::Path;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,7 +33,10 @@ pub fn format_options_from_editorconfig(
     Ok(opts)
 }
 
-pub fn generate_types(module: &Module, opts: &GenerateTypesOptions) -> Result<String, String> {
+pub fn generate_types(
+    module: &LoweredModule,
+    opts: &GenerateTypesOptions,
+) -> Result<String, String> {
     let exported = model::collect_exported_types(module);
 
     let mut writer = CodeWriter::new(opts.format.clone());

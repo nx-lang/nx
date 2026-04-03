@@ -3,7 +3,7 @@
 //! This module provides the infrastructure for resolving identifiers to their
 //! definitions, tracking scopes, and detecting undefined references.
 
-use crate::{ExprId, Module, Name};
+use crate::{ExprId, LoweredModule, Name};
 use la_arena::{Arena, Idx};
 use nx_diagnostics::{Diagnostic, TextSpan};
 use rustc_hash::FxHashMap;
@@ -219,7 +219,7 @@ impl Default for ScopeManager {
 /// Builds scopes from a module and resolves all identifiers.
 ///
 /// Returns a scope manager and a list of diagnostics for undefined identifiers.
-pub fn build_scopes(module: &Module) -> (ScopeManager, Vec<Diagnostic>) {
+pub fn build_scopes(module: &LoweredModule) -> (ScopeManager, Vec<Diagnostic>) {
     let mut manager = ScopeManager::new();
     let diagnostics = Vec::new();
 
@@ -263,7 +263,7 @@ pub fn build_scopes(module: &Module) -> (ScopeManager, Vec<Diagnostic>) {
 
 /// Checks all identifier expressions in a module and reports undefined references.
 pub fn check_undefined_identifiers(
-    _module: &Module,
+    _module: &LoweredModule,
     _scope_manager: &ScopeManager,
 ) -> Vec<Diagnostic> {
     // TODO: Implement when we have expression traversal
@@ -419,7 +419,7 @@ mod tests {
 
     #[test]
     fn test_build_scopes_empty_module() {
-        let module = Module::new(crate::SourceId::new(0));
+        let module = LoweredModule::new(crate::SourceId::new(0));
         let (manager, diagnostics) = build_scopes(&module);
 
         assert!(manager.get(manager.root()).is_empty());
@@ -428,7 +428,7 @@ mod tests {
 
     #[test]
     fn test_build_scopes_registers_component_symbols() {
-        let mut module = Module::new(crate::SourceId::new(0));
+        let mut module = LoweredModule::new(crate::SourceId::new(0));
         let span = TextSpan::new(TextSize::from(0), TextSize::from(9));
         let body = module.alloc_expr(crate::ast::Expr::Error(span));
         module.add_item(crate::Item::Component(crate::Component {
@@ -453,7 +453,7 @@ mod tests {
 
     #[test]
     fn test_build_scopes_registers_top_level_value_symbols() {
-        let mut module = Module::new(crate::SourceId::new(0));
+        let mut module = LoweredModule::new(crate::SourceId::new(0));
         let span = TextSpan::new(TextSize::from(0), TextSize::from(5));
         let value = module.alloc_expr(crate::ast::Expr::Literal(crate::ast::Literal::Int(42)));
         module.add_item(crate::Item::Value(crate::ValueDef {

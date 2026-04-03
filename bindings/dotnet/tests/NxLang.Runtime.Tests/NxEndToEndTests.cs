@@ -77,4 +77,78 @@ public class NxEndToEndTests
             File.Exists(nativeLibraryPath),
             $"Expected the staged NX native runtime at '{nativeLibraryPath}'. Build `cargo build --release -p nx-ffi` before running dotnet tests.");
     }
+
+    [Fact]
+    public void Evaluate_WithProgramArtifact_ReusesImportedLibraryContext()
+    {
+        string tempPath = Path.Combine(Path.GetTempPath(), $"nx-prepared-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempPath);
+
+        try
+        {
+            string appRoot = Path.Combine(tempPath, "app");
+            string libraryRoot = Path.Combine(tempPath, "question-flow");
+            Directory.CreateDirectory(appRoot);
+            Directory.CreateDirectory(libraryRoot);
+            File.WriteAllText(
+                Path.Combine(libraryRoot, "QuestionFlow.nx"),
+                """
+                let answer() = { 42 }
+                """);
+
+            string source = """
+                import "../question-flow"
+                let root() = { answer() }
+                """;
+            string mainPath = Path.Combine(appRoot, "main.nx");
+            File.WriteAllText(mainPath, source);
+            using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, mainPath);
+
+            int result = NxRuntime.Evaluate<int>(programArtifact);
+
+            Assert.Equal(42, result);
+        }
+        finally
+        {
+            Directory.Delete(tempPath, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BuildProgramArtifact_WithInvalidImportedLibrary_ThrowsEvaluationException()
+    {
+        string tempPath = Path.Combine(Path.GetTempPath(), $"nx-prepared-invalid-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempPath);
+
+        try
+        {
+            string appRoot = Path.Combine(tempPath, "app");
+            string libraryRoot = Path.Combine(tempPath, "question-flow");
+            Directory.CreateDirectory(appRoot);
+            Directory.CreateDirectory(libraryRoot);
+            File.WriteAllText(
+                Path.Combine(libraryRoot, "QuestionFlow.nx"),
+                """
+                let broken(): int = "oops"
+                """);
+
+            string source = """
+                import "../question-flow"
+                let root() = { 0 }
+                """;
+            string mainPath = Path.Combine(appRoot, "main.nx");
+            File.WriteAllText(mainPath, source);
+
+            NxEvaluationException exception = Assert.Throws<NxEvaluationException>(
+                () => NxProgramArtifact.Build(source, mainPath));
+
+            Assert.Contains(
+                exception.Diagnostics,
+                diagnostic => diagnostic.Code == "return-type-mismatch");
+        }
+        finally
+        {
+            Directory.Delete(tempPath, recursive: true);
+        }
+    }
 }

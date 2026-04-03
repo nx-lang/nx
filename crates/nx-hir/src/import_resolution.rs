@@ -1,4 +1,4 @@
-//! File-based library linking for NX modules.
+//! File-based local library import resolution for NX modules.
 //!
 //! This module augments a lowered entry module with visible declarations from:
 //! - peer files in the same local library (public + internal)
@@ -9,8 +9,8 @@
 
 use crate::ast::{self, Expr, Stmt};
 use crate::{
-    Component, Element, ElementId, EnumDef, ExprId, Function, ImportKind, Item, Module, Name,
-    Property, RecordDef, RecordField, SelectiveImport, TypeAlias, ValueDef, Visibility,
+    Component, Element, ElementId, EnumDef, ExprId, Function, ImportKind, Item, LoweredModule,
+    Name, Property, RecordDef, RecordField, SelectiveImport, TypeAlias, ValueDef, Visibility,
 };
 use nx_syntax::parse_file;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -27,7 +27,7 @@ struct ItemRef {
 #[derive(Debug, Clone)]
 struct LoadedFile {
     path: PathBuf,
-    module: Module,
+    module: LoweredModule,
 }
 
 #[derive(Debug, Clone)]
@@ -169,7 +169,7 @@ fn candidate_origin(candidate: &Candidate, visible_name: &str) -> String {
 }
 
 fn add_ambiguous_binding_diagnostic(
-    module: &mut Module,
+    module: &mut LoweredModule,
     visible_name: &str,
     span: nx_diagnostics::TextSpan,
     candidates: &[Candidate],
@@ -196,7 +196,7 @@ fn collect_local_bindings_from_stmt(stmt: &Stmt, bindings: &mut FxHashSet<String
     }
 }
 
-fn flattened_member_name(module: &Module, expr_id: ExprId) -> Option<String> {
+fn flattened_member_name(module: &LoweredModule, expr_id: ExprId) -> Option<String> {
     match module.expr(expr_id) {
         Expr::Ident(name) => Some(name.as_str().to_string()),
         Expr::Member { base, member, .. } => {
@@ -210,13 +210,16 @@ fn flattened_member_name(module: &Module, expr_id: ExprId) -> Option<String> {
 }
 
 struct AmbiguityVisitor<'a> {
-    module: &'a mut Module,
+    module: &'a mut LoweredModule,
     ambiguous: &'a FxHashMap<String, Vec<Candidate>>,
     locals: Vec<FxHashSet<String>>,
 }
 
 impl<'a> AmbiguityVisitor<'a> {
-    fn new(module: &'a mut Module, ambiguous: &'a FxHashMap<String, Vec<Candidate>>) -> Self {
+    fn new(
+        module: &'a mut LoweredModule,
+        ambiguous: &'a FxHashMap<String, Vec<Candidate>>,
+    ) -> Self {
         Self {
             module,
             ambiguous,
@@ -457,14 +460,14 @@ impl<'a> AmbiguityVisitor<'a> {
 }
 
 struct ModuleCopier<'dst, 'src> {
-    dst: &'dst mut Module,
-    src: &'src Module,
+    dst: &'dst mut LoweredModule,
+    src: &'src LoweredModule,
     expr_map: FxHashMap<ExprId, ExprId>,
     element_map: FxHashMap<ElementId, ElementId>,
 }
 
 impl<'dst, 'src> ModuleCopier<'dst, 'src> {
-    fn new(dst: &'dst mut Module, src: &'src Module) -> Self {
+    fn new(dst: &'dst mut LoweredModule, src: &'src LoweredModule) -> Self {
         Self {
             dst,
             src,
@@ -742,8 +745,11 @@ fn line_col_for_span(source: &str, span: nx_diagnostics::TextSpan) -> Option<(us
     Some((line, column))
 }
 
-/// Link peer-library and imported-library declarations into a lowered entry module.
-pub fn link_local_libraries(mut module: Module, root_path: &Path) -> io::Result<Module> {
+/// Resolve peer-library and imported-library declarations into a lowered entry module.
+pub fn resolve_local_library_imports(
+    mut module: LoweredModule,
+    root_path: &Path,
+) -> io::Result<LoweredModule> {
     let root_path = fs::canonicalize(root_path)?;
     let root_source = fs::read_to_string(&root_path).ok();
     let current_library_root = root_path
@@ -771,7 +777,7 @@ pub fn link_local_libraries(mut module: Module, root_path: &Path) -> io::Result<
         if !file.module.imports.is_empty() {
             module.add_diagnostic(crate::LoweringDiagnostic {
                 message: format!(
-                    "Library file '{}' contains imports; nested library imports are not yet supported during linking",
+                    "Library file '{}' contains imports; nested library imports are not yet supported during import resolution",
                     file.path.display()
                 ),
                 span: nx_diagnostics::TextSpan::default(),
@@ -869,7 +875,7 @@ pub fn link_local_libraries(mut module: Module, root_path: &Path) -> io::Result<
             if !file.module.imports.is_empty() {
                 module.add_diagnostic(crate::LoweringDiagnostic {
                     message: format!(
-                        "Library file '{}' contains imports; nested library imports are not yet supported during linking",
+                        "Library file '{}' contains imports; nested library imports are not yet supported during import resolution",
                         file.path.display()
                     ),
                     span: import.span,
@@ -969,15 +975,16 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
-    fn lower_and_link(path: &Path) -> Module {
+    fn lower_and_resolve_imports(path: &Path) -> LoweredModule {
         let parse_result = parse_file(path).expect("source file should load");
         let tree = parse_result.tree.expect("source file should parse");
         let module = crate::lower(tree.root(), SourceId::new(parse_result.source_id.as_u32()));
-        link_local_libraries(module, path).expect("library linking should succeed")
+        resolve_local_library_imports(module, path)
+            .expect("library import resolution should succeed")
     }
 
     #[test]
-    fn test_link_selective_import_with_qualified_prefix() {
+    fn test_resolve_selective_import_with_qualified_prefix() {
         let temp = TempDir::new().expect("temp dir");
         let app_dir = temp.path().join("app");
         let ui_dir = temp.path().join("ui");
@@ -997,11 +1004,11 @@ let root() = { <Layout.Button /> }"#,
         )
         .expect("root file");
 
-        let module = lower_and_link(&app_dir.join("main.nx"));
+        let module = lower_and_resolve_imports(&app_dir.join("main.nx"));
 
         assert!(
             module.find_item("Layout.Button").is_some(),
-            "Expected qualified selective import to be linked into the module"
+            "Expected qualified selective import to be resolved into the module"
         );
         assert!(
             module.diagnostics().is_empty(),
@@ -1011,7 +1018,7 @@ let root() = { <Layout.Button /> }"#,
     }
 
     #[test]
-    fn test_link_same_library_exposes_internal_but_not_private() {
+    fn test_resolve_same_library_exposes_internal_but_not_private() {
         let temp = TempDir::new().expect("temp dir");
         let lib_dir = temp.path().join("lib");
         fs::create_dir_all(&lib_dir).expect("lib dir");
@@ -1024,7 +1031,7 @@ private let secretName: string = "hidden""#,
         .expect("helpers file");
         fs::write(lib_dir.join("main.nx"), r#"let root() = { formatName }"#).expect("main file");
 
-        let module = lower_and_link(&lib_dir.join("main.nx"));
+        let module = lower_and_resolve_imports(&lib_dir.join("main.nx"));
 
         assert!(module.find_item("formatName").is_some());
         assert!(module.find_item("secretName").is_none());
@@ -1036,7 +1043,7 @@ private let secretName: string = "hidden""#,
     }
 
     #[test]
-    fn test_link_same_library_exposes_internal_enum_but_not_private_enum() {
+    fn test_resolve_same_library_exposes_internal_enum_but_not_private_enum() {
         let temp = TempDir::new().expect("temp dir");
         let lib_dir = temp.path().join("lib");
         fs::create_dir_all(&lib_dir).expect("lib dir");
@@ -1049,7 +1056,7 @@ private enum HiddenMode = Secret | Hidden"#,
         .expect("shared file");
         fs::write(lib_dir.join("main.nx"), r#"let root() = { <div /> }"#).expect("main file");
 
-        let module = lower_and_link(&lib_dir.join("main.nx"));
+        let module = lower_and_resolve_imports(&lib_dir.join("main.nx"));
 
         assert!(module.find_item("SharedMode").is_some());
         assert!(module.find_item("HiddenMode").is_none());
@@ -1061,7 +1068,7 @@ private enum HiddenMode = Secret | Hidden"#,
     }
 
     #[test]
-    fn test_link_duplicate_library_import_reports_diagnostic() {
+    fn test_resolve_duplicate_library_import_reports_diagnostic() {
         let temp = TempDir::new().expect("temp dir");
         let app_dir = temp.path().join("app");
         let ui_dir = temp.path().join("ui");
@@ -1077,7 +1084,7 @@ let root() = { <div /> }"#,
         )
         .expect("root file");
 
-        let module = lower_and_link(&app_dir.join("main.nx"));
+        let module = lower_and_resolve_imports(&app_dir.join("main.nx"));
         let duplicate_import = module
             .diagnostics()
             .iter()
@@ -1094,7 +1101,7 @@ let root() = { <div /> }"#,
     }
 
     #[test]
-    fn test_link_missing_selective_import_reports_diagnostic() {
+    fn test_resolve_missing_selective_import_reports_diagnostic() {
         let temp = TempDir::new().expect("temp dir");
         let app_dir = temp.path().join("app");
         let ui_dir = temp.path().join("ui");
@@ -1109,7 +1116,7 @@ let root() = { <div /> }"#,
         )
         .expect("root file");
 
-        let module = lower_and_link(&app_dir.join("main.nx"));
+        let module = lower_and_resolve_imports(&app_dir.join("main.nx"));
 
         assert!(
             module
@@ -1122,7 +1129,7 @@ let root() = { <div /> }"#,
     }
 
     #[test]
-    fn test_link_ambiguous_import_is_reported_only_when_used() {
+    fn test_resolve_ambiguous_import_is_reported_only_when_used() {
         let temp = TempDir::new().expect("temp dir");
         let unused_app_dir = temp.path().join("unused-app");
         let used_app_dir = temp.path().join("used-app");
@@ -1152,14 +1159,14 @@ let root() = { <Button /> }"#,
         )
         .expect("used root file");
 
-        let unused_module = lower_and_link(&unused_app_dir.join("main.nx"));
+        let unused_module = lower_and_resolve_imports(&unused_app_dir.join("main.nx"));
         assert!(
             unused_module.diagnostics().is_empty(),
             "Unused ambiguity should not emit diagnostics, got {:?}",
             unused_module.diagnostics()
         );
 
-        let used_module = lower_and_link(&used_app_dir.join("main.nx"));
+        let used_module = lower_and_resolve_imports(&used_app_dir.join("main.nx"));
         assert!(
             used_module.diagnostics().iter().any(|diagnostic| diagnostic
                 .message
@@ -1170,7 +1177,7 @@ let root() = { <Button /> }"#,
     }
 
     #[test]
-    fn test_link_remote_import_reports_not_supported() {
+    fn test_resolve_remote_import_reports_not_supported() {
         let temp = TempDir::new().expect("temp dir");
         let app_dir = temp.path().join("app");
         fs::create_dir_all(&app_dir).expect("app dir");
@@ -1181,7 +1188,7 @@ let root() = { <div /> }"#,
         )
         .expect("root file");
 
-        let module = lower_and_link(&app_dir.join("main.nx"));
+        let module = lower_and_resolve_imports(&app_dir.join("main.nx"));
         assert!(
             module.diagnostics().iter().any(|diagnostic| diagnostic
                 .message

@@ -1,5 +1,7 @@
 use nx_diagnostics::{Diagnostic, Severity};
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
 use text_size::TextRange;
 
 /// The severity level of a diagnostic message.
@@ -92,19 +94,24 @@ pub struct NxDiagnostic {
 /// `source` must be the same source text that was parsed to produce `diagnostics`; otherwise
 /// the computed line/column positions will be incorrect.
 pub fn diagnostics_to_api(diagnostics: &[Diagnostic], source: &str) -> Vec<NxDiagnostic> {
-    let index = LineIndex::new(source);
     diagnostics
         .iter()
-        .map(|d| diagnostic_to_api(d, source, &index))
+        .map(|d| diagnostic_to_api(d, source))
         .collect()
 }
 
-fn diagnostic_to_api(diagnostic: &Diagnostic, source: &str, index: &LineIndex) -> NxDiagnostic {
+fn diagnostic_to_api(diagnostic: &Diagnostic, fallback_source: &str) -> NxDiagnostic {
     let mut labels = Vec::with_capacity(diagnostic.labels().len());
     for label in diagnostic.labels() {
+        let label_source = if !label.file.is_empty() && Path::new(&label.file).is_file() {
+            fs::read_to_string(&label.file).unwrap_or_else(|_| fallback_source.to_string())
+        } else {
+            fallback_source.to_string()
+        };
+        let index = LineIndex::new(&label_source);
         labels.push(NxDiagnosticLabel {
             file: label.file.clone(),
-            span: text_range_to_span(label.range, source, index),
+            span: text_range_to_span(label.range, &label_source, &index),
             message: label.message.clone(),
             primary: label.primary,
         });

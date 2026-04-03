@@ -1,5 +1,6 @@
 //! Runtime value representation for the NX interpreter.
 
+use crate::RuntimeModuleId;
 use nx_hir::Name;
 use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
@@ -83,6 +84,8 @@ pub enum Value {
 
     /// Lazy component action handler callback with captured lexical values.
     ActionHandler {
+        /// Owning lowered module for the handler body.
+        module_id: RuntimeModuleId,
         /// Component name
         component: Name,
         /// Local emitted action name

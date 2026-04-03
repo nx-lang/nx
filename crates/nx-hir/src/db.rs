@@ -3,7 +3,7 @@
 //! This module defines the query groups and database implementation for
 //! incremental parsing, lowering, and semantic analysis.
 
-use crate::{lower, Module, SourceId};
+use crate::{lower, LoweredModule, SourceId};
 use nx_syntax::parse_str;
 use std::sync::Arc;
 
@@ -47,7 +47,7 @@ pub trait NxDatabase: salsa::Database {
     /// ```ignore
     /// let module = db.lower_to_hir(file_id);
     /// ```
-    fn lower_to_hir(&self, file: SourceId) -> Arc<Module>;
+    fn lower_to_hir(&self, file: SourceId) -> Arc<LoweredModule>;
 }
 
 /// Implementation of the lower_to_hir query.
@@ -57,7 +57,7 @@ pub trait NxDatabase: salsa::Database {
 ///
 /// This function performs both parsing and lowering in one step, which allows
 /// us to avoid storing the tree-sitter Tree in Salsa's cache (it doesn't implement Eq).
-fn lower_to_hir(db: &dyn NxDatabase, file: SourceId) -> Arc<Module> {
+fn lower_to_hir(db: &dyn NxDatabase, file: SourceId) -> Arc<LoweredModule> {
     let source = db.source_text(file);
     let file_name = db.file_name(file);
 
@@ -70,7 +70,7 @@ fn lower_to_hir(db: &dyn NxDatabase, file: SourceId) -> Arc<Module> {
         Arc::new(module)
     } else {
         // If parsing failed, return an empty module
-        Arc::new(Module::new(file))
+        Arc::new(LoweredModule::new(file))
     }
 }
 

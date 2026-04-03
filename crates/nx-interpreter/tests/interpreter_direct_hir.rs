@@ -5,7 +5,7 @@
 
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_hir::ast::{BinOp, Expr, Stmt};
-use nx_hir::{Function, Item, Module, Name, Param, SourceId};
+use nx_hir::{Function, Item, LoweredModule, Name, Param, SourceId};
 use nx_interpreter::{Interpreter, Value};
 use smol_str::SmolStr;
 
@@ -17,7 +17,7 @@ fn span(start: u32, end: u32) -> TextSpan {
 /// Test simple addition function
 #[test]
 fn test_add_function_direct_hir() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
 
     // Create parameters a:int and b:int
     let params = vec![
@@ -67,7 +67,7 @@ fn test_add_function_direct_hir() {
 /// Test subtraction
 #[test]
 fn test_subtract_function_direct_hir() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
 
     let params = vec![
         Param::new(
@@ -113,7 +113,7 @@ fn test_subtract_function_direct_hir() {
 /// Test multiplication
 #[test]
 fn test_multiply_function_direct_hir() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
 
     let params = vec![
         Param::new(
@@ -159,7 +159,7 @@ fn test_multiply_function_direct_hir() {
 /// Test division
 #[test]
 fn test_divide_function_direct_hir() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
 
     let params = vec![
         Param::new(
@@ -205,7 +205,7 @@ fn test_divide_function_direct_hir() {
 /// Test division by zero error
 #[test]
 fn test_division_by_zero_direct_hir() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
 
     let params = vec![
         Param::new(
@@ -254,7 +254,7 @@ fn test_division_by_zero_direct_hir() {
 /// Test string concatenation
 #[test]
 fn test_string_concat_direct_hir() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
 
     let params = vec![
         Param::new(
@@ -307,7 +307,7 @@ fn test_string_concat_direct_hir() {
 /// Test function with block and local variables
 #[test]
 fn test_block_with_variables_direct_hir() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
 
     let params = vec![Param::new(
         Name::new("x"),
@@ -364,7 +364,7 @@ fn test_block_with_variables_direct_hir() {
 /// Test complex arithmetic with multiple operations
 #[test]
 fn test_complex_arithmetic_direct_hir() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
 
     let params = vec![
         Param::new(

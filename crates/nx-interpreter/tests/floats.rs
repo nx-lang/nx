@@ -7,7 +7,7 @@
 
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_hir::ast::{BinOp, Expr};
-use nx_hir::{lower, Function, Item, Module, Name, Param, SourceId};
+use nx_hir::{lower, Function, Item, LoweredModule, Name, Param, SourceId};
 use nx_interpreter::{Interpreter, Value};
 use nx_syntax::parse_str;
 
@@ -502,7 +502,7 @@ fn span(start: u32, end: u32) -> TextSpan {
 
 #[test]
 fn test_float_in_conditional() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
 
     // Create function: maxf(a, b) = if a > b { a } else { b }
     let params = vec![

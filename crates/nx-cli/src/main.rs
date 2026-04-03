@@ -12,8 +12,9 @@ mod format;
 mod json;
 
 use clap::{Parser, Subcommand};
-use nx_diagnostics::render_diagnostics_cli;
-use nx_hir::{lower_source_module, Item, Module};
+use nx_api::{build_program_artifact_from_source, ProgramArtifact};
+use nx_diagnostics::{render_diagnostics_cli, Severity};
+use nx_hir::{lower_source_module, Item, LoweredModule};
 use nx_interpreter::{Interpreter, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -147,15 +148,17 @@ fn run_file(path: &PathBuf, format: OutputFormat, output: Option<&PathBuf>) -> E
         }
     };
 
-    // Get the file name for error messages
-    let file_name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown");
-
-    let module = match load_source_module(&source, file_name, path.as_path()) {
-        Ok(module) => module,
+    let program = match load_source_program_for_run(&source, path.as_path()) {
+        Ok(program) => program,
         Err(exit_code) => return exit_code,
+    };
+    let Some(module) = program
+        .root_modules
+        .first()
+        .and_then(|artifact| artifact.lowered_module.as_ref())
+    else {
+        eprintln!("Error: No root module available for '{}'", path.display());
+        return ExitCode::from(1);
     };
 
     // Check if there's a root function
@@ -171,8 +174,8 @@ fn run_file(path: &PathBuf, format: OutputFormat, output: Option<&PathBuf>) -> E
     }
 
     // Execute the root function
-    let interpreter = Interpreter::new();
-    match interpreter.execute_function(&module, "root", vec![]) {
+    let interpreter = Interpreter::from_resolved_program(program.resolved_program.clone());
+    match interpreter.execute_resolved_program_function("root", vec![]) {
         Ok(value) => {
             let output_text = match format_output(&value, format) {
                 Ok(output) => output,
@@ -296,11 +299,40 @@ fn format_output(value: &Value, format: OutputFormat) -> Result<String, String> 
     }
 }
 
-fn load_source_module(source: &str, file_name: &str, path: &Path) -> Result<Module, ExitCode> {
+fn load_source_module(
+    source: &str,
+    file_name: &str,
+    path: &Path,
+) -> Result<LoweredModule, ExitCode> {
     match lower_source_module(source, file_name, Some(path)) {
         Ok(module) => Ok(module),
         Err(diagnostics) => Err(render_source_diagnostics(file_name, source, &diagnostics)),
     }
+}
+
+fn load_source_program_for_run(source: &str, path: &Path) -> Result<ProgramArtifact, ExitCode> {
+    let file_name = path.display().to_string();
+    let program = match build_program_artifact_from_source(source, &file_name) {
+        Ok(program) => program,
+        Err(error) => {
+            eprintln!("Error: Failed to build program artifact: {}", error);
+            return Err(ExitCode::from(1));
+        }
+    };
+
+    if program
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity() == Severity::Error)
+    {
+        return Err(render_source_diagnostics(
+            file_name.as_str(),
+            source,
+            &program.diagnostics,
+        ));
+    }
+
+    Ok(program)
 }
 
 fn render_source_diagnostics(
@@ -318,7 +350,7 @@ fn render_source_diagnostics(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nx_hir::{link_local_libraries, lower, SourceId};
+    use nx_hir::{lower, resolve_local_library_imports, SourceId};
     use nx_syntax::parse_file;
     use nx_value::NxValue;
     use std::fs;
@@ -332,11 +364,11 @@ mod tests {
         (dir, file_path)
     }
 
-    fn lower_linked_file(path: &Path) -> nx_hir::Module {
+    fn lower_import_resolved_file(path: &Path) -> nx_hir::LoweredModule {
         let parse_result = parse_file(path).expect("file should load");
         let tree = parse_result.tree.expect("file should parse");
         let module = lower(tree.root(), SourceId::new(parse_result.source_id.as_u32()));
-        link_local_libraries(module, path).expect("linking should succeed")
+        resolve_local_library_imports(module, path).expect("import resolution should succeed")
     }
 
     #[test]
@@ -373,7 +405,7 @@ let root() = { Math.addOne(41) }"#,
         )
         .expect("root file");
 
-        let module = lower_linked_file(&app_dir.join("main.nx"));
+        let module = lower_import_resolved_file(&app_dir.join("main.nx"));
         let interpreter = Interpreter::new();
         let result = interpreter
             .execute_function(&module, "root", vec![])
@@ -398,7 +430,7 @@ let root() = { Ui.Title }"#,
         )
         .expect("root file");
 
-        let module = lower_linked_file(&app_dir.join("main.nx"));
+        let module = lower_import_resolved_file(&app_dir.join("main.nx"));
         let interpreter = Interpreter::new();
         let result = interpreter
             .execute_function(&module, "root", vec![])
@@ -718,6 +750,32 @@ let root() = { Ui.Title }"#,
         assert!(stdout.contains("<User"));
         assert!(stdout.contains("name=\"Bob\""));
         assert!(stdout.contains("age=\"30\""));
+    }
+
+    #[test]
+    fn test_cli_run_component_with_action_handler_uses_resolved_program_runtime() {
+        let source = r#"
+            action SearchSubmitted = { searchString:string }
+            action DoSearch = { search:string }
+
+            component <SearchBox emits { SearchSubmitted } /> = {
+              <TextInput />
+            }
+
+            let root() = { <SearchBox onSearchSubmitted=<DoSearch search={action.searchString} /> /> }
+        "#;
+        let (_dir, path) = create_temp_nx_file(source);
+
+        let output = run_cli(&["run", path.to_str().unwrap()]);
+
+        assert!(
+            output.status.success(),
+            "CLI should execute handler-producing roots"
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("<onSearchSubmitted"));
+        assert!(stdout.contains("component=\"SearchBox\""));
+        assert!(stdout.contains("action=\"SearchSubmitted\""));
     }
 
     #[test]

@@ -95,6 +95,9 @@ pub enum RuntimeErrorKind {
         phase: String,
     },
 
+    /// Operation requires a resolved program runtime to provide stable module identity
+    ResolvedProgramRequired { operation: String },
+
     /// Malformed or incompatible component state snapshot
     InvalidComponentStateSnapshot { reason: String },
 
@@ -177,6 +180,9 @@ impl fmt::Display for RuntimeErrorKind {
                 "Missing required component field '{}' on '{}' during {}",
                 field, component, phase
             ),
+            RuntimeErrorKind::ResolvedProgramRequired { operation } => {
+                write!(f, "Resolved program runtime required for {}", operation)
+            }
             RuntimeErrorKind::InvalidComponentStateSnapshot { reason } => {
                 write!(f, "Invalid component state snapshot: {}", reason)
             }

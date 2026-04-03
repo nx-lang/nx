@@ -1,4 +1,4 @@
-use nx_hir::{ast::TypeRef, EnumDef, Item, Module, RecordDef};
+use nx_hir::{ast::TypeRef, EnumDef, Item, LoweredModule, RecordDef};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExportedEnum {
@@ -25,7 +25,7 @@ pub struct ExportedTypes {
     pub records: Vec<ExportedRecord>,
 }
 
-pub fn collect_exported_types(module: &Module) -> ExportedTypes {
+pub fn collect_exported_types(module: &LoweredModule) -> ExportedTypes {
     let mut enums = Vec::new();
     let mut records = Vec::new();
 

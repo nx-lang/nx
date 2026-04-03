@@ -2,7 +2,7 @@
 
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_hir::ast::{BinOp, Expr, Literal};
-use nx_hir::{Function, Item, Module, Name, Param, SourceId};
+use nx_hir::{Function, Item, LoweredModule, Name, Param, SourceId};
 use nx_interpreter::{Interpreter, ResourceLimits, RuntimeErrorKind, Value};
 
 /// Helper to create a text span
@@ -13,7 +13,7 @@ fn span(start: u32, end: u32) -> TextSpan {
 /// Test factorial function with recursion
 #[test]
 fn test_factorial_recursion() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
 
     // Create function: factorial(n) = if n <= 1 { 1 } else { n * factorial(n - 1) }
     let params = vec![Param::new(
@@ -106,7 +106,7 @@ fn test_factorial_recursion() {
 /// Test Fibonacci function with recursion
 #[test]
 fn test_fibonacci_recursion() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
 
     // Create function: fib(n) = if n <= 1 { n } else { fib(n-1) + fib(n-2) }
     let params = vec![Param::new(
@@ -212,7 +212,7 @@ fn test_fibonacci_recursion() {
 /// Test recursion depth limit enforcement (T054)
 #[test]
 fn test_recursion_depth_limit() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
 
     // Create function: infinite(n) = infinite(n + 1)
     let params = vec![Param::new(
@@ -272,7 +272,7 @@ fn test_recursion_depth_limit() {
 /// Test deep recursion within limit
 #[test]
 fn test_deep_recursion_within_limit() {
-    let mut module = Module::new(SourceId::new(0));
+    let mut module = LoweredModule::new(SourceId::new(0));
 
     // Create function: countdown(n) = if n <= 0 { 0 } else { countdown(n - 1) }
     let params = vec![Param::new(

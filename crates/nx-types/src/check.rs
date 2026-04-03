@@ -2,30 +2,40 @@
 
 use crate::{InferenceContext, Type, TypeEnvironment};
 use nx_diagnostics::{Diagnostic, Label, Severity, TextSize, TextSpan};
-use nx_hir::{link_local_libraries, lower, ExprId, LoweringDiagnostic, Module, SourceId};
+use nx_hir::{
+    lower, resolve_local_library_imports, ExprId, Import, LoweredModule, LoweringDiagnostic,
+    SourceId,
+};
 use nx_syntax::{parse_file as syntax_parse_file, parse_str as syntax_parse_str};
 use rustc_hash::FxHashMap;
 use std::io;
 use std::path::Path;
 use std::sync::Arc;
 
-/// Result of analyzing NX source.
+/// File-scoped analysis artifact for one NX source file.
 ///
-/// Contains the lowered module, inferred type environment, and any static-analysis diagnostics
-/// (errors or warnings) discovered while parsing, lowering, building scopes, and type checking.
+/// This artifact preserves the parse outcome, lowered HIR, inferred type environment, static
+/// diagnostics, and import metadata produced while parsing, lowering, resolving imports, building
+/// scopes, and type checking one source file.
 #[derive(Debug, Clone)]
-pub struct SourceAnalysisResult {
-    /// The lowered module produced during analysis (None if parsing failed fatally)
-    pub module: Option<Arc<Module>>,
+pub struct ModuleArtifact {
+    /// Source file name used for diagnostics.
+    pub file_name: String,
+    /// Source file ID.
+    pub source_id: SourceId,
+    /// Whether parsing produced a syntax tree for this file.
+    pub parse_succeeded: bool,
+    /// The lowered module produced during analysis, if parsing succeeded.
+    pub lowered_module: Option<Arc<LoweredModule>>,
     /// Type environment with all inferred bindings
     pub type_env: TypeEnvironment,
     /// Diagnostics from parsing, lowering, scope building, and type checking
     pub diagnostics: Vec<Diagnostic>,
-    /// Source file ID
-    pub source_id: SourceId,
+    /// Import metadata preserved from the lowered module.
+    pub imports: Vec<Import>,
 }
 
-impl SourceAnalysisResult {
+impl ModuleArtifact {
     /// Returns true if analysis succeeded without any error diagnostics.
     pub fn is_ok(&self) -> bool {
         self.errors().is_empty()
@@ -50,16 +60,18 @@ impl SourceAnalysisResult {
     }
 }
 
-/// Backward-compatible alias for callers that still think of the shared analysis result as the
-/// outcome of type checking.
-pub type TypeCheckResult = SourceAnalysisResult;
+/// Backward-compatible alias for callers that still think of shared analysis as a result object.
+pub type SourceAnalysisResult = ModuleArtifact;
+
+/// Alias for callers that use shared analysis as a type-checking entry point.
+pub type TypeCheckResult = ModuleArtifact;
 
 /// Analyzes NX source code from a string.
 ///
 /// This performs parsing, lowering, scope building, and type checking in one pass. If parsing
 /// produces a syntax tree, the returned analysis result preserves the lowered module even when
 /// later phases report diagnostics.
-pub fn analyze_str(source: &str, file_name: &str) -> SourceAnalysisResult {
+pub fn analyze_str(source: &str, file_name: &str) -> ModuleArtifact {
     let parse_result = syntax_parse_str(source, file_name);
     analyze_string_parse_result(parse_result, source, file_name, None)
 }
@@ -70,7 +82,7 @@ pub fn analyze_str_with_path(
     source: &str,
     file_name: &str,
     source_path: impl AsRef<Path>,
-) -> SourceAnalysisResult {
+) -> ModuleArtifact {
     let parse_result = syntax_parse_str(source, file_name);
     analyze_string_parse_result(parse_result, source, file_name, Some(source_path.as_ref()))
 }
@@ -88,7 +100,7 @@ pub fn analyze_str_with_path(
 ///
 /// let result = check_str(source, "example.nx");
 /// // Parse should succeed
-/// assert!(result.module.is_some());
+/// assert!(result.lowered_module.is_some());
 /// ```
 pub fn check_str(source: &str, file_name: &str) -> TypeCheckResult {
     analyze_str(source, file_name)
@@ -126,42 +138,41 @@ fn analyze_string_parse_result(
     source: &str,
     file_name: &str,
     source_path: Option<&Path>,
-) -> SourceAnalysisResult {
+) -> ModuleArtifact {
     let source_id = SourceId::new(parse_result.source_id.as_u32());
     let mut diagnostics = normalize_diagnostics_file_name(parse_result.errors, file_name);
 
     let Some(tree) = parse_result.tree else {
-        return SourceAnalysisResult {
-            module: None,
-            type_env: TypeEnvironment::new(),
-            diagnostics,
-            source_id,
-        };
+        return parse_failure_artifact(file_name, source_id, diagnostics);
     };
 
     let mut module = lower(tree.root(), source_id);
 
     if let Some(path) = source_path {
-        module = match link_local_libraries(module.clone(), path) {
+        module = match resolve_local_library_imports(module.clone(), path) {
             Ok(module) => module,
             Err(error) => {
                 diagnostics.push(library_load_error_diagnostic(source, file_name, &error));
-                return SourceAnalysisResult {
-                    module: Some(Arc::new(module)),
-                    type_env: TypeEnvironment::new(),
-                    diagnostics,
+                return module_artifact(
+                    file_name,
                     source_id,
-                };
+                    true,
+                    Some(Arc::new(module)),
+                    TypeEnvironment::new(),
+                    diagnostics,
+                );
             }
         };
     } else if !module.imports.is_empty() {
         diagnostics.push(library_imports_require_path_diagnostic(source, file_name));
-        return SourceAnalysisResult {
-            module: Some(Arc::new(module)),
-            type_env: TypeEnvironment::new(),
-            diagnostics,
+        return module_artifact(
+            file_name,
             source_id,
-        };
+            true,
+            Some(Arc::new(module)),
+            TypeEnvironment::new(),
+            diagnostics,
+        );
     }
 
     analyze_lowered_module(module, diagnostics, file_name, source_id)
@@ -171,22 +182,17 @@ fn analyze_parse_result(
     parse_result: nx_syntax::ParseResult,
     file_name: &str,
     source_path: Option<&Path>,
-) -> io::Result<SourceAnalysisResult> {
+) -> io::Result<ModuleArtifact> {
     let source_id = SourceId::new(parse_result.source_id.as_u32());
     let diagnostics = normalize_diagnostics_file_name(parse_result.errors, file_name);
 
     let Some(tree) = parse_result.tree else {
-        return Ok(SourceAnalysisResult {
-            module: None,
-            type_env: TypeEnvironment::new(),
-            diagnostics,
-            source_id,
-        });
+        return Ok(parse_failure_artifact(file_name, source_id, diagnostics));
     };
 
     let mut module = lower(tree.root(), source_id);
     if let Some(path) = source_path {
-        module = link_local_libraries(module, path)?;
+        module = resolve_local_library_imports(module, path)?;
     }
 
     Ok(analyze_lowered_module(
@@ -198,11 +204,11 @@ fn analyze_parse_result(
 }
 
 fn analyze_lowered_module(
-    module: Module,
+    module: LoweredModule,
     mut diagnostics: Vec<Diagnostic>,
     file_name: &str,
     source_id: SourceId,
-) -> SourceAnalysisResult {
+) -> ModuleArtifact {
     diagnostics.extend(lowering_diagnostics(module.diagnostics(), file_name));
 
     let (_scope_manager, scope_diagnostics) = nx_hir::build_scopes(&module);
@@ -229,11 +235,52 @@ fn analyze_lowered_module(
     let (type_env, type_diagnostics) = ctx.finish();
     diagnostics.extend(normalize_diagnostics_file_name(type_diagnostics, file_name));
 
-    SourceAnalysisResult {
-        module: Some(Arc::new(module)),
+    module_artifact(
+        file_name,
+        source_id,
+        true,
+        Some(Arc::new(module)),
         type_env,
         diagnostics,
+    )
+}
+
+fn parse_failure_artifact(
+    file_name: &str,
+    source_id: SourceId,
+    diagnostics: Vec<Diagnostic>,
+) -> ModuleArtifact {
+    module_artifact(
+        file_name,
         source_id,
+        false,
+        None,
+        TypeEnvironment::new(),
+        diagnostics,
+    )
+}
+
+fn module_artifact(
+    file_name: &str,
+    source_id: SourceId,
+    parse_succeeded: bool,
+    lowered_module: Option<Arc<LoweredModule>>,
+    type_env: TypeEnvironment,
+    diagnostics: Vec<Diagnostic>,
+) -> ModuleArtifact {
+    let imports = lowered_module
+        .as_ref()
+        .map(|module| module.imports.clone())
+        .unwrap_or_default();
+
+    ModuleArtifact {
+        file_name: file_name.to_string(),
+        source_id,
+        parse_succeeded,
+        lowered_module,
+        type_env,
+        diagnostics,
+        imports,
     }
 }
 
@@ -403,13 +450,53 @@ mod tests {
         let result = analyze_str(source, "virtual/main.nx");
 
         assert!(
-            result.module.is_some(),
+            result.parse_succeeded,
+            "Expected parse metadata to be preserved"
+        );
+        assert!(
+            result.lowered_module.is_some(),
             "Expected lowered module to be preserved"
+        );
+        assert_eq!(
+            result.imports.len(),
+            1,
+            "Expected import metadata to be preserved"
         );
         assert!(result
             .diagnostics
             .iter()
             .any(|diagnostic| diagnostic.code() == Some("library-imports-require-path")));
+    }
+
+    #[test]
+    fn test_analyze_str_returns_parse_failure_module_artifact() {
+        let diagnostic = Diagnostic::error("parse-failed")
+            .with_message("Failed to parse source")
+            .build();
+        let parse_result = nx_syntax::ParseResult {
+            tree: None,
+            errors: vec![diagnostic],
+            source_id: nx_syntax::SourceId::new(7),
+        };
+        let result =
+            analyze_string_parse_result(parse_result, "let root( =", "widgets/search-box.nx", None);
+
+        assert!(
+            !result.parse_succeeded,
+            "Expected parse-failure artifacts to record the parse outcome"
+        );
+        assert!(
+            result.lowered_module.is_none(),
+            "Expected parse-failure artifacts to omit the lowered module"
+        );
+        assert!(
+            result.imports.is_empty(),
+            "Expected parse-failure imports to be empty"
+        );
+        assert!(
+            !result.diagnostics.is_empty(),
+            "Expected parse diagnostics to be preserved"
+        );
     }
 
     #[test]
@@ -434,7 +521,7 @@ mod tests {
         let result = analyze_str(source, file_name);
 
         assert!(
-            result.module.is_some(),
+            result.lowered_module.is_some(),
             "Expected lowered module to be preserved"
         );
 
@@ -459,7 +546,7 @@ mod tests {
         let result = check_str(source, "test.nx");
 
         // Parse should succeed even though we don't have full lowering yet
-        assert!(result.module.is_some());
+        assert!(result.lowered_module.is_some());
     }
 
     #[test]
@@ -565,7 +652,10 @@ mod tests {
             let root() = { <A /> <B /> }
         "#;
         let result = check_str(source, "object-fallback.nx");
-        let module = result.module.as_ref().expect("Expected lowered module");
+        let module = result
+            .lowered_module
+            .as_ref()
+            .expect("Expected lowered module");
         let root = module
             .items()
             .iter()
@@ -597,7 +687,10 @@ mod tests {
             let root() = { 1 2 3 }
         "#;
         let result = check_str(source, "int-array.nx");
-        let module = result.module.as_ref().expect("Expected lowered module");
+        let module = result
+            .lowered_module
+            .as_ref()
+            .expect("Expected lowered module");
         let root = module
             .items()
             .iter()

@@ -2,12 +2,13 @@
 
 use crate::context::{ExecutionContext, ResourceLimits};
 use crate::error::{RuntimeError, RuntimeErrorKind};
+use crate::resolved_program::{ResolvedProgram, RuntimeModuleId};
 use crate::value::Value;
 use la_arena::RawIdx;
 use nx_hir::{
-    ast, effective_record_shape_for_name, is_record_subtype,
+    ast, effective_record_shape_for_name,
     resolve_record_definition as resolve_hir_record_definition, ElementId, ExprId, Function, Item,
-    Module, Name, RecordKind,
+    LoweredModule, Name, RecordKind,
 };
 use nx_types::{
     common_supertype, is_object_type, resolve_type_ref_with, resolve_type_ref_with_seen,
@@ -24,7 +25,7 @@ const COMPONENT_SNAPSHOT_VERSION: u32 = 1;
 /// Tree-walking interpreter for NX HIR
 #[derive(Debug)]
 pub struct Interpreter {
-    // The interpreter is stateless; all state is in ExecutionContext
+    program: Option<ResolvedProgram>,
 }
 
 /// Result of component initialization.
@@ -48,6 +49,8 @@ pub struct ComponentDispatchResult {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct SerializedComponentSnapshot {
     version: u32,
+    program_fingerprint: Option<u64>,
+    component_module_id: u32,
     component: String,
     props: BTreeMap<String, SerializedValue>,
     state: BTreeMap<String, SerializedValue>,
@@ -72,6 +75,7 @@ enum SerializedValue {
         fields: BTreeMap<String, SerializedValue>,
     },
     ActionHandler {
+        module_id: u32,
         component: String,
         emit: String,
         action_name: String,
@@ -82,6 +86,7 @@ enum SerializedValue {
 
 #[derive(Debug, Clone, PartialEq)]
 struct DecodedComponentSnapshot {
+    component_module_id: RuntimeModuleId,
     component: Name,
     props: FxHashMap<SmolStr, Value>,
     state: FxHashMap<SmolStr, Value>,
@@ -90,7 +95,14 @@ struct DecodedComponentSnapshot {
 impl Interpreter {
     /// Create a new interpreter
     pub fn new() -> Self {
-        Self {}
+        Self { program: None }
+    }
+
+    /// Create a new interpreter bound to a resolved program.
+    pub fn from_resolved_program(program: ResolvedProgram) -> Self {
+        Self {
+            program: Some(program),
+        }
     }
 
     /// Execute a function by name with the given arguments
@@ -127,7 +139,7 @@ impl Interpreter {
     /// ```
     pub fn execute_function(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         function_name: &str,
         args: Vec<Value>,
     ) -> Result<Value, RuntimeError> {
@@ -137,7 +149,7 @@ impl Interpreter {
     /// Invoke a lowered component action handler with a concrete action value.
     pub fn invoke_action_handler(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         handler: &Value,
         action: Value,
     ) -> Result<Vec<Value>, RuntimeError> {
@@ -147,7 +159,7 @@ impl Interpreter {
     /// Initialize a named component instance from input props.
     pub fn initialize_component(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         component_name: &str,
         props: Value,
     ) -> Result<ComponentInitResult, RuntimeError> {
@@ -162,7 +174,7 @@ impl Interpreter {
     /// Dispatch a batch of actions against an opaque component state snapshot.
     pub fn dispatch_component_actions(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         state_snapshot: &[u8],
         actions: Vec<Value>,
     ) -> Result<ComponentDispatchResult, RuntimeError> {
@@ -172,6 +184,202 @@ impl Interpreter {
             actions,
             ResourceLimits::default(),
         )
+    }
+
+    /// Execute a resolved-program entrypoint function.
+    pub fn execute_resolved_program_function(
+        &self,
+        function_name: &str,
+        args: Vec<Value>,
+    ) -> Result<Value, RuntimeError> {
+        self.execute_resolved_program_function_with_limits(
+            function_name,
+            args,
+            ResourceLimits::default(),
+        )
+    }
+
+    /// Execute a resolved-program entrypoint function with custom limits.
+    pub fn execute_resolved_program_function_with_limits(
+        &self,
+        function_name: &str,
+        args: Vec<Value>,
+        limits: ResourceLimits,
+    ) -> Result<Value, RuntimeError> {
+        let program = self.program.as_ref().ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorKind::FunctionNotFound {
+                name: SmolStr::new(function_name),
+            })
+        })?;
+        let entry = program.entry_function(function_name).ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorKind::FunctionNotFound {
+                name: SmolStr::new(function_name),
+            })
+        })?;
+        let module = program.module(entry.module_id).ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorKind::FunctionNotFound {
+                name: SmolStr::new(function_name),
+            })
+        })?;
+
+        self.execute_function_with_limits(
+            module.lowered_module.as_ref(),
+            &entry.item_name,
+            args,
+            limits,
+        )
+    }
+
+    /// Initialize a resolved-program component entrypoint.
+    pub fn initialize_resolved_component(
+        &self,
+        component_name: &str,
+        props: Value,
+    ) -> Result<ComponentInitResult, RuntimeError> {
+        self.initialize_resolved_component_with_limits(
+            component_name,
+            props,
+            ResourceLimits::default(),
+        )
+    }
+
+    /// Initialize a resolved-program component entrypoint with custom limits.
+    pub fn initialize_resolved_component_with_limits(
+        &self,
+        component_name: &str,
+        props: Value,
+        limits: ResourceLimits,
+    ) -> Result<ComponentInitResult, RuntimeError> {
+        let program = self.program.as_ref().ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorKind::ComponentNotFound {
+                name: SmolStr::new(component_name),
+            })
+        })?;
+        let entry = program.entry_component(component_name).ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorKind::ComponentNotFound {
+                name: SmolStr::new(component_name),
+            })
+        })?;
+        let module = program.module(entry.module_id).ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorKind::ComponentNotFound {
+                name: SmolStr::new(component_name),
+            })
+        })?;
+
+        self.initialize_component_with_limits(
+            module.lowered_module.as_ref(),
+            &entry.item_name,
+            props,
+            limits,
+        )
+    }
+
+    /// Dispatch actions against a resolved-program snapshot.
+    pub fn dispatch_resolved_component_actions(
+        &self,
+        state_snapshot: &[u8],
+        actions: Vec<Value>,
+    ) -> Result<ComponentDispatchResult, RuntimeError> {
+        self.dispatch_resolved_component_actions_with_limits(
+            state_snapshot,
+            actions,
+            ResourceLimits::default(),
+        )
+    }
+
+    /// Dispatch actions against a resolved-program snapshot with custom limits.
+    pub fn dispatch_resolved_component_actions_with_limits(
+        &self,
+        state_snapshot: &[u8],
+        actions: Vec<Value>,
+        limits: ResourceLimits,
+    ) -> Result<ComponentDispatchResult, RuntimeError> {
+        let module = self.program_root_module()?;
+        self.dispatch_component_actions_with_limits(module, state_snapshot, actions, limits)
+    }
+
+    fn program_root_module(&self) -> Result<&LoweredModule, RuntimeError> {
+        let program = self.program.as_ref().ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorKind::InvalidComponentStateSnapshot {
+                reason: "resolved program runtime is not available".to_string(),
+            })
+        })?;
+        let root_module_id = program.root_modules().first().copied().ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorKind::InvalidComponentStateSnapshot {
+                reason: "resolved program does not contain any root modules".to_string(),
+            })
+        })?;
+        let module = program.module(root_module_id).ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorKind::InvalidComponentStateSnapshot {
+                reason: format!(
+                    "resolved program is missing root module {}",
+                    root_module_id.as_u32()
+                ),
+            })
+        })?;
+
+        Ok(module.lowered_module.as_ref())
+    }
+
+    fn current_module_id(&self, module: &LoweredModule) -> Option<RuntimeModuleId> {
+        self.program.as_ref().and_then(|program| {
+            program
+                .modules()
+                .iter()
+                .find(|candidate| std::ptr::eq(candidate.lowered_module.as_ref(), module))
+                .map(|candidate| candidate.id)
+        })
+    }
+
+    fn require_current_module_id(
+        &self,
+        module: &LoweredModule,
+        operation: &str,
+    ) -> Result<RuntimeModuleId, RuntimeError> {
+        self.current_module_id(module).ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorKind::ResolvedProgramRequired {
+                operation: operation.to_string(),
+            })
+        })
+    }
+
+    fn module_for_id<'a>(
+        &'a self,
+        fallback_module: &'a LoweredModule,
+        module_id: RuntimeModuleId,
+    ) -> Result<&'a LoweredModule, RuntimeError> {
+        if let Some(program) = self.program.as_ref() {
+            let resolved_module = program.module(module_id).ok_or_else(|| {
+                RuntimeError::new(RuntimeErrorKind::InvalidComponentStateSnapshot {
+                    reason: format!(
+                        "snapshot references unknown module id '{}'",
+                        module_id.as_u32()
+                    ),
+                })
+            })?;
+            Ok(resolved_module.lowered_module.as_ref())
+        } else {
+            Ok(fallback_module)
+        }
+    }
+
+    fn resolve_item<'a>(
+        &'a self,
+        module: &'a LoweredModule,
+        name: &str,
+    ) -> Option<(&'a LoweredModule, &'a Item)> {
+        if let Some(item) = module.find_item(name) {
+            return Some((module, item));
+        }
+
+        let program = self.program.as_ref()?;
+        let module_id = self.current_module_id(module)?;
+        let item_ref = program.imported_item(module_id, name)?;
+        let target_module = program.module(item_ref.module_id)?;
+        let item = target_module
+            .lowered_module
+            .find_item(&item_ref.item_name)?;
+        Some((target_module.lowered_module.as_ref(), item))
     }
 
     /// Execute a function with custom resource limits
@@ -207,7 +415,7 @@ impl Interpreter {
     /// ```
     pub fn execute_function_with_limits(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         function_name: &str,
         args: Vec<Value>,
         limits: ResourceLimits,
@@ -255,19 +463,20 @@ impl Interpreter {
     /// Invoke a lowered component action handler with custom resource limits.
     pub fn invoke_action_handler_with_limits(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         handler: &Value,
         action: Value,
         limits: ResourceLimits,
     ) -> Result<Vec<Value>, RuntimeError> {
-        let (component, emit, action_name, body, captured) = match handler {
+        let (handler_module_id, component, emit, action_name, body, captured) = match handler {
             Value::ActionHandler {
+                module_id,
                 component,
                 emit,
                 action_name,
                 body,
                 captured,
-            } => (component, emit, action_name, *body, captured),
+            } => (*module_id, component, emit, action_name, *body, captured),
             other => {
                 return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
                     expected: "action handler".to_string(),
@@ -276,24 +485,26 @@ impl Interpreter {
                 }))
             }
         };
+        let handler_module = self.module_for_id(module, handler_module_id)?;
 
-        let action = self.validate_handler_input(module, action, action_name, component, emit)?;
+        let action =
+            self.validate_handler_input(handler_module, action, action_name, component, emit)?;
 
         let mut ctx = ExecutionContext::with_limits(limits);
-        self.bind_top_level_values(module, &mut ctx)?;
+        self.bind_top_level_values(handler_module, &mut ctx)?;
         for (name, value) in captured {
             ctx.define_variable(name.clone(), value.clone());
         }
         ctx.define_variable(SmolStr::new("action"), action);
 
-        let result = self.eval_expr(module, &mut ctx, body)?;
-        self.normalize_handler_result(module, result, component, emit)
+        let result = self.eval_expr(handler_module, &mut ctx, body)?;
+        self.normalize_handler_result(handler_module, result, component, emit)
     }
 
     /// Initialize a named component instance from input props with custom resource limits.
     pub fn initialize_component_with_limits(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         component_name: &str,
         props: Value,
         limits: ResourceLimits,
@@ -306,8 +517,14 @@ impl Interpreter {
         let normalized_state =
             self.materialize_component_state(module, &mut ctx, component, FxHashMap::default())?;
         let rendered = self.eval_expr(module, &mut ctx, component.body)?;
-        let state_snapshot =
-            self.encode_component_snapshot(&component.name, &normalized_props, &normalized_state)?;
+        let component_module_id =
+            self.require_current_module_id(module, "component state snapshot creation")?;
+        let state_snapshot = self.encode_component_snapshot(
+            component_module_id,
+            &component.name,
+            &normalized_props,
+            &normalized_state,
+        )?;
 
         Ok(ComponentInitResult {
             rendered,
@@ -318,13 +535,15 @@ impl Interpreter {
     /// Dispatch a batch of actions against an opaque component state snapshot with custom limits.
     pub fn dispatch_component_actions_with_limits(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         state_snapshot: &[u8],
         actions: Vec<Value>,
         limits: ResourceLimits,
     ) -> Result<ComponentDispatchResult, RuntimeError> {
         let decoded_snapshot = self.decode_component_snapshot(module, state_snapshot)?;
-        let component = self.find_component(module, decoded_snapshot.component.as_str())?;
+        let component_module = self.module_for_id(module, decoded_snapshot.component_module_id)?;
+        let component =
+            self.find_component(component_module, decoded_snapshot.component.as_str())?;
         let mut effects = Vec::new();
 
         for action in actions {
@@ -334,11 +553,12 @@ impl Interpreter {
             if let Some(handler) = decoded_snapshot.props.get(handler_name.as_str()) {
                 match handler {
                     Value::ActionHandler { .. } => {
-                        effects.extend(
-                            self.invoke_action_handler_with_limits(
-                                module, handler, action, limits,
-                            )?,
-                        );
+                        effects.extend(self.invoke_action_handler_with_limits(
+                            component_module,
+                            handler,
+                            action,
+                            limits,
+                        )?);
                     }
                     _ => {
                         return Err(RuntimeError::new(
@@ -355,6 +575,7 @@ impl Interpreter {
         }
 
         let next_state_snapshot = self.encode_component_snapshot(
+            decoded_snapshot.component_module_id,
             &decoded_snapshot.component,
             &decoded_snapshot.props,
             &decoded_snapshot.state,
@@ -368,12 +589,12 @@ impl Interpreter {
 
     /// Find a function by name in the module
     fn find_function<'a>(
-        &self,
-        module: &'a Module,
+        &'a self,
+        module: &'a LoweredModule,
         name: &str,
     ) -> Result<&'a Function, RuntimeError> {
-        match module.find_item(name) {
-            Some(nx_hir::Item::Function(func)) => Ok(func),
+        match self.resolve_item(module, name) {
+            Some((_, nx_hir::Item::Function(func))) => Ok(func),
             _ => Err(RuntimeError::new(RuntimeErrorKind::FunctionNotFound {
                 name: SmolStr::new(name),
             })),
@@ -381,12 +602,12 @@ impl Interpreter {
     }
 
     fn find_component<'a>(
-        &self,
-        module: &'a Module,
+        &'a self,
+        module: &'a LoweredModule,
         name: &str,
     ) -> Result<&'a nx_hir::Component, RuntimeError> {
-        match module.find_item(name) {
-            Some(Item::Component(component)) => Ok(component),
+        match self.resolve_item(module, name) {
+            Some((_, Item::Component(component))) => Ok(component),
             _ => Err(RuntimeError::new(RuntimeErrorKind::ComponentNotFound {
                 name: SmolStr::new(name),
             })),
@@ -395,7 +616,7 @@ impl Interpreter {
 
     fn bind_top_level_values(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         ctx: &mut ExecutionContext,
     ) -> Result<(), RuntimeError> {
         for item in module.items() {
@@ -416,7 +637,7 @@ impl Interpreter {
         Ok(())
     }
 
-    fn flattened_expr_name(&self, module: &Module, expr_id: ExprId) -> Option<String> {
+    fn flattened_expr_name(&self, module: &LoweredModule, expr_id: ExprId) -> Option<String> {
         match module.expr(expr_id) {
             ast::Expr::Ident(name) => Some(name.as_str().to_string()),
             ast::Expr::Member { base, member, .. } => {
@@ -464,7 +685,7 @@ impl Interpreter {
 
     fn materialize_component_fields(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         ctx: &mut ExecutionContext,
         component: &nx_hir::Component,
         fields: &[nx_hir::RecordField],
@@ -508,7 +729,7 @@ impl Interpreter {
 
     fn normalize_component_props(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         ctx: &mut ExecutionContext,
         component: &nx_hir::Component,
         props: Value,
@@ -579,7 +800,7 @@ impl Interpreter {
 
     fn materialize_component_state(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         ctx: &mut ExecutionContext,
         component: &nx_hir::Component,
         mut overrides: FxHashMap<SmolStr, Value>,
@@ -621,12 +842,15 @@ impl Interpreter {
 
     fn encode_component_snapshot(
         &self,
+        component_module_id: RuntimeModuleId,
         component_name: &Name,
         props: &FxHashMap<SmolStr, Value>,
         state: &FxHashMap<SmolStr, Value>,
     ) -> Result<Vec<u8>, RuntimeError> {
         let snapshot = SerializedComponentSnapshot {
             version: COMPONENT_SNAPSHOT_VERSION,
+            program_fingerprint: self.program.as_ref().map(|program| program.fingerprint),
+            component_module_id: component_module_id.as_u32(),
             component: component_name.as_str().to_string(),
             props: props
                 .iter()
@@ -647,7 +871,7 @@ impl Interpreter {
 
     fn decode_component_snapshot(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         bytes: &[u8],
     ) -> Result<DecodedComponentSnapshot, RuntimeError> {
         let snapshot: SerializedComponentSnapshot = rmp_serde::from_slice(bytes).map_err(|e| {
@@ -665,6 +889,32 @@ impl Interpreter {
                     ),
                 },
             ));
+        }
+
+        match self.program.as_ref() {
+            Some(program) => {
+                if snapshot.program_fingerprint != Some(program.fingerprint) {
+                    return Err(RuntimeError::new(
+                        RuntimeErrorKind::InvalidComponentStateSnapshot {
+                            reason: format!(
+                                "snapshot fingerprint {:?} does not match program fingerprint {}",
+                                snapshot.program_fingerprint, program.fingerprint
+                            ),
+                        },
+                    ));
+                }
+            }
+            None if snapshot.program_fingerprint.is_some() => {
+                return Err(RuntimeError::new(
+                    RuntimeErrorKind::InvalidComponentStateSnapshot {
+                        reason: format!(
+                            "snapshot fingerprint {:?} requires a resolved program runtime",
+                            snapshot.program_fingerprint
+                        ),
+                    },
+                ));
+            }
+            None => {}
         }
 
         let props = snapshot
@@ -689,6 +939,7 @@ impl Interpreter {
             .collect::<Result<FxHashMap<_, _>, RuntimeError>>()?;
 
         Ok(DecodedComponentSnapshot {
+            component_module_id: RuntimeModuleId::new(snapshot.component_module_id),
             component: Name::new(&snapshot.component),
             props,
             state,
@@ -719,12 +970,14 @@ impl Interpreter {
                     .collect(),
             },
             Value::ActionHandler {
+                module_id,
                 component,
                 emit,
                 action_name,
                 body,
                 captured,
             } => SerializedValue::ActionHandler {
+                module_id: module_id.as_u32(),
                 component: component.as_str().to_string(),
                 emit: emit.as_str().to_string(),
                 action_name: action_name.as_str().to_string(),
@@ -739,7 +992,7 @@ impl Interpreter {
 
     fn deserialize_runtime_value(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         value: SerializedValue,
     ) -> Result<Value, RuntimeError> {
         match value {
@@ -773,15 +1026,19 @@ impl Interpreter {
                     .collect::<Result<FxHashMap<_, _>, RuntimeError>>()?,
             }),
             SerializedValue::ActionHandler {
+                module_id,
                 component,
                 emit,
                 action_name,
                 body,
                 captured,
             } => {
+                let handler_module_id = RuntimeModuleId::new(module_id);
+                let handler_module = self.module_for_id(module, handler_module_id)?;
+
                 if usize::try_from(body)
                     .ok()
-                    .filter(|body| *body < module.expr_count())
+                    .filter(|body| *body < handler_module.expr_count())
                     .is_none()
                 {
                     return Err(RuntimeError::new(
@@ -795,6 +1052,7 @@ impl Interpreter {
                 }
 
                 Ok(Value::ActionHandler {
+                    module_id: handler_module_id,
                     component: Name::new(&component),
                     emit: Name::new(&emit),
                     action_name: Name::new(&action_name),
@@ -816,7 +1074,7 @@ impl Interpreter {
     /// Evaluate an expression (T013 - skeleton)
     fn eval_expr(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         ctx: &mut ExecutionContext,
         expr_id: ExprId,
     ) -> Result<Value, RuntimeError> {
@@ -864,7 +1122,7 @@ impl Interpreter {
                 action_name,
                 body,
                 ..
-            } => self.eval_action_handler_expr(ctx, component, emit, action_name, *body),
+            } => self.eval_action_handler_expr(module, ctx, component, emit, action_name, *body),
             ast::Expr::Element { element, .. } => self.eval_element_expr(module, ctx, *element),
             ast::Expr::RecordLiteral {
                 record, properties, ..
@@ -891,6 +1149,7 @@ impl Interpreter {
 
     fn eval_action_handler_expr(
         &self,
+        module: &LoweredModule,
         ctx: &ExecutionContext,
         component: &Name,
         emit: &Name,
@@ -899,8 +1158,10 @@ impl Interpreter {
     ) -> Result<Value, RuntimeError> {
         let mut captured = ctx.snapshot_visible_variables();
         captured.remove("action");
+        let module_id = self.require_current_module_id(module, "action handler creation")?;
 
         Ok(Value::ActionHandler {
+            module_id,
             component: component.clone(),
             emit: emit.clone(),
             action_name: action_name.clone(),
@@ -917,7 +1178,7 @@ impl Interpreter {
     /// Evaluate a block expression (T014 - placeholder)
     fn eval_block(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         ctx: &mut ExecutionContext,
         stmts: &[ast::Stmt],
         final_expr: Option<&ExprId>,
@@ -943,7 +1204,7 @@ impl Interpreter {
     /// Evaluate a statement (T014 - placeholder)
     fn eval_stmt(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         ctx: &mut ExecutionContext,
         stmt: &ast::Stmt,
     ) -> Result<(), RuntimeError> {
@@ -963,7 +1224,7 @@ impl Interpreter {
     /// Evaluate a binary operation (T017, T036, T038)
     fn eval_binary_op(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         ctx: &mut ExecutionContext,
         lhs: ExprId,
         op: ast::BinOp,
@@ -1051,7 +1312,7 @@ impl Interpreter {
     /// Evaluate a unary operation (T038)
     fn eval_unary_op(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         ctx: &mut ExecutionContext,
         op: ast::UnOp,
         expr: ExprId,
@@ -1080,7 +1341,7 @@ impl Interpreter {
     /// Evaluate an if expression (T037)
     fn eval_if(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         ctx: &mut ExecutionContext,
         condition: ExprId,
         then_branch: ExprId,
@@ -1117,7 +1378,7 @@ impl Interpreter {
     /// then evaluates the body expression with that binding.
     fn eval_let(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         ctx: &mut ExecutionContext,
         name: &Name,
         value: ExprId,
@@ -1142,7 +1403,7 @@ impl Interpreter {
     /// Evaluate a function call expression (T053)
     fn eval_call(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         ctx: &mut ExecutionContext,
         func_expr: ExprId,
         args: &[ExprId],
@@ -1160,22 +1421,26 @@ impl Interpreter {
             arg_values.push(self.eval_expr(module, ctx, *arg_expr)?);
         }
 
-        match module.find_item(func_name.as_str()) {
-            Some(Item::Function(function)) => {
-                self.eval_function_call(module, ctx, func_name.as_str(), function, arg_values)
-            }
-            Some(Item::Record(record_def)) => self.eval_record_constructor_call(
-                module,
+        match self.resolve_item(module, func_name.as_str()) {
+            Some((target_module, Item::Function(function))) => self.eval_function_call(
+                target_module,
+                ctx,
+                func_name.as_str(),
+                function,
+                arg_values,
+            ),
+            Some((target_module, Item::Record(record_def))) => self.eval_record_constructor_call(
+                target_module,
                 ctx,
                 func_name.as_str(),
                 record_def,
                 arg_values,
             ),
-            Some(Item::TypeAlias(_)) => {
+            Some((target_module, Item::TypeAlias(_))) => {
                 if let Some(record_def) = self.resolve_record_definition(module, func_name.as_str())
                 {
                     self.eval_record_constructor_call(
-                        module,
+                        target_module,
                         ctx,
                         func_name.as_str(),
                         &record_def,
@@ -1195,7 +1460,7 @@ impl Interpreter {
 
     fn eval_function_call(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         ctx: &mut ExecutionContext,
         func_name: &str,
         function: &Function,
@@ -1249,7 +1514,7 @@ impl Interpreter {
 
     fn eval_record_constructor_call(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         ctx: &mut ExecutionContext,
         func_name: &str,
         record_def: &nx_hir::RecordDef,
@@ -1283,7 +1548,7 @@ impl Interpreter {
 
     fn eval_element_expr(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         ctx: &mut ExecutionContext,
         element_id: ElementId,
     ) -> Result<Value, RuntimeError> {
@@ -1299,7 +1564,8 @@ impl Interpreter {
         let child_values = self.eval_child_expressions(module, ctx, &element.children)?;
         let normalized_children = self.normalize_child_values(child_values);
 
-        if let Some(Item::Function(function)) = module.find_item(tag_name) {
+        if let Some((target_module, Item::Function(function))) = self.resolve_item(module, tag_name)
+        {
             self.inject_element_children_field(
                 &mut fields,
                 normalized_children,
@@ -1326,7 +1592,7 @@ impl Interpreter {
                 match fields.remove(param.name.as_str()) {
                     Some(value) => {
                         arg_values.push(self.coerce_value_to_type(
-                            module,
+                            target_module,
                             value,
                             &param.ty,
                             &format!("parameter '{}'", param.name.as_str()),
@@ -1350,7 +1616,7 @@ impl Interpreter {
                 }));
             }
 
-            return self.eval_function_call(module, ctx, tag_name, function, arg_values);
+            return self.eval_function_call(target_module, ctx, tag_name, function, arg_values);
         }
 
         if let Some(record_def) = self.resolve_record_definition(module, tag_name) {
@@ -1419,7 +1685,7 @@ impl Interpreter {
 
     fn eval_child_expressions(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         ctx: &mut ExecutionContext,
         child_exprs: &[ExprId],
     ) -> Result<Vec<Value>, RuntimeError> {
@@ -1446,7 +1712,7 @@ impl Interpreter {
 
     fn coerce_arguments_for_params(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         arg_values: Vec<Value>,
         params: &[nx_hir::Param],
         operation: &str,
@@ -1465,7 +1731,7 @@ impl Interpreter {
 
     fn coerce_value_to_type(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         value: Value,
         expected: &ast::TypeRef,
         operation: &str,
@@ -1476,7 +1742,7 @@ impl Interpreter {
 
     fn coerce_value_to_resolved_type(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         value: Value,
         expected: &Type,
         operation: &str,
@@ -1596,7 +1862,7 @@ impl Interpreter {
         }
     }
 
-    fn runtime_type_from_type_ref(&self, module: &Module, type_ref: &ast::TypeRef) -> Type {
+    fn runtime_type_from_type_ref(&self, module: &LoweredModule, type_ref: &ast::TypeRef) -> Type {
         resolve_type_ref_with(type_ref, &mut |name, seen| {
             self.resolve_runtime_named_type(module, name, seen)
         })
@@ -1604,7 +1870,7 @@ impl Interpreter {
 
     fn resolve_runtime_named_type(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         name: &Name,
         seen: &mut FxHashSet<Name>,
     ) -> Type {
@@ -1612,10 +1878,10 @@ impl Interpreter {
             return Type::named(name.clone());
         }
 
-        let resolved = match module.find_item(name.as_str()) {
-            Some(Item::TypeAlias(alias)) => {
+        let resolved = match self.resolve_item(module, name.as_str()) {
+            Some((target_module, Item::TypeAlias(alias))) => {
                 resolve_type_ref_with_seen(&alias.ty, seen, &mut |nested_name, nested_seen| {
-                    self.resolve_runtime_named_type(module, nested_name, nested_seen)
+                    self.resolve_runtime_named_type(target_module, nested_name, nested_seen)
                 })
             }
             _ => Type::named(name.clone()),
@@ -1627,7 +1893,7 @@ impl Interpreter {
 
     fn eval_member(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         ctx: &mut ExecutionContext,
         base_expr: ExprId,
         member: &Name,
@@ -1728,7 +1994,7 @@ impl Interpreter {
     /// Instantiate a record value from its definition, applying default values.
     pub fn instantiate_record_defaults(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         record_name: &str,
     ) -> Result<Value, RuntimeError> {
         let mut ctx = ExecutionContext::new();
@@ -1738,7 +2004,7 @@ impl Interpreter {
     /// Evaluate a for loop expression
     fn eval_for(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         ctx: &mut ExecutionContext,
         item: &Name,
         index: Option<&Name>,
@@ -1789,20 +2055,29 @@ impl Interpreter {
     }
 
     fn resolve_enum_definition<'a>(
-        &self,
-        module: &'a Module,
+        &'a self,
+        module: &'a LoweredModule,
         name: &Name,
     ) -> Option<&'a nx_hir::EnumDef> {
         self.resolve_enum_definition_inner(module, name, &mut FxHashSet::default())
     }
 
-    fn resolve_record_definition(&self, module: &Module, name: &str) -> Option<nx_hir::RecordDef> {
-        resolve_hir_record_definition(module, &Name::new(name))
+    fn resolve_record_definition(
+        &self,
+        module: &LoweredModule,
+        name: &str,
+    ) -> Option<nx_hir::RecordDef> {
+        let (target_module, item) = self.resolve_item(module, name)?;
+        match item {
+            Item::Record(record_def) => Some(record_def.clone()),
+            Item::TypeAlias(alias) => resolve_hir_record_definition(target_module, &alias.name),
+            _ => None,
+        }
     }
 
     fn resolve_enum_definition_inner<'a>(
-        &self,
-        module: &'a Module,
+        &'a self,
+        module: &'a LoweredModule,
         name: &Name,
         seen: &mut FxHashSet<SmolStr>,
     ) -> Option<&'a nx_hir::EnumDef> {
@@ -1811,11 +2086,11 @@ impl Interpreter {
             return None;
         }
 
-        let result = match module.find_item(name.as_str()) {
-            Some(nx_hir::Item::Enum(enum_def)) => Some(enum_def),
-            Some(nx_hir::Item::TypeAlias(alias)) => match &alias.ty {
+        let result = match self.resolve_item(module, name.as_str()) {
+            Some((_, nx_hir::Item::Enum(enum_def))) => Some(enum_def),
+            Some((target_module, nx_hir::Item::TypeAlias(alias))) => match &alias.ty {
                 ast::TypeRef::Name(target) => {
-                    self.resolve_enum_definition_inner(module, target, seen)
+                    self.resolve_enum_definition_inner(target_module, target, seen)
                 }
                 _ => None,
             },
@@ -1828,10 +2103,14 @@ impl Interpreter {
 
     fn effective_record_shape(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         name: &Name,
     ) -> Result<nx_hir::EffectiveRecordShape, RuntimeError> {
-        let shape = effective_record_shape_for_name(module, name)
+        let target_module = self
+            .resolve_item(module, name.as_str())
+            .map(|(target_module, _)| target_module)
+            .unwrap_or(module);
+        let shape = effective_record_shape_for_name(target_module, name)
             .map_err(|error| self.record_resolution_runtime_error(error))?;
 
         shape.ok_or_else(|| {
@@ -1854,16 +2133,31 @@ impl Interpreter {
 
     fn record_type_satisfies_expected(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         actual: &Name,
         expected: &Name,
     ) -> bool {
-        is_record_subtype(module, actual, expected).unwrap_or(false)
+        if actual == expected {
+            return true;
+        }
+
+        let mut current = self.resolve_record_definition(module, actual.as_str());
+        while let Some(record) = current {
+            let Some(base_name) = record.base.as_ref() else {
+                return false;
+            };
+            if base_name == expected {
+                return true;
+            }
+            current = self.resolve_record_definition(module, base_name.as_str());
+        }
+
+        false
     }
 
     fn record_value_matches_expected_type(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         actual_type_name: &Name,
         expected: &Type,
     ) -> bool {
@@ -1897,7 +2191,7 @@ impl Interpreter {
     // intentionally scoped to explicit input boundaries rather than general parameter coercion.
     fn construct_external_record_value(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         actual_type_name: &Name,
         fields: FxHashMap<SmolStr, Value>,
         expected_type_name: &Name,
@@ -1941,7 +2235,7 @@ impl Interpreter {
 
     fn validate_handler_input(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         action: Value,
         expected_action_name: &Name,
         component: &Name,
@@ -1990,7 +2284,7 @@ impl Interpreter {
 
     fn normalize_handler_result(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         result: Value,
         component: &Name,
         emit: &Name,
@@ -2033,7 +2327,7 @@ impl Interpreter {
 
     fn ensure_action_result_value(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         value: &Value,
         component: &Name,
         emit: &Name,
@@ -2075,7 +2369,7 @@ impl Interpreter {
 impl Interpreter {
     fn eval_record_literal(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         ctx: &mut ExecutionContext,
         record: &Name,
         properties: &[(Name, ExprId)],
@@ -2091,7 +2385,7 @@ impl Interpreter {
 
     fn build_record_value(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         ctx: &mut ExecutionContext,
         record_name: &str,
         overrides: FxHashMap<SmolStr, Value>,
@@ -2102,7 +2396,7 @@ impl Interpreter {
 
     fn build_record_value_from_shape(
         &self,
-        module: &Module,
+        module: &LoweredModule,
         ctx: &mut ExecutionContext,
         record_shape: nx_hir::EffectiveRecordShape,
         mut overrides: FxHashMap<SmolStr, Value>,
@@ -2162,6 +2456,9 @@ mod tests {
     use nx_diagnostics::{TextSize, TextSpan};
     use nx_hir::{lower as lower_hir, SourceId};
     use nx_syntax::parse_str;
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    use std::sync::Arc;
 
     #[test]
     fn test_interpreter_creation() {
@@ -2172,12 +2469,12 @@ mod tests {
     #[test]
     fn test_function_not_found() {
         let interpreter = Interpreter::new();
-        let module = Module::new(SourceId::new(0));
+        let module = LoweredModule::new(SourceId::new(0));
         let result = interpreter.execute_function(&module, "nonexistent", vec![]);
         assert!(result.is_err());
     }
 
-    fn lower_module(source: &str) -> Module {
+    fn lower_module(source: &str) -> LoweredModule {
         let parse_result = parse_str(source, "handler-test.nx");
         assert!(
             parse_result.errors.is_empty(),
@@ -2188,6 +2485,27 @@ mod tests {
             .tree
             .expect("Expected handler test source to parse");
         lower_hir(tree.root(), SourceId::new(0))
+    }
+
+    fn single_module_runtime(
+        module: LoweredModule,
+        identity: &str,
+        fingerprint_seed: &str,
+    ) -> (Arc<LoweredModule>, Interpreter) {
+        let module = Arc::new(module);
+        let mut hasher = DefaultHasher::new();
+        identity.hash(&mut hasher);
+        fingerprint_seed.hash(&mut hasher);
+        let interpreter = Interpreter::from_resolved_program(ResolvedProgram::single_root_module(
+            hasher.finish(),
+            identity.to_string(),
+            module.clone(),
+        ));
+        (module, interpreter)
+    }
+
+    fn lower_module_runtime(source: &str) -> (Arc<LoweredModule>, Interpreter) {
+        single_module_runtime(lower_module(source), "handler-test.nx", source)
     }
 
     fn extract_handler<'a>(value: &'a Value, field: &str) -> &'a Value {
@@ -2217,6 +2535,60 @@ mod tests {
     }
 
     #[test]
+    fn test_bare_interpreter_rejects_action_handler_creation_without_resolved_program() {
+        let source = r#"
+            action SearchSubmitted = { searchString:string }
+            action DoSearch = { search:string }
+
+            component <SearchBox emits { SearchSubmitted } /> = {
+              <TextInput />
+            }
+
+            let render() = <SearchBox onSearchSubmitted=<DoSearch search={action.searchString} /> />
+        "#;
+
+        let module = lower_module(source);
+        let interpreter = Interpreter::new();
+        let error = interpreter
+            .execute_function(&module, "render", vec![])
+            .expect_err("Expected bare interpreter to reject handler creation");
+
+        assert!(matches!(
+            error.kind(),
+            RuntimeErrorKind::ResolvedProgramRequired { operation }
+                if operation == "action handler creation"
+        ));
+    }
+
+    #[test]
+    fn test_bare_interpreter_rejects_component_snapshot_creation_without_resolved_program() {
+        let source = r#"
+            component <SearchBox /> = {
+              <TextInput />
+            }
+        "#;
+
+        let module = lower_module(source);
+        let interpreter = Interpreter::new();
+        let error = interpreter
+            .initialize_component(
+                &module,
+                "SearchBox",
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::default(),
+                },
+            )
+            .expect_err("Expected bare interpreter to reject snapshot creation");
+
+        assert!(matches!(
+            error.kind(),
+            RuntimeErrorKind::ResolvedProgramRequired { operation }
+                if operation == "component state snapshot creation"
+        ));
+    }
+
+    #[test]
     fn test_invoke_action_handler_captures_values_and_returns_single_action() {
         let source = r#"
             action SearchSubmitted = { searchString:string }
@@ -2229,10 +2601,13 @@ mod tests {
             let render(userId:string) = <SearchBox onSearchSubmitted=<DoSearch userId={userId} search={action.searchString} /> />
         "#;
 
-        let module = lower_module(source);
-        let interpreter = Interpreter::new();
+        let (module, interpreter) = lower_module_runtime(source);
         let render_result = interpreter
-            .execute_function(&module, "render", vec![Value::String(SmolStr::new("u1"))])
+            .execute_function(
+                module.as_ref(),
+                "render",
+                vec![Value::String(SmolStr::new("u1"))],
+            )
             .expect("Expected render to succeed");
 
         let handler = extract_handler(&render_result, "onSearchSubmitted");
@@ -2262,7 +2637,7 @@ mod tests {
         );
         let actions = interpreter
             .invoke_action_handler(
-                &module,
+                module.as_ref(),
                 handler,
                 Value::Record {
                     type_name: Name::new("SearchSubmitted"),
@@ -2301,11 +2676,10 @@ mod tests {
             let render(action:string, source:string) = <SearchBox onSearchSubmitted=<DoSearch source={source} search={action.searchString} /> />
         "#;
 
-        let module = lower_module(source);
-        let interpreter = Interpreter::new();
+        let (module, interpreter) = lower_module_runtime(source);
         let render_result = interpreter
             .execute_function(
-                &module,
+                module.as_ref(),
                 "render",
                 vec![
                     Value::String(SmolStr::new("outer-action")),
@@ -2336,7 +2710,7 @@ mod tests {
         );
         let actions = interpreter
             .invoke_action_handler(
-                &module,
+                module.as_ref(),
                 handler,
                 Value::Record {
                     type_name: Name::new("SearchSubmitted"),
@@ -2368,15 +2742,15 @@ mod tests {
             action DoSearch = { userId:string search:string }
         "#;
 
-        let mut module = lower_module(source);
-        let user_id_expr = module.alloc_expr(ast::Expr::Ident(Name::new("userId")));
-        let action_ident = module.alloc_expr(ast::Expr::Ident(Name::new("action")));
-        let search_expr = module.alloc_expr(ast::Expr::Member {
+        let mut lowered_module = lower_module(source);
+        let user_id_expr = lowered_module.alloc_expr(ast::Expr::Ident(Name::new("userId")));
+        let action_ident = lowered_module.alloc_expr(ast::Expr::Ident(Name::new("action")));
+        let search_expr = lowered_module.alloc_expr(ast::Expr::Member {
             base: action_ident,
             member: Name::new("searchString"),
             span: span(0, 0),
         });
-        let body = module.alloc_expr(ast::Expr::RecordLiteral {
+        let body = lowered_module.alloc_expr(ast::Expr::RecordLiteral {
             record: Name::new("DoSearch"),
             properties: vec![
                 (Name::new("userId"), user_id_expr),
@@ -2384,7 +2758,7 @@ mod tests {
             ],
             span: span(0, 0),
         });
-        let handler_expr = module.alloc_expr(ast::Expr::ActionHandler {
+        let handler_expr = lowered_module.alloc_expr(ast::Expr::ActionHandler {
             component: Name::new("SearchBox"),
             emit: Name::new("SearchSubmitted"),
             action_name: Name::new("SearchSubmitted"),
@@ -2392,7 +2766,11 @@ mod tests {
             span: span(0, 0),
         });
 
-        let interpreter = Interpreter::new();
+        let (module, interpreter) = single_module_runtime(
+            lowered_module,
+            "manual-handler-test.nx",
+            "test_action_handler_captures_snapshot_not_live_reference",
+        );
         let mut ctx = ExecutionContext::new();
         ctx.define_variable(SmolStr::new("userId"), Value::String(SmolStr::new("u1")));
         ctx.define_variable(
@@ -2401,7 +2779,7 @@ mod tests {
         );
 
         let handler = interpreter
-            .eval_expr(&module, &mut ctx, handler_expr)
+            .eval_expr(module.as_ref(), &mut ctx, handler_expr)
             .expect("Expected handler expression to evaluate");
         ctx.update_variable("userId", Value::String(SmolStr::new("u2")))
             .expect("Expected outer variable update to succeed");
@@ -2413,7 +2791,7 @@ mod tests {
         );
         let actions = interpreter
             .invoke_action_handler(
-                &module,
+                module.as_ref(),
                 &handler,
                 Value::Record {
                     type_name: Name::new("SearchSubmitted"),
@@ -2440,7 +2818,7 @@ mod tests {
 
     #[test]
     fn test_record_literal_reports_missing_record_type() {
-        let mut module = Module::new(SourceId::new(0));
+        let mut module = LoweredModule::new(SourceId::new(0));
         let body = module.alloc_expr(ast::Expr::RecordLiteral {
             record: Name::new("MissingRecord"),
             properties: vec![],
@@ -2481,16 +2859,15 @@ mod tests {
             let render() = <SearchBox onSearchSubmitted=<DoSearch search={action.searchString} source={action.source} /> />
         "#;
 
-        let module = lower_module(source);
-        let interpreter = Interpreter::new();
+        let (module, interpreter) = lower_module_runtime(source);
         let render_result = interpreter
-            .execute_function(&module, "render", vec![])
+            .execute_function(module.as_ref(), "render", vec![])
             .expect("Expected render to succeed");
         let handler = extract_handler(&render_result, "onSearchSubmitted");
 
         let actions = interpreter
             .invoke_action_handler(
-                &module,
+                module.as_ref(),
                 handler,
                 Value::Record {
                     type_name: Name::new("SearchSubmitted"),
@@ -2525,16 +2902,15 @@ mod tests {
             let render() = <SearchBox onSearchSubmitted=<DoSearch search="ok" /> />
         "#;
 
-        let module = lower_module(source);
-        let interpreter = Interpreter::new();
+        let (module, interpreter) = lower_module_runtime(source);
         let render_result = interpreter
-            .execute_function(&module, "render", vec![])
+            .execute_function(module.as_ref(), "render", vec![])
             .expect("Expected render to succeed");
         let handler = extract_handler(&render_result, "onSearchSubmitted");
 
         let error = interpreter
             .invoke_action_handler(
-                &module,
+                module.as_ref(),
                 handler,
                 Value::Record {
                     type_name: Name::new("SearchSubmitted"),
@@ -2568,10 +2944,9 @@ mod tests {
             let render() = <SearchBox onValueChanged={<LogSearch value={action.value} /> <TrackSearch value={action.value} />} />
         "#;
 
-        let module = lower_module(source);
-        let interpreter = Interpreter::new();
+        let (module, interpreter) = lower_module_runtime(source);
         let render_result = interpreter
-            .execute_function(&module, "render", vec![])
+            .execute_function(module.as_ref(), "render", vec![])
             .expect("Expected render to succeed");
         let handler = extract_handler(&render_result, "onValueChanged");
         match handler {
@@ -2593,7 +2968,7 @@ mod tests {
 
         let actions = interpreter
             .invoke_action_handler(
-                &module,
+                module.as_ref(),
                 &handler,
                 Value::Record {
                     type_name: Name::new("SearchBox.ValueChanged"),
@@ -2639,15 +3014,14 @@ mod tests {
             let renderWrong() = <SearchBox onSearchSubmitted="docs" />
         "#;
 
-        let module = lower_module(source);
-        let interpreter = Interpreter::new();
+        let (module, interpreter) = lower_module_runtime(source);
         let empty_render_result = interpreter
-            .execute_function(&module, "renderEmpty", vec![])
+            .execute_function(module.as_ref(), "renderEmpty", vec![])
             .expect("Expected empty-result render to succeed");
         let empty_handler = extract_handler(&empty_render_result, "onSearchSubmitted");
 
         let wrong_render_result = interpreter
-            .execute_function(&module, "renderWrong", vec![])
+            .execute_function(module.as_ref(), "renderWrong", vec![])
             .expect("Expected wrong-result render to succeed");
         let wrong_handler = extract_handler(&wrong_render_result, "onSearchSubmitted");
 
@@ -2659,7 +3033,7 @@ mod tests {
         };
 
         let empty_error = interpreter
-            .invoke_action_handler(&module, empty_handler, empty_action_input)
+            .invoke_action_handler(module.as_ref(), empty_handler, empty_action_input)
             .expect_err("Expected empty handler result to fail");
         assert!(matches!(
             empty_error.kind(),
@@ -2678,7 +3052,7 @@ mod tests {
         };
 
         let wrong_error = interpreter
-            .invoke_action_handler(&module, wrong_handler, wrong_action_input)
+            .invoke_action_handler(module.as_ref(), wrong_handler, wrong_action_input)
             .expect_err("Expected non-action handler result to fail");
         assert!(matches!(
             wrong_error.kind(),
@@ -2701,10 +3075,9 @@ mod tests {
             let render() = <SearchBox onSearchSubmitted=<DoSearch search={action.searchString} /> />
         "#;
 
-        let module = lower_module(source);
-        let interpreter = Interpreter::new();
+        let (module, interpreter) = lower_module_runtime(source);
         let render_result = interpreter
-            .execute_function(&module, "render", vec![])
+            .execute_function(module.as_ref(), "render", vec![])
             .expect("Expected render to succeed");
         let handler = extract_handler(&render_result, "onSearchSubmitted");
 
@@ -2715,7 +3088,7 @@ mod tests {
         );
         let error = interpreter
             .invoke_action_handler(
-                &module,
+                module.as_ref(),
                 handler,
                 Value::Record {
                     type_name: Name::new("ValueChanged"),
@@ -2744,10 +3117,9 @@ mod tests {
             let renderRecord() = <SearchBox onSearchSubmitted=<SearchResult search={action.searchString} /> />
         "#;
 
-        let module = lower_module(source);
-        let interpreter = Interpreter::new();
+        let (module, interpreter) = lower_module_runtime(source);
         let render_result = interpreter
-            .execute_function(&module, "renderRecord", vec![])
+            .execute_function(module.as_ref(), "renderRecord", vec![])
             .expect("Expected non-action render to succeed");
         let handler = extract_handler(&render_result, "onSearchSubmitted");
 
@@ -2758,7 +3130,7 @@ mod tests {
         );
         let error = interpreter
             .invoke_action_handler(
-                &module,
+                module.as_ref(),
                 handler,
                 Value::Record {
                     type_name: Name::new("SearchSubmitted"),
@@ -2786,11 +3158,10 @@ mod tests {
             }
         "#;
 
-        let module = lower_module(source);
-        let interpreter = Interpreter::new();
+        let (module, interpreter) = lower_module_runtime(source);
         let init = interpreter
             .initialize_component(
-                &module,
+                module.as_ref(),
                 "SearchBox",
                 Value::Record {
                     type_name: Name::new("object"),
@@ -2808,7 +3179,7 @@ mod tests {
         );
 
         let snapshot = interpreter
-            .decode_component_snapshot(&module, &init.state_snapshot)
+            .decode_component_snapshot(module.as_ref(), &init.state_snapshot)
             .expect("Expected snapshot to decode");
         assert_eq!(
             snapshot.props.get("placeholder"),
@@ -2832,14 +3203,13 @@ mod tests {
             }
         "#;
 
-        let module = lower_module(source);
-        let interpreter = Interpreter::new();
+        let (module, interpreter) = lower_module_runtime(source);
         let mut props = FxHashMap::default();
         props.insert(SmolStr::new("text"), Value::String(SmolStr::new("Save")));
 
         let init = interpreter
             .initialize_component(
-                &module,
+                module.as_ref(),
                 "Button",
                 Value::Record {
                     type_name: Name::new("object"),
@@ -2849,7 +3219,7 @@ mod tests {
             .expect("Expected stateless component initialization to succeed");
 
         let snapshot = interpreter
-            .decode_component_snapshot(&module, &init.state_snapshot)
+            .decode_component_snapshot(module.as_ref(), &init.state_snapshot)
             .expect("Expected snapshot to decode");
         assert!(snapshot.state.is_empty(), "Expected empty component state");
         assert_eq!(
@@ -2867,11 +3237,10 @@ mod tests {
             }
         "#;
 
-        let module = lower_module(source);
-        let interpreter = Interpreter::new();
+        let (module, interpreter) = lower_module_runtime(source);
         let error = interpreter
             .initialize_component(
-                &module,
+                module.as_ref(),
                 "SearchBox",
                 Value::Record {
                     type_name: Name::new("object"),
@@ -2901,11 +3270,10 @@ mod tests {
             }
         "#;
 
-        let module = lower_module(source);
-        let interpreter = Interpreter::new();
+        let (module, interpreter) = lower_module_runtime(source);
         let init = interpreter
             .initialize_component(
-                &module,
+                module.as_ref(),
                 "SearchBox",
                 Value::Record {
                     type_name: Name::new("object"),
@@ -2914,21 +3282,26 @@ mod tests {
             )
             .expect("Expected initialization to succeed");
         let mut snapshot = interpreter
-            .decode_component_snapshot(&module, &init.state_snapshot)
+            .decode_component_snapshot(module.as_ref(), &init.state_snapshot)
             .expect("Expected snapshot to decode");
         snapshot.state.insert(
             SmolStr::new("query"),
             Value::String(SmolStr::new("persisted")),
         );
         let mutated_snapshot = interpreter
-            .encode_component_snapshot(&snapshot.component, &snapshot.props, &snapshot.state)
+            .encode_component_snapshot(
+                snapshot.component_module_id,
+                &snapshot.component,
+                &snapshot.props,
+                &snapshot.state,
+            )
             .expect("Expected snapshot to encode");
 
         let dispatch = interpreter
-            .dispatch_component_actions(&module, &mutated_snapshot, vec![])
+            .dispatch_component_actions(module.as_ref(), &mutated_snapshot, vec![])
             .expect("Expected empty dispatch to succeed");
         let next_snapshot = interpreter
-            .decode_component_snapshot(&module, &dispatch.state_snapshot)
+            .decode_component_snapshot(module.as_ref(), &dispatch.state_snapshot)
             .expect("Expected next snapshot to decode");
 
         assert_eq!(
@@ -2961,18 +3334,17 @@ mod tests {
             let withoutHandlers() = <SearchBox placeholder="Find docs" />
         "#;
 
-        let module = lower_module(source);
-        let interpreter = Interpreter::new();
+        let (module, interpreter) = lower_module_runtime(source);
 
         let props_with_handlers = interpreter
-            .execute_function(&module, "withHandlers", vec![])
+            .execute_function(module.as_ref(), "withHandlers", vec![])
             .expect("Expected handler-bound props to evaluate");
         let init = interpreter
-            .initialize_component(&module, "SearchBox", props_with_handlers)
+            .initialize_component(module.as_ref(), "SearchBox", props_with_handlers)
             .expect("Expected component initialization with handlers to succeed");
         let dispatch = interpreter
             .dispatch_component_actions(
-                &module,
+                module.as_ref(),
                 &init.state_snapshot,
                 vec![
                     Value::Record {
@@ -3004,14 +3376,14 @@ mod tests {
         assert_eq!(effect_names, vec!["LogSearch", "DoSearch", "TrackSearch"]);
 
         let props_without_handlers = interpreter
-            .execute_function(&module, "withoutHandlers", vec![])
+            .execute_function(module.as_ref(), "withoutHandlers", vec![])
             .expect("Expected handler-free props to evaluate");
         let init_without_handlers = interpreter
-            .initialize_component(&module, "SearchBox", props_without_handlers)
+            .initialize_component(module.as_ref(), "SearchBox", props_without_handlers)
             .expect("Expected component initialization without handlers to succeed");
         let empty_dispatch = interpreter
             .dispatch_component_actions(
-                &module,
+                module.as_ref(),
                 &init_without_handlers.state_snapshot,
                 vec![Value::Record {
                     type_name: Name::new("SearchSubmitted"),
@@ -3036,11 +3408,10 @@ mod tests {
             }
         "#;
 
-        let module = lower_module(source);
-        let interpreter = Interpreter::new();
+        let (module, interpreter) = lower_module_runtime(source);
         let init = interpreter
             .initialize_component(
-                &module,
+                module.as_ref(),
                 "SearchBox",
                 Value::Record {
                     type_name: Name::new("object"),
@@ -3051,7 +3422,7 @@ mod tests {
 
         let error = interpreter
             .dispatch_component_actions(
-                &module,
+                module.as_ref(),
                 &init.state_snapshot,
                 vec![Value::Record {
                     type_name: Name::new("ValueChanged"),
@@ -3080,11 +3451,10 @@ mod tests {
             }
         "#;
 
-        let module = lower_module(source);
-        let interpreter = Interpreter::new();
+        let (module, interpreter) = lower_module_runtime(source);
         let init = interpreter
             .initialize_component(
-                &module,
+                module.as_ref(),
                 "SearchBox",
                 Value::Record {
                     type_name: Name::new("object"),
@@ -3095,7 +3465,7 @@ mod tests {
 
         let error = interpreter
             .dispatch_component_actions(
-                &module,
+                module.as_ref(),
                 &init.state_snapshot,
                 vec![Value::String(SmolStr::new("docs"))],
             )
@@ -3126,12 +3496,15 @@ mod tests {
             }
         "#;
 
-        let module = lower_module(source);
-        let other_module = lower_module(other_module_source);
-        let interpreter = Interpreter::new();
+        let (module, interpreter) = lower_module_runtime(source);
+        let (other_module, other_interpreter) = single_module_runtime(
+            lower_module(other_module_source),
+            "other-module-test.nx",
+            other_module_source,
+        );
 
         let malformed_error = interpreter
-            .dispatch_component_actions(&module, b"not-a-valid-snapshot", vec![])
+            .dispatch_component_actions(module.as_ref(), b"not-a-valid-snapshot", vec![])
             .expect_err("Expected malformed snapshot to fail");
         assert!(matches!(
             malformed_error.kind(),
@@ -3140,7 +3513,7 @@ mod tests {
 
         let init = interpreter
             .initialize_component(
-                &module,
+                module.as_ref(),
                 "SearchBox",
                 Value::Record {
                     type_name: Name::new("object"),
@@ -3148,12 +3521,13 @@ mod tests {
                 },
             )
             .expect("Expected component initialization to succeed");
-        let incompatible_error = interpreter
-            .dispatch_component_actions(&other_module, &init.state_snapshot, vec![])
+        let incompatible_error = other_interpreter
+            .dispatch_component_actions(other_module.as_ref(), &init.state_snapshot, vec![])
             .expect_err("Expected incompatible snapshot to fail");
         assert!(matches!(
             incompatible_error.kind(),
-            RuntimeErrorKind::ComponentNotFound { name } if name == "SearchBox"
+            RuntimeErrorKind::InvalidComponentStateSnapshot { reason }
+                if reason.contains("snapshot fingerprint")
         ));
     }
 }

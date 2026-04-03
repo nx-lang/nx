@@ -6,9 +6,9 @@
 use crate::ast::{BinOp, Expr, Literal, OrderedFloat, Stmt, TypeRef, UnOp};
 use crate::{
     validate_record_definitions, Component, ComponentEmit, ComponentEmitKind, Element, EnumDef,
-    EnumMember, ExprId, Function, Import, ImportKind, Item, LoweringDiagnostic, Module, Name,
-    Param, Property, RecordDef, RecordField, RecordKind, SelectiveImport, SourceId, TypeAlias,
-    ValueDef, Visibility,
+    EnumMember, ExprId, Function, Import, ImportKind, Item, LoweredModule, LoweringDiagnostic,
+    Name, Param, Property, RecordDef, RecordField, RecordKind, SelectiveImport, SourceId,
+    TypeAlias, ValueDef, Visibility,
 };
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_syntax::{SyntaxKind, SyntaxNode};
@@ -87,7 +87,7 @@ struct PredeclaredComponent {
 }
 
 pub struct LoweringContext {
-    module: Module,
+    module: LoweredModule,
     expr_types: FxHashMap<ExprId, TypeTag>,
     scope_stack: Vec<FxHashMap<Name, TypeTag>>,
     predeclared_components: FxHashMap<Name, PredeclaredComponent>,
@@ -99,7 +99,7 @@ impl LoweringContext {
     /// Creates a new lowering context for the given source file.
     pub fn new(source_id: SourceId) -> Self {
         Self {
-            module: Module::new(source_id),
+            module: LoweredModule::new(source_id),
             expr_types: FxHashMap::default(),
             scope_stack: vec![FxHashMap::default()],
             predeclared_components: FxHashMap::default(),
@@ -109,7 +109,7 @@ impl LoweringContext {
     }
 
     /// Consumes the context and returns the completed module.
-    pub fn finish(self) -> Module {
+    pub fn finish(self) -> LoweredModule {
         self.module
     }
 
@@ -1681,8 +1681,8 @@ impl LoweringContext {
     }
 }
 
-/// Lower a CST root node to a HIR Module.
-pub fn lower(root: SyntaxNode, source_id: SourceId) -> Module {
+/// Lower a CST root node to a HIR LoweredModule.
+pub fn lower(root: SyntaxNode, source_id: SourceId) -> LoweredModule {
     let mut ctx = LoweringContext::new(source_id);
     ctx.lower_module(root);
     ctx.finish()

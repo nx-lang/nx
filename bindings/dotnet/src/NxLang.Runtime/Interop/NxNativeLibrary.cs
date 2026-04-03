@@ -13,7 +13,7 @@ namespace NxLang.Nx.Interop;
 
 internal static class NxNativeLibrary
 {
-    internal const uint SupportedAbiVersion = 2;
+    internal const uint SupportedAbiVersion = 4;
 
     private static readonly object SyncRoot = new();
     private static Exception? _loadException;

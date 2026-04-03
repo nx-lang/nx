@@ -1,6 +1,7 @@
 // Copyright (c) Bret Johnson. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
+using System;
 using System.Runtime.InteropServices;
 
 namespace NxLang.Nx.Interop;
@@ -21,6 +22,23 @@ internal static class NxNativeMethods
         out NxBuffer outBuffer);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NxEvalStatus nx_build_program_artifact(
+        byte[] sourcePtr,
+        nuint sourceLen,
+        byte[] fileNamePtr,
+        nuint fileNameLen,
+        out IntPtr outHandle,
+        out NxBuffer outBuffer);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern void nx_free_program_artifact(IntPtr handle);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NxEvalStatus nx_eval_program_artifact(
+        IntPtr programArtifactPtr,
+        out NxBuffer outBuffer);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NxEvalStatus nx_component_init(
         byte[] sourcePtr,
         nuint sourceLen,
@@ -33,11 +51,29 @@ internal static class NxNativeMethods
         out NxBuffer outBuffer);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NxEvalStatus nx_component_init_program_artifact(
+        IntPtr programArtifactPtr,
+        byte[] componentNamePtr,
+        nuint componentNameLen,
+        byte[] propsPtr,
+        nuint propsLen,
+        out NxBuffer outBuffer);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NxEvalStatus nx_component_dispatch_actions(
         byte[] sourcePtr,
         nuint sourceLen,
         byte[] fileNamePtr,
         nuint fileNameLen,
+        byte[] stateSnapshotPtr,
+        nuint stateSnapshotLen,
+        byte[] actionsPtr,
+        nuint actionsLen,
+        out NxBuffer outBuffer);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NxEvalStatus nx_component_dispatch_actions_program_artifact(
+        IntPtr programArtifactPtr,
         byte[] stateSnapshotPtr,
         nuint stateSnapshotLen,
         byte[] actionsPtr,
