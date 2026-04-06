@@ -1,10 +1,5 @@
-# declaration-visibility Specification
+## MODIFIED Requirements
 
-## Purpose
-Define private, default-internal, and export visibility for top-level NX declarations across file,
-library, and consumer boundaries.
-
-## Requirements
 ### Requirement: Top-level declarations support explicit visibility modifiers
 The parser and lowered representation SHALL support `private` and `export` as optional visibility
 modifiers on top-level `let`, `type`, `enum`, record, and `component` declarations. When no
@@ -25,19 +20,7 @@ visibility keyword is present, the declaration SHALL have visibility `internal`.
 - **THEN** parsing and lowering SHALL preserve `Theme` as a top-level declaration with visibility
   `internal`
 
-### Requirement: Private declarations are visible only within the declaring file
-The system SHALL allow references to a `private` declaration only from the file that declares it.
-Other files in the same library and external consumers MUST NOT resolve that declaration.
-
-#### Scenario: Same file can reference a private declaration
-- **WHEN** a file contains `private let footerText = "Built with NX"` and `let <Footer/> =
-  <footer>{footerText}</footer>`
-- **THEN** the file SHALL compile successfully
-
-#### Scenario: Peer file in the same library cannot resolve a private declaration
-- **WHEN** `helpers.nx` contains `private let formatName(name:string) = name` and `page.nx` in the
-  same library references `formatName`
-- **THEN** analysis SHALL report an unresolved-name error for `formatName`
+## ADDED Requirements
 
 ### Requirement: Default declarations are visible throughout the declaring library or program
 The system SHALL make a declaration with no visibility keyword visible to other files in the same
@@ -72,3 +55,16 @@ importing consumer libraries and SHALL remain visible within the declaring libra
 - **WHEN** `button.nx` contains `export component <Button/> = { <button/> }` and `page.nx` in the
   same library references `Button`
 - **THEN** analysis SHALL resolve `Button` successfully
+
+## REMOVED Requirements
+
+### Requirement: Internal declarations are visible throughout the declaring library
+**Reason**: The `internal` source keyword is removed. Library-scoped visibility remains, but it is
+now the default when no visibility keyword is present.
+**Migration**: None. Declarations that should remain library-local or program-local use no
+visibility modifier.
+
+### Requirement: Public declarations are exported to consumers by default
+**Reason**: External exposure now requires an explicit `export` modifier so libraries do not
+publish declarations unintentionally.
+**Migration**: Add `export` to every declaration that must remain available to importing libraries.

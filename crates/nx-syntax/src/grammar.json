@@ -269,7 +269,7 @@
         },
         {
           "type": "STRING",
-          "value": "internal"
+          "value": "export"
         }
       ]
     },

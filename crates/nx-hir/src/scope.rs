@@ -433,7 +433,7 @@ mod tests {
         let body = module.alloc_expr(crate::ast::Expr::Error(span));
         module.add_item(crate::Item::Component(crate::Component {
             name: Name::new("SearchBox"),
-            visibility: crate::Visibility::Public,
+            visibility: crate::Visibility::Internal,
             props: Vec::new(),
             emits: Vec::new(),
             state: Vec::new(),
@@ -458,7 +458,7 @@ mod tests {
         let value = module.alloc_expr(crate::ast::Expr::Literal(crate::ast::Literal::Int(42)));
         module.add_item(crate::Item::Value(crate::ValueDef {
             name: Name::new("answer"),
-            visibility: crate::Visibility::Public,
+            visibility: crate::Visibility::Export,
             ty: Some(crate::ast::TypeRef::name("int")),
             value,
             span,
@@ -471,6 +471,29 @@ mod tests {
 
         assert_eq!(symbol.kind, SymbolKind::Variable);
         assert_eq!(symbol.name.as_str(), "answer");
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn test_build_scopes_registers_private_top_level_symbols() {
+        let mut module = LoweredModule::new(crate::SourceId::new(0));
+        let span = TextSpan::new(TextSize::from(0), TextSize::from(6));
+        let value = module.alloc_expr(crate::ast::Expr::Literal(crate::ast::Literal::Int(7)));
+        module.add_item(crate::Item::Value(crate::ValueDef {
+            name: Name::new("secret"),
+            visibility: crate::Visibility::Private,
+            ty: Some(crate::ast::TypeRef::name("int")),
+            value,
+            span,
+        }));
+
+        let (manager, diagnostics) = build_scopes(&module);
+        let symbol = manager
+            .resolve(&Name::new("secret"), manager.root())
+            .expect("Expected private symbol in the defining module scope");
+
+        assert_eq!(symbol.kind, SymbolKind::Variable);
+        assert_eq!(symbol.name.as_str(), "secret");
         assert!(diagnostics.is_empty());
     }
 }

@@ -17,10 +17,12 @@ import "./theme"
 import { Button, Input } from "./ui"
 import { Stack as Layout.Stack } from "./layout"
 
-internal let greeting = "Hello"
+let greeting = "Hello"
 private let WelcomeMessage = <span>Hello World</span>
+export let accentName = "hello"
 
 <Layout.Stack>
+  <text>{accentName}</text>
   <WelcomeMessage/>
   <Button/>
   <Input/>
@@ -42,7 +44,8 @@ private let WelcomeMessage = <span>Hello World</span>
 ## Libraries
 - A library is a directory, not a barrel file.
 - Every `.nx` file under that directory contributes declarations recursively.
-- Declarations are public by default, so most library code needs no extra modifier.
+- Declarations are internal by default, so helper bindings stay inside the library unless marked
+  `export`.
 
 ## Root Elements
 - A root element at the end of the file behaves like `main`. Tooling can render it immediately or expose it as the module default.
@@ -53,12 +56,13 @@ private let WelcomeMessage = <span>Hello World</span>
 | Keyword | Same file | Other library files | Consumers |
 | --- | --- | --- | --- |
 | `private` | Yes | No | No |
-| `internal` | Yes | Yes | No |
-| default | Yes | Yes | Yes |
+| default | Yes | Yes | No |
+| `export` | Yes | Yes | Yes |
 
 - `private` keeps declarations in the current file only.
-- `internal` shares declarations across files in the same library while hiding them from consumers.
-- Omitting a visibility keyword makes the declaration public.
+- Omitting a visibility keyword shares declarations across files in the same library or program
+  while hiding them from external consumers.
+- `export` exposes declarations to importing libraries.
 
 ## See also
 - Language Tour: [Modules & Imports](/language-tour/modules-and-imports)

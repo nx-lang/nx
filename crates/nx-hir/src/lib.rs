@@ -136,7 +136,7 @@ impl std::fmt::Display for Name {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Visibility {
     /// Visible to the declaring file, peer library files, and consumers.
-    Public,
+    Export,
     /// Visible only within the declaring library.
     Internal,
     /// Visible only within the declaring source file.
@@ -145,7 +145,7 @@ pub enum Visibility {
 
 impl Default for Visibility {
     fn default() -> Self {
-        Self::Public
+        Self::Internal
     }
 }
 
@@ -320,7 +320,7 @@ pub enum ComponentEmitKind {
 pub struct ComponentEmit {
     /// Local emitted action name used for `on<ActionName>` bindings.
     pub name: Name,
-    /// Public action type name. Inline emits use `<Component>.<Action>`.
+    /// Exported action type name. Inline emits use `<Component>.<Action>`.
     pub action_name: Name,
     /// Whether this emit was defined inline or referenced.
     pub kind: ComponentEmitKind,
@@ -607,7 +607,7 @@ mod tests {
 
         let func = Function {
             name: Name::new("test"),
-            visibility: Visibility::Public,
+            visibility: Visibility::Export,
             params: Vec::new(),
             return_type: None,
             body: module.alloc_expr(ast::Expr::Literal(ast::Literal::Null)),

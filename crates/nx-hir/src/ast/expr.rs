@@ -226,7 +226,7 @@ pub enum Expr {
         component: Name,
         /// Local emitted action name used by the component
         emit: Name,
-        /// Public action type name expected at invocation time
+        /// Exported action type name expected at invocation time
         action_name: Name,
         /// Handler body expression
         body: ExprId,

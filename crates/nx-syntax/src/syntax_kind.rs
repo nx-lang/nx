@@ -162,7 +162,7 @@ pub enum SyntaxKind {
     FROM,
     AS,
     PRIVATE,
-    INTERNAL,
+    EXPORT,
     ABSTRACT,
     EXTENDS,
     IF,
@@ -238,7 +238,7 @@ impl SyntaxKind {
                 | SyntaxKind::FROM
                 | SyntaxKind::AS
                 | SyntaxKind::PRIVATE
-                | SyntaxKind::INTERNAL
+                | SyntaxKind::EXPORT
                 | SyntaxKind::ABSTRACT
                 | SyntaxKind::EXTENDS
                 | SyntaxKind::ENUM
@@ -310,7 +310,7 @@ impl SyntaxKind {
                 | SyntaxKind::FROM
                 | SyntaxKind::AS
                 | SyntaxKind::PRIVATE
-                | SyntaxKind::INTERNAL
+                | SyntaxKind::EXPORT
                 | SyntaxKind::ABSTRACT
                 | SyntaxKind::EXTENDS
                 | SyntaxKind::IF
@@ -481,7 +481,7 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "from" => SyntaxKind::FROM,
         "as" => SyntaxKind::AS,
         "private" => SyntaxKind::PRIVATE,
-        "internal" => SyntaxKind::INTERNAL,
+        "export" => SyntaxKind::EXPORT,
         "abstract" => SyntaxKind::ABSTRACT,
         "extends" => SyntaxKind::EXTENDS,
         "enum" => SyntaxKind::ENUM,
@@ -566,6 +566,7 @@ mod tests {
         );
         assert_eq!(syntax_kind_from_str("action"), SyntaxKind::ACTION);
         assert_eq!(syntax_kind_from_str("component"), SyntaxKind::COMPONENT);
+        assert_eq!(syntax_kind_from_str("export"), SyntaxKind::EXPORT);
         assert_eq!(syntax_kind_from_str("identifier"), SyntaxKind::IDENTIFIER);
         assert_eq!(syntax_kind_from_str("unknown"), SyntaxKind::ERROR);
     }

@@ -177,8 +177,8 @@ impl LoweringContext {
     fn lower_visibility(node: SyntaxNode) -> Visibility {
         match node.child_by_field("visibility").map(|child| child.text()) {
             Some("private") => Visibility::Private,
-            Some("internal") => Visibility::Internal,
-            _ => Visibility::Public,
+            Some("export") => Visibility::Export,
+            _ => Visibility::Internal,
         }
     }
 
@@ -1657,10 +1657,12 @@ impl LoweringContext {
                         span,
                     });
 
-                    // Create the implicit 'root' function
+                    // Create the implicit 'root' function. This entry point must remain
+                    // discoverable by the runtime even though omitted source visibility
+                    // now lowers to internal visibility.
                     let root_func = Function {
                         name: Name::new("root"),
-                        visibility: Visibility::Public,
+                        visibility: Visibility::Export,
                         params: vec![],
                         return_type: None,
                         body,
@@ -1809,10 +1811,10 @@ import "./controls" as UI
     fn test_lower_visibility_modifiers() {
         let source = r#"private let footerText: string = "Built with NX"
 private action SaveRequested = {}
-internal component <SearchBox /> = { <input /> }
+export component <SearchBox /> = { <input /> }
 type Theme = string
 private let <Render /> = <div />
-internal enum Mode = light | dark"#;
+enum Mode = light | dark"#;
         let parse_result = parse_str(source, "visibility.nx");
 
         let tree = parse_result.tree.expect("Visibility source should parse");
@@ -1832,12 +1834,12 @@ internal enum Mode = light | dark"#;
         let search_box = module
             .find_item("SearchBox")
             .expect("Expected lowered component");
-        assert_eq!(search_box.visibility(), Visibility::Internal);
+        assert_eq!(search_box.visibility(), Visibility::Export);
 
         let theme = module
             .find_item("Theme")
             .expect("Expected lowered type alias");
-        assert_eq!(theme.visibility(), Visibility::Public);
+        assert_eq!(theme.visibility(), Visibility::Internal);
 
         let render = module
             .find_item("Render")
@@ -1850,7 +1852,7 @@ internal enum Mode = light | dark"#;
 
     #[test]
     fn test_lower_top_level_value_definition() {
-        let source = r#"internal let title: string = "NX""#;
+        let source = r#"let title: string = "NX""#;
         let parse_result = parse_str(source, "value.nx");
         let tree = parse_result.tree.expect("Value source should parse");
         let module = lower(tree.root(), SourceId::new(0));
@@ -1869,6 +1871,28 @@ internal enum Mode = light | dark"#;
         assert!(
             matches!(value.ty.as_ref(), Some(TypeRef::Name(name)) if name.as_str() == "string")
         );
+    }
+
+    #[test]
+    fn test_lower_exported_top_level_value_definition() {
+        let source = r#"export let title: string = "NX""#;
+        let parse_result = parse_str(source, "value.nx");
+        let tree = parse_result
+            .tree
+            .expect("Exported value source should parse");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let value = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Value(value) => Some(value),
+                _ => None,
+            })
+            .expect("Expected lowered exported top-level value");
+
+        assert_eq!(value.name.as_str(), "title");
+        assert_eq!(value.visibility, Visibility::Export);
     }
 
     #[test]

@@ -28,24 +28,25 @@ import { Button, Stack as Layout.Stack } from "./ui"
 ## Declarations and visibility
 
 ```nx
-internal let footerText = "Built with NX"
+let footerText = "Built with NX"
 private let copyright = "2026"
+export let brandName = "NX"
 
 let <Footer text:string = footerText/> =
-  <footer>{text} @{copyright}</footer>
+  <footer>{brandName} {text} @{copyright}</footer>
 ```
 
-- Visibility defaults to public.
+- Visibility defaults to internal within the current library or non-library program.
 - `private` keeps a binding inside the current file.
-- `internal` makes a binding visible to other files in the same library, but not to external
-  consumers.
+- `export` makes a binding visible to external library consumers while keeping it visible inside the
+  current library or program.
 - Use `let` and `type` as needed before the root element.
 
 | Keyword | Same file | Other library files | Consumers |
 | --- | --- | --- | --- |
 | `private` | Yes | No | No |
-| `internal` | Yes | Yes | No |
-| default | Yes | Yes | Yes |
+| default | Yes | Yes | No |
+| `export` | Yes | Yes | Yes |
 
 ## Root element
 

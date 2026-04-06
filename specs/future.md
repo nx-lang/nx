@@ -107,3 +107,27 @@ If this is revisited in the future:
 - Keep the current analyze-then-execute contract intact while expanding the
   implementation, so runtime-only validation still happens only after static
   analysis succeeds.
+
+## Manifest-Rooted Packages
+
+NX currently has an asymmetric source organization model: libraries are
+directory-rooted collections of modules, while programs are still built
+primarily from a single source entry point. A future packaging design could
+unify those concepts around an explicit package manifest. This is also the
+underlying architecture gap behind RF2 in the
+`update-declaration-visibility-keywords` review: non-library programs do not
+yet have a first-class multi-module package model, so whole-program visibility
+across peer modules has no clear implementation path.
+
+If this is revisited in the future:
+- Introduce a declarative `package.nx` file at the root of each package rather
+  than relying on separate manifest conventions for libraries and executable
+  packages.
+- Use `kind: app` and `kind: library` in `package.nx` to distinguish
+  executable and reusable packages while preserving one shared package model.
+- Build multi-module analysis, dependency resolution, and runtime entrypoint
+  selection around packages so app packages and library packages follow the
+  same root-level metadata and module discovery rules.
+- Resolve the RF2-style case by making peer-module visibility within an app
+  package an explicit package-level behavior rather than an accidental
+  extension of the current single-source program artifact model.

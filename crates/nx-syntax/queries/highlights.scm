@@ -4,7 +4,7 @@
 ;; Keywords
 [
   "private"
-  "internal"
+  "export"
   "let"
   "action"
   "component"

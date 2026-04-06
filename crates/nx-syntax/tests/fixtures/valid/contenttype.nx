@@ -1,4 +1,4 @@
 import "./ui" as UI
-internal let title = "NX"
+let title = "NX"
 
 <UI.App title={title} />

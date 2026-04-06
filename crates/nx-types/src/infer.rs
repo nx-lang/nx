@@ -1162,7 +1162,7 @@ mod tests {
 
         let function = Function {
             name: Name::new("Button"),
-            visibility: nx_hir::Visibility::Public,
+            visibility: nx_hir::Visibility::Export,
             params: vec![param],
             return_type: None,
             body,
@@ -1193,7 +1193,7 @@ mod tests {
         let body = module.alloc_expr(Expr::Ident(Name::new("value")));
         let function = Function {
             name: Name::new("identity"),
-            visibility: nx_hir::Visibility::Public,
+            visibility: nx_hir::Visibility::Export,
             params: vec![Param::new(Name::new("value"), TypeRef::name("int"), span)],
             return_type: None,
             body,
@@ -1242,7 +1242,7 @@ mod tests {
         });
         let add_fn = Function {
             name: Name::new("add"),
-            visibility: nx_hir::Visibility::Public,
+            visibility: nx_hir::Visibility::Export,
             params: vec![
                 Param::new(Name::new("a"), TypeRef::name("int"), span),
                 Param::new(Name::new("b"), TypeRef::name("int"), span),
@@ -1264,7 +1264,7 @@ mod tests {
         });
         let double_fn = Function {
             name: Name::new("double"),
-            visibility: nx_hir::Visibility::Public,
+            visibility: nx_hir::Visibility::Export,
             params: vec![Param::new(Name::new("value"), TypeRef::name("int"), span)],
             return_type: Some(TypeRef::name("int")),
             body: double_body,
@@ -1289,7 +1289,7 @@ mod tests {
         });
         let compute_fn = Function {
             name: Name::new("compute"),
-            visibility: nx_hir::Visibility::Public,
+            visibility: nx_hir::Visibility::Export,
             params: vec![Param::new(Name::new("n"), TypeRef::name("int"), span)],
             return_type: Some(TypeRef::name("int")),
             body: compute_body,
@@ -1329,7 +1329,7 @@ mod tests {
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
         let enum_def = EnumDef {
             name: Name::new("Direction"),
-            visibility: nx_hir::Visibility::Public,
+            visibility: nx_hir::Visibility::Export,
             members: vec![
                 EnumMember {
                     name: Name::new("north"),
@@ -1370,7 +1370,7 @@ mod tests {
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
         let enum_def = EnumDef {
             name: Name::new("Status"),
-            visibility: nx_hir::Visibility::Public,
+            visibility: nx_hir::Visibility::Export,
             members: vec![EnumMember {
                 name: Name::new("active"),
                 span,
@@ -1399,7 +1399,7 @@ mod tests {
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
         let enum_def = EnumDef {
             name: Name::new("Status"),
-            visibility: nx_hir::Visibility::Public,
+            visibility: nx_hir::Visibility::Export,
             members: vec![EnumMember {
                 name: Name::new("active"),
                 span,
@@ -1409,7 +1409,7 @@ mod tests {
         module.add_item(Item::Enum(enum_def));
         let alias = TypeAlias {
             name: Name::new("State"),
-            visibility: nx_hir::Visibility::Public,
+            visibility: nx_hir::Visibility::Export,
             ty: ast::TypeRef::name("Status"),
             span,
         };
@@ -1438,7 +1438,7 @@ mod tests {
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
         let enum_def = EnumDef {
             name: Name::new("Direction"),
-            visibility: nx_hir::Visibility::Public,
+            visibility: nx_hir::Visibility::Export,
             members: vec![EnumMember {
                 name: Name::new("north"),
                 span,
@@ -1455,7 +1455,7 @@ mod tests {
         });
         let func = Function {
             name: Name::new("north"),
-            visibility: nx_hir::Visibility::Public,
+            visibility: nx_hir::Visibility::Export,
             params: vec![],
             return_type: None,
             body: member,

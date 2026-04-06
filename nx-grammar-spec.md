@@ -15,7 +15,7 @@ Terminals are UPPER_SNAKE token kinds produced by the lexer. Lexeme hints are il
 
 Keywords
 - PRIVATE ("private")
-- INTERNAL ("internal")
+- EXPORT ("export")
 - IMPORT ("import")
 - FROM ("from")
 - AS ("as")
@@ -188,7 +188,7 @@ LibraryPath (AST: LibraryPathSyntax)
 
 VisibilityModifier
 - VisibilityModifier → PRIVATE
-- VisibilityModifier → INTERNAL
+- VisibilityModifier → EXPORT
 
 TypeDefinition (AST: TypeDefinitionSyntax is a sum type)
 - TypeDefinition → RecordDefinition (RecordDefinitionSyntax)
@@ -197,11 +197,11 @@ TypeDefinition (AST: TypeDefinitionSyntax is a sum type)
 
 RecordDefinition (AST: RecordDefinitionSyntax)
 - RecordDefinition → VisibilityModifier? ABSTRACT? TYPE IDENTIFIER RecordExtendsClauseOpt EQ LBRACE RecordPropertyDefinition* RBRACE
-  - fields: visibility?: "private"|"internal", isAbstract: bool, name: string, base?: QualifiedNameSyntax, properties: RecordPropertyDefinitionSyntax[]
+  - fields: visibility?: "private"|"export", isAbstract: bool, name: string, base?: QualifiedNameSyntax, properties: RecordPropertyDefinitionSyntax[]
 
 ActionDefinition (AST: ActionDefinitionSyntax)
 - ActionDefinition → VisibilityModifier? ACTION IDENTIFIER EQ LBRACE RecordPropertyDefinition* RBRACE
-  - fields: visibility?: "private"|"internal", name: string, properties: RecordPropertyDefinitionSyntax[]
+  - fields: visibility?: "private"|"export", name: string, properties: RecordPropertyDefinitionSyntax[]
 
 RecordExtendsClauseOpt
 - RecordExtendsClauseOpt → EXTENDS QualifiedName
@@ -217,11 +217,11 @@ RecordPropertyDefaultOpt
 
 TypeAliasDefinition (AST: TypeAliasDefinitionSyntax)
 - TypeAliasDefinition → VisibilityModifier? TYPE IDENTIFIER EQ Type
-  - fields: visibility?: "private"|"internal", name: string, type: TypeSyntax
+  - fields: visibility?: "private"|"export", name: string, type: TypeSyntax
 
 EnumDefinition (AST: EnumDefinitionSyntax)
 - EnumDefinition → VisibilityModifier? ENUM IDENTIFIER EQ EnumMemberList
-  - fields: visibility?: "private"|"internal", name: string, members: EnumMemberSyntax[]
+  - fields: visibility?: "private"|"export", name: string, members: EnumMemberSyntax[]
 
 EnumMemberList
 - EnumMemberList → EnumMemberListLead EnumMemberListTail
@@ -240,7 +240,7 @@ EnumMember (AST: EnumMemberSyntax)
 
 ValueDefinition (AST: ValueDefinitionSyntax)
 - ValueDefinition → VisibilityModifier? LET IDENTIFIER ValueDefinitionTypeOpt EQ RhsExpression
-  - fields: visibility?: "private"|"internal", name: string, type?: TypeSyntax, value: ExpressionSyntax
+  - fields: visibility?: "private"|"export", name: string, type?: TypeSyntax, value: ExpressionSyntax
 
 ValueDefinitionTypeOpt
 - ValueDefinitionTypeOpt → COLON Type
@@ -270,7 +270,7 @@ FunctionDefinition (AST: FunctionDefinitionSyntax is a sum type)
 
 ComponentDefinition (AST: ComponentDefinitionSyntax)
 - ComponentDefinition → VisibilityModifier? COMPONENT ComponentSignature EQ ComponentBody
-  - fields: visibility?: "private"|"internal", signature: ComponentSignatureSyntax, body: ComponentBodySyntax
+  - fields: visibility?: "private"|"export", signature: ComponentSignatureSyntax, body: ComponentBodySyntax
 
 ComponentSignature (AST: ComponentSignatureSyntax)
 - ComponentSignature → LT ElementName PropertyDefinition* EmitsGroupOpt SLASH GT
@@ -303,11 +303,11 @@ StateGroup (AST: StateGroupSyntax)
 
 ElementFunctionDefinition (AST: ElementFunctionDefinitionSyntax)
 - ElementFunctionDefinition → VisibilityModifier? LET LT ElementName PropertyDefinition* SLASH GT FunctionReturnTypeOpt EQ RhsExpression
-  - fields: visibility?: "private"|"internal", elementName: QualifiedMarkupNameSyntax, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
+  - fields: visibility?: "private"|"export", elementName: QualifiedMarkupNameSyntax, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
 
 ParenFunctionDefinition (AST: ParenFunctionDefinitionSyntax)
 - ParenFunctionDefinition → VisibilityModifier? LET IDENTIFIER LPAREN ParenParameterListOpt RPAREN FunctionReturnTypeOpt EQ RhsExpression
-  - fields: visibility?: "private"|"internal", name: string, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
+  - fields: visibility?: "private"|"export", name: string, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
 
 ParenParameterListOpt
 - ParenParameterListOpt → ParenParameterList
@@ -649,19 +649,19 @@ This section lists the AST node types with fields for implementers.
 - SelectiveImportSyntax: name: string, alias?: QualifiedNameSyntax
 - LibraryPathSyntax: value: string
 - TypeDefinitionSyntax: TypeAliasDefinitionSyntax | EnumDefinitionSyntax | RecordDefinitionSyntax
-- TypeAliasDefinitionSyntax: visibility?: "private"|"internal", name: string, type: TypeSyntax
-- EnumDefinitionSyntax: visibility?: "private"|"internal", name: string, members: EnumMemberSyntax[]
-- RecordDefinitionSyntax: visibility?: "private"|"internal", name: string, properties: RecordPropertyDefinitionSyntax[]
-- ActionDefinitionSyntax: visibility?: "private"|"internal", name: string, properties: RecordPropertyDefinitionSyntax[]
+- TypeAliasDefinitionSyntax: visibility?: "private"|"export", name: string, type: TypeSyntax
+- EnumDefinitionSyntax: visibility?: "private"|"export", name: string, members: EnumMemberSyntax[]
+- RecordDefinitionSyntax: visibility?: "private"|"export", name: string, properties: RecordPropertyDefinitionSyntax[]
+- ActionDefinitionSyntax: visibility?: "private"|"export", name: string, properties: RecordPropertyDefinitionSyntax[]
 - RecordPropertyDefinitionSyntax: name: string, type: TypeSyntax, default?: ExpressionSyntax
-- ValueDefinitionSyntax: visibility?: "private"|"internal", name: string, type?: TypeSyntax, value: ExpressionSyntax
+- ValueDefinitionSyntax: visibility?: "private"|"export", name: string, type?: TypeSyntax, value: ExpressionSyntax
 - TypeSyntax: kind: "primitive"|"user", name: string (qualified), modifier?: "nullable"|"sequence"
 - PrimitiveTypeSyntax: name: string
 - UserTypeSyntax: name: QualifiedNameSyntax
 - FunctionDefinitionSyntax: ElementFunctionDefinitionSyntax | ParenFunctionDefinitionSyntax
-- ElementFunctionDefinitionSyntax: visibility?: "private"|"internal", elementName: QualifiedMarkupNameSyntax, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
-- ParenFunctionDefinitionSyntax: visibility?: "private"|"internal", name: string, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
-- ComponentDefinitionSyntax: visibility?: "private"|"internal", signature: ComponentSignatureSyntax, body: ComponentBodySyntax
+- ElementFunctionDefinitionSyntax: visibility?: "private"|"export", elementName: QualifiedMarkupNameSyntax, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
+- ParenFunctionDefinitionSyntax: visibility?: "private"|"export", name: string, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
+- ComponentDefinitionSyntax: visibility?: "private"|"export", signature: ComponentSignatureSyntax, body: ComponentBodySyntax
 - PropertyDefinitionSyntax: name: string, type: TypeSyntax, default?: ExpressionSyntax
 - ExpressionSyntax: union of MarkupElementSyntax | ValuesBracedExpressionSyntax | LiteralExpressionSyntax | IdentifierNameSyntax | ValueIfSimpleExpressionSyntax | ValueIfMatchExpressionSyntax | ValueIfConditionListExpressionSyntax | ValueForExpressionSyntax | ConditionalExpressionSyntax | ParenFunctionCallExpressionSyntax | MemberAccessExpressionSyntax | BinaryExpressionSyntax | PrefixUnaryExpressionSyntax | ParenthesizedExpressionSyntax | UnitLiteralSyntax
  - ParenFunctionCallExpressionSyntax: callee: ExpressionSyntax, args: ExpressionSyntax[]
@@ -746,7 +746,8 @@ This section lists the AST node types with fields for implementers.
 - TextElement closing tag name must match opening ElementName.
 - PropertyDefinition names within a single FunctionDefinition should be unique.
 - SelectiveImport aliases must contain exactly one DOT and the final identifier must match the imported name.
-- Omitted visibility on top-level declarations defaults to public; `private` is file-scoped and `internal` is library-scoped.
+- Omitted visibility on top-level declarations defaults to internal; `private` is file-scoped,
+  omitted visibility is library-scoped or program-scoped, and `export` is visible to consumers.
 - Type modifiers: at most one of QMARK or LBRACK RBRACK.
 - Switch expressions (property variants): at least one case; patterns per case must be non-empty.
 - ValueIfMatchExpression / ElementsIfMatchExpression / PropertyListIfMatchExpression: at least one pattern arm; each arm requires ≥1 pattern.

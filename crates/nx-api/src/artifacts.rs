@@ -183,7 +183,7 @@ pub struct LibraryArtifact {
     pub modules: Vec<ModuleArtifact>,
     pub exports: FxHashMap<String, LibraryExport>,
     pub interface_items: Vec<LibraryInterfaceItem>,
-    pub public_items: FxHashMap<String, Vec<usize>>,
+    pub exported_items: FxHashMap<String, Vec<usize>>,
     pub visible_to_library_items: FxHashMap<String, Vec<usize>>,
     pub dependency_roots: Vec<PathBuf>,
     pub diagnostics: Vec<Diagnostic>,
@@ -769,7 +769,7 @@ fn build_library_artifact_with_registry(
     let mut modules = Vec::with_capacity(source_files.len());
     let mut exports = FxHashMap::default();
     let mut interface_items = Vec::new();
-    let mut public_items = FxHashMap::default();
+    let mut exported_items = FxHashMap::default();
     let mut visible_to_library_items = FxHashMap::default();
     let mut diagnostics = Vec::new();
 
@@ -788,8 +788,8 @@ fn build_library_artifact_with_registry(
                             .or_insert_with(Vec::new)
                             .push(interface_index);
                     }
-                    if item.visibility() == Visibility::Public {
-                        public_items
+                    if item.visibility() == Visibility::Export {
+                        exported_items
                             .entry(item.name().as_str().to_string())
                             .or_insert_with(Vec::new)
                             .push(interface_index);
@@ -815,7 +815,7 @@ fn build_library_artifact_with_registry(
         modules,
         exports,
         interface_items,
-        public_items,
+        exported_items,
         visible_to_library_items,
         dependency_roots,
         diagnostics,
@@ -1136,14 +1136,10 @@ fn apply_build_context_imports(
     let root_path = match fs::canonicalize(root_path) {
         Ok(root_path) => root_path,
         Err(error) => {
-            if module
-                .imports
-                .iter()
-                .any(|import| {
-                    !is_git_library_path(&import.library_path)
-                        && !is_http_library_path(&import.library_path)
-                })
-            {
+            if module.imports.iter().any(|import| {
+                !is_git_library_path(&import.library_path)
+                    && !is_http_library_path(&import.library_path)
+            }) {
                 module.add_diagnostic(LoweringDiagnostic {
                     message: format!(
                         "Local library import resolution was skipped because source file path '{}' could not be resolved: {}",
@@ -1250,7 +1246,7 @@ fn apply_build_context_imports(
 
         match &import.kind {
             ImportKind::Wildcard { alias } => {
-                let mut export_names = library.public_items.keys().cloned().collect::<Vec<_>>();
+                let mut export_names = library.exported_items.keys().cloned().collect::<Vec<_>>();
                 export_names.sort();
 
                 for export_name in export_names {
@@ -1262,7 +1258,7 @@ fn apply_build_context_imports(
                         continue;
                     }
 
-                    let Some(item_indices) = library.public_items.get(&export_name) else {
+                    let Some(item_indices) = library.exported_items.get(&export_name) else {
                         continue;
                     };
                     if item_indices.len() != 1 {
@@ -1301,7 +1297,7 @@ fn apply_build_context_imports(
             }
             ImportKind::Selective { entries } => {
                 for entry in entries {
-                    let Some(item_indices) = library.public_items.get(entry.name.as_str()) else {
+                    let Some(item_indices) = library.exported_items.get(entry.name.as_str()) else {
                         module.add_diagnostic(LoweringDiagnostic {
                             message: format!(
                                 "Library '{}' does not export '{}'",
@@ -1536,6 +1532,15 @@ fn build_resolved_program(
         .iter()
         .map(|library| (library.root_path.clone(), library.clone()))
         .collect::<FxHashMap<_, _>>();
+    let library_by_module_file = libraries
+        .iter()
+        .flat_map(|library| {
+            library
+                .modules
+                .iter()
+                .map(move |artifact| (artifact.file_name.clone(), library.clone()))
+        })
+        .collect::<FxHashMap<_, _>>();
 
     for artifact in root_modules
         .iter()
@@ -1595,6 +1600,53 @@ fn build_resolved_program(
                             });
                     }
                 }
+            }
+        }
+
+        if let Some(library) = library_by_module_file.get(&artifact.file_name) {
+            let mut local_item_names = artifact
+                .lowered_module
+                .as_ref()
+                .map(|module| {
+                    module
+                        .items()
+                        .iter()
+                        .map(|item| item.name().as_str().to_string())
+                        .collect::<FxHashSet<_>>()
+                })
+                .unwrap_or_default();
+            let mut visible_names = library
+                .visible_to_library_items
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>();
+            visible_names.sort();
+
+            for visible_name in visible_names {
+                if local_item_names.contains(&visible_name) {
+                    continue;
+                }
+
+                let Some(item_indices) = library.visible_to_library_items.get(&visible_name) else {
+                    continue;
+                };
+                if item_indices.len() != 1 {
+                    continue;
+                }
+
+                let interface_item = &library.interface_items[item_indices[0]];
+                let Some(&target_module_id) = module_ids.get(&interface_item.module_file) else {
+                    continue;
+                };
+
+                visible_imports
+                    .entry(visible_name.clone())
+                    .or_insert_with(|| ModuleQualifiedItemRef {
+                        module_id: target_module_id,
+                        item_name: interface_item.item_name.clone(),
+                        kind: interface_item.kind(),
+                    });
+                local_item_names.insert(visible_name);
             }
         }
 
@@ -1981,15 +2033,23 @@ mod tests {
         let forms_dir = ui_dir.join("forms");
         fs::create_dir_all(&forms_dir).expect("forms dir");
 
-        fs::write(ui_dir.join("button.nx"), r#"let <Button /> = <button />"#).expect("button");
-        fs::write(forms_dir.join("input.nx"), r#"let <Input /> = <input />"#).expect("input");
+        fs::write(
+            ui_dir.join("button.nx"),
+            r#"export let <Button /> = <button />"#,
+        )
+        .expect("button");
+        fs::write(
+            forms_dir.join("input.nx"),
+            r#"export let <Input /> = <input />"#,
+        )
+        .expect("input");
 
         let artifact =
             build_library_artifact_from_directory(&ui_dir).expect("Expected library artifact");
 
         assert_eq!(artifact.modules.len(), 2);
-        assert_eq!(artifact.public_items.get("Button").map(Vec::len), Some(1));
-        assert_eq!(artifact.public_items.get("Input").map(Vec::len), Some(1));
+        assert_eq!(artifact.exported_items.get("Button").map(Vec::len), Some(1));
+        assert_eq!(artifact.exported_items.get("Input").map(Vec::len), Some(1));
         assert!(
             artifact
                 .modules
@@ -2000,6 +2060,126 @@ mod tests {
     }
 
     #[test]
+    fn library_artifact_default_internal_items_remain_library_local() {
+        let temp = TempDir::new().expect("temp dir");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(ui_dir.join("helpers.nx"), r#"let helper(): int = { 42 }"#)
+            .expect("helpers file");
+        fs::write(
+            ui_dir.join("public.nx"),
+            r#"export let answer(): int = { helper() }"#,
+        )
+        .expect("public file");
+
+        let artifact =
+            build_library_artifact_from_directory(&ui_dir).expect("Expected library artifact");
+
+        assert!(
+            !has_error_diagnostics(&artifact.diagnostics),
+            "Expected default-internal declarations to resolve across library files"
+        );
+        assert_eq!(
+            artifact
+                .visible_to_library_items
+                .get("helper")
+                .map(Vec::len),
+            Some(1)
+        );
+        assert!(artifact.exported_items.get("helper").is_none());
+        assert!(artifact.exports.get("helper").is_none());
+        assert_eq!(artifact.exported_items.get("answer").map(Vec::len), Some(1));
+    }
+
+    #[test]
+    fn library_artifact_private_items_stay_file_local() {
+        let temp = TempDir::new().expect("temp dir");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("helpers.nx"),
+            r#"private let secret(): int = { 7 }"#,
+        )
+        .expect("helpers file");
+        fs::write(
+            ui_dir.join("public.nx"),
+            r#"export let answer(): int = { secret() }"#,
+        )
+        .expect("public file");
+
+        let artifact =
+            build_library_artifact_from_directory(&ui_dir).expect("Expected library artifact");
+
+        assert!(artifact.diagnostics.iter().any(|diagnostic| {
+            diagnostic.severity() == Severity::Error && diagnostic.message().contains("secret")
+        }));
+    }
+
+    #[test]
+    fn consumer_imports_only_explicit_exports() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(ui_dir.join("helpers.nx"), r#"let helper(): int = { 42 }"#)
+            .expect("helpers file");
+        fs::write(
+            ui_dir.join("public.nx"),
+            r#"export let answer(): int = { helper() }"#,
+        )
+        .expect("public file");
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("Expected ui registry load");
+        let build_context = registry.build_context();
+
+        let visible_main_path = app_dir.join("visible-main.nx");
+        let visible_source = r#"import "../ui"
+let root() = { answer() }"#;
+        fs::write(&visible_main_path, visible_source).expect("visible main file");
+
+        let visible_artifact = build_program_artifact_from_source(
+            visible_source,
+            &visible_main_path.display().to_string(),
+            &build_context,
+        )
+        .expect("Expected visible program artifact");
+
+        assert!(
+            !has_error_diagnostics(&visible_artifact.diagnostics),
+            "Expected explicit exports to remain visible to consumers"
+        );
+
+        let EvalResult::Ok(value) = eval_program_artifact(&visible_artifact) else {
+            panic!("Expected explicit export program artifact evaluation to succeed");
+        };
+        assert_eq!(value, nx_value::NxValue::Int(42));
+
+        let hidden_main_path = app_dir.join("hidden-main.nx");
+        let hidden_source = r#"import { helper } from "../ui"
+let root() = { helper() }"#;
+        fs::write(&hidden_main_path, hidden_source).expect("hidden main file");
+
+        let hidden_artifact = build_program_artifact_from_source(
+            hidden_source,
+            &hidden_main_path.display().to_string(),
+            &build_context,
+        )
+        .expect("Expected hidden program artifact with diagnostics");
+
+        assert!(hidden_artifact
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.message().contains("does not export 'helper'") }));
+    }
+
+    #[test]
     fn library_registry_loads_library_closure_without_program_build() {
         let temp = TempDir::new().expect("temp dir");
         let widgets_dir = temp.path().join("widgets");
@@ -2007,7 +2187,11 @@ mod tests {
         fs::create_dir_all(&widgets_dir).expect("widgets dir");
         fs::create_dir_all(&ui_dir).expect("ui dir");
 
-        fs::write(ui_dir.join("button.nx"), r#"let <Button /> = <button />"#).expect("ui file");
+        fs::write(
+            ui_dir.join("button.nx"),
+            r#"export let <Button /> = <button />"#,
+        )
+        .expect("ui file");
         fs::write(
             widgets_dir.join("search-box.nx"),
             r#"import "../ui"
@@ -2094,7 +2278,11 @@ let from_b() = { from_a() }"#,
         fs::create_dir_all(&app_dir).expect("app dir");
         fs::create_dir_all(&ui_dir).expect("ui dir");
 
-        fs::write(ui_dir.join("answer.nx"), r#"let answer() = { 42 }"#).expect("ui file");
+        fs::write(
+            ui_dir.join("answer.nx"),
+            r#"export let answer(): int = { 42 }"#,
+        )
+        .expect("ui file");
         let registry = LibraryRegistry::new();
         let ui_snapshot = registry
             .load_library_from_directory(&ui_dir)
@@ -2138,7 +2326,11 @@ let root() = { answer() }"#;
         let ui_dir = temp.path().join("ui");
         fs::create_dir_all(&app_dir).expect("app dir");
         fs::create_dir_all(&ui_dir).expect("ui dir");
-        fs::write(ui_dir.join("button.nx"), r#"let <Button /> = <button />"#).expect("ui file");
+        fs::write(
+            ui_dir.join("button.nx"),
+            r#"export let <Button /> = <button />"#,
+        )
+        .expect("ui file");
 
         let main_path = app_dir.join("main.nx");
         let source = r#"import "../ui"
@@ -2191,7 +2383,11 @@ let root() = { answer() }"#;
         fs::create_dir_all(&app_dir).expect("app dir");
         fs::create_dir_all(&ui_dir).expect("ui dir");
 
-        fs::write(ui_dir.join("answer.nx"), r#"let answer() = { 42 }"#).expect("ui file");
+        fs::write(
+            ui_dir.join("answer.nx"),
+            r#"export let answer(): int = { 42 }"#,
+        )
+        .expect("ui file");
         let registry = LibraryRegistry::new();
         registry
             .load_library_from_directory(&ui_dir)
@@ -2227,11 +2423,15 @@ let root() = { answer() }"#;
         fs::create_dir_all(&widgets_dir).expect("widgets dir");
         fs::create_dir_all(&ui_dir).expect("ui dir");
 
-        fs::write(ui_dir.join("answer.nx"), r#"let ui_answer() = { 42 }"#).expect("ui file");
+        fs::write(
+            ui_dir.join("answer.nx"),
+            r#"export let ui_answer(): int = { 42 }"#,
+        )
+        .expect("ui file");
         fs::write(
             widgets_dir.join("answer.nx"),
             r#"import "../ui"
-let answer() = { ui_answer() }"#,
+export let answer(): int = { ui_answer() }"#,
         )
         .expect("widgets file");
 
@@ -2292,8 +2492,16 @@ let root() = { answer() }"#;
         fs::create_dir_all(&ui_dir).expect("ui dir");
         fs::create_dir_all(&admin_dir).expect("admin dir");
 
-        fs::write(ui_dir.join("answer.nx"), r#"let answer() = { 42 }"#).expect("ui file");
-        fs::write(admin_dir.join("secret.nx"), r#"let secret() = { 7 }"#).expect("admin file");
+        fs::write(
+            ui_dir.join("answer.nx"),
+            r#"export let answer(): int = { 42 }"#,
+        )
+        .expect("ui file");
+        fs::write(
+            admin_dir.join("secret.nx"),
+            r#"export let secret(): int = { 7 }"#,
+        )
+        .expect("admin file");
 
         let registry = LibraryRegistry::new();
         registry
@@ -2360,11 +2568,15 @@ let root() = { secret() }"#;
         fs::create_dir_all(&widgets_dir).expect("widgets dir");
         fs::create_dir_all(&ui_dir).expect("ui dir");
 
-        fs::write(ui_dir.join("answer.nx"), r#"let ui_answer() = { 42 }"#).expect("ui file");
+        fs::write(
+            ui_dir.join("answer.nx"),
+            r#"export let ui_answer(): int = { 42 }"#,
+        )
+        .expect("ui file");
         fs::write(
             widgets_dir.join("answer.nx"),
             r#"import "../ui"
-let answer() = { ui_answer() }"#,
+export let answer(): int = { ui_answer() }"#,
         )
         .expect("widgets file");
 

@@ -124,7 +124,7 @@ module.exports = grammar({
 
     visibility_modifier: $ => choice(
       'private',
-      'internal',
+      'export',
     ),
 
     // ===== Type Definitions =====

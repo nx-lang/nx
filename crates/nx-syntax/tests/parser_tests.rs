@@ -1181,7 +1181,7 @@ fn test_parse_selective_imports_with_aliases() {
 #[test]
 fn test_parse_visibility_modifiers() {
     let source = r#"private let title = "NX"
-internal component <Button/> = { <button/> }
+export component <Button/> = { <button/> }
 let subtitle = "Runtime""#;
     let result = parse_str(source, "test.nx");
 
@@ -1204,13 +1204,13 @@ let subtitle = "Runtime""#;
     assert_eq!(
         children[1]
             .child_by_field("visibility")
-            .expect("internal component should expose visibility")
+            .expect("export component should expose visibility")
             .text(),
-        "internal"
+        "export"
     );
     assert!(
         children[2].child_by_field("visibility").is_none(),
-        "public declaration should omit visibility field"
+        "default-internal declaration should omit visibility field"
     );
     assert_eq!(children[2].kind(), SyntaxKind::VALUE_DEFINITION);
 }

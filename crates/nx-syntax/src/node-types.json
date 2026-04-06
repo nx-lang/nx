@@ -2320,6 +2320,10 @@
     "named": true
   },
   {
+    "type": "export",
+    "named": false
+  },
+  {
     "type": "extends",
     "named": false
   },
@@ -2386,10 +2390,6 @@
   {
     "type": "int_literal",
     "named": true
-  },
-  {
-    "type": "internal",
-    "named": false
   },
   {
     "type": "is",

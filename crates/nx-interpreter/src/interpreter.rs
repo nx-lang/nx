@@ -2826,7 +2826,7 @@ mod tests {
         });
         module.add_item(Item::Function(Function {
             name: Name::new("make"),
-            visibility: nx_hir::Visibility::Public,
+            visibility: nx_hir::Visibility::Export,
             params: vec![],
             return_type: None,
             body,

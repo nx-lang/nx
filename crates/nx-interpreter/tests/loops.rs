@@ -67,7 +67,7 @@ fn test_for_loop_simple() {
 
     let func = Function {
         name: Name::new("double_all"),
-        visibility: nx_hir::Visibility::Public,
+        visibility: nx_hir::Visibility::Export,
         params,
         return_type: None,
         body: for_expr,
@@ -124,7 +124,7 @@ fn test_for_loop_with_index() {
 
     let func = Function {
         name: Name::new("add_index"),
-        visibility: nx_hir::Visibility::Public,
+        visibility: nx_hir::Visibility::Export,
         params,
         return_type: None,
         body: for_expr,
@@ -176,7 +176,7 @@ fn test_nested_for_loops() {
 
     let func = Function {
         name: Name::new("identity"),
-        visibility: nx_hir::Visibility::Public,
+        visibility: nx_hir::Visibility::Export,
         params,
         return_type: None,
         body: for_expr,
@@ -221,7 +221,7 @@ fn test_for_loop_empty_array() {
 
     let func = Function {
         name: Name::new("process"),
-        visibility: nx_hir::Visibility::Public,
+        visibility: nx_hir::Visibility::Export,
         params,
         return_type: None,
         body: for_expr,
@@ -264,7 +264,7 @@ fn test_for_loop_type_error() {
 
     let func = Function {
         name: Name::new("bad_loop"),
-        visibility: nx_hir::Visibility::Public,
+        visibility: nx_hir::Visibility::Export,
         params,
         return_type: None,
         body: for_expr,
@@ -389,7 +389,7 @@ fn test_for_loop_index_arithmetic() {
 
     let func = Function {
         name: Name::new("index_times_two"),
-        visibility: nx_hir::Visibility::Public,
+        visibility: nx_hir::Visibility::Export,
         params,
         return_type: None,
         body: for_expr,
@@ -530,7 +530,7 @@ fn test_for_loop_float_array() {
 
     let func = Function {
         name: Name::new("double_floats"),
-        visibility: nx_hir::Visibility::Public,
+        visibility: nx_hir::Visibility::Export,
         params,
         return_type: None,
         body: for_expr,

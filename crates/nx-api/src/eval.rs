@@ -265,7 +265,11 @@ let root() = { <Layout.Button /> }"#;
         fs::create_dir_all(&app_dir).expect("app dir");
         fs::create_dir_all(&ui_dir).expect("ui dir");
 
-        fs::write(ui_dir.join("button.nx"), r#"let <Button /> = <button />"#).expect("ui file");
+        fs::write(
+            ui_dir.join("button.nx"),
+            r#"export let <Button /> = <button />"#,
+        )
+        .expect("ui file");
         let main_path = app_dir.join("main.nx");
         let source = r#"import { Button as Layout.Button } from "../ui"
 let root() = { <Layout.Button /> }"#;
@@ -300,7 +304,11 @@ let root() = { <Layout.Button /> }"#;
         fs::create_dir_all(&app_dir).expect("app dir");
         fs::create_dir_all(&ui_dir).expect("ui dir");
 
-        fs::write(ui_dir.join("answer.nx"), r#"let answer() = { 42 }"#).expect("ui file");
+        fs::write(
+            ui_dir.join("answer.nx"),
+            r#"export let answer(): int = { 42 }"#,
+        )
+        .expect("ui file");
         let main_path = app_dir.join("main.nx");
         let source = r#"import "../ui"
 let root() = { answer() }"#;

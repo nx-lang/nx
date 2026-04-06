@@ -275,7 +275,7 @@ import { Bar } from "./bar""#;
     fn test_visibility_modifier_cst_structure() {
         let mut parser = parser();
         let source = r#"private let title = "NX"
-internal component <Button/> = { <button/> }"#;
+export component <Button/> = { <button/> }"#;
         let tree = parser.parse(source, None).unwrap();
         let root = SyntaxNode::new(tree.root_node(), source);
 
@@ -299,7 +299,7 @@ internal component <Button/> = { <button/> }"#;
                 .child_by_field("visibility")
                 .expect("component_definition should expose visibility")
                 .text(),
-            "internal"
+            "export"
         );
     }
 }

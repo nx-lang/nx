@@ -89,9 +89,9 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(importLine, importTokens, 'as')).to.include('keyword.control.import.nx');
     expect(scopesForSubstring(importLine, importTokens, 'from')).to.include('keyword.control.import.nx');
 
-    const typeLine = 'internal type Entity = {';
+    const typeLine = 'export type Entity = {';
     const typeTokens = grammar.tokenizeLine(typeLine, null).tokens;
-    expect(scopesForSubstring(typeLine, typeTokens, 'internal')).to.include('storage.modifier.visibility.nx');
+    expect(scopesForSubstring(typeLine, typeTokens, 'export')).to.include('storage.modifier.visibility.nx');
     expect(scopesForSubstring(typeLine, typeTokens, 'type')).to.include('keyword.declaration.type.nx');
 
     const valueLine = 'private let totalCount: int = 42';

@@ -54,9 +54,10 @@ under `Prefix.Name`, while `import { Name as Prefix.Name } from "<library>"` add
 prefix for just that imported declaration. The qualified selective alias must contain exactly one
 dot, and its final identifier must match the imported declaration name.
 
-Declarations are public by default. `private` restricts a declaration to its defining file, and
-`internal` makes it visible to other files in the same library while hiding it from external
-consumers.
+Declarations are internal by default. `private` restricts a declaration to its defining file, and
+`export` makes it visible to external consumers as well as to other files in the same library. In
+non-library program builds, default visibility remains visible throughout the same program, while
+`export` has no additional external effect until the code is consumed as a library.
 
 <a id="types"></a>
 ## Types
@@ -85,7 +86,7 @@ ActionDefinition ::=
 
 VisibilityModifier ::=
     "private"
-    | "internal"
+    | "export"
 
 TypeDeclaration ::=
     PrimitiveType [TypeModifier]

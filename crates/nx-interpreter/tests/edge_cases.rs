@@ -63,7 +63,7 @@ fn test_variable_shadowing_in_block() {
 
     let func = Function {
         name: Name::new("shadow"),
-        visibility: nx_hir::Visibility::Public,
+        visibility: nx_hir::Visibility::Export,
         params,
         return_type: None,
         body: inner_y,
@@ -208,7 +208,7 @@ fn test_deeply_nested_blocks() {
 
     let func = Function {
         name: Name::new("deep_blocks"),
-        visibility: nx_hir::Visibility::Public,
+        visibility: nx_hir::Visibility::Export,
         params,
         return_type: None,
         body,
@@ -360,7 +360,7 @@ fn test_boolean_double_negation() {
 
     let func = Function {
         name: Name::new("double_neg"),
-        visibility: nx_hir::Visibility::Public,
+        visibility: nx_hir::Visibility::Export,
         params,
         return_type: None,
         body: not_not_x,

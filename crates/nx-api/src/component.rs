@@ -633,7 +633,7 @@ mod tests {
         fs::write(
             ui_dir.join("search-box.nx"),
             r#"
-                component <SearchBox placeholder:string = "Find docs" /> = {
+                export component <SearchBox placeholder:string = "Find docs" /> = {
                   state { query:string = {placeholder} }
                   <TextInput value={query} placeholder={placeholder} />
                 }
@@ -691,7 +691,7 @@ let root() = { 0 }"#;
             r#"
                 action SearchSubmitted = { searchString:string }
 
-                component <SearchBox emits { SearchSubmitted } /> = {
+                export component <SearchBox emits { SearchSubmitted } /> = {
                   <TextInput />
                 }
             "#,
@@ -724,7 +724,7 @@ let root() = { 0 }"#;
             r#"
                 action SearchSubmitted = { searchString:string }
 
-                component <SearchBox placeholder:string = "Updated" emits { SearchSubmitted } /> = {
+                export component <SearchBox placeholder:string = "Updated" emits { SearchSubmitted } /> = {
                   <TextInput placeholder={placeholder} />
                 }
             "#,

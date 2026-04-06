@@ -42,7 +42,7 @@ fn test_division_by_zero_int() {
 
     let func = Function {
         name: Name::new("divide_by_zero"),
-        visibility: nx_hir::Visibility::Public,
+        visibility: nx_hir::Visibility::Export,
         params: vec![],
         return_type: None,
         body: div_expr,
@@ -142,7 +142,7 @@ fn test_paren_function_invalid_return_type_usage() {
     });
     let func = Function {
         name: Name::new("select"),
-        visibility: nx_hir::Visibility::Public,
+        visibility: nx_hir::Visibility::Export,
         params: vec![param],
         return_type: None,
         body: if_expr,
@@ -180,7 +180,7 @@ fn test_enum_not_found_runtime_error() {
 
     let func = Function {
         name: Name::new("getDirection"),
-        visibility: nx_hir::Visibility::Public,
+        visibility: nx_hir::Visibility::Export,
         params: Vec::new(),
         return_type: None,
         body: member,
