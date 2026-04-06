@@ -208,8 +208,8 @@ RecordExtendsClauseOpt
 - RecordExtendsClauseOpt → ε
 
 RecordPropertyDefinition (AST: RecordPropertyDefinitionSyntax)
-- RecordPropertyDefinition → MARKUP_IDENTIFIER COLON Type RecordPropertyDefaultOpt
-  - fields: name: string, type: TypeSyntax, default?: ExpressionSyntax
+- RecordPropertyDefinition → CONTENT? MARKUP_IDENTIFIER COLON Type RecordPropertyDefaultOpt
+  - fields: modifier?: "content", name: string, type: TypeSyntax, default?: ExpressionSyntax
 
 RecordPropertyDefaultOpt
 - RecordPropertyDefaultOpt → EQ RhsExpression
@@ -323,8 +323,8 @@ FunctionReturnTypeOpt
 - FunctionReturnTypeOpt → ε
 
 PropertyDefinition (AST: PropertyDefinitionSyntax)
-- PropertyDefinition → MARKUP_IDENTIFIER COLON Type [EQ RhsExpression]
-  - fields: name: string, type: TypeSyntax, default?: ExpressionSyntax
+- PropertyDefinition → CONTENT? MARKUP_IDENTIFIER COLON Type [EQ RhsExpression]
+  - fields: modifier?: "content", name: string, type: TypeSyntax, default?: ExpressionSyntax
 
 
 
@@ -653,7 +653,7 @@ This section lists the AST node types with fields for implementers.
 - EnumDefinitionSyntax: visibility?: "private"|"export", name: string, members: EnumMemberSyntax[]
 - RecordDefinitionSyntax: visibility?: "private"|"export", name: string, properties: RecordPropertyDefinitionSyntax[]
 - ActionDefinitionSyntax: visibility?: "private"|"export", name: string, properties: RecordPropertyDefinitionSyntax[]
-- RecordPropertyDefinitionSyntax: name: string, type: TypeSyntax, default?: ExpressionSyntax
+- RecordPropertyDefinitionSyntax: modifier?: "content", name: string, type: TypeSyntax, default?: ExpressionSyntax
 - ValueDefinitionSyntax: visibility?: "private"|"export", name: string, type?: TypeSyntax, value: ExpressionSyntax
 - TypeSyntax: kind: "primitive"|"user", name: string (qualified), modifier?: "nullable"|"sequence"
 - PrimitiveTypeSyntax: name: string
@@ -662,7 +662,7 @@ This section lists the AST node types with fields for implementers.
 - ElementFunctionDefinitionSyntax: visibility?: "private"|"export", elementName: QualifiedMarkupNameSyntax, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
 - ParenFunctionDefinitionSyntax: visibility?: "private"|"export", name: string, parameters: PropertyDefinitionSyntax[], returnType?: TypeSyntax, body: ExpressionSyntax
 - ComponentDefinitionSyntax: visibility?: "private"|"export", signature: ComponentSignatureSyntax, body: ComponentBodySyntax
-- PropertyDefinitionSyntax: name: string, type: TypeSyntax, default?: ExpressionSyntax
+- PropertyDefinitionSyntax: modifier?: "content", name: string, type: TypeSyntax, default?: ExpressionSyntax
 - ExpressionSyntax: union of MarkupElementSyntax | ValuesBracedExpressionSyntax | LiteralExpressionSyntax | IdentifierNameSyntax | ValueIfSimpleExpressionSyntax | ValueIfMatchExpressionSyntax | ValueIfConditionListExpressionSyntax | ValueForExpressionSyntax | ConditionalExpressionSyntax | ParenFunctionCallExpressionSyntax | MemberAccessExpressionSyntax | BinaryExpressionSyntax | PrefixUnaryExpressionSyntax | ParenthesizedExpressionSyntax | UnitLiteralSyntax
  - ParenFunctionCallExpressionSyntax: callee: ExpressionSyntax, args: ExpressionSyntax[]
  - MemberAccessExpressionSyntax: target: ExpressionSyntax, name: string (includes both property access and enum member access; distinguished during semantic analysis)

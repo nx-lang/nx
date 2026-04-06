@@ -661,30 +661,30 @@ mod tests {
     }
 
     #[test]
-    fn test_children_binding_conflict_reports_diagnostic() {
+    fn test_content_binding_conflict_reports_diagnostic() {
         let source = r#"
-            let <Collect children: object[] />: object[] = { children }
-            let root(): object[] = { <Collect children={null}><div /></Collect> }
+            let <Collect content items: object[] />: object[] = { items }
+            let root(): object[] = { <Collect items={null}><div /></Collect> }
         "#;
-        let result = check_str(source, "children-binding-conflict.nx");
+        let result = check_str(source, "content-binding-conflict.nx");
 
         assert!(
             result
                 .diagnostics
                 .iter()
-                .any(|diag| diag.code() == Some("children-binding-conflict")),
-            "Expected children binding conflict diagnostic, got {:?}",
+                .any(|diag| diag.code() == Some("content-binding-conflict")),
+            "Expected content binding conflict diagnostic, got {:?}",
             result.diagnostics
         );
     }
 
     #[test]
-    fn test_children_scalar_coerces_to_list_annotation() {
+    fn test_content_scalar_coerces_to_list_annotation() {
         let source = r#"
-            let <Collect children: object[] />: object[] = { children }
+            let <Collect content items: object[] />: object[] = { items }
             let root(): object[] = { <Collect><div /></Collect> }
         "#;
-        let result = check_str(source, "children-coerce.nx");
+        let result = check_str(source, "content-coerce.nx");
 
         assert!(
             result.errors().is_empty(),
@@ -694,12 +694,12 @@ mod tests {
     }
 
     #[test]
-    fn test_scalar_value_child_satisfies_scalar_children_annotation() {
+    fn test_text_body_satisfies_scalar_string_content_annotation() {
         let source = r#"
-            let <Collect children: int />: int = { children }
-            let root(): int = { <Collect>{1}</Collect> }
+            type Label = { content text:string }
+            let root(): Label = { <Label>label text</Label> }
         "#;
-        let result = check_str(source, "children-scalar-value.nx");
+        let result = check_str(source, "content-text-scalar.nx");
 
         assert!(
             result.errors().is_empty(),
@@ -709,12 +709,12 @@ mod tests {
     }
 
     #[test]
-    fn test_scalar_value_child_coerces_to_list_children_annotation() {
+    fn test_scalar_value_child_coerces_to_list_content_annotation() {
         let source = r#"
-            let <Collect children: int[] />: int[] = { children }
+            let <Collect content items: int[] />: int[] = { items }
             let root(): int[] = { <Collect>{1}</Collect> }
         "#;
-        let result = check_str(source, "children-scalar-value-list.nx");
+        let result = check_str(source, "content-scalar-value-list.nx");
 
         assert!(
             result.errors().is_empty(),
@@ -724,19 +724,89 @@ mod tests {
     }
 
     #[test]
-    fn test_children_multi_value_rejected_for_scalar_annotation() {
+    fn test_missing_content_property_reports_diagnostic() {
         let source = r#"
-            let <Single children: div />: div = { children }
-            let root(): div = { <Single><div /><span /></Single> }
+            let <Collect items: object[] />: object[] = { items }
+            let root(): object[] = { <Collect><div /></Collect> }
         "#;
-        let result = check_str(source, "children-reject.nx");
+        let result = check_str(source, "missing-content-property.nx");
 
         assert!(
             result
                 .diagnostics
                 .iter()
-                .any(|diag| diag.code() == Some("children-type-mismatch")),
-            "Expected children type mismatch diagnostic, got {:?}",
+                .any(|diag| diag.code() == Some("missing-content-property")),
+            "Expected missing content property diagnostic, got {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn test_content_multi_value_rejected_for_scalar_annotation() {
+        let source = r#"
+            let <Single content item: div />: div = { item }
+            let root(): div = { <Single><div /><span /></Single> }
+        "#;
+        let result = check_str(source, "content-reject.nx");
+
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code() == Some("content-type-mismatch")),
+            "Expected content type mismatch diagnostic, got {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn test_paren_function_markup_invocation_accepts_declared_content_param() {
+        let source = r#"
+            let Wrap(title:string, content body:Element) = <section>{body}</section>
+            let root() = <Wrap title="Docs"><Badge /></Wrap>
+        "#;
+        let result = check_str(source, "paren-content-invocation.nx");
+
+        assert!(
+            result.errors().is_empty(),
+            "Expected no diagnostics, got {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn test_component_markup_invocation_requires_declared_content_prop() {
+        let source = r#"
+            component <Panel title:string /> = {
+                <section>{title}</section>
+            }
+            let root() = <Panel title="Docs"><Badge /></Panel>
+        "#;
+        let result = check_str(source, "component-missing-content.nx");
+
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code() == Some("missing-content-property")),
+            "Expected missing content property diagnostic, got {:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn test_component_markup_invocation_accepts_declared_content_prop() {
+        let source = r#"
+            component <Panel title:string content body:Element /> = {
+                <section>{body}</section>
+            }
+            let root() = <Panel title="Docs"><Badge /></Panel>
+        "#;
+        let result = check_str(source, "component-content.nx");
+
+        assert!(
+            result.errors().is_empty(),
+            "Expected no diagnostics, got {:?}",
             result.diagnostics
         );
     }

@@ -48,7 +48,7 @@ let baseTheme: Theme =
 Wire tokens into layout and styling instead of raw strings:
 
 ```nx
-let <Panel theme:Theme title:string> content:Element </Panel> =
+let <Panel theme:Theme title:string  content body:Element /> =
   let spacing = theme.space[2].value  // "md" spacing
   <section
     style=<Style
@@ -58,7 +58,7 @@ let <Panel theme:Theme title:string> content:Element </Panel> =
       fontFamily={theme.fonts[0].family}
     />>
     <h2>{title}</h2>
-    <div>{content}</div>
+    <div>{body}</div>
   </section>
 ```
 

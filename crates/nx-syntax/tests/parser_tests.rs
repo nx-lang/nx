@@ -89,6 +89,222 @@ fn test_parse_paren_function_definition() {
 }
 
 #[test]
+fn test_parse_content_modifier_is_contextual_in_property_positions() {
+    let source = r#"
+        type Note = { content body:string title:string }
+        let Wrap(title:string, content body:Element) = <section>{body}</section>
+        component <Panel title:string content body:Element emits { Submitted { content payload:string } } /> = {
+            state { content current:Element }
+            <section>{body}</section>
+        }
+    "#;
+    let result = parse_str(source, "content-modifier.nx");
+
+    assert!(
+        result.is_ok(),
+        "Content modifiers should parse across declaration surfaces"
+    );
+    let root = result.root().expect("Should have root node");
+
+    let record = root
+        .children()
+        .find(|child| child.kind() == SyntaxKind::RECORD_DEFINITION)
+        .expect("Expected record definition");
+    let record_props: Vec<_> = record
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::PROPERTY_DEFINITION)
+        .collect();
+    assert_eq!(record_props.len(), 2);
+    assert_eq!(
+        record_props[0]
+            .child_by_field("modifier")
+            .expect("Record content property should expose modifier")
+            .text(),
+        "content"
+    );
+
+    let function = root
+        .children()
+        .find(|child| {
+            child.kind() == SyntaxKind::FUNCTION_DEFINITION
+                && child
+                    .child_by_field("name")
+                    .map(|name| name.text() == "Wrap")
+                    .unwrap_or(false)
+        })
+        .expect("Expected paren-style function definition");
+    let function_params: Vec<_> = function
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::PROPERTY_DEFINITION)
+        .collect();
+    assert_eq!(function_params.len(), 2);
+    assert_eq!(
+        function_params[1]
+            .child_by_field("modifier")
+            .expect("Content parameter should expose modifier")
+            .text(),
+        "content"
+    );
+
+    let component = root
+        .children()
+        .find(|child| child.kind() == SyntaxKind::COMPONENT_DEFINITION)
+        .expect("Expected component definition");
+    let signature = component
+        .child_by_field("signature")
+        .expect("Component should expose signature");
+    let component_props: Vec<_> = signature
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::PROPERTY_DEFINITION)
+        .collect();
+    assert_eq!(component_props.len(), 2);
+    assert_eq!(
+        component_props[1]
+            .child_by_field("modifier")
+            .expect("Component content prop should expose modifier")
+            .text(),
+        "content"
+    );
+
+    let emits = signature
+        .child_by_field("emits")
+        .expect("Component should expose emits");
+    let emit_definition = emits
+        .children()
+        .find(|child| child.kind() == SyntaxKind::EMIT_DEFINITION)
+        .expect("Expected inline emit definition");
+    let emit_payload = emit_definition
+        .children()
+        .find(|child| child.kind() == SyntaxKind::PROPERTY_DEFINITION)
+        .expect("Expected emit payload property");
+    assert_eq!(
+        emit_payload
+            .child_by_field("modifier")
+            .expect("Emit payload content property should expose modifier")
+            .text(),
+        "content"
+    );
+
+    let component_body = component
+        .child_by_field("body")
+        .expect("Component should expose body");
+    let state = component_body
+        .child_by_field("state")
+        .expect("Component body should expose state");
+    let state_field = state
+        .children()
+        .find(|child| child.kind() == SyntaxKind::PROPERTY_DEFINITION)
+        .expect("Expected state property");
+    assert_eq!(
+        state_field
+            .child_by_field("modifier")
+            .expect("State content property should expose modifier")
+            .text(),
+        "content"
+    );
+}
+
+#[test]
+fn test_parse_content_remains_identifier_outside_modifier_position() {
+    let source = r#"
+        type Note = { content:string }
+        let render(content:string) = { content }
+    "#;
+    let result = parse_str(source, "content-contextual.nx");
+
+    assert!(
+        result.is_ok(),
+        "Content should remain a valid identifier outside modifier position"
+    );
+    let root = result.root().expect("Should have root node");
+
+    let record = root
+        .children()
+        .find(|child| child.kind() == SyntaxKind::RECORD_DEFINITION)
+        .expect("Expected record definition");
+    let property = record
+        .children()
+        .find(|child| child.kind() == SyntaxKind::PROPERTY_DEFINITION)
+        .expect("Expected property definition");
+    assert!(
+        property.child_by_field("modifier").is_none(),
+        "Property named content should not be treated as a modifier"
+    );
+    assert_eq!(
+        property
+            .child_by_field("name")
+            .expect("Property should expose name")
+            .text(),
+        "content"
+    );
+
+    let function = root
+        .children()
+        .find(|child| child.kind() == SyntaxKind::FUNCTION_DEFINITION)
+        .expect("Expected function definition");
+    let param = function
+        .children()
+        .find(|child| child.kind() == SyntaxKind::PROPERTY_DEFINITION)
+        .expect("Expected parameter");
+    assert!(
+        param.child_by_field("modifier").is_none(),
+        "Parameter named content should not be treated as a modifier"
+    );
+    assert_eq!(
+        param.child_by_field("name")
+            .expect("Parameter should expose name")
+            .text(),
+        "content"
+    );
+}
+
+#[test]
+fn test_parse_regular_element_mixed_content_preserves_text_runs() {
+    let source = r#"
+        let value = 1
+        let root() = <Panel>label text<Badge />{value}</Panel>
+    "#;
+    let result = parse_str(source, "mixed-content.nx");
+
+    assert!(
+        result.is_ok(),
+        "Regular element mixed content should parse"
+    );
+    let root = result.root().expect("Should have root node");
+    let function = root
+        .children()
+        .find(|child| {
+            child.kind() == SyntaxKind::FUNCTION_DEFINITION
+                && child
+                    .child_by_field("name")
+                    .map(|name| name.text() == "root")
+                    .unwrap_or(false)
+        })
+        .expect("Expected root function");
+    let body = function
+        .child_by_field("body")
+        .expect("Function should expose body");
+    let element = body
+        .children()
+        .find(|child| child.kind() == SyntaxKind::ELEMENT)
+        .expect("Function body should contain element");
+    let mixed_content = element
+        .child_by_field("content")
+        .expect("Element should expose mixed content");
+    assert_eq!(mixed_content.kind(), SyntaxKind::MIXED_CONTENT);
+
+    let child_kinds: Vec<_> = mixed_content.children().map(|child| child.kind()).collect();
+    assert_eq!(
+        child_kinds,
+        vec![
+            SyntaxKind::TEXT_RUN,
+            SyntaxKind::ELEMENT,
+            SyntaxKind::VALUES_BRACED_EXPRESSION
+        ]
+    );
+}
+
+#[test]
 fn test_parse_element_function_with_return_type() {
     let source = r#"let <Button text:string />: Element = <button>{text}</button>"#;
     let result = parse_str(source, "test.nx");

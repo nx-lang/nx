@@ -175,6 +175,8 @@ pub struct Param {
     pub name: Name,
     /// Parameter type (must be explicit per spec)
     pub ty: ast::TypeRef,
+    /// Whether this parameter receives markup body content for element-style invocation.
+    pub is_content: bool,
     /// Source location
     pub span: TextSpan,
 }
@@ -182,7 +184,17 @@ pub struct Param {
 impl Param {
     /// Create a new parameter.
     pub fn new(name: Name, ty: ast::TypeRef, span: TextSpan) -> Self {
-        Self { name, ty, span }
+        Self::with_content(name, ty, false, span)
+    }
+
+    /// Create a new parameter with explicit content metadata.
+    pub fn with_content(name: Name, ty: ast::TypeRef, is_content: bool, span: TextSpan) -> Self {
+        Self {
+            name,
+            ty,
+            is_content,
+            span,
+        }
     }
 }
 
@@ -201,6 +213,13 @@ pub struct Function {
     pub body: ExprId,
     /// Source location
     pub span: TextSpan,
+}
+
+impl Function {
+    /// Returns the declared content parameter, if any.
+    pub fn content_param(&self) -> Option<&Param> {
+        self.params.iter().find(|param| param.is_content)
+    }
 }
 
 /// Top-level value declaration.
@@ -260,10 +279,31 @@ pub struct RecordField {
     pub name: Name,
     /// Field type
     pub ty: ast::TypeRef,
+    /// Whether this field receives markup body content for element-style construction.
+    pub is_content: bool,
     /// Default value expression (if present)
     pub default: Option<ExprId>,
     /// Source span
     pub span: TextSpan,
+}
+
+impl RecordField {
+    /// Create a new record field with explicit content metadata.
+    pub fn with_content(
+        name: Name,
+        ty: ast::TypeRef,
+        is_content: bool,
+        default: Option<ExprId>,
+        span: TextSpan,
+    ) -> Self {
+        Self {
+            name,
+            ty,
+            is_content,
+            default,
+            span,
+        }
+    }
 }
 
 /// Distinguishes ordinary records from action records.
@@ -303,6 +343,11 @@ impl RecordDef {
     /// Returns true when this record is declared as abstract.
     pub fn is_abstract(&self) -> bool {
         self.is_abstract
+    }
+
+    /// Returns the declared content property, if any.
+    pub fn content_property(&self) -> Option<&RecordField> {
+        self.properties.iter().find(|field| field.is_content)
     }
 }
 
@@ -347,6 +392,13 @@ pub struct Component {
     pub span: TextSpan,
 }
 
+impl Component {
+    /// Returns the declared content prop, if any.
+    pub fn content_prop(&self) -> Option<&RecordField> {
+        self.props.iter().find(|field| field.is_content)
+    }
+}
+
 /// Element property (key-value pair).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Property {
@@ -365,8 +417,8 @@ pub struct Element {
     pub tag: Name,
     /// Element properties
     pub properties: Vec<Property>,
-    /// Nested child expressions in source order
-    pub children: Vec<ExprId>,
+    /// Nested body-content expressions in source order
+    pub content: Vec<ExprId>,
     /// Closing tag name (must match opening tag)
     pub close_name: Option<Name>,
     /// Source location

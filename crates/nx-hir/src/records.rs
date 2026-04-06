@@ -9,6 +9,12 @@ pub struct EffectiveRecordShape {
     pub ancestors: Vec<Name>,
 }
 
+impl EffectiveRecordShape {
+    pub fn content_property(&self) -> Option<&RecordField> {
+        self.fields.iter().find(|field| field.is_content)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InvalidBaseReason {
     NotFound,
@@ -37,6 +43,13 @@ pub enum RecordResolutionError {
         inherited_from: Name,
         span: TextSpan,
     },
+    DuplicateContentProperty {
+        record: Name,
+        existing_field: Name,
+        existing_owner: Name,
+        field: Name,
+        span: TextSpan,
+    },
 }
 
 impl RecordResolutionError {
@@ -52,6 +65,9 @@ impl RecordResolutionError {
             RecordResolutionError::InheritanceCycle { .. } => "record-inheritance-cycle",
             RecordResolutionError::DuplicateInheritedField { .. } => {
                 "record-duplicate-inherited-field"
+            }
+            RecordResolutionError::DuplicateContentProperty { .. } => {
+                "record-duplicate-content-property"
             }
         }
     }
@@ -102,6 +118,25 @@ impl RecordResolutionError {
                 "Record '{}' redeclares inherited field '{}' from '{}'",
                 record, field, inherited_from
             ),
+            RecordResolutionError::DuplicateContentProperty {
+                record,
+                existing_field,
+                existing_owner,
+                field,
+                ..
+            } => {
+                if existing_owner == record {
+                    format!(
+                        "Record '{}' declares more than one content property: '{}' and '{}'",
+                        record, existing_field, field
+                    )
+                } else {
+                    format!(
+                        "Record '{}' declares content property '{}' but already inherits content property '{}' from '{}'",
+                        record, field, existing_field, existing_owner
+                    )
+                }
+            }
         }
     }
 
@@ -109,7 +144,8 @@ impl RecordResolutionError {
         match self {
             RecordResolutionError::InvalidBase { span, .. }
             | RecordResolutionError::InheritanceCycle { span, .. }
-            | RecordResolutionError::DuplicateInheritedField { span, .. } => *span,
+            | RecordResolutionError::DuplicateInheritedField { span, .. }
+            | RecordResolutionError::DuplicateContentProperty { span, .. } => *span,
         }
     }
 }
@@ -320,6 +356,19 @@ fn resolve_record_shape_inner(
         let mut fields = base_shape.fields;
 
         for field in &record.properties {
+            if field.is_content {
+                if let Some(existing) = fields.iter().find(|existing| existing.field.is_content) {
+                    stack.pop();
+                    return Err(RecordResolutionError::DuplicateContentProperty {
+                        record: record.name.clone(),
+                        existing_field: existing.field.name.clone(),
+                        existing_owner: existing.owner.clone(),
+                        field: field.name.clone(),
+                        span: field.span,
+                    });
+                }
+            }
+
             if let Some(existing) = fields
                 .iter()
                 .find(|existing| existing.field.name == field.name)

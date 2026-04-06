@@ -14,7 +14,7 @@ Evaluating NX is easier when you can position it beside tools you already use to
 | Tooling story | ✅ Built-in LSP + expression trees | ✅ Mature editors | ✅ Strong in IDEs, weaker elsewhere | ⚠️ Basic validation only |
 
 ### When NX Shines
-- Your UI code needs strong guarantees about props, children, and layout but must still stay ergonomic.
+- Your UI code needs strong guarantees about props, content, and layout but must still stay ergonomic.
 - You want to share a component model between design tools and runtime without switching languages.
 - Configuration files need conditional logic, iteration, or reuse that JSON/YAML cannot express safely.
 

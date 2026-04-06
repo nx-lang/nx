@@ -75,5 +75,5 @@ let currentUser = <User id="42" name="Kai" title="Designer"/>
 
 ## 6) Extend the pattern
 - Add a `status:"online"|"away"|"offline"` field and render a badge using `if … is`.
-- Introduce a `children` slot to let callers inject extra actions.
+- Introduce a `content footer:Element` property to let callers inject extra actions.
 - Thread design tokens (see the next tutorial) into `tone` and button styling so the component respects theming.

@@ -11,7 +11,7 @@ NX’s design goals explain why the language looks and behaves the way it does. 
 - Any attribute can hold expressions or markup, so composition never falls back to string concatenation.
 
 ## Built for UI and Design Systems
-- Components, slots, and design tokens are first-class; children slots sit beside typed attributes.
+- Components, content-marked properties, and design tokens are first-class; typed body content sits beside typed attributes.
 - Namespaces keep large UI libraries organised without sacrificing readability.
 - Styling and theming can be expressed as data, not strings, so tokens remain type-checked.
 
@@ -39,10 +39,10 @@ import { Button, Stack } from "./ui"
 type <Action label:string href:string? onClick:() => void/>
 type <Theme primary:string surface:string text:string/>
 
-let <Hero actions:Action[] theme:Theme> content:Element </Hero> =
+let <Hero actions:Action[] theme:Theme  content body:Element /> =
   <section style=<Style backgroundColor={theme.surface} color={theme.text} />>
     <Stack gap=12>
-      {content}
+      {body}
       <div>
         for action in actions {
           <Button

@@ -57,7 +57,7 @@ Expressions, conditionals, and sequences are valid attribute values.
 ## Styling
 
 ```nx
-let <StyledButton variant:string = "primary" content:Element/> =
+let <StyledButton variant:string = "primary"  content body:Element /> =
   <button
     style=<Style
       backgroundColor={if (variant == "primary") { "#007bff" } else { "#6c757d" }}
@@ -68,11 +68,13 @@ let <StyledButton variant:string = "primary" content:Element/> =
       cursor="pointer"
     />
   >
-    {content}
+    {body}
   </button>
 ```
 
 Inline styles follow the same attribute rules as other properties.
+When a declaration marks exactly one property with `content`, element body content binds to that
+property during invocation.
 
 ## Objects as Attributes
 

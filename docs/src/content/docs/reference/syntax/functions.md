@@ -56,6 +56,20 @@ let <DataGrid
 - Complex defaults can reference other parameters or inline expressions.
 - Iteration and conditionals in the body behave like any other expression.
 
+## Content-marked Parameters
+
+```nx
+let <Dialog title:string  content body:Element /> =
+  <section>
+    <h2>{title}</h2>
+    {body}
+  </section>
+```
+
+- Prefix one property with `content` to declare where element body content binds.
+- The marker is contextual: `content` remains a normal identifier outside property-definition positions.
+- The same inline form works for element-style `let`, paren-style `let`, `component` props, emitted-action payloads, and component `state`.
+
 ## `component` Declarations
 
 ```nx

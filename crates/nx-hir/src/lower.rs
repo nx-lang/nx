@@ -319,15 +319,15 @@ impl LoweringContext {
         }
     }
 
-    fn lower_sequence_expr_from_children(&mut self, node: SyntaxNode) -> ExprId {
-        let children: Vec<_> = node.children().collect();
-        match children.len() {
+    fn lower_sequence_expr_from_items(&mut self, node: SyntaxNode) -> ExprId {
+        let items: Vec<_> = node.children().collect();
+        match items.len() {
             0 => self.error_expr(node.span()),
-            1 => self.lower_expr(children[0]),
+            1 => self.lower_expr(items[0]),
             _ => {
-                let elements = children
+                let elements = items
                     .into_iter()
-                    .map(|child| self.lower_expr(child))
+                    .map(|item| self.lower_expr(item))
                     .collect();
                 self.alloc_expr(Expr::Array {
                     elements,
@@ -392,36 +392,84 @@ impl LoweringContext {
         self.predeclared_action_records.get(&Name::new(name))
     }
 
+    fn property_definition_name(prop: SyntaxNode) -> Name {
+        prop.child_by_field("name")
+            .map(|node| Name::new(node.text()))
+            .unwrap_or_else(|| Name::new("_"))
+    }
+
+    fn property_definition_is_content(prop: SyntaxNode) -> bool {
+        prop.child_by_field("modifier")
+            .map(|node| node.text() == "content")
+            .unwrap_or(false)
+    }
+
+    fn lower_property_definition(
+        &mut self,
+        prop: SyntaxNode,
+    ) -> (Name, TypeRef, Option<ExprId>, bool) {
+        let field_name = Self::property_definition_name(prop);
+        let ty_node = prop.child_by_field("type").unwrap_or(prop);
+        let ty = self.lower_type(ty_node);
+        let default = prop
+            .child_by_field("default")
+            .map(|default_node| self.lower_expr(default_node));
+        let is_content = Self::property_definition_is_content(prop);
+
+        if let Some(modifier) = prop.child_by_field("modifier") {
+            if modifier.text() != "content" {
+                self.add_diagnostic(
+                    format!(
+                        "Unsupported property modifier '{}'; only 'content' is allowed here",
+                        modifier.text()
+                    ),
+                    modifier.span(),
+                );
+            }
+        }
+
+        (field_name, ty, default, is_content)
+    }
+
     fn lower_record_fields_from_node(
         &mut self,
         node: SyntaxNode,
         define_names: bool,
     ) -> Vec<RecordField> {
         let mut properties = Vec::new();
+        let mut content_field_name: Option<Name> = None;
         for prop in node
             .children()
             .filter(|child| child.kind() == SyntaxKind::PROPERTY_DEFINITION)
         {
-            let field_name = prop
-                .child_by_field("name")
-                .map(|n| Name::new(n.text()))
-                .unwrap_or_else(|| Name::new("_"));
-            let ty_node = prop.child_by_field("type").unwrap_or(prop);
-            let ty = self.lower_type(ty_node);
-            let default = prop
-                .child_by_field("default")
-                .map(|default_node| self.lower_expr(default_node));
+            let (field_name, ty, default, is_content) = self.lower_property_definition(prop);
+
+            if is_content {
+                if let Some(existing_name) = content_field_name.as_ref() {
+                    self.add_diagnostic(
+                        format!(
+                            "Only one content property is allowed in this declaration; '{}' conflicts with '{}'",
+                            field_name.as_str(),
+                            existing_name.as_str()
+                        ),
+                        prop.span(),
+                    );
+                } else {
+                    content_field_name = Some(field_name.clone());
+                }
+            }
 
             if define_names {
                 self.define_name(&field_name, TypeTag::from_type_ref(&ty));
             }
 
-            properties.push(RecordField {
-                name: field_name,
+            properties.push(RecordField::with_content(
+                field_name,
                 ty,
+                is_content,
                 default,
-                span: prop.span(),
-            });
+                prop.span(),
+            ));
         }
 
         properties
@@ -874,7 +922,7 @@ impl LoweringContext {
                 let span = node.span();
                 let element = self.lower_element(node);
 
-                if element.children.is_empty() {
+                if element.content.is_empty() {
                     if let Some(record_def) = self
                         .module
                         .find_item(element.tag.as_str())
@@ -948,12 +996,12 @@ impl LoweringContext {
             }
 
             SyntaxKind::VALUES_BRACED_EXPRESSION | SyntaxKind::EMBED_BRACED_EXPRESSION => {
-                self.lower_sequence_expr_from_children(node)
+                self.lower_sequence_expr_from_items(node)
             }
             SyntaxKind::ELEMENTS_BRACED_EXPRESSION => node
                 .children()
                 .next()
-                .map(|child| self.lower_sequence_expr_from_children(child))
+                .map(|child| self.lower_sequence_expr_from_items(child))
                 .unwrap_or_else(|| self.error_expr(node.span())),
 
             SyntaxKind::VALUE_LIST_ITEM_EXPRESSION => node
@@ -1388,25 +1436,31 @@ impl LoweringContext {
 
         // Parse parameters from property_definition nodes
         let mut params = Vec::new();
+        let mut content_param_name: Option<Name> = None;
         for child in node.children() {
             if child.kind() == SyntaxKind::PROPERTY_DEFINITION {
-                // property_definition: name ':' type ['=' default]
-                let param_name = child
-                    .child_by_field("name")
-                    .map(|n| Name::new(n.text()))
-                    .unwrap_or_else(|| Name::new("_"));
-
-                let type_node = child
-                    .child_by_field("type")
-                    .or_else(|| child.children().find(|n| n.kind() == SyntaxKind::TYPE));
-
-                let param_type = type_node
-                    .map(|n| self.lower_type(n))
-                    .unwrap_or_else(|| TypeRef::name("unknown"));
-
+                let (param_name, param_type, _default, is_content) =
+                    self.lower_property_definition(child);
                 let param_span = child.span();
 
-                params.push(Param::new(param_name, param_type, param_span));
+                if is_content {
+                    if let Some(existing_name) = content_param_name.as_ref() {
+                        self.add_diagnostic(
+                            format!(
+                                "Only one content property is allowed in this declaration; '{}' conflicts with '{}'",
+                                param_name.as_str(),
+                                existing_name.as_str()
+                            ),
+                            param_span,
+                        );
+                    } else {
+                        content_param_name = Some(param_name.clone());
+                    }
+                }
+
+                params.push(Param::with_content(
+                    param_name, param_type, is_content, param_span,
+                ));
 
                 // Note: Default values are part of property_definition grammar
                 // but we don't store them in Param yet (future enhancement)
@@ -1443,11 +1497,11 @@ impl LoweringContext {
         }
     }
 
-    /// Recursively extracts element children from content nodes.
+    /// Recursively extracts element body-content expressions from parsed content nodes.
     ///
     /// Content can be wrapped in element/text containers. This preserves expression-producing
-    /// children instead of only literal nested elements.
-    fn lower_element_children(&mut self, node: SyntaxNode, children: &mut Vec<ExprId>) {
+    /// body content instead of only literal nested elements.
+    fn lower_element_content(&mut self, node: SyntaxNode, content: &mut Vec<ExprId>) {
         match node.kind() {
             SyntaxKind::ELEMENT
             | SyntaxKind::TEXT_CHILD_ELEMENT
@@ -1464,26 +1518,32 @@ impl LoweringContext {
             | SyntaxKind::ELEMENTS_IF_MATCH_EXPRESSION
             | SyntaxKind::ELEMENTS_IF_CONDITION_LIST_EXPRESSION
             | SyntaxKind::ELEMENTS_FOR_EXPRESSION => {
-                children.push(self.lower_expr(node));
+                content.push(self.lower_expr(node));
             }
-            // These are container nodes - recurse into their children
+            // These containers just group body content, so recurse into their syntax children.
             SyntaxKind::MIXED_CONTENT
             | SyntaxKind::ELEMENTS_EXPRESSION
             | SyntaxKind::CONTENT
             | SyntaxKind::TEXT_CONTENT
             | SyntaxKind::EMBED_TEXT_CONTENT => {
                 for child in node.children() {
-                    self.lower_element_children(child, children);
+                    self.lower_element_content(child, content);
                 }
             }
-            // Intentionally skip plain text runs until HIR grows a first-class text child model.
+            SyntaxKind::TEXT_RUN | SyntaxKind::RAW_TEXT_RUN => {
+                let text = node.text();
+                if !text.trim().is_empty() {
+                    content
+                        .push(self.alloc_expr(Expr::Literal(Literal::String(SmolStr::new(text)))));
+                }
+            }
             _ => {}
         }
     }
 
     /// Lowers an element.
     ///
-    /// Parses: `<tag prop1=val1 prop2={expr}>...children...</tag>`
+    /// Parses: `<tag prop1=val1 prop2={expr}>...body content...</tag>`
     /// Or self-closing: `<tag prop1=val1 />`
     pub fn lower_element(&mut self, node: SyntaxNode) -> Element {
         let span = node.span();
@@ -1575,12 +1635,10 @@ impl LoweringContext {
             }
         }
 
-        // Parse child elements from content
-        let mut children = Vec::new();
-        if let Some(content) = node.child_by_field("content") {
-            // Content can be MIXED_CONTENT, ELEMENTS_EXPRESSION, etc.
-            // We need to recursively search for ELEMENT nodes
-            self.lower_element_children(content, &mut children);
+        // Parse body content expressions.
+        let mut content = Vec::new();
+        if let Some(content_node) = node.child_by_field("content") {
+            self.lower_element_content(content_node, &mut content);
         }
 
         // Extract closing tag name for validation
@@ -1591,7 +1649,7 @@ impl LoweringContext {
         Element {
             tag,
             properties,
-            children,
+            content,
             close_name,
             span,
         }
@@ -2004,6 +2062,114 @@ enum Mode = light | dark"#;
     }
 
     #[test]
+    fn test_lower_content_metadata_across_function_record_and_component_surfaces() {
+        let source = r#"
+            type Note = { title:string content body:string }
+            let Wrap(title:string, content body:Element) = <section>{body}</section>
+            component <Panel title:string content body:Element emits { Submitted { content payload:string } } /> = {
+                state { content current:Element }
+                <section>{body}</section>
+            }
+        "#;
+        let parse_result = parse_str(source, "content-metadata.nx");
+        let tree = parse_result
+            .tree
+            .expect("Should parse content metadata source");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let record = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Record(record) if record.name.as_str() == "Note" => Some(record),
+                _ => None,
+            })
+            .expect("Expected record definition");
+        assert_eq!(
+            record.content_property().map(|field| field.name.as_str()),
+            Some("body")
+        );
+
+        let function = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Function(function) if function.name.as_str() == "Wrap" => Some(function),
+                _ => None,
+            })
+            .expect("Expected function definition");
+        assert_eq!(
+            function.content_param().map(|param| param.name.as_str()),
+            Some("body")
+        );
+
+        let component = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Component(component) if component.name.as_str() == "Panel" => Some(component),
+                _ => None,
+            })
+            .expect("Expected component definition");
+        assert_eq!(
+            component.content_prop().map(|field| field.name.as_str()),
+            Some("body")
+        );
+        assert_eq!(
+            component
+                .state
+                .iter()
+                .find(|field| field.is_content)
+                .map(|field| field.name.as_str()),
+            Some("current")
+        );
+
+        let emitted_action = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Record(record) if record.name.as_str() == "Panel.Submitted" => Some(record),
+                _ => None,
+            })
+            .expect("Expected inline emitted action record");
+        assert_eq!(
+            emitted_action
+                .content_property()
+                .map(|field| field.name.as_str()),
+            Some("payload")
+        );
+    }
+
+    #[test]
+    fn test_lower_duplicate_content_property_in_single_record_diagnostic() {
+        let source = r#"
+            type Foo = {
+              content title:string
+              content body:string
+            }
+        "#;
+        let parse_result = parse_str(source, "duplicate-record-content.nx");
+        let tree = parse_result
+            .tree
+            .expect("Should parse duplicate record content source");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let messages: Vec<_> = module
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect();
+
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("Only one content property is allowed")),
+            "Expected duplicate content property diagnostic, got {:?}",
+            messages
+        );
+    }
+
+    #[test]
     fn test_lower_type_alias_and_enum() {
         let source = r#"
             type UserId = string
@@ -2166,6 +2332,38 @@ enum Mode = light | dark"#;
                 .iter()
                 .any(|message| message.contains("redeclares inherited field 'name'")),
             "Expected duplicate inherited field diagnostic, got {:?}",
+            messages
+        );
+    }
+
+    #[test]
+    fn test_lower_record_inheritance_duplicate_content_property_diagnostic() {
+        let source = r#"
+            abstract type Base = {
+              content body:string
+            }
+
+            type Card extends Base = {
+              content footer:string
+            }
+        "#;
+        let parse_result = parse_str(source, "record-content-conflict.nx");
+        let tree = parse_result
+            .tree
+            .expect("Should parse content inheritance conflict");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let messages: Vec<_> = module
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect();
+
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("already inherits content property")),
+            "Expected duplicate content property diagnostic, got {:?}",
             messages
         );
     }
@@ -2431,7 +2629,7 @@ enum Mode = light | dark"#;
                         let elem = module.element(*element);
                         assert_eq!(elem.tag.as_str(), "button");
                         assert_eq!(elem.properties.len(), 0);
-                        assert_eq!(elem.children.len(), 0);
+                        assert_eq!(elem.content.len(), 0);
                     }
                     _ => panic!("Expected Element expression as body"),
                 }
@@ -2628,10 +2826,10 @@ enum Mode = light | dark"#;
                     Expr::Element { element, .. } => {
                         let elem = module.element(*element);
                         assert_eq!(elem.tag.as_str(), "div");
-                        assert_eq!(elem.children.len(), 1);
+                        assert_eq!(elem.content.len(), 1);
 
                         // Check nested button element
-                        match module.expr(elem.children[0]) {
+                        match module.expr(elem.content[0]) {
                             Expr::Element { element, .. } => {
                                 let child = module.element(*element);
                                 assert_eq!(child.tag.as_str(), "button");
@@ -2649,7 +2847,7 @@ enum Mode = light | dark"#;
     }
 
     #[test]
-    fn test_lower_dynamic_element_children_are_preserved() {
+    fn test_lower_dynamic_element_content_is_preserved() {
         let source = r#"
             let <Panel flag:bool items:object /> = <div>
               {<A /> <B />}
@@ -2657,8 +2855,8 @@ enum Mode = light | dark"#;
               for item in items { <Row /> }
             </div>
         "#;
-        let parse_result = parse_str(source, "dynamic-children.nx");
-        let tree = parse_result.tree.expect("Should parse dynamic children");
+        let parse_result = parse_str(source, "dynamic-content.nx");
+        let tree = parse_result.tree.expect("Should parse dynamic content");
         let root = tree.root();
         let module = lower(root, SourceId::new(0));
 
@@ -2673,26 +2871,26 @@ enum Mode = light | dark"#;
         };
 
         let element = module.element(*element);
-        assert_eq!(element.children.len(), 3);
+        assert_eq!(element.content.len(), 3);
 
-        match module.expr(element.children[0]) {
+        match module.expr(element.content[0]) {
             Expr::Array { elements, .. } => {
                 assert_eq!(elements.len(), 2);
                 for child in elements {
                     assert!(
                         matches!(module.expr(*child), Expr::Element { .. }),
-                        "Expected element in braced child list, got {:?}",
+                        "Expected element in braced content list, got {:?}",
                         module.expr(*child)
                     );
                 }
             }
             other => panic!(
-                "Expected braced child list to lower to array, got {:?}",
+                "Expected braced content list to lower to array, got {:?}",
                 other
             ),
         }
 
-        match module.expr(element.children[1]) {
+        match module.expr(element.content[1]) {
             Expr::If {
                 then_branch,
                 else_branch,
@@ -2702,26 +2900,24 @@ enum Mode = light | dark"#;
                 let else_branch = else_branch.as_ref().expect("Expected else branch");
                 assert!(matches!(module.expr(*else_branch), Expr::Element { .. }));
             }
-            other => panic!("Expected conditional child expression, got {:?}", other),
+            other => panic!("Expected conditional content expression, got {:?}", other),
         }
 
-        match module.expr(element.children[2]) {
+        match module.expr(element.content[2]) {
             Expr::For { body, .. } => {
                 assert!(matches!(module.expr(*body), Expr::Element { .. }));
             }
-            other => panic!("Expected for child expression, got {:?}", other),
+            other => panic!("Expected for content expression, got {:?}", other),
         }
     }
 
     #[test]
-    fn test_lower_scalar_braced_child_expression_is_preserved() {
+    fn test_lower_scalar_braced_content_expression_is_preserved() {
         let source = r#"
             let <Panel count:int /> = <div>{count}</div>
         "#;
-        let parse_result = parse_str(source, "scalar-child.nx");
-        let tree = parse_result
-            .tree
-            .expect("Should parse scalar child content");
+        let parse_result = parse_str(source, "scalar-content.nx");
+        let tree = parse_result.tree.expect("Should parse scalar content");
         let root = tree.root();
         let module = lower(root, SourceId::new(0));
 
@@ -2736,15 +2932,56 @@ enum Mode = light | dark"#;
         };
 
         let element = module.element(*element);
-        assert_eq!(element.children.len(), 1);
+        assert_eq!(element.content.len(), 1);
 
-        match module.expr(element.children[0]) {
+        match module.expr(element.content[0]) {
             Expr::Ident(name) => assert_eq!(name.as_str(), "count"),
             other => panic!(
-                "Expected scalar child expression to be preserved, got {:?}",
+                "Expected scalar content expression to be preserved, got {:?}",
                 other
             ),
         }
+    }
+
+    #[test]
+    fn test_lower_plain_text_element_content_is_preserved() {
+        let source = r#"
+            let root() = <Panel>label text<Badge /></Panel>
+        "#;
+        let parse_result = parse_str(source, "text-content.nx");
+        let tree = parse_result
+            .tree
+            .expect("Should parse regular element text content");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let func = match &module.items()[0] {
+            Item::Function(func) => func,
+            other => panic!("Expected function item, got {:?}", other),
+        };
+
+        let body_expr = module.expr(func.body);
+        let Expr::Element { element, .. } = body_expr else {
+            panic!("Expected element body, got {:?}", body_expr);
+        };
+
+        let element = module.element(*element);
+        assert_eq!(element.content.len(), 2);
+
+        match module.expr(element.content[0]) {
+            Expr::Literal(Literal::String(value)) => {
+                assert_eq!(value.as_str(), "label text");
+            }
+            other => panic!(
+                "Expected text content to lower to string literal, got {:?}",
+                other
+            ),
+        }
+
+        assert!(
+            matches!(module.expr(element.content[1]), Expr::Element { .. }),
+            "Expected nested element content item, got {:?}",
+            module.expr(element.content[1])
+        );
     }
 
     #[test]

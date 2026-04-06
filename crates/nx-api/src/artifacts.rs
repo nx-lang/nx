@@ -30,6 +30,7 @@ pub struct LibraryExport {
 pub struct LibraryInterfaceParam {
     pub name: Name,
     pub ty: TypeRef,
+    pub is_content: bool,
     pub span: TextSpan,
 }
 
@@ -37,6 +38,7 @@ pub struct LibraryInterfaceParam {
 pub struct LibraryInterfaceField {
     pub name: Name,
     pub ty: TypeRef,
+    pub is_content: bool,
     pub span: TextSpan,
 }
 
@@ -114,6 +116,7 @@ impl LibraryInterfaceItem {
                     .map(|param| Param {
                         name: param.name.clone(),
                         ty: param.ty.clone(),
+                        is_content: param.is_content,
                         span: param.span,
                     })
                     .collect(),
@@ -546,6 +549,7 @@ impl<'dst, 'src> ModuleCopier<'dst, 'src> {
         RecordField {
             name: field.name.clone(),
             ty: field.ty.clone(),
+            is_content: field.is_content,
             default: field.default.map(|expr| self.copy_expr(expr)),
             span: field.span,
         }
@@ -703,10 +707,10 @@ impl<'dst, 'src> ModuleCopier<'dst, 'src> {
                     span: property.span,
                 })
                 .collect(),
-            children: element
-                .children
+            content: element
+                .content
                 .into_iter()
-                .map(|child| self.copy_expr(child))
+                .map(|content_expr| self.copy_expr(content_expr))
                 .collect(),
             close_name: element.close_name,
             span: element.span,
@@ -1671,6 +1675,7 @@ fn interface_field_to_record_field(field: &LibraryInterfaceField) -> RecordField
     RecordField {
         name: field.name.clone(),
         ty: field.ty.clone(),
+        is_content: field.is_content,
         default: None,
         span: field.span,
     }
@@ -1695,6 +1700,7 @@ fn build_interface_item(artifact: &ModuleArtifact, item: &Item) -> Option<Librar
                     .map(|param| LibraryInterfaceParam {
                         name: param.name.clone(),
                         ty: param.ty.clone(),
+                        is_content: param.is_content,
                         span: param.span,
                     })
                     .collect(),
@@ -1762,6 +1768,7 @@ fn record_field_to_interface_field(field: &RecordField) -> LibraryInterfaceField
     LibraryInterfaceField {
         name: field.name.clone(),
         ty: field.ty.clone(),
+        is_content: field.is_content,
         span: field.span,
     }
 }
@@ -2118,6 +2125,79 @@ mod tests {
     }
 
     #[test]
+    fn library_artifact_interface_items_preserve_content_metadata() {
+        let temp = TempDir::new().expect("temp dir");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("content.nx"),
+            r#"export type Wrapper = { content body:object }
+export let wrap(content body:object): object = { body }
+export component <Panel content body:object /> = {
+  state {
+    content cached:string = ""
+  }
+  <section>{body}</section>
+}"#,
+        )
+        .expect("content file");
+
+        let artifact =
+            build_library_artifact_from_directory(&ui_dir).expect("Expected library artifact");
+
+        assert!(
+            !has_error_diagnostics(&artifact.diagnostics),
+            "Expected content metadata fixture to analyze without errors"
+        );
+
+        let wrap_item = artifact
+            .interface_items
+            .iter()
+            .find(|item| item.item_name == "wrap")
+            .expect("Expected exported function interface item");
+        match &wrap_item.item {
+            LibraryInterfaceKind::Function { params, .. } => {
+                assert_eq!(params.len(), 1);
+                assert_eq!(params[0].name.as_str(), "body");
+                assert!(params[0].is_content);
+            }
+            other => panic!("Expected function interface item, got {other:?}"),
+        }
+
+        let wrapper_item = artifact
+            .interface_items
+            .iter()
+            .find(|item| item.item_name == "Wrapper")
+            .expect("Expected exported record interface item");
+        match &wrapper_item.item {
+            LibraryInterfaceKind::Record { properties, .. } => {
+                assert_eq!(properties.len(), 1);
+                assert_eq!(properties[0].name.as_str(), "body");
+                assert!(properties[0].is_content);
+            }
+            other => panic!("Expected record interface item, got {other:?}"),
+        }
+
+        let panel_item = artifact
+            .interface_items
+            .iter()
+            .find(|item| item.item_name == "Panel")
+            .expect("Expected exported component interface item");
+        match &panel_item.item {
+            LibraryInterfaceKind::Component { props, state, .. } => {
+                assert_eq!(props.len(), 1);
+                assert_eq!(props[0].name.as_str(), "body");
+                assert!(props[0].is_content);
+                assert_eq!(state.len(), 1);
+                assert_eq!(state[0].name.as_str(), "cached");
+                assert!(state[0].is_content);
+            }
+            other => panic!("Expected component interface item, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn consumer_imports_only_explicit_exports() {
         let temp = TempDir::new().expect("temp dir");
         let app_dir = temp.path().join("app");
@@ -2317,6 +2397,71 @@ let root() = { answer() }"#;
             panic!("Expected registry-backed program artifact evaluation to succeed");
         };
         assert_eq!(value, nx_value::NxValue::Int(42));
+    }
+
+    #[test]
+    fn imported_content_bindings_match_local_behavior() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("content.nx"),
+            r#"export type Wrapper = { content body:object }
+export let Wrap(content body:object): object = { body }
+export component <Panel content body:object /> = {
+  <section>{body}</section>
+}"#,
+        )
+        .expect("content file");
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("Expected ui registry load");
+        let build_context = registry.build_context();
+
+        let main_path = app_dir.join("main.nx");
+        let source = r#"import { Wrapper, Wrap, Panel } from "../ui"
+let root(): object[] = {
+  <Wrap><Badge /></Wrap>
+  <Wrapper><Badge /></Wrapper>
+  <Panel><Badge /></Panel>
+}"#;
+        fs::write(&main_path, source).expect("main file");
+
+        let artifact = build_program_artifact_from_source(
+            source,
+            &main_path.display().to_string(),
+            &build_context,
+        )
+        .expect("Expected program artifact");
+
+        assert!(
+            !has_error_diagnostics(&artifact.diagnostics),
+            "Expected imported content bindings to analyze without errors, got {:?}",
+            artifact.diagnostics
+        );
+
+        let EvalResult::Ok(value) = eval_program_artifact(&artifact) else {
+            panic!("Expected imported content bindings evaluation to succeed");
+        };
+
+        let badge = nx_value::NxValue::Record {
+            type_name: Some("Badge".to_string()),
+            properties: std::collections::BTreeMap::new(),
+        };
+        let wrapper = nx_value::NxValue::Record {
+            type_name: Some("Wrapper".to_string()),
+            properties: std::collections::BTreeMap::from([("body".to_string(), badge.clone())]),
+        };
+        let panel = nx_value::NxValue::Record {
+            type_name: Some("Panel".to_string()),
+            properties: std::collections::BTreeMap::from([("body".to_string(), badge.clone())]),
+        };
+        assert_eq!(value, nx_value::NxValue::Array(vec![badge, wrapper, panel]));
     }
 
     #[test]

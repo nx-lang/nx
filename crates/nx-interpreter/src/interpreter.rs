@@ -1561,19 +1561,16 @@ impl Interpreter {
             fields.insert(SmolStr::new(prop.key.as_str()), value);
         }
 
-        let child_values = self.eval_child_expressions(module, ctx, &element.children)?;
-        let normalized_children = self.normalize_child_values(child_values);
+        let content_values = self.eval_content_expressions(module, ctx, &element.content)?;
+        let normalized_content = self.normalize_content_values(content_values);
 
         if let Some((target_module, Item::Function(function))) = self.resolve_item(module, tag_name)
         {
-            self.inject_element_children_field(
+            self.inject_element_content_field(
                 &mut fields,
-                normalized_children,
-                function
-                    .params
-                    .iter()
-                    .any(|p| p.name.as_str() == "children"),
-                "function without 'children' parameter",
+                normalized_content,
+                function.content_param().map(|param| param.name.as_str()),
+                "function without a declared content parameter",
                 "element function call",
             )?;
 
@@ -1619,27 +1616,58 @@ impl Interpreter {
             return self.eval_function_call(target_module, ctx, tag_name, function, arg_values);
         }
 
+        if let Some((target_module, Item::Component(component))) =
+            self.resolve_item(module, tag_name)
+        {
+            self.inject_element_content_field(
+                &mut fields,
+                normalized_content,
+                component.content_prop().map(|field| field.name.as_str()),
+                "component without a declared content prop",
+                "element component call",
+            )?;
+
+            ctx.push_scope();
+            let normalized_props = self.normalize_component_props(
+                target_module,
+                ctx,
+                component,
+                Value::Record {
+                    type_name: component.name.clone(),
+                    fields,
+                },
+            );
+            ctx.pop_scope();
+            let normalized_props = normalized_props?;
+
+            return Ok(Value::Record {
+                type_name: component.name.clone(),
+                fields: normalized_props,
+            });
+        }
+
         if let Some(record_def) = self.resolve_record_definition(module, tag_name) {
             let record_shape = self.effective_record_shape(module, &record_def.name)?;
-            self.inject_element_children_field(
+            self.inject_element_content_field(
                 &mut fields,
-                normalized_children,
+                normalized_content,
                 record_shape
-                    .fields
-                    .iter()
-                    .any(|p| p.name.as_str() == "children"),
-                "record without 'children' field",
+                    .content_property()
+                    .map(|field| field.name.as_str()),
+                "record without a declared content field",
                 "element record call",
             )?;
 
             return self.build_record_value_from_shape(module, ctx, record_shape, fields, None);
         }
 
-        if !fields.contains_key("children") {
-            if let Some(children_value) = normalized_children {
-                fields.insert(SmolStr::new("children"), children_value);
-            }
-        }
+        self.inject_element_content_field(
+            &mut fields,
+            normalized_content,
+            Some("content"),
+            "intrinsic element content channel",
+            "element intrinsic call",
+        )?;
 
         Ok(Value::Record {
             type_name: element.tag.clone(),
@@ -1647,54 +1675,57 @@ impl Interpreter {
         })
     }
 
-    fn inject_element_children_field(
+    fn inject_element_content_field(
         &self,
         fields: &mut FxHashMap<SmolStr, Value>,
-        normalized_children: Option<Value>,
-        accepts_children: bool,
-        missing_children_expected: &str,
+        normalized_content: Option<Value>,
+        content_property_name: Option<&str>,
+        missing_content_expected: &str,
         operation: &str,
     ) -> Result<(), RuntimeError> {
-        let has_children = normalized_children.is_some();
+        let Some(content_value) = normalized_content else {
+            return Ok(());
+        };
 
-        if fields.contains_key("children") && has_children {
+        let Some(content_property_name) = content_property_name else {
             return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                expected: "children passed either as a named property or as element body"
-                    .to_string(),
-                actual: "both a children property and element body".to_string(),
-                operation: operation.to_string(),
-            }));
-        }
-
-        if !accepts_children && has_children {
-            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                expected: missing_children_expected.to_string(),
+                expected: missing_content_expected.to_string(),
                 actual: "element body content".to_string(),
                 operation: operation.to_string(),
             }));
+        };
+
+        if fields.contains_key(content_property_name) {
+            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: format!(
+                    "content for '{}' passed either as a named property or as element body",
+                    content_property_name
+                ),
+                actual: format!(
+                    "both a '{}' property and element body content",
+                    content_property_name
+                ),
+                operation: operation.to_string(),
+            }));
         }
 
-        if accepts_children && !fields.contains_key("children") {
-            if let Some(children_value) = normalized_children {
-                fields.insert(SmolStr::new("children"), children_value);
-            }
-        }
+        fields.insert(SmolStr::new(content_property_name), content_value);
 
         Ok(())
     }
 
-    fn eval_child_expressions(
+    fn eval_content_expressions(
         &self,
         module: &LoweredModule,
         ctx: &mut ExecutionContext,
-        child_exprs: &[ExprId],
+        content_exprs: &[ExprId],
     ) -> Result<Vec<Value>, RuntimeError> {
         let mut values = Vec::new();
-        for child_expr in child_exprs {
-            let value = self.eval_expr(module, ctx, *child_expr)?;
+        for content_expr in content_exprs {
+            let value = self.eval_expr(module, ctx, *content_expr)?;
             match value {
-                // Child arrays represent sibling child results from multi-item braces and
-                // element-producing control flow, so splice them into the parent child list.
+                // Content arrays represent sibling body-content results from multi-item braces and
+                // element-producing control flow, so splice them into the parent content list.
                 Value::Array(items) => values.extend(items),
                 other => values.push(other),
             }
@@ -1702,11 +1733,11 @@ impl Interpreter {
         Ok(values)
     }
 
-    fn normalize_child_values(&self, child_values: Vec<Value>) -> Option<Value> {
-        match child_values.len() {
+    fn normalize_content_values(&self, content_values: Vec<Value>) -> Option<Value> {
+        match content_values.len() {
             0 => None,
-            1 => child_values.into_iter().next(),
-            _ => Some(Value::Array(child_values)),
+            1 => content_values.into_iter().next(),
+            _ => Some(Value::Array(content_values)),
         }
     }
 
@@ -3223,7 +3254,7 @@ mod tests {
             .expect("Expected snapshot to decode");
         assert!(snapshot.state.is_empty(), "Expected empty component state");
         assert_eq!(
-            extract_record_field(&init.rendered, "children"),
+            extract_record_field(&init.rendered, "content"),
             &Value::String(SmolStr::new("Save"))
         );
     }

@@ -135,7 +135,7 @@ ParenFunctionDefinition ::=
     [VisibilityModifier] "let" Identifier "(" [PropertyDefinition {"," PropertyDefinition}] ")" [":" TypeDeclaration] "=" RhsExpression
 
 PropertyDefinition ::=
-    MarkupIdentifier ":" TypeDeclaration ["=" RhsExpression]
+    ["content"] MarkupIdentifier ":" TypeDeclaration ["=" RhsExpression]
 ```
 
 ## Components
@@ -174,6 +174,10 @@ they can also declare emitted action payloads in `emits` and persistent local st
 `state`. The `emits` block must contain at least one `EmitDefinition`, each emit name is a plain
 identifier, and each emit/state field uses the same `PropertyDefinition` shape as other record-like
 members.
+
+Within a single record, function signature, component signature, emitted action payload, or state
+block, at most one `PropertyDefinition` may be prefixed by `content`. That content-marked property
+receives element body content during markup-style invocation.
 
 <a id="expressions"></a>
 ## Expressions

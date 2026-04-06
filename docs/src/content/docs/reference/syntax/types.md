@@ -33,6 +33,7 @@ type User extends UserBase = {
 ```
 
 - Fields use `name: Type` and can optionally declare defaults with `=`.
+- Prefix one field with `content` when element body content should bind to that field during markup-style construction.
 - `abstract type` records can appear in annotations but cannot be instantiated directly.
 - `extends Base` is valid only when `Base` resolves to an abstract record declaration.
 
@@ -67,6 +68,18 @@ type Person = {
 ```
 
 Combining record types allows you to describe complex domain models while keeping named shapes explicit.
+
+## Content-marked record fields
+
+```nx
+type Panel = {
+  title: string
+  content body: Element
+}
+```
+
+When you instantiate a record with element syntax, any body content binds to the field marked with
+`content`.
 
 ## Record creation
 Concrete records are instantiated with the same element-style syntax used elsewhere in NX.

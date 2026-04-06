@@ -31,6 +31,7 @@ module.exports = grammar({
     [$.value_expression, $.value_list_item_expression],
     [$.value_expression, $._value_list_expression],
     [$.elements_expression],
+    [$.mixed_content],
     [$.property_list],
     [$.property_list_if_condition_arm],
     [$.property_list_if_match_arm],
@@ -56,6 +57,9 @@ module.exports = grammar({
     [$.embed_text_run],
     [$.identifier_expression, $.qualified_markup_name],
     [$.identifier_expression, $.qualified_name],
+    [$.value_definition, $.function_definition],
+    [$.property_definition],
+    [$._component_property_definition],
   ],
 
   word: $ => $.identifier,
@@ -302,14 +306,26 @@ module.exports = grammar({
     // stream tree-sitter produces in component signatures and nested emits/state
     // blocks. Using the shared property_definition rule directly regresses plain
     // identifier props like `text:string` under `component`.
-    _component_property_definition: $ => seq(
-      field('name', alias($._component_field_name, $.markup_identifier)),
-      ':',
-      field('type', $.type),
-      optional(seq(
-        '=',
-        field('default', $.rhs_expression),
-      )),
+    _component_property_definition: $ => choice(
+      seq(
+        field('name', alias($._component_field_name, $.markup_identifier)),
+        ':',
+        field('type', $.type),
+        optional(seq(
+          '=',
+          field('default', $.rhs_expression),
+        )),
+      ),
+      seq(
+        field('modifier', alias($._component_field_name, $.markup_identifier)),
+        field('name', alias($._component_field_name, $.markup_identifier)),
+        ':',
+        field('type', $.type),
+        optional(seq(
+          '=',
+          field('default', $.rhs_expression),
+        )),
+      ),
     ),
 
     _component_field_name: $ => choice(
@@ -317,14 +333,26 @@ module.exports = grammar({
       $.markup_identifier,
     ),
 
-    property_definition: $ => seq(
-      field('name', $.markup_identifier),
-      ':',
-      field('type', $.type),
-      optional(seq(
-        '=',
-        field('default', $.rhs_expression),
-      )),
+    property_definition: $ => choice(
+      seq(
+        field('name', $.markup_identifier),
+        ':',
+        field('type', $.type),
+        optional(seq(
+          '=',
+          field('default', $.rhs_expression),
+        )),
+      ),
+      seq(
+        field('modifier', $.markup_identifier),
+        field('name', $.markup_identifier),
+        ':',
+        field('type', $.type),
+        optional(seq(
+          '=',
+          field('default', $.rhs_expression),
+        )),
+      ),
     ),
 
     // ===== Expressions =====
@@ -538,6 +566,18 @@ module.exports = grammar({
     ),
 
     // ===== Elements Expression =====
+    // Keep bare if/for/else prefixes available for control-flow items in mixed content. Text
+    // that would otherwise collide with those prefixes can still be written via braces.
+    _mixed_text_run: $ => alias(token(prec(-1, /(?:[^\s<{ife][^<{]*|i[^f\s<{][^<{]*|if[^\s<{][^<{]*|f[^o\s<{][^<{]*|fo[^r\s<{][^<{]*|for[^\s<{][^<{]*|e[^l\s<{][^<{]*|el[^s\s<{][^<{]*|els[^e\s<{][^<{]*|else[^\s<{][^<{]*)/)), $.text_run),
+
+    mixed_content: $ => repeat1(choice(
+      $._mixed_text_run,
+      $.element,
+      $.elements_if_expression,
+      $.elements_for_expression,
+      $.values_braced_expression,
+    )),
+
     elements_expression: $ => repeat1(choice(
       $.element,
       $.elements_if_expression,
@@ -639,7 +679,7 @@ module.exports = grammar({
             seq('/', '>'),  // self-closing
             seq(
               '>',
-              field('content', $.elements_expression),
+              field('content', $.mixed_content),
               '<',
               '/',
               field('close_name', $.element_name),

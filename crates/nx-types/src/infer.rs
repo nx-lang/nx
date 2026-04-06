@@ -18,7 +18,7 @@ struct TypeAliasInfo {
 }
 
 struct ElementBindingSpec {
-    children: Option<Type>,
+    content_property: Option<(Name, Type)>,
     properties: FxHashMap<Name, Type>,
 }
 
@@ -642,6 +642,11 @@ impl<'a> InferenceContext<'a> {
                 .unwrap_or_else(|| Type::named(function.name));
         }
 
+        if let Some(component) = self.resolve_component_definition(&element.tag) {
+            self.check_element_bindings_against_component(element, &component, span);
+            return Type::named(component.name);
+        }
+
         if let Some(record_def) = self.resolve_record_definition(&element.tag) {
             if record_def.is_abstract {
                 self.error(
@@ -664,7 +669,25 @@ impl<'a> InferenceContext<'a> {
         span: TextSpan,
     ) {
         let spec = self.build_element_binding_spec(
-            function.params.iter().map(|param| (&param.name, &param.ty)),
+            function
+                .params
+                .iter()
+                .map(|param| (&param.name, &param.ty, param.is_content)),
+        );
+        self.check_element_bindings(element, span, &spec);
+    }
+
+    fn check_element_bindings_against_component(
+        &mut self,
+        element: &nx_hir::Element,
+        component: &nx_hir::Component,
+        span: TextSpan,
+    ) {
+        let spec = self.build_element_binding_spec(
+            component
+                .props
+                .iter()
+                .map(|field| (&field.name, &field.ty, field.is_content)),
         );
         self.check_element_bindings(element, span, &spec);
     }
@@ -682,28 +705,28 @@ impl<'a> InferenceContext<'a> {
                 .map(|shape| shape.fields.as_slice())
                 .unwrap_or(record_def.properties.as_slice())
                 .iter()
-                .map(|field| (&field.name, &field.ty)),
+                .map(|field| (&field.name, &field.ty, field.is_content)),
         );
         self.check_element_bindings(element, span, &spec);
     }
 
     fn build_element_binding_spec<'b, I>(&mut self, bindings: I) -> ElementBindingSpec
     where
-        I: IntoIterator<Item = (&'b Name, &'b ast::TypeRef)>,
+        I: IntoIterator<Item = (&'b Name, &'b ast::TypeRef, bool)>,
     {
-        let mut children = None;
+        let mut content_property = None;
         let mut properties = FxHashMap::default();
 
-        for (name, ty_ref) in bindings {
+        for (name, ty_ref, is_content) in bindings {
             let ty = self.type_from_type_ref(ty_ref);
-            if name.as_str() == "children" {
-                children = Some(ty.clone());
+            if is_content {
+                content_property = Some((name.clone(), ty.clone()));
             }
             properties.insert(name.clone(), ty);
         }
 
         ElementBindingSpec {
-            children,
+            content_property,
             properties,
         }
     }
@@ -714,28 +737,39 @@ impl<'a> InferenceContext<'a> {
         span: TextSpan,
         spec: &ElementBindingSpec,
     ) {
-        if !element.children.is_empty() {
-            if element
-                .properties
-                .iter()
-                .any(|prop| prop.key.as_str() == "children")
-            {
+        if !element.content.is_empty() {
+            if let Some((content_name, expected)) = spec.content_property.as_ref() {
+                if element
+                    .properties
+                    .iter()
+                    .any(|prop| prop.key == *content_name)
+                {
+                    self.error(
+                        "content-binding-conflict",
+                        format!(
+                            "Element '{}' passes content for '{}' both as a property and as body content",
+                            element.tag, content_name
+                        ),
+                        span,
+                    );
+                } else {
+                    let actual = self.normalized_sequence_type(&element.content, span);
+                    self.check_typed_binding(
+                        &actual,
+                        expected,
+                        span,
+                        "content-type-mismatch",
+                        format!("Content for '{}' binds to '{}'", element.tag, content_name),
+                    );
+                }
+            } else {
                 self.error(
-                    "children-binding-conflict",
+                    "missing-content-property",
                     format!(
-                        "Element '{}' passes children both as a property and as body content",
-                        element.tag
+                        "Element '{}' passes body content, but '{}' does not declare a content property",
+                        element.tag, element.tag
                     ),
                     span,
-                );
-            } else if let Some(expected) = spec.children.as_ref() {
-                let actual = self.normalized_sequence_type(&element.children, span);
-                self.check_typed_binding(
-                    &actual,
-                    expected,
-                    span,
-                    "children-type-mismatch",
-                    format!("Children for '{}'", element.tag),
                 );
             }
         }
@@ -932,6 +966,13 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
+    fn resolve_component_definition(&self, name: &Name) -> Option<nx_hir::Component> {
+        match self.module.find_item(name.as_str()) {
+            Some(nx_hir::Item::Component(component)) => Some(component.clone()),
+            _ => None,
+        }
+    }
+
     fn resolve_record_definition(&self, name: &Name) -> Option<nx_hir::RecordDef> {
         resolve_hir_record_definition(self.module, name)
     }
@@ -1026,12 +1067,34 @@ impl<'a> InferenceContext<'a> {
         is_record_subtype(self.module, actual, expected).unwrap_or(false)
     }
 
+    fn named_type_is_element_like(&self, name: &Name) -> bool {
+        if name.as_str() == "Element" {
+            return true;
+        }
+
+        match self.module.find_item(name.as_str()) {
+            Some(nx_hir::Item::Function(_)) | Some(nx_hir::Item::Component(_)) => true,
+            Some(
+                nx_hir::Item::Record(_)
+                | nx_hir::Item::TypeAlias(_)
+                | nx_hir::Item::Enum(_)
+                | nx_hir::Item::Value(_),
+            ) => false,
+            None => true,
+        }
+    }
+
     fn type_satisfies_expected(&self, actual: &Type, expected: &Type) -> bool {
         if generic_type_satisfies_expected(actual, expected) {
             return true;
         }
 
         match (actual, expected) {
+            (Type::Named(actual_name), Type::Named(expected_name))
+                if expected_name.as_str() == "Element" =>
+            {
+                self.named_type_is_element_like(actual_name)
+            }
             (Type::Named(actual_name), Type::Named(expected_name)) => {
                 self.record_type_satisfies_expected(actual_name, expected_name)
             }
@@ -1150,6 +1213,21 @@ mod tests {
         let ty = ctx.infer_expr(expr_id);
 
         assert_eq!(ty, Type::bool());
+    }
+
+    #[test]
+    fn test_element_supertype_requires_exact_case() {
+        let module = LoweredModule::new(SourceId::new(0));
+        let ctx = InferenceContext::new(&module);
+
+        assert!(ctx.type_satisfies_expected(
+            &Type::named(Name::new("div")),
+            &Type::named(Name::new("Element"))
+        ));
+        assert!(!ctx.type_satisfies_expected(
+            &Type::named(Name::new("div")),
+            &Type::named(Name::new("element"))
+        ));
     }
 
     #[test]

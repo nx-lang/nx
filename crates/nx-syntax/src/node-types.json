@@ -303,11 +303,11 @@
         "required": false,
         "types": [
           {
-            "type": "elements_expression",
+            "type": "embed_text_content",
             "named": true
           },
           {
-            "type": "embed_text_content",
+            "type": "mixed_content",
             "named": true
           },
           {
@@ -1044,6 +1044,37 @@
     }
   },
   {
+    "type": "mixed_content",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "element",
+          "named": true
+        },
+        {
+          "type": "elements_for_expression",
+          "named": true
+        },
+        {
+          "type": "elements_if_expression",
+          "named": true
+        },
+        {
+          "type": "text_run",
+          "named": true
+        },
+        {
+          "type": "values_braced_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "module_definition",
     "named": true,
     "fields": {},
@@ -1169,6 +1200,16 @@
         "types": [
           {
             "type": "rhs_expression",
+            "named": true
+          }
+        ]
+      },
+      "modifier": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "markup_identifier",
             "named": true
           }
         ]
@@ -1666,7 +1707,7 @@
     "fields": {},
     "children": {
       "multiple": true,
-      "required": true,
+      "required": false,
       "types": [
         {
           "type": "entity",

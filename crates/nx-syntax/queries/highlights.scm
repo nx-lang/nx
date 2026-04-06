@@ -67,6 +67,10 @@
     (identifier) @type))
 
 ;; Parameters
+(property_definition
+  modifier: (markup_identifier) @keyword
+  (#eq? @keyword "content"))
+
 (function_definition
   (property_definition
     name: (markup_identifier) @variable.parameter))

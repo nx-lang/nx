@@ -14,7 +14,7 @@ private let titleFontSize = 14
 let <UserCard
     user:User
     className:string = "primary"
-    content:Element[]
+    content body:Element[]
     isLoading:bool = false
     /> =
   <section class="card {className}">
@@ -22,7 +22,7 @@ let <UserCard
       <Ui.Spinner/>
     } else {
       <div>
-        {content}
+        {body}
       </div>
     }
   </section>

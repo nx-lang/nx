@@ -777,14 +777,14 @@ fn test_paren_call_constructs_record_type_positionally() {
 }
 
 #[test]
-fn test_element_call_passes_children_to_function() {
+fn test_element_call_passes_content_to_paren_function() {
     let source = r#"
-        let collect(children:object[]): object[] = { children }
+        let collect(content items:object[]): object[] = { items }
         let root(): object[] = { <collect><div /><span /></collect> }
     "#;
 
     let result = execute_function(source, "root", vec![])
-        .unwrap_or_else(|err| panic!("Element call with children failed:\n{}", err));
+        .unwrap_or_else(|err| panic!("Element call with content failed:\n{}", err));
 
     let expected = Value::Array(vec![
         Value::Record {
@@ -831,14 +831,14 @@ fn test_element_call_constructs_record_via_type_alias() {
 }
 
 #[test]
-fn test_element_call_children_injected_for_element_defined_function() {
+fn test_element_call_content_is_injected_for_element_defined_function() {
     let source = r#"
-        let <collect children: object[] />: object[] = { children }
+        let <collect content items: object[] />: object[] = { items }
         let root(): object[] = { <collect><div /><span /></collect> }
     "#;
 
     let result = execute_function(source, "root", vec![])
-        .unwrap_or_else(|err| panic!("Element call with children failed:\n{}", err));
+        .unwrap_or_else(|err| panic!("Element call with content failed:\n{}", err));
 
     let expected = Value::Array(vec![
         Value::Record {
@@ -855,14 +855,14 @@ fn test_element_call_children_injected_for_element_defined_function() {
 }
 
 #[test]
-fn test_element_call_single_child_coerces_to_scalar_children_parameter() {
+fn test_element_call_single_child_coerces_to_scalar_content_parameter() {
     let source = r#"
-        let <collect children: div />: div = { children }
+        let <collect content item: div />: div = { item }
         let root(): div = { <collect><div /></collect> }
     "#;
 
     let result = execute_function(source, "root", vec![])
-        .unwrap_or_else(|err| panic!("Element call with scalar children failed:\n{}", err));
+        .unwrap_or_else(|err| panic!("Element call with scalar content failed:\n{}", err));
 
     assert_eq!(
         result,
@@ -874,35 +874,39 @@ fn test_element_call_single_child_coerces_to_scalar_children_parameter() {
 }
 
 #[test]
-fn test_element_call_scalar_value_child_passes_to_scalar_children_parameter() {
+fn test_element_call_scalar_value_child_passes_to_scalar_content_parameter() {
     let source = r#"
-        let <collect children: int />: int = { children }
+        let <collect content item: int />: int = { item }
         let root(): int = { <collect>{1}</collect> }
     "#;
 
     let result = execute_function(source, "root", vec![])
-        .unwrap_or_else(|err| panic!("Element call with scalar value child failed:\n{}", err));
+        .unwrap_or_else(|err| panic!("Element call with scalar value content failed:\n{}", err));
 
     assert_eq!(result, Value::Int(1));
 }
 
 #[test]
-fn test_element_call_scalar_value_child_coerces_to_list_children_parameter() {
+fn test_element_call_scalar_value_child_coerces_to_list_content_parameter() {
     let source = r#"
-        let <collect children: int[] />: int[] = { children }
+        let <collect content items: int[] />: int[] = { items }
         let root(): int[] = { <collect>{1}</collect> }
     "#;
 
-    let result = execute_function(source, "root", vec![])
-        .unwrap_or_else(|err| panic!("Element call with scalar value child list failed:\n{}", err));
+    let result = execute_function(source, "root", vec![]).unwrap_or_else(|err| {
+        panic!(
+            "Element call with scalar value content list failed:\n{}",
+            err
+        )
+    });
 
     assert_eq!(result, Value::Array(vec![Value::Int(1)]));
 }
 
 #[test]
-fn test_element_call_multi_children_rejected_for_scalar_children_parameter() {
+fn test_element_call_multi_children_rejected_for_scalar_content_parameter() {
     let source = r#"
-        let <collect children: div />: div = { children }
+        let <collect content item: div />: div = { item }
         let root(): div = { <collect><div /><span /></collect> }
     "#;
 
@@ -910,16 +914,32 @@ fn test_element_call_multi_children_rejected_for_scalar_children_parameter() {
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(
-        err.contains("return value") || err.contains("parameter") || err.contains("children"),
+        err.contains("return value") || err.contains("parameter") || err.contains("content"),
         "Error should mention the scalar/list mismatch:\n{}",
         err
     );
 }
 
 #[test]
-fn test_element_call_braced_child_list_flattens_children_array() {
+fn test_intrinsic_element_named_and_body_content_conflict_is_rejected() {
     let source = r#"
-        let <collect children: object[] />: object[] = { children }
+        let root() = <div content="named">body</div>
+    "#;
+
+    let result = execute_function(source, "root", vec![]);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("both a 'content' property and element body content"),
+        "Error should mention the intrinsic content conflict:\n{}",
+        err
+    );
+}
+
+#[test]
+fn test_element_call_braced_child_list_flattens_content_array() {
+    let source = r#"
+        let <collect content items: object[] />: object[] = { items }
         let root(): object[] = { <collect>{<div /> <span />}</collect> }
     "#;
 
@@ -941,14 +961,14 @@ fn test_element_call_braced_child_list_flattens_children_array() {
 }
 
 #[test]
-fn test_element_call_conditional_child_expression_preserves_selected_element() {
+fn test_element_call_conditional_content_expression_preserves_selected_element() {
     let source = r#"
-        let <collect children: object[] />: object[] = { children }
+        let <collect content items: object[] />: object[] = { items }
         let root(flag: bool): object[] = { <collect>if flag { <A /> } else { <B /> }</collect> }
     "#;
 
     let true_result = execute_function(source, "root", vec![Value::Boolean(true)])
-        .unwrap_or_else(|err| panic!("Element call with conditional children failed:\n{}", err));
+        .unwrap_or_else(|err| panic!("Element call with conditional content failed:\n{}", err));
     assert_eq!(
         true_result,
         Value::Array(vec![Value::Record {
@@ -958,7 +978,7 @@ fn test_element_call_conditional_child_expression_preserves_selected_element() {
     );
 
     let false_result = execute_function(source, "root", vec![Value::Boolean(false)])
-        .unwrap_or_else(|err| panic!("Element call with conditional children failed:\n{}", err));
+        .unwrap_or_else(|err| panic!("Element call with conditional content failed:\n{}", err));
     assert_eq!(
         false_result,
         Value::Array(vec![Value::Record {
@@ -969,15 +989,15 @@ fn test_element_call_conditional_child_expression_preserves_selected_element() {
 }
 
 #[test]
-fn test_element_call_for_child_expression_flattens_element_results() {
+fn test_element_call_for_content_expression_flattens_element_results() {
     let source = r#"
-        let <collect children: object[] />: object[] = { children }
+        let <collect content items: object[] />: object[] = { items }
         let root(items: object[]): object[] = { <collect>for item in items { <Row /> }</collect> }
     "#;
 
     let items = Value::Array(vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
     let result = execute_function(source, "root", vec![items])
-        .unwrap_or_else(|err| panic!("Element call with for children failed:\n{}", err));
+        .unwrap_or_else(|err| panic!("Element call with for content failed:\n{}", err));
 
     let expected = Value::Array(vec![
         Value::Record {
@@ -1049,44 +1069,44 @@ fn test_multi_value_brace_return_is_rejected_for_scalar_annotation_runtime() {
 }
 
 #[test]
-fn test_element_call_children_conflict_is_error_for_function() {
+fn test_element_call_content_conflict_is_error_for_function() {
     let source = r#"
-        let collect(children: object[]): object[] = { children }
-        let root(): object[] = { <collect children={null}><div /></collect> }
+        let collect(content items: object[]): object[] = { items }
+        let root(): object[] = { <collect items={null}><div /></collect> }
     "#;
 
     let result = execute_function(source, "root", vec![]);
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(
-        err.contains("children"),
-        "Error should mention children:\n{}",
+        err.contains("content"),
+        "Error should mention content:\n{}",
         err
     );
     assert!(err.contains("both"), "Error should mention both:\n{}", err);
 }
 
 #[test]
-fn test_element_call_children_conflict_is_error_for_record() {
+fn test_element_call_content_conflict_is_error_for_record() {
     let source = r#"
-        type Container = { children: object[] }
+        type Container = { content items: object[] }
         type Box = Container
-        let root(): object = { <Box children={null}><div /></Box> }
+        let root(): object = { <Box items={null}><div /></Box> }
     "#;
 
     let result = execute_function(source, "root", vec![]);
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(
-        err.contains("children"),
-        "Error should mention children:\n{}",
+        err.contains("content"),
+        "Error should mention content:\n{}",
         err
     );
     assert!(err.contains("both"), "Error should mention both:\n{}", err);
 }
 
 #[test]
-fn test_element_call_body_is_error_for_record_without_children_field() {
+fn test_element_call_body_is_error_for_record_without_content_field() {
     let source = r#"
         type User = { name: string }
         type Person = User
@@ -1097,22 +1117,22 @@ fn test_element_call_body_is_error_for_record_without_children_field() {
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(
-        err.contains("children"),
-        "Error should mention children:\n{}",
+        err.contains("content"),
+        "Error should mention content:\n{}",
         err
     );
 }
 
 #[test]
-fn test_element_call_body_populates_record_children_field() {
+fn test_element_call_body_populates_record_content_field() {
     let source = r#"
-        type Container = { children: object[] }
+        type Container = { content items: object[] }
         type Box = Container
-        let root(): object[] = { <Box><div /><span /></Box>.children }
+        let root(): object[] = { <Box><div /><span /></Box>.items }
     "#;
 
     let result = execute_function(source, "root", vec![])
-        .unwrap_or_else(|err| panic!("Record children injection failed:\n{}", err));
+        .unwrap_or_else(|err| panic!("Record content injection failed:\n{}", err));
 
     let expected = Value::Array(vec![
         Value::Record {
@@ -1126,4 +1146,38 @@ fn test_element_call_body_populates_record_children_field() {
     ]);
 
     assert_eq!(result, expected);
+}
+
+#[test]
+fn test_element_call_text_body_populates_scalar_content_field() {
+    let source = r#"
+        type Label = { content text:string }
+        let root(): string = { <Label>label text</Label>.text }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("Record text content injection failed:\n{}", err));
+
+    assert_eq!(result, Value::String(SmolStr::new("label text")));
+}
+
+#[test]
+fn test_component_invocation_binds_body_to_declared_content_prop() {
+    let source = r#"
+        component <Panel title:string content body:object /> = {
+            <section title={title}>{body}</section>
+        }
+        let root() = { <Panel title="Docs"><Badge /></Panel>.body }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("Component content invocation failed:\n{}", err));
+
+    assert_eq!(
+        result,
+        Value::Record {
+            type_name: nx_hir::Name::new("Badge"),
+            fields: FxHashMap::default(),
+        }
+    );
 }
