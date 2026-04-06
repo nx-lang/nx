@@ -202,8 +202,8 @@ fn test_paren_function_without_return_annotation() {
 #[test]
 fn test_enum_member_return() {
     let source = r#"
-        enum Direction = | North | South | East | West
-        let <north /> = { Direction.North }
+        enum Direction = | north | south | east | west
+        let <north /> = { Direction.north }
     "#;
 
     let result = execute_function(source, "north", vec![]).unwrap_or_else(|err| panic!("{}", err));
@@ -211,7 +211,7 @@ fn test_enum_member_return() {
         result,
         Value::EnumVariant {
             type_name: nx_hir::Name::new("Direction"),
-            variant: SmolStr::new("North")
+            variant: SmolStr::new("north")
         }
     );
 }
@@ -219,8 +219,8 @@ fn test_enum_member_return() {
 #[test]
 fn test_enum_comparison() {
     let source = r#"
-        enum Direction = | North | South | East | West
-        let isNorth(value:Direction): bool = { value == Direction.North }
+        enum Direction = | north | south | east | west
+        let isNorth(value:Direction): bool = { value == Direction.north }
     "#;
 
     let result = execute_function(
@@ -228,7 +228,7 @@ fn test_enum_comparison() {
         "isNorth",
         vec![Value::EnumVariant {
             type_name: nx_hir::Name::new("Direction"),
-            variant: SmolStr::new("North"),
+            variant: SmolStr::new("north"),
         }],
     )
     .unwrap_or_else(|err| panic!("{}", err));

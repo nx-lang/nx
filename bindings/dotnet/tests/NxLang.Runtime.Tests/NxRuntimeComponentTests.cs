@@ -187,6 +187,122 @@ public class NxRuntimeComponentTests
     }
 
     [Fact]
+    public void InitializeComponent_WithBuildContext_ResolvesImportedComponentDefinition()
+    {
+        string tempPath = Path.Combine(Path.GetTempPath(), $"nx-component-context-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempPath);
+
+        try
+        {
+            string appRoot = Path.Combine(tempPath, "app");
+            string libraryRoot = Path.Combine(tempPath, "question-flow");
+            Directory.CreateDirectory(appRoot);
+            Directory.CreateDirectory(libraryRoot);
+            File.WriteAllText(
+                Path.Combine(libraryRoot, "QuestionFlow.nx"),
+                """
+                action SearchSubmitted = { searchString:string }
+
+                component <SearchBox placeholder:string = "Find docs" emits { SearchSubmitted } /> = {
+                  state { query:string = {placeholder} }
+                  <TextInput value={query} placeholder={placeholder} />
+                }
+                """);
+
+            string source = """
+                import "../question-flow"
+                let root() = { 0 }
+                """;
+            string mainPath = Path.Combine(appRoot, "main.nx");
+            File.WriteAllText(mainPath, source);
+
+            using NxLibraryRegistry registry = new();
+            registry.LoadFromDirectory(libraryRoot);
+            using NxProgramBuildContext buildContext = registry.CreateBuildContext();
+
+            NxComponentInitResult<TextInputElement> result =
+                NxRuntime.InitializeComponent<SearchBoxProps, TextInputElement>(
+                    source,
+                    "SearchBox",
+                    buildContext,
+                    new SearchBoxProps { Placeholder = "From library" },
+                    mainPath);
+
+            Assert.Equal("From library", result.Rendered.Value);
+            Assert.Equal("From library", result.Rendered.Placeholder);
+            Assert.NotEmpty(result.StateSnapshot);
+        }
+        finally
+        {
+            Directory.Delete(tempPath, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DispatchComponentActions_WithBuildContext_ReusesImportedComponentDefinition()
+    {
+        string tempPath = Path.Combine(Path.GetTempPath(), $"nx-component-context-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempPath);
+
+        try
+        {
+            string appRoot = Path.Combine(tempPath, "app");
+            string libraryRoot = Path.Combine(tempPath, "question-flow");
+            Directory.CreateDirectory(appRoot);
+            Directory.CreateDirectory(libraryRoot);
+            File.WriteAllText(
+                Path.Combine(libraryRoot, "QuestionFlow.nx"),
+                """
+                action SearchSubmitted = { searchString:string }
+
+                component <SearchBox placeholder:string = "Find docs" emits { SearchSubmitted } /> = {
+                  state { query:string = {placeholder} }
+                  <TextInput value={query} placeholder={placeholder} />
+                }
+                """);
+
+            string source = """
+                import "../question-flow"
+                let root() = { 0 }
+                """;
+            string mainPath = Path.Combine(appRoot, "main.nx");
+            File.WriteAllText(mainPath, source);
+
+            using NxLibraryRegistry registry = new();
+            registry.LoadFromDirectory(libraryRoot);
+            using NxProgramBuildContext buildContext = registry.CreateBuildContext();
+
+            NxComponentInitResult<TextInputElement> initResult =
+                NxRuntime.InitializeComponent<TextInputElement>(
+                    source,
+                    "SearchBox",
+                    buildContext,
+                    mainPath);
+
+            NxComponentDispatchResult<SearchSubmittedAction> dispatchResult =
+                NxRuntime.DispatchComponentActions<SearchSubmittedAction[], SearchSubmittedAction>(
+                    source,
+                    initResult.StateSnapshot,
+                    buildContext,
+                    new[]
+                    {
+                        new SearchSubmittedAction
+                        {
+                            SearchString = "docs"
+                        }
+                    },
+                    mainPath);
+
+            Assert.Empty(dispatchResult.Effects);
+            Assert.NotEmpty(dispatchResult.StateSnapshot);
+        }
+        finally
+        {
+            Directory.Delete(tempPath, recursive: true);
+        }
+    }
+
+    [Fact]
     public void InitializeComponent_WithProgramArtifact_ReusesImportedComponentDefinition()
     {
         string tempPath = Path.Combine(Path.GetTempPath(), $"nx-prepared-component-{Guid.NewGuid():N}");
@@ -215,7 +331,10 @@ public class NxRuntimeComponentTests
                 """;
             string mainPath = Path.Combine(appRoot, "main.nx");
             File.WriteAllText(mainPath, source);
-            using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, mainPath);
+            using NxLibraryRegistry registry = new();
+            registry.LoadFromDirectory(libraryRoot);
+            using NxProgramBuildContext buildContext = registry.CreateBuildContext();
+            using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, buildContext, mainPath);
 
             NxComponentInitResult<TextInputElement> result =
                 NxRuntime.InitializeComponent<SearchBoxProps, TextInputElement>(
@@ -262,7 +381,10 @@ public class NxRuntimeComponentTests
                 """;
             string mainPath = Path.Combine(appRoot, "main.nx");
             File.WriteAllText(mainPath, source);
-            using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, mainPath);
+            using NxLibraryRegistry registry = new();
+            registry.LoadFromDirectory(libraryRoot);
+            using NxProgramBuildContext buildContext = registry.CreateBuildContext();
+            using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, buildContext, mainPath);
             NxComponentInitResult<TextInputElement> initResult =
                 NxRuntime.InitializeComponent<TextInputElement>(
                     programArtifact,

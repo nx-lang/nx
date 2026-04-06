@@ -895,21 +895,29 @@ impl<'a> InferenceContext<'a> {
     }
 
     fn register_value_bindings(&mut self) {
-        for item in self.module.items() {
+        for (index, item) in self.module.items().iter().enumerate() {
             if let nx_hir::Item::Value(value) = item {
-                let actual = self.infer_expr(value.value);
-                let binding_ty = if let Some(ty_ref) = value.ty.as_ref() {
-                    let expected = self.type_from_type_ref(ty_ref);
-                    self.check_typed_binding(
-                        &actual,
-                        &expected,
-                        value.span,
-                        "value-type-mismatch",
-                        format!("Initializer for value '{}'", value.name),
-                    );
-                    expected
+                let binding_ty = if self.module.is_external_item(index) {
+                    value
+                        .ty
+                        .as_ref()
+                        .map(|ty_ref| self.type_from_type_ref(ty_ref))
+                        .unwrap_or(Type::Error)
                 } else {
-                    actual
+                    let actual = self.infer_expr(value.value);
+                    if let Some(ty_ref) = value.ty.as_ref() {
+                        let expected = self.type_from_type_ref(ty_ref);
+                        self.check_typed_binding(
+                            &actual,
+                            &expected,
+                            value.span,
+                            "value-type-mismatch",
+                            format!("Initializer for value '{}'", value.name),
+                        );
+                        expected
+                    } else {
+                        actual
+                    }
                 };
 
                 self.env.bind(value.name.clone(), binding_ty);
@@ -1324,11 +1332,11 @@ mod tests {
             visibility: nx_hir::Visibility::Public,
             members: vec![
                 EnumMember {
-                    name: Name::new("North"),
+                    name: Name::new("north"),
                     span,
                 },
                 EnumMember {
-                    name: Name::new("South"),
+                    name: Name::new("south"),
                     span,
                 },
             ],
@@ -1339,7 +1347,7 @@ mod tests {
         let base = module.alloc_expr(Expr::Ident(Name::new("Direction")));
         let expr_id = module.alloc_expr(Expr::Member {
             base,
-            member: Name::new("North"),
+            member: Name::new("north"),
             span,
         });
 
@@ -1364,7 +1372,7 @@ mod tests {
             name: Name::new("Status"),
             visibility: nx_hir::Visibility::Public,
             members: vec![EnumMember {
-                name: Name::new("Active"),
+                name: Name::new("active"),
                 span,
             }],
             span,
@@ -1374,7 +1382,7 @@ mod tests {
         let base = module.alloc_expr(Expr::Ident(Name::new("Status")));
         let expr_id = module.alloc_expr(Expr::Member {
             base,
-            member: Name::new("Pending"),
+            member: Name::new("pending_review"),
             span,
         });
 
@@ -1393,7 +1401,7 @@ mod tests {
             name: Name::new("Status"),
             visibility: nx_hir::Visibility::Public,
             members: vec![EnumMember {
-                name: Name::new("Active"),
+                name: Name::new("active"),
                 span,
             }],
             span,
@@ -1410,7 +1418,7 @@ mod tests {
         let base = module.alloc_expr(Expr::Ident(Name::new("State")));
         let expr_id = module.alloc_expr(Expr::Member {
             base,
-            member: Name::new("Active"),
+            member: Name::new("active"),
             span,
         });
 
@@ -1432,7 +1440,7 @@ mod tests {
             name: Name::new("Direction"),
             visibility: nx_hir::Visibility::Public,
             members: vec![EnumMember {
-                name: Name::new("North"),
+                name: Name::new("north"),
                 span,
             }],
             span,
@@ -1442,7 +1450,7 @@ mod tests {
         let base = module.alloc_expr(Expr::Ident(Name::new("Direction")));
         let member = module.alloc_expr(Expr::Member {
             base,
-            member: Name::new("North"),
+            member: Name::new("north"),
             span,
         });
         let func = Function {

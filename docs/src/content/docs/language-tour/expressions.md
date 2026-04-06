@@ -18,10 +18,12 @@ let statusBadge = if isActive {
 ### Match-style conditions
 
 ```nx
-let badge = if plan is {
-  "free" => <Badge tone="neutral">Free</Badge>
-  "pro" => <Badge tone="success">Pro</Badge>
-  else => <Badge tone="info">Enterprise</Badge>
+enum DealStage = draft | pending_review | approved
+
+let badge = if stage is {
+  DealStage.draft => <Badge tone="neutral">Draft</Badge>
+  DealStage.pending_review => <Badge tone="warning">Pending review</Badge>
+  else => <Badge tone="success">Approved</Badge>
 }
 ```
 

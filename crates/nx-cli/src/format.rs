@@ -304,9 +304,9 @@ mod tests {
     fn test_format_enum_variant() {
         let value = Value::EnumVariant {
             type_name: nx_hir::Name::new("Status"),
-            variant: SmolStr::new("Active"),
+            variant: SmolStr::new("active"),
         };
-        assert_eq!(format_value(&value), "Status.Active");
+        assert_eq!(format_value(&value), "Status.active");
     }
 
     #[test]

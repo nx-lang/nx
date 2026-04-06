@@ -33,9 +33,11 @@ let cssClass = if (isActive) { "active" } else { "inactive" }
 Match-style `if` evaluates arms in order; the first match wins.
 
 ```nx
-let dashboard = if user.role is {
-  "admin" => <AdminPanel/>
-  "member" => <MemberHome/>
+enum AccessLevel = read_only | member | admin
+
+let dashboard = if accessLevel is {
+  AccessLevel.admin => <AdminPanel/>
+  AccessLevel.member => <MemberHome/>
   else => <ReadOnlyView/>
 }
 ```

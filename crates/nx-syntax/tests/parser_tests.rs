@@ -1366,9 +1366,9 @@ fn test_parse_enum_definition() {
         .map(|member| member.text().to_string())
         .collect();
     assert!(
-        member_names.contains(&"Pending".to_string())
-            && member_names.contains(&"Active".to_string())
-            && member_names.contains(&"Disabled".to_string()),
+        member_names.contains(&"pending_review".to_string())
+            && member_names.contains(&"active".to_string())
+            && member_names.contains(&"disabled".to_string()),
         "All enum members should be captured"
     );
 }

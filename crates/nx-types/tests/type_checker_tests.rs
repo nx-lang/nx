@@ -58,8 +58,8 @@ fn test_infer_array_types() {
 #[test]
 fn test_enum_definition_type_checks() {
     let source = r#"
-        enum Direction = | North | South | East | West
-        let current: Direction = { Direction.North }
+        enum Direction = | north | south | east | west
+        let current: Direction = { Direction.north }
     "#;
 
     let result = check_str(source, "enum.nx");
@@ -69,8 +69,8 @@ fn test_enum_definition_type_checks() {
 #[test]
 fn test_unknown_enum_member_diagnostic() {
     let source = r#"
-        enum Direction = | North | South
-        let useDirection(): Direction = { Direction.Nort }
+        enum Direction = | north | south
+        let useDirection(): Direction = { Direction.nort }
     "#;
 
     let result = check_str(source, "bad-enum.nx");

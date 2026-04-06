@@ -4,12 +4,11 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use nx_api::{
     dispatch_component_actions_program_artifact as api_dispatch_component_actions_program_artifact,
-    dispatch_component_actions_source, eval_program_artifact as api_eval_program_artifact,
-    eval_source,
+    eval_program_artifact as api_eval_program_artifact, eval_source,
     initialize_component_program_artifact as api_initialize_component_program_artifact,
-    initialize_component_source, load_program_artifact_from_source, ComponentDispatchEvalResult,
-    ComponentDispatchResult, ComponentInitEvalResult, ComponentInitResult, EvalResult,
-    NxDiagnostic, NxSeverity, ProgramArtifact,
+    load_program_artifact_from_source, ComponentDispatchEvalResult, ComponentDispatchResult,
+    ComponentInitEvalResult, ComponentInitResult, EvalResult, LibraryRegistry, NxDiagnostic,
+    NxSeverity, ProgramArtifact, ProgramBuildContext,
 };
 use nx_value::NxValue;
 use serde::de::DeserializeOwned;
@@ -17,7 +16,7 @@ use serde::Serialize;
 use std::any::Any;
 use std::panic;
 
-pub const NX_FFI_ABI_VERSION: u32 = 4;
+pub const NX_FFI_ABI_VERSION: u32 = 7;
 
 #[repr(C)]
 pub struct NxBuffer {
@@ -26,8 +25,22 @@ pub struct NxBuffer {
     pub cap: usize,
 }
 
-pub struct NxProgramArtifactHandle {
+pub struct NxProgramArtifactHandle;
+
+struct ProgramArtifactHandleInner {
     program_artifact: ProgramArtifact,
+}
+
+pub struct NxLibraryRegistryHandle;
+
+struct LibraryRegistryHandleInner {
+    registry: LibraryRegistry,
+}
+
+pub struct NxProgramBuildContextHandle;
+
+struct ProgramBuildContextHandleInner {
+    build_context: ProgramBuildContext,
 }
 
 impl NxBuffer {
@@ -124,6 +137,34 @@ fn prepare_out_program_artifact_handle(
     Ok(())
 }
 
+fn prepare_out_library_registry_handle(
+    out_handle: *mut *mut NxLibraryRegistryHandle,
+) -> Result<(), NxEvalStatus> {
+    unsafe {
+        if out_handle.is_null() {
+            return Err(NxEvalStatus::InvalidArgument);
+        }
+
+        *out_handle = std::ptr::null_mut();
+    }
+
+    Ok(())
+}
+
+fn prepare_out_build_context_handle(
+    out_handle: *mut *mut NxProgramBuildContextHandle,
+) -> Result<(), NxEvalStatus> {
+    unsafe {
+        if out_handle.is_null() {
+            return Err(NxEvalStatus::InvalidArgument);
+        }
+
+        *out_handle = std::ptr::null_mut();
+    }
+
+    Ok(())
+}
+
 fn finish_msgpack_entry(
     out_buffer: *mut NxBuffer,
     result: Result<Result<(NxEvalStatus, Vec<u8>), String>, Box<dyn Any + Send>>,
@@ -179,8 +220,20 @@ fn with_program_artifact<T>(
         return Err("program artifact handle is null".to_string());
     }
 
-    let handle = unsafe { &*handle_ptr };
+    let handle = unsafe { &*handle_ptr.cast::<ProgramArtifactHandleInner>() };
     f(&handle.program_artifact)
+}
+
+fn with_library_registry<T>(
+    handle_ptr: *const NxLibraryRegistryHandle,
+    f: impl FnOnce(&LibraryRegistry) -> Result<T, String>,
+) -> Result<T, String> {
+    if handle_ptr.is_null() {
+        return Err("library registry handle is null".to_string());
+    }
+
+    let handle = unsafe { &*handle_ptr.cast::<LibraryRegistryHandleInner>() };
+    f(&handle.registry)
 }
 
 fn empty_record() -> NxValue {
@@ -233,8 +286,9 @@ pub extern "C" fn nx_eval_source(
     let result = panic::catch_unwind(|| {
         let source = unsafe { slice_to_str(source_ptr, source_len) }?;
         let file_name = parse_file_name(file_name_ptr, file_name_len)?;
+        let build_context = ProgramBuildContext::empty();
 
-        let bytes = match eval_source(source, &file_name) {
+        let bytes = match eval_source(source, &file_name, &build_context) {
             EvalResult::Ok(value) => {
                 let payload = rmp_serde::to_vec(&value)
                     .map_err(|e| format!("messagepack serialize failed: {e}"))?;
@@ -255,6 +309,7 @@ pub extern "C" fn nx_eval_source(
 
 #[no_mangle]
 pub extern "C" fn nx_build_program_artifact(
+    build_context_ptr: *const NxProgramBuildContextHandle,
     source_ptr: *const u8,
     source_len: usize,
     file_name_ptr: *const u8,
@@ -270,15 +325,21 @@ pub extern "C" fn nx_build_program_artifact(
         return status;
     }
 
+    if build_context_ptr.is_null() {
+        return NxEvalStatus::InvalidArgument;
+    }
+
     let result = panic::catch_unwind(|| {
         let source = unsafe { slice_to_str(source_ptr, source_len) }?;
         let file_name = parse_file_name(file_name_ptr, file_name_len)?;
+        let handle = unsafe { &*build_context_ptr.cast::<ProgramBuildContextHandleInner>() };
+        let build_context = handle.build_context.clone();
 
-        match load_program_artifact_from_source(source, &file_name) {
+        match load_program_artifact_from_source(source, &file_name, &build_context) {
             Ok(program_artifact) => {
-                let handle = Box::new(NxProgramArtifactHandle { program_artifact });
+                let handle = Box::new(ProgramArtifactHandleInner { program_artifact });
                 unsafe {
-                    *out_handle = Box::into_raw(handle);
+                    *out_handle = Box::into_raw(handle).cast::<NxProgramArtifactHandle>();
                 }
                 Ok((NxEvalStatus::Ok, Vec::new()))
             }
@@ -294,13 +355,120 @@ pub extern "C" fn nx_build_program_artifact(
 }
 
 #[no_mangle]
+pub extern "C" fn nx_create_library_registry(
+    out_handle: *mut *mut NxLibraryRegistryHandle,
+) -> NxEvalStatus {
+    if let Err(status) = prepare_out_library_registry_handle(out_handle) {
+        return status;
+    }
+
+    let handle = Box::new(LibraryRegistryHandleInner {
+        registry: LibraryRegistry::new(),
+    });
+    unsafe {
+        *out_handle = Box::into_raw(handle).cast::<NxLibraryRegistryHandle>();
+    }
+    NxEvalStatus::Ok
+}
+
+#[no_mangle]
+pub extern "C" fn nx_free_library_registry(handle: *mut NxLibraryRegistryHandle) {
+    if handle.is_null() {
+        return;
+    }
+
+    unsafe {
+        let _ = Box::from_raw(handle.cast::<LibraryRegistryHandleInner>());
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn nx_load_library_into_registry(
+    registry_ptr: *const NxLibraryRegistryHandle,
+    root_path_ptr: *const u8,
+    root_path_len: usize,
+    out_buffer: *mut NxBuffer,
+) -> NxEvalStatus {
+    if let Err(status) = prepare_out_buffer(out_buffer) {
+        return status;
+    }
+
+    if registry_ptr.is_null() {
+        return NxEvalStatus::InvalidArgument;
+    }
+
+    let result = panic::catch_unwind(|| {
+        let root_path = unsafe { slice_to_str(root_path_ptr, root_path_len) }?;
+        if root_path.is_empty() {
+            return Err("library root path is empty".to_string());
+        }
+
+        let bytes = with_library_registry(registry_ptr, |registry| {
+            match registry.load_library_from_directory(root_path) {
+                Ok(_) => Ok((NxEvalStatus::Ok, Vec::new())),
+                Err(diagnostics) => {
+                    let payload = rmp_serde::to_vec_named(&diagnostics)
+                        .map_err(|e| format!("messagepack serialize failed: {e}"))?;
+                    Ok((NxEvalStatus::Error, payload))
+                }
+            }
+        })?;
+
+        Ok(bytes)
+    });
+
+    finish_msgpack_entry(out_buffer, result)
+}
+
+#[no_mangle]
+pub extern "C" fn nx_create_program_build_context(
+    registry_ptr: *const NxLibraryRegistryHandle,
+    out_handle: *mut *mut NxProgramBuildContextHandle,
+) -> NxEvalStatus {
+    if let Err(status) = prepare_out_build_context_handle(out_handle) {
+        return status;
+    }
+
+    if registry_ptr.is_null() {
+        return NxEvalStatus::InvalidArgument;
+    }
+
+    let result = panic::catch_unwind(|| {
+        let build_context =
+            with_library_registry(registry_ptr, |registry| Ok(registry.build_context()))?;
+        let handle = Box::new(ProgramBuildContextHandleInner { build_context });
+        unsafe {
+            *out_handle = Box::into_raw(handle).cast::<NxProgramBuildContextHandle>();
+        }
+        Ok::<(), String>(())
+    });
+
+    match result {
+        Ok(Ok(())) => NxEvalStatus::Ok,
+        Ok(Err(_)) => NxEvalStatus::Error,
+        Err(_) => NxEvalStatus::Panic,
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn nx_free_program_build_context(handle: *mut NxProgramBuildContextHandle) {
+    if handle.is_null() {
+        return;
+    }
+
+    unsafe {
+        let _ = Box::from_raw(handle.cast::<ProgramBuildContextHandleInner>());
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn nx_free_program_artifact(handle: *mut NxProgramArtifactHandle) {
     if handle.is_null() {
         return;
     }
 
     unsafe {
-        let _ = Box::from_raw(handle);
+        let _ = Box::from_raw(handle.cast::<ProgramArtifactHandleInner>());
     }
 }
 
@@ -311,6 +479,10 @@ pub extern "C" fn nx_eval_program_artifact(
 ) -> NxEvalStatus {
     if let Err(status) = prepare_out_buffer(out_buffer) {
         return status;
+    }
+
+    if program_artifact_ptr.is_null() {
+        return NxEvalStatus::InvalidArgument;
     }
 
     let result = panic::catch_unwind(|| {
@@ -336,50 +508,6 @@ pub extern "C" fn nx_eval_program_artifact(
 }
 
 #[no_mangle]
-pub extern "C" fn nx_component_init(
-    source_ptr: *const u8,
-    source_len: usize,
-    file_name_ptr: *const u8,
-    file_name_len: usize,
-    component_name_ptr: *const u8,
-    component_name_len: usize,
-    props_ptr: *const u8,
-    props_len: usize,
-    out_buffer: *mut NxBuffer,
-) -> NxEvalStatus {
-    if let Err(status) = prepare_out_buffer(out_buffer) {
-        return status;
-    }
-
-    let result = panic::catch_unwind(|| {
-        let source = unsafe { slice_to_str(source_ptr, source_len) }?;
-        let file_name = parse_file_name(file_name_ptr, file_name_len)?;
-        let component_name = unsafe { slice_to_str(component_name_ptr, component_name_len) }?;
-        let props = if props_len == 0 {
-            empty_record()
-        } else {
-            let bytes = unsafe { slice_to_bytes(props_ptr, props_len) }?;
-            parse_msgpack_value(bytes)?
-        };
-
-        match initialize_component_source(source, &file_name, component_name, &props) {
-            ComponentInitEvalResult::Ok(result) => {
-                let payload = rmp_serde::to_vec_named(&result)
-                    .map_err(|e| format!("messagepack serialize failed: {e}"))?;
-                Ok((NxEvalStatus::Ok, payload))
-            }
-            ComponentInitEvalResult::Err(diagnostics) => {
-                let payload = rmp_serde::to_vec_named(&diagnostics)
-                    .map_err(|e| format!("messagepack serialize failed: {e}"))?;
-                Ok((NxEvalStatus::Error, payload))
-            }
-        }
-    });
-
-    finish_msgpack_entry(out_buffer, result)
-}
-
-#[no_mangle]
 pub extern "C" fn nx_component_init_program_artifact(
     program_artifact_ptr: *const NxProgramArtifactHandle,
     component_name_ptr: *const u8,
@@ -390,6 +518,10 @@ pub extern "C" fn nx_component_init_program_artifact(
 ) -> NxEvalStatus {
     if let Err(status) = prepare_out_buffer(out_buffer) {
         return status;
+    }
+
+    if program_artifact_ptr.is_null() {
+        return NxEvalStatus::InvalidArgument;
     }
 
     let result = panic::catch_unwind(|| {
@@ -427,54 +559,6 @@ pub extern "C" fn nx_component_init_program_artifact(
 }
 
 #[no_mangle]
-pub extern "C" fn nx_component_dispatch_actions(
-    source_ptr: *const u8,
-    source_len: usize,
-    file_name_ptr: *const u8,
-    file_name_len: usize,
-    state_snapshot_ptr: *const u8,
-    state_snapshot_len: usize,
-    actions_ptr: *const u8,
-    actions_len: usize,
-    out_buffer: *mut NxBuffer,
-) -> NxEvalStatus {
-    if let Err(status) = prepare_out_buffer(out_buffer) {
-        return status;
-    }
-
-    let result = panic::catch_unwind(|| {
-        let source = unsafe { slice_to_str(source_ptr, source_len) }?;
-        let file_name = parse_file_name(file_name_ptr, file_name_len)?;
-        let state_snapshot = if state_snapshot_len == 0 {
-            &[][..]
-        } else {
-            unsafe { slice_to_bytes(state_snapshot_ptr, state_snapshot_len) }?
-        };
-        let actions = if actions_len == 0 {
-            Vec::new()
-        } else {
-            let bytes = unsafe { slice_to_bytes(actions_ptr, actions_len) }?;
-            parse_msgpack_actions(bytes)?
-        };
-
-        match dispatch_component_actions_source(source, &file_name, state_snapshot, &actions) {
-            ComponentDispatchEvalResult::Ok(result) => {
-                let payload = rmp_serde::to_vec_named(&result)
-                    .map_err(|e| format!("messagepack serialize failed: {e}"))?;
-                Ok((NxEvalStatus::Ok, payload))
-            }
-            ComponentDispatchEvalResult::Err(diagnostics) => {
-                let payload = rmp_serde::to_vec_named(&diagnostics)
-                    .map_err(|e| format!("messagepack serialize failed: {e}"))?;
-                Ok((NxEvalStatus::Error, payload))
-            }
-        }
-    });
-
-    finish_msgpack_entry(out_buffer, result)
-}
-
-#[no_mangle]
 pub extern "C" fn nx_component_dispatch_actions_program_artifact(
     program_artifact_ptr: *const NxProgramArtifactHandle,
     state_snapshot_ptr: *const u8,
@@ -485,6 +569,10 @@ pub extern "C" fn nx_component_dispatch_actions_program_artifact(
 ) -> NxEvalStatus {
     if let Err(status) = prepare_out_buffer(out_buffer) {
         return status;
+    }
+
+    if program_artifact_ptr.is_null() {
+        return NxEvalStatus::InvalidArgument;
     }
 
     let result = panic::catch_unwind(|| {

@@ -49,7 +49,7 @@ impl Error for FromNxValueError {}
 /// - `$enum` — the enum type name
 /// - `$variant` — the variant name
 ///
-/// For example, `Color::Red` becomes `{ "$enum": "Color", "$variant": "Red" }`.
+/// For example, `Color.red` becomes `{ "$enum": "Color", "$variant": "red" }`.
 ///
 /// `Value::ActionHandler` is encoded as a record for display and inspection only. That shape is
 /// intentionally not round-trippable through [`from_nx_value`].

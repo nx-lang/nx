@@ -12,7 +12,7 @@ mod format;
 mod json;
 
 use clap::{Parser, Subcommand};
-use nx_api::{build_program_artifact_from_source, ProgramArtifact};
+use nx_api::{build_program_artifact_from_source, ProgramArtifact, ProgramBuildContext};
 use nx_diagnostics::{render_diagnostics_cli, Severity};
 use nx_hir::{lower_source_module, Item, LoweredModule};
 use nx_interpreter::{Interpreter, Value};
@@ -302,9 +302,9 @@ fn format_output(value: &Value, format: OutputFormat) -> Result<String, String> 
 fn load_source_module(
     source: &str,
     file_name: &str,
-    path: &Path,
+    _path: &Path,
 ) -> Result<LoweredModule, ExitCode> {
-    match lower_source_module(source, file_name, Some(path)) {
+    match lower_source_module(source, file_name) {
         Ok(module) => Ok(module),
         Err(diagnostics) => Err(render_source_diagnostics(file_name, source, &diagnostics)),
     }
@@ -312,7 +312,8 @@ fn load_source_module(
 
 fn load_source_program_for_run(source: &str, path: &Path) -> Result<ProgramArtifact, ExitCode> {
     let file_name = path.display().to_string();
-    let program = match build_program_artifact_from_source(source, &file_name) {
+    let build_context = ProgramBuildContext::empty();
+    let program = match build_program_artifact_from_source(source, &file_name, &build_context) {
         Ok(program) => program,
         Err(error) => {
             eprintln!("Error: Failed to build program artifact: {}", error);
@@ -350,7 +351,8 @@ fn render_source_diagnostics(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nx_hir::{lower, resolve_local_library_imports, SourceId};
+    use nx_api::LibraryRegistry;
+    use nx_hir::{lower, SourceId};
     use nx_syntax::parse_file;
     use nx_value::NxValue;
     use std::fs;
@@ -364,11 +366,37 @@ mod tests {
         (dir, file_path)
     }
 
-    fn lower_import_resolved_file(path: &Path) -> nx_hir::LoweredModule {
-        let parse_result = parse_file(path).expect("file should load");
-        let tree = parse_result.tree.expect("file should parse");
-        let module = lower(tree.root(), SourceId::new(parse_result.source_id.as_u32()));
-        resolve_local_library_imports(module, path).expect("import resolution should succeed")
+    fn build_import_resolved_program(path: &Path) -> ProgramArtifact {
+        let source = fs::read_to_string(path).expect("source file should load");
+        let file_name = path.display().to_string();
+        let module = lower_source_module(&source, &file_name).unwrap_or_else(|diagnostics| {
+            panic!("Expected {file_name} to lower, got {:?}", diagnostics)
+        });
+        let registry = LibraryRegistry::new();
+
+        for import in &module.imports {
+            if import.library_path.contains("://") || import.library_path.starts_with("git+") {
+                continue;
+            }
+
+            let Some(parent) = path.parent() else {
+                continue;
+            };
+            let library_root = parent.join(&import.library_path);
+            registry
+                .load_library_from_directory(&library_root)
+                .unwrap_or_else(|diagnostics| {
+                    panic!(
+                        "Expected {} to load, got {:?}",
+                        library_root.display(),
+                        diagnostics
+                    )
+                });
+        }
+
+        let build_context = registry.build_context();
+        build_program_artifact_from_source(&source, &file_name, &build_context)
+            .expect("program artifact should build")
     }
 
     #[test]
@@ -405,36 +433,36 @@ let root() = { Math.addOne(41) }"#,
         )
         .expect("root file");
 
-        let module = lower_import_resolved_file(&app_dir.join("main.nx"));
-        let interpreter = Interpreter::new();
+        let program = build_import_resolved_program(&app_dir.join("main.nx"));
+        let interpreter = Interpreter::from_resolved_program(program.resolved_program.clone());
         let result = interpreter
-            .execute_function(&module, "root", vec![])
+            .execute_resolved_program_function("root", vec![])
             .expect("qualified imported function should execute");
 
         assert_eq!(format_output(&result, OutputFormat::Nx).unwrap(), "42");
     }
 
     #[test]
-    fn test_run_qualified_selective_imported_value() {
+    fn test_run_qualified_selective_imported_function() {
         let dir = TempDir::new().expect("temp dir");
         let app_dir = dir.path().join("app");
         let ui_dir = dir.path().join("ui");
         fs::create_dir_all(&app_dir).expect("app dir");
         fs::create_dir_all(&ui_dir).expect("ui dir");
 
-        fs::write(ui_dir.join("theme.nx"), r#"let Title: string = "Hello""#).expect("ui library");
+        fs::write(ui_dir.join("theme.nx"), r#"let title() = { "Hello" }"#).expect("ui library");
         fs::write(
             app_dir.join("main.nx"),
-            r#"import { Title as Ui.Title } from "../ui"
-let root() = { Ui.Title }"#,
+            r#"import { title as Ui.title } from "../ui"
+let root() = { Ui.title() }"#,
         )
         .expect("root file");
 
-        let module = lower_import_resolved_file(&app_dir.join("main.nx"));
-        let interpreter = Interpreter::new();
+        let program = build_import_resolved_program(&app_dir.join("main.nx"));
+        let interpreter = Interpreter::from_resolved_program(program.resolved_program.clone());
         let result = interpreter
-            .execute_function(&module, "root", vec![])
-            .expect("qualified imported value should evaluate");
+            .execute_resolved_program_function("root", vec![])
+            .expect("qualified imported function should execute");
 
         assert_eq!(format_output(&result, OutputFormat::Nx).unwrap(), "Hello");
     }

@@ -38,10 +38,9 @@ const LIBRARY_SOURCE: &str = r#"
 
 fn lower_module(source: &str, path: &Path) -> Arc<LoweredModule> {
     let file_name = path.display().to_string();
-    let module =
-        lower_source_module(source, &file_name, Some(path)).unwrap_or_else(|diagnostics| {
-            panic!("Expected {file_name} to lower, got {:?}", diagnostics)
-        });
+    let module = lower_source_module(source, &file_name).unwrap_or_else(|diagnostics| {
+        panic!("Expected {file_name} to lower, got {:?}", diagnostics)
+    });
     Arc::new(module)
 }
 

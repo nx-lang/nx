@@ -174,7 +174,7 @@ fn test_enum_not_found_runtime_error() {
     let base = module.alloc_expr(Expr::Ident(Name::new("Direction")));
     let member = module.alloc_expr(Expr::Member {
         base,
-        member: Name::new("North"),
+        member: Name::new("north"),
         span,
     });
 

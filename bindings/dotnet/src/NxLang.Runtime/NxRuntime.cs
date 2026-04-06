@@ -38,6 +38,17 @@ public static class NxRuntime
     }
 
     /// <summary>
+    /// Evaluates NX source code against a caller-supplied build context.
+    /// </summary>
+    public static byte[] EvaluateBytes(string source, NxProgramBuildContext buildContext, string? fileName = null)
+    {
+        ArgumentNullException.ThrowIfNull(buildContext);
+
+        using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, buildContext, fileName);
+        return EvaluateBytes(programArtifact);
+    }
+
+    /// <summary>
     /// Evaluates the <c>root()</c> entrypoint of a previously built program artifact.
     /// </summary>
     public static byte[] EvaluateBytes(NxProgramArtifact programArtifact)
@@ -86,6 +97,15 @@ public static class NxRuntime
     }
 
     /// <summary>
+    /// Evaluates NX source code against a caller-supplied build context and deserializes the result.
+    /// </summary>
+    public static T Evaluate<T>(string source, NxProgramBuildContext buildContext, string? fileName = null)
+    {
+        byte[] bytes = EvaluateBytes(source, buildContext, fileName);
+        return MessagePackSerializer.Deserialize<T>(bytes, MessagePackOptions);
+    }
+
+    /// <summary>
     /// Evaluates the <c>root()</c> entrypoint of a previously built program artifact and deserializes the result.
     /// </summary>
     public static T Evaluate<T>(NxProgramArtifact programArtifact)
@@ -103,19 +123,24 @@ public static class NxRuntime
         byte[]? propsBytes = null,
         string? fileName = null)
     {
-        byte[] payload = InvokeComponentInitSourceNativeCall(
-            source,
-            componentName,
-            propsBytes,
-            fileName,
-            NxNativeMethods.nx_component_init,
-            out NxEvalStatus status);
-        return status switch
-        {
-            NxEvalStatus.Ok => payload,
-            NxEvalStatus.Error => throw CreateEvaluationExceptionFromMessagePack(payload),
-            _ => throw CreateInteropStatusException(status),
-        };
+        using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, fileName);
+        return InitializeComponentBytes(programArtifact, componentName, propsBytes);
+    }
+
+    /// <summary>
+    /// Initializes a named component from source text against a caller-supplied build context.
+    /// </summary>
+    public static byte[] InitializeComponentBytes(
+        string source,
+        string componentName,
+        NxProgramBuildContext buildContext,
+        byte[]? propsBytes = null,
+        string? fileName = null)
+    {
+        ArgumentNullException.ThrowIfNull(buildContext);
+
+        using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, buildContext, fileName);
+        return InitializeComponentBytes(programArtifact, componentName, propsBytes);
     }
 
     /// <summary>
@@ -166,6 +191,21 @@ public static class NxRuntime
     }
 
     /// <summary>
+    /// Initializes a named component from source text using a caller-supplied build context.
+    /// </summary>
+    public static NxComponentInitResult<TElement> InitializeComponent<TElement>(
+        string source,
+        string componentName,
+        NxProgramBuildContext buildContext,
+        string? fileName = null)
+    {
+        byte[] payload = InitializeComponentBytes(source, componentName, buildContext, null, fileName);
+        return DeserializeMessagePackResult<NxComponentInitResult<TElement>>(
+            payload,
+            "NX native runtime returned an invalid component initialization MessagePack payload.");
+    }
+
+    /// <summary>
     /// Initializes a named component from a program artifact using no explicit props and deserializes the rendered result.
     /// </summary>
     public static NxComponentInitResult<TElement> InitializeComponent<TElement>(
@@ -191,6 +231,25 @@ public static class NxRuntime
             ? Array.Empty<byte>()
             : MessagePackSerializer.Serialize(props, MessagePackOptions);
         byte[] payload = InitializeComponentBytes(source, componentName, propsBytes, fileName);
+        return DeserializeMessagePackResult<NxComponentInitResult<TElement>>(
+            payload,
+            "NX native runtime returned an invalid component initialization MessagePack payload.");
+    }
+
+    /// <summary>
+    /// Initializes a named component with MessagePack-serializable props against a caller-supplied build context.
+    /// </summary>
+    public static NxComponentInitResult<TElement> InitializeComponent<TProps, TElement>(
+        string source,
+        string componentName,
+        NxProgramBuildContext buildContext,
+        TProps props,
+        string? fileName = null)
+    {
+        byte[] propsBytes = props is null
+            ? Array.Empty<byte>()
+            : MessagePackSerializer.Serialize(props, MessagePackOptions);
+        byte[] payload = InitializeComponentBytes(source, componentName, buildContext, propsBytes, fileName);
         return DeserializeMessagePackResult<NxComponentInitResult<TElement>>(
             payload,
             "NX native runtime returned an invalid component initialization MessagePack payload.");
@@ -223,19 +282,24 @@ public static class NxRuntime
         byte[]? actionsBytes = null,
         string? fileName = null)
     {
-        byte[] payload = InvokeComponentDispatchSourceNativeCall(
-            source,
-            stateSnapshot,
-            actionsBytes,
-            fileName,
-            NxNativeMethods.nx_component_dispatch_actions,
-            out NxEvalStatus status);
-        return status switch
-        {
-            NxEvalStatus.Ok => payload,
-            NxEvalStatus.Error => throw CreateEvaluationExceptionFromMessagePack(payload),
-            _ => throw CreateInteropStatusException(status),
-        };
+        using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, fileName);
+        return DispatchComponentActionsBytes(programArtifact, stateSnapshot, actionsBytes);
+    }
+
+    /// <summary>
+    /// Dispatches actions against source text using a caller-supplied build context.
+    /// </summary>
+    public static byte[] DispatchComponentActionsBytes(
+        string source,
+        byte[] stateSnapshot,
+        NxProgramBuildContext buildContext,
+        byte[]? actionsBytes = null,
+        string? fileName = null)
+    {
+        ArgumentNullException.ThrowIfNull(buildContext);
+
+        using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, buildContext, fileName);
+        return DispatchComponentActionsBytes(programArtifact, stateSnapshot, actionsBytes);
     }
 
     /// <summary>
@@ -286,6 +350,21 @@ public static class NxRuntime
     }
 
     /// <summary>
+    /// Dispatches no actions against a prior component state snapshot using a caller-supplied build context.
+    /// </summary>
+    public static NxComponentDispatchResult<TEffect> DispatchComponentActions<TEffect>(
+        string source,
+        byte[] stateSnapshot,
+        NxProgramBuildContext buildContext,
+        string? fileName = null)
+    {
+        byte[] payload = DispatchComponentActionsBytes(source, stateSnapshot, buildContext, null, fileName);
+        return DeserializeMessagePackResult<NxComponentDispatchResult<TEffect>>(
+            payload,
+            "NX native runtime returned an invalid component dispatch MessagePack payload.");
+    }
+
+    /// <summary>
     /// Dispatches no actions against a prior component state snapshot for a previously built program artifact.
     /// </summary>
     public static NxComponentDispatchResult<TEffect> DispatchComponentActions<TEffect>(
@@ -317,6 +396,25 @@ public static class NxRuntime
     }
 
     /// <summary>
+    /// Dispatches MessagePack-serializable actions against source text using a caller-supplied build context.
+    /// </summary>
+    public static NxComponentDispatchResult<TEffect> DispatchComponentActions<TActions, TEffect>(
+        string source,
+        byte[] stateSnapshot,
+        NxProgramBuildContext buildContext,
+        TActions actions,
+        string? fileName = null)
+    {
+        byte[] actionsBytes = actions is null
+            ? Array.Empty<byte>()
+            : MessagePackSerializer.Serialize(actions, MessagePackOptions);
+        byte[] payload = DispatchComponentActionsBytes(source, stateSnapshot, buildContext, actionsBytes, fileName);
+        return DeserializeMessagePackResult<NxComponentDispatchResult<TEffect>>(
+            payload,
+            "NX native runtime returned an invalid component dispatch MessagePack payload.");
+    }
+
+    /// <summary>
     /// Dispatches MessagePack-serializable actions against a prior component state snapshot for a program artifact.
     /// </summary>
     public static NxComponentDispatchResult<TEffect> DispatchComponentActions<TActions, TEffect>(
@@ -341,41 +439,19 @@ public static class NxRuntime
         out NxBuffer buffer);
 
     private delegate NxEvalStatus EvalProgramArtifactCallback(
-        IntPtr programArtifactHandle,
-        out NxBuffer buffer);
-
-    private delegate NxEvalStatus ComponentInitSourceCallback(
-        byte[] sourceBytes,
-        nuint sourceLength,
-        byte[] fileNameBytes,
-        nuint fileNameLength,
-        byte[] componentNameBytes,
-        nuint componentNameLength,
-        byte[] propsBytes,
-        nuint propsLength,
+        NxProgramArtifactSafeHandle programArtifactHandle,
         out NxBuffer buffer);
 
     private delegate NxEvalStatus ComponentInitProgramArtifactCallback(
-        IntPtr programArtifactHandle,
+        NxProgramArtifactSafeHandle programArtifactHandle,
         byte[] componentNameBytes,
         nuint componentNameLength,
         byte[] propsBytes,
         nuint propsLength,
         out NxBuffer buffer);
 
-    private delegate NxEvalStatus ComponentDispatchSourceCallback(
-        byte[] sourceBytes,
-        nuint sourceLength,
-        byte[] fileNameBytes,
-        nuint fileNameLength,
-        byte[] stateSnapshotBytes,
-        nuint stateSnapshotLength,
-        byte[] actionsBytes,
-        nuint actionsLength,
-        out NxBuffer buffer);
-
     private delegate NxEvalStatus ComponentDispatchProgramArtifactCallback(
-        IntPtr programArtifactHandle,
+        NxProgramArtifactSafeHandle programArtifactHandle,
         byte[] stateSnapshotBytes,
         nuint stateSnapshotLength,
         byte[] actionsBytes,
@@ -418,38 +494,7 @@ public static class NxRuntime
         NxNativeLibrary.EnsureLoaded();
 
         status = callback(
-            programArtifact.DangerousGetHandle(),
-            out NxBuffer buffer);
-        return CopyAndFreeBuffer(buffer);
-    }
-
-    private static byte[] InvokeComponentInitSourceNativeCall(
-        string source,
-        string componentName,
-        byte[]? propsBytes,
-        string? fileName,
-        ComponentInitSourceCallback callback,
-        out NxEvalStatus status)
-    {
-        ArgumentNullException.ThrowIfNull(source);
-        ArgumentNullException.ThrowIfNull(componentName);
-
-        NxNativeLibrary.EnsureLoaded();
-
-        byte[] sourceBytes = Encoding.UTF8.GetBytes(source);
-        byte[] fileNameBytes = fileName is null ? Array.Empty<byte>() : Encoding.UTF8.GetBytes(fileName);
-        byte[] componentNameBytes = Encoding.UTF8.GetBytes(componentName);
-        byte[] payloadBytes = propsBytes ?? Array.Empty<byte>();
-
-        status = callback(
-            sourceBytes,
-            (nuint)sourceBytes.Length,
-            fileNameBytes,
-            (nuint)fileNameBytes.Length,
-            componentNameBytes,
-            (nuint)componentNameBytes.Length,
-            payloadBytes,
-            (nuint)payloadBytes.Length,
+            programArtifact.SafeHandle,
             out NxBuffer buffer);
         return CopyAndFreeBuffer(buffer);
     }
@@ -470,39 +515,9 @@ public static class NxRuntime
         byte[] payloadBytes = propsBytes ?? Array.Empty<byte>();
 
         status = callback(
-            programArtifact.DangerousGetHandle(),
+            programArtifact.SafeHandle,
             componentNameBytes,
             (nuint)componentNameBytes.Length,
-            payloadBytes,
-            (nuint)payloadBytes.Length,
-            out NxBuffer buffer);
-        return CopyAndFreeBuffer(buffer);
-    }
-
-    private static byte[] InvokeComponentDispatchSourceNativeCall(
-        string source,
-        byte[] stateSnapshot,
-        byte[]? actionsBytes,
-        string? fileName,
-        ComponentDispatchSourceCallback callback,
-        out NxEvalStatus status)
-    {
-        ArgumentNullException.ThrowIfNull(source);
-        ArgumentNullException.ThrowIfNull(stateSnapshot);
-
-        NxNativeLibrary.EnsureLoaded();
-
-        byte[] sourceBytes = Encoding.UTF8.GetBytes(source);
-        byte[] fileNameBytes = fileName is null ? Array.Empty<byte>() : Encoding.UTF8.GetBytes(fileName);
-        byte[] payloadBytes = actionsBytes ?? Array.Empty<byte>();
-
-        status = callback(
-            sourceBytes,
-            (nuint)sourceBytes.Length,
-            fileNameBytes,
-            (nuint)fileNameBytes.Length,
-            stateSnapshot,
-            (nuint)stateSnapshot.Length,
             payloadBytes,
             (nuint)payloadBytes.Length,
             out NxBuffer buffer);
@@ -524,7 +539,7 @@ public static class NxRuntime
         byte[] payloadBytes = actionsBytes ?? Array.Empty<byte>();
 
         status = callback(
-            programArtifact.DangerousGetHandle(),
+            programArtifact.SafeHandle,
             stateSnapshot,
             (nuint)stateSnapshot.Length,
             payloadBytes,

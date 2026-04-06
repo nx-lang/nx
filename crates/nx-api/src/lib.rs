@@ -5,7 +5,8 @@
 //! - [`eval_program_artifact`]: evaluate the `root()` entrypoint of a previously built
 //!   [`ProgramArtifact`]
 //! - [`initialize_component_source`] / [`dispatch_component_actions_source`]: component lifecycle
-//!   entry points that analyze source, initialize a named component, and dispatch action batches
+//!   entry points that analyze source against a caller-supplied [`ProgramBuildContext`],
+//!   initialize a named component, and dispatch action batches
 //! - [`initialize_component_program_artifact`] / [`dispatch_component_actions_program_artifact`]:
 //!   component lifecycle entry points that execute a resolved [`ProgramArtifact`]
 //! - [`NxDiagnostic`]: a stable, serde-friendly diagnostic model for tooling and FFI
@@ -21,7 +22,7 @@ mod value;
 
 pub use artifacts::{
     build_library_artifact_from_directory, build_program_artifact_from_source, LibraryArtifact,
-    LibraryExport, ProgramArtifact,
+    LibraryExport, LibraryRegistry, ProgramArtifact, ProgramBuildContext,
 };
 pub use component::{
     dispatch_component_actions_program_artifact, dispatch_component_actions_source,
@@ -30,5 +31,8 @@ pub use component::{
     ComponentInitResult,
 };
 pub use diagnostics::{NxDiagnostic, NxDiagnosticLabel, NxSeverity, NxTextSpan};
-pub use eval::{eval_program_artifact, eval_source, load_program_artifact_from_source, EvalResult};
+pub use eval::{
+    eval_program_artifact, eval_source, load_library_artifact_from_directory,
+    load_program_artifact_from_source, EvalResult,
+};
 pub use value::{from_nx_value, to_nx_value, FromNxValueError};

@@ -6,11 +6,11 @@ type UserList = UserBase[]
 type EntityList = Entity[]
 
 // Enums
-enum Foo = Abc | Def | Ghi
+enum Foo = abc | def | ghi
 enum Bar =
-  | Abc
-  | Def
-  | Ghi
+  | abc
+  | def
+  | ghi
 
 // Records
 abstract type Entity = {

@@ -135,17 +135,25 @@ int value = MessagePackSerializer.Deserialize<int>(resultBytes);
 ```csharp
 using NxLang.Nx;
 
+using NxLibraryRegistry registry = new();
+registry.LoadFromDirectory("/app/question-flow");
+using NxProgramBuildContext buildContext = registry.CreateBuildContext();
+
 string source = """
     import "../question-flow"
     let root() = { answer() }
     """;
 
-using NxProgramArtifact program = NxProgramArtifact.Build(source, "/app/main.nx");
+using NxProgramArtifact program = NxProgramArtifact.Build(source, buildContext, "/app/main.nx");
 int value = NxRuntime.Evaluate<int>(program);
 ```
 
 Build a `NxProgramArtifact` when you want to reuse the same resolved program across evaluation or
-component lifecycle calls, especially when the source imports local NX libraries.
+component lifecycle calls. If the source imports local NX libraries, preload them in a
+`NxLibraryRegistry` and build through a `NxProgramBuildContext` so program construction uses the
+selected loaded snapshots instead of reading libraries from disk on demand. The parameterless
+`NxProgramArtifact.Build(source, fileName)` convenience still exists, but it now creates a
+transient empty registry/build-context pair internally before calling the native build API.
 
 ### Optional JSON Debug Output
 
@@ -200,6 +208,8 @@ NxComponentDispatchResult<SearchSubmittedAction> dispatch =
 - Dispatch consumes that saved snapshot and an ordered action list, then returns effect actions plus the next snapshot.
 - Reuse a saved `StateSnapshot` only with the exact same `NxProgramArtifact` revision that produced it.
   Mixing snapshots across program revisions is rejected.
+- The managed source-based component helpers build transient `NxProgramArtifact`s internally and then
+  call the native program-artifact component APIs. The public native C ABI itself is artifact-first.
 - State defaults run only during initialization in this change. Declarative state-update actions are still a follow-up, so dispatch currently preserves state values while still producing effect actions from bound handlers.
 - Component lifecycle APIs in the managed binding use canonical NX bytes. Persist the returned `StateSnapshot`
   bytes and pass them back on later dispatch calls.

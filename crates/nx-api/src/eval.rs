@@ -1,11 +1,13 @@
-use crate::artifacts::{build_program_artifact_from_source, ProgramArtifact};
+use crate::artifacts::{
+    build_library_artifact_from_directory, build_program_artifact_from_source, LibraryArtifact,
+    ProgramArtifact, ProgramBuildContext,
+};
 use crate::diagnostics::diagnostics_to_api;
 use crate::value::to_nx_value;
 use crate::NxDiagnostic;
 use nx_diagnostics::{Diagnostic, Label, Severity};
 use nx_hir::Item;
 use nx_interpreter::{Interpreter, RuntimeError};
-use nx_types::{analyze_str, analyze_str_with_path, ModuleArtifact};
 use nx_value::NxValue;
 use std::fs;
 use std::path::Path;
@@ -23,24 +25,6 @@ pub enum EvalResult {
     Err(Vec<NxDiagnostic>),
 }
 
-pub(crate) fn analyze_source_artifact(
-    source: &str,
-    file_name: &str,
-) -> Result<ModuleArtifact, Vec<NxDiagnostic>> {
-    let source_path = Path::new(file_name);
-    let analysis = if source_path.exists() {
-        analyze_str_with_path(source, file_name, source_path)
-    } else {
-        analyze_str(source, file_name)
-    };
-
-    if !analysis.is_ok() || analysis.lowered_module.is_none() {
-        return Err(diagnostics_to_api(&analysis.diagnostics, source));
-    }
-
-    Ok(analysis)
-}
-
 pub(crate) fn runtime_error_diagnostics(source: &str, error: RuntimeError) -> Vec<NxDiagnostic> {
     let diag = Diagnostic::error("runtime-error")
         .with_message(error.to_string())
@@ -51,18 +35,50 @@ pub(crate) fn runtime_error_diagnostics(source: &str, error: RuntimeError) -> Ve
 pub(crate) fn build_source_program_artifact(
     source: &str,
     file_name: &str,
+    build_context: &ProgramBuildContext,
 ) -> Result<ProgramArtifact, Vec<NxDiagnostic>> {
-    let program = build_program_artifact_from_source(source, file_name).map_err(|error| {
-        let diag = Diagnostic::error("library-load-error")
-            .with_message(format!("Failed to load library imports: {}", error))
-            .with_label(Label::primary(file_name, full_source_span(source)))
-            .build();
-        diagnostics_to_api(&[diag], source)
-    })?;
+    let program =
+        build_program_artifact_from_source(source, file_name, build_context).map_err(|error| {
+            let diag = Diagnostic::error("library-load-error")
+                .with_message(format!("Failed to load library imports: {}", error))
+                .with_label(Label::primary(file_name, full_source_span(source)))
+                .build();
+            diagnostics_to_api(&[diag], source)
+        })?;
 
     match program_artifact_error_diagnostics(&program, source) {
         Some(diagnostics) => Err(diagnostics),
         None => Ok(program),
+    }
+}
+
+pub(crate) fn library_artifact_error_diagnostics(
+    library: &LibraryArtifact,
+) -> Option<Vec<NxDiagnostic>> {
+    has_error_diagnostics(&library.diagnostics)
+        .then(|| diagnostics_to_api(&library.diagnostics, ""))
+}
+
+/// Builds a reusable [`LibraryArtifact`] from a local directory and returns public diagnostics if
+/// static analysis fails.
+pub fn load_library_artifact_from_directory(
+    root_path: impl AsRef<Path>,
+) -> Result<LibraryArtifact, Vec<NxDiagnostic>> {
+    let root_path = root_path.as_ref();
+    let library = build_library_artifact_from_directory(root_path).map_err(|error| {
+        let diagnostic = Diagnostic::error("library-load-error")
+            .with_message(format!(
+                "Failed to load library artifact from '{}': {}",
+                root_path.display(),
+                error
+            ))
+            .build();
+        diagnostics_to_api(&[diagnostic], "")
+    })?;
+
+    match library_artifact_error_diagnostics(&library) {
+        Some(diagnostics) => Err(diagnostics),
+        None => Ok(library),
     }
 }
 
@@ -147,9 +163,9 @@ pub fn eval_program_artifact(program: &ProgramArtifact) -> EvalResult {
 pub fn load_program_artifact_from_source(
     source: &str,
     file_name: &str,
+    build_context: &ProgramBuildContext,
 ) -> Result<ProgramArtifact, Vec<NxDiagnostic>> {
-    analyze_source_artifact(source, file_name)?;
-    build_source_program_artifact(source, file_name)
+    build_source_program_artifact(source, file_name, build_context)
 }
 
 /// Runs shared static analysis and then evaluates a self-contained NX source string, returning the
@@ -158,8 +174,8 @@ pub fn load_program_artifact_from_source(
 /// The source must define a zero-argument `root()` function. That function is called and its
 /// return value is converted to [`NxValue`] via [`to_nx_value`](crate::to_nx_value).
 ///
-/// `file_name` is used for diagnostic labels. If it points to an on-disk source file, local
-/// library imports are resolved relative to that path before runtime execution.
+/// `file_name` is used for diagnostic labels. Callers must supply the `ProgramBuildContext` used
+/// to resolve any imported libraries during program construction.
 ///
 /// # Errors
 ///
@@ -167,8 +183,12 @@ pub fn load_program_artifact_from_source(
 /// - Static analysis reports errors
 /// - No `root()` function is defined
 /// - A runtime error occurs during evaluation
-pub fn eval_source(source: &str, file_name: &str) -> EvalResult {
-    let program = match load_program_artifact_from_source(source, file_name) {
+pub fn eval_source(
+    source: &str,
+    file_name: &str,
+    build_context: &ProgramBuildContext,
+) -> EvalResult {
+    let program = match load_program_artifact_from_source(source, file_name, build_context) {
         Ok(program) => program,
         Err(diagnostics) => return EvalResult::Err(diagnostics),
     };
@@ -179,7 +199,7 @@ pub fn eval_source(source: &str, file_name: &str) -> EvalResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::artifacts::build_program_artifact_from_source;
+    use crate::artifacts::{build_program_artifact_from_source, LibraryRegistry};
     use std::fs;
     use tempfile::TempDir;
 
@@ -202,7 +222,11 @@ mod tests {
             let root(): int = { 1 / 0 }
         "#;
 
-        let EvalResult::Err(diagnostics) = eval_source(source, "eval-static-errors.nx") else {
+        let EvalResult::Err(diagnostics) = eval_source(
+            source,
+            "eval-static-errors.nx",
+            &ProgramBuildContext::empty(),
+        ) else {
             panic!("Expected evaluation to stop on static analysis diagnostics");
         };
 
@@ -222,7 +246,9 @@ mod tests {
         let source = r#"import { Button as Layout.Button } from "../ui"
 let root() = { <Layout.Button /> }"#;
 
-        let EvalResult::Err(diagnostics) = eval_source(source, "virtual/main.nx") else {
+        let EvalResult::Err(diagnostics) =
+            eval_source(source, "virtual/main.nx", &ProgramBuildContext::empty())
+        else {
             panic!("Expected virtual import source to fail");
         };
 
@@ -232,7 +258,7 @@ let root() = { <Layout.Button /> }"#;
     }
 
     #[test]
-    fn eval_source_resolves_local_imports_when_file_name_points_to_real_path() {
+    fn eval_source_resolves_preloaded_local_imports() {
         let temp = TempDir::new().expect("temp dir");
         let app_dir = temp.path().join("app");
         let ui_dir = temp.path().join("ui");
@@ -245,7 +271,15 @@ let root() = { <Layout.Button /> }"#;
 let root() = { <Layout.Button /> }"#;
         fs::write(&main_path, source).expect("main file");
 
-        let EvalResult::Ok(value) = eval_source(source, &main_path.display().to_string()) else {
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("Expected registry preload");
+        let build_context = registry.build_context();
+
+        let EvalResult::Ok(value) =
+            eval_source(source, &main_path.display().to_string(), &build_context)
+        else {
             panic!("Expected import-backed source evaluation to succeed");
         };
 
@@ -272,8 +306,18 @@ let root() = { <Layout.Button /> }"#;
 let root() = { answer() }"#;
         fs::write(&main_path, source).expect("main file");
 
-        let program = build_program_artifact_from_source(source, &main_path.display().to_string())
-            .expect("Expected program artifact");
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("Expected registry preload");
+        let build_context = registry.build_context();
+
+        let program = build_program_artifact_from_source(
+            source,
+            &main_path.display().to_string(),
+            &build_context,
+        )
+        .expect("Expected program artifact");
 
         let EvalResult::Ok(value) = eval_program_artifact(&program) else {
             panic!("Expected program artifact evaluation to succeed");

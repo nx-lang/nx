@@ -245,10 +245,10 @@ mod tests {
         assert_eq!(
             Value::EnumVariant {
                 type_name: Name::new("Status"),
-                variant: SmolStr::new("Active")
+                variant: SmolStr::new("active")
             }
             .to_string(),
-            "Status.Active"
+            "Status.active"
         );
 
         let mut fields = FxHashMap::default();

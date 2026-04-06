@@ -31,11 +31,13 @@ Use compact expressions for attributes and property assignments.
 `if <value> is { ... }` evaluates the arms in order and returns the first match. It is useful for enums, discriminated unions, or simple value dispatch.
 
 ```nx
+enum ReviewStatus = pending_review | approved | rejected
+
 let statusBadge = if status is {
-  "pending"  => <Badge: tone="info">Pending</Badge>
-  "approved" => <Badge: tone="success">Approved</Badge>
-  "rejected" => <Badge: tone="danger">Rejected</Badge>
-  else       => <Badge: tone="neutral">Unknown</Badge>
+  ReviewStatus.pending_review => <Badge: tone="info">Pending review</Badge>
+  ReviewStatus.approved => <Badge: tone="success">Approved</Badge>
+  ReviewStatus.rejected => <Badge: tone="danger">Rejected</Badge>
+  else => <Badge: tone="neutral">Unknown</Badge>
 }
 ```
 

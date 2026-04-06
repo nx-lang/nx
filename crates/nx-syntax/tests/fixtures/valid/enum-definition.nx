@@ -1,9 +1,9 @@
-enum Status = Pending | Active | Disabled
+enum Status = pending_review | active | disabled
 
-enum Direction = | North | South | East | West
+enum Direction = | north | south | east | west
 
 let <Indicator current:Direction /> = {
-    if current == Direction.North {
+    if current == Direction.north {
         1
     } else {
         0

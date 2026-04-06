@@ -1,7 +1,7 @@
-use crate::artifacts::ProgramArtifact;
+use crate::artifacts::{ProgramArtifact, ProgramBuildContext};
 use crate::eval::{
-    analyze_source_artifact, build_source_program_artifact, program_artifact_error_diagnostics,
-    program_root_source, runtime_error_diagnostics,
+    build_source_program_artifact, program_artifact_error_diagnostics, program_root_source,
+    runtime_error_diagnostics,
 };
 use crate::value::{from_nx_value, to_nx_value};
 use crate::{NxDiagnostic, NxSeverity};
@@ -54,21 +54,19 @@ pub enum ComponentDispatchEvalResult {
     Err(Vec<NxDiagnostic>),
 }
 
-/// Runs shared static analysis and then initializes a named component from source text.
+/// Runs shared static analysis and then initializes a named component from source text using a
+/// caller-supplied build context.
 ///
 /// The returned state snapshot is opaque host-owned data and is only valid with the exact same
 /// source text revision that produced it.
 pub fn initialize_component_source(
     source: &str,
     file_name: &str,
+    build_context: &ProgramBuildContext,
     component_name: &str,
     props: &NxValue,
 ) -> ComponentInitEvalResult {
-    if let Err(diagnostics) = analyze_source_artifact(source, file_name) {
-        return ComponentInitEvalResult::Err(diagnostics);
-    }
-
-    let program = match build_source_program_artifact(source, file_name) {
+    let program = match build_source_program_artifact(source, file_name, build_context) {
         Ok(program) => program,
         Err(diagnostics) => return ComponentInitEvalResult::Err(diagnostics),
     };
@@ -123,14 +121,11 @@ fn initialize_component_program_artifact_with_source(
 pub fn dispatch_component_actions_source(
     source: &str,
     file_name: &str,
+    build_context: &ProgramBuildContext,
     state_snapshot: &[u8],
     actions: &[NxValue],
 ) -> ComponentDispatchEvalResult {
-    if let Err(diagnostics) = analyze_source_artifact(source, file_name) {
-        return ComponentDispatchEvalResult::Err(diagnostics);
-    }
-
-    let program = match build_source_program_artifact(source, file_name) {
+    let program = match build_source_program_artifact(source, file_name, build_context) {
         Ok(program) => program,
         Err(diagnostics) => return ComponentDispatchEvalResult::Err(diagnostics),
     };
@@ -280,7 +275,7 @@ fn lookup_contains_component(lookup: ComponentLookup<'_>, type_name: &str) -> bo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::artifacts::build_program_artifact_from_source;
+    use crate::artifacts::{build_program_artifact_from_source, LibraryRegistry};
     use std::collections::BTreeMap;
     use std::fs;
     use tempfile::TempDir;
@@ -332,8 +327,13 @@ mod tests {
             }
         "#;
 
-        let result =
-            initialize_component_source(source, "component-init.nx", "SearchBox", &empty_record());
+        let result = initialize_component_source(
+            source,
+            "component-init.nx",
+            &ProgramBuildContext::empty(),
+            "SearchBox",
+            &empty_record(),
+        );
         let ComponentInitEvalResult::Ok(result) = result else {
             panic!("Expected source-based component initialization to succeed");
         };
@@ -370,8 +370,12 @@ mod tests {
             let withHandler() = <SearchBox onSearchSubmitted=<DoSearch search={action.searchString} /> />
         "#;
 
-        let program = build_program_artifact_from_source(source, "component-dispatch.nx")
-            .expect("Expected program artifact");
+        let program = build_program_artifact_from_source(
+            source,
+            "component-dispatch.nx",
+            &ProgramBuildContext::empty(),
+        )
+        .expect("Expected program artifact");
         let root_module = program
             .root_modules
             .first()
@@ -395,6 +399,7 @@ mod tests {
         let result = dispatch_component_actions_source(
             source,
             "component-dispatch.nx",
+            &ProgramBuildContext::empty(),
             &init.state_snapshot,
             &[action],
         );
@@ -424,7 +429,13 @@ mod tests {
             }
         "#;
 
-        let result = dispatch_component_actions_source(source, "invalid-snapshot.nx", b"nope", &[]);
+        let result = dispatch_component_actions_source(
+            source,
+            "invalid-snapshot.nx",
+            &ProgramBuildContext::empty(),
+            b"nope",
+            &[],
+        );
         let ComponentDispatchEvalResult::Err(diagnostics) = result else {
             panic!("Expected invalid snapshot dispatch to fail");
         };
@@ -446,6 +457,7 @@ mod tests {
         let result = initialize_component_source(
             static_analysis_failure_source(),
             "component-static-errors.nx",
+            &ProgramBuildContext::empty(),
             "SearchBox",
             &empty_record(),
         );
@@ -464,6 +476,7 @@ mod tests {
         let result = dispatch_component_actions_source(
             static_analysis_failure_source(),
             "component-static-errors.nx",
+            &ProgramBuildContext::empty(),
             b"nope",
             &[],
         );
@@ -500,7 +513,13 @@ mod tests {
             )]),
         };
 
-        let result = initialize_component_source(source, "component-props.nx", "Wrapper", &props);
+        let result = initialize_component_source(
+            source,
+            "component-props.nx",
+            &ProgramBuildContext::empty(),
+            "Wrapper",
+            &props,
+        );
         let ComponentInitEvalResult::Err(diagnostics) = result else {
             panic!("Expected component-shaped host props to be rejected");
         };
@@ -523,6 +542,7 @@ mod tests {
         let init = initialize_component_source(
             source,
             "component-actions.nx",
+            &ProgramBuildContext::empty(),
             "SearchBox",
             &empty_record(),
         );
@@ -544,6 +564,7 @@ mod tests {
         let result = dispatch_component_actions_source(
             source,
             "component-actions.nx",
+            &ProgramBuildContext::empty(),
             &init.state_snapshot,
             &[action],
         );
@@ -566,8 +587,13 @@ mod tests {
             }
         "#;
 
-        let init =
-            initialize_component_source(source, "untyped-action.nx", "SearchBox", &empty_record());
+        let init = initialize_component_source(
+            source,
+            "untyped-action.nx",
+            &ProgramBuildContext::empty(),
+            "SearchBox",
+            &empty_record(),
+        );
         let ComponentInitEvalResult::Ok(init) = init else {
             panic!("Expected component initialization to succeed");
         };
@@ -583,6 +609,7 @@ mod tests {
         let result = dispatch_component_actions_source(
             source,
             "untyped-action.nx",
+            &ProgramBuildContext::empty(),
             &init.state_snapshot,
             &[action],
         );
@@ -618,8 +645,18 @@ mod tests {
 let root() = { 0 }"#;
         fs::write(&main_path, source).expect("main file");
 
-        let program = build_program_artifact_from_source(source, &main_path.display().to_string())
-            .expect("Expected program artifact");
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("Expected registry preload");
+        let build_context = registry.build_context();
+
+        let program = build_program_artifact_from_source(
+            source,
+            &main_path.display().to_string(),
+            &build_context,
+        )
+        .expect("Expected program artifact");
         let result = initialize_component_program_artifact(&program, "SearchBox", &empty_record());
         let ComponentInitEvalResult::Ok(result) = result else {
             panic!("Expected imported component initialization to succeed");
@@ -641,7 +678,7 @@ let root() = { 0 }"#;
     }
 
     #[test]
-    fn dispatch_component_actions_source_rejects_snapshots_from_other_program_revisions() {
+    fn dispatch_component_actions_source_keeps_loaded_snapshot_after_disk_changes() {
         let temp = TempDir::new().expect("temp dir");
         let app_dir = temp.path().join("app");
         let ui_dir = temp.path().join("ui");
@@ -665,9 +702,16 @@ let root() = { 0 }"#;
 let root() = { 0 }"#;
         fs::write(&main_path, source).expect("main file");
 
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("Expected registry preload");
+        let build_context = registry.build_context();
+
         let init = initialize_component_source(
             source,
             &main_path.display().to_string(),
+            &build_context,
             "SearchBox",
             &empty_record(),
         );
@@ -690,15 +734,13 @@ let root() = { 0 }"#;
         let result = dispatch_component_actions_source(
             source,
             &main_path.display().to_string(),
+            &build_context,
             &init.state_snapshot,
             &[],
         );
-        let ComponentDispatchEvalResult::Err(diagnostics) = result else {
-            panic!("Expected cross-program snapshot dispatch to fail");
+        let ComponentDispatchEvalResult::Ok(result) = result else {
+            panic!("Expected dispatch to keep using the loaded snapshot");
         };
-
-        assert!(diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.message.contains("snapshot fingerprint")));
+        assert!(!result.state_snapshot.is_empty());
     }
 }

@@ -38,10 +38,14 @@ type User extends UserBase = {
 ## Enums
 
 ```nx
-enum Plan = "free" | "pro" | "enterprise"
+enum DealStage = draft | pending_review | closed_won
 ```
 
 Use enums when values must come from a fixed set.
+
+Enum members conventionally use `snake_case`. NX serializes enum values using the member name as
+written, so `snake_case` keeps the source aligned with JSON or database values such as
+`"pending_review"`.
 
 ## Type aliases for collections
 
@@ -60,10 +64,12 @@ let displayName(user: UserBase) = user.name
 let user: User = <User id={1} name={"Ada"} email={"ada@example.com"} />
 let value = displayName(user)
 
-let badgeTone = if plan is {
-  "free" => "neutral"
-  "pro" => "success"
-  else => "info"
+let stage: DealStage = { DealStage.pending_review }
+
+let badgeTone = if stage is {
+  DealStage.draft => "neutral"
+  DealStage.pending_review => "warning"
+  else => "success"
 }
 ```
 

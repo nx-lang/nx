@@ -114,14 +114,14 @@ describe('NX TextMate grammar', function () {
   });
 
   it('highlights enum definitions with leading pipe', function () {
-    const line = 'enum Status = | Active | Pending | Disabled';
+    const line = 'enum Status = | active | pending_review | disabled';
     const { tokens } = grammar.tokenizeLine(line, null);
     expect(scopesForSubstring(line, tokens, 'enum')).to.include('keyword.declaration.type.nx');
     expect(scopesForSubstring(line, tokens, '|')).to.include('punctuation.separator.enum.nx');
   });
 
   it('highlights enum definitions without leading pipe', function () {
-    const line = 'enum Color = Red | Green | Blue';
+    const line = 'enum Color = red | green | blue';
     const { tokens } = grammar.tokenizeLine(line, null);
     expect(scopesForSubstring(line, tokens, 'enum')).to.include('keyword.declaration.type.nx');
     expect(scopesForSubstring(line, tokens, '|')).to.include('punctuation.separator.enum.nx');

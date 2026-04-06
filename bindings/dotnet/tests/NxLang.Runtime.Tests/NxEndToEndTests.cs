@@ -79,7 +79,7 @@ public class NxEndToEndTests
     }
 
     [Fact]
-    public void Evaluate_WithProgramArtifact_ReusesImportedLibraryContext()
+    public void Evaluate_WithProgramArtifact_ReusesPreloadedLibraryAcrossBuildContexts()
     {
         string tempPath = Path.Combine(Path.GetTempPath(), $"nx-prepared-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempPath);
@@ -102,11 +102,19 @@ public class NxEndToEndTests
                 """;
             string mainPath = Path.Combine(appRoot, "main.nx");
             File.WriteAllText(mainPath, source);
-            using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, mainPath);
 
-            int result = NxRuntime.Evaluate<int>(programArtifact);
+            using NxLibraryRegistry registry = new();
+            registry.LoadFromDirectory(libraryRoot);
+            using NxProgramBuildContext firstContext = registry.CreateBuildContext();
+            using NxProgramBuildContext secondContext = registry.CreateBuildContext();
+            using NxProgramArtifact firstProgram = NxProgramArtifact.Build(source, firstContext, mainPath);
+            using NxProgramArtifact secondProgram = NxProgramArtifact.Build(source, secondContext, mainPath);
 
-            Assert.Equal(42, result);
+            int firstResult = NxRuntime.Evaluate<int>(firstProgram);
+            int secondResult = NxRuntime.Evaluate<int>(secondProgram);
+
+            Assert.Equal(42, firstResult);
+            Assert.Equal(42, secondResult);
         }
         finally
         {
@@ -115,7 +123,52 @@ public class NxEndToEndTests
     }
 
     [Fact]
-    public void BuildProgramArtifact_WithInvalidImportedLibrary_ThrowsEvaluationException()
+    public void Evaluate_WithProgramArtifact_RemainsExecutableAfterBuildContextAndRegistryDispose()
+    {
+        string tempPath = Path.Combine(Path.GetTempPath(), $"nx-prepared-disposed-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempPath);
+
+        try
+        {
+            string appRoot = Path.Combine(tempPath, "app");
+            string libraryRoot = Path.Combine(tempPath, "question-flow");
+            Directory.CreateDirectory(appRoot);
+            Directory.CreateDirectory(libraryRoot);
+            File.WriteAllText(
+                Path.Combine(libraryRoot, "QuestionFlow.nx"),
+                """
+                let answer() = { 42 }
+                """);
+
+            string source = """
+                import "../question-flow"
+                let root() = { answer() }
+                """;
+            string mainPath = Path.Combine(appRoot, "main.nx");
+            File.WriteAllText(mainPath, source);
+
+            NxProgramArtifact programArtifact;
+            using (NxLibraryRegistry registry = new())
+            {
+                registry.LoadFromDirectory(libraryRoot);
+                using NxProgramBuildContext buildContext = registry.CreateBuildContext();
+                programArtifact = NxProgramArtifact.Build(source, buildContext, mainPath);
+            }
+
+            using (programArtifact)
+            {
+                int result = NxRuntime.Evaluate<int>(programArtifact);
+                Assert.Equal(42, result);
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempPath, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BuildProgramArtifact_WithMissingLibraryFromContext_ThrowsEvaluationException()
     {
         string tempPath = Path.Combine(Path.GetTempPath(), $"nx-prepared-invalid-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempPath);
@@ -138,9 +191,79 @@ public class NxEndToEndTests
                 """;
             string mainPath = Path.Combine(appRoot, "main.nx");
             File.WriteAllText(mainPath, source);
+            using NxLibraryRegistry registry = new();
+            using NxProgramBuildContext buildContext = registry.CreateBuildContext();
 
             NxEvaluationException exception = Assert.Throws<NxEvaluationException>(
-                () => NxProgramArtifact.Build(source, mainPath));
+                () => NxProgramArtifact.Build(source, buildContext, mainPath));
+
+            Assert.Contains(
+                exception.Diagnostics,
+                diagnostic => diagnostic.Message.Contains("Missing loaded library", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(tempPath, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void LibraryRegistry_LoadFromDirectory_Succeeds()
+    {
+        string tempPath = Path.Combine(Path.GetTempPath(), $"nx-library-artifact-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempPath);
+
+        try
+        {
+            string appRoot = Path.Combine(tempPath, "app");
+            string libraryRoot = Path.Combine(tempPath, "question-flow");
+            Directory.CreateDirectory(appRoot);
+            Directory.CreateDirectory(libraryRoot);
+            File.WriteAllText(
+                Path.Combine(libraryRoot, "QuestionFlow.nx"),
+                """
+                let answer() = { 42 }
+                """);
+            string source = """
+                import "../question-flow"
+                let root() = { answer() }
+                """;
+            string mainPath = Path.Combine(appRoot, "main.nx");
+            File.WriteAllText(mainPath, source);
+
+            using NxLibraryRegistry registry = new();
+            registry.LoadFromDirectory(libraryRoot);
+            using NxProgramBuildContext buildContext = registry.CreateBuildContext();
+
+            int result = NxRuntime.Evaluate<int>(source, buildContext, mainPath);
+
+            Assert.Equal(42, result);
+        }
+        finally
+        {
+            Directory.Delete(tempPath, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void LibraryRegistry_LoadFromDirectory_WithInvalidSource_ThrowsEvaluationException()
+    {
+        string tempPath = Path.Combine(Path.GetTempPath(), $"nx-library-artifact-invalid-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempPath);
+
+        try
+        {
+            string libraryRoot = Path.Combine(tempPath, "question-flow");
+            Directory.CreateDirectory(libraryRoot);
+            File.WriteAllText(
+                Path.Combine(libraryRoot, "QuestionFlow.nx"),
+                """
+                let broken(): int = "oops"
+                """);
+
+            using NxLibraryRegistry registry = new();
+            NxEvaluationException exception = Assert.Throws<NxEvaluationException>(
+                () => registry.LoadFromDirectory(libraryRoot));
 
             Assert.Contains(
                 exception.Diagnostics,

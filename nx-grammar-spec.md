@@ -738,7 +738,7 @@ This section lists the AST node types with fields for implementers.
   - Semantic analysis resolves the target expression to determine interpretation:
     - If target resolves to an enum type → enum member access (verify name is valid enum member)
     - If target resolves to a value → property/field access (verify name is valid property/field on target's type)
-  - Examples: `Status.Active` (if Status is enum type), `obj.field` (if obj is value), `foo.bar` (ambiguous at parse time, resolved during type checking)
+  - Examples: `Status.pending_review` (if Status is enum type), `obj.field` (if obj is value), `foo.bar` (ambiguous at parse time, resolved during type checking)
 
 ## Validation Rules (post-parse)
 

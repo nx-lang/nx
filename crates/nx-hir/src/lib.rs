@@ -22,22 +22,20 @@
 
 pub mod ast;
 pub mod db;
-pub mod import_resolution;
 pub mod lower;
 pub mod records;
 pub mod scope;
 
 use la_arena::{Arena, Idx};
-use nx_diagnostics::{Diagnostic, Label, Severity, TextSize, TextSpan};
+use nx_diagnostics::{Diagnostic, Label, Severity, TextSpan};
+use rustc_hash::FxHashSet;
 use smol_str::SmolStr;
-use std::path::Path;
 
 // Re-export lowering function
 pub use lower::lower;
 
 // Re-export database types
 pub use db::{DatabaseImpl, NxDatabase};
-pub use import_resolution::resolve_local_library_imports;
 
 // Re-export scope and symbol types
 pub use records::{
@@ -49,15 +47,13 @@ pub use scope::{
     build_scopes, check_undefined_identifiers, Scope, ScopeId, ScopeManager, Symbol, SymbolKind,
 };
 
-/// Parses, lowers, resolves local imports, and validates a module from source text.
+/// Parses, lowers, and validates a module from source text.
 ///
-/// `file_name` is used for diagnostic labels. Pass `source_path` when library imports should be
-/// resolved from disk; if imports are present and no path is provided, the function returns a
-/// diagnostic explaining that import resolution requires an on-disk source path.
+/// `file_name` is used for diagnostic labels. Import resolution is intentionally out of scope for
+/// this helper; callers that need library-aware analysis should do that in a higher-level layer.
 pub fn lower_source_module(
     source: &str,
     file_name: &str,
-    source_path: Option<&Path>,
 ) -> Result<LoweredModule, Vec<Diagnostic>> {
     let parse_result = nx_syntax::parse_str(source, file_name);
 
@@ -80,39 +76,7 @@ pub fn lower_source_module(
     };
 
     let source_id = SourceId::new(parse_result.source_id.as_u32());
-    let mut module = lower(tree.root(), source_id);
-
-    if let Some(path) = source_path {
-        module = match resolve_local_library_imports(module, path) {
-            Ok(module) => module,
-            Err(error) => {
-                let source_len = u32::try_from(source.len()).expect(
-                    "NX source size should be validated before import-resolution diagnostics are created",
-                );
-                let diagnostic = Diagnostic::error("library-load-error")
-                    .with_message(format!("Failed to load library imports: {}", error))
-                    .with_label(Label::primary(
-                        file_name,
-                        TextSpan::new(TextSize::from(0), TextSize::from(source_len)),
-                    ))
-                    .build();
-                return Err(vec![diagnostic]);
-            }
-        };
-    } else if !module.imports.is_empty() {
-        let source_len = u32::try_from(source.len()).expect(
-            "NX source size should be validated before import-resolution diagnostics are created",
-        );
-        let diagnostic = Diagnostic::error("library-imports-require-path")
-            .with_message("Library imports require an on-disk source path")
-            .with_label(Label::primary(
-                file_name,
-                TextSpan::new(TextSize::from(0), TextSize::from(source_len)),
-            ))
-            .with_help("Pass a real file path as file_name or use a file-based entry point.")
-            .build();
-        return Err(vec![diagnostic]);
-    }
+    let module = lower(tree.root(), source_id);
 
     if !module.diagnostics().is_empty() {
         let diagnostics = module
@@ -509,6 +473,8 @@ pub struct LoweredModule {
     pub imports: Vec<Import>,
     /// Top-level items
     items: Vec<Item>,
+    /// Imported interface-only items synthesized for transient analysis.
+    external_items: FxHashSet<usize>,
     /// Lowering-time diagnostics
     diagnostics: Vec<LoweringDiagnostic>,
     /// Arena for all expressions
@@ -524,6 +490,7 @@ impl LoweredModule {
             source_id,
             imports: Vec::new(),
             items: Vec::new(),
+            external_items: FxHashSet::default(),
             diagnostics: Vec::new(),
             exprs: Arena::new(),
             elements: Arena::new(),
@@ -548,6 +515,18 @@ impl LoweredModule {
     /// Add a new item to the module.
     pub fn add_item(&mut self, item: Item) {
         self.items.push(item);
+    }
+
+    /// Add a synthesized interface-only item used during transient analysis.
+    pub fn add_external_item(&mut self, item: Item) {
+        let index = self.items.len();
+        self.items.push(item);
+        self.external_items.insert(index);
+    }
+
+    /// Returns true when the item at `index` is a synthesized external interface item.
+    pub fn is_external_item(&self, index: usize) -> bool {
+        self.external_items.contains(&index)
     }
 
     /// Add a lowering diagnostic.

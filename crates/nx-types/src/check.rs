@@ -1,11 +1,8 @@
 //! High-level type checking and source-analysis API.
 
 use crate::{InferenceContext, Type, TypeEnvironment};
-use nx_diagnostics::{Diagnostic, Label, Severity, TextSize, TextSpan};
-use nx_hir::{
-    lower, resolve_local_library_imports, ExprId, Import, LoweredModule, LoweringDiagnostic,
-    SourceId,
-};
+use nx_diagnostics::{Diagnostic, Label, Severity};
+use nx_hir::{lower, ExprId, Import, LoweredModule, LoweringDiagnostic, SourceId};
 use nx_syntax::{parse_file as syntax_parse_file, parse_str as syntax_parse_str};
 use rustc_hash::FxHashMap;
 use std::io;
@@ -15,8 +12,8 @@ use std::sync::Arc;
 /// File-scoped analysis artifact for one NX source file.
 ///
 /// This artifact preserves the parse outcome, lowered HIR, inferred type environment, static
-/// diagnostics, and import metadata produced while parsing, lowering, resolving imports, building
-/// scopes, and type checking one source file.
+/// diagnostics, and import metadata produced while parsing, lowering, preparing an analysis
+/// module, building scopes, and type checking one source file.
 #[derive(Debug, Clone)]
 pub struct ModuleArtifact {
     /// Source file name used for diagnostics.
@@ -73,18 +70,7 @@ pub type TypeCheckResult = ModuleArtifact;
 /// later phases report diagnostics.
 pub fn analyze_str(source: &str, file_name: &str) -> ModuleArtifact {
     let parse_result = syntax_parse_str(source, file_name);
-    analyze_string_parse_result(parse_result, source, file_name, None)
-}
-
-/// Analyzes NX source code from a string while resolving local library imports from an on-disk
-/// source path.
-pub fn analyze_str_with_path(
-    source: &str,
-    file_name: &str,
-    source_path: impl AsRef<Path>,
-) -> ModuleArtifact {
-    let parse_result = syntax_parse_str(source, file_name);
-    analyze_string_parse_result(parse_result, source, file_name, Some(source_path.as_ref()))
+    analyze_string_parse_result(parse_result, file_name)
 }
 
 /// Type checks NX source code from a string.
@@ -130,96 +116,36 @@ pub fn check_file(path: impl AsRef<Path>) -> io::Result<TypeCheckResult> {
     let path = path.as_ref();
     let parse_result = syntax_parse_file(path)?;
     let file_name = path.display().to_string();
-    analyze_parse_result(parse_result, &file_name, Some(path))
+    Ok(analyze_parse_result(parse_result, &file_name))
 }
 
-fn analyze_string_parse_result(
-    parse_result: nx_syntax::ParseResult,
-    source: &str,
-    file_name: &str,
-    source_path: Option<&Path>,
-) -> ModuleArtifact {
-    let source_id = SourceId::new(parse_result.source_id.as_u32());
-    let mut diagnostics = normalize_diagnostics_file_name(parse_result.errors, file_name);
-
-    let Some(tree) = parse_result.tree else {
-        return parse_failure_artifact(file_name, source_id, diagnostics);
-    };
-
-    let mut module = lower(tree.root(), source_id);
-
-    if let Some(path) = source_path {
-        module = match resolve_local_library_imports(module.clone(), path) {
-            Ok(module) => module,
-            Err(error) => {
-                diagnostics.push(library_load_error_diagnostic(source, file_name, &error));
-                return module_artifact(
-                    file_name,
-                    source_id,
-                    true,
-                    Some(Arc::new(module)),
-                    TypeEnvironment::new(),
-                    diagnostics,
-                );
-            }
-        };
-    } else if !module.imports.is_empty() {
-        diagnostics.push(library_imports_require_path_diagnostic(source, file_name));
-        return module_artifact(
-            file_name,
-            source_id,
-            true,
-            Some(Arc::new(module)),
-            TypeEnvironment::new(),
-            diagnostics,
-        );
-    }
-
-    analyze_lowered_module(module, diagnostics, file_name, source_id)
-}
-
-fn analyze_parse_result(
-    parse_result: nx_syntax::ParseResult,
-    file_name: &str,
-    source_path: Option<&Path>,
-) -> io::Result<ModuleArtifact> {
-    let source_id = SourceId::new(parse_result.source_id.as_u32());
-    let diagnostics = normalize_diagnostics_file_name(parse_result.errors, file_name);
-
-    let Some(tree) = parse_result.tree else {
-        return Ok(parse_failure_artifact(file_name, source_id, diagnostics));
-    };
-
-    let mut module = lower(tree.root(), source_id);
-    if let Some(path) = source_path {
-        module = resolve_local_library_imports(module, path)?;
-    }
-
-    Ok(analyze_lowered_module(
-        module,
-        diagnostics,
-        file_name,
-        source_id,
-    ))
-}
-
-fn analyze_lowered_module(
-    module: LoweredModule,
-    mut diagnostics: Vec<Diagnostic>,
+/// Analyzes a prepared module artifact where import resolution or other augmentation has already
+/// been applied to the analysis module.
+pub fn analyze_prepared_module(
     file_name: &str,
     source_id: SourceId,
+    preserved_module: LoweredModule,
+    analysis_module: LoweredModule,
+    mut diagnostics: Vec<Diagnostic>,
 ) -> ModuleArtifact {
-    diagnostics.extend(lowering_diagnostics(module.diagnostics(), file_name));
+    diagnostics.extend(lowering_diagnostics(
+        analysis_module.diagnostics(),
+        file_name,
+    ));
 
-    let (_scope_manager, scope_diagnostics) = nx_hir::build_scopes(&module);
+    let (_scope_manager, scope_diagnostics) = nx_hir::build_scopes(&analysis_module);
     diagnostics.extend(normalize_diagnostics_file_name(
         scope_diagnostics,
         file_name,
     ));
 
-    let mut ctx = InferenceContext::with_file_name(&module, file_name);
+    let mut ctx = InferenceContext::with_file_name(&analysis_module, file_name);
 
-    for item in module.items() {
+    for (index, item) in analysis_module.items().iter().enumerate() {
+        if analysis_module.is_external_item(index) {
+            continue;
+        }
+
         match item {
             nx_hir::Item::Function(func) => {
                 ctx.infer_function(func);
@@ -235,14 +161,42 @@ fn analyze_lowered_module(
     let (type_env, type_diagnostics) = ctx.finish();
     diagnostics.extend(normalize_diagnostics_file_name(type_diagnostics, file_name));
 
-    module_artifact(
-        file_name,
+    ModuleArtifact {
+        file_name: file_name.to_string(),
         source_id,
-        true,
-        Some(Arc::new(module)),
+        parse_succeeded: true,
+        lowered_module: Some(Arc::new(preserved_module)),
         type_env,
         diagnostics,
-    )
+        imports: analysis_module.imports.clone(),
+    }
+}
+
+fn analyze_string_parse_result(
+    parse_result: nx_syntax::ParseResult,
+    file_name: &str,
+) -> ModuleArtifact {
+    let source_id = SourceId::new(parse_result.source_id.as_u32());
+    let diagnostics = normalize_diagnostics_file_name(parse_result.errors, file_name);
+
+    let Some(tree) = parse_result.tree else {
+        return parse_failure_artifact(file_name, source_id, diagnostics);
+    };
+
+    let module = lower(tree.root(), source_id);
+    analyze_prepared_module(file_name, source_id, module.clone(), module, diagnostics)
+}
+
+fn analyze_parse_result(parse_result: nx_syntax::ParseResult, file_name: &str) -> ModuleArtifact {
+    let source_id = SourceId::new(parse_result.source_id.as_u32());
+    let diagnostics = normalize_diagnostics_file_name(parse_result.errors, file_name);
+
+    let Some(tree) = parse_result.tree else {
+        return parse_failure_artifact(file_name, source_id, diagnostics);
+    };
+
+    let module = lower(tree.root(), source_id);
+    analyze_prepared_module(file_name, source_id, module.clone(), module, diagnostics)
 }
 
 fn parse_failure_artifact(
@@ -294,27 +248,6 @@ fn lowering_diagnostics(diagnostics: &[LoweringDiagnostic], file_name: &str) -> 
                 .build()
         })
         .collect()
-}
-
-fn full_source_span(source: &str) -> TextSpan {
-    let source_len = u32::try_from(source.len())
-        .expect("NX source size should be validated before creating source diagnostics");
-    TextSpan::new(TextSize::from(0), TextSize::from(source_len))
-}
-
-fn library_load_error_diagnostic(source: &str, file_name: &str, error: &io::Error) -> Diagnostic {
-    Diagnostic::error("library-load-error")
-        .with_message(format!("Failed to load library imports: {}", error))
-        .with_label(Label::primary(file_name, full_source_span(source)))
-        .build()
-}
-
-fn library_imports_require_path_diagnostic(source: &str, file_name: &str) -> Diagnostic {
-    Diagnostic::error("library-imports-require-path")
-        .with_message("Library imports require an on-disk source path")
-        .with_label(Label::primary(file_name, full_source_span(source)))
-        .with_help("Pass a real file path as file_name or use a file-based entry point.")
-        .build()
 }
 
 fn normalize_diagnostics_file_name(
@@ -441,7 +374,7 @@ mod tests {
     use nx_hir::{Item, Name};
 
     #[test]
-    fn test_analyze_str_reports_library_imports_require_path_without_source_path() {
+    fn test_analyze_str_preserves_import_metadata_without_resolving_imports() {
         let source = r#"
             import { Button as Layout.Button } from "../ui"
             let root() = { <Layout.Button /> }
@@ -462,10 +395,13 @@ mod tests {
             1,
             "Expected import metadata to be preserved"
         );
-        assert!(result
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code() == Some("library-imports-require-path")));
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code() != Some("library-imports-require-path")),
+            "Prepared-module analysis should not perform implicit import resolution"
+        );
     }
 
     #[test]
@@ -478,8 +414,7 @@ mod tests {
             errors: vec![diagnostic],
             source_id: nx_syntax::SourceId::new(7),
         };
-        let result =
-            analyze_string_parse_result(parse_result, "let root( =", "widgets/search-box.nx", None);
+        let result = analyze_string_parse_result(parse_result, "widgets/search-box.nx");
 
         assert!(
             !result.parse_succeeded,

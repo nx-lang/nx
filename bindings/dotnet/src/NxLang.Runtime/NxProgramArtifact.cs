@@ -3,7 +3,6 @@
 
 using System;
 using System.Text;
-using System.Threading;
 using NxLang.Nx.Interop;
 
 namespace NxLang.Nx;
@@ -13,11 +12,11 @@ namespace NxLang.Nx;
 /// </summary>
 public sealed class NxProgramArtifact : IDisposable
 {
-    private IntPtr _handle;
+    private readonly NxProgramArtifactSafeHandle _handle;
 
     private NxProgramArtifact(IntPtr handle, string fileName)
     {
-        _handle = handle;
+        _handle = new NxProgramArtifactSafeHandle(handle);
         FileName = fileName;
     }
 
@@ -37,6 +36,29 @@ public sealed class NxProgramArtifact : IDisposable
     /// <exception cref="InvalidOperationException">Thrown when the native runtime cannot build the program.</exception>
     public static NxProgramArtifact Build(string source, string? fileName = null)
     {
+        using NxLibraryRegistry registry = new();
+        using NxProgramBuildContext buildContext = registry.CreateBuildContext();
+        return BuildCore(source, buildContext.SafeHandle, fileName);
+    }
+
+    /// <summary>
+    /// Builds a reusable program artifact from NX source text against a preloaded build context.
+    /// </summary>
+    /// <param name="source">The NX source code to build.</param>
+    /// <param name="buildContext">The registry-backed build context used to resolve imported libraries.</param>
+    /// <param name="fileName">Optional file name used for diagnostics and local import normalization.</param>
+    /// <returns>A disposable program artifact handle.</returns>
+    public static NxProgramArtifact Build(string source, NxProgramBuildContext buildContext, string? fileName = null)
+    {
+        ArgumentNullException.ThrowIfNull(buildContext);
+        return BuildCore(source, buildContext.SafeHandle, fileName);
+    }
+
+    private static NxProgramArtifact BuildCore(
+        string source,
+        NxProgramBuildContextSafeHandle? buildContextHandle,
+        string? fileName)
+    {
         ArgumentNullException.ThrowIfNull(source);
 
         NxNativeLibrary.EnsureLoaded();
@@ -48,6 +70,7 @@ public sealed class NxProgramArtifact : IDisposable
         try
         {
             NxEvalStatus status = NxNativeMethods.nx_build_program_artifact(
+                buildContextHandle,
                 sourceBytes,
                 (nuint)sourceBytes.Length,
                 fileNameBytes,
@@ -83,30 +106,15 @@ public sealed class NxProgramArtifact : IDisposable
     /// </summary>
     public void Dispose()
     {
-        ReleaseHandle();
-        GC.SuppressFinalize(this);
+        _handle.Dispose();
     }
 
-    internal IntPtr DangerousGetHandle()
+    internal NxProgramArtifactSafeHandle SafeHandle
     {
-        IntPtr handle = Interlocked.CompareExchange(ref _handle, IntPtr.Zero, IntPtr.Zero);
-        ObjectDisposedException.ThrowIf(handle == IntPtr.Zero, this);
-        return handle;
-    }
-
-    ~NxProgramArtifact()
-    {
-        ReleaseHandle();
-    }
-
-    private void ReleaseHandle()
-    {
-        IntPtr handle = Interlocked.Exchange(ref _handle, IntPtr.Zero);
-        if (handle == IntPtr.Zero)
+        get
         {
-            return;
+            ObjectDisposedException.ThrowIf(_handle.IsClosed || _handle.IsInvalid, this);
+            return _handle;
         }
-
-        NxNativeMethods.nx_free_program_artifact(handle);
     }
 }

@@ -49,8 +49,9 @@
 //! assert!(!result.is_ok());
 //! ```
 //!
-//! When the source depends on local `import` statements, use [`analyze_str_with_path`] so the
-//! analysis pipeline can resolve those imports from disk.
+//! Import resolution is intentionally outside this crate's public analysis surface. Callers that
+//! need library-aware analysis should prepare a module via a higher-level resolver and then use
+//! the prepared-module entry points exposed from [`check`].
 //!
 //! For checking files:
 //!
@@ -134,7 +135,7 @@ pub mod ty;
 
 // Re-export main types
 pub use check::{
-    analyze_str, analyze_str_with_path, check_file, check_str, ModuleArtifact,
+    analyze_prepared_module, analyze_str, check_file, check_str, ModuleArtifact,
     SourceAnalysisResult, TypeCheckResult, TypeCheckSession,
 };
 pub use env::{TypeBinding, TypeEnvironment};

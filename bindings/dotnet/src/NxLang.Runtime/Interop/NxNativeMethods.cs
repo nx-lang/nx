@@ -23,6 +23,7 @@ internal static class NxNativeMethods
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NxEvalStatus nx_build_program_artifact(
+        NxProgramBuildContextSafeHandle? buildContextPtr,
         byte[] sourcePtr,
         nuint sourceLen,
         byte[] fileNamePtr,
@@ -34,25 +35,34 @@ internal static class NxNativeMethods
     internal static extern void nx_free_program_artifact(IntPtr handle);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-    internal static extern NxEvalStatus nx_eval_program_artifact(
-        IntPtr programArtifactPtr,
+    internal static extern NxEvalStatus nx_create_library_registry(out IntPtr outHandle);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern void nx_free_library_registry(IntPtr handle);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NxEvalStatus nx_load_library_into_registry(
+        NxLibraryRegistrySafeHandle registryPtr,
+        byte[] rootPathPtr,
+        nuint rootPathLen,
         out NxBuffer outBuffer);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-    internal static extern NxEvalStatus nx_component_init(
-        byte[] sourcePtr,
-        nuint sourceLen,
-        byte[] fileNamePtr,
-        nuint fileNameLen,
-        byte[] componentNamePtr,
-        nuint componentNameLen,
-        byte[] propsPtr,
-        nuint propsLen,
+    internal static extern NxEvalStatus nx_create_program_build_context(
+        NxLibraryRegistrySafeHandle registryPtr,
+        out IntPtr outHandle);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern void nx_free_program_build_context(IntPtr handle);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NxEvalStatus nx_eval_program_artifact(
+        NxProgramArtifactSafeHandle programArtifactPtr,
         out NxBuffer outBuffer);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NxEvalStatus nx_component_init_program_artifact(
-        IntPtr programArtifactPtr,
+        NxProgramArtifactSafeHandle programArtifactPtr,
         byte[] componentNamePtr,
         nuint componentNameLen,
         byte[] propsPtr,
@@ -60,20 +70,8 @@ internal static class NxNativeMethods
         out NxBuffer outBuffer);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-    internal static extern NxEvalStatus nx_component_dispatch_actions(
-        byte[] sourcePtr,
-        nuint sourceLen,
-        byte[] fileNamePtr,
-        nuint fileNameLen,
-        byte[] stateSnapshotPtr,
-        nuint stateSnapshotLen,
-        byte[] actionsPtr,
-        nuint actionsLen,
-        out NxBuffer outBuffer);
-
-    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NxEvalStatus nx_component_dispatch_actions_program_artifact(
-        IntPtr programArtifactPtr,
+        NxProgramArtifactSafeHandle programArtifactPtr,
         byte[] stateSnapshotPtr,
         nuint stateSnapshotLen,
         byte[] actionsPtr,

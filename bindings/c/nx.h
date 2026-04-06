@@ -13,7 +13,7 @@
 #endif
 
 
-#define NX_FFI_ABI_VERSION 2
+#define NX_FFI_ABI_VERSION 7
 
 enum NxEvalStatus
 #ifdef __cplusplus
@@ -28,6 +28,12 @@ enum NxEvalStatus
 #ifndef __cplusplus
 typedef uint32_t NxEvalStatus;
 #endif // __cplusplus
+
+typedef struct NxLibraryRegistryHandle NxLibraryRegistryHandle;
+
+typedef struct NxProgramArtifactHandle NxProgramArtifactHandle;
+
+typedef struct NxProgramBuildContextHandle NxProgramBuildContextHandle;
 
 typedef struct NxBuffer {
   uint8_t *ptr;
@@ -51,34 +57,51 @@ NxEvalStatus nx_eval_source(const uint8_t *source_ptr,
                             struct NxBuffer *out_buffer);
 
 NX_FFI_EXPORT
-/* Initializes a named component from source. The returned state snapshot is opaque host-owned
- * data and is only valid with the exact same source text revision that produced it. Reusing the
- * snapshot with different source text is undefined behavior.
- */
-NxEvalStatus nx_component_init(const uint8_t *source_ptr,
-                               size_t source_len,
-                               const uint8_t *file_name_ptr,
-                               size_t file_name_len,
-                               const uint8_t *component_name_ptr,
-                               size_t component_name_len,
-                               const uint8_t *props_ptr,
-                               size_t props_len,
-                               struct NxBuffer *out_buffer);
+NxEvalStatus nx_build_program_artifact(const struct NxProgramBuildContextHandle *build_context_ptr,
+                                       const uint8_t *source_ptr,
+                                       size_t source_len,
+                                       const uint8_t *file_name_ptr,
+                                       size_t file_name_len,
+                                       struct NxProgramArtifactHandle **out_handle,
+                                       struct NxBuffer *out_buffer);
+
+NX_FFI_EXPORT NxEvalStatus nx_create_library_registry(struct NxLibraryRegistryHandle **out_handle);
+
+NX_FFI_EXPORT void nx_free_library_registry(struct NxLibraryRegistryHandle *handle);
 
 NX_FFI_EXPORT
-/* Dispatches actions against a previously returned state snapshot. The snapshot must come from
- * nx_component_init or an earlier nx_component_dispatch_actions call using the exact same source
- * text revision. Reusing a snapshot with different source text is undefined behavior.
- */
-NxEvalStatus nx_component_dispatch_actions(const uint8_t *source_ptr,
-                                           size_t source_len,
-                                           const uint8_t *file_name_ptr,
-                                           size_t file_name_len,
-                                           const uint8_t *state_snapshot_ptr,
-                                           size_t state_snapshot_len,
-                                           const uint8_t *actions_ptr,
-                                           size_t actions_len,
+NxEvalStatus nx_load_library_into_registry(const struct NxLibraryRegistryHandle *registry_ptr,
+                                           const uint8_t *root_path_ptr,
+                                           size_t root_path_len,
                                            struct NxBuffer *out_buffer);
+
+NX_FFI_EXPORT
+NxEvalStatus nx_create_program_build_context(const struct NxLibraryRegistryHandle *registry_ptr,
+                                             struct NxProgramBuildContextHandle **out_handle);
+
+NX_FFI_EXPORT void nx_free_program_build_context(struct NxProgramBuildContextHandle *handle);
+
+NX_FFI_EXPORT void nx_free_program_artifact(struct NxProgramArtifactHandle *handle);
+
+NX_FFI_EXPORT
+NxEvalStatus nx_eval_program_artifact(const struct NxProgramArtifactHandle *program_artifact_ptr,
+                                      struct NxBuffer *out_buffer);
+
+NX_FFI_EXPORT
+NxEvalStatus nx_component_init_program_artifact(const struct NxProgramArtifactHandle *program_artifact_ptr,
+                                                const uint8_t *component_name_ptr,
+                                                size_t component_name_len,
+                                                const uint8_t *props_ptr,
+                                                size_t props_len,
+                                                struct NxBuffer *out_buffer);
+
+NX_FFI_EXPORT
+NxEvalStatus nx_component_dispatch_actions_program_artifact(const struct NxProgramArtifactHandle *program_artifact_ptr,
+                                                            const uint8_t *state_snapshot_ptr,
+                                                            size_t state_snapshot_len,
+                                                            const uint8_t *actions_ptr,
+                                                            size_t actions_len,
+                                                            struct NxBuffer *out_buffer);
 
 NX_FFI_EXPORT
 NxEvalStatus nx_value_msgpack_to_json(const uint8_t *payload_ptr,

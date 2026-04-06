@@ -36,6 +36,19 @@ type User extends UserBase = {
 - `abstract type` records can appear in annotations but cannot be instantiated directly.
 - `extends Base` is valid only when `Base` resolves to an abstract record declaration.
 
+## Enum Types
+Enums declare a fixed set of named values.
+
+```nx
+enum DealStage = draft | pending_review | approved_for_launch
+
+let stage = DealStage.pending_review
+```
+
+- Enum members conventionally use `snake_case`.
+- NX serializes enum values exactly as they appear in source, so `pending_review` stays
+  `"pending_review"` over the wire or in storage.
+
 ## Nested records
 
 ```nx

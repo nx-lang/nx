@@ -263,14 +263,14 @@ fn test_void_value() {
 /// Test enum variant value access
 #[test]
 fn test_enum_variant_access() {
-    let source = r#"enum Color = Red | Green | Blue
-let <color /> = { Color.Green }"#;
+    let source = r#"enum Color = red | green | blue
+let <color /> = { Color.green }"#;
 
     let result = execute_function(source, "color", vec![]).unwrap_or_else(|e| panic!("{}", e));
     match result {
         Value::EnumVariant { type_name, variant } => {
             assert_eq!(type_name.as_str(), "Color");
-            assert_eq!(variant.as_str(), "Green");
+            assert_eq!(variant.as_str(), "green");
         }
         other => panic!("Expected EnumVariant, got {:?}", other),
     }
@@ -279,8 +279,8 @@ let <color /> = { Color.Green }"#;
 /// Test undefined enum variant (should error)
 #[test]
 fn test_undefined_enum_variant() {
-    let source = r#"enum Color = Red | Green | Blue
-let <color /> = { Color.Yellow }"#;
+    let source = r#"enum Color = red | green | blue
+let <color /> = { Color.yellow }"#;
 
     let result = execute_function(source, "color", vec![]);
     assert!(result.is_err(), "Expected error for undefined enum variant");

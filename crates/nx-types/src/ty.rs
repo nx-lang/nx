@@ -674,7 +674,7 @@ mod tests {
             "(int, int) => int"
         );
         assert_eq!(
-            Type::enum_type(Name::new("Direction"), vec![Name::new("North")]).to_string(),
+            Type::enum_type(Name::new("Direction"), vec![Name::new("north")]).to_string(),
             "Direction"
         );
     }

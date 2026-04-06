@@ -14,7 +14,7 @@
       id="q2"
       type="singleChoice"
     } >
-    <Label>How did you hear about us?</Label>
+    label=<:html>How *did* you <img/> hear about us?</>
     <Options>
       if includeSocialMedia {
         <Option value="social">Social media</Option>

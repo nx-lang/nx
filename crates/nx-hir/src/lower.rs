@@ -1812,7 +1812,7 @@ private action SaveRequested = {}
 internal component <SearchBox /> = { <input /> }
 type Theme = string
 private let <Render /> = <div />
-internal enum Mode = Light | Dark"#;
+internal enum Mode = light | dark"#;
         let parse_result = parse_str(source, "visibility.nx");
 
         let tree = parse_result.tree.expect("Visibility source should parse");
@@ -1983,7 +1983,7 @@ internal enum Mode = Light | Dark"#;
     fn test_lower_type_alias_and_enum() {
         let source = r#"
             type UserId = string
-            enum Direction = | North | South | East | West
+            enum Direction = | north | south | east | west
         "#;
         let parse_result = parse_str(source, "types.nx");
         let tree = parse_result.tree.expect("Should parse enum/type defs");
@@ -2007,8 +2007,8 @@ internal enum Mode = Light | Dark"#;
                     .iter()
                     .map(|member| member.name.as_str())
                     .collect();
-                assert!(names.contains(&"North"));
-                assert!(names.contains(&"West"));
+                assert!(names.contains(&"north"));
+                assert!(names.contains(&"west"));
             }
             other => panic!("Expected enum definition, got {:?}", other),
         }
@@ -2360,7 +2360,7 @@ internal enum Mode = Light | Dark"#;
     #[test]
     fn test_lower_enum_with_leading_pipe() {
         let source = r#"
-            enum Orientation = | Horizontal | Vertical
+            enum Orientation = | horizontal | vertical
         "#;
         let parse_result = parse_str(source, "enum-lead.nx");
         let tree = parse_result.tree.expect("Should parse enum");
@@ -2379,8 +2379,8 @@ internal enum Mode = Light | Dark"#;
         let enum_def = enums[0];
         assert_eq!(enum_def.name.as_str(), "Orientation");
         assert_eq!(enum_def.members.len(), 2);
-        assert_eq!(enum_def.members[0].name.as_str(), "Horizontal");
-        assert_eq!(enum_def.members[1].name.as_str(), "Vertical");
+        assert_eq!(enum_def.members[0].name.as_str(), "horizontal");
+        assert_eq!(enum_def.members[1].name.as_str(), "vertical");
     }
 
     #[test]
