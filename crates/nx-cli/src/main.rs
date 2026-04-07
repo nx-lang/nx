@@ -2,7 +2,7 @@
 //!
 //! Provides commands like:
 //! - `nxlang run <file>` - Run an NX file and output the result
-//! - `nxlang generate <file> --language <csharp|typescript>` - Generate language-specific type definitions
+//! - `nxlang generate <path> --language <csharp|typescript>` - Generate language-specific type definitions
 //! - `nxlang parse <file>` - Parse and display AST (future)
 //! - `nxlang check <file>` - Type check and report errors (future)
 //! - `nxlang format <file>` - Format NX source code (future)
@@ -12,12 +12,15 @@ mod format;
 mod json;
 
 use clap::{Parser, Subcommand};
-use nx_api::{build_program_artifact_from_source, ProgramArtifact, ProgramBuildContext};
+use nx_api::{
+    build_program_artifact_from_source, LibraryRegistry, NxDiagnostic, ProgramArtifact,
+    ProgramBuildContext,
+};
 use nx_diagnostics::{render_diagnostics_cli, Severity};
 use nx_hir::{lower_source_module, Item, LoweredModule};
 use nx_interpreter::{Interpreter, Value};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
 
 #[derive(Parser)]
@@ -53,18 +56,19 @@ enum Commands {
         output: Option<PathBuf>,
     },
 
-    /// Generate language-specific type definitions from an NX file
+    /// Generate language-specific type definitions from an NX file or library directory
     ///
-    /// Outputs all NX `record` and `enum` type declarations in the file.
+    /// Outputs exported NX type declarations. File input generates one file. Directory input
+    /// analyzes the full library and writes one generated file per contributing module.
     Generate {
-        /// Path to the NX file to read type definitions from
+        /// Path to an NX source file or NX library directory
         file: PathBuf,
 
         /// Target language for generated code
         #[arg(long, value_enum)]
         language: GenLanguage,
 
-        /// Write output to a file instead of stdout
+        /// Write output to a file for single-file generation or a directory for library generation
         #[arg(short, long)]
         output: Option<PathBuf>,
 
@@ -210,79 +214,136 @@ fn generate_types(
     editorconfig: Option<&PathBuf>,
     csharp_namespace: &str,
 ) -> ExitCode {
-    if !path.exists() {
-        eprintln!("Error: File not found: {}", path.display());
+    let input_kind = match classify_generate_input(path) {
+        Ok(kind) => kind,
+        Err(message) => {
+            eprintln!("Error: {}", message);
+            return ExitCode::from(1);
+        }
+    };
+
+    let target_language = match language {
+        GenLanguage::Typescript => codegen::TargetLanguage::TypeScript,
+        GenLanguage::Csharp => codegen::TargetLanguage::CSharp,
+    };
+    let csharp_namespace = match language {
+        GenLanguage::Typescript => None,
+        GenLanguage::Csharp => Some(csharp_namespace.to_string()),
+    };
+
+    let format_target_name = match input_kind {
+        GenerateInputKind::SourceFile => output
+            .and_then(|output_path| output_path.file_name().and_then(|name| name.to_str()))
+            .unwrap_or(codegen::default_single_file_name(target_language)),
+        GenerateInputKind::LibraryDirectory => {
+            codegen::default_library_target_name(target_language)
+        }
+    };
+    let format = match resolve_format_options(target_language, editorconfig, format_target_name) {
+        Ok(format) => format,
+        Err(message) => {
+            eprintln!("Error: {}", message);
+            return ExitCode::from(1);
+        }
+    };
+    let opts = codegen::GenerateTypesOptions {
+        language: target_language,
+        csharp_namespace,
+        format,
+    };
+
+    match input_kind {
+        GenerateInputKind::SourceFile => generate_types_from_file(path, output, &opts),
+        GenerateInputKind::LibraryDirectory => generate_types_from_library(path, output, &opts),
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GenerateInputKind {
+    SourceFile,
+    LibraryDirectory,
+}
+
+fn classify_generate_input(path: &Path) -> Result<GenerateInputKind, String> {
+    let metadata =
+        std::fs::metadata(path).map_err(|_| format!("Input not found: {}", path.display()))?;
+
+    if metadata.is_dir() {
+        return Ok(GenerateInputKind::LibraryDirectory);
+    }
+
+    if metadata.is_file() {
+        if path.extension().and_then(|extension| extension.to_str()) == Some("nx") {
+            return Ok(GenerateInputKind::SourceFile);
+        }
+
+        return Err(format!(
+            "Unsupported input '{}': expected a .nx file or a directory",
+            path.display()
+        ));
+    }
+
+    Err(format!(
+        "Unsupported input '{}': expected a .nx file or a directory",
+        path.display()
+    ))
+}
+
+fn resolve_format_options(
+    language: codegen::TargetLanguage,
+    editorconfig: Option<&PathBuf>,
+    target_file_name: &str,
+) -> Result<codegen::options::FormatOptions, String> {
+    match editorconfig {
+        Some(path) => codegen::format_options_from_editorconfig(language, path, target_file_name),
+        None => Ok(codegen::options::FormatOptions::defaults_for(language)),
+    }
+}
+
+fn generate_types_from_file(
+    path: &Path,
+    output: Option<&PathBuf>,
+    opts: &codegen::GenerateTypesOptions,
+) -> ExitCode {
+    if output.is_some_and(|output_path| output_path.is_dir()) {
+        eprintln!(
+            "Error: Single-file generation requires --output to be a file path, not a directory"
+        );
         return ExitCode::from(1);
     }
 
-    if path.extension().and_then(|e| e.to_str()) != Some("nx") {
-        eprintln!(
-            "Warning: File '{}' does not have .nx extension",
-            path.display()
-        );
-    }
-
     let source = match std::fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Error reading file: {}", e);
+        Ok(source) => source,
+        Err(error) => {
+            eprintln!("Error reading file: {}", error);
             return ExitCode::from(1);
         }
     };
 
     let file_name = path
         .file_name()
-        .and_then(|n| n.to_str())
+        .and_then(|name| name.to_str())
         .unwrap_or("unknown");
-
-    let module = match load_source_module(&source, file_name, path.as_path()) {
+    let module = match load_source_module(&source, file_name, path) {
         Ok(module) => module,
         Err(exit_code) => return exit_code,
     };
 
-    let (language, default_target_name, ns) = match language {
-        GenLanguage::Typescript => (codegen::TargetLanguage::TypeScript, "types.ts", None),
-        GenLanguage::Csharp => (
-            codegen::TargetLanguage::CSharp,
-            "Types.g.cs",
-            Some(csharp_namespace.to_string()),
-        ),
-    };
-
-    let target_file_name = output
-        .and_then(|p| p.file_name().and_then(|n| n.to_str()))
-        .unwrap_or(default_target_name);
-
-    let format = match editorconfig {
-        Some(path) => {
-            match codegen::format_options_from_editorconfig(language, path, target_file_name) {
-                Ok(opts) => opts,
-                Err(e) => {
-                    eprintln!("Error: {}", e);
-                    return ExitCode::from(1);
-                }
-            }
-        }
-        None => codegen::options::FormatOptions::defaults_for(language),
-    };
-
-    let opts = codegen::GenerateTypesOptions {
-        language,
-        csharp_namespace: ns,
-        format,
-    };
-
-    let output_text = match codegen::generate_types(&module, &opts) {
+    let output_text = match codegen::generate_types(&module, path, opts) {
         Ok(text) => text,
-        Err(e) => {
-            eprintln!("Error: {}", e);
+        Err(message) => {
+            eprintln!("Error: {}", message);
             return ExitCode::from(1);
         }
     };
 
     if let Some(output_path) = output {
-        if let Err(e) = std::fs::write(output_path, output_text) {
-            eprintln!("Error writing output to '{}': {}", output_path.display(), e);
+        if let Err(error) = std::fs::write(output_path, output_text) {
+            eprintln!(
+                "Error writing output to '{}': {}",
+                output_path.display(),
+                error
+            );
             return ExitCode::from(1);
         }
     } else {
@@ -290,6 +351,137 @@ fn generate_types(
     }
 
     ExitCode::SUCCESS
+}
+
+fn generate_types_from_library(
+    path: &Path,
+    output: Option<&PathBuf>,
+    opts: &codegen::GenerateTypesOptions,
+) -> ExitCode {
+    let Some(output_root) = output else {
+        eprintln!("Error: Library generation requires an output directory");
+        return ExitCode::from(1);
+    };
+
+    if output_root.exists() && !output_root.is_dir() {
+        eprintln!("Error: Library generation requires --output to be a directory root");
+        return ExitCode::from(1);
+    }
+
+    let registry = LibraryRegistry::new();
+    let library = match registry.load_library_from_directory(path) {
+        Ok(library) => library,
+        Err(diagnostics) => return render_api_diagnostics(&diagnostics),
+    };
+
+    if library.modules.is_empty() {
+        eprintln!(
+            "Error: '{}' is not a valid NX library root because it contains no .nx source files",
+            path.display()
+        );
+        return ExitCode::from(1);
+    }
+
+    let generated_files = match codegen::generate_library_types(library.as_ref(), opts) {
+        Ok(files) => files,
+        Err(message) => {
+            eprintln!("Error: {}", message);
+            return ExitCode::from(1);
+        }
+    };
+
+    if let Err(error) = std::fs::create_dir_all(output_root) {
+        eprintln!(
+            "Error creating output directory '{}': {}",
+            output_root.display(),
+            error
+        );
+        return ExitCode::from(1);
+    }
+
+    for file in generated_files {
+        let target_path = match resolve_generated_output_path(output_root, &file.relative_path) {
+            Ok(path) => path,
+            Err(message) => {
+                eprintln!("Error: {}", message);
+                return ExitCode::from(1);
+            }
+        };
+        if let Some(parent) = target_path.parent() {
+            if let Err(error) = std::fs::create_dir_all(parent) {
+                eprintln!(
+                    "Error creating output directory '{}': {}",
+                    parent.display(),
+                    error
+                );
+                return ExitCode::from(1);
+            }
+        }
+
+        if let Err(error) = std::fs::write(&target_path, file.content) {
+            eprintln!(
+                "Error writing output to '{}': {}",
+                target_path.display(),
+                error
+            );
+            return ExitCode::from(1);
+        }
+    }
+
+    ExitCode::SUCCESS
+}
+
+fn resolve_generated_output_path(
+    output_root: &Path,
+    relative_path: &Path,
+) -> Result<PathBuf, String> {
+    if relative_path.as_os_str().is_empty() {
+        return Err("Generated output path must not be empty".to_string());
+    }
+
+    for component in relative_path.components() {
+        match component {
+            Component::Normal(_) | Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(format!(
+                    "Generated output path '{}' escapes the output directory",
+                    relative_path.display()
+                ));
+            }
+        }
+    }
+
+    Ok(output_root.join(relative_path))
+}
+
+fn render_api_diagnostics(diagnostics: &[NxDiagnostic]) -> ExitCode {
+    for diagnostic in diagnostics {
+        eprintln!("error: {}", diagnostic.message);
+
+        for label in &diagnostic.labels {
+            if label.file.is_empty() {
+                continue;
+            }
+
+            eprintln!(
+                "  --> {}:{}:{}",
+                label.file, label.span.start_line, label.span.start_column
+            );
+            if let Some(message) = &label.message {
+                eprintln!("   | {}", message);
+            }
+        }
+
+        if let Some(help) = &diagnostic.help {
+            eprintln!("help: {}", help);
+        }
+
+        if let Some(note) = &diagnostic.note {
+            eprintln!("note: {}", note);
+        }
+    }
+
+    ExitCode::from(1)
 }
 
 fn format_output(value: &Value, format: OutputFormat) -> Result<String, String> {
@@ -366,6 +558,22 @@ mod tests {
         (dir, file_path)
     }
 
+    fn create_temp_library(files: &[(&str, &str)]) -> (TempDir, PathBuf) {
+        let dir = TempDir::new().unwrap();
+        let library_path = dir.path().join("library");
+        fs::create_dir_all(&library_path).unwrap();
+
+        for (relative_path, content) in files {
+            let file_path = library_path.join(relative_path);
+            if let Some(parent) = file_path.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(&file_path, content).unwrap();
+        }
+
+        (dir, library_path)
+    }
+
     fn build_import_resolved_program(path: &Path) -> ProgramArtifact {
         let source = fs::read_to_string(path).expect("source file should load");
         let file_name = path.display().to_string();
@@ -395,8 +603,17 @@ mod tests {
         }
 
         let build_context = registry.build_context();
-        build_program_artifact_from_source(&source, &file_name, &build_context)
-            .expect("program artifact should build")
+        let artifact = build_program_artifact_from_source(&source, &file_name, &build_context)
+            .expect("program artifact should build");
+        assert!(
+            !artifact
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.severity() == Severity::Error),
+            "Expected import-resolved program to analyze without errors, got {:?}",
+            artifact.diagnostics
+        );
+        artifact
     }
 
     #[test]
@@ -424,7 +641,7 @@ mod tests {
         fs::create_dir_all(&app_dir).expect("app dir");
         fs::create_dir_all(&math_dir).expect("math dir");
 
-        fs::write(math_dir.join("add.nx"), r#"let addOne(n:int) = { n + 1 }"#)
+        fs::write(math_dir.join("add.nx"), r#"export let addOne(n:int) = { n + 1 }"#)
             .expect("math library");
         fs::write(
             app_dir.join("main.nx"),
@@ -450,7 +667,8 @@ let root() = { Math.addOne(41) }"#,
         fs::create_dir_all(&app_dir).expect("app dir");
         fs::create_dir_all(&ui_dir).expect("ui dir");
 
-        fs::write(ui_dir.join("theme.nx"), r#"let title() = { "Hello" }"#).expect("ui library");
+        fs::write(ui_dir.join("theme.nx"), r#"export let title() = { "Hello" }"#)
+            .expect("ui library");
         fs::write(
             app_dir.join("main.nx"),
             r#"import { title as Ui.title } from "../ui"
@@ -756,6 +974,197 @@ let root() = { Ui.title() }"#,
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("No root element found"));
         assert!(stderr.contains("Hint:"));
+    }
+
+    #[test]
+    fn test_cli_generate_file_infers_single_file_generation() {
+        let source = r#"
+            type Hidden = string
+            export type Theme = string
+            export action SearchRequested = { query:string }
+        "#;
+        let (_dir, path) = create_temp_nx_file(source);
+
+        let output = run_cli(&[
+            "generate",
+            path.to_str().unwrap(),
+            "--language",
+            "typescript",
+        ]);
+
+        assert!(
+            output.status.success(),
+            "CLI should generate for .nx file input"
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("export type Theme = string;"));
+        assert!(stdout.contains("export interface SearchRequested {"));
+        assert!(!stdout.contains("Hidden"));
+    }
+
+    #[test]
+    fn test_cli_generate_rejects_non_nx_files() {
+        let dir = TempDir::new().unwrap();
+        let file_path = dir.path().join("README.md");
+        fs::write(&file_path, "# Not NX").unwrap();
+
+        let output = run_cli(&[
+            "generate",
+            file_path.to_str().unwrap(),
+            "--language",
+            "typescript",
+        ]);
+
+        assert!(!output.status.success(), "CLI should reject non-NX files");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("Unsupported input"));
+        assert!(stderr.contains(".nx file or a directory"));
+    }
+
+    #[test]
+    fn test_cli_generate_library_requires_output_directory() {
+        let (_dir, library_path) =
+            create_temp_library(&[("theme.nx", "export enum ThemeMode = | light | dark")]);
+
+        let output = run_cli(&[
+            "generate",
+            library_path.to_str().unwrap(),
+            "--language",
+            "typescript",
+        ]);
+
+        assert!(
+            !output.status.success(),
+            "CLI should require --output for library generation"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("Library generation requires an output directory"));
+    }
+
+    #[test]
+    fn test_cli_generate_rejects_empty_library_directory() {
+        let dir = TempDir::new().unwrap();
+        let library_path = dir.path().join("empty-library");
+        let output_path = dir.path().join("generated");
+        fs::create_dir_all(&library_path).unwrap();
+
+        let output = run_cli(&[
+            "generate",
+            library_path.to_str().unwrap(),
+            "--language",
+            "typescript",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        assert!(
+            !output.status.success(),
+            "CLI should reject empty library directories"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("contains no .nx source files"));
+    }
+
+    #[test]
+    fn test_cli_generate_surfaces_library_diagnostics() {
+        let (_dir, library_path) =
+            create_temp_library(&[("broken.nx", r#"export let answer(): int = { "oops" }"#)]);
+        let output_path = library_path.parent().unwrap().join("generated");
+
+        let output = run_cli(&[
+            "generate",
+            library_path.to_str().unwrap(),
+            "--language",
+            "typescript",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        assert!(
+            !output.status.success(),
+            "CLI should fail when library analysis reports errors"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("error:"));
+        assert!(stderr.contains("broken.nx"));
+    }
+
+    #[test]
+    fn test_cli_generate_library_writes_typescript_output() {
+        let (dir, library_path) = create_temp_library(&[
+            ("theme.nx", "export enum ThemeMode = | light | dark"),
+            (
+                "forms.nx",
+                "export type FormState = { theme: ThemeMode }\nexport type FormTheme = ThemeMode",
+            ),
+        ]);
+        let output_path = dir.path().join("generated-ts");
+
+        let output = run_cli(&[
+            "generate",
+            library_path.to_str().unwrap(),
+            "--language",
+            "typescript",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        assert!(
+            output.status.success(),
+            "CLI should write TypeScript library output"
+        );
+        let forms = fs::read_to_string(output_path.join("forms.ts")).unwrap();
+        let theme = fs::read_to_string(output_path.join("theme.ts")).unwrap();
+        let index = fs::read_to_string(output_path.join("index.ts")).unwrap();
+
+        assert!(forms.contains("import type { ThemeMode } from \"./theme\";"));
+        assert!(forms.contains("export interface FormState {"));
+        assert!(forms.contains("export type FormTheme = ThemeMode;"));
+        assert!(theme.contains("export type ThemeMode = \"light\" | \"dark\";"));
+        assert!(index.contains("export * from \"./forms\";"));
+        assert!(index.contains("export * from \"./theme\";"));
+    }
+
+    #[test]
+    fn test_cli_generate_library_writes_csharp_output() {
+        let (dir, library_path) = create_temp_library(&[
+            ("theme.nx", "export enum ThemeMode = | light | dark"),
+            ("forms.nx", "export type FormState = { theme: ThemeMode }"),
+        ]);
+        let output_path = dir.path().join("generated-cs");
+
+        let output = run_cli(&[
+            "generate",
+            library_path.to_str().unwrap(),
+            "--language",
+            "csharp",
+            "--csharp-namespace",
+            "MyApp.Models",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        assert!(
+            output.status.success(),
+            "CLI should write C# library output"
+        );
+        let forms = fs::read_to_string(output_path.join("forms.g.cs")).unwrap();
+        let theme = fs::read_to_string(output_path.join("theme.g.cs")).unwrap();
+
+        assert!(forms.contains("namespace MyApp.Models"));
+        assert!(forms.contains("public sealed class FormState"));
+        assert!(forms.contains("public ThemeMode Theme { get; set; }"));
+        assert!(theme.contains("namespace MyApp.Models"));
+        assert!(theme.contains("public enum ThemeMode"));
+    }
+
+    #[test]
+    fn test_resolve_generated_output_path_rejects_parent_dir_escape() {
+        let output_root = Path::new("/tmp/generated");
+        let error = resolve_generated_output_path(output_root, Path::new("../escape.ts"))
+            .expect_err("parent-dir output path should be rejected");
+
+        assert!(error.contains("escapes the output directory"));
     }
 
     #[test]

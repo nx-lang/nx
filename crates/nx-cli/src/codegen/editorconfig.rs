@@ -141,6 +141,9 @@ fn parse_key_value(line: &str) -> Option<(String, String)> {
 }
 
 fn strip_comment(line: &str) -> &str {
+    // This intentionally treats the first '#' or ';' as the start of a comment. That is enough
+    // for the small set of supported EditorConfig properties because none of their values contain
+    // comment characters.
     let mut chars = line.char_indices();
     while let Some((idx, ch)) = chars.next() {
         if ch == '#' || ch == ';' {

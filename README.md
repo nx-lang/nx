@@ -82,6 +82,26 @@ for (name, result) in session.check_all() {
 }
 ```
 
+### Generated Types
+
+Use `nxlang generate` with either a single `.nx` file or a full library directory:
+
+```bash
+# Single-file generation writes one output unit to stdout by default.
+nxlang generate ./models/person.nx --language typescript
+
+# Library generation writes one generated file per contributing NX module.
+nxlang generate ./ui --language csharp --csharp-namespace MyApp.Models --output ./generated
+```
+
+Generated output includes only exported type declarations:
+
+- `export type` aliases
+- `export enum` declarations
+- `export type` / `export action` record-like declarations
+
+Directory input must point at a valid NX library root and always requires `--output`.
+
 ## Features
 
 ### Parsing (nx-syntax)

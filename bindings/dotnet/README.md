@@ -246,8 +246,16 @@ diagnostic set and does not execute `root`, component initialization, or compone
 NX type generation remains C#-first:
 
 ```bash
-nxlang codegen --language csharp --namespace MyApp.Models Person.nx > Person.cs
+# Single NX file to stdout or a chosen file
+nxlang generate Person.nx --language csharp --csharp-namespace MyApp.Models > Person.g.cs
+
+# Full NX library to a generated output directory
+nxlang generate ./models --language csharp --csharp-namespace MyApp.Models --output ./generated
 ```
+
+Generation now honors NX export visibility, so only declarations marked `export` are emitted.
+Library generation writes one `.g.cs` file per contributing module under the requested output
+directory.
 
 ## Troubleshooting
 
