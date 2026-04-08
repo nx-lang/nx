@@ -2,13 +2,14 @@
 
 use crate::context::{ExecutionContext, ResourceLimits};
 use crate::error::{RuntimeError, RuntimeErrorKind};
-use crate::resolved_program::{ResolvedProgram, RuntimeModuleId};
+use crate::resolved_program::{ResolvedItemKind, ResolvedProgram, RuntimeModuleId};
 use crate::value::Value;
 use la_arena::RawIdx;
 use nx_hir::{
     ast, effective_record_shape_for_name,
     resolve_record_definition as resolve_hir_record_definition, ElementId, ExprId, Function, Item,
-    LoweredModule, Name, RecordKind,
+    LoweredModule, Name, PreparedBinding, PreparedBindingOrigin, PreparedBindingTarget,
+    PreparedItemKind, PreparedModule, RecordKind,
 };
 use nx_types::{
     common_supertype, is_object_type, resolve_type_ref_with, resolve_type_ref_with_seen,
@@ -18,7 +19,9 @@ use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 const COMPONENT_SNAPSHOT_VERSION: u32 = 1;
 
@@ -26,6 +29,7 @@ const COMPONENT_SNAPSHOT_VERSION: u32 = 1;
 #[derive(Debug)]
 pub struct Interpreter {
     program: Option<ResolvedProgram>,
+    runtime_prepared_cache: RefCell<FxHashMap<RuntimeModuleId, Arc<PreparedModule>>>,
 }
 
 /// Result of component initialization.
@@ -95,13 +99,17 @@ struct DecodedComponentSnapshot {
 impl Interpreter {
     /// Create a new interpreter
     pub fn new() -> Self {
-        Self { program: None }
+        Self {
+            program: None,
+            runtime_prepared_cache: RefCell::new(FxHashMap::default()),
+        }
     }
 
     /// Create a new interpreter bound to a resolved program.
     pub fn from_resolved_program(program: ResolvedProgram) -> Self {
         Self {
             program: Some(program),
+            runtime_prepared_cache: RefCell::new(FxHashMap::default()),
         }
     }
 
@@ -221,13 +229,20 @@ impl Interpreter {
                 name: SmolStr::new(function_name),
             })
         })?;
+        let item = module
+            .lowered_module
+            .item_by_definition(entry.definition_id)
+            .ok_or_else(|| {
+                RuntimeError::new(RuntimeErrorKind::FunctionNotFound {
+                    name: SmolStr::new(function_name),
+                })
+            })?;
+        let target_name = match item {
+            Item::Function(function) => function.name.as_str(),
+            _ => function_name,
+        };
 
-        self.execute_function_with_limits(
-            module.lowered_module.as_ref(),
-            &entry.item_name,
-            args,
-            limits,
-        )
+        self.execute_function_with_limits(module.lowered_module.as_ref(), target_name, args, limits)
     }
 
     /// Initialize a resolved-program component entrypoint.
@@ -265,10 +280,22 @@ impl Interpreter {
                 name: SmolStr::new(component_name),
             })
         })?;
+        let item = module
+            .lowered_module
+            .item_by_definition(entry.definition_id)
+            .ok_or_else(|| {
+                RuntimeError::new(RuntimeErrorKind::ComponentNotFound {
+                    name: SmolStr::new(component_name),
+                })
+            })?;
+        let target_name = match item {
+            Item::Component(component) => component.name.as_str(),
+            _ => component_name,
+        };
 
         self.initialize_component_with_limits(
             module.lowered_module.as_ref(),
-            &entry.item_name,
+            target_name,
             props,
             limits,
         )
@@ -363,23 +390,102 @@ impl Interpreter {
         }
     }
 
+    fn runtime_prepared_module(&self, module: &LoweredModule) -> Arc<PreparedModule> {
+        let module_identity = self
+            .program
+            .as_ref()
+            .and_then(|program| {
+                self.current_module_id(module).and_then(|module_id| {
+                    program
+                        .module(module_id)
+                        .map(|resolved_module| resolved_module.identity.clone())
+                })
+            })
+            .unwrap_or_else(|| "<runtime>".to_string());
+
+        let Some(program) = self.program.as_ref() else {
+            return Arc::new(PreparedModule::standalone(module_identity, module.clone()));
+        };
+        let Some(module_id) = self.current_module_id(module) else {
+            return Arc::new(PreparedModule::standalone(module_identity, module.clone()));
+        };
+
+        if let Some(prepared) = self.runtime_prepared_cache.borrow().get(&module_id) {
+            return Arc::clone(prepared);
+        };
+
+        let mut prepared = PreparedModule::standalone(module_identity, module.clone());
+        let Some(visible_items) = program.imported_items(module_id) else {
+            let prepared = Arc::new(prepared);
+            self.runtime_prepared_cache
+                .borrow_mut()
+                .insert(module_id, Arc::clone(&prepared));
+            return prepared;
+        };
+
+        for (visible_name, item_ref) in visible_items {
+            let Some(target_module) = program.module(item_ref.module_id) else {
+                continue;
+            };
+            let Some(kind) = runtime_prepared_item_kind(item_ref.kind) else {
+                continue;
+            };
+
+            prepared.add_peer_module(
+                target_module.identity.clone(),
+                target_module.lowered_module.clone(),
+            );
+
+            for namespace in kind.namespaces() {
+                prepared.insert_binding(PreparedBinding {
+                    visible_name: Name::new(visible_name),
+                    namespace: *namespace,
+                    kind,
+                    origin: PreparedBindingOrigin::Peer {
+                        module_identity: target_module.identity.clone(),
+                    },
+                    target: PreparedBindingTarget::Peer {
+                        module_identity: target_module.identity.clone(),
+                        definition_id: item_ref.definition_id,
+                    },
+                });
+            }
+        }
+
+        let prepared = Arc::new(prepared);
+        self.runtime_prepared_cache
+            .borrow_mut()
+            .insert(module_id, Arc::clone(&prepared));
+        prepared
+    }
+
     fn resolve_item<'a>(
         &'a self,
         module: &'a LoweredModule,
         name: &str,
     ) -> Option<(&'a LoweredModule, &'a Item)> {
-        if let Some(item) = module.find_item(name) {
-            return Some((module, item));
+        if let Some(program) = self.program.as_ref() {
+            let module_id = self.current_module_id(module)?;
+            if let Some(item_ref) = program.local_item(module_id, name) {
+                let target_module = program.module(item_ref.module_id)?;
+                let item = target_module
+                    .lowered_module
+                    .item_by_definition(item_ref.definition_id)?;
+                return Some((target_module.lowered_module.as_ref(), item));
+            }
+
+            if let Some(item_ref) = program.imported_item(module_id, name) {
+                let target_module = program.module(item_ref.module_id)?;
+                let item = target_module
+                    .lowered_module
+                    .item_by_definition(item_ref.definition_id)?;
+                return Some((target_module.lowered_module.as_ref(), item));
+            }
+
+            return None;
         }
 
-        let program = self.program.as_ref()?;
-        let module_id = self.current_module_id(module)?;
-        let item_ref = program.imported_item(module_id, name)?;
-        let target_module = program.module(item_ref.module_id)?;
-        let item = target_module
-            .lowered_module
-            .find_item(&item_ref.item_name)?;
-        Some((target_module.lowered_module.as_ref(), item))
+        module.find_item(name).map(|item| (module, item))
     }
 
     /// Execute a function with custom resource limits
@@ -2099,9 +2205,10 @@ impl Interpreter {
         name: &str,
     ) -> Option<nx_hir::RecordDef> {
         let (target_module, item) = self.resolve_item(module, name)?;
+        let prepared = self.runtime_prepared_module(target_module);
         match item {
             Item::Record(record_def) => Some(record_def.clone()),
-            Item::TypeAlias(alias) => resolve_hir_record_definition(target_module, &alias.name),
+            Item::TypeAlias(alias) => resolve_hir_record_definition(prepared.as_ref(), &alias.name),
             _ => None,
         }
     }
@@ -2141,7 +2248,8 @@ impl Interpreter {
             .resolve_item(module, name.as_str())
             .map(|(target_module, _)| target_module)
             .unwrap_or(module);
-        let shape = effective_record_shape_for_name(target_module, name)
+        let prepared = self.runtime_prepared_module(target_module);
+        let shape = effective_record_shape_for_name(prepared.as_ref(), name)
             .map_err(|error| self.record_resolution_runtime_error(error))?;
 
         shape.ok_or_else(|| {
@@ -2394,6 +2502,17 @@ impl Interpreter {
                 ),
             })),
         }
+    }
+}
+
+fn runtime_prepared_item_kind(kind: ResolvedItemKind) -> Option<PreparedItemKind> {
+    match kind {
+        ResolvedItemKind::Function => Some(PreparedItemKind::Function),
+        ResolvedItemKind::Value => Some(PreparedItemKind::Value),
+        ResolvedItemKind::Component => Some(PreparedItemKind::Component),
+        ResolvedItemKind::TypeAlias => Some(PreparedItemKind::TypeAlias),
+        ResolvedItemKind::Enum => Some(PreparedItemKind::Enum),
+        ResolvedItemKind::Record => Some(PreparedItemKind::Record),
     }
 }
 
@@ -2874,6 +2993,23 @@ mod tests {
             &RuntimeErrorKind::RecordTypeNotFound {
                 name: SmolStr::new("MissingRecord"),
             }
+        );
+    }
+
+    #[test]
+    fn test_runtime_prepared_module_is_cached_per_runtime_module() {
+        let source = r#"
+            type User = { name:string }
+            let root() = { <User name={"Ada"} /> }
+        "#;
+
+        let (module, interpreter) = lower_module_runtime(source);
+        let first = interpreter.runtime_prepared_module(module.as_ref());
+        let second = interpreter.runtime_prepared_module(module.as_ref());
+
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "Expected runtime prepared modules to be cached per runtime module"
         );
     }
 

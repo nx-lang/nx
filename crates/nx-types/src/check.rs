@@ -2,7 +2,7 @@
 
 use crate::{InferenceContext, Type, TypeEnvironment};
 use nx_diagnostics::{Diagnostic, Label, Severity};
-use nx_hir::{lower, ExprId, Import, LoweredModule, LoweringDiagnostic, SourceId};
+use nx_hir::{lower, ExprId, Import, LoweredModule, LoweringDiagnostic, PreparedModule, SourceId};
 use nx_syntax::{parse_file as syntax_parse_file, parse_str as syntax_parse_str};
 use rustc_hash::FxHashMap;
 use std::io;
@@ -119,33 +119,41 @@ pub fn check_file(path: impl AsRef<Path>) -> io::Result<TypeCheckResult> {
     Ok(analyze_parse_result(parse_result, &file_name))
 }
 
-/// Analyzes a prepared module artifact where import resolution or other augmentation has already
-/// been applied to the analysis module.
+/// Analyzes a caller-prepared module where visible bindings have already been constructed.
 pub fn analyze_prepared_module(
     file_name: &str,
-    source_id: SourceId,
-    preserved_module: LoweredModule,
-    analysis_module: LoweredModule,
+    mut prepared_module: PreparedModule,
     mut diagnostics: Vec<Diagnostic>,
 ) -> ModuleArtifact {
+    for error in nx_hir::validate_record_definitions(&prepared_module) {
+        prepared_module.add_diagnostic(LoweringDiagnostic {
+            message: error.message(),
+            span: error.span(),
+        });
+    }
+
     diagnostics.extend(lowering_diagnostics(
-        analysis_module.diagnostics(),
+        prepared_module.raw_module().diagnostics(),
+        file_name,
+    ));
+    diagnostics.extend(lowering_diagnostics(
+        prepared_module.diagnostics(),
         file_name,
     ));
 
-    let (_scope_manager, scope_diagnostics) = nx_hir::build_scopes(&analysis_module);
+    let (scope_manager, scope_diagnostics) = nx_hir::build_scopes(&prepared_module);
     diagnostics.extend(normalize_diagnostics_file_name(
         scope_diagnostics,
         file_name,
     ));
+    diagnostics.extend(normalize_diagnostics_file_name(
+        nx_hir::check_undefined_identifiers(&prepared_module, &scope_manager),
+        file_name,
+    ));
 
-    let mut ctx = InferenceContext::with_file_name(&analysis_module, file_name);
+    let mut ctx = InferenceContext::with_file_name(&prepared_module, file_name);
 
-    for (index, item) in analysis_module.items().iter().enumerate() {
-        if analysis_module.is_external_item(index) {
-            continue;
-        }
-
+    for item in prepared_module.raw_module().items() {
         match item {
             nx_hir::Item::Function(func) => {
                 ctx.infer_function(func);
@@ -161,6 +169,10 @@ pub fn analyze_prepared_module(
     let (type_env, type_diagnostics) = ctx.finish();
     diagnostics.extend(normalize_diagnostics_file_name(type_diagnostics, file_name));
 
+    let preserved_module = prepared_module.raw_module().clone();
+    let source_id = prepared_module.source_id();
+    let imports = preserved_module.imports.clone();
+
     ModuleArtifact {
         file_name: file_name.to_string(),
         source_id,
@@ -168,7 +180,7 @@ pub fn analyze_prepared_module(
         lowered_module: Some(Arc::new(preserved_module)),
         type_env,
         diagnostics,
-        imports: analysis_module.imports.clone(),
+        imports,
     }
 }
 
@@ -184,7 +196,11 @@ fn analyze_string_parse_result(
     };
 
     let module = lower(tree.root(), source_id);
-    analyze_prepared_module(file_name, source_id, module.clone(), module, diagnostics)
+    analyze_prepared_module(
+        file_name,
+        PreparedModule::standalone(file_name, module),
+        diagnostics,
+    )
 }
 
 fn analyze_parse_result(parse_result: nx_syntax::ParseResult, file_name: &str) -> ModuleArtifact {
@@ -196,7 +212,11 @@ fn analyze_parse_result(parse_result: nx_syntax::ParseResult, file_name: &str) -
     };
 
     let module = lower(tree.root(), source_id);
-    analyze_prepared_module(file_name, source_id, module.clone(), module, diagnostics)
+    analyze_prepared_module(
+        file_name,
+        PreparedModule::standalone(file_name, module),
+        diagnostics,
+    )
 }
 
 fn parse_failure_artifact(

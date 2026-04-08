@@ -1,9 +1,10 @@
 use nx_diagnostics::{Diagnostic, Label, Severity, TextSize, TextSpan};
 use nx_hir::{
-    ast::{Expr, Stmt, TypeRef},
-    lower, Component, ComponentEmit, Element, ElementId, EnumDef, EnumMember, Function, Import,
-    ImportKind, Item, LoweredModule, LoweringDiagnostic, Name, Param, Property, RecordDef,
-    RecordField, RecordKind, SelectiveImport, SourceId, TypeAlias, ValueDef, Visibility,
+    ast::TypeRef, binding_specs_for_item, local_definition_id, lower, Import, ImportKind,
+    InterfaceField, InterfaceItem, InterfaceItemKind, InterfaceParam, Item, LocalDefinitionId,
+    LoweredModule, LoweringDiagnostic, Name, PreparedBinding, PreparedBindingOrigin,
+    PreparedBindingTarget, PreparedModule, PreparedNamespace, RecordField, SelectiveImport,
+    SourceId, Visibility,
 };
 use nx_interpreter::{
     ModuleQualifiedItemRef, ResolvedItemKind, ResolvedModule, ResolvedProgram, RuntimeModuleId,
@@ -23,161 +24,14 @@ use std::sync::{Arc, RwLock};
 pub struct LibraryExport {
     pub module_file: String,
     pub item_name: String,
+    pub definition_id: LocalDefinitionId,
     pub kind: ResolvedItemKind,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LibraryInterfaceParam {
-    pub name: Name,
-    pub ty: TypeRef,
-    pub is_content: bool,
-    pub span: TextSpan,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LibraryInterfaceField {
-    pub name: Name,
-    pub ty: TypeRef,
-    pub is_content: bool,
-    pub span: TextSpan,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LibraryInterfaceKind {
-    Function {
-        params: Vec<LibraryInterfaceParam>,
-        return_type: TypeRef,
-        span: TextSpan,
-    },
-    Value {
-        ty: TypeRef,
-        span: TextSpan,
-    },
-    Component {
-        props: Vec<LibraryInterfaceField>,
-        emits: Vec<ComponentEmit>,
-        state: Vec<LibraryInterfaceField>,
-        span: TextSpan,
-    },
-    TypeAlias {
-        ty: TypeRef,
-        span: TextSpan,
-    },
-    Enum {
-        members: Vec<EnumMember>,
-        span: TextSpan,
-    },
-    Record {
-        kind: RecordKind,
-        is_abstract: bool,
-        base: Option<Name>,
-        properties: Vec<LibraryInterfaceField>,
-        span: TextSpan,
-    },
-}
-
-impl LibraryInterfaceKind {
-    fn kind(&self) -> ResolvedItemKind {
-        match self {
-            Self::Function { .. } => ResolvedItemKind::Function,
-            Self::Value { .. } => ResolvedItemKind::Value,
-            Self::Component { .. } => ResolvedItemKind::Component,
-            Self::TypeAlias { .. } => ResolvedItemKind::TypeAlias,
-            Self::Enum { .. } => ResolvedItemKind::Enum,
-            Self::Record { .. } => ResolvedItemKind::Record,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LibraryInterfaceItem {
-    pub module_file: String,
-    pub item_name: String,
-    pub visibility: Visibility,
-    pub item: LibraryInterfaceKind,
-}
-
-impl LibraryInterfaceItem {
-    fn kind(&self) -> ResolvedItemKind {
-        self.item.kind()
-    }
-
-    fn synthesize_item(&self, visible_name: &str, module: &mut LoweredModule) -> Item {
-        match &self.item {
-            LibraryInterfaceKind::Function {
-                params,
-                return_type,
-                span,
-            } => Item::Function(Function {
-                name: Name::new(visible_name),
-                visibility: self.visibility,
-                params: params
-                    .iter()
-                    .map(|param| Param {
-                        name: param.name.clone(),
-                        ty: param.ty.clone(),
-                        is_content: param.is_content,
-                        span: param.span,
-                    })
-                    .collect(),
-                return_type: Some(return_type.clone()),
-                body: module.alloc_expr(nx_hir::ast::Expr::Error(*span)),
-                span: *span,
-            }),
-            LibraryInterfaceKind::Value { ty, span } => Item::Value(ValueDef {
-                name: Name::new(visible_name),
-                visibility: self.visibility,
-                ty: Some(ty.clone()),
-                value: module.alloc_expr(nx_hir::ast::Expr::Error(*span)),
-                span: *span,
-            }),
-            LibraryInterfaceKind::Component {
-                props,
-                emits,
-                state,
-                span,
-            } => Item::Component(Component {
-                name: Name::new(visible_name),
-                visibility: self.visibility,
-                props: props.iter().map(interface_field_to_record_field).collect(),
-                emits: emits.clone(),
-                state: state.iter().map(interface_field_to_record_field).collect(),
-                body: module.alloc_expr(nx_hir::ast::Expr::Error(*span)),
-                span: *span,
-            }),
-            LibraryInterfaceKind::TypeAlias { ty, span } => Item::TypeAlias(TypeAlias {
-                name: Name::new(visible_name),
-                visibility: self.visibility,
-                ty: ty.clone(),
-                span: *span,
-            }),
-            LibraryInterfaceKind::Enum { members, span } => Item::Enum(EnumDef {
-                name: Name::new(visible_name),
-                visibility: self.visibility,
-                members: members.clone(),
-                span: *span,
-            }),
-            LibraryInterfaceKind::Record {
-                kind,
-                is_abstract,
-                base,
-                properties,
-                span,
-            } => Item::Record(RecordDef {
-                name: Name::new(visible_name),
-                visibility: self.visibility,
-                kind: *kind,
-                is_abstract: *is_abstract,
-                base: base.clone(),
-                properties: properties
-                    .iter()
-                    .map(interface_field_to_record_field)
-                    .collect(),
-                span: *span,
-            }),
-        }
-    }
-}
+pub type LibraryInterfaceParam = InterfaceParam;
+pub type LibraryInterfaceField = InterfaceField;
+pub type LibraryInterfaceKind = InterfaceItemKind;
+pub type LibraryInterfaceItem = InterfaceItem;
 
 /// File-preserving artifact for one local NX library directory.
 #[derive(Debug, Clone)]
@@ -466,262 +320,6 @@ struct PreparedRootModule {
     diagnostics: Vec<Diagnostic>,
 }
 
-struct ModuleCopier<'dst, 'src> {
-    dst: &'dst mut LoweredModule,
-    src: &'src LoweredModule,
-    expr_map: FxHashMap<nx_hir::ExprId, nx_hir::ExprId>,
-    element_map: FxHashMap<ElementId, ElementId>,
-}
-
-impl<'dst, 'src> ModuleCopier<'dst, 'src> {
-    fn new(dst: &'dst mut LoweredModule, src: &'src LoweredModule) -> Self {
-        Self {
-            dst,
-            src,
-            expr_map: FxHashMap::default(),
-            element_map: FxHashMap::default(),
-        }
-    }
-
-    fn copy_item(&mut self, item: &Item, visible_name: &str) -> Item {
-        match item {
-            Item::Function(function) => Item::Function(Function {
-                name: Name::new(visible_name),
-                visibility: function.visibility,
-                params: function.params.clone(),
-                return_type: function.return_type.clone(),
-                body: self.copy_expr(function.body),
-                span: function.span,
-            }),
-            Item::Value(value) => Item::Value(ValueDef {
-                name: Name::new(visible_name),
-                visibility: value.visibility,
-                ty: value.ty.clone(),
-                value: self.copy_expr(value.value),
-                span: value.span,
-            }),
-            Item::Component(component) => Item::Component(Component {
-                name: Name::new(visible_name),
-                visibility: component.visibility,
-                props: component
-                    .props
-                    .iter()
-                    .map(|field| self.copy_record_field(field))
-                    .collect(),
-                emits: component.emits.clone(),
-                state: component
-                    .state
-                    .iter()
-                    .map(|field| self.copy_record_field(field))
-                    .collect(),
-                body: self.copy_expr(component.body),
-                span: component.span,
-            }),
-            Item::TypeAlias(alias) => Item::TypeAlias(TypeAlias {
-                name: Name::new(visible_name),
-                visibility: alias.visibility,
-                ty: alias.ty.clone(),
-                span: alias.span,
-            }),
-            Item::Enum(enum_def) => Item::Enum(EnumDef {
-                name: Name::new(visible_name),
-                visibility: enum_def.visibility,
-                members: enum_def.members.clone(),
-                span: enum_def.span,
-            }),
-            Item::Record(record) => Item::Record(RecordDef {
-                name: Name::new(visible_name),
-                visibility: record.visibility,
-                kind: record.kind,
-                is_abstract: record.is_abstract,
-                base: record.base.clone(),
-                properties: record
-                    .properties
-                    .iter()
-                    .map(|field| self.copy_record_field(field))
-                    .collect(),
-                span: record.span,
-            }),
-        }
-    }
-
-    fn copy_record_field(&mut self, field: &RecordField) -> RecordField {
-        RecordField {
-            name: field.name.clone(),
-            ty: field.ty.clone(),
-            is_content: field.is_content,
-            default: field.default.map(|expr| self.copy_expr(expr)),
-            span: field.span,
-        }
-    }
-
-    fn copy_stmt(&mut self, stmt: &Stmt) -> Stmt {
-        match stmt {
-            Stmt::Let {
-                name,
-                ty,
-                init,
-                span,
-            } => Stmt::Let {
-                name: name.clone(),
-                ty: ty.clone(),
-                init: self.copy_expr(*init),
-                span: *span,
-            },
-            Stmt::Expr(expr, span) => Stmt::Expr(self.copy_expr(*expr), *span),
-        }
-    }
-
-    fn copy_expr(&mut self, expr_id: nx_hir::ExprId) -> nx_hir::ExprId {
-        if let Some(&mapped) = self.expr_map.get(&expr_id) {
-            return mapped;
-        }
-
-        let expr = match self.src.expr(expr_id).clone() {
-            Expr::Literal(literal) => Expr::Literal(literal),
-            Expr::Ident(name) => Expr::Ident(name),
-            Expr::BinaryOp { lhs, op, rhs, span } => Expr::BinaryOp {
-                lhs: self.copy_expr(lhs),
-                op,
-                rhs: self.copy_expr(rhs),
-                span,
-            },
-            Expr::UnaryOp { op, expr, span } => Expr::UnaryOp {
-                op,
-                expr: self.copy_expr(expr),
-                span,
-            },
-            Expr::Call { func, args, span } => Expr::Call {
-                func: self.copy_expr(func),
-                args: args.into_iter().map(|arg| self.copy_expr(arg)).collect(),
-                span,
-            },
-            Expr::If {
-                condition,
-                then_branch,
-                else_branch,
-                span,
-            } => Expr::If {
-                condition: self.copy_expr(condition),
-                then_branch: self.copy_expr(then_branch),
-                else_branch: else_branch.map(|branch| self.copy_expr(branch)),
-                span,
-            },
-            Expr::Let {
-                name,
-                value,
-                body,
-                span,
-            } => Expr::Let {
-                name,
-                value: self.copy_expr(value),
-                body: self.copy_expr(body),
-                span,
-            },
-            Expr::Block { stmts, expr, span } => Expr::Block {
-                stmts: stmts.iter().map(|stmt| self.copy_stmt(stmt)).collect(),
-                expr: expr.map(|expr| self.copy_expr(expr)),
-                span,
-            },
-            Expr::Array { elements, span } => Expr::Array {
-                elements: elements
-                    .into_iter()
-                    .map(|element| self.copy_expr(element))
-                    .collect(),
-                span,
-            },
-            Expr::Index { base, index, span } => Expr::Index {
-                base: self.copy_expr(base),
-                index: self.copy_expr(index),
-                span,
-            },
-            Expr::Member { base, member, span } => Expr::Member {
-                base: self.copy_expr(base),
-                member,
-                span,
-            },
-            Expr::RecordLiteral {
-                record,
-                properties,
-                span,
-            } => Expr::RecordLiteral {
-                record,
-                properties: properties
-                    .into_iter()
-                    .map(|(name, value)| (name, self.copy_expr(value)))
-                    .collect(),
-                span,
-            },
-            Expr::Element { element, span } => Expr::Element {
-                element: self.copy_element(element),
-                span,
-            },
-            Expr::ActionHandler {
-                component,
-                emit,
-                action_name,
-                body,
-                span,
-            } => Expr::ActionHandler {
-                component,
-                emit,
-                action_name,
-                body: self.copy_expr(body),
-                span,
-            },
-            Expr::For {
-                item,
-                index,
-                iterable,
-                body,
-                span,
-            } => Expr::For {
-                item,
-                index,
-                iterable: self.copy_expr(iterable),
-                body: self.copy_expr(body),
-                span,
-            },
-            Expr::Error(span) => Expr::Error(span),
-        };
-
-        let mapped = self.dst.alloc_expr(expr);
-        self.expr_map.insert(expr_id, mapped);
-        mapped
-    }
-
-    fn copy_element(&mut self, element_id: ElementId) -> ElementId {
-        if let Some(&mapped) = self.element_map.get(&element_id) {
-            return mapped;
-        }
-
-        let element = self.src.element(element_id).clone();
-        let copied = Element {
-            tag: element.tag,
-            properties: element
-                .properties
-                .into_iter()
-                .map(|property| Property {
-                    key: property.key,
-                    value: self.copy_expr(property.value),
-                    span: property.span,
-                })
-                .collect(),
-            content: element
-                .content
-                .into_iter()
-                .map(|content_expr| self.copy_expr(content_expr))
-                .collect(),
-            close_name: element.close_name,
-            span: element.span,
-        };
-
-        let mapped = self.dst.alloc_element(copied);
-        self.element_map.insert(element_id, mapped);
-        mapped
-    }
-}
-
 /// Builds a file-preserving library artifact from a local directory.
 pub fn build_library_artifact_from_directory(
     root_path: impl AsRef<Path>,
@@ -754,21 +352,6 @@ fn build_library_artifact_with_registry(
     dependency_roots.sort();
 
     let dependency_context = registry.build_context();
-    let prepared_modules = source_files
-        .iter()
-        .map(|source_file| {
-            source_file.preserved_module.as_ref().map(|module| {
-                let mut prepared_module = module.clone();
-                apply_build_context_imports(
-                    &mut prepared_module,
-                    &source_file.path,
-                    &dependency_context,
-                    &source_file.source,
-                );
-                prepared_module
-            })
-        })
-        .collect::<Vec<_>>();
 
     let mut modules = Vec::with_capacity(source_files.len());
     let mut exports = FxHashMap::default();
@@ -779,12 +362,12 @@ fn build_library_artifact_with_registry(
 
     for (index, source_file) in source_files.iter().enumerate() {
         let artifact =
-            analyze_library_source_file(&root_path, &source_files, &prepared_modules, index);
+            analyze_library_source_file(&root_path, &source_files, &dependency_context, index);
         diagnostics.extend(artifact.diagnostics.iter().cloned());
 
         if let Some(module) = artifact.lowered_module.as_ref() {
-            for item in module.items() {
-                if let Some(interface_item) = build_interface_item(&artifact, item) {
+            for (item_index, item) in module.items().iter().enumerate() {
+                if let Some(interface_item) = build_interface_item(&artifact, item_index, item) {
                     let interface_index = interface_items.len();
                     if item.visibility() != Visibility::Private {
                         visible_to_library_items
@@ -801,8 +384,9 @@ fn build_library_artifact_with_registry(
                             .entry(item.name().as_str().to_string())
                             .or_insert_with(|| LibraryExport {
                                 module_file: artifact.file_name.clone(),
-                                item_name: item.name().as_str().to_string(),
-                                kind: interface_item.kind(),
+                                item_name: interface_item.item_name.clone(),
+                                definition_id: interface_item.definition_id,
+                                kind: resolved_item_kind_from_interface(interface_item.item.kind()),
                             });
                     }
                     interface_items.push(interface_item);
@@ -881,7 +465,7 @@ fn read_library_source_files(root_path: &Path) -> io::Result<Vec<LibrarySourceFi
 fn analyze_library_source_file(
     library_root: &Path,
     source_files: &[LibrarySourceFile],
-    prepared_modules: &[Option<LoweredModule>],
+    dependency_context: &ProgramBuildContext,
     current_file_index: usize,
 ) -> ModuleArtifact {
     let source_file = &source_files[current_file_index];
@@ -889,89 +473,76 @@ fn analyze_library_source_file(
     let Some(preserved_module) = source_file.preserved_module.clone() else {
         return parse_failure_artifact(&source_file.file_name, source_file.source_id, diagnostics);
     };
-    let mut analysis_module = prepared_modules[current_file_index]
-        .clone()
-        .expect("prepared module should exist when preserved module exists");
+    let mut prepared_module = PreparedModule::new(&source_file.file_name, preserved_module);
+    apply_build_context_imports(
+        &mut prepared_module,
+        &source_file.path,
+        dependency_context,
+        &source_file.source,
+    );
     apply_current_library_items(
-        &mut analysis_module,
+        &mut prepared_module,
         library_root,
         source_files,
-        prepared_modules,
         current_file_index,
     );
-    finalize_module_artifact(
-        &source_file.file_name,
-        source_file.source_id,
-        preserved_module,
-        analysis_module,
-        diagnostics,
-    )
+    finalize_module_artifact(&source_file.file_name, prepared_module, diagnostics)
 }
 
 fn apply_current_library_items(
-    module: &mut LoweredModule,
+    module: &mut PreparedModule,
     library_root: &Path,
     source_files: &[LibrarySourceFile],
-    prepared_modules: &[Option<LoweredModule>],
     current_file_index: usize,
 ) {
-    let mut local_item_names = module
-        .items()
-        .iter()
-        .map(|item| item.name().as_str().to_string())
-        .collect::<FxHashSet<_>>();
-    let mut external_item_names = local_item_names.clone();
-    let mut peer_candidates = FxHashMap::<String, Vec<LocalLibraryCandidate>>::default();
+    let mut peer_candidates =
+        FxHashMap::<(PreparedNamespace, String), Vec<LocalLibraryCandidate>>::default();
 
-    for (file_index, peer_module) in prepared_modules.iter().enumerate() {
+    for (file_index, source_file) in source_files.iter().enumerate() {
         if file_index == current_file_index {
             continue;
         }
 
-        let Some(peer_module) = peer_module.as_ref() else {
+        let Some(peer_module) = source_file.preserved_module.as_ref() else {
             continue;
         };
-        let peer_path = &source_files[file_index].path;
+        module.add_peer_module(source_file.file_name.clone(), Arc::new(peer_module.clone()));
 
         for (item_index, item) in peer_module.items().iter().enumerate() {
-            let visible_name = item.name().as_str().to_string();
-            if peer_module.is_external_item(item_index) {
-                if !external_item_names.insert(visible_name.clone()) {
-                    continue;
-                }
-                let mut copier = ModuleCopier::new(module, peer_module);
-                let copied = copier.copy_item(item, &visible_name);
-                module.add_external_item(copied);
-                continue;
-            }
-
             if item.visibility() == Visibility::Private {
                 continue;
             }
 
-            peer_candidates
-                .entry(visible_name)
-                .or_default()
-                .push(LocalLibraryCandidate {
-                    source_file: peer_path.clone(),
-                    item: LocalLibraryItemRef {
-                        file_index,
-                        item_index,
-                    },
-                });
+            for (namespace, _) in binding_specs_for_item(item) {
+                peer_candidates
+                    .entry((namespace, item.name().as_str().to_string()))
+                    .or_default()
+                    .push(LocalLibraryCandidate {
+                        source_file: source_file.path.clone(),
+                        item: LocalLibraryItemRef {
+                            file_index,
+                            item_index,
+                        },
+                    });
+            }
         }
     }
 
     let mut visible_names = peer_candidates.keys().cloned().collect::<Vec<_>>();
-    visible_names.sort();
+    visible_names.sort_by(|lhs, rhs| {
+        lhs.1
+            .cmp(&rhs.1)
+            .then_with(|| namespace_order(lhs.0).cmp(&namespace_order(rhs.0)))
+    });
 
-    for visible_name in visible_names {
-        if local_item_names.contains(&visible_name) {
+    for (namespace, visible_name) in visible_names {
+        let visible_name_ref = Name::new(&visible_name);
+        if module.has_binding(namespace, &visible_name_ref) {
             continue;
         }
 
         let candidates = peer_candidates
-            .remove(&visible_name)
+            .remove(&(namespace, visible_name.clone()))
             .expect("visible name was collected from peer candidates");
         if candidates.len() != 1 {
             let sources = candidates
@@ -997,14 +568,29 @@ fn apply_current_library_items(
         }
 
         let candidate = &candidates[0];
-        let peer_module = prepared_modules[candidate.item.file_index]
+        let peer_module = source_files[candidate.item.file_index]
+            .preserved_module
             .as_ref()
             .expect("peer prepared module should exist");
         let item = &peer_module.items()[candidate.item.item_index];
-        let mut copier = ModuleCopier::new(module, peer_module);
-        let copied = copier.copy_item(item, &visible_name);
-        local_item_names.insert(visible_name);
-        module.add_item(copied);
+        let kind = binding_specs_for_item(item)
+            .into_iter()
+            .find(|(candidate_namespace, _)| *candidate_namespace == namespace)
+            .map(|(_, kind)| kind)
+            .expect("peer binding namespace should match item kind");
+        let target_module_identity = source_files[candidate.item.file_index].file_name.clone();
+        module.insert_binding(PreparedBinding {
+            visible_name: visible_name_ref,
+            namespace,
+            kind,
+            origin: PreparedBindingOrigin::Peer {
+                module_identity: target_module_identity.clone(),
+            },
+            target: PreparedBindingTarget::Peer {
+                module_identity: target_module_identity,
+                definition_id: local_definition_id(candidate.item.item_index),
+            },
+        });
     }
 }
 
@@ -1071,29 +657,23 @@ fn prepare_root_module_with_context(
     };
 
     let preserved_module = lower(tree.root(), source_id);
-    let mut analysis_module = preserved_module.clone();
+    let mut prepared_module = PreparedModule::new(file_name, preserved_module);
     let mut libraries = Vec::new();
     let mut selection_diagnostics = Vec::new();
 
     if let Some(path) = source_path {
         let resolved_imports =
-            apply_build_context_imports(&mut analysis_module, path, build_context, source);
+            apply_build_context_imports(&mut prepared_module, path, build_context, source);
         let selection =
             selected_program_libraries(&resolved_imports, file_name, source, build_context);
         libraries = selection.libraries;
         selection_diagnostics = selection.diagnostics;
-    } else if !preserved_module.imports.is_empty() {
+    } else if !prepared_module.raw_module().imports.is_empty() {
         diagnostics.push(library_imports_require_path_diagnostic(source, file_name));
     }
 
     PreparedRootModule {
-        artifact: finalize_module_artifact(
-            file_name,
-            source_id,
-            preserved_module,
-            analysis_module,
-            diagnostics,
-        ),
+        artifact: finalize_module_artifact(file_name, prepared_module, diagnostics),
         libraries,
         diagnostics: selection_diagnostics,
     }
@@ -1117,22 +697,14 @@ fn parse_failure_artifact(
 
 fn finalize_module_artifact(
     file_name: &str,
-    source_id: SourceId,
-    preserved_module: LoweredModule,
-    analysis_module: LoweredModule,
+    prepared_module: PreparedModule,
     diagnostics: Vec<Diagnostic>,
 ) -> ModuleArtifact {
-    analyze_prepared_module(
-        file_name,
-        source_id,
-        preserved_module,
-        analysis_module,
-        diagnostics,
-    )
+    analyze_prepared_module(file_name, prepared_module, diagnostics)
 }
 
 fn apply_build_context_imports(
-    module: &mut LoweredModule,
+    module: &mut PreparedModule,
     root_path: &Path,
     build_context: &ProgramBuildContext,
     source: &str,
@@ -1140,7 +712,7 @@ fn apply_build_context_imports(
     let root_path = match fs::canonicalize(root_path) {
         Ok(root_path) => root_path,
         Err(error) => {
-            if module.imports.iter().any(|import| {
+            if module.raw_module().imports.iter().any(|import| {
                 !is_git_library_path(&import.library_path)
                     && !is_http_library_path(&import.library_path)
             }) {
@@ -1157,16 +729,11 @@ fn apply_build_context_imports(
         }
     };
 
-    let mut local_item_names = module
-        .items()
-        .iter()
-        .map(|item| item.name().as_str().to_string())
-        .collect::<FxHashSet<_>>();
     let mut seen_import_roots = FxHashMap::default();
     let mut imported_visible_names = FxHashMap::default();
     let mut resolved_imports = Vec::new();
 
-    for import in module.imports.clone() {
+    for import in module.raw_module().imports.clone() {
         if is_git_library_path(&import.library_path) {
             module.add_diagnostic(LoweringDiagnostic {
                 message: format!(
@@ -1258,45 +825,18 @@ fn apply_build_context_imports(
                         .as_ref()
                         .map(|prefix| format!("{}.{}", prefix.as_str(), export_name))
                         .unwrap_or_else(|| export_name.clone());
-                    if local_item_names.contains(&visible_name) {
-                        continue;
-                    }
 
                     let Some(item_indices) = library.exported_items.get(&export_name) else {
                         continue;
                     };
-                    if item_indices.len() != 1 {
-                        add_ambiguous_interface_diagnostic(
-                            module,
-                            &visible_name,
-                            import.span,
-                            &library,
-                            item_indices,
-                        );
-                        continue;
-                    }
-
-                    if let Some(previous_origin) = imported_visible_names.get(&visible_name) {
-                        module.add_diagnostic(LoweringDiagnostic {
-                            message: format!(
-                                "Imported name '{}' is provided by both {} and {}. Use aliases to disambiguate.",
-                                visible_name,
-                                previous_origin,
-                                library.root_path.display()
-                            ),
-                            span: import.span,
-                        });
-                        continue;
-                    }
-
-                    let interface_item = &library.interface_items[item_indices[0]];
-                    let synthesized = interface_item.synthesize_item(&visible_name, module);
-                    module.add_external_item(synthesized);
-                    imported_visible_names.insert(
-                        visible_name.clone(),
-                        library.root_path.display().to_string(),
+                    add_imported_interface_bindings(
+                        module,
+                        &visible_name,
+                        import.span,
+                        &library,
+                        item_indices,
+                        &mut imported_visible_names,
                     );
-                    local_item_names.insert(visible_name);
                 }
             }
             ImportKind::Selective { entries } => {
@@ -1314,42 +854,14 @@ fn apply_build_context_imports(
                     };
 
                     let visible_name = visible_name_for_selective(entry);
-                    if local_item_names.contains(&visible_name) {
-                        continue;
-                    }
-
-                    if item_indices.len() != 1 {
-                        add_ambiguous_interface_diagnostic(
-                            module,
-                            &visible_name,
-                            entry.span,
-                            &library,
-                            item_indices,
-                        );
-                        continue;
-                    }
-
-                    if let Some(previous_origin) = imported_visible_names.get(&visible_name) {
-                        module.add_diagnostic(LoweringDiagnostic {
-                            message: format!(
-                                "Imported name '{}' is provided by both {} and {}. Use aliases to disambiguate.",
-                                visible_name,
-                                previous_origin,
-                                library.root_path.display()
-                            ),
-                            span: entry.span,
-                        });
-                        continue;
-                    }
-
-                    let interface_item = &library.interface_items[item_indices[0]];
-                    let synthesized = interface_item.synthesize_item(&visible_name, module);
-                    module.add_external_item(synthesized);
-                    imported_visible_names.insert(
-                        visible_name.clone(),
-                        library.root_path.display().to_string(),
+                    add_imported_interface_bindings(
+                        module,
+                        &visible_name,
+                        entry.span,
+                        &library,
+                        item_indices,
+                        &mut imported_visible_names,
                     );
-                    local_item_names.insert(visible_name);
                 }
             }
         }
@@ -1359,7 +871,7 @@ fn apply_build_context_imports(
 }
 
 fn add_ambiguous_interface_diagnostic(
-    module: &mut LoweredModule,
+    module: &mut PreparedModule,
     visible_name: &str,
     span: TextSpan,
     library: &LibraryArtifact,
@@ -1379,6 +891,84 @@ fn add_ambiguous_interface_diagnostic(
         ),
         span,
     });
+}
+
+fn add_imported_interface_bindings(
+    module: &mut PreparedModule,
+    visible_name: &str,
+    span: TextSpan,
+    library: &LibraryArtifact,
+    item_indices: &[usize],
+    imported_visible_names: &mut FxHashMap<(PreparedNamespace, String), String>,
+) {
+    let mut candidates = FxHashMap::<PreparedNamespace, Vec<usize>>::default();
+
+    for item_index in item_indices {
+        let interface_item = &library.interface_items[*item_index];
+        let kind = interface_item.item.kind();
+        for namespace in kind.namespaces() {
+            candidates.entry(*namespace).or_default().push(*item_index);
+        }
+    }
+
+    let mut namespaces = candidates.keys().copied().collect::<Vec<_>>();
+    namespaces.sort_by_key(|namespace| namespace_order(*namespace));
+
+    for namespace in namespaces {
+        let Some(indices) = candidates.remove(&namespace) else {
+            continue;
+        };
+        let visible_name_ref = Name::new(visible_name);
+        if module.has_binding(namespace, &visible_name_ref) {
+            continue;
+        }
+
+        if indices.len() != 1 {
+            add_ambiguous_interface_diagnostic(module, visible_name, span, library, &indices);
+            continue;
+        }
+
+        if let Some(previous_origin) =
+            imported_visible_names.get(&(namespace, visible_name.to_string()))
+        {
+            module.add_diagnostic(LoweringDiagnostic {
+                message: format!(
+                    "Imported name '{}' is provided by both {} and {}. Use aliases to disambiguate.",
+                    visible_name,
+                    previous_origin,
+                    library.root_path.display()
+                ),
+                span,
+            });
+            continue;
+        }
+
+        let interface_item = library.interface_items[indices[0]].clone();
+        let kind = interface_item.item.kind();
+        module.insert_binding(PreparedBinding {
+            visible_name: visible_name_ref,
+            namespace,
+            kind,
+            origin: PreparedBindingOrigin::Imported {
+                module_identity: interface_item.module_identity.clone(),
+            },
+            target: PreparedBindingTarget::Imported {
+                item: interface_item,
+            },
+        });
+        imported_visible_names.insert(
+            (namespace, visible_name.to_string()),
+            library.root_path.display().to_string(),
+        );
+    }
+}
+
+fn namespace_order(namespace: PreparedNamespace) -> u8 {
+    match namespace {
+        PreparedNamespace::Value => 0,
+        PreparedNamespace::Type => 1,
+        PreparedNamespace::Element => 2,
+    }
 }
 
 fn selected_program_libraries(
@@ -1495,7 +1085,7 @@ fn build_resolved_program(
             continue;
         };
 
-        for item in module.items() {
+        for (item_index, item) in module.items().iter().enumerate() {
             insert_entry_symbol(
                 &mut entry_functions,
                 &mut entry_components,
@@ -1504,7 +1094,7 @@ fn build_resolved_program(
                 item.name().as_str(),
                 ModuleQualifiedItemRef {
                     module_id,
-                    item_name: item.name().as_str().to_string(),
+                    definition_id: local_definition_id(item_index),
                     kind: resolved_item_kind(item),
                 },
             );
@@ -1525,7 +1115,7 @@ fn build_resolved_program(
                 export_name,
                 ModuleQualifiedItemRef {
                     module_id,
-                    item_name: export.item_name.clone(),
+                    definition_id: export.definition_id,
                     kind: export.kind,
                 },
             );
@@ -1580,7 +1170,7 @@ fn build_resolved_program(
                         visible_imports.entry(visible_name).or_insert_with(|| {
                             ModuleQualifiedItemRef {
                                 module_id: target_module_id,
-                                item_name: export.item_name.clone(),
+                                definition_id: export.definition_id,
                                 kind: export.kind,
                             }
                         });
@@ -1599,7 +1189,7 @@ fn build_resolved_program(
                             .entry(visible_name_for_selective(entry))
                             .or_insert_with(|| ModuleQualifiedItemRef {
                                 module_id: target_module_id,
-                                item_name: export.item_name.clone(),
+                                definition_id: export.definition_id,
                                 kind: export.kind,
                             });
                     }
@@ -1639,7 +1229,8 @@ fn build_resolved_program(
                 }
 
                 let interface_item = &library.interface_items[item_indices[0]];
-                let Some(&target_module_id) = module_ids.get(&interface_item.module_file) else {
+                let Some(&target_module_id) = module_ids.get(&interface_item.module_identity)
+                else {
                     continue;
                 };
 
@@ -1647,8 +1238,8 @@ fn build_resolved_program(
                     .entry(visible_name.clone())
                     .or_insert_with(|| ModuleQualifiedItemRef {
                         module_id: target_module_id,
-                        item_name: interface_item.item_name.clone(),
-                        kind: interface_item.kind(),
+                        definition_id: interface_item.definition_id,
+                        kind: resolved_item_kind_from_interface(interface_item.item.kind()),
                     });
                 local_item_names.insert(visible_name);
             }
@@ -1671,17 +1262,11 @@ fn build_resolved_program(
     )
 }
 
-fn interface_field_to_record_field(field: &LibraryInterfaceField) -> RecordField {
-    RecordField {
-        name: field.name.clone(),
-        ty: field.ty.clone(),
-        is_content: field.is_content,
-        default: None,
-        span: field.span,
-    }
-}
-
-fn build_interface_item(artifact: &ModuleArtifact, item: &Item) -> Option<LibraryInterfaceItem> {
+fn build_interface_item(
+    artifact: &ModuleArtifact,
+    item_index: usize,
+    item: &Item,
+) -> Option<LibraryInterfaceItem> {
     let item_name = item.name().as_str().to_string();
     let visibility = item.visibility();
     let item = match item {
@@ -1757,8 +1342,9 @@ fn build_interface_item(artifact: &ModuleArtifact, item: &Item) -> Option<Librar
     };
 
     Some(LibraryInterfaceItem {
-        module_file: artifact.file_name.clone(),
+        module_identity: artifact.file_name.clone(),
         item_name,
+        definition_id: local_definition_id(item_index),
         visibility,
         item,
     })
@@ -1830,6 +1416,17 @@ fn insert_entry_symbol(
     }
 }
 
+fn resolved_item_kind_from_interface(kind: nx_hir::PreparedItemKind) -> ResolvedItemKind {
+    match kind {
+        nx_hir::PreparedItemKind::Function => ResolvedItemKind::Function,
+        nx_hir::PreparedItemKind::Value => ResolvedItemKind::Value,
+        nx_hir::PreparedItemKind::Component => ResolvedItemKind::Component,
+        nx_hir::PreparedItemKind::TypeAlias => ResolvedItemKind::TypeAlias,
+        nx_hir::PreparedItemKind::Enum => ResolvedItemKind::Enum,
+        nx_hir::PreparedItemKind::Record => ResolvedItemKind::Record,
+    }
+}
+
 fn resolved_item_kind(item: &Item) -> ResolvedItemKind {
     match item {
         Item::Function(_) => ResolvedItemKind::Function,
@@ -1842,7 +1439,7 @@ fn resolved_item_kind(item: &Item) -> ResolvedItemKind {
 }
 
 fn interface_origin(root_path: &Path, item: &LibraryInterfaceItem) -> String {
-    let item_path = Path::new(&item.module_file);
+    let item_path = Path::new(&item.module_identity);
     let relative = item_path.strip_prefix(root_path).unwrap_or(item_path);
     format!("{} ({})", item.item_name, relative.display())
 }
@@ -2100,6 +1697,36 @@ mod tests {
     }
 
     #[test]
+    fn library_artifact_record_inheritance_resolves_across_library_files() {
+        let temp = TempDir::new().expect("temp dir");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("base.nx"),
+            r#"export abstract type Field = { label:string }"#,
+        )
+        .expect("base file");
+        fs::write(
+            ui_dir.join("derived.nx"),
+            r#"export type TextField extends Field = { placeholder:string? }"#,
+        )
+        .expect("derived file");
+
+        let artifact =
+            build_library_artifact_from_directory(&ui_dir).expect("Expected library artifact");
+
+        assert!(
+            !has_error_diagnostics(&artifact.diagnostics),
+            "Expected abstract record bases from peer files to resolve within one library"
+        );
+        assert_eq!(
+            artifact.exported_items.get("TextField").map(Vec::len),
+            Some(1)
+        );
+    }
+
+    #[test]
     fn library_artifact_private_items_stay_file_local() {
         let temp = TempDir::new().expect("temp dir");
         let ui_dir = temp.path().join("ui");
@@ -2257,6 +1884,45 @@ let root() = { helper() }"#;
             .diagnostics
             .iter()
             .any(|diagnostic| { diagnostic.message().contains("does not export 'helper'") }));
+    }
+
+    #[test]
+    fn program_artifact_record_inheritance_resolves_imported_abstract_base() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("base.nx"),
+            r#"export abstract type Field = { label:string }"#,
+        )
+        .expect("base file");
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("Expected ui registry load");
+        let build_context = registry.build_context();
+
+        let main_path = app_dir.join("main.nx");
+        let source = r#"import "../ui"
+type TextField extends Field = { placeholder:string? }
+let root() = { 0 }"#;
+        fs::write(&main_path, source).expect("main file");
+
+        let artifact = build_program_artifact_from_source(
+            source,
+            &main_path.display().to_string(),
+            &build_context,
+        )
+        .expect("Expected program artifact");
+
+        assert!(
+            !has_error_diagnostics(&artifact.diagnostics),
+            "Expected imported abstract record bases to resolve through the build context"
+        );
     }
 
     #[test]
@@ -2502,7 +2168,8 @@ let root() = { answer() }"#;
         let parse_result = syntax_parse_str(source, "virtual.nx");
         let source_id = SourceId::new(parse_result.source_id.as_u32());
         let tree = parse_result.tree.expect("Expected syntax tree");
-        let mut module = lower(tree.root(), source_id);
+        let mut module =
+            PreparedModule::standalone("virtual.nx", nx_hir::lower(tree.root(), source_id));
 
         let resolved_imports = apply_build_context_imports(
             &mut module,

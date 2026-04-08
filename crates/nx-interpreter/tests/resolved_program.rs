@@ -46,12 +46,19 @@ fn lower_module(source: &str, path: &Path) -> Arc<LoweredModule> {
 
 fn item_ref(
     module_id: RuntimeModuleId,
+    module: &LoweredModule,
     item_name: &str,
     kind: ResolvedItemKind,
 ) -> ModuleQualifiedItemRef {
+    let definition_id = module
+        .items()
+        .iter()
+        .position(|item| item.name().as_str() == item_name)
+        .and_then(|index| module.definition_id_at(index))
+        .unwrap_or_else(|| panic!("Expected item '{item_name}'"));
     ModuleQualifiedItemRef {
         module_id,
-        item_name: item_name.to_string(),
+        definition_id,
         kind,
     }
 }
@@ -101,22 +108,37 @@ fn build_resolved_program(
         ResolvedModule {
             id: library_module_id,
             identity: "ui/search-box.nx".to_string(),
-            lowered_module: library_module,
+            lowered_module: library_module.clone(),
         },
     ];
 
     let mut entry_functions = FxHashMap::default();
     entry_functions.insert(
         "render".to_string(),
-        item_ref(root_module_id, "render", ResolvedItemKind::Function),
+        item_ref(
+            root_module_id,
+            root_module.as_ref(),
+            "render",
+            ResolvedItemKind::Function,
+        ),
     );
     entry_functions.insert(
         "root".to_string(),
-        item_ref(root_module_id, "root", ResolvedItemKind::Function),
+        item_ref(
+            root_module_id,
+            root_module.as_ref(),
+            "root",
+            ResolvedItemKind::Function,
+        ),
     );
     entry_functions.insert(
         "calcDouble".to_string(),
-        item_ref(library_module_id, "calcDouble", ResolvedItemKind::Function),
+        item_ref(
+            library_module_id,
+            library_module.as_ref(),
+            "calcDouble",
+            ResolvedItemKind::Function,
+        ),
     );
 
     let mut entry_components = FxHashMap::default();
@@ -124,6 +146,7 @@ fn build_resolved_program(
         "LibrarySearchBox".to_string(),
         item_ref(
             library_module_id,
+            library_module.as_ref(),
             "LibrarySearchBox",
             ResolvedItemKind::Component,
         ),
@@ -132,12 +155,18 @@ fn build_resolved_program(
     let mut entry_records = FxHashMap::default();
     entry_records.insert(
         "DoSearch".to_string(),
-        item_ref(library_module_id, "DoSearch", ResolvedItemKind::Record),
+        item_ref(
+            library_module_id,
+            library_module.as_ref(),
+            "DoSearch",
+            ResolvedItemKind::Record,
+        ),
     );
     entry_records.insert(
         "SearchSubmitted".to_string(),
         item_ref(
             library_module_id,
+            library_module.as_ref(),
             "SearchSubmitted",
             ResolvedItemKind::Record,
         ),
@@ -149,17 +178,28 @@ fn build_resolved_program(
         "SearchSubmitted".to_string(),
         item_ref(
             library_module_id,
+            library_module.as_ref(),
             "SearchSubmitted",
             ResolvedItemKind::Record,
         ),
     );
     root_imports.insert(
         "DoSearch".to_string(),
-        item_ref(library_module_id, "DoSearch", ResolvedItemKind::Record),
+        item_ref(
+            library_module_id,
+            library_module.as_ref(),
+            "DoSearch",
+            ResolvedItemKind::Record,
+        ),
     );
     root_imports.insert(
         "calcDouble".to_string(),
-        item_ref(library_module_id, "calcDouble", ResolvedItemKind::Function),
+        item_ref(
+            library_module_id,
+            library_module.as_ref(),
+            "calcDouble",
+            ResolvedItemKind::Function,
+        ),
     );
     imports.insert(root_module_id, root_imports);
 

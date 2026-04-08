@@ -14,6 +14,7 @@ smol_str.workspace = true
 la-arena.workspace = true
 salsa.workspace = true
 rustc-hash.workspace = true
+serde.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

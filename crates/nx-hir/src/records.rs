@@ -1,4 +1,7 @@
-use crate::{ast, Item, LoweredModule, Name, RecordDef, RecordField, RecordKind};
+use crate::{
+    ast, interface_record, interface_type_alias, InterfaceItemKind, Item, Name, PreparedModule,
+    PreparedNamespace, RecordDef, RecordField, RecordKind, ResolvedPreparedItem,
+};
 use nx_diagnostics::TextSpan;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -169,12 +172,12 @@ enum RecordValidationStatus {
     Invalid,
 }
 
-pub fn resolve_record_definition(module: &LoweredModule, name: &Name) -> Option<RecordDef> {
+pub fn resolve_record_definition(module: &PreparedModule, name: &Name) -> Option<RecordDef> {
     resolve_record_definition_inner(module, name, &mut FxHashSet::default())
 }
 
 pub fn effective_record_shape_for_name(
-    module: &LoweredModule,
+    module: &PreparedModule,
     name: &Name,
 ) -> Result<Option<EffectiveRecordShape>, RecordResolutionError> {
     let Some(record) = resolve_record_definition(module, name) else {
@@ -185,7 +188,7 @@ pub fn effective_record_shape_for_name(
 }
 
 pub fn effective_record_shape(
-    module: &LoweredModule,
+    module: &PreparedModule,
     record: &RecordDef,
 ) -> Result<EffectiveRecordShape, RecordResolutionError> {
     let resolved = resolve_record_shape_inner(module, record, &mut Vec::new())?;
@@ -201,7 +204,7 @@ pub fn effective_record_shape(
 }
 
 pub fn is_record_subtype(
-    module: &LoweredModule,
+    module: &PreparedModule,
     actual: &Name,
     expected: &Name,
 ) -> Result<bool, RecordResolutionError> {
@@ -223,15 +226,20 @@ pub fn is_record_subtype(
         .any(|ancestor| ancestor == &expected_record.name))
 }
 
-pub fn validate_record_definitions(module: &LoweredModule) -> Vec<RecordResolutionError> {
+pub fn validate_record_definitions(module: &PreparedModule) -> Vec<RecordResolutionError> {
     let mut errors = Vec::new();
     let mut statuses = FxHashMap::default();
     let mut stack = Vec::new();
 
-    for record in module.items().iter().filter_map(|item| match item {
-        Item::Record(record) if record.kind == RecordKind::Plain => Some(record),
-        _ => None,
-    }) {
+    for record in module
+        .raw_module()
+        .items()
+        .iter()
+        .filter_map(|item| match item {
+            Item::Record(record) if record.kind == RecordKind::Plain => Some(record),
+            _ => None,
+        })
+    {
         validate_record_definition(module, record, &mut statuses, &mut stack, &mut errors);
     }
 
@@ -239,7 +247,7 @@ pub fn validate_record_definitions(module: &LoweredModule) -> Vec<RecordResoluti
 }
 
 fn validate_record_definition(
-    module: &LoweredModule,
+    module: &PreparedModule,
     record: &RecordDef,
     statuses: &mut FxHashMap<Name, RecordValidationStatus>,
     stack: &mut Vec<Name>,
@@ -293,7 +301,7 @@ fn validate_record_definition(
 }
 
 fn validate_record_shape(
-    module: &LoweredModule,
+    module: &PreparedModule,
     record: &RecordDef,
     errors: &mut Vec<RecordResolutionError>,
 ) -> RecordValidationStatus {
@@ -313,7 +321,7 @@ fn push_unique_record_error(errors: &mut Vec<RecordResolutionError>, error: Reco
 }
 
 fn resolve_record_definition_inner(
-    module: &LoweredModule,
+    module: &PreparedModule,
     name: &Name,
     seen: &mut FxHashSet<Name>,
 ) -> Option<RecordDef> {
@@ -321,12 +329,35 @@ fn resolve_record_definition_inner(
         return None;
     }
 
-    let result = match module.find_item(name.as_str()) {
-        Some(Item::Record(record)) => Some(record.clone()),
-        Some(Item::TypeAlias(alias)) => match &alias.ty {
+    let result = match module
+        .resolve_binding(PreparedNamespace::Type, name)
+        .and_then(|binding| module.resolve_prepared_item(binding))
+    {
+        Some(ResolvedPreparedItem::Raw {
+            item: Item::Record(record),
+            ..
+        }) => Some(record),
+        Some(ResolvedPreparedItem::Raw {
+            item: Item::TypeAlias(alias),
+            ..
+        }) => match &alias.ty {
             ast::TypeRef::Name(target) => resolve_record_definition_inner(module, target, seen),
             _ => None,
         },
+        Some(ResolvedPreparedItem::Imported { item, .. }) => {
+            if let Some(record) = interface_record(&item) {
+                Some(record)
+            } else if let Some(alias) = interface_type_alias(&item) {
+                match &alias.ty {
+                    ast::TypeRef::Name(target) => {
+                        resolve_record_definition_inner(module, target, seen)
+                    }
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        }
         _ => None,
     };
 
@@ -335,7 +366,7 @@ fn resolve_record_definition_inner(
 }
 
 fn resolve_record_shape_inner(
-    module: &LoweredModule,
+    module: &PreparedModule,
     record: &RecordDef,
     stack: &mut Vec<Name>,
 ) -> Result<ResolvedRecordShape, RecordResolutionError> {
@@ -417,7 +448,7 @@ fn resolve_record_shape_inner(
 }
 
 fn resolve_base_record(
-    module: &LoweredModule,
+    module: &PreparedModule,
     record: &RecordDef,
 ) -> Result<Option<RecordDef>, RecordResolutionError> {
     let Some(base_name) = record.base.as_ref() else {
@@ -429,7 +460,7 @@ fn resolve_base_record(
 }
 
 fn resolve_base_record_inner(
-    module: &LoweredModule,
+    module: &PreparedModule,
     record: &RecordDef,
     base_name: &Name,
     seen: &mut FxHashSet<Name>,
@@ -443,49 +474,90 @@ fn resolve_base_record_inner(
         });
     }
 
-    let result = match module.find_item(base_name.as_str()) {
-        Some(Item::Record(base_record)) => {
-            if base_record.kind == RecordKind::Action {
-                Err(RecordResolutionError::InvalidBase {
-                    record: record.name.clone(),
-                    base: record.base.clone().unwrap_or_else(|| base_name.clone()),
-                    span: record.span,
-                    reason: InvalidBaseReason::ActionRecord,
-                })
-            } else if !base_record.is_abstract {
-                Err(RecordResolutionError::InvalidBase {
-                    record: record.name.clone(),
-                    base: record.base.clone().unwrap_or_else(|| base_name.clone()),
-                    span: record.span,
-                    reason: InvalidBaseReason::ConcreteRecord,
-                })
-            } else {
-                Ok(base_record.clone())
-            }
-        }
-        Some(Item::TypeAlias(alias)) => match &alias.ty {
+    let result = match module
+        .resolve_binding(PreparedNamespace::Type, base_name)
+        .and_then(|binding| module.resolve_prepared_item(binding))
+    {
+        Some(ResolvedPreparedItem::Raw {
+            item: Item::Record(base_record),
+            ..
+        }) => validate_base_record(record, base_name, &base_record),
+        Some(ResolvedPreparedItem::Raw {
+            item: Item::TypeAlias(alias),
+            ..
+        }) => match &alias.ty {
             ast::TypeRef::Name(target) => resolve_base_record_inner(module, record, target, seen),
-            _ => Err(RecordResolutionError::InvalidBase {
-                record: record.name.clone(),
-                base: record.base.clone().unwrap_or_else(|| base_name.clone()),
-                span: record.span,
-                reason: InvalidBaseReason::NotRecord,
-            }),
+            _ => Err(invalid_base(
+                record,
+                base_name,
+                InvalidBaseReason::NotRecord,
+            )),
         },
-        Some(_) => Err(RecordResolutionError::InvalidBase {
-            record: record.name.clone(),
-            base: record.base.clone().unwrap_or_else(|| base_name.clone()),
-            span: record.span,
-            reason: InvalidBaseReason::NotRecord,
-        }),
-        None => Err(RecordResolutionError::InvalidBase {
-            record: record.name.clone(),
-            base: record.base.clone().unwrap_or_else(|| base_name.clone()),
-            span: record.span,
-            reason: InvalidBaseReason::NotFound,
-        }),
+        Some(ResolvedPreparedItem::Imported { item, .. }) => match &item.item {
+            InterfaceItemKind::Record { .. } => {
+                let base_record = interface_record(&item)
+                    .expect("interface record should convert into record definition");
+                validate_base_record(record, base_name, &base_record)
+            }
+            InterfaceItemKind::TypeAlias { ty, .. } => match ty {
+                ast::TypeRef::Name(target) => {
+                    resolve_base_record_inner(module, record, target, seen)
+                }
+                _ => Err(invalid_base(
+                    record,
+                    base_name,
+                    InvalidBaseReason::NotRecord,
+                )),
+            },
+            _ => Err(invalid_base(
+                record,
+                base_name,
+                InvalidBaseReason::NotRecord,
+            )),
+        },
+        Some(ResolvedPreparedItem::Raw { .. }) => Err(invalid_base(
+            record,
+            base_name,
+            InvalidBaseReason::NotRecord,
+        )),
+        None => Err(invalid_base(record, base_name, InvalidBaseReason::NotFound)),
     };
 
     seen.remove(base_name);
     result
+}
+
+fn invalid_base(
+    record: &RecordDef,
+    base_name: &Name,
+    reason: InvalidBaseReason,
+) -> RecordResolutionError {
+    RecordResolutionError::InvalidBase {
+        record: record.name.clone(),
+        base: record.base.clone().unwrap_or_else(|| base_name.clone()),
+        span: record.span,
+        reason,
+    }
+}
+
+fn validate_base_record(
+    record: &RecordDef,
+    base_name: &Name,
+    base_record: &RecordDef,
+) -> Result<RecordDef, RecordResolutionError> {
+    if base_record.kind == RecordKind::Action {
+        Err(invalid_base(
+            record,
+            base_name,
+            InvalidBaseReason::ActionRecord,
+        ))
+    } else if !base_record.is_abstract {
+        Err(invalid_base(
+            record,
+            base_name,
+            InvalidBaseReason::ConcreteRecord,
+        ))
+    } else {
+        Ok(base_record.clone())
+    }
 }

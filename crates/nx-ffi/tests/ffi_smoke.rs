@@ -222,7 +222,7 @@ fn ffi_registry_backed_program_build_reuses_preloaded_library() {
     std::fs::create_dir_all(&library_root).expect("library root");
     std::fs::write(
         library_root.join("QuestionFlow.nx"),
-        r#"let answer() = { 42 }"#,
+        r#"export let answer() = { 42 }"#,
     )
     .expect("library file");
 
@@ -419,7 +419,7 @@ fn ffi_component_init_with_program_artifact_reuses_preloaded_library_component()
         r#"
             action SearchSubmitted = { searchString:string }
 
-            component <SearchBox placeholder:string = "Find docs" emits { SearchSubmitted } /> = {
+            export component <SearchBox placeholder:string = "Find docs" emits { SearchSubmitted } /> = {
               state { query:string = {placeholder} }
               <TextInput value={query} placeholder={placeholder} />
             }

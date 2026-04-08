@@ -3,9 +3,9 @@
 //! This module provides the infrastructure for resolving identifiers to their
 //! definitions, tracking scopes, and detecting undefined references.
 
-use crate::{ExprId, LoweredModule, Name};
+use crate::{ast, ExprId, Item, Name, PreparedItemKind, PreparedModule, PreparedNamespace};
 use la_arena::{Arena, Idx};
-use nx_diagnostics::{Diagnostic, TextSpan};
+use nx_diagnostics::{Diagnostic, Label, TextSpan};
 use rustc_hash::FxHashMap;
 
 /// Index into the scope arena.
@@ -216,64 +216,340 @@ impl Default for ScopeManager {
     }
 }
 
-/// Builds scopes from a module and resolves all identifiers.
+/// Builds scopes from a prepared module and seeds the root scope with prepared top-level bindings.
 ///
 /// Returns a scope manager and a list of diagnostics for undefined identifiers.
-pub fn build_scopes(module: &LoweredModule) -> (ScopeManager, Vec<Diagnostic>) {
+pub fn build_scopes(module: &PreparedModule) -> (ScopeManager, Vec<Diagnostic>) {
     let mut manager = ScopeManager::new();
     let diagnostics = Vec::new();
 
-    // First pass: define all top-level symbols
-    for item in module.items() {
-        match item {
-            crate::Item::Function(func) => {
-                let symbol = Symbol::new(func.name.clone(), SymbolKind::Function, func.span);
-                manager.define(manager.root(), symbol);
+    for namespace in [
+        PreparedNamespace::Value,
+        PreparedNamespace::Element,
+        PreparedNamespace::Type,
+    ] {
+        for binding in module.bindings(namespace) {
+            if manager
+                .get(manager.root())
+                .lookup_local(&binding.visible_name)
+                .is_some()
+            {
+                continue;
             }
-            crate::Item::Value(value) => {
-                let symbol = Symbol::new(value.name.clone(), SymbolKind::Variable, value.span);
-                manager.define(manager.root(), symbol);
-            }
-            crate::Item::Component(component) => {
-                let symbol = Symbol::new(
-                    component.name.clone(),
-                    SymbolKind::Component,
-                    component.span,
-                );
-                manager.define(manager.root(), symbol);
-            }
-            crate::Item::TypeAlias(alias) => {
-                let symbol = Symbol::new(alias.name.clone(), SymbolKind::Type, alias.span);
-                manager.define(manager.root(), symbol);
-            }
-            crate::Item::Enum(enum_def) => {
-                let symbol = Symbol::new(enum_def.name.clone(), SymbolKind::Type, enum_def.span);
-                manager.define(manager.root(), symbol);
-            }
-            crate::Item::Record(record_def) => {
-                let symbol =
-                    Symbol::new(record_def.name.clone(), SymbolKind::Type, record_def.span);
-                manager.define(manager.root(), symbol);
-            }
+
+            let Some(resolved) = module.resolve_prepared_item(binding) else {
+                continue;
+            };
+            let Some(span) = resolved_item_span(&resolved) else {
+                continue;
+            };
+            let symbol = Symbol::new(
+                binding.visible_name.clone(),
+                symbol_kind_from_prepared_kind(binding.kind),
+                span,
+            );
+            manager.define(manager.root(), symbol);
         }
     }
 
     (manager, diagnostics)
 }
 
-/// Checks all identifier expressions in a module and reports undefined references.
+/// Checks all identifier expressions in a prepared module and reports undefined references.
 pub fn check_undefined_identifiers(
-    _module: &LoweredModule,
-    _scope_manager: &ScopeManager,
+    module: &PreparedModule,
+    scope_manager: &ScopeManager,
 ) -> Vec<Diagnostic> {
-    // TODO: Implement when we have expression traversal
-    // For now, return empty diagnostics
-    Vec::new()
+    let mut checker = UndefinedIdentifierChecker::new(module, scope_manager);
+    checker.check();
+    checker.finish()
+}
+
+fn symbol_kind_from_prepared_kind(kind: PreparedItemKind) -> SymbolKind {
+    match kind {
+        PreparedItemKind::Function => SymbolKind::Function,
+        PreparedItemKind::Value => SymbolKind::Variable,
+        PreparedItemKind::Component => SymbolKind::Component,
+        PreparedItemKind::TypeAlias | PreparedItemKind::Enum | PreparedItemKind::Record => {
+            SymbolKind::Type
+        }
+    }
+}
+
+fn resolved_item_span(item: &crate::ResolvedPreparedItem) -> Option<TextSpan> {
+    match item {
+        crate::ResolvedPreparedItem::Raw { item, .. } => Some(match item {
+            Item::Function(function) => function.span,
+            Item::Value(value) => value.span,
+            Item::Component(component) => component.span,
+            Item::TypeAlias(alias) => alias.span,
+            Item::Enum(enum_def) => enum_def.span,
+            Item::Record(record) => record.span,
+        }),
+        crate::ResolvedPreparedItem::Imported { item, .. } => Some(match &item.item {
+            crate::InterfaceItemKind::Function { span, .. }
+            | crate::InterfaceItemKind::Value { span, .. }
+            | crate::InterfaceItemKind::Component { span, .. }
+            | crate::InterfaceItemKind::TypeAlias { span, .. }
+            | crate::InterfaceItemKind::Enum { span, .. }
+            | crate::InterfaceItemKind::Record { span, .. } => *span,
+        }),
+    }
+}
+
+struct UndefinedIdentifierChecker<'a> {
+    module: &'a PreparedModule,
+    scope_manager: ScopeManager,
+    diagnostics: Vec<Diagnostic>,
+}
+
+impl<'a> UndefinedIdentifierChecker<'a> {
+    fn new(module: &'a PreparedModule, scope_manager: &'a ScopeManager) -> Self {
+        Self {
+            module,
+            scope_manager: scope_manager.clone(),
+            diagnostics: Vec::new(),
+        }
+    }
+
+    fn finish(self) -> Vec<Diagnostic> {
+        self.diagnostics
+    }
+
+    fn check(&mut self) {
+        for item in self.module.raw_module().items() {
+            match item {
+                Item::Function(function) => {
+                    let scope = self.scope_manager.create_child(self.scope_manager.root());
+                    self.define_params(scope, &function.params);
+                    self.check_expr(function.body, scope);
+                }
+                Item::Value(value) => {
+                    self.check_expr(value.value, self.scope_manager.root());
+                }
+                Item::Component(component) => {
+                    let scope = self.scope_manager.create_child(self.scope_manager.root());
+                    let symbols =
+                        component
+                            .props
+                            .iter()
+                            .map(|field| (field.name.clone(), SymbolKind::Parameter, field.span))
+                            .chain(component.state.iter().map(|field| {
+                                (field.name.clone(), SymbolKind::Variable, field.span)
+                            }))
+                            .collect::<Vec<_>>();
+                    for (name, kind, span) in symbols {
+                        self.scope_manager_define(scope, name, kind, span);
+                    }
+                    self.check_expr(component.body, scope);
+                }
+                Item::TypeAlias(_) | Item::Enum(_) | Item::Record(_) => {}
+            }
+        }
+    }
+
+    fn define_params(&mut self, scope: ScopeId, params: &[crate::Param]) {
+        for param in params {
+            self.scope_manager_define(scope, param.name.clone(), SymbolKind::Parameter, param.span);
+        }
+    }
+
+    fn scope_manager_define(
+        &mut self,
+        scope: ScopeId,
+        name: Name,
+        kind: SymbolKind,
+        span: TextSpan,
+    ) {
+        self.scope_manager
+            .define(scope, Symbol::new(name, kind, span));
+    }
+
+    fn flattened_expr_name(&self, expr_id: ExprId) -> Option<Name> {
+        match self.module.raw_module().expr(expr_id) {
+            ast::Expr::Ident(name) => Some(name.clone()),
+            ast::Expr::Member { base, member, .. } => {
+                let mut name = self.flattened_expr_name(*base)?.as_str().to_string();
+                name.push('.');
+                name.push_str(member.as_str());
+                Some(Name::new(&name))
+            }
+            _ => None,
+        }
+    }
+
+    fn resolves_prepared_binding(&self, name: &Name) -> bool {
+        [
+            PreparedNamespace::Value,
+            PreparedNamespace::Element,
+            PreparedNamespace::Type,
+        ]
+        .iter()
+        .any(|namespace| self.module.resolve_binding(*namespace, name).is_some())
+    }
+
+    fn check_expr(&mut self, expr_id: ExprId, scope: ScopeId) {
+        match self.module.raw_module().expr(expr_id) {
+            ast::Expr::Literal(_) | ast::Expr::Error(_) => {}
+            ast::Expr::Ident(name) => {
+                if self.scope_manager.resolve(name, scope).is_none() {
+                    self.report_undefined(name, self.module.raw_module().expr(expr_id).span());
+                }
+            }
+            ast::Expr::BinaryOp { lhs, rhs, .. } => {
+                self.check_expr(*lhs, scope);
+                self.check_expr(*rhs, scope);
+            }
+            ast::Expr::UnaryOp { expr, .. } => {
+                self.check_expr(*expr, scope);
+            }
+            ast::Expr::Call { func, args, .. } => {
+                self.check_expr(*func, scope);
+                for arg in args {
+                    self.check_expr(*arg, scope);
+                }
+            }
+            ast::Expr::If {
+                condition,
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.check_expr(*condition, scope);
+                self.check_expr(*then_branch, scope);
+                if let Some(else_branch) = else_branch {
+                    self.check_expr(*else_branch, scope);
+                }
+            }
+            ast::Expr::Array { elements, .. } => {
+                for element in elements {
+                    self.check_expr(*element, scope);
+                }
+            }
+            ast::Expr::Index { base, index, .. } => {
+                self.check_expr(*base, scope);
+                self.check_expr(*index, scope);
+            }
+            ast::Expr::Member { base, .. } => {
+                let is_prepared_top_level = self
+                    .flattened_expr_name(expr_id)
+                    .as_ref()
+                    .is_some_and(|name| self.resolves_prepared_binding(name));
+
+                if !is_prepared_top_level {
+                    self.check_expr(*base, scope);
+                }
+            }
+            ast::Expr::RecordLiteral { properties, .. } => {
+                for (_, expr) in properties {
+                    self.check_expr(*expr, scope);
+                }
+            }
+            ast::Expr::Element { element, .. } => {
+                let element = self.module.raw_module().element(*element);
+                for property in &element.properties {
+                    self.check_expr(property.value, scope);
+                }
+                for content in &element.content {
+                    self.check_expr(*content, scope);
+                }
+            }
+            ast::Expr::ActionHandler { body, span, .. } => {
+                let handler_scope = self.scope_manager.create_child(scope);
+                self.scope_manager_define(
+                    handler_scope,
+                    Name::new("action"),
+                    SymbolKind::Variable,
+                    *span,
+                );
+                self.check_expr(*body, handler_scope);
+            }
+            ast::Expr::Block { stmts, expr, .. } => {
+                let block_scope = self.scope_manager.create_child(scope);
+                for stmt in stmts {
+                    match stmt {
+                        ast::Stmt::Let {
+                            name, init, span, ..
+                        } => {
+                            self.check_expr(*init, block_scope);
+                            self.scope_manager_define(
+                                block_scope,
+                                name.clone(),
+                                SymbolKind::Variable,
+                                *span,
+                            );
+                        }
+                        ast::Stmt::Expr(expr, _) => {
+                            self.check_expr(*expr, block_scope);
+                        }
+                    }
+                }
+                if let Some(expr) = expr {
+                    self.check_expr(*expr, block_scope);
+                }
+            }
+            ast::Expr::For {
+                item,
+                index,
+                iterable,
+                body,
+                ..
+            } => {
+                self.check_expr(*iterable, scope);
+                let for_scope = self.scope_manager.create_child(scope);
+                self.scope_manager_define(
+                    for_scope,
+                    item.clone(),
+                    SymbolKind::Variable,
+                    self.module.raw_module().expr(*body).span(),
+                );
+                if let Some(index_name) = index {
+                    self.scope_manager_define(
+                        for_scope,
+                        index_name.clone(),
+                        SymbolKind::Variable,
+                        self.module.raw_module().expr(*body).span(),
+                    );
+                }
+                self.check_expr(*body, for_scope);
+            }
+            ast::Expr::Let {
+                name, value, body, ..
+            } => {
+                self.check_expr(*value, scope);
+                let let_scope = self.scope_manager.create_child(scope);
+                self.scope_manager_define(
+                    let_scope,
+                    name.clone(),
+                    SymbolKind::Variable,
+                    self.module.raw_module().expr(*body).span(),
+                );
+                self.check_expr(*body, let_scope);
+            }
+        }
+    }
+
+    fn report_undefined(&mut self, name: &Name, span: TextSpan) {
+        self.diagnostics.push(
+            Diagnostic::error("undefined-identifier")
+                .with_message(format!("Undefined identifier '{}'", name))
+                .with_label(Label::primary(
+                    self.module.module_identity().to_string(),
+                    span,
+                ))
+                .build(),
+        );
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        ast, InterfaceItem, InterfaceItemKind, InterfaceParam, LocalDefinitionId, LoweredModule,
+        PreparedBinding, PreparedBindingOrigin, PreparedBindingTarget, PreparedItemKind,
+        PreparedModule, PreparedNamespace, Visibility,
+    };
     use nx_diagnostics::TextSize;
 
     #[test]
@@ -420,7 +696,8 @@ mod tests {
     #[test]
     fn test_build_scopes_empty_module() {
         let module = LoweredModule::new(crate::SourceId::new(0));
-        let (manager, diagnostics) = build_scopes(&module);
+        let prepared = PreparedModule::standalone("empty.nx", module);
+        let (manager, diagnostics) = build_scopes(&prepared);
 
         assert!(manager.get(manager.root()).is_empty());
         assert!(diagnostics.is_empty());
@@ -441,7 +718,8 @@ mod tests {
             span,
         }));
 
-        let (manager, diagnostics) = build_scopes(&module);
+        let prepared = PreparedModule::standalone("component.nx", module);
+        let (manager, diagnostics) = build_scopes(&prepared);
         let symbol = manager
             .resolve(&Name::new("SearchBox"), manager.root())
             .expect("Expected component symbol in root scope");
@@ -464,7 +742,8 @@ mod tests {
             span,
         }));
 
-        let (manager, diagnostics) = build_scopes(&module);
+        let prepared = PreparedModule::standalone("value.nx", module);
+        let (manager, diagnostics) = build_scopes(&prepared);
         let symbol = manager
             .resolve(&Name::new("answer"), manager.root())
             .expect("Expected top-level value symbol in root scope");
@@ -487,7 +766,8 @@ mod tests {
             span,
         }));
 
-        let (manager, diagnostics) = build_scopes(&module);
+        let prepared = PreparedModule::standalone("private.nx", module);
+        let (manager, diagnostics) = build_scopes(&prepared);
         let symbol = manager
             .resolve(&Name::new("secret"), manager.root())
             .expect("Expected private symbol in the defining module scope");
@@ -495,5 +775,53 @@ mod tests {
         assert_eq!(symbol.kind, SymbolKind::Variable);
         assert_eq!(symbol.name.as_str(), "secret");
         assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn qualified_prepared_binding_does_not_report_undefined_base_identifier() {
+        let source = r#"let root() = { Math.addOne(41) }"#;
+        let parse = nx_syntax::parse_str(source, "qualified.nx");
+        let tree = parse.tree.expect("Expected syntax tree");
+        let mut prepared = PreparedModule::standalone(
+            "qualified.nx",
+            crate::lower(tree.root(), crate::SourceId::new(parse.source_id.as_u32())),
+        );
+
+        let imported_function = InterfaceItem {
+            module_identity: "math/add.nx".to_string(),
+            item_name: "addOne".to_string(),
+            definition_id: LocalDefinitionId::new(0),
+            visibility: Visibility::Export,
+            item: InterfaceItemKind::Function {
+                params: vec![InterfaceParam {
+                    name: Name::new("n"),
+                    ty: ast::TypeRef::name("int"),
+                    is_content: false,
+                    span: TextSpan::default(),
+                }],
+                return_type: ast::TypeRef::name("int"),
+                span: TextSpan::default(),
+            },
+        };
+        prepared.insert_binding(PreparedBinding {
+            visible_name: Name::new("Math.addOne"),
+            namespace: PreparedNamespace::Value,
+            kind: PreparedItemKind::Function,
+            origin: PreparedBindingOrigin::Imported {
+                module_identity: imported_function.module_identity.clone(),
+            },
+            target: PreparedBindingTarget::Imported {
+                item: imported_function,
+            },
+        });
+
+        let (scopes, _) = build_scopes(&prepared);
+        let diagnostics = check_undefined_identifiers(&prepared, &scopes);
+
+        assert!(
+            diagnostics.is_empty(),
+            "Expected qualified prepared bindings to suppress undefined-base diagnostics, got {:?}",
+            diagnostics
+        );
     }
 }

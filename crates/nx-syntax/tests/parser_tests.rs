@@ -251,7 +251,8 @@ fn test_parse_content_remains_identifier_outside_modifier_position() {
         "Parameter named content should not be treated as a modifier"
     );
     assert_eq!(
-        param.child_by_field("name")
+        param
+            .child_by_field("name")
             .expect("Parameter should expose name")
             .text(),
         "content"
@@ -266,10 +267,7 @@ fn test_parse_regular_element_mixed_content_preserves_text_runs() {
     "#;
     let result = parse_str(source, "mixed-content.nx");
 
-    assert!(
-        result.is_ok(),
-        "Regular element mixed content should parse"
-    );
+    assert!(result.is_ok(), "Regular element mixed content should parse");
     let root = result.root().expect("Should have root node");
     let function = root
         .children()

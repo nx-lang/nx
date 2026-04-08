@@ -23,16 +23,23 @@
 pub mod ast;
 pub mod db;
 pub mod lower;
+pub mod prepared;
 pub mod records;
 pub mod scope;
 
 use la_arena::{Arena, Idx};
 use nx_diagnostics::{Diagnostic, Label, Severity, TextSpan};
-use rustc_hash::FxHashSet;
 use smol_str::SmolStr;
 
 // Re-export lowering function
 pub use lower::lower;
+pub use prepared::{
+    binding_specs_for_item, interface_enum, interface_function_signature, interface_record,
+    interface_type_alias, local_definition_id, prepared_item_kind, InterfaceField, InterfaceItem,
+    InterfaceItemKind, InterfaceParam, LocalDefinitionId, PreparedBinding, PreparedBindingOrigin,
+    PreparedBindingTarget, PreparedItemKind, PreparedModule, PreparedNamespace,
+    ResolvedPreparedItem,
+};
 
 // Re-export database types
 pub use db::{DatabaseImpl, NxDatabase};
@@ -525,8 +532,6 @@ pub struct LoweredModule {
     pub imports: Vec<Import>,
     /// Top-level items
     items: Vec<Item>,
-    /// Imported interface-only items synthesized for transient analysis.
-    external_items: FxHashSet<usize>,
     /// Lowering-time diagnostics
     diagnostics: Vec<LoweringDiagnostic>,
     /// Arena for all expressions
@@ -542,7 +547,6 @@ impl LoweredModule {
             source_id,
             imports: Vec::new(),
             items: Vec::new(),
-            external_items: FxHashSet::default(),
             diagnostics: Vec::new(),
             exprs: Arena::new(),
             elements: Arena::new(),
@@ -564,21 +568,19 @@ impl LoweredModule {
         self.items.iter().find(|item| item.name().as_str() == name)
     }
 
+    /// Returns the stable local definition identity for one raw item index, if present.
+    pub fn definition_id_at(&self, index: usize) -> Option<LocalDefinitionId> {
+        (index < self.items.len()).then_some(LocalDefinitionId::new(index as u32))
+    }
+
+    /// Returns the raw item identified by one stable local definition identity.
+    pub fn item_by_definition(&self, definition_id: LocalDefinitionId) -> Option<&Item> {
+        self.items.get(definition_id.index())
+    }
+
     /// Add a new item to the module.
     pub fn add_item(&mut self, item: Item) {
         self.items.push(item);
-    }
-
-    /// Add a synthesized interface-only item used during transient analysis.
-    pub fn add_external_item(&mut self, item: Item) {
-        let index = self.items.len();
-        self.items.push(item);
-        self.external_items.insert(index);
-    }
-
-    /// Returns true when the item at `index` is a synthesized external interface item.
-    pub fn is_external_item(&self, index: usize) -> bool {
-        self.external_items.contains(&index)
     }
 
     /// Add a lowering diagnostic.

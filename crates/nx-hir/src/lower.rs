@@ -5,10 +5,9 @@
 
 use crate::ast::{BinOp, Expr, Literal, OrderedFloat, Stmt, TypeRef, UnOp};
 use crate::{
-    validate_record_definitions, Component, ComponentEmit, ComponentEmitKind, Element, EnumDef,
-    EnumMember, ExprId, Function, Import, ImportKind, Item, LoweredModule, LoweringDiagnostic,
-    Name, Param, Property, RecordDef, RecordField, RecordKind, SelectiveImport, SourceId,
-    TypeAlias, ValueDef, Visibility,
+    Component, ComponentEmit, ComponentEmitKind, Element, EnumDef, EnumMember, ExprId, Function,
+    Import, ImportKind, Item, LoweredModule, LoweringDiagnostic, Name, Param, Property, RecordDef,
+    RecordField, RecordKind, SelectiveImport, SourceId, TypeAlias, ValueDef, Visibility,
 };
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_syntax::{SyntaxKind, SyntaxNode};
@@ -1734,10 +1733,6 @@ impl LoweringContext {
                 }
             }
         }
-
-        for error in validate_record_definitions(&self.module) {
-            self.add_diagnostic(error.message(), error.span());
-        }
     }
 }
 
@@ -1751,6 +1746,7 @@ pub fn lower(root: SyntaxNode, source_id: SourceId) -> LoweredModule {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{validate_record_definitions, PreparedModule};
     use nx_syntax::parse_str;
     mod tree_helpers {
         include!(concat!(
@@ -1759,6 +1755,14 @@ mod tests {
         ));
     }
     use tree_helpers::{collect_kinds, find_first_kind};
+
+    fn prepared_record_validation_messages(module: &LoweredModule) -> Vec<String> {
+        let prepared = PreparedModule::standalone("record-validation.nx", module.clone());
+        validate_record_definitions(&prepared)
+            .into_iter()
+            .map(|error| error.message())
+            .collect()
+    }
 
     #[test]
     fn test_lowering_context_creation() {
@@ -2314,11 +2318,11 @@ enum Mode = light | dark"#;
             .expect("Should parse record inheritance error source");
         let module = lower(tree.root(), SourceId::new(0));
 
-        let messages: Vec<_> = module
-            .diagnostics()
-            .iter()
-            .map(|diagnostic| diagnostic.message.as_str())
-            .collect();
+        assert!(
+            module.diagnostics().is_empty(),
+            "Raw lowering should defer record-inheritance diagnostics to prepared validation"
+        );
+        let messages = prepared_record_validation_messages(&module);
 
         assert!(
             messages
@@ -2353,11 +2357,11 @@ enum Mode = light | dark"#;
             .expect("Should parse content inheritance conflict");
         let module = lower(tree.root(), SourceId::new(0));
 
-        let messages: Vec<_> = module
-            .diagnostics()
-            .iter()
-            .map(|diagnostic| diagnostic.message.as_str())
-            .collect();
+        assert!(
+            module.diagnostics().is_empty(),
+            "Raw lowering should defer record-inheritance diagnostics to prepared validation"
+        );
+        let messages = prepared_record_validation_messages(&module);
 
         assert!(
             messages
@@ -2385,11 +2389,11 @@ enum Mode = light | dark"#;
             .expect("Should parse record inheritance cycle");
         let module = lower(tree.root(), SourceId::new(0));
 
-        let messages: Vec<_> = module
-            .diagnostics()
-            .iter()
-            .map(|diagnostic| diagnostic.message.as_str())
-            .collect();
+        assert!(
+            module.diagnostics().is_empty(),
+            "Raw lowering should defer record-inheritance diagnostics to prepared validation"
+        );
+        let messages = prepared_record_validation_messages(&module);
 
         assert!(
             messages
@@ -2421,11 +2425,11 @@ enum Mode = light | dark"#;
             .expect("Should parse record inheritance error source");
         let module = lower(tree.root(), SourceId::new(0));
 
-        let messages: Vec<_> = module
-            .diagnostics()
-            .iter()
-            .map(|diagnostic| diagnostic.message.as_str())
-            .collect();
+        assert!(
+            module.diagnostics().is_empty(),
+            "Raw lowering should defer record-inheritance diagnostics to prepared validation"
+        );
+        let messages = prepared_record_validation_messages(&module);
         let missing_base_messages = messages
             .iter()
             .filter(|message| message.contains("BrokenBase") && message.contains("MissingBase"))

@@ -7,8 +7,9 @@ use crate::{
 };
 use nx_diagnostics::{Diagnostic, Label, TextSpan};
 use nx_hir::{
-    ast, effective_record_shape_for_name, is_record_subtype,
-    resolve_record_definition as resolve_hir_record_definition, ExprId, LoweredModule, Name,
+    ast, effective_record_shape_for_name, interface_enum, interface_function_signature,
+    interface_type_alias, is_record_subtype, ExprId, InterfaceItemKind, Item, Name,
+    PreparedBindingOrigin, PreparedModule, PreparedNamespace, ResolvedPreparedItem,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -28,7 +29,7 @@ struct ElementBindingSpec {
 /// of expressions within a module.
 pub struct InferenceContext<'a> {
     /// The module being type-checked
-    module: &'a LoweredModule,
+    module: &'a PreparedModule,
     /// Original caller-provided file name for diagnostics.
     file_name: String,
     /// Type environment (name → type, expr → type)
@@ -47,12 +48,12 @@ pub struct InferenceContext<'a> {
 
 impl<'a> InferenceContext<'a> {
     /// Creates a new inference context for a module.
-    pub fn new(module: &'a LoweredModule) -> Self {
+    pub fn new(module: &'a PreparedModule) -> Self {
         Self::with_file_name(module, "")
     }
 
     /// Creates a new inference context for a module with a diagnostic file name.
-    pub fn with_file_name(module: &'a LoweredModule, file_name: impl Into<String>) -> Self {
+    pub fn with_file_name(module: &'a PreparedModule, file_name: impl Into<String>) -> Self {
         let mut ctx = Self {
             module,
             file_name: file_name.into(),
@@ -66,6 +67,7 @@ impl<'a> InferenceContext<'a> {
         ctx.register_type_definitions();
         ctx.register_function_signatures();
         ctx.register_value_bindings();
+        ctx.validate_local_record_defaults();
         ctx
     }
 
@@ -77,7 +79,7 @@ impl<'a> InferenceContext<'a> {
     }
 
     fn flattened_expr_name(&self, expr_id: ExprId) -> Option<Name> {
-        match self.module.expr(expr_id) {
+        match self.module.raw_module().expr(expr_id) {
             ast::Expr::Ident(name) => Some(name.clone()),
             ast::Expr::Member { base, member, .. } => {
                 let mut name = self.flattened_expr_name(*base)?.as_str().to_string();
@@ -91,7 +93,7 @@ impl<'a> InferenceContext<'a> {
 
     /// Infers the type of an expression.
     pub fn infer_expr(&mut self, expr_id: ExprId) -> Type {
-        let expr = self.module.expr(expr_id);
+        let expr = self.module.raw_module().expr(expr_id);
 
         let ty = match expr {
             // Literals have known types
@@ -102,12 +104,6 @@ impl<'a> InferenceContext<'a> {
                 if let Some(ty) = self.env.lookup(name) {
                     ty.clone()
                 } else {
-                    // Undefined identifier - record error
-                    self.error(
-                        "undefined-identifier",
-                        format!("Undefined identifier '{}'", name),
-                        expr.span(),
-                    );
                     Type::Error
                 }
             }
@@ -262,7 +258,7 @@ impl<'a> InferenceContext<'a> {
             }
 
             ast::Expr::Element { element, span } => {
-                let element_ref = self.module.element(*element).clone();
+                let element_ref = self.module.raw_module().element(*element).clone();
                 self.infer_element_expression(&element_ref, *span)
             }
 
@@ -629,22 +625,62 @@ impl<'a> InferenceContext<'a> {
 
     fn infer_element_expression(&mut self, element: &nx_hir::Element, span: TextSpan) -> Type {
         if let Some(function) = self.resolve_function_definition(&element.tag) {
-            self.check_element_bindings_against_function(element, &function, span);
-            if let Some(func_ty) = self.env.lookup(&function.name) {
-                if let Type::Function { ret, .. } = func_ty {
-                    return (**ret).clone();
+            match function {
+                ResolvedPreparedItem::Raw {
+                    item: Item::Function(function),
+                    ..
+                } => {
+                    self.check_element_bindings_against_function(element, &function, span);
+                    if let Some(func_ty) = self.env.lookup(&element.tag) {
+                        if let Type::Function { ret, .. } = func_ty {
+                            return (**ret).clone();
+                        }
+                    }
+                    return function
+                        .return_type
+                        .as_ref()
+                        .map(|ty| self.type_from_type_ref(ty))
+                        .unwrap_or_else(|| Type::named(element.tag.clone()));
                 }
+                ResolvedPreparedItem::Imported { item, .. } => {
+                    if let Some((_name, _visibility, params, return_type, _span)) =
+                        interface_function_signature(&item)
+                    {
+                        let spec = self.build_element_binding_spec(
+                            params
+                                .iter()
+                                .map(|param| (&param.name, &param.ty, param.is_content)),
+                        );
+                        self.check_element_bindings(element, span, &spec);
+                        return self.type_from_type_ref(&return_type);
+                    }
+                }
+                _ => {}
             }
-            return function
-                .return_type
-                .as_ref()
-                .map(|ty| self.type_from_type_ref(ty))
-                .unwrap_or_else(|| Type::named(function.name));
         }
 
         if let Some(component) = self.resolve_component_definition(&element.tag) {
-            self.check_element_bindings_against_component(element, &component, span);
-            return Type::named(component.name);
+            match component {
+                ResolvedPreparedItem::Raw {
+                    item: Item::Component(component),
+                    ..
+                } => {
+                    self.check_element_bindings_against_component(element, &component, span);
+                    return Type::named(element.tag.clone());
+                }
+                ResolvedPreparedItem::Imported { item, .. } => {
+                    if let InterfaceItemKind::Component { props, .. } = &item.item {
+                        let spec = self.build_element_binding_spec(
+                            props
+                                .iter()
+                                .map(|field| (&field.name, &field.ty, field.is_content)),
+                        );
+                        self.check_element_bindings(element, span, &spec);
+                        return Type::named(element.tag.clone());
+                    }
+                }
+                _ => {}
+            }
         }
 
         if let Some(record_def) = self.resolve_record_definition(&element.tag) {
@@ -656,7 +692,7 @@ impl<'a> InferenceContext<'a> {
                 );
             }
             self.check_element_bindings_against_record(element, &record_def, span);
-            return Type::named(record_def.name);
+            return Type::named(element.tag.clone());
         }
 
         Type::named(element.tag.clone())
@@ -868,117 +904,242 @@ impl<'a> InferenceContext<'a> {
     }
 
     fn register_type_definitions(&mut self) {
-        for item in self.module.items() {
-            match item {
-                nx_hir::Item::TypeAlias(alias) => {
+        let bindings = self
+            .module
+            .bindings(PreparedNamespace::Type)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        for binding in bindings {
+            let Some(resolved) = self.module.resolve_prepared_item(&binding) else {
+                continue;
+            };
+
+            match resolved {
+                ResolvedPreparedItem::Raw {
+                    item: Item::TypeAlias(alias),
+                    ..
+                } => {
                     self.type_aliases.insert(
-                        alias.name.clone(),
+                        binding.visible_name.clone(),
                         TypeAliasInfo {
-                            target: alias.ty.clone(),
+                            target: alias.ty,
                             span: alias.span,
                         },
                     );
                 }
-                nx_hir::Item::Enum(enum_def) => {
+                ResolvedPreparedItem::Imported { item, .. } => {
+                    if let Some(alias) = interface_type_alias(&item) {
+                        self.type_aliases.insert(
+                            binding.visible_name.clone(),
+                            TypeAliasInfo {
+                                target: alias.ty,
+                                span: alias.span,
+                            },
+                        );
+                    } else if let Some(enum_def) = interface_enum(&item) {
+                        let members = enum_def
+                            .members
+                            .iter()
+                            .map(|member| member.name.clone())
+                            .collect();
+                        self.enum_defs.insert(
+                            binding.visible_name.clone(),
+                            EnumType::new(binding.visible_name.clone(), members),
+                        );
+                    }
+                }
+                ResolvedPreparedItem::Raw {
+                    item: Item::Enum(enum_def),
+                    ..
+                } => {
                     let members = enum_def
                         .members
                         .iter()
                         .map(|member| member.name.clone())
                         .collect();
                     self.enum_defs.insert(
-                        enum_def.name.clone(),
-                        EnumType::new(enum_def.name.clone(), members),
+                        binding.visible_name.clone(),
+                        EnumType::new(binding.visible_name.clone(), members),
                     );
                 }
-                nx_hir::Item::Record(record_def) => {
-                    for prop in &record_def.properties {
-                        if let Some(default_expr) = prop.default {
-                            let expected = self.type_from_type_ref(&prop.ty);
-                            let actual = self.infer_expr(default_expr);
-                            self.check_typed_binding(
-                                &actual,
-                                &expected,
-                                prop.span,
-                                "record-default-type-mismatch",
-                                format!("Default value for record property '{}'", prop.name),
-                            );
-                        }
-                    }
-                }
-                nx_hir::Item::Component(_) => {}
                 _ => {}
             }
         }
     }
 
-    fn register_function_signatures(&mut self) {
-        for item in self.module.items() {
-            if let nx_hir::Item::Function(func) = item {
-                let return_type = if let Some(ty) = func.return_type.as_ref() {
-                    self.type_from_type_ref(ty)
-                } else {
-                    let placeholder = self.fresh_var();
-                    self.function_return_placeholders
-                        .insert(func.name.clone(), placeholder.clone());
-                    placeholder
-                };
+    fn validate_local_record_defaults(&mut self) {
+        let local_items = self.module.raw_module().items().to_vec();
+        for item in local_items {
+            if let Item::Record(record_def) = item {
+                for prop in &record_def.properties {
+                    if let Some(default_expr) = prop.default {
+                        let expected = self.type_from_type_ref(&prop.ty);
+                        let actual = self.infer_expr(default_expr);
+                        self.check_typed_binding(
+                            &actual,
+                            &expected,
+                            prop.span,
+                            "record-default-type-mismatch",
+                            format!("Default value for record property '{}'", prop.name),
+                        );
+                    }
+                }
+            }
+        }
+    }
 
-                self.bind_function_signature(func, return_type);
+    fn register_function_signatures(&mut self) {
+        let bindings = self
+            .module
+            .bindings(PreparedNamespace::Value)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        for binding in bindings {
+            let Some(resolved) = self.module.resolve_prepared_item(&binding) else {
+                continue;
+            };
+
+            match resolved {
+                ResolvedPreparedItem::Raw {
+                    item: Item::Function(func),
+                    origin,
+                    ..
+                } => {
+                    let return_type = if let Some(ty) = func.return_type.as_ref() {
+                        self.type_from_type_ref(ty)
+                    } else {
+                        let placeholder = self.fresh_var();
+                        if matches!(origin, PreparedBindingOrigin::Local) {
+                            self.function_return_placeholders
+                                .insert(binding.visible_name.clone(), placeholder.clone());
+                        }
+                        placeholder
+                    };
+
+                    self.bind_function_signature_from_parts(
+                        binding.visible_name.clone(),
+                        &func.params,
+                        return_type,
+                    );
+                }
+                ResolvedPreparedItem::Imported { item, .. } => {
+                    if let Some((_name, _visibility, params, return_type, _span)) =
+                        interface_function_signature(&item)
+                    {
+                        let param_types = params
+                            .iter()
+                            .map(|param| self.type_from_type_ref(&param.ty))
+                            .collect::<Vec<_>>();
+                        let return_type = self.type_from_type_ref(&return_type);
+                        self.env.bind(
+                            binding.visible_name.clone(),
+                            Type::function(param_types, return_type),
+                        );
+                    }
+                }
+                _ => {}
             }
         }
     }
 
     fn register_value_bindings(&mut self) {
-        for (index, item) in self.module.items().iter().enumerate() {
-            if let nx_hir::Item::Value(value) = item {
-                let binding_ty = if self.module.is_external_item(index) {
-                    value
-                        .ty
-                        .as_ref()
-                        .map(|ty_ref| self.type_from_type_ref(ty_ref))
-                        .unwrap_or(Type::Error)
-                } else {
-                    let actual = self.infer_expr(value.value);
-                    if let Some(ty_ref) = value.ty.as_ref() {
-                        let expected = self.type_from_type_ref(ty_ref);
-                        self.check_typed_binding(
-                            &actual,
-                            &expected,
-                            value.span,
-                            "value-type-mismatch",
-                            format!("Initializer for value '{}'", value.name),
-                        );
-                        expected
-                    } else {
-                        actual
-                    }
-                };
+        let bindings = self
+            .module
+            .bindings(PreparedNamespace::Value)
+            .cloned()
+            .collect::<Vec<_>>();
 
-                self.env.bind(value.name.clone(), binding_ty);
+        for binding in bindings {
+            let Some(resolved) = self.module.resolve_prepared_item(&binding) else {
+                continue;
+            };
+
+            match resolved {
+                ResolvedPreparedItem::Raw {
+                    module_identity,
+                    item: Item::Value(value),
+                    ..
+                } => {
+                    let binding_ty = if module_identity == self.module.module_identity() {
+                        let actual = self.infer_expr(value.value);
+                        if let Some(ty_ref) = value.ty.as_ref() {
+                            let expected = self.type_from_type_ref(ty_ref);
+                            self.check_typed_binding(
+                                &actual,
+                                &expected,
+                                value.span,
+                                "value-type-mismatch",
+                                format!("Initializer for value '{}'", value.name),
+                            );
+                            expected
+                        } else {
+                            actual
+                        }
+                    } else {
+                        value
+                            .ty
+                            .as_ref()
+                            .map(|ty_ref| self.type_from_type_ref(ty_ref))
+                            .unwrap_or(Type::Error)
+                    };
+
+                    self.env.bind(binding.visible_name.clone(), binding_ty);
+                }
+                ResolvedPreparedItem::Imported { item, .. } => {
+                    if let InterfaceItemKind::Value { ty, .. } = &item.item {
+                        let binding_ty = self.type_from_type_ref(ty);
+                        self.env.bind(binding.visible_name.clone(), binding_ty);
+                    }
+                }
+                _ => {}
             }
         }
     }
 
-    fn resolve_function_definition(&self, name: &Name) -> Option<nx_hir::Function> {
-        match self.module.find_item(name.as_str()) {
-            Some(nx_hir::Item::Function(func)) => Some(func.clone()),
-            _ => None,
-        }
+    fn resolve_function_definition(&self, name: &Name) -> Option<ResolvedPreparedItem> {
+        self.module
+            .resolve_binding(PreparedNamespace::Element, name)
+            .and_then(|binding| self.module.resolve_prepared_item(binding))
+            .and_then(|resolved| match &resolved {
+                ResolvedPreparedItem::Raw {
+                    item: Item::Function(_),
+                    ..
+                } => Some(resolved),
+                ResolvedPreparedItem::Imported { item, .. }
+                    if matches!(item.item, InterfaceItemKind::Function { .. }) =>
+                {
+                    Some(resolved)
+                }
+                _ => None,
+            })
     }
 
-    fn resolve_component_definition(&self, name: &Name) -> Option<nx_hir::Component> {
-        match self.module.find_item(name.as_str()) {
-            Some(nx_hir::Item::Component(component)) => Some(component.clone()),
-            _ => None,
-        }
+    fn resolve_component_definition(&self, name: &Name) -> Option<ResolvedPreparedItem> {
+        self.module
+            .resolve_binding(PreparedNamespace::Element, name)
+            .and_then(|binding| self.module.resolve_prepared_item(binding))
+            .and_then(|resolved| match &resolved {
+                ResolvedPreparedItem::Raw {
+                    item: Item::Component(_),
+                    ..
+                } => Some(resolved),
+                ResolvedPreparedItem::Imported { item, .. }
+                    if matches!(item.item, InterfaceItemKind::Component { .. }) =>
+                {
+                    Some(resolved)
+                }
+                _ => None,
+            })
     }
 
     fn resolve_record_definition(&self, name: &Name) -> Option<nx_hir::RecordDef> {
-        resolve_hir_record_definition(self.module, name)
+        nx_hir::resolve_record_definition(self.module, name)
     }
 
     fn enum_info_for_expr(&self, expr_id: ExprId) -> Option<&EnumType> {
-        match self.module.expr(expr_id) {
+        match self.module.raw_module().expr(expr_id) {
             ast::Expr::Ident(name) => {
                 let mut seen = FxHashSet::default();
                 self.enum_info_from_name(name, &mut seen)
@@ -1043,17 +1204,22 @@ impl<'a> InferenceContext<'a> {
         Type::named(name.clone())
     }
 
-    fn function_param_types(&mut self, func: &nx_hir::Function) -> Vec<Type> {
-        func.params
-            .iter()
-            .map(|p| self.type_from_type_ref(&p.ty))
-            .collect()
+    fn bind_function_signature(&mut self, func: &nx_hir::Function, return_type: Type) {
+        self.bind_function_signature_from_parts(func.name.clone(), &func.params, return_type);
     }
 
-    fn bind_function_signature(&mut self, func: &nx_hir::Function, return_type: Type) {
-        let param_types = self.function_param_types(func);
+    fn bind_function_signature_from_parts(
+        &mut self,
+        name: Name,
+        params: &[nx_hir::Param],
+        return_type: Type,
+    ) {
+        let param_types = params
+            .iter()
+            .map(|param| self.type_from_type_ref(&param.ty))
+            .collect::<Vec<_>>();
         self.env
-            .bind(func.name.clone(), Type::function(param_types, return_type));
+            .bind(name, Type::function(param_types, return_type));
     }
 
     fn effective_record_shape(
@@ -1072,15 +1238,17 @@ impl<'a> InferenceContext<'a> {
             return true;
         }
 
-        match self.module.find_item(name.as_str()) {
-            Some(nx_hir::Item::Function(_)) | Some(nx_hir::Item::Component(_)) => true,
-            Some(
-                nx_hir::Item::Record(_)
-                | nx_hir::Item::TypeAlias(_)
-                | nx_hir::Item::Enum(_)
-                | nx_hir::Item::Value(_),
-            ) => false,
-            None => true,
+        if self
+            .module
+            .resolve_binding(PreparedNamespace::Element, name)
+            .is_some()
+        {
+            true
+        } else {
+            self.module
+                .resolve_binding(PreparedNamespace::Type, name)
+                .or_else(|| self.module.resolve_binding(PreparedNamespace::Value, name))
+                .is_none()
         }
     }
 
@@ -1162,7 +1330,7 @@ pub struct TypeInference;
 
 impl TypeInference {
     /// Infers types for all expressions in a module.
-    pub fn infer_module(module: &LoweredModule) -> (TypeEnvironment, Vec<Diagnostic>) {
+    pub fn infer_module(module: &PreparedModule) -> (TypeEnvironment, Vec<Diagnostic>) {
         let ctx = InferenceContext::new(module);
 
         // TODO: Process all items and their expressions
@@ -1178,15 +1346,20 @@ mod tests {
     use nx_diagnostics::{TextSize, TextSpan};
     use nx_hir::{
         ast::BinOp, ast::Expr, ast::Literal, ast::TypeRef, EnumDef, EnumMember, Function, Item,
-        Name, Param, SourceId, TypeAlias,
+        LoweredModule, Name, Param, PreparedModule, SourceId, TypeAlias,
     };
+
+    fn prepared(module: &LoweredModule) -> PreparedModule {
+        PreparedModule::standalone("test.nx", module.clone())
+    }
 
     #[test]
     fn test_infer_int_literal() {
         let mut module = LoweredModule::new(SourceId::new(0));
         let expr_id = module.alloc_expr(Expr::Literal(Literal::Int(42)));
 
-        let mut ctx = InferenceContext::new(&module);
+        let prepared = prepared(&module);
+        let mut ctx = InferenceContext::new(&prepared);
         let ty = ctx.infer_expr(expr_id);
 
         assert_eq!(ty, Type::int());
@@ -1198,7 +1371,8 @@ mod tests {
         let mut module = LoweredModule::new(SourceId::new(0));
         let expr_id = module.alloc_expr(Expr::Literal(Literal::String("hello".into())));
 
-        let mut ctx = InferenceContext::new(&module);
+        let prepared = prepared(&module);
+        let mut ctx = InferenceContext::new(&prepared);
         let ty = ctx.infer_expr(expr_id);
 
         assert_eq!(ty, Type::string());
@@ -1209,7 +1383,8 @@ mod tests {
         let mut module = LoweredModule::new(SourceId::new(0));
         let expr_id = module.alloc_expr(Expr::Literal(Literal::Boolean(true)));
 
-        let mut ctx = InferenceContext::new(&module);
+        let prepared = prepared(&module);
+        let mut ctx = InferenceContext::new(&prepared);
         let ty = ctx.infer_expr(expr_id);
 
         assert_eq!(ty, Type::bool());
@@ -1218,7 +1393,8 @@ mod tests {
     #[test]
     fn test_element_supertype_requires_exact_case() {
         let module = LoweredModule::new(SourceId::new(0));
-        let ctx = InferenceContext::new(&module);
+        let prepared = prepared(&module);
+        let ctx = InferenceContext::new(&prepared);
 
         assert!(ctx.type_satisfies_expected(
             &Type::named(Name::new("div")),
@@ -1249,7 +1425,8 @@ mod tests {
 
         module.add_item(Item::Function(function));
 
-        let mut ctx = InferenceContext::new(&module);
+        let prepared = prepared(&module);
+        let mut ctx = InferenceContext::new(&prepared);
 
         if let Item::Function(func) = &module.items()[0] {
             ctx.infer_function(func);
@@ -1279,7 +1456,8 @@ mod tests {
         };
         module.add_item(Item::Function(function));
 
-        let mut ctx = InferenceContext::new(&module);
+        let prepared = prepared(&module);
+        let mut ctx = InferenceContext::new(&prepared);
         if let Item::Function(func) = &module.items()[0] {
             ctx.infer_function(func);
         }
@@ -1375,7 +1553,8 @@ mod tests {
         };
         module.add_item(Item::Function(compute_fn));
 
-        let mut ctx = InferenceContext::new(&module);
+        let prepared = prepared(&module);
+        let mut ctx = InferenceContext::new(&prepared);
         for item in module.items() {
             if let Item::Function(func) = item {
                 ctx.infer_function(func);
@@ -1429,7 +1608,8 @@ mod tests {
             span,
         });
 
-        let mut ctx = InferenceContext::new(&module);
+        let prepared = prepared(&module);
+        let mut ctx = InferenceContext::new(&prepared);
         let ty = ctx.infer_expr(expr_id);
 
         match ty {
@@ -1464,7 +1644,8 @@ mod tests {
             span,
         });
 
-        let mut ctx = InferenceContext::new(&module);
+        let prepared = prepared(&module);
+        let mut ctx = InferenceContext::new(&prepared);
         let ty = ctx.infer_expr(expr_id);
 
         assert!(ty.is_error());
@@ -1500,7 +1681,8 @@ mod tests {
             span,
         });
 
-        let mut ctx = InferenceContext::new(&module);
+        let prepared = prepared(&module);
+        let mut ctx = InferenceContext::new(&prepared);
         let ty = ctx.infer_expr(expr_id);
 
         match ty {
@@ -1541,7 +1723,8 @@ mod tests {
         };
         module.add_item(Item::Function(func));
 
-        let mut ctx = InferenceContext::new(&module);
+        let prepared = prepared(&module);
+        let mut ctx = InferenceContext::new(&prepared);
         if let Item::Function(func) = &module.items()[1] {
             ctx.infer_function(func);
         }

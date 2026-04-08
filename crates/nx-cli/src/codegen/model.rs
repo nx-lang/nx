@@ -3,7 +3,7 @@ use nx_hir::{
     ast::TypeRef, EnumDef, Item, LoweredModule, RecordDef, RecordKind, TypeAlias, Visibility,
 };
 use rustc_hash::FxHashMap;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -29,6 +29,7 @@ pub struct ExportedRecordField {
 pub struct ExportedRecord {
     pub name: String,
     pub kind: RecordKind,
+    pub is_abstract: bool,
     pub base: Option<String>,
     pub fields: Vec<ExportedRecordField>,
 }
@@ -46,22 +47,6 @@ impl ExportedType {
             Self::Alias(alias) => &alias.name,
             Self::Enum(enum_def) => &enum_def.name,
             Self::Record(record) => &record.name,
-        }
-    }
-
-    fn collect_referenced_type_names(&self, out: &mut BTreeSet<String>) {
-        match self {
-            Self::Alias(alias) => collect_type_ref_names(&alias.target, out),
-            Self::Enum(_) => {}
-            Self::Record(record) => {
-                if let Some(base) = &record.base {
-                    out.insert(base.clone());
-                }
-
-                for field in &record.fields {
-                    collect_type_ref_names(&field.ty, out);
-                }
-            }
         }
     }
 }
@@ -82,12 +67,6 @@ impl ExportedTypeDecl {
 pub struct ExportedModule {
     pub module_path: PathBuf,
     pub declarations: Vec<ExportedTypeDecl>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ModuleDependency {
-    pub module_path: PathBuf,
-    pub type_names: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -152,37 +131,44 @@ impl ExportedTypeGraph {
             .find(|declaration| declaration.name() == type_name)
     }
 
-    pub fn module_dependencies(&self, module: &ExportedModule) -> Vec<ModuleDependency> {
-        let mut dependencies = BTreeMap::<PathBuf, BTreeSet<String>>::new();
+    pub fn record(&self, type_name: &str) -> Option<&ExportedRecord> {
+        match &self.declaration(type_name)?.item {
+            ExportedType::Record(record) => Some(record),
+            _ => None,
+        }
+    }
 
-        for declaration in &module.declarations {
-            let mut referenced_names = BTreeSet::new();
-            declaration
-                .item
-                .collect_referenced_type_names(&mut referenced_names);
+    pub fn resolve_record(&self, type_name: &str) -> Option<&ExportedRecord> {
+        match &self
+            .resolve_named_type_declaration(type_name, &mut BTreeSet::new())?
+            .item
+        {
+            ExportedType::Record(record) => Some(record),
+            _ => None,
+        }
+    }
 
-            for referenced_name in referenced_names {
-                let Some(owner_path) = self.owner_module(&referenced_name) else {
-                    continue;
-                };
+    pub fn resolved_record_base<'a>(
+        &'a self,
+        record: &ExportedRecord,
+    ) -> Option<&'a ExportedRecord> {
+        let base_name = record.base.as_deref()?;
+        self.resolve_record(base_name)
+    }
 
-                if owner_path == module.module_path.as_path() {
-                    continue;
-                }
-
-                dependencies
-                    .entry(owner_path.to_path_buf())
-                    .or_default()
-                    .insert(referenced_name);
-            }
+    pub fn concrete_descendants<'a>(&'a self, type_name: &str) -> Vec<&'a ExportedRecord> {
+        let Some(record) = self.record(type_name) else {
+            return Vec::new();
+        };
+        if !record.is_abstract {
+            return Vec::new();
         }
 
-        dependencies
+        let mut names = BTreeSet::new();
+        self.collect_concrete_descendant_names(type_name, &mut names);
+        names
             .into_iter()
-            .map(|(module_path, type_names)| ModuleDependency {
-                module_path,
-                type_names: type_names.into_iter().collect(),
-            })
+            .filter_map(|name| self.record(&name))
             .collect()
     }
 
@@ -196,6 +182,59 @@ impl ExportedTypeGraph {
         }
 
         Self { modules, owners }
+    }
+
+    fn resolve_named_type_declaration<'a>(
+        &'a self,
+        type_name: &str,
+        seen_aliases: &mut BTreeSet<String>,
+    ) -> Option<&'a ExportedTypeDecl> {
+        let declaration = self.declaration(type_name)?;
+        match &declaration.item {
+            ExportedType::Alias(alias) => {
+                let TypeRef::Name(target_name) = &alias.target else {
+                    return Some(declaration);
+                };
+
+                if !seen_aliases.insert(type_name.to_string()) {
+                    return None;
+                }
+
+                let resolved =
+                    self.resolve_named_type_declaration(target_name.as_str(), seen_aliases);
+                seen_aliases.remove(type_name);
+                resolved
+            }
+            _ => Some(declaration),
+        }
+    }
+
+    fn collect_concrete_descendant_names(&self, type_name: &str, out: &mut BTreeSet<String>) {
+        for record in self.records() {
+            let Some(base_record) = self.resolved_record_base(record) else {
+                continue;
+            };
+
+            if base_record.name != type_name {
+                continue;
+            }
+
+            if record.is_abstract {
+                self.collect_concrete_descendant_names(&record.name, out);
+            } else {
+                out.insert(record.name.clone());
+            }
+        }
+    }
+
+    fn records(&self) -> impl Iterator<Item = &ExportedRecord> {
+        self.modules
+            .iter()
+            .flat_map(|module| module.declarations.iter())
+            .filter_map(|declaration| match &declaration.item {
+                ExportedType::Record(record) => Some(record),
+                _ => None,
+            })
     }
 }
 
@@ -253,6 +292,7 @@ fn export_record(def: &RecordDef) -> ExportedRecord {
     ExportedRecord {
         name: def.name.as_str().to_string(),
         kind: def.kind,
+        is_abstract: def.is_abstract,
         base: def.base.as_ref().map(|name| name.as_str().to_string()),
         fields: def
             .properties
@@ -266,24 +306,6 @@ fn export_record(def: &RecordDef) -> ExportedRecord {
     }
 }
 
-fn collect_type_ref_names(ty: &TypeRef, out: &mut BTreeSet<String>) {
-    match ty {
-        TypeRef::Name(name) => {
-            out.insert(name.as_str().to_string());
-        }
-        TypeRef::Array(inner) | TypeRef::Nullable(inner) => collect_type_ref_names(inner, out),
-        TypeRef::Function {
-            params,
-            return_type,
-        } => {
-            for param in params {
-                collect_type_ref_names(param, out);
-            }
-            collect_type_ref_names(return_type, out);
-        }
-    }
-}
-
 fn module_output_stem(path: &Path) -> Result<PathBuf, String> {
     let stem = path.with_extension("");
     if stem.as_os_str().is_empty() {
@@ -294,4 +316,78 @@ fn module_output_stem(path: &Path) -> Result<PathBuf, String> {
     }
 
     Ok(stem)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nx_api::build_library_artifact_from_directory;
+    use nx_hir::{lower, LoweredModule, SourceId};
+    use nx_syntax::parse_str;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn lower_module(source: &str, file_name: &str) -> LoweredModule {
+        let parse_result = parse_str(source, file_name);
+        let tree = parse_result.tree.expect("expected parse tree");
+        lower(tree.root(), SourceId::new(0))
+    }
+
+    #[test]
+    fn resolves_abstract_record_alias_bases() {
+        let source = r#"
+            export abstract type Question = { label:string }
+            export type QuestionBaseAlias = Question
+            export type ShortTextQuestion extends QuestionBaseAlias = { placeholder:string? }
+        "#;
+        let module = lower_module(source, "types.nx");
+        let graph = ExportedTypeGraph::from_module(&module, Path::new("types.nx")).unwrap();
+
+        let short_text = graph
+            .record("ShortTextQuestion")
+            .expect("short text record");
+        let base = graph
+            .resolved_record_base(short_text)
+            .expect("resolved abstract base");
+        assert_eq!(base.name, "Question");
+        assert!(base.is_abstract);
+    }
+
+    #[test]
+    fn collects_transitive_concrete_descendants_across_modules() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let library_dir = temp_dir.path().join("ui");
+        fs::create_dir_all(&library_dir).expect("library dir");
+        fs::write(
+            library_dir.join("base.nx"),
+            "export abstract type Question = { label:string }",
+        )
+        .expect("base file");
+        fs::write(
+            library_dir.join("derived.nx"),
+            "export abstract type TextQuestion extends Question = { placeholder:string? }",
+        )
+        .expect("derived file");
+        fs::write(
+            library_dir.join("short-text.nx"),
+            "export type ShortTextQuestion extends TextQuestion = { maxLength:int? }",
+        )
+        .expect("short text file");
+
+        let artifact = build_library_artifact_from_directory(&library_dir).expect("library build");
+        let graph = ExportedTypeGraph::from_library(&artifact).unwrap();
+
+        let descendants = graph
+            .concrete_descendants("Question")
+            .into_iter()
+            .map(|record| record.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(descendants, vec!["ShortTextQuestion"]);
+        assert_eq!(
+            graph
+                .owner_module("ShortTextQuestion")
+                .expect("short text module"),
+            Path::new("short-text")
+        );
+    }
 }

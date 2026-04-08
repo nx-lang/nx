@@ -1,4 +1,4 @@
-use nx_hir::LoweredModule;
+use nx_hir::{LocalDefinitionId, LoweredModule};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -34,7 +34,7 @@ pub enum ResolvedItemKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModuleQualifiedItemRef {
     pub module_id: RuntimeModuleId,
-    pub item_name: String,
+    pub definition_id: LocalDefinitionId,
     pub kind: ResolvedItemKind,
 }
 
@@ -59,6 +59,7 @@ pub struct ResolvedProgram {
     pub fingerprint: u64,
     root_modules: Vec<RuntimeModuleId>,
     modules: Vec<ResolvedModule>,
+    local_items: FxHashMap<RuntimeModuleId, FxHashMap<String, ModuleQualifiedItemRef>>,
     pub entry_functions: FxHashMap<String, ModuleQualifiedItemRef>,
     pub entry_components: FxHashMap<String, ModuleQualifiedItemRef>,
     pub entry_records: FxHashMap<String, ModuleQualifiedItemRef>,
@@ -78,10 +79,12 @@ impl ResolvedProgram {
         entry_enums: FxHashMap<String, ModuleQualifiedItemRef>,
         imports: FxHashMap<RuntimeModuleId, FxHashMap<String, ModuleQualifiedItemRef>>,
     ) -> Self {
+        let local_items = build_local_items(&modules);
         Self {
             fingerprint,
             root_modules,
             modules,
+            local_items,
             entry_functions,
             entry_components,
             entry_records,
@@ -138,6 +141,17 @@ impl ResolvedProgram {
         self.entry_components.get(name)
     }
 
+    /// Looks up a local item owned by one preserved module.
+    pub fn local_item(
+        &self,
+        module_id: RuntimeModuleId,
+        visible_name: &str,
+    ) -> Option<&ModuleQualifiedItemRef> {
+        self.local_items
+            .get(&module_id)
+            .and_then(|items| items.get(visible_name))
+    }
+
     /// Looks up an imported symbol visible from one module.
     pub fn imported_item(
         &self,
@@ -147,5 +161,46 @@ impl ResolvedProgram {
         self.imports
             .get(&module_id)
             .and_then(|items| items.get(visible_name))
+    }
+
+    /// Returns every imported or peer-visible item prepared for one module.
+    pub fn imported_items(
+        &self,
+        module_id: RuntimeModuleId,
+    ) -> Option<&FxHashMap<String, ModuleQualifiedItemRef>> {
+        self.imports.get(&module_id)
+    }
+}
+
+fn build_local_items(
+    modules: &[ResolvedModule],
+) -> FxHashMap<RuntimeModuleId, FxHashMap<String, ModuleQualifiedItemRef>> {
+    let mut local_items = FxHashMap::default();
+
+    for module in modules {
+        let mut items = FxHashMap::default();
+        for (index, item) in module.lowered_module.items().iter().enumerate() {
+            items
+                .entry(item.name().as_str().to_string())
+                .or_insert_with(|| ModuleQualifiedItemRef {
+                    module_id: module.id,
+                    definition_id: LocalDefinitionId::new(index as u32),
+                    kind: resolved_item_kind(item),
+                });
+        }
+        local_items.insert(module.id, items);
+    }
+
+    local_items
+}
+
+fn resolved_item_kind(item: &nx_hir::Item) -> ResolvedItemKind {
+    match item {
+        nx_hir::Item::Function(_) => ResolvedItemKind::Function,
+        nx_hir::Item::Value(_) => ResolvedItemKind::Value,
+        nx_hir::Item::Component(_) => ResolvedItemKind::Component,
+        nx_hir::Item::TypeAlias(_) => ResolvedItemKind::TypeAlias,
+        nx_hir::Item::Enum(_) => ResolvedItemKind::Enum,
+        nx_hir::Item::Record(_) => ResolvedItemKind::Record,
     }
 }
