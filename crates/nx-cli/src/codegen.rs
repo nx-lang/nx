@@ -118,8 +118,53 @@ mod tests {
 
         assert!(output.contains("export type Theme = string;"));
         assert!(output.contains("export type Direction = \"north\" | \"south\";"));
-        assert!(output.contains("export interface SearchRequested {"));
+        assert!(output.contains("export interface NxRecord<TType extends string = string>"));
+        assert!(output
+            .contains("export interface SearchRequested extends NxRecord<\"SearchRequested\">"));
         assert!(!output.contains("Hidden"));
+    }
+
+    #[test]
+    fn generates_typescript_concrete_root_records_with_discriminators() {
+        let source = r#"
+            export type Payload = { data:string }
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(output.contains("export interface NxRecord<TType extends string = string>"));
+        assert!(output.contains("export interface Payload extends NxRecord<\"Payload\">"));
+        assert!(output.contains("data: string;"));
+    }
+
+    #[test]
+    fn generates_typescript_abstract_record_runtime_unions() {
+        let source = r#"
+            export abstract type Question = { label:string }
+            export type ShortTextQuestion extends Question = { placeholder:string? }
+            export type LongTextQuestion extends Question = { wordLimit:int? }
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(output.contains("export interface QuestionBase extends NxRecord"));
+        assert!(output.contains("export type Question = LongTextQuestion | ShortTextQuestion;"));
+        assert!(output
+            .contains("export interface ShortTextQuestion extends QuestionBase, NxRecord<\"ShortTextQuestion\">"));
+        assert!(output
+            .contains("export interface LongTextQuestion extends QuestionBase, NxRecord<\"LongTextQuestion\">"));
     }
 
     #[test]
@@ -180,6 +225,7 @@ mod tests {
             .iter()
             .find(|file| file.relative_path == PathBuf::from("index.ts"))
             .expect("index.ts");
+        assert!(!index.content.contains("NxRecord"));
         assert!(index.content.contains("export * from \"./forms\";"));
         assert!(index.content.contains("export * from \"./theme\";"));
     }
@@ -220,10 +266,75 @@ mod tests {
             .iter()
             .find(|file| file.relative_path == PathBuf::from("index.ts"))
             .expect("index.ts");
+        assert!(!index.content.contains("NxRecord"));
         assert!(index
             .content
             .contains("export * from \"./components/button\";"));
         assert!(index.content.contains("export * from \"./theme\";"));
+    }
+
+    #[test]
+    fn generates_typescript_library_files_for_cross_module_abstract_record_families() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let library_dir = temp_dir.path().join("ui");
+        fs::create_dir_all(&library_dir).expect("library dir");
+        fs::write(
+            library_dir.join("base.nx"),
+            "export abstract type Question = { label:string }",
+        )
+        .expect("base file");
+        fs::write(
+            library_dir.join("short-text.nx"),
+            "export type ShortTextQuestion extends Question = { placeholder:string? }",
+        )
+        .expect("short text file");
+
+        let artifact = build_library_artifact_from_directory(&library_dir).expect("library build");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let files = generate_library_types(&artifact, &opts).unwrap();
+        let base = files
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("base.ts"))
+            .expect("base.ts");
+        assert!(base
+            .content
+            .contains("import type { NxRecord } from \"./_nx\";"));
+        assert!(base
+            .content
+            .contains("import type { ShortTextQuestion } from \"./short-text\";"));
+        assert!(base
+            .content
+            .contains("export interface QuestionBase extends NxRecord"));
+        assert!(base
+            .content
+            .contains("export type Question = ShortTextQuestion;"));
+
+        let short_text = files
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("short-text.ts"))
+            .expect("short-text.ts");
+        assert!(short_text
+            .content
+            .contains("import type { NxRecord } from \"./_nx\";"));
+        assert!(short_text
+            .content
+            .contains("import type { QuestionBase } from \"./base\";"));
+        assert!(short_text
+            .content
+            .contains("export interface ShortTextQuestion extends QuestionBase, NxRecord<\"ShortTextQuestion\">"));
+
+        let index = files
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("index.ts"))
+            .expect("index.ts");
+        assert!(index
+            .content
+            .contains("export type { NxRecord } from \"./_nx\";"));
     }
 
     #[test]
@@ -240,8 +351,67 @@ mod tests {
 
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
 
-        assert!(output.contains("public string? __NxType { get; set; }"));
+        assert!(output.contains("public string __NxType { get; set; } = \"Payload\";"));
         assert!(output.contains("public string NxType { get; set; } = default!;"));
+    }
+
+    #[test]
+    fn generates_csharp_abstract_record_discriminators_for_concrete_descendants() {
+        let source = r#"
+            export abstract type Question = { label:string }
+            export type ShortTextQuestion extends Question = { placeholder:string? }
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.Models".to_string()),
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(output.contains("public abstract class Question"));
+        assert!(output.contains("public abstract string __NxType { get; set; }"));
+        assert!(output.contains("public sealed class ShortTextQuestion : Question"));
+        assert!(output
+            .contains("public override string __NxType { get; set; } = \"ShortTextQuestion\";"));
+    }
+
+    #[test]
+    fn generates_csharp_multi_level_abstract_record_discriminators() {
+        let source = r#"
+            export abstract type Question = { label:string }
+            export abstract type TextQuestion extends Question = { placeholder:string? }
+            export type ShortTextQuestion extends TextQuestion = { maxLength:int? }
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.Models".to_string()),
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(output.contains("public abstract class Question"));
+        assert!(output.contains("public abstract string __NxType { get; set; }"));
+        assert!(output.contains("public abstract class TextQuestion : Question"));
+        assert!(output.contains("public sealed class ShortTextQuestion : TextQuestion"));
+        assert!(output
+            .contains("public override string __NxType { get; set; } = \"ShortTextQuestion\";"));
+
+        let text_question_block = output
+            .split("public abstract class TextQuestion : Question")
+            .nth(1)
+            .and_then(|tail| {
+                tail.split("public sealed class ShortTextQuestion : TextQuestion")
+                    .next()
+            })
+            .expect("TextQuestion block");
+        assert!(
+            !text_question_block.contains("__NxType"),
+            "intermediate abstract records should inherit the root discriminator without redeclaring it"
+        );
     }
 
     #[test]

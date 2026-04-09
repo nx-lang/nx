@@ -17,9 +17,7 @@ action TrackSearch = {
 component <SearchBox
   placeholder:string
   emits {
-    ValueChanged {
-      value:string
-    }
+    ValueChanged { value:string }
     SearchSubmitted
   }
 /> = {

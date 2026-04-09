@@ -641,8 +641,11 @@ mod tests {
         fs::create_dir_all(&app_dir).expect("app dir");
         fs::create_dir_all(&math_dir).expect("math dir");
 
-        fs::write(math_dir.join("add.nx"), r#"export let addOne(n:int) = { n + 1 }"#)
-            .expect("math library");
+        fs::write(
+            math_dir.join("add.nx"),
+            r#"export let addOne(n:int) = { n + 1 }"#,
+        )
+        .expect("math library");
         fs::write(
             app_dir.join("main.nx"),
             r#"import "../math" as Math
@@ -667,8 +670,11 @@ let root() = { Math.addOne(41) }"#,
         fs::create_dir_all(&app_dir).expect("app dir");
         fs::create_dir_all(&ui_dir).expect("ui dir");
 
-        fs::write(ui_dir.join("theme.nx"), r#"export let title() = { "Hello" }"#)
-            .expect("ui library");
+        fs::write(
+            ui_dir.join("theme.nx"),
+            r#"export let title() = { "Hello" }"#,
+        )
+        .expect("ui library");
         fs::write(
             app_dir.join("main.nx"),
             r#"import { title as Ui.title } from "../ui"

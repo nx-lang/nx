@@ -4,7 +4,16 @@ use crate::codegen::model::{
 use crate::codegen::writer::CodeWriter;
 use crate::codegen::{GenerateTypesOptions, GeneratedFile};
 use nx_hir::ast::TypeRef;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+
+const NX_RECORD_HELPER_MODULE: &str = "_nx";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NxRecordMode {
+    Inline,
+    Import,
+}
 
 pub fn emit_single_file(
     graph: &ExportedTypeGraph,
@@ -14,7 +23,13 @@ pub fn emit_single_file(
         .modules
         .first()
         .ok_or_else(|| "Single-file generation requires one source module".to_string())?;
-    Ok(render_module(graph, module, opts, false))
+    Ok(render_module(
+        graph,
+        module,
+        opts,
+        false,
+        NxRecordMode::Inline,
+    ))
 }
 
 pub fn emit_library(
@@ -22,18 +37,26 @@ pub fn emit_library(
     opts: &GenerateTypesOptions,
 ) -> Result<Vec<GeneratedFile>, String> {
     let mut files = Vec::new();
+    let has_records = graph.modules.iter().any(module_has_records);
+
+    if has_records {
+        files.push(GeneratedFile {
+            relative_path: PathBuf::from(format!("{NX_RECORD_HELPER_MODULE}.ts")),
+            content: render_nx_record_module(opts),
+        });
+    }
 
     for module in &graph.modules {
         files.push(GeneratedFile {
             relative_path: module_output_path(&module.module_path),
-            content: render_module(graph, module, opts, true),
+            content: render_module(graph, module, opts, true, NxRecordMode::Import),
         });
     }
 
     if !graph.modules.is_empty() {
         files.push(GeneratedFile {
             relative_path: PathBuf::from("index.ts"),
-            content: render_index(graph, opts),
+            content: render_index(graph, opts, has_records),
         });
     }
 
@@ -45,30 +68,40 @@ fn render_module(
     module: &ExportedModule,
     opts: &GenerateTypesOptions,
     include_imports: bool,
+    nx_record_mode: NxRecordMode,
 ) -> String {
     let mut writer = CodeWriter::new(opts.format.clone());
     write_header(&mut writer);
 
+    let mut wrote_import = false;
     if include_imports {
-        let dependencies = graph.module_dependencies(module);
-        for dependency in &dependencies {
-            let names = dependency
-                .type_names
-                .iter()
-                .map(|name| sanitize_ts_type_name(name))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let specifier = relative_module_specifier(&module.module_path, &dependency.module_path);
-            writer.line(&format!("import type {{ {names} }} from \"{specifier}\";"));
+        if module_has_records(module) && nx_record_mode == NxRecordMode::Import {
+            let specifier =
+                relative_module_specifier(&module.module_path, Path::new(NX_RECORD_HELPER_MODULE));
+            writer.line(&format!("import type {{ NxRecord }} from \"{specifier}\";"));
+            wrote_import = true;
         }
 
-        if !dependencies.is_empty() && !module.declarations.is_empty() {
+        let dependencies = collect_module_imports(graph, module);
+        for (module_path, type_names) in &dependencies {
+            let names = type_names.iter().cloned().collect::<Vec<_>>().join(", ");
+            let specifier = relative_module_specifier(&module.module_path, module_path);
+            writer.line(&format!("import type {{ {names} }} from \"{specifier}\";"));
+            wrote_import = true;
+        }
+
+        if wrote_import {
             writer.blank_line();
         }
     }
 
+    if module_has_records(module) && nx_record_mode == NxRecordMode::Inline {
+        emit_nx_record(&mut writer);
+        writer.blank_line();
+    }
+
     for (index, declaration) in module.declarations.iter().enumerate() {
-        emit_declaration(&mut writer, &declaration.item);
+        emit_declaration(&mut writer, &declaration.item, graph);
         if index + 1 != module.declarations.len() {
             writer.blank_line();
         }
@@ -77,9 +110,26 @@ fn render_module(
     writer.finish()
 }
 
-fn render_index(graph: &ExportedTypeGraph, opts: &GenerateTypesOptions) -> String {
+fn render_nx_record_module(opts: &GenerateTypesOptions) -> String {
     let mut writer = CodeWriter::new(opts.format.clone());
     write_header(&mut writer);
+    emit_nx_record(&mut writer);
+    writer.finish()
+}
+
+fn render_index(
+    graph: &ExportedTypeGraph,
+    opts: &GenerateTypesOptions,
+    has_records: bool,
+) -> String {
+    let mut writer = CodeWriter::new(opts.format.clone());
+    write_header(&mut writer);
+
+    if has_records {
+        writer.line(&format!(
+            "export type {{ NxRecord }} from \"./{NX_RECORD_HELPER_MODULE}\";"
+        ));
+    }
 
     for module in &graph.modules {
         let specifier = module_path_specifier(&module.module_path);
@@ -95,11 +145,24 @@ fn write_header(writer: &mut CodeWriter) {
     writer.blank_line();
 }
 
-fn emit_declaration(writer: &mut CodeWriter, declaration: &ExportedType) {
+fn emit_nx_record(writer: &mut CodeWriter) {
+    writer.block(
+        "export interface NxRecord<TType extends string = string>",
+        |writer| {
+            writer.line("$type: TType;");
+        },
+    );
+}
+
+fn emit_declaration(
+    writer: &mut CodeWriter,
+    declaration: &ExportedType,
+    graph: &ExportedTypeGraph,
+) {
     match declaration {
         ExportedType::Alias(alias) => emit_alias(writer, alias),
         ExportedType::Enum(enum_def) => emit_enum(writer, enum_def),
-        ExportedType::Record(record) => emit_record(writer, record),
+        ExportedType::Record(record) => emit_record(writer, record, graph),
     }
 }
 
@@ -130,15 +193,28 @@ fn emit_enum(writer: &mut CodeWriter, enum_def: &ExportedEnum) {
     ));
 }
 
-fn emit_record(writer: &mut CodeWriter, record: &ExportedRecord) {
-    let header = if let Some(base) = &record.base {
+fn emit_record(writer: &mut CodeWriter, record: &ExportedRecord, graph: &ExportedTypeGraph) {
+    if record.is_abstract {
+        emit_abstract_record(writer, record, graph);
+    } else {
+        emit_concrete_record(writer, record, graph);
+    }
+}
+
+fn emit_abstract_record(
+    writer: &mut CodeWriter,
+    record: &ExportedRecord,
+    graph: &ExportedTypeGraph,
+) {
+    let base_contract_name = ts_base_contract_name(&record.name);
+    let header = if let Some(base_record) = graph.resolved_record_base(record) {
         format!(
             "export interface {} extends {}",
-            sanitize_ts_type_name(&record.name),
-            sanitize_ts_type_name(base)
+            base_contract_name,
+            ts_base_contract_name(&base_record.name)
         )
     } else {
-        format!("export interface {}", sanitize_ts_type_name(&record.name))
+        format!("export interface {} extends NxRecord", base_contract_name)
     };
 
     writer.block(&header, |writer| {
@@ -148,6 +224,159 @@ fn emit_record(writer: &mut CodeWriter, record: &ExportedRecord) {
             writer.line(&format!("{key}: {ty};"));
         }
     });
+
+    writer.blank_line();
+
+    let descendants = graph.concrete_descendants(&record.name);
+    let runtime_surface = if descendants.is_empty() {
+        base_contract_name
+    } else {
+        descendants
+            .iter()
+            .map(|record| sanitize_ts_type_name(&record.name))
+            .collect::<Vec<_>>()
+            .join(" | ")
+    };
+
+    writer.line(&format!(
+        "export type {} = {};",
+        sanitize_ts_type_name(&record.name),
+        runtime_surface
+    ));
+}
+
+fn emit_concrete_record(
+    writer: &mut CodeWriter,
+    record: &ExportedRecord,
+    graph: &ExportedTypeGraph,
+) {
+    let mut bases = Vec::new();
+    if let Some(base_record) = graph.resolved_record_base(record) {
+        bases.push(ts_base_contract_name(&base_record.name));
+    }
+    bases.push(format!("NxRecord<\"{}\">", escape_ts_string(&record.name)));
+
+    let header = format!(
+        "export interface {} extends {}",
+        sanitize_ts_type_name(&record.name),
+        bases.join(", ")
+    );
+
+    writer.block(&header, |writer| {
+        for field in &record.fields {
+            let key = ts_property_key(&field.name);
+            let ty = ts_type(&field.ty);
+            writer.line(&format!("{key}: {ty};"));
+        }
+    });
+}
+
+fn module_has_records(module: &ExportedModule) -> bool {
+    module
+        .declarations
+        .iter()
+        .any(|declaration| matches!(declaration.item, ExportedType::Record(_)))
+}
+
+fn collect_module_imports(
+    graph: &ExportedTypeGraph,
+    module: &ExportedModule,
+) -> BTreeMap<PathBuf, BTreeSet<String>> {
+    let mut imports = BTreeMap::<PathBuf, BTreeSet<String>>::new();
+
+    for declaration in &module.declarations {
+        match &declaration.item {
+            ExportedType::Alias(alias) => {
+                add_type_ref_imports(graph, module, &alias.target, &mut imports);
+            }
+            ExportedType::Enum(_) => {}
+            ExportedType::Record(record) => {
+                if let Some(base_record) = graph.resolved_record_base(record) {
+                    add_imported_symbol(
+                        graph,
+                        module,
+                        &base_record.name,
+                        ts_base_contract_name(&base_record.name),
+                        &mut imports,
+                    );
+                }
+
+                for field in &record.fields {
+                    add_type_ref_imports(graph, module, &field.ty, &mut imports);
+                }
+
+                if record.is_abstract {
+                    for descendant in graph.concrete_descendants(&record.name) {
+                        add_imported_symbol(
+                            graph,
+                            module,
+                            &descendant.name,
+                            sanitize_ts_type_name(&descendant.name),
+                            &mut imports,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    imports
+}
+
+fn add_type_ref_imports(
+    graph: &ExportedTypeGraph,
+    module: &ExportedModule,
+    ty: &TypeRef,
+    imports: &mut BTreeMap<PathBuf, BTreeSet<String>>,
+) {
+    let mut names = BTreeSet::new();
+    collect_type_ref_names(ty, &mut names);
+    for name in names {
+        add_imported_symbol(graph, module, &name, sanitize_ts_type_name(&name), imports);
+    }
+}
+
+fn add_imported_symbol(
+    graph: &ExportedTypeGraph,
+    module: &ExportedModule,
+    type_name: &str,
+    imported_name: String,
+    imports: &mut BTreeMap<PathBuf, BTreeSet<String>>,
+) {
+    let Some(owner_module) = graph.owner_module(type_name) else {
+        return;
+    };
+
+    if owner_module == module.module_path.as_path() {
+        return;
+    }
+
+    imports
+        .entry(owner_module.to_path_buf())
+        .or_default()
+        .insert(imported_name);
+}
+
+fn collect_type_ref_names(ty: &TypeRef, out: &mut BTreeSet<String>) {
+    match ty {
+        TypeRef::Name(name) => {
+            out.insert(name.as_str().to_string());
+        }
+        TypeRef::Array(inner) | TypeRef::Nullable(inner) => collect_type_ref_names(inner, out),
+        TypeRef::Function {
+            params,
+            return_type,
+        } => {
+            for param in params {
+                collect_type_ref_names(param, out);
+            }
+            collect_type_ref_names(return_type, out);
+        }
+    }
+}
+
+fn ts_base_contract_name(name: &str) -> String {
+    format!("{}Base", sanitize_ts_type_name(name))
 }
 
 fn ts_type(ty: &TypeRef) -> String {

@@ -160,24 +160,28 @@ fn emit_record(
     context: &CSharpRenderContext<'_>,
 ) {
     writer.line("[MessagePackObject]");
+    let class_modifier = if record.is_abstract {
+        "public abstract class"
+    } else {
+        "public sealed class"
+    };
     let header = if let Some(base) = &record.base {
         format!(
-            "public sealed class {} : {}",
+            "{} {} : {}",
+            class_modifier,
             sanitize_csharp_identifier(&record.name),
             csharp_type_name(base, context).text
         )
     } else {
         format!(
-            "public sealed class {}",
+            "{} {}",
+            class_modifier,
             sanitize_csharp_identifier(&record.name)
         )
     };
 
     writer.block(&header, |writer| {
-        writer.line("[Key(\"$type\")]");
-        writer.line(&format!(
-            "public string? {NX_TYPE_DISCRIMINATOR_PROPERTY} {{ get; set; }}"
-        ));
+        emit_record_discriminator(writer, record, context);
 
         for field in &record.fields {
             let field_type = csharp_type(&field.ty, context);
@@ -200,6 +204,37 @@ fn emit_record(
             }
         }
     });
+}
+
+fn emit_record_discriminator(
+    writer: &mut CodeWriter,
+    record: &ExportedRecord,
+    context: &CSharpRenderContext<'_>,
+) {
+    if record.is_abstract {
+        if graph_resolves_record_base(context, record) {
+            return;
+        }
+
+        writer.line("[Key(\"$type\")]");
+        writer.line(&format!(
+            "public abstract string {NX_TYPE_DISCRIMINATOR_PROPERTY} {{ get; set; }}"
+        ));
+        return;
+    }
+
+    writer.line("[Key(\"$type\")]");
+    if graph_resolves_record_base(context, record) {
+        writer.line(&format!(
+            "public override string {NX_TYPE_DISCRIMINATOR_PROPERTY} {{ get; set; }} = \"{}\";",
+            escape_csharp_string_literal(&record.name)
+        ));
+    } else {
+        writer.line(&format!(
+            "public string {NX_TYPE_DISCRIMINATOR_PROPERTY} {{ get; set; }} = \"{}\";",
+            escape_csharp_string_literal(&record.name)
+        ));
+    }
 }
 
 fn emit_enum_messagepack_formatter(writer: &mut CodeWriter, enum_def: &ExportedEnum) {
@@ -321,6 +356,10 @@ struct CSharpRenderContext<'a> {
     namespace: &'a str,
     graph: &'a ExportedTypeGraph,
     qualify_generated_types: bool,
+}
+
+fn graph_resolves_record_base(context: &CSharpRenderContext<'_>, record: &ExportedRecord) -> bool {
+    context.graph.resolved_record_base(record).is_some()
 }
 
 fn csharp_type(ty: &TypeRef, context: &CSharpRenderContext<'_>) -> CSharpType {
