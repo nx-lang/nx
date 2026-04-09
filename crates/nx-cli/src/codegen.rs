@@ -159,7 +159,7 @@ mod tests {
 
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
 
-        assert!(output.contains("export interface QuestionBase extends NxRecord"));
+        assert!(output.contains("export interface QuestionBase {"));
         assert!(output.contains("export type Question = LongTextQuestion | ShortTextQuestion;"));
         assert!(output
             .contains("export interface ShortTextQuestion extends QuestionBase, NxRecord<\"ShortTextQuestion\">"));
@@ -301,15 +301,11 @@ mod tests {
             .iter()
             .find(|file| file.relative_path == PathBuf::from("base.ts"))
             .expect("base.ts");
-        assert!(base
-            .content
-            .contains("import type { NxRecord } from \"./_nx\";"));
+        assert!(!base.content.contains("import type { NxRecord }"));
         assert!(base
             .content
             .contains("import type { ShortTextQuestion } from \"./short-text\";"));
-        assert!(base
-            .content
-            .contains("export interface QuestionBase extends NxRecord"));
+        assert!(base.content.contains("export interface QuestionBase {"));
         assert!(base
             .content
             .contains("export type Question = ShortTextQuestion;"));
@@ -335,6 +331,123 @@ mod tests {
         assert!(index
             .content
             .contains("export type { NxRecord } from \"./_nx\";"));
+    }
+
+    #[test]
+    fn generates_typescript_library_files_when_source_module_matches_helper_name() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let library_dir = temp_dir.path().join("ui");
+        fs::create_dir_all(&library_dir).expect("library dir");
+        fs::write(
+            library_dir.join("_nx.nx"),
+            "export type Payload = { data:string }",
+        )
+        .expect("_nx source file");
+
+        let artifact = build_library_artifact_from_directory(&library_dir).expect("library build");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let files = generate_library_types(&artifact, &opts).unwrap();
+        assert_eq!(files.len(), 3);
+
+        let payload_module = files
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("_nx.ts"))
+            .expect("_nx.ts source output");
+        assert!(payload_module
+            .content
+            .contains("import type { NxRecord } from \"./_nx1\";"));
+        assert!(payload_module
+            .content
+            .contains("export interface Payload extends NxRecord<\"Payload\">"));
+
+        let helper_module = files
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("_nx1.ts"))
+            .expect("_nx1.ts helper output");
+        assert!(helper_module
+            .content
+            .contains("export interface NxRecord<TType extends string = string>"));
+
+        let index = files
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("index.ts"))
+            .expect("index.ts");
+        assert!(index
+            .content
+            .contains("export type { NxRecord } from \"./_nx1\";"));
+        assert!(index.content.contains("export * from \"./_nx\";"));
+    }
+
+    #[test]
+    fn generates_typescript_library_files_when_source_modules_match_nested_helper_names() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let library_dir = temp_dir.path().join("ui");
+        fs::create_dir_all(&library_dir).expect("library dir");
+        fs::write(
+            library_dir.join("_nx.nx"),
+            "export type Payload = { data:string }",
+        )
+        .expect("_nx source file");
+        fs::write(
+            library_dir.join("_nx1.nx"),
+            "export type PayloadExtra = { flag:bool }",
+        )
+        .expect("_nx1 source file");
+
+        let artifact = build_library_artifact_from_directory(&library_dir).expect("library build");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let files = generate_library_types(&artifact, &opts).unwrap();
+        assert_eq!(files.len(), 4);
+
+        let first_payload_module = files
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("_nx.ts"))
+            .expect("_nx.ts source output");
+        assert!(first_payload_module
+            .content
+            .contains("import type { NxRecord } from \"./_nx2\";"));
+        assert!(first_payload_module
+            .content
+            .contains("export interface Payload extends NxRecord<\"Payload\">"));
+
+        let second_payload_module = files
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("_nx1.ts"))
+            .expect("_nx1.ts source output");
+        assert!(second_payload_module
+            .content
+            .contains("import type { NxRecord } from \"./_nx2\";"));
+        assert!(second_payload_module
+            .content
+            .contains("export interface PayloadExtra extends NxRecord<\"PayloadExtra\">"));
+
+        let helper_module = files
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("_nx2.ts"))
+            .expect("_nx2.ts helper output");
+        assert!(helper_module
+            .content
+            .contains("export interface NxRecord<TType extends string = string>"));
+
+        let index = files
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("index.ts"))
+            .expect("index.ts");
+        assert!(index
+            .content
+            .contains("export type { NxRecord } from \"./_nx2\";"));
+        assert!(index.content.contains("export * from \"./_nx\";"));
+        assert!(index.content.contains("export * from \"./_nx1\";"));
     }
 
     #[test]

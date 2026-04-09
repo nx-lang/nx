@@ -1004,7 +1004,8 @@ let root() = { Ui.title() }"#,
         );
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("export type Theme = string;"));
-        assert!(stdout.contains("export interface SearchRequested {"));
+        assert!(stdout
+            .contains("export interface SearchRequested extends NxRecord<\"SearchRequested\">"));
         assert!(!stdout.contains("Hidden"));
     }
 
@@ -1124,7 +1125,7 @@ let root() = { Ui.title() }"#,
         let index = fs::read_to_string(output_path.join("index.ts")).unwrap();
 
         assert!(forms.contains("import type { ThemeMode } from \"./theme\";"));
-        assert!(forms.contains("export interface FormState {"));
+        assert!(forms.contains("export interface FormState extends NxRecord<\"FormState\">"));
         assert!(forms.contains("export type FormTheme = ThemeMode;"));
         assert!(theme.contains("export type ThemeMode = \"light\" | \"dark\";"));
         assert!(index.contains("export * from \"./forms\";"));

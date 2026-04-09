@@ -7,7 +7,7 @@ use nx_hir::ast::TypeRef;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-const NX_RECORD_HELPER_MODULE: &str = "_nx";
+const NX_RECORD_HELPER_MODULE_BASENAME: &str = "_nx";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NxRecordMode {
@@ -29,6 +29,7 @@ pub fn emit_single_file(
         opts,
         false,
         NxRecordMode::Inline,
+        None,
     ))
 }
 
@@ -37,11 +38,12 @@ pub fn emit_library(
     opts: &GenerateTypesOptions,
 ) -> Result<Vec<GeneratedFile>, String> {
     let mut files = Vec::new();
-    let has_records = graph.modules.iter().any(module_has_records);
+    let has_records = graph.modules.iter().any(|m| module_needs_nx_record(m));
+    let helper_module_path = has_records.then(|| nx_record_helper_module_path(graph));
 
-    if has_records {
+    if let Some(helper_module_path) = &helper_module_path {
         files.push(GeneratedFile {
-            relative_path: PathBuf::from(format!("{NX_RECORD_HELPER_MODULE}.ts")),
+            relative_path: helper_module_path.with_extension("ts"),
             content: render_nx_record_module(opts),
         });
     }
@@ -49,14 +51,21 @@ pub fn emit_library(
     for module in &graph.modules {
         files.push(GeneratedFile {
             relative_path: module_output_path(&module.module_path),
-            content: render_module(graph, module, opts, true, NxRecordMode::Import),
+            content: render_module(
+                graph,
+                module,
+                opts,
+                true,
+                NxRecordMode::Import,
+                helper_module_path.as_deref(),
+            ),
         });
     }
 
     if !graph.modules.is_empty() {
         files.push(GeneratedFile {
             relative_path: PathBuf::from("index.ts"),
-            content: render_index(graph, opts, has_records),
+            content: render_index(graph, opts, helper_module_path.as_deref()),
         });
     }
 
@@ -69,15 +78,17 @@ fn render_module(
     opts: &GenerateTypesOptions,
     include_imports: bool,
     nx_record_mode: NxRecordMode,
+    helper_module_path: Option<&Path>,
 ) -> String {
     let mut writer = CodeWriter::new(opts.format.clone());
     write_header(&mut writer);
 
     let mut wrote_import = false;
     if include_imports {
-        if module_has_records(module) && nx_record_mode == NxRecordMode::Import {
-            let specifier =
-                relative_module_specifier(&module.module_path, Path::new(NX_RECORD_HELPER_MODULE));
+        if module_needs_nx_record(module) && nx_record_mode == NxRecordMode::Import {
+            let helper_module_path = helper_module_path
+                .expect("record-bearing library modules require an NxRecord helper module");
+            let specifier = relative_module_specifier(&module.module_path, helper_module_path);
             writer.line(&format!("import type {{ NxRecord }} from \"{specifier}\";"));
             wrote_import = true;
         }
@@ -95,7 +106,7 @@ fn render_module(
         }
     }
 
-    if module_has_records(module) && nx_record_mode == NxRecordMode::Inline {
+    if module_needs_nx_record(module) && nx_record_mode == NxRecordMode::Inline {
         emit_nx_record(&mut writer);
         writer.blank_line();
     }
@@ -117,17 +128,38 @@ fn render_nx_record_module(opts: &GenerateTypesOptions) -> String {
     writer.finish()
 }
 
+fn nx_record_helper_module_path(graph: &ExportedTypeGraph) -> PathBuf {
+    for suffix in 0usize.. {
+        let module_name = if suffix == 0 {
+            NX_RECORD_HELPER_MODULE_BASENAME.to_string()
+        } else {
+            format!("{NX_RECORD_HELPER_MODULE_BASENAME}{suffix}")
+        };
+        let candidate = PathBuf::from(module_name);
+        if graph
+            .modules
+            .iter()
+            .all(|module| module.module_path != candidate)
+        {
+            return candidate;
+        }
+    }
+
+    unreachable!("helper module name search should always terminate")
+}
+
 fn render_index(
     graph: &ExportedTypeGraph,
     opts: &GenerateTypesOptions,
-    has_records: bool,
+    helper_module_path: Option<&Path>,
 ) -> String {
     let mut writer = CodeWriter::new(opts.format.clone());
     write_header(&mut writer);
 
-    if has_records {
+    if let Some(helper_module_path) = helper_module_path {
         writer.line(&format!(
-            "export type {{ NxRecord }} from \"./{NX_RECORD_HELPER_MODULE}\";"
+            "export type {{ NxRecord }} from \"{}\";",
+            module_path_specifier(helper_module_path)
         ));
     }
 
@@ -214,7 +246,7 @@ fn emit_abstract_record(
             ts_base_contract_name(&base_record.name)
         )
     } else {
-        format!("export interface {} extends NxRecord", base_contract_name)
+        format!("export interface {}", base_contract_name)
     };
 
     writer.block(&header, |writer| {
@@ -271,11 +303,13 @@ fn emit_concrete_record(
     });
 }
 
-fn module_has_records(module: &ExportedModule) -> bool {
-    module
-        .declarations
-        .iter()
-        .any(|declaration| matches!(declaration.item, ExportedType::Record(_)))
+fn module_needs_nx_record(module: &ExportedModule) -> bool {
+    module.declarations.iter().any(|declaration| {
+        matches!(
+            &declaration.item,
+            ExportedType::Record(record) if !record.is_abstract
+        )
+    })
 }
 
 fn collect_module_imports(
