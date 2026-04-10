@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "skills": {
+    "openspecex-review": {
+      "source": "/home/bret/src/openspecex-skills",
+      "sourceType": "local",
+      "computedHash": "99328ece01453c751cb7f1db6cbc993413b3d734c8f5b2d3fd8ed4846a526fbf"
+    },
+    "openspecex-review-fix": {
+      "source": "/home/bret/src/openspecex-skills",
+      "sourceType": "local",
+      "computedHash": "6e6fe5fb65a144d4e05ba37eaee168d47a95a4d5e0b23c5be42aad6a7173dd8a"
+    },
+    "openspecex-review-verify": {
+      "source": "/home/bret/src/openspecex-skills",
+      "sourceType": "local",
+      "computedHash": "879c108ebb692da2ff4a15030806dbe61d02d3e3d67766383c2cf9a465b8fba0"
+    }
+  }
+}
