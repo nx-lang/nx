@@ -15,6 +15,8 @@ the existing record architecture than inventing a separate action system.
 
 **Goals:**
 - Add top-level `abstract action Name = { ... }` and `action Name extends Base = { ... }` syntax.
+- Add inline component emitted action syntax `ActionName extends Base { ... }` for concrete emitted
+  actions that reuse abstract action bases.
 - Allow action inheritance through the same alias-aware prepared binding model that record
   inheritance already uses.
 - Preserve action identity across inherited shape resolution, subtype checks, and generated output.
@@ -23,7 +25,7 @@ the existing record architecture than inventing a separate action system.
   abstract and concrete action inheritance chains.
 
 **Non-Goals:**
-- Extending inline component `emits { ... }` definitions with `extends` syntax in this change.
+- Adding `abstract` inline emitted action declarations inside component `emits` blocks.
 - Changing component dispatch matching from exact emitted action names to polymorphic action-family
   dispatch.
 - Introducing multiple inheritance, field overriding, or action-only runtime semantics beyond
@@ -53,11 +55,41 @@ Why rejected:
 - The codebase already relies on a stable action-vs-record syntax distinction for lowering and
   diagnostics, and action inheritance does not remove that need.
 
+### 1a. Extend inline emitted action definitions with a concrete-only `extends` clause
+
+`emit_definition` should gain the same single optional `extends` clause as top-level actions, but
+not the `abstract` modifier:
+
+```text
+emit_definition
+  : identifier optional('extends' qualified_name) '{' property_definition* '}'
+```
+
+Inline emitted actions already synthesize a component-scoped public record name
+`<ComponentName>.<ActionName>` during component predeclaration. This change should preserve that
+model and simply let the synthesized action record carry a resolved base action.
+
+Inline emitted action rules:
+- an inline emitted action remains concrete, even when it extends an abstract base action
+- the synthesized public action name remains `<ComponentName>.<ActionName>`
+- the optional base resolves through the same alias-aware prepared binding path as top-level action
+  inheritance
+- only abstract action declarations or aliases to them are valid bases
+
+Alternative considered: require users to declare a top-level derived action and reference it from
+  `emits` instead of allowing inline `extends`.
+
+Why rejected:
+- Inline emitted actions already exist as first-class public action names. Forcing inheritance
+  users to rewrite them as separate top-level declarations would create an arbitrary inconsistency
+  between two action forms that otherwise share record-compatible semantics.
+
 ### 2. Generalize record-family validation to all record-like declarations, but require same-kind abstract bases
 
 `nx_hir::records` should stop validating inheritance only for `RecordKind::Plain`. Instead, it
 should validate every `RecordDef` that declares or may inherit a base, using the same shared base
-resolution and effective-shape helpers for records and actions.
+resolution and effective-shape helpers for records and actions. That includes synthesized inline
+emitted action records created during component predeclaration.
 
 Base validation rules:
 - `type` declarations may extend only abstract plain records.
@@ -90,6 +122,9 @@ Action-specific semantics remain layered on top:
   declaration kind is `Action`
 - subtype compatibility is family-aware, so a derived action is compatible with an abstract parent
   action of the same lineage but not with an unrelated plain record
+- inline emitted derived actions expose inherited base fields through their synthesized
+  `<Component>.<Action>` public action name and through the implicit `action` value bound inside
+  matching component handlers
 
 Alternative considered: keep action compatibility exact-name-only even after adding action bases.
 
@@ -127,6 +162,9 @@ Why rejected:
 - [Generalizing record validation to actions may surface new diagnostics in existing edge cases] ->
   Mitigation: keep same-kind rules explicit and add focused tests for both valid and invalid mixed
   hierarchies.
+- [Inline emitted actions now share more of the action inheritance surface] -> Mitigation: keep
+  them concrete-only, preserve exact emitted-action-name dispatch, and add focused parser/lowering
+  coverage for `emits { Action extends Base { ... } }`.
 - [Shared subtype helpers make abstract actions more visible in runtime-adjacent paths] ->
   Mitigation: keep action-only gates, such as handler input validation, checking `RecordKind::Action`
   after resolution.
@@ -136,16 +174,19 @@ Why rejected:
 
 ## Migration Plan
 
-1. Extend `action_definition` grammar, generated parser artifacts, AST helpers, validation hints,
-   and syntax fixtures for `abstract action` and `action ... extends ...`.
-2. Update record-family validation and diagnostics in `nx_hir::records` to validate action
-   inheritance and enforce same-kind abstract bases.
-3. Add or update lowering, type-checking, and interpreter tests for inherited action field access,
-   abstract action non-instantiability, and action-family subtype compatibility.
-4. Add code generation tests for exported abstract and concrete action families in TypeScript and
-   C# single-file and library output.
+1. Extend `action_definition` and `emit_definition` grammar, generated parser artifacts, AST
+   helpers, validation hints, and syntax fixtures for top-level `abstract action` / `action ...
+   extends ...` plus inline emitted `Action extends Base { ... }`.
+2. Update component predeclaration plus record-family validation and diagnostics in `nx_hir::records`
+   to preserve inline emitted action bases, validate action inheritance, and enforce same-kind
+   abstract bases.
+3. Add or update lowering, type-checking, component-handler, and interpreter tests for inherited
+   action field access, inline emitted inherited fields, abstract action non-instantiability, and
+   action-family subtype compatibility.
+4. Add code generation tests for exported abstract and concrete top-level action families in
+   TypeScript and C# single-file and library output.
 
 ## Open Questions
 
-None. The requested scope is clear once inline `emits` inheritance and polymorphic component
-dispatch are treated as separate follow-up concerns.
+None. The requested scope is clear once inline emitted `extends` support is included while
+polymorphic component dispatch and abstract inline emits remain separate follow-up concerns.

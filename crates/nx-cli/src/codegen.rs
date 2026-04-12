@@ -168,6 +168,30 @@ mod tests {
     }
 
     #[test]
+    fn generates_typescript_abstract_action_runtime_unions() {
+        let source = r#"
+            export abstract action SearchAction = { source:string }
+            export action SearchRequested extends SearchAction = { query:string }
+            export action SearchSubmitted extends SearchAction = { submittedAt:string }
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(output.contains("export interface SearchActionBase {"));
+        assert!(output.contains("export type SearchAction = SearchRequested | SearchSubmitted;"));
+        assert!(output
+            .contains("export interface SearchRequested extends SearchActionBase, NxRecord<\"SearchRequested\">"));
+        assert!(output
+            .contains("export interface SearchSubmitted extends SearchActionBase, NxRecord<\"SearchSubmitted\">"));
+    }
+
+    #[test]
     fn generates_csharp_global_aliases() {
         let source = r#"
             export type Count = int
@@ -334,6 +358,66 @@ mod tests {
     }
 
     #[test]
+    fn generates_typescript_library_files_for_cross_module_abstract_action_families() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let library_dir = temp_dir.path().join("ui");
+        fs::create_dir_all(&library_dir).expect("library dir");
+        fs::write(
+            library_dir.join("base.nx"),
+            "export abstract action SearchAction = { source:string }",
+        )
+        .expect("base file");
+        fs::write(
+            library_dir.join("requested.nx"),
+            "export action SearchRequested extends SearchAction = { query:string }",
+        )
+        .expect("requested file");
+
+        let artifact = build_library_artifact_from_directory(&library_dir).expect("library build");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let files = generate_library_types(&artifact, &opts).unwrap();
+        let base = files
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("base.ts"))
+            .expect("base.ts");
+        assert!(!base.content.contains("import type { NxRecord }"));
+        assert!(base
+            .content
+            .contains("import type { SearchRequested } from \"./requested\";"));
+        assert!(base.content.contains("export interface SearchActionBase {"));
+        assert!(base
+            .content
+            .contains("export type SearchAction = SearchRequested;"));
+
+        let requested = files
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("requested.ts"))
+            .expect("requested.ts");
+        assert!(requested
+            .content
+            .contains("import type { NxRecord } from \"./_nx\";"));
+        assert!(requested
+            .content
+            .contains("import type { SearchActionBase } from \"./base\";"));
+        assert!(requested
+            .content
+            .contains("export interface SearchRequested extends SearchActionBase, NxRecord<\"SearchRequested\">"));
+
+        let index = files
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("index.ts"))
+            .expect("index.ts");
+        assert!(index
+            .content
+            .contains("export type { NxRecord } from \"./_nx\";"));
+    }
+
+    #[test]
     fn generates_typescript_library_files_when_source_module_matches_helper_name() {
         let temp_dir = TempDir::new().expect("temp dir");
         let library_dir = temp_dir.path().join("ui");
@@ -488,6 +572,29 @@ mod tests {
         assert!(output.contains("public sealed class ShortTextQuestion : Question"));
         assert!(output
             .contains("public override string __NxType { get; set; } = \"ShortTextQuestion\";"));
+    }
+
+    #[test]
+    fn generates_csharp_abstract_action_discriminators_for_concrete_descendants() {
+        let source = r#"
+            export abstract action SearchAction = { source:string }
+            export action SearchRequested extends SearchAction = { query:string }
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.Models".to_string()),
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(output.contains("public abstract class SearchAction"));
+        assert!(output.contains("public abstract string __NxType { get; set; }"));
+        assert!(output.contains("public string Source { get; set; } = default!;"));
+        assert!(output.contains("public sealed class SearchRequested : SearchAction"));
+        assert!(output
+            .contains("public override string __NxType { get; set; } = \"SearchRequested\";"));
     }
 
     #[test]

@@ -63,7 +63,9 @@ compatible with abstract parent actions in type positions.
 
 ### Requirement: Inline emitted actions expose public action record names
 An inline emitted action definition inside a component `emits` group SHALL introduce a public action
-record whose name is `<ComponentName>.<ActionName>`. The public action record SHALL remain
+record whose name is `<ComponentName>.<ActionName>`. An inline emitted action definition MAY
+declare a single optional `extends BaseAction` clause and SHALL remain a concrete action record
+even when it derives from an abstract base action. The public action record SHALL remain
 record-compatible everywhere normal action records are accepted.
 
 #### Scenario: Inline emitted action can be constructed through its public name
@@ -73,3 +75,18 @@ record-compatible everywhere normal action records are accepted.
 #### Scenario: Inline emitted action can be referenced in type positions
 - **WHEN** a file contains `component <SearchBox emits { ValueChanged { value:string } } /> = { <TextInput /> }` and `let read(change:SearchBox.ValueChanged) = change.value`
 - **THEN** lowering SHALL accept `SearchBox.ValueChanged` anywhere a normal action or record type name is accepted
+
+#### Scenario: Inline emitted action can extend an abstract action base
+- **WHEN** a file contains `abstract action InputAction = { source:string } component <SearchBox emits { ValueChanged extends InputAction { value:string } } /> = { <TextInput /> }`
+- **THEN** lowering SHALL synthesize `SearchBox.ValueChanged` as a concrete action record whose
+  base action is `InputAction`
+
+#### Scenario: Inline emitted derived action can be constructed with inherited and local fields
+- **WHEN** a file contains `abstract action InputAction = { source:string } component <SearchBox emits { ValueChanged extends InputAction { value:string } } /> = { <TextInput /> }` and `let makeChange(source:string, value:string) = <SearchBox.ValueChanged source={source} value={value} />`
+- **THEN** lowering and type checking SHALL accept `SearchBox.ValueChanged` construction using both
+  inherited base fields and local inline fields
+
+#### Scenario: Inline emitted derived action is accepted where abstract parent action is expected
+- **WHEN** a file contains `abstract action InputAction = { source:string } component <SearchBox emits { ValueChanged extends InputAction { value:string } } /> = { <TextInput /> } let read(action:InputAction) = action.source let value = read(<SearchBox.ValueChanged source={"keyboard"} value={"docs"} />)`
+- **THEN** type checking SHALL accept the call because `SearchBox.ValueChanged` is compatible with
+  the abstract action type `InputAction`

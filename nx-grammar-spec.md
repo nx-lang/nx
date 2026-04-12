@@ -200,8 +200,8 @@ RecordDefinition (AST: RecordDefinitionSyntax)
   - fields: visibility?: "private"|"export", isAbstract: bool, name: string, base?: QualifiedNameSyntax, properties: RecordPropertyDefinitionSyntax[]
 
 ActionDefinition (AST: ActionDefinitionSyntax)
-- ActionDefinition → VisibilityModifier? ACTION IDENTIFIER EQ LBRACE RecordPropertyDefinition* RBRACE
-  - fields: visibility?: "private"|"export", name: string, properties: RecordPropertyDefinitionSyntax[]
+- ActionDefinition → VisibilityModifier? ABSTRACT? ACTION IDENTIFIER RecordExtendsClauseOpt EQ LBRACE RecordPropertyDefinition* RBRACE
+  - fields: visibility?: "private"|"export", isAbstract: bool, name: string, base?: QualifiedNameSyntax, properties: RecordPropertyDefinitionSyntax[]
 
 RecordExtendsClauseOpt
 - RecordExtendsClauseOpt → EXTENDS QualifiedName
@@ -285,9 +285,13 @@ EmitsGroup (AST: EmitsGroupSyntax)
   - fields: definitions: EmitDefinitionSyntax[]
 
 EmitDefinition (AST: EmitDefinitionSyntax)
-- EmitDefinition → IDENTIFIER LBRACE PropertyDefinition* RBRACE
-  - fields: name: string, properties: PropertyDefinitionSyntax[]
+- EmitDefinition → IDENTIFIER EmitExtendsClauseOpt LBRACE PropertyDefinition* RBRACE
+  - fields: name: string, base?: QualifiedNameSyntax, properties: PropertyDefinitionSyntax[]
   - note: emit names are plain identifiers, so dotted or hyphenated names are not valid here
+
+EmitExtendsClauseOpt
+- EmitExtendsClauseOpt → EXTENDS QualifiedName
+- EmitExtendsClauseOpt → ε
 
 ComponentBody (AST: ComponentBodySyntax)
 - ComponentBody → LBRACE StateGroupOpt ValueExpression RBRACE
@@ -651,8 +655,8 @@ This section lists the AST node types with fields for implementers.
 - TypeDefinitionSyntax: TypeAliasDefinitionSyntax | EnumDefinitionSyntax | RecordDefinitionSyntax
 - TypeAliasDefinitionSyntax: visibility?: "private"|"export", name: string, type: TypeSyntax
 - EnumDefinitionSyntax: visibility?: "private"|"export", name: string, members: EnumMemberSyntax[]
-- RecordDefinitionSyntax: visibility?: "private"|"export", name: string, properties: RecordPropertyDefinitionSyntax[]
-- ActionDefinitionSyntax: visibility?: "private"|"export", name: string, properties: RecordPropertyDefinitionSyntax[]
+- RecordDefinitionSyntax: visibility?: "private"|"export", isAbstract: bool, name: string, base?: QualifiedNameSyntax, properties: RecordPropertyDefinitionSyntax[]
+- ActionDefinitionSyntax: visibility?: "private"|"export", isAbstract: bool, name: string, base?: QualifiedNameSyntax, properties: RecordPropertyDefinitionSyntax[]
 - RecordPropertyDefinitionSyntax: modifier?: "content", name: string, type: TypeSyntax, default?: ExpressionSyntax
 - ValueDefinitionSyntax: visibility?: "private"|"export", name: string, type?: TypeSyntax, value: ExpressionSyntax
 - TypeSyntax: kind: "primitive"|"user", name: string (qualified), modifier?: "nullable"|"sequence"

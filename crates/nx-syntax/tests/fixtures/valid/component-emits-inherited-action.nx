@@ -1,0 +1,7 @@
+abstract action InputAction = {
+  source: string
+}
+
+component <SearchBox emits { ValueChanged extends InputAction { value: string } } /> = {
+  <TextInput />
+}

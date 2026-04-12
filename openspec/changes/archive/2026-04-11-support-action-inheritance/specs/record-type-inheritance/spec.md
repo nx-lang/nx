@@ -2,8 +2,10 @@
 
 ### Requirement: Record inheritance declaration syntax
 The parser SHALL support abstract record declarations and single-base inheritance on record-like
-declarations using the `abstract` and `extends` keywords. Top-level `type` record declarations and
-top-level `action` declarations SHALL allow at most one `extends` clause.
+declarations using the `abstract` and `extends` keywords. Top-level `type` record declarations,
+top-level `action` declarations, and inline emitted action definitions SHALL allow at most one
+`extends` clause. Inline emitted action definitions SHALL remain concrete and therefore SHALL NOT
+accept `abstract`.
 
 #### Scenario: Abstract root record declaration
 - **WHEN** a file contains `abstract type UserBase = { name:string age:int }`
@@ -29,6 +31,16 @@ top-level `action` declarations SHALL allow at most one `extends` clause.
 - **WHEN** a file contains `action SearchSubmitted extends InputAction, TrackingAction = { query:string }`
 - **THEN** parsing or validation SHALL reject the declaration as an invalid action inheritance
   clause
+
+#### Scenario: Inline emitted action declaration can extend an abstract action
+- **WHEN** a file contains `abstract action InputAction = { source:string } component <SearchBox emits { ValueChanged extends InputAction { value:string } } /> = { <TextInput /> }`
+- **THEN** parsing and lowering SHALL preserve `SearchBox.ValueChanged` as a concrete inline
+  emitted action whose base is `InputAction`
+
+#### Scenario: Inline emitted action rejects multiple base actions
+- **WHEN** a file contains `component <SearchBox emits { ValueChanged extends InputAction, TrackingAction { value:string } } /> = { <TextInput /> }`
+- **THEN** parsing or validation SHALL reject the emitted action definition as an invalid action
+  inheritance clause
 
 ### Requirement: Only abstract records may act as base records
 The system SHALL accept `extends Base` only when `Base` resolves to an abstract record-like
@@ -84,10 +96,24 @@ base records.
   `action SearchSubmitted extends SearchActionBase = { submittedAt:string }`
 - **THEN** analysis SHALL accept `SearchSubmitted extends SearchActionBase`
 
+#### Scenario: Inline emitted action can extend imported alias to an abstract action
+- **WHEN** a host loads `../ui` into a `LibraryRegistry`
+- **AND** creates a `ProgramBuildContext` from that registry
+- **AND** `../ui` exports `type SearchActionBase = SearchAction` and
+  `abstract action SearchAction = { query:string }`
+- **AND** `app/main.nx` contains `import "../ui"` and
+  `component <SearchBox emits { SearchSubmitted extends SearchActionBase { submittedAt:string } } /> = { <TextInput /> }`
+- **THEN** analysis SHALL accept `SearchBox.SearchSubmitted extends SearchActionBase`
+
 #### Scenario: Action cannot extend abstract plain record
 - **WHEN** a file contains `abstract type EventBase = { source:string } action SearchSubmitted extends EventBase = { query:string }`
 - **THEN** analysis SHALL reject `SearchSubmitted extends EventBase` because `EventBase` does not
   resolve to an abstract action declaration
+
+#### Scenario: Inline emitted action cannot extend abstract plain record
+- **WHEN** a file contains `abstract type EventBase = { source:string } component <SearchBox emits { SearchSubmitted extends EventBase { query:string } } /> = { <TextInput /> }`
+- **THEN** analysis SHALL reject `SearchBox.SearchSubmitted extends EventBase` because `EventBase`
+  does not resolve to an abstract action declaration
 
 #### Scenario: Record cannot extend abstract action
 - **WHEN** a file contains `abstract action SearchAction = { query:string } type SearchEnvelope extends SearchAction = { submittedAt:string }`
@@ -133,6 +159,11 @@ field names across the base chain and derived declaration MUST be rejected.
 - **WHEN** a file contains `abstract action SearchAction = { query:string } action SearchSubmitted extends SearchAction = { query:string submittedAt:string }`
 - **THEN** analysis SHALL reject `SearchSubmitted` because `query` duplicates an inherited action
   field
+
+#### Scenario: Inline emitted action inherits base fields and rejects duplicates
+- **WHEN** a file contains `abstract action SearchAction = { query:string } component <SearchBox emits { SearchSubmitted extends SearchAction { query:string submittedAt:string } } /> = { <TextInput /> }`
+- **THEN** analysis SHALL reject `SearchBox.SearchSubmitted` because `query` duplicates an
+  inherited action field
 
 ### Requirement: Abstract records cannot be instantiated
 Abstract records and abstract actions SHALL be valid in type positions but MUST NOT be instantiated

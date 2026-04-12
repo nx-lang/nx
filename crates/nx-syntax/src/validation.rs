@@ -296,7 +296,10 @@ fn analyze_error_context(
             "action_definition" => {
                 return (
                     "Invalid action definition".to_string(),
-                    Some("Expected: action ActionType = { prop:type }".to_string()),
+                    Some(
+                        "Expected: [abstract] action ActionType [extends BaseAction] = { prop:type }"
+                            .to_string(),
+                    ),
                 );
             }
             "record_definition" => {
@@ -326,7 +329,7 @@ fn analyze_error_context(
             "emit_definition" => {
                 return (
                     "Invalid emitted action definition".to_string(),
-                    Some("Expected: ActionName { prop:type }".to_string()),
+                    Some("Expected: ActionName [extends BaseAction] { prop:type }".to_string()),
                 );
             }
             "emit_reference" => {

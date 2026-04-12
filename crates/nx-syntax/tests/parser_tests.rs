@@ -447,6 +447,51 @@ fn test_parse_component_with_emits() {
 }
 
 #[test]
+fn test_parse_component_with_emits_inherited_action() {
+    let path = fixture_path("valid/component-emits-inherited-action.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(
+        result.is_ok(),
+        "Component emits inheritance fixture should parse"
+    );
+    let root = result.root().expect("Should have root node");
+
+    let component = root
+        .children()
+        .find(|c| c.kind() == SyntaxKind::COMPONENT_DEFINITION)
+        .expect("Should find component_definition node");
+    let signature = component
+        .child_by_field("signature")
+        .expect("Component should expose signature field");
+    let emits = signature
+        .child_by_field("emits")
+        .expect("Component signature should expose emits group");
+
+    let emit_defs: Vec<_> = emits
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::EMIT_DEFINITION)
+        .collect();
+    assert_eq!(emit_defs.len(), 1, "Expected one emitted action definition");
+
+    let emit_def = emit_defs[0];
+    assert_eq!(
+        emit_def
+            .child_by_field("name")
+            .expect("Emit definition should expose name")
+            .text(),
+        "ValueChanged"
+    );
+    assert_eq!(
+        emit_def
+            .child_by_field("base")
+            .expect("Emit definition should expose base")
+            .text(),
+        "InputAction"
+    );
+}
+
+#[test]
 fn test_parse_component_with_emits_reference() {
     let path = fixture_path("valid/component-emits-reference.nx");
     let result = parse_file(&path).unwrap();
@@ -783,6 +828,45 @@ fn test_parse_action_definition() {
         .filter(|c| c.kind() == SyntaxKind::PROPERTY_DEFINITION)
         .count();
     assert_eq!(prop_count, 2, "Should parse two action fields");
+}
+
+#[test]
+fn test_parse_action_inheritance_definition() {
+    let path = fixture_path("valid/action-inheritance.nx");
+    let result = parse_file(&path).expect("action inheritance fixture should load");
+
+    assert!(result.is_ok(), "Action inheritance fixture should parse");
+    let root = result.root().expect("Should have syntax tree root");
+
+    let actions: Vec<_> = root
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::ACTION_DEFINITION)
+        .collect();
+    assert_eq!(actions.len(), 3, "Expected three action definitions");
+
+    let input_action = actions[0];
+    assert!(input_action.child_by_field("abstract").is_some());
+    assert!(input_action.child_by_field("base").is_none());
+
+    let search_action = actions[1];
+    assert!(search_action.child_by_field("abstract").is_some());
+    assert_eq!(
+        search_action
+            .child_by_field("base")
+            .expect("Expected base field")
+            .text(),
+        "InputAction"
+    );
+
+    let submitted = actions[2];
+    assert!(submitted.child_by_field("abstract").is_none());
+    assert_eq!(
+        submitted
+            .child_by_field("base")
+            .expect("Expected concrete base field")
+            .text(),
+        "SearchAction"
+    );
 }
 
 #[test]
@@ -1525,6 +1609,21 @@ fn test_parse_multiple_record_bases_is_error() {
     assert!(
         !result.errors.is_empty(),
         "Malformed multiple-base record syntax should produce parse errors"
+    );
+}
+
+#[test]
+fn test_parse_multiple_action_bases_is_error() {
+    let path = fixture_path("invalid/action-inheritance-multiple-bases.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(
+        !result.is_ok(),
+        "Malformed multiple-base action syntax should fail"
+    );
+    assert!(
+        !result.errors.is_empty(),
+        "Malformed multiple-base action syntax should produce parse errors"
     );
 }
 

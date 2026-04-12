@@ -503,7 +503,9 @@ impl LoweringContext {
                             visibility,
                             kind: RecordKind::Action,
                             is_abstract: false,
-                            base: None,
+                            base: emit_node
+                                .child_by_field("base")
+                                .map(|base| Name::new(base.text())),
                             properties: self.lower_record_fields_from_node(emit_node, false),
                             span: emit_node.span(),
                         };
@@ -1746,7 +1748,7 @@ pub fn lower(root: SyntaxNode, source_id: SourceId) -> LoweredModule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{validate_record_definitions, PreparedModule};
+    use crate::{effective_record_shape, validate_record_definitions, PreparedModule};
     use nx_syntax::parse_str;
     mod tree_helpers {
         include!(concat!(
@@ -2290,6 +2292,95 @@ enum Mode = light | dark"#;
     }
 
     #[test]
+    fn test_lower_action_inheritance_metadata() {
+        let source = r#"
+            abstract action InputAction = {
+              source: string
+            }
+
+            abstract action SearchAction extends InputAction = {
+              query: string
+            }
+
+            action SearchSubmitted extends SearchAction = {
+              submittedAt: string
+            }
+        "#;
+        let parse_result = parse_str(source, "action-inheritance.nx");
+        let tree = parse_result.tree.expect("Should parse action inheritance");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let actions: Vec<_> = module
+            .items()
+            .iter()
+            .filter_map(|item| match item {
+                Item::Record(def) if def.kind == RecordKind::Action => Some(def),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(actions.len(), 3);
+        assert_eq!(actions[0].name.as_str(), "InputAction");
+        assert!(actions[0].is_abstract);
+        assert!(actions[0].base.is_none());
+
+        assert_eq!(actions[1].name.as_str(), "SearchAction");
+        assert!(actions[1].is_abstract);
+        assert_eq!(
+            actions[1].base.as_ref().map(|name| name.as_str()),
+            Some("InputAction")
+        );
+
+        assert_eq!(actions[2].name.as_str(), "SearchSubmitted");
+        assert!(!actions[2].is_abstract);
+        assert_eq!(
+            actions[2].base.as_ref().map(|name| name.as_str()),
+            Some("SearchAction")
+        );
+    }
+
+    #[test]
+    fn test_lower_action_inheritance_ancestry() {
+        let source = r#"
+            abstract action InputAction = {
+              source: string
+            }
+
+            type InputActionBase = InputAction
+
+            abstract action SearchAction extends InputActionBase = {
+              query: string
+            }
+
+            action SearchSubmitted extends SearchAction = {
+              submittedAt: string
+            }
+        "#;
+        let parse_result = parse_str(source, "action-ancestry.nx");
+        let tree = parse_result.tree.expect("Should parse action inheritance");
+        let module = lower(tree.root(), SourceId::new(0));
+        let prepared = PreparedModule::standalone("action-ancestry.nx", module.clone());
+
+        let action = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Record(def) if def.name.as_str() == "SearchSubmitted" => Some(def),
+                _ => None,
+            })
+            .expect("Should lower SearchSubmitted action");
+
+        let shape = effective_record_shape(&prepared, action)
+            .expect("Action shape should resolve");
+        let ancestors: Vec<_> = shape
+            .ancestors
+            .iter()
+            .map(|name| name.as_str())
+            .collect();
+        assert_eq!(ancestors, vec!["SearchAction", "InputAction"]);
+    }
+
+    #[test]
     fn test_lower_record_inheritance_validation_diagnostics() {
         let source = r#"
             abstract type Entity = {
@@ -2336,6 +2427,100 @@ enum Mode = light | dark"#;
                 .iter()
                 .any(|message| message.contains("redeclares inherited field 'name'")),
             "Expected duplicate inherited field diagnostic, got {:?}",
+            messages
+        );
+    }
+
+    #[test]
+    fn test_lower_action_inheritance_validation_diagnostics() {
+        let source = r#"
+            abstract action InputAction = {
+              source: string
+            }
+
+            action DuplicateAction extends InputAction = {
+              source: string
+            }
+
+            action ConcreteBase = {
+              query: string
+            }
+
+            action DerivedAction extends ConcreteBase = {
+              submittedAt: string
+            }
+        "#;
+        let parse_result = parse_str(source, "action-inheritance-errors.nx");
+        let tree = parse_result
+            .tree
+            .expect("Should parse action inheritance error source");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        assert!(
+            module.diagnostics().is_empty(),
+            "Raw lowering should defer action-inheritance diagnostics to prepared validation"
+        );
+        let messages = prepared_record_validation_messages(&module);
+
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("only abstract actions may be extended")),
+            "Expected concrete-base diagnostic, got {:?}",
+            messages
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("redeclares inherited field 'source'")),
+            "Expected duplicate inherited field diagnostic, got {:?}",
+            messages
+        );
+    }
+
+    #[test]
+    fn test_lower_action_inheritance_rejects_mixed_kinds() {
+        let source = r#"
+            abstract type EventBase = {
+              source: string
+            }
+
+            abstract action ActionBase = {
+              query: string
+            }
+
+            action ActionDerived extends EventBase = {
+              value: string
+            }
+
+            type RecordDerived extends ActionBase = {
+              extra: string
+            }
+        "#;
+        let parse_result = parse_str(source, "action-kind-mismatch.nx");
+        let tree = parse_result
+            .tree
+            .expect("Should parse action inheritance kind mismatch");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        assert!(
+            module.diagnostics().is_empty(),
+            "Raw lowering should defer action kind mismatch diagnostics to prepared validation"
+        );
+        let messages = prepared_record_validation_messages(&module);
+
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("actions cannot be used as base records")),
+            "Expected record/action mismatch diagnostic, got {:?}",
+            messages
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("records cannot be used as base actions")),
+            "Expected action/record mismatch diagnostic, got {:?}",
             messages
         );
     }
@@ -2399,6 +2584,38 @@ enum Mode = light | dark"#;
             messages
                 .iter()
                 .any(|message| message.contains("Record inheritance cycle detected")),
+            "Expected inheritance cycle diagnostic, got {:?}",
+            messages
+        );
+    }
+
+    #[test]
+    fn test_lower_action_inheritance_cycle_diagnostic() {
+        let source = r#"
+            abstract action InputAction extends SearchAction = {
+              source: string
+            }
+
+            abstract action SearchAction extends InputAction = {
+              query: string
+            }
+        "#;
+        let parse_result = parse_str(source, "action-cycle.nx");
+        let tree = parse_result
+            .tree
+            .expect("Should parse action inheritance cycle");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        assert!(
+            module.diagnostics().is_empty(),
+            "Raw lowering should defer action cycle diagnostics to prepared validation"
+        );
+        let messages = prepared_record_validation_messages(&module);
+
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("inheritance cycle detected")),
             "Expected inheritance cycle diagnostic, got {:?}",
             messages
         );
@@ -2552,6 +2769,51 @@ enum Mode = light | dark"#;
             panic!("Expected action constructor to lower as record literal");
         };
         assert_eq!(record.as_str(), "SaveRequested");
+    }
+
+    #[test]
+    fn test_lower_inline_emit_action_inheritance_metadata() {
+        let source = r#"
+            abstract action InputAction = {
+              source: string
+            }
+
+            type InputActionBase = InputAction
+
+            component <SearchBox emits { ValueChanged extends InputActionBase { value: string } } /> = {
+              <TextInput />
+            }
+        "#;
+        let parse_result = parse_str(source, "inline-action-inheritance.nx");
+        let tree = parse_result
+            .tree
+            .expect("Inline emitted action inheritance should parse");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let inline_action = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Record(record) if record.name.as_str() == "SearchBox.ValueChanged" => {
+                    Some(record)
+                }
+                _ => None,
+            })
+            .expect("Expected synthesized inline emitted action record");
+
+        assert_eq!(inline_action.kind, RecordKind::Action);
+        assert!(!inline_action.is_abstract);
+        assert_eq!(
+            inline_action.base.as_ref().map(|name| name.as_str()),
+            Some("InputActionBase")
+        );
+
+        let messages = prepared_record_validation_messages(&module);
+        assert!(
+            messages.is_empty(),
+            "Inline emitted action inheritance should validate, got {:?}",
+            messages
+        );
     }
 
     #[test]
