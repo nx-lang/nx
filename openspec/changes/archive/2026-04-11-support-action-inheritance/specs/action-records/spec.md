@@ -1,8 +1,5 @@
-# action-records Specification
+## MODIFIED Requirements
 
-## Purpose
-Define the parser and HIR behavior for top-level `action` declarations and their record compatibility.
-## Requirements
 ### Requirement: Action declaration syntax
 The parser SHALL support top-level action declarations introduced by the `action` keyword,
 including optional `abstract` modifiers and single-base inheritance through `extends`. An action
@@ -43,8 +40,8 @@ compatible with abstract parent actions in type positions.
 
 #### Scenario: Action declaration lowers as a record item with action identity
 - **WHEN** a file contains `action SaveRequested = { value:string }`
-- **THEN** HIR lowering SHALL produce a record item named `SaveRequested` that is marked as an action
-  record rather than a plain record
+- **THEN** HIR lowering SHALL produce a record item named `SaveRequested` that is marked as an
+  action record rather than a plain record
 
 #### Scenario: Derived action lowers as an action record with preserved ancestry
 - **WHEN** a file contains `abstract action InputAction = { source:string } action ValueChanged extends InputAction = { value:string }`
@@ -52,11 +49,6 @@ compatible with abstract parent actions in type positions.
   action records
 - **AND** `ValueChanged` SHALL preserve `InputAction` as its abstract base action rather than
   lowering as a plain record
-
-#### Scenario: Action declaration can be used in record construction positions
-- **WHEN** a file contains `action SaveRequested = { value:string }` and `let save(message:string) = <SaveRequested value={message} />`
-- **THEN** lowering SHALL accept `SaveRequested` anywhere a normal record name is accepted and SHALL
-  lower the element-shaped construction as a record literal targeting `SaveRequested`
 
 #### Scenario: Derived action can be used in record construction positions
 - **WHEN** a file contains `abstract action InputAction = { source:string } action ValueChanged extends InputAction = { value:string } let change = <ValueChanged source={"keyboard"} value={"docs"} />`

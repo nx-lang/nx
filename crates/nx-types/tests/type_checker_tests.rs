@@ -266,6 +266,228 @@ fn test_record_inheritance_uses_shared_abstract_supertype_for_branches() {
 }
 
 #[test]
+fn test_action_inheritance_accepts_concrete_leaf_for_abstract_parameter() {
+    let source = r#"
+        abstract action InputAction = {
+          source: string
+        }
+
+        action ValueChanged extends InputAction = {
+          value: string
+        }
+
+        let consume(action: InputAction): int = { 1 }
+        let root(): int = { consume(<ValueChanged source={"ui"} value={"docs"} />) }
+    "#;
+
+    let result = check_str(source, "action-inheritance-subtyping.nx");
+    assert!(
+        result.errors().is_empty(),
+        "Expected abstract action substitution to type check, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_action_inheritance_allows_inherited_fields_in_record_literal() {
+    let source = r#"
+        abstract action InputAction = {
+          source: string
+        }
+
+        action ValueChanged extends InputAction = {
+          value: string
+        }
+
+        let make(): ValueChanged = { <ValueChanged source={"ui"} value={"docs"} /> }
+    "#;
+
+    let result = check_str(source, "action-inheritance-record-literal.nx");
+    assert!(
+        result.errors().is_empty(),
+        "Expected derived action construction to type check, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_action_inheritance_reports_inherited_field_type_mismatch() {
+    let source = r#"
+        abstract action InputAction = {
+          source: string
+        }
+
+        action ValueChanged extends InputAction = {
+          value: string
+        }
+
+        let make(): ValueChanged = { <ValueChanged source={1} value={"docs"} /> }
+    "#;
+
+    let result = check_str(source, "action-inheritance-field-mismatch.nx");
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code() == Some("record-field-type-mismatch")),
+        "Expected inherited field mismatch diagnostic, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_inline_emitted_action_inheritance_allows_inherited_fields() {
+    let source = r#"
+        abstract action InputAction = {
+          source: string
+        }
+
+        component <SearchBox emits { ValueChanged extends InputAction { value: string } } /> = {
+          <TextInput />
+        }
+
+        let make(): SearchBox.ValueChanged = {
+          <SearchBox.ValueChanged source={"ui"} value={"docs"} />
+        }
+    "#;
+
+    let result = check_str(source, "inline-action-inheritance.nx");
+    assert!(
+        result.errors().is_empty(),
+        "Expected inline emitted action inheritance to type check, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_inline_emitted_action_inheritance_allows_abstract_parent_subtyping() {
+    let source = r#"
+        abstract action InputAction = {
+          source: string
+        }
+
+        component <SearchBox emits { ValueChanged extends InputAction { value: string } } /> = {
+          <TextInput />
+        }
+
+        let read(action: InputAction): int = { 1 }
+        let result(): int = { read(<SearchBox.ValueChanged source={"keyboard"} value={"docs"} />) }
+    "#;
+
+    let result = check_str(source, "inline-action-inheritance-subtyping.nx");
+    assert!(
+        result.errors().is_empty(),
+        "Expected inline emitted action subtyping to type check, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_inline_emitted_action_inheritance_reports_inherited_field_type_mismatch() {
+    let source = r#"
+        abstract action InputAction = {
+          source: string
+        }
+
+        component <SearchBox emits { ValueChanged extends InputAction { value: string } } /> = {
+          <TextInput />
+        }
+
+        let make(): SearchBox.ValueChanged = {
+          <SearchBox.ValueChanged source={1} value={"docs"} />
+        }
+    "#;
+
+    let result = check_str(source, "inline-action-inheritance-mismatch.nx");
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code() == Some("record-field-type-mismatch")),
+        "Expected inherited field property mismatch diagnostic, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_abstract_action_instantiation_is_rejected() {
+    let source = r#"
+        abstract action InputAction = {
+          source: string
+        }
+
+        let root(): InputAction = { <InputAction source={"ui"} /> }
+    "#;
+
+    let result = check_str(source, "abstract-action-instantiation.nx");
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code() == Some("abstract-record-instantiation")),
+        "Expected abstract-record-instantiation diagnostic, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_abstract_derived_action_instantiation_is_rejected() {
+    let source = r#"
+        abstract action InputAction = {
+          source: string
+        }
+
+        abstract action SearchAction extends InputAction = {
+          query: string
+        }
+
+        let root(): SearchAction = { <SearchAction source={"toolbar"} query={"docs"} /> }
+    "#;
+
+    let result = check_str(source, "abstract-derived-action-instantiation.nx");
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code() == Some("abstract-record-instantiation")),
+        "Expected abstract-record-instantiation diagnostic, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn test_duplicate_inherited_field_reports_diagnostic() {
     let source = r#"
         abstract type UserBase = {

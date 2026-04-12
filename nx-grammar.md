@@ -80,7 +80,7 @@ TypeAliasDefinition ::=
     [VisibilityModifier] "type" Identifier "=" TypeDeclaration
 
 ActionDefinition ::=
-    [VisibilityModifier] "action" Identifier "=" "{"
+    [VisibilityModifier] ["abstract"] "action" Identifier ["extends" QualifiedName] "=" "{"
         {PropertyDefinition}
     "}"
 
@@ -107,10 +107,22 @@ UserDefinedType ::=
     QualifiedName
 ```
 
-Record declarations reserve the `abstract` and `extends` keywords. `abstract type Name = { ... }`
+Record and action declarations reserve the `abstract` and `extends` keywords. `abstract type Name = { ... }`
 declares a non-instantiable record root, `abstract type Name extends Base = { ... }` declares an
 abstract derived record, and `type Name extends Base = { ... }` declares a concrete derived record.
-Only abstract records may appear in the `extends` clause.
+Only abstract records and actions may appear in the `extends` clause.
+
+Action inheritance example:
+
+```nx
+abstract action InputAction = {
+  source: string
+}
+
+action ValueChanged extends InputAction = {
+  value: string
+}
+```
 
 <a id="values"></a>
 ## Values
@@ -153,7 +165,7 @@ EmitsGroup ::=
     "}"
 
 EmitDefinition ::=
-    Identifier "{"
+    Identifier ["extends" QualifiedName] "{"
         {PropertyDefinition}
     "}"
 
@@ -173,7 +185,19 @@ Components are distinct from `let` functions. They keep the element-shaped signa
 they can also declare emitted action payloads in `emits` and persistent local state fields in
 `state`. The `emits` block must contain at least one `EmitDefinition`, each emit name is a plain
 identifier, and each emit/state field uses the same `PropertyDefinition` shape as other record-like
-members.
+members. Inline emitted actions may optionally include an `extends` clause but remain concrete.
+
+Inline emitted action inheritance example:
+
+```nx
+abstract action InputAction = {
+  source: string
+}
+
+component <SearchBox emits { ValueChanged extends InputAction { value: string } } /> = {
+  <TextInput />
+}
+```
 
 Within a single record, function signature, component signature, emitted action payload, or state
 block, at most one `PropertyDefinition` may be prefixed by `content`. That content-marked property

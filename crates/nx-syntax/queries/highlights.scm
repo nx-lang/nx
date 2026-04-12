@@ -45,6 +45,10 @@
 (action_definition
   name: (identifier) @type)
 
+(action_definition
+  base: (qualified_name
+    (identifier) @type))
+
 ;; Variables
 (value_definition
   name: (identifier) @variable)
@@ -61,6 +65,10 @@
 
 (emit_definition
   name: (identifier) @type)
+
+(emit_definition
+  base: (qualified_name
+    (identifier) @type))
 
 (emit_reference
   (qualified_name

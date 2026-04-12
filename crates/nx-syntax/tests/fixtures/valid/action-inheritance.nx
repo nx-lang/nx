@@ -1,0 +1,11 @@
+abstract action InputAction = {
+  source: string
+}
+
+abstract action SearchAction extends InputAction = {
+  query: string
+}
+
+action SearchSubmitted extends SearchAction = {
+  submittedAt: string
+}

@@ -509,6 +509,47 @@ fn test_record_inheritance_applies_inherited_defaults() {
 }
 
 #[test]
+fn test_action_inheritance_applies_inherited_defaults() {
+    let source = r#"
+        abstract action InputAction = {
+          source: string = "ui"
+        }
+
+        action SearchSubmitted extends InputAction = {
+          query: string = "search"
+        }
+    "#;
+
+    let parse_result = parse_str(source, "action-inheritance-defaults.nx");
+    assert!(
+        parse_result.errors.is_empty(),
+        "Parse errors: {:?}",
+        parse_result.errors
+    );
+    let root = parse_result.root().expect("root");
+    let module = lower(root, SourceId::new(0));
+
+    let interpreter = Interpreter::new();
+    let action = interpreter
+        .instantiate_record_defaults(&module, "SearchSubmitted")
+        .expect("instantiate inherited action defaults");
+
+    match action {
+        Value::Record { type_name, fields } => {
+            assert_eq!(type_name.as_str(), "SearchSubmitted");
+            assert_eq!(
+                fields.get("source"),
+                Some(&Value::String(SmolStr::new("ui")))
+            );
+        }
+        other => panic!(
+            "Expected inherited defaults to produce an action record, got {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
 fn test_record_literal_defaults_and_overrides() {
     let source = r#"
         type User = { name: string = "Anon" age: int = 30 }

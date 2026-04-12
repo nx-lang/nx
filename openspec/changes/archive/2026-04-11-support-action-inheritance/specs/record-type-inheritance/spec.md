@@ -1,9 +1,4 @@
-# record-type-inheritance Specification
-
-## Purpose
-TBD - created by archiving change add-abstract-record-inheritance. Update Purpose after archive.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Record inheritance declaration syntax
 The parser SHALL support abstract record declarations and single-base inheritance on record-like

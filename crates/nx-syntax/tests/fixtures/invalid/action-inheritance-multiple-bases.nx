@@ -1,0 +1,7 @@
+action SearchSubmitted extends InputAction, TrackingAction = {
+  query: string
+}
+
+component <SearchBox emits { ValueChanged extends InputAction, TrackingAction { value: string } } /> = {
+  <TextInput />
+}

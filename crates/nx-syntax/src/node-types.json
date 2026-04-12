@@ -3,6 +3,26 @@
     "type": "action_definition",
     "named": true,
     "fields": {
+      "abstract": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "abstract",
+            "named": false
+          }
+        ]
+      },
+      "base": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "qualified_name",
+            "named": true
+          }
+        ]
+      },
       "name": {
         "multiple": false,
         "required": true,
@@ -717,6 +737,16 @@
     "type": "emit_definition",
     "named": true,
     "fields": {
+      "base": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "qualified_name",
+            "named": true
+          }
+        ]
+      },
       "name": {
         "multiple": false,
         "required": true,
@@ -1077,6 +1107,7 @@
   {
     "type": "module_definition",
     "named": true,
+    "root": true,
     "fields": {},
     "children": {
       "multiple": true,
@@ -2318,7 +2349,8 @@
   },
   {
     "type": "block_comment",
-    "named": true
+    "named": true,
+    "extra": true
   },
   {
     "type": "bool",
@@ -2398,7 +2430,8 @@
   },
   {
     "type": "html_block_comment",
-    "named": true
+    "named": true,
+    "extra": true
   },
   {
     "type": "i32",
@@ -2442,7 +2475,8 @@
   },
   {
     "type": "line_comment",
-    "named": true
+    "named": true,
+    "extra": true
   },
   {
     "type": "null_literal",

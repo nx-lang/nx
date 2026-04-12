@@ -2280,18 +2280,9 @@ impl Interpreter {
             return true;
         }
 
-        let mut current = self.resolve_record_definition(module, actual.as_str());
-        while let Some(record) = current {
-            let Some(base_name) = record.base.as_ref() else {
-                return false;
-            };
-            if base_name == expected {
-                return true;
-            }
-            current = self.resolve_record_definition(module, base_name.as_str());
-        }
-
-        false
+        self.effective_record_shape(module, actual)
+            .map(|shape| shape.ancestors.iter().any(|ancestor| ancestor == expected))
+            .unwrap_or(false)
     }
 
     fn record_value_matches_expected_type(
@@ -3057,6 +3048,51 @@ mod tests {
     }
 
     #[test]
+    fn test_invoke_action_handler_applies_inherited_inline_emit_defaults() {
+        let source = r#"
+            abstract action InputAction = { source:string = "ui" }
+            action LogSearch = { source:string }
+
+            component <SearchBox emits { ValueChanged extends InputAction { value:string } } /> = {
+              <TextInput />
+            }
+
+            let render() = <SearchBox onValueChanged=<LogSearch source={action.source} /> />
+        "#;
+
+        let (module, interpreter) = lower_module_runtime(source);
+        let render_result = interpreter
+            .execute_function(module.as_ref(), "render", vec![])
+            .expect("Expected render to succeed");
+        let handler = extract_handler(&render_result, "onValueChanged");
+
+        let mut input_fields = FxHashMap::default();
+        input_fields.insert(SmolStr::new("value"), Value::String(SmolStr::new("docs")));
+
+        let actions = interpreter
+            .invoke_action_handler(
+                module.as_ref(),
+                handler,
+                Value::Record {
+                    type_name: Name::new("SearchBox.ValueChanged"),
+                    fields: input_fields,
+                },
+            )
+            .expect("Expected inherited action defaults to be normalized");
+
+        match &actions[0] {
+            Value::Record { type_name, fields } => {
+                assert_eq!(type_name.as_str(), "LogSearch");
+                assert_eq!(
+                    fields.get("source"),
+                    Some(&Value::String(SmolStr::new("ui")))
+                );
+            }
+            other => panic!("Expected action record result, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_invoke_action_handler_rejects_missing_required_action_input_fields() {
         let source = r#"
             action SearchSubmitted = { searchString:string source:string? }
@@ -3095,6 +3131,51 @@ mod tests {
             } if record == "SearchSubmitted"
                 && field == "searchString"
                 && operation == "action handler input for SearchBox.SearchSubmitted"
+        ));
+    }
+
+    #[test]
+    fn test_invoke_action_handler_rejects_missing_required_inherited_fields() {
+        let source = r#"
+            abstract action InputAction = { source:string }
+            action LogSearch = { source:string }
+
+            component <SearchBox emits { ValueChanged extends InputAction { value:string } } /> = {
+              <TextInput />
+            }
+
+            let render() = <SearchBox onValueChanged=<LogSearch source={action.source} /> />
+        "#;
+
+        let (module, interpreter) = lower_module_runtime(source);
+        let render_result = interpreter
+            .execute_function(module.as_ref(), "render", vec![])
+            .expect("Expected render to succeed");
+        let handler = extract_handler(&render_result, "onValueChanged");
+
+        let mut input_fields = FxHashMap::default();
+        input_fields.insert(SmolStr::new("value"), Value::String(SmolStr::new("docs")));
+
+        let error = interpreter
+            .invoke_action_handler(
+                module.as_ref(),
+                handler,
+                Value::Record {
+                    type_name: Name::new("SearchBox.ValueChanged"),
+                    fields: input_fields,
+                },
+            )
+            .expect_err("Expected missing inherited action field to fail");
+
+        assert!(matches!(
+            error.kind(),
+            RuntimeErrorKind::MissingRequiredRecordField {
+                record,
+                field,
+                operation,
+            } if record == "SearchBox.ValueChanged"
+                && field == "source"
+                && operation == "action handler input for SearchBox.ValueChanged"
         ));
     }
 

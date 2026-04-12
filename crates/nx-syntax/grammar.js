@@ -149,8 +149,13 @@ module.exports = grammar({
 
     action_definition: $ => seq(
       optional(field('visibility', $.visibility_modifier)),
+      optional(field('abstract', 'abstract')),
       'action',
       field('name', $.identifier),
+      optional(seq(
+        'extends',
+        field('base', $.qualified_name),
+      )),
       '=',
       '{',
       repeat(field('properties', $.property_definition)),
@@ -281,6 +286,10 @@ module.exports = grammar({
 
     emit_definition: $ => seq(
       field('name', $.identifier),
+      optional(seq(
+        'extends',
+        field('base', $.qualified_name),
+      )),
       '{',
       repeat(field('properties', alias($._component_property_definition, $.property_definition))),
       '}',

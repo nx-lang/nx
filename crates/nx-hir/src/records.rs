@@ -23,14 +23,15 @@ pub enum InvalidBaseReason {
     NotFound,
     NotRecord,
     AliasCycle,
-    ActionRecord,
     ConcreteRecord,
+    KindMismatch { expected: RecordKind, found: RecordKind },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecordResolutionError {
     InvalidBase {
         record: Name,
+        record_kind: RecordKind,
         base: Name,
         span: TextSpan,
         reason: InvalidBaseReason,
@@ -62,8 +63,8 @@ impl RecordResolutionError {
                 InvalidBaseReason::NotFound => "record-base-not-found",
                 InvalidBaseReason::NotRecord => "record-base-not-record",
                 InvalidBaseReason::AliasCycle => "record-base-alias-cycle",
-                InvalidBaseReason::ActionRecord => "record-base-action",
                 InvalidBaseReason::ConcreteRecord => "record-base-not-abstract",
+                InvalidBaseReason::KindMismatch { .. } => "record-base-kind-mismatch",
             },
             RecordResolutionError::InheritanceCycle { .. } => "record-inheritance-cycle",
             RecordResolutionError::DuplicateInheritedField { .. } => {
@@ -80,30 +81,48 @@ impl RecordResolutionError {
             RecordResolutionError::InvalidBase {
                 record,
                 base,
+                record_kind,
                 reason,
                 ..
-            } => match reason {
-                InvalidBaseReason::NotFound => format!(
-                    "Record '{}' extends '{}', but '{}' could not be resolved",
-                    record, base, base
-                ),
-                InvalidBaseReason::NotRecord => format!(
-                    "Record '{}' extends '{}', but '{}' does not resolve to an abstract record declaration",
-                    record, base, base
-                ),
-                InvalidBaseReason::AliasCycle => format!(
-                    "Record '{}' extends '{}', but resolving '{}' encountered a type alias cycle",
-                    record, base, base
-                ),
-                InvalidBaseReason::ActionRecord => format!(
-                    "Record '{}' extends '{}', but actions cannot be used as base records",
-                    record, base
-                ),
-                InvalidBaseReason::ConcreteRecord => format!(
-                    "Record '{}' extends '{}', but only abstract records may be extended",
-                    record, base
-                ),
-            },
+            } => {
+                let (kind_label, kind_singular, kind_plural) = match record_kind {
+                    RecordKind::Plain => ("Record", "record", "records"),
+                    RecordKind::Action => ("Action", "action", "actions"),
+                };
+
+                match reason {
+                    InvalidBaseReason::NotFound => format!(
+                        "{} '{}' extends '{}', but '{}' could not be resolved",
+                        kind_label, record, base, base
+                    ),
+                    InvalidBaseReason::NotRecord => format!(
+                        "{} '{}' extends '{}', but '{}' does not resolve to an abstract {} declaration",
+                        kind_label, record, base, base, kind_singular
+                    ),
+                    InvalidBaseReason::AliasCycle => format!(
+                        "{} '{}' extends '{}', but resolving '{}' encountered a type alias cycle",
+                        kind_label, record, base, base
+                    ),
+                    InvalidBaseReason::ConcreteRecord => format!(
+                        "{} '{}' extends '{}', but only abstract {} may be extended",
+                        kind_label, record, base, kind_plural
+                    ),
+                    InvalidBaseReason::KindMismatch { expected, found } => {
+                        let (_, _, expected_plural) = match expected {
+                            RecordKind::Plain => ("Record", "record", "records"),
+                            RecordKind::Action => ("Action", "action", "actions"),
+                        };
+                        let (_, _, found_plural) = match found {
+                            RecordKind::Plain => ("Record", "record", "records"),
+                            RecordKind::Action => ("Action", "action", "actions"),
+                        };
+                        format!(
+                            "{} '{}' extends '{}', but {} cannot be used as base {}",
+                            kind_label, record, base, found_plural, expected_plural
+                        )
+                    }
+                }
+            }
             RecordResolutionError::InheritanceCycle { cycle, .. } => {
                 let chain = cycle
                     .iter()
@@ -236,7 +255,7 @@ pub fn validate_record_definitions(module: &PreparedModule) -> Vec<RecordResolut
         .items()
         .iter()
         .filter_map(|item| match item {
-            Item::Record(record) if record.kind == RecordKind::Plain => Some(record),
+            Item::Record(record) => Some(record),
             _ => None,
         })
     {
@@ -468,6 +487,7 @@ fn resolve_base_record_inner(
     if !seen.insert(base_name.clone()) {
         return Err(RecordResolutionError::InvalidBase {
             record: record.name.clone(),
+            record_kind: record.kind,
             base: record.base.clone().unwrap_or_else(|| base_name.clone()),
             span: record.span,
             reason: InvalidBaseReason::AliasCycle,
@@ -534,6 +554,7 @@ fn invalid_base(
 ) -> RecordResolutionError {
     RecordResolutionError::InvalidBase {
         record: record.name.clone(),
+        record_kind: record.kind,
         base: record.base.clone().unwrap_or_else(|| base_name.clone()),
         span: record.span,
         reason,
@@ -545,19 +566,24 @@ fn validate_base_record(
     base_name: &Name,
     base_record: &RecordDef,
 ) -> Result<RecordDef, RecordResolutionError> {
-    if base_record.kind == RecordKind::Action {
-        Err(invalid_base(
+    if base_record.kind != record.kind {
+        return Err(invalid_base(
             record,
             base_name,
-            InvalidBaseReason::ActionRecord,
-        ))
-    } else if !base_record.is_abstract {
-        Err(invalid_base(
+            InvalidBaseReason::KindMismatch {
+                expected: record.kind,
+                found: base_record.kind,
+            },
+        ));
+    }
+
+    if !base_record.is_abstract {
+        return Err(invalid_base(
             record,
             base_name,
             InvalidBaseReason::ConcreteRecord,
-        ))
-    } else {
-        Ok(base_record.clone())
+        ));
     }
+
+    Ok(base_record.clone())
 }
