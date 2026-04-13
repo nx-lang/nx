@@ -79,10 +79,16 @@ enum HandlerPropResolution {
 struct PredeclaredComponent {
     name: Name,
     visibility: Visibility,
-    props: Vec<RecordField>,
-    emits: Vec<ComponentEmit>,
+    is_abstract: bool,
+    is_external: bool,
+    base: Option<Name>,
+    declared_props: Vec<RecordField>,
+    declared_emits: Vec<ComponentEmit>,
+    effective_props: Vec<RecordField>,
+    effective_emits: Vec<ComponentEmit>,
     span: TextSpan,
     handler_props: FxHashMap<Name, HandlerPropResolution>,
+    finalized: bool,
 }
 
 pub struct LoweringContext {
@@ -387,6 +393,116 @@ impl LoweringContext {
         self.predeclared_components.get(&Name::new(name))
     }
 
+    fn finalize_predeclared_component(&mut self, name: &Name, stack: &mut Vec<Name>) {
+        if self
+            .predeclared_components
+            .get(name)
+            .map(|component| component.finalized)
+            .unwrap_or(false)
+        {
+            return;
+        }
+
+        if stack.contains(name) {
+            return;
+        }
+
+        stack.push(name.clone());
+
+        let base = self
+            .predeclared_components
+            .get(name)
+            .and_then(|component| component.base.clone());
+        if let Some(base_name) = base.clone() {
+            let should_inherit = self
+                .predeclared_components
+                .get(&base_name)
+                .map(|component| component.is_abstract)
+                .unwrap_or(false);
+            if should_inherit {
+                self.finalize_predeclared_component(&base_name, stack);
+            }
+        }
+
+        let mut effective_props = Vec::new();
+        let mut effective_emits = Vec::new();
+
+        if let Some(base_name) = base {
+            if let Some(base_component) = self.predeclared_components.get(&base_name) {
+                if base_component.is_abstract {
+                    effective_props.extend(base_component.effective_props.clone());
+                    effective_emits.extend(base_component.effective_emits.clone());
+                }
+            }
+        }
+
+        let (declared_props, declared_emits, component_name) = self
+            .predeclared_components
+            .get(name)
+            .map(|component| {
+                (
+                    component.declared_props.clone(),
+                    component.declared_emits.clone(),
+                    component.name.clone(),
+                )
+            })
+            .unwrap_or_else(|| (Vec::new(), Vec::new(), name.clone()));
+
+        effective_props.extend(declared_props.clone());
+        effective_emits.extend(declared_emits.clone());
+
+        let mut handler_props = FxHashMap::default();
+        let mut seen_handler_props: FxHashMap<Name, TextSpan> = FxHashMap::default();
+        for emit in &effective_emits {
+            let handler_name = Name::new(&Self::handler_prop_name(emit.name.as_str()));
+            let mut has_collision = false;
+
+            if effective_props.iter().any(|prop| prop.name == handler_name) {
+                self.add_diagnostic(
+                    format!(
+                        "Component '{}' declares prop '{}' which collides with emitted action handler '{}'",
+                        component_name.as_str(),
+                        handler_name.as_str(),
+                        handler_name.as_str()
+                    ),
+                    emit.span,
+                );
+                has_collision = true;
+            }
+
+            if let Some(previous_span) = seen_handler_props.insert(handler_name.clone(), emit.span)
+            {
+                self.add_diagnostic(
+                    format!(
+                        "Component '{}' emits multiple actions that map to handler '{}'",
+                        component_name.as_str(),
+                        handler_name.as_str()
+                    ),
+                    previous_span,
+                );
+                has_collision = true;
+            }
+
+            handler_props.insert(
+                handler_name,
+                if has_collision {
+                    HandlerPropResolution::Collision
+                } else {
+                    HandlerPropResolution::Emit(emit.clone())
+                },
+            );
+        }
+
+        if let Some(component) = self.predeclared_components.get_mut(name) {
+            component.effective_props = effective_props;
+            component.effective_emits = effective_emits;
+            component.handler_props = handler_props;
+            component.finalized = true;
+        }
+
+        stack.pop();
+    }
+
     fn find_predeclared_record(&self, name: &str) -> Option<&RecordDef> {
         self.predeclared_action_records.get(&Name::new(name))
     }
@@ -484,6 +600,11 @@ impl LoweringContext {
             .map(|n| Name::new(n.text()))
             .unwrap_or_else(|| Name::new("unknown"));
         let visibility = Self::lower_visibility(node);
+        let is_abstract = node.child_by_field("abstract").is_some();
+        let is_external = node.child_by_field("external").is_some();
+        let base = signature
+            .child_by_field("base")
+            .map(|base| Name::new(base.text()));
         let props = self.lower_record_fields_from_node(signature, false);
 
         let mut emits = Vec::new();
@@ -537,48 +658,6 @@ impl LoweringContext {
             }
         }
 
-        let mut handler_props = FxHashMap::default();
-        let mut seen_handler_props: FxHashMap<Name, TextSpan> = FxHashMap::default();
-        for emit in &emits {
-            let handler_name = Name::new(&Self::handler_prop_name(emit.name.as_str()));
-            let mut has_collision = false;
-
-            if props.iter().any(|prop| prop.name == handler_name) {
-                self.add_diagnostic(
-                    format!(
-                        "Component '{}' declares prop '{}' which collides with emitted action handler '{}'",
-                        name.as_str(),
-                        handler_name.as_str(),
-                        handler_name.as_str()
-                    ),
-                    emit.span,
-                );
-                has_collision = true;
-            }
-
-            if let Some(previous_span) = seen_handler_props.insert(handler_name.clone(), emit.span)
-            {
-                self.add_diagnostic(
-                    format!(
-                        "Component '{}' emits multiple actions that map to handler '{}'",
-                        name.as_str(),
-                        handler_name.as_str()
-                    ),
-                    previous_span,
-                );
-                has_collision = true;
-            }
-
-            handler_props.insert(
-                handler_name,
-                if has_collision {
-                    HandlerPropResolution::Collision
-                } else {
-                    HandlerPropResolution::Emit(emit.clone())
-                },
-            );
-        }
-
         self.component_emit_records
             .insert(name.clone(), inline_records);
         self.predeclared_components.insert(
@@ -586,10 +665,16 @@ impl LoweringContext {
             PredeclaredComponent {
                 name,
                 visibility,
-                props,
-                emits,
+                is_abstract,
+                is_external,
+                base,
+                declared_props: props.clone(),
+                declared_emits: emits.clone(),
+                effective_props: props,
+                effective_emits: emits,
                 span: node.span(),
-                handler_props,
+                handler_props: FxHashMap::default(),
+                finalized: false,
             },
         );
     }
@@ -599,6 +684,16 @@ impl LoweringContext {
             if child.kind() == SyntaxKind::COMPONENT_DEFINITION {
                 self.predeclare_component(child);
             }
+        }
+
+        let component_names = self
+            .predeclared_components
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut stack = Vec::new();
+        for name in component_names {
+            self.finalize_predeclared_component(&name, &mut stack);
         }
     }
 
@@ -611,18 +706,26 @@ impl LoweringContext {
 
         let body_node = node.child_by_field("body");
         let predeclared = self.predeclared_components.get(&name).cloned();
-        let (visibility, props, emits, span) = predeclared
+        let (visibility, is_abstract, is_external, base, props, emits, span) = predeclared
             .map(|component| {
                 (
                     component.visibility,
-                    component.props,
-                    component.emits,
+                    component.is_abstract,
+                    component.is_external,
+                    component.base,
+                    component.declared_props,
+                    component.declared_emits,
                     component.span,
                 )
             })
             .unwrap_or_else(|| {
                 (
                     Self::lower_visibility(node),
+                    node.child_by_field("abstract").is_some(),
+                    node.child_by_field("external").is_some(),
+                    node.child_by_field("signature")
+                        .and_then(|signature| signature.child_by_field("base"))
+                        .map(|base| Name::new(base.text())),
                     Vec::new(),
                     Vec::new(),
                     node.span(),
@@ -640,13 +743,15 @@ impl LoweringContext {
             .unwrap_or_default();
         let body = body_node
             .and_then(|body| body.child_by_field("body"))
-            .map(|body_expr| self.lower_expr(body_expr))
-            .unwrap_or_else(|| self.error_expr(node.span()));
+            .map(|body_expr| self.lower_expr(body_expr));
         self.pop_scope();
 
         Component {
             name,
             visibility,
+            is_abstract,
+            is_external,
+            base,
             props,
             emits,
             state,
@@ -1570,7 +1675,10 @@ impl LoweringContext {
                     let value_node = Self::property_value_node(child);
                     let value = if let Some(component) = component.as_ref() {
                         let prop_name = key.as_str();
-                        let is_declared_prop = component.props.iter().any(|prop| prop.name == key);
+                        let is_declared_prop = component
+                            .effective_props
+                            .iter()
+                            .any(|prop| prop.name == key);
 
                         if !is_declared_prop && Self::is_handler_binding_candidate(prop_name) {
                             if let Some(HandlerPropResolution::Emit(emit)) =
@@ -2370,13 +2478,8 @@ enum Mode = light | dark"#;
             })
             .expect("Should lower SearchSubmitted action");
 
-        let shape = effective_record_shape(&prepared, action)
-            .expect("Action shape should resolve");
-        let ancestors: Vec<_> = shape
-            .ancestors
-            .iter()
-            .map(|name| name.as_str())
-            .collect();
+        let shape = effective_record_shape(&prepared, action).expect("Action shape should resolve");
+        let ancestors: Vec<_> = shape.ancestors.iter().map(|name| name.as_str()).collect();
         assert_eq!(ancestors, vec!["SearchAction", "InputAction"]);
     }
 
@@ -3743,6 +3846,57 @@ enum Mode = light | dark"#;
     }
 
     #[test]
+    fn test_lower_inherited_component_emit_handler_uses_ancestor_action_name() {
+        let source = r#"
+            action TrackSearch = { value: string }
+
+            abstract component <SearchBase emits { ValueChanged { value:string } } />
+            component <SearchBox extends SearchBase /> = {
+              <TextInput />
+            }
+
+            let render() = <SearchBox onValueChanged=<TrackSearch value={action.value} /> />
+        "#;
+
+        let parse_result = parse_str(source, "component-inherited-actions.nx");
+        let tree = parse_result
+            .tree
+            .expect("Inherited component action handler source should parse");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let render = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Function(function) if function.name.as_str() == "render" => Some(function),
+                _ => None,
+            })
+            .expect("Expected render function");
+
+        let render_element = match module.expr(render.body) {
+            Expr::Element { element, .. } => *element,
+            other => panic!("Expected component invocation element, got {:?}", other),
+        };
+        let property = &module.element(render_element).properties[0];
+        match module.expr(property.value) {
+            Expr::ActionHandler {
+                component,
+                emit,
+                action_name,
+                ..
+            } => {
+                assert_eq!(component.as_str(), "SearchBox");
+                assert_eq!(emit.as_str(), "ValueChanged");
+                assert_eq!(action_name.as_str(), "SearchBase.ValueChanged");
+            }
+            other => panic!(
+                "Expected lowered inherited action handler expression, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
     fn test_lower_component_preserves_prop_defaults_state_and_body() {
         let source = r#"
             component <SearchBox placeholder:string = "Find docs" /> = {
@@ -3783,13 +3937,89 @@ enum Mode = light | dark"#;
             component.state.iter().all(|field| field.default.is_some()),
             "Expected state defaults to be preserved"
         );
+        assert!(!component.is_abstract);
+        assert!(!component.is_external);
+        assert!(component.base.is_none());
 
-        let Expr::Element { element, .. } = module.expr(component.body) else {
+        let Expr::Element { element, .. } = module.expr(
+            component
+                .body
+                .expect("Expected lowered component body expression"),
+        ) else {
             panic!("Expected lowered component body expression");
         };
         let element = module.element(*element);
         assert_eq!(element.tag.as_str(), "TextInput");
         assert_eq!(element.properties.len(), 2);
+    }
+
+    #[test]
+    fn test_lower_component_preserves_modifier_base_and_optional_body_metadata() {
+        let source = r#"
+            abstract component <SearchBase placeholder:string emits { ValueChanged { value:string } } />
+            external component <SearchBox extends SearchBase showSearchIcon:bool = true />
+            abstract external component <RemoteSearchBase />
+        "#;
+
+        let parse_result = parse_str(source, "component-metadata.nx");
+        let tree = parse_result
+            .tree
+            .expect("Component metadata source should parse");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let search_base = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Component(component) if component.name.as_str() == "SearchBase" => {
+                    Some(component)
+                }
+                _ => None,
+            })
+            .expect("Expected abstract base component");
+        assert!(search_base.is_abstract);
+        assert!(!search_base.is_external);
+        assert!(search_base.base.is_none());
+        assert!(search_base.body.is_none());
+        assert_eq!(
+            search_base.emits[0].action_name.as_str(),
+            "SearchBase.ValueChanged"
+        );
+
+        let search_box = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Component(component) if component.name.as_str() == "SearchBox" => {
+                    Some(component)
+                }
+                _ => None,
+            })
+            .expect("Expected external derived component");
+        assert!(!search_box.is_abstract);
+        assert!(search_box.is_external);
+        assert_eq!(
+            search_box.base.as_ref().map(|name| name.as_str()),
+            Some("SearchBase")
+        );
+        assert!(search_box.body.is_none());
+        assert_eq!(search_box.props.len(), 1);
+        assert_eq!(search_box.props[0].name.as_str(), "showSearchIcon");
+
+        let remote_base = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Component(component) if component.name.as_str() == "RemoteSearchBase" => {
+                    Some(component)
+                }
+                _ => None,
+            })
+            .expect("Expected abstract external component");
+        assert!(remote_base.is_abstract);
+        assert!(remote_base.is_external);
+        assert!(remote_base.base.is_none());
+        assert!(remote_base.body.is_none());
     }
 
     #[test]

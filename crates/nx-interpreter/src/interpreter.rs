@@ -6,10 +6,10 @@ use crate::resolved_program::{ResolvedItemKind, ResolvedProgram, RuntimeModuleId
 use crate::value::Value;
 use la_arena::RawIdx;
 use nx_hir::{
-    ast, effective_record_shape_for_name,
-    resolve_record_definition as resolve_hir_record_definition, ElementId, ExprId, Function, Item,
-    LoweredModule, Name, PreparedBinding, PreparedBindingOrigin, PreparedBindingTarget,
-    PreparedItemKind, PreparedModule, RecordKind,
+    ast, effective_component_contract, effective_record_shape_for_name,
+    resolve_record_definition as resolve_hir_record_definition, EffectiveField, ElementId, ExprId,
+    Function, Item, LoweredModule, Name, PreparedBinding, PreparedBindingOrigin,
+    PreparedBindingTarget, PreparedItemKind, PreparedModule, RecordKind,
 };
 use nx_types::{
     common_supertype, is_object_type, resolve_type_ref_with, resolve_type_ref_with_seen,
@@ -390,6 +390,38 @@ impl Interpreter {
         }
     }
 
+    fn module_for_identity<'a>(
+        &'a self,
+        current_module: &'a LoweredModule,
+        module_identity: &str,
+        operation: &str,
+    ) -> Result<&'a LoweredModule, RuntimeError> {
+        let prepared = self.runtime_prepared_module(current_module);
+        if prepared.module_identity() == module_identity {
+            return Ok(current_module);
+        }
+
+        let Some(program) = self.program.as_ref() else {
+            return Err(RuntimeError::new(
+                RuntimeErrorKind::ResolvedProgramRequired {
+                    operation: operation.to_string(),
+                },
+            ));
+        };
+
+        program
+            .modules()
+            .iter()
+            .find(|module| module.identity == module_identity)
+            .map(|module| module.lowered_module.as_ref())
+            .ok_or_else(|| {
+                RuntimeError::new(RuntimeErrorKind::ModuleNotFound {
+                    module_identity: module_identity.to_string(),
+                    operation: operation.to_string(),
+                })
+            })
+    }
+
     fn runtime_prepared_module(&self, module: &LoweredModule) -> Arc<PreparedModule> {
         let module_identity = self
             .program
@@ -616,13 +648,41 @@ impl Interpreter {
         limits: ResourceLimits,
     ) -> Result<ComponentInitResult, RuntimeError> {
         let component = self.find_component(module, component_name)?;
+        let contract = self.effective_component_contract(module, component);
+        if contract.component.is_abstract {
+            return Err(RuntimeError::new(
+                RuntimeErrorKind::AbstractComponentInstantiation {
+                    component: SmolStr::new(component.name.as_str()),
+                    operation: "component initialization".to_string(),
+                },
+            ));
+        }
         let mut ctx = ExecutionContext::with_limits(limits);
         self.bind_top_level_values(module, &mut ctx)?;
         let normalized_props =
-            self.normalize_component_props(module, &mut ctx, component, props)?;
-        let normalized_state =
-            self.materialize_component_state(module, &mut ctx, component, FxHashMap::default())?;
-        let rendered = self.eval_expr(module, &mut ctx, component.body)?;
+            self.normalize_component_props(module, &mut ctx, component, &contract, props)?;
+        let mut visible_fields = normalized_props.clone();
+        let normalized_state = self.materialize_component_state(
+            module,
+            &mut ctx,
+            component,
+            FxHashMap::default(),
+            &mut visible_fields,
+        )?;
+        let rendered = if component.is_external {
+            Value::Record {
+                type_name: component.name.clone(),
+                fields: normalized_props.clone(),
+            }
+        } else if let Some(body) = component.body {
+            self.eval_expr(module, &mut ctx, body)?
+        } else {
+            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: "component body".to_string(),
+                actual: "missing".to_string(),
+                operation: format!("component initialization for '{}'", component.name),
+            }));
+        };
         let component_module_id =
             self.require_current_module_id(module, "component state snapshot creation")?;
         let state_snapshot = self.encode_component_snapshot(
@@ -650,10 +710,11 @@ impl Interpreter {
         let component_module = self.module_for_id(module, decoded_snapshot.component_module_id)?;
         let component =
             self.find_component(component_module, decoded_snapshot.component.as_str())?;
+        let contract = self.effective_component_contract(component_module, component);
         let mut effects = Vec::new();
 
         for action in actions {
-            let emit = self.validate_component_action(component, &action)?;
+            let emit = self.validate_component_action(&contract, &action)?;
             let handler_name = Self::component_handler_prop_name(emit.name.as_str());
 
             if let Some(handler) = decoded_snapshot.props.get(handler_name.as_str()) {
@@ -720,6 +781,30 @@ impl Interpreter {
         }
     }
 
+    fn effective_component_contract(
+        &self,
+        module: &LoweredModule,
+        component: &nx_hir::Component,
+    ) -> nx_hir::EffectiveComponentContract {
+        let prepared = self.runtime_prepared_module(module);
+        let module_identity = prepared.module_identity().to_string();
+        effective_component_contract(prepared.as_ref(), component).unwrap_or_else(|_| {
+            nx_hir::EffectiveComponentContract {
+                component: component.clone(),
+                props: component
+                    .props
+                    .iter()
+                    .cloned()
+                    .map(|field| {
+                        nx_hir::EffectiveField::from_record_field(field, module_identity.clone())
+                    })
+                    .collect(),
+                emits: component.emits.clone(),
+                ancestors: Vec::new(),
+            }
+        })
+    }
+
     fn bind_top_level_values(
         &self,
         module: &LoweredModule,
@@ -741,6 +826,54 @@ impl Interpreter {
         }
 
         Ok(())
+    }
+
+    fn unavailable_effective_field_default_error(
+        &self,
+        field_name: &Name,
+        operation: &str,
+    ) -> RuntimeError {
+        RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+            expected: format!("available default for '{}'", field_name.as_str()),
+            actual: "missing imported default body".to_string(),
+            operation: operation.to_string(),
+        })
+    }
+
+    fn owner_module_for_effective_field<'a>(
+        &'a self,
+        current_module: &'a LoweredModule,
+        field: &EffectiveField,
+        operation: &str,
+    ) -> Result<&'a LoweredModule, RuntimeError> {
+        self.module_for_identity(current_module, field.module_identity.as_str(), operation)
+    }
+
+    fn eval_effective_field_default(
+        &self,
+        current_module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        field: &EffectiveField,
+        visible_fields: &FxHashMap<SmolStr, Value>,
+        operation: &str,
+    ) -> Result<Value, RuntimeError> {
+        let Some(default_expr) = field.default.as_ref() else {
+            return Err(self.unavailable_effective_field_default_error(&field.name, operation));
+        };
+
+        let owner_module = self.module_for_identity(
+            current_module,
+            default_expr.module_identity.as_str(),
+            operation,
+        )?;
+        let mut default_ctx = ctx.fork_isolated();
+        self.bind_top_level_values(owner_module, &mut default_ctx)?;
+        for (name, value) in visible_fields {
+            default_ctx.define_variable(name.clone(), value.clone());
+        }
+        let result = self.eval_expr(owner_module, &mut default_ctx, default_expr.expr_id);
+        ctx.sync_usage_from(&default_ctx);
+        result
     }
 
     fn flattened_expr_name(&self, module: &LoweredModule, expr_id: ExprId) -> Option<String> {
@@ -794,8 +927,9 @@ impl Interpreter {
         module: &LoweredModule,
         ctx: &mut ExecutionContext,
         component: &nx_hir::Component,
-        fields: &[nx_hir::RecordField],
+        fields: &[nx_hir::EffectiveField],
         overrides: &mut FxHashMap<SmolStr, Value>,
+        visible_fields: &mut FxHashMap<SmolStr, Value>,
         phase: &str,
     ) -> Result<FxHashMap<SmolStr, Value>, RuntimeError> {
         let mut normalized = FxHashMap::default();
@@ -803,10 +937,31 @@ impl Interpreter {
         for field in fields {
             let value = if let Some(value) = overrides.remove(field.name.as_str()) {
                 value
-            } else if let Some(default_expr) = field.default {
-                self.eval_expr(module, ctx, default_expr)?
+            } else if field.default.is_some() {
+                self.eval_effective_field_default(
+                    module,
+                    ctx,
+                    field,
+                    visible_fields,
+                    &format!(
+                        "component {} '{}.{}' default evaluation",
+                        phase,
+                        component.name.as_str(),
+                        field.name.as_str()
+                    ),
+                )?
             } else if matches!(&field.ty, ast::TypeRef::Nullable(_)) {
                 Value::Null
+            } else if !field.is_required {
+                return Err(self.unavailable_effective_field_default_error(
+                    &field.name,
+                    &format!(
+                        "component {} '{}.{}'",
+                        phase,
+                        component.name.as_str(),
+                        field.name.as_str()
+                    ),
+                ));
             } else {
                 return Err(self.missing_required_component_field_error(
                     &component.name,
@@ -815,8 +970,18 @@ impl Interpreter {
                 ));
             };
 
-            let value = self.coerce_value_to_type(
+            let owner_module = self.owner_module_for_effective_field(
                 module,
+                field,
+                &format!(
+                    "component {} '{}.{}' type coercion",
+                    phase,
+                    component.name.as_str(),
+                    field.name.as_str()
+                ),
+            )?;
+            let value = self.coerce_value_to_type(
+                owner_module,
                 value,
                 &field.ty,
                 &format!(
@@ -827,6 +992,7 @@ impl Interpreter {
                 ),
             )?;
             ctx.define_variable(SmolStr::new(field.name.as_str()), value.clone());
+            visible_fields.insert(SmolStr::new(field.name.as_str()), value.clone());
             normalized.insert(SmolStr::new(field.name.as_str()), value);
         }
 
@@ -838,23 +1004,26 @@ impl Interpreter {
         module: &LoweredModule,
         ctx: &mut ExecutionContext,
         component: &nx_hir::Component,
+        contract: &nx_hir::EffectiveComponentContract,
         props: Value,
     ) -> Result<FxHashMap<SmolStr, Value>, RuntimeError> {
         let mut overrides = self.input_fields_from_value(
             props,
             &format!("component props for '{}'", component.name.as_str()),
         )?;
+        let mut visible_fields = FxHashMap::default();
         let mut normalized = self.materialize_component_fields(
             module,
             ctx,
             component,
-            &component.props,
+            &contract.props,
             &mut overrides,
+            &mut visible_fields,
             "prop initialization",
         )?;
 
         for (name, value) in overrides {
-            if let Some(emit) = component
+            if let Some(emit) = contract
                 .emits
                 .iter()
                 .find(|emit| Self::component_handler_prop_name(emit.name.as_str()) == name)
@@ -910,37 +1079,52 @@ impl Interpreter {
         ctx: &mut ExecutionContext,
         component: &nx_hir::Component,
         mut overrides: FxHashMap<SmolStr, Value>,
+        visible_fields: &mut FxHashMap<SmolStr, Value>,
     ) -> Result<FxHashMap<SmolStr, Value>, RuntimeError> {
+        let module_identity = self
+            .runtime_prepared_module(module)
+            .module_identity()
+            .to_string();
+        let state_fields = component
+            .state
+            .iter()
+            .cloned()
+            .map(|field| nx_hir::EffectiveField::from_record_field(field, module_identity.clone()))
+            .collect::<Vec<_>>();
         self.materialize_component_fields(
             module,
             ctx,
             component,
-            &component.state,
+            &state_fields,
             &mut overrides,
+            visible_fields,
             "state initialization",
         )
     }
 
     fn validate_component_action<'a>(
         &self,
-        component: &'a nx_hir::Component,
+        contract: &'a nx_hir::EffectiveComponentContract,
         action: &Value,
     ) -> Result<&'a nx_hir::ComponentEmit, RuntimeError> {
         let Value::Record { type_name, .. } = action else {
             return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
                 expected: "action".to_string(),
                 actual: action.type_name().to_string(),
-                operation: format!("component dispatch for '{}'", component.name.as_str()),
+                operation: format!(
+                    "component dispatch for '{}'",
+                    contract.component.name.as_str()
+                ),
             }));
         };
 
-        component
+        contract
             .emits
             .iter()
             .find(|emit| emit.action_name == *type_name)
             .ok_or_else(|| {
                 RuntimeError::new(RuntimeErrorKind::UnsupportedComponentAction {
-                    component: SmolStr::new(component.name.as_str()),
+                    component: SmolStr::new(contract.component.name.as_str()),
                     action: SmolStr::new(type_name.as_str()),
                 })
             })
@@ -1640,12 +1824,6 @@ impl Interpreter {
 
         let mut overrides = FxHashMap::default();
         for (field, value) in record_shape.fields.iter().zip(arg_values.into_iter()) {
-            let value = self.coerce_value_to_type(
-                module,
-                value,
-                &field.ty,
-                &format!("record field '{}'", field.name.as_str()),
-            )?;
             overrides.insert(SmolStr::new(field.name.as_str()), value);
         }
 
@@ -1725,10 +1903,19 @@ impl Interpreter {
         if let Some((target_module, Item::Component(component))) =
             self.resolve_item(module, tag_name)
         {
+            let contract = self.effective_component_contract(target_module, component);
+            if contract.component.is_abstract {
+                return Err(RuntimeError::new(
+                    RuntimeErrorKind::AbstractComponentInstantiation {
+                        component: SmolStr::new(component.name.as_str()),
+                        operation: "element component call".to_string(),
+                    },
+                ));
+            }
             self.inject_element_content_field(
                 &mut fields,
                 normalized_content,
-                component.content_prop().map(|field| field.name.as_str()),
+                contract.content_prop().map(|field| field.name.as_str()),
                 "component without a declared content prop",
                 "element component call",
             )?;
@@ -1738,6 +1925,7 @@ impl Interpreter {
                 target_module,
                 ctx,
                 component,
+                &contract,
                 Value::Record {
                     type_name: component.name.clone(),
                     fields,
@@ -2552,13 +2740,28 @@ impl Interpreter {
             ));
         }
 
+        let mut materialized = FxHashMap::default();
         for prop in &record_shape.fields {
             let value = if let Some(value) = overrides.remove(prop.name.as_str()) {
                 value
-            } else if let Some(default_expr) = prop.default {
-                self.eval_expr(module, ctx, default_expr)?
+            } else if prop.default.is_some() {
+                self.eval_effective_field_default(
+                    module,
+                    ctx,
+                    prop,
+                    &materialized,
+                    &format!(
+                        "record field '{}.{}' default evaluation",
+                        record_def.name, prop.name
+                    ),
+                )?
             } else if matches!(&prop.ty, ast::TypeRef::Nullable(_)) {
                 Value::Null
+            } else if !prop.is_required {
+                return Err(self.unavailable_effective_field_default_error(
+                    &prop.name,
+                    &format!("record field '{}.{}'", record_def.name, prop.name),
+                ));
             } else if let Some(operation) = missing_operation {
                 return Err(self.missing_required_record_field_error(
                     &record_def.name,
@@ -2569,18 +2772,26 @@ impl Interpreter {
                 Value::Null
             };
 
-            let value = self.coerce_value_to_type(
+            let owner_module = self.owner_module_for_effective_field(
                 module,
+                prop,
+                &format!(
+                    "record field '{}.{}' type coercion",
+                    record_def.name, prop.name
+                ),
+            )?;
+            let value = self.coerce_value_to_type(
+                owner_module,
                 value,
                 &prop.ty,
                 &format!("record field '{}'", prop.name.as_str()),
             )?;
-            overrides.insert(SmolStr::new(prop.name.as_str()), value);
+            materialized.insert(SmolStr::new(prop.name.as_str()), value);
         }
 
         Ok(Value::Record {
             type_name: record_shape.record.name,
-            fields: overrides,
+            fields: materialized,
         })
     }
 }
@@ -3474,6 +3685,141 @@ mod tests {
             extract_record_field(&init.rendered, "content"),
             &Value::String(SmolStr::new("Save"))
         );
+    }
+
+    #[test]
+    fn test_initialize_component_rejects_abstract_component() {
+        let source = r#"
+            abstract component <SearchBase placeholder:string />
+        "#;
+
+        let (module, interpreter) = lower_module_runtime(source);
+        let error = interpreter
+            .initialize_component(
+                module.as_ref(),
+                "SearchBase",
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::default(),
+                },
+            )
+            .expect_err("Expected abstract component initialization to fail");
+
+        assert!(matches!(
+            error.kind(),
+            RuntimeErrorKind::AbstractComponentInstantiation { component, .. }
+                if component == "SearchBase"
+        ));
+    }
+
+    #[test]
+    fn test_external_component_invocation_returns_typed_record_with_defaults_and_handlers() {
+        let source = r#"
+            action SearchRequested = { query:string }
+            action DoSearch = { query:string }
+
+            external component <SearchBox placeholder:string = "Find docs" emits { SearchRequested } />
+            let render() = <SearchBox onSearchRequested=<DoSearch query={action.query} /> />
+        "#;
+
+        let (module, interpreter) = lower_module_runtime(source);
+        let render_result = interpreter
+            .execute_function(module.as_ref(), "render", vec![])
+            .expect("Expected render to succeed");
+
+        let Value::Record { type_name, fields } = &render_result else {
+            panic!("Expected external component record value");
+        };
+        assert_eq!(type_name.as_str(), "SearchBox");
+        assert_eq!(
+            fields.get("placeholder"),
+            Some(&Value::String(SmolStr::new("Find docs")))
+        );
+        assert!(matches!(
+            fields.get("onSearchRequested"),
+            Some(Value::ActionHandler { .. })
+        ));
+    }
+
+    #[test]
+    fn test_initialize_external_component_returns_typed_record_and_empty_state() {
+        let source = r#"
+            external component <SearchBox placeholder:string = "Find docs" showSearchIcon:bool = true />
+        "#;
+
+        let (module, interpreter) = lower_module_runtime(source);
+        let init = interpreter
+            .initialize_component(
+                module.as_ref(),
+                "SearchBox",
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::default(),
+                },
+            )
+            .expect("Expected external component initialization to succeed");
+
+        let Value::Record { type_name, fields } = &init.rendered else {
+            panic!("Expected external component render value");
+        };
+        assert_eq!(type_name.as_str(), "SearchBox");
+        assert_eq!(
+            fields.get("placeholder"),
+            Some(&Value::String(SmolStr::new("Find docs")))
+        );
+        assert_eq!(fields.get("showSearchIcon"), Some(&Value::Boolean(true)));
+
+        let snapshot = interpreter
+            .decode_component_snapshot(module.as_ref(), &init.state_snapshot)
+            .expect("Expected snapshot to decode");
+        assert!(snapshot.state.is_empty(), "Expected empty external state");
+    }
+
+    #[test]
+    fn test_dispatch_external_component_actions_uses_bound_handlers() {
+        let source = r#"
+            action SearchRequested = { query:string }
+            action DoSearch = { query:string }
+
+            external component <SearchBox emits { SearchRequested } />
+            let withHandler() = <SearchBox onSearchRequested=<DoSearch query={action.query} /> />
+        "#;
+
+        let (module, interpreter) = lower_module_runtime(source);
+        let props = interpreter
+            .execute_function(module.as_ref(), "withHandler", vec![])
+            .expect("Expected handler props function to succeed");
+        let init = interpreter
+            .initialize_component(module.as_ref(), "SearchBox", props)
+            .expect("Expected external component initialization to succeed");
+
+        let result = interpreter
+            .dispatch_component_actions(
+                module.as_ref(),
+                &init.state_snapshot,
+                vec![Value::Record {
+                    type_name: Name::new("SearchRequested"),
+                    fields: [(SmolStr::new("query"), Value::String(SmolStr::new("docs")))]
+                        .into_iter()
+                        .collect(),
+                }],
+            )
+            .expect("Expected external component dispatch to succeed");
+
+        assert_eq!(
+            result.effects,
+            vec![Value::Record {
+                type_name: Name::new("DoSearch"),
+                fields: [(SmolStr::new("query"), Value::String(SmolStr::new("docs")),)]
+                    .into_iter()
+                    .collect(),
+            }]
+        );
+
+        let snapshot = interpreter
+            .decode_component_snapshot(module.as_ref(), &result.state_snapshot)
+            .expect("Expected snapshot to decode");
+        assert!(snapshot.state.is_empty(), "Expected empty external state");
     }
 
     #[test]

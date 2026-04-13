@@ -1,6 +1,7 @@
 use crate::{
-    ast, interface_record, interface_type_alias, InterfaceItemKind, Item, Name, PreparedModule,
-    PreparedNamespace, RecordDef, RecordField, RecordKind, ResolvedPreparedItem,
+    ast, interface_record, interface_type_alias, EffectiveField, InterfaceField, InterfaceItem,
+    InterfaceItemKind, Item, Name, PreparedModule, PreparedNamespace, RecordDef, RecordKind,
+    ResolvedPreparedItem,
 };
 use nx_diagnostics::TextSpan;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -8,12 +9,12 @@ use rustc_hash::{FxHashMap, FxHashSet};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectiveRecordShape {
     pub record: RecordDef,
-    pub fields: Vec<RecordField>,
+    pub fields: Vec<EffectiveField>,
     pub ancestors: Vec<Name>,
 }
 
 impl EffectiveRecordShape {
-    pub fn content_property(&self) -> Option<&RecordField> {
+    pub fn content_property(&self) -> Option<&EffectiveField> {
         self.fields.iter().find(|field| field.is_content)
     }
 }
@@ -24,7 +25,10 @@ pub enum InvalidBaseReason {
     NotRecord,
     AliasCycle,
     ConcreteRecord,
-    KindMismatch { expected: RecordKind, found: RecordKind },
+    KindMismatch {
+        expected: RecordKind,
+        found: RecordKind,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -174,7 +178,7 @@ impl RecordResolutionError {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct OwnedRecordField {
-    field: RecordField,
+    field: EffectiveField,
     owner: Name,
 }
 
@@ -185,6 +189,39 @@ struct ResolvedRecordShape {
     ancestors: Vec<Name>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RecordFieldSource {
+    Raw,
+    Interface { properties: Vec<InterfaceField> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedRecordDefinition {
+    record: RecordDef,
+    module_identity: String,
+    field_source: RecordFieldSource,
+}
+
+impl ResolvedRecordDefinition {
+    fn declared_fields(&self) -> Vec<EffectiveField> {
+        match &self.field_source {
+            RecordFieldSource::Raw => self
+                .record
+                .properties
+                .iter()
+                .cloned()
+                .map(|field| EffectiveField::from_record_field(field, self.module_identity.clone()))
+                .collect(),
+            RecordFieldSource::Interface { properties } => properties
+                .iter()
+                .map(|field| {
+                    EffectiveField::from_interface_field(field, self.module_identity.clone())
+                })
+                .collect(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RecordValidationStatus {
     Valid,
@@ -192,23 +229,35 @@ enum RecordValidationStatus {
 }
 
 pub fn resolve_record_definition(module: &PreparedModule, name: &Name) -> Option<RecordDef> {
-    resolve_record_definition_inner(module, name, &mut FxHashSet::default())
+    resolve_record_definition_with_identity(module, name).map(|resolved| resolved.record)
 }
 
 pub fn effective_record_shape_for_name(
     module: &PreparedModule,
     name: &Name,
 ) -> Result<Option<EffectiveRecordShape>, RecordResolutionError> {
-    let Some(record) = resolve_record_definition(module, name) else {
+    let Some(record) = resolve_record_definition_with_identity(module, name) else {
         return Ok(None);
     };
 
-    effective_record_shape(module, &record).map(Some)
+    effective_record_shape_resolved(module, &record).map(Some)
 }
 
 pub fn effective_record_shape(
     module: &PreparedModule,
     record: &RecordDef,
+) -> Result<EffectiveRecordShape, RecordResolutionError> {
+    let record = ResolvedRecordDefinition {
+        record: record.clone(),
+        module_identity: module.module_identity().to_string(),
+        field_source: RecordFieldSource::Raw,
+    };
+    effective_record_shape_resolved(module, &record)
+}
+
+fn effective_record_shape_resolved(
+    module: &PreparedModule,
+    record: &ResolvedRecordDefinition,
 ) -> Result<EffectiveRecordShape, RecordResolutionError> {
     let resolved = resolve_record_shape_inner(module, record, &mut Vec::new())?;
     Ok(EffectiveRecordShape {
@@ -222,27 +271,77 @@ pub fn effective_record_shape(
     })
 }
 
+fn resolve_record_definition_with_identity(
+    module: &PreparedModule,
+    name: &Name,
+) -> Option<ResolvedRecordDefinition> {
+    resolve_record_definition_inner(module, name, &mut FxHashSet::default())
+}
+
+fn record_definition_from_interface_item(item: &InterfaceItem) -> Option<ResolvedRecordDefinition> {
+    let record = interface_record(item)?;
+    let properties = match &item.item {
+        InterfaceItemKind::Record { properties, .. } => properties.clone(),
+        _ => return None,
+    };
+    Some(ResolvedRecordDefinition {
+        record,
+        module_identity: item.module_identity.clone(),
+        field_source: RecordFieldSource::Interface { properties },
+    })
+}
+
+fn record_definition_from_prepared_item(
+    module: &PreparedModule,
+    resolved: ResolvedPreparedItem,
+) -> Option<ResolvedRecordDefinition> {
+    match resolved {
+        ResolvedPreparedItem::Raw {
+            module_identity,
+            item: Item::Record(record),
+            ..
+        } => Some(ResolvedRecordDefinition {
+            record,
+            module_identity,
+            field_source: RecordFieldSource::Raw,
+        }),
+        ResolvedPreparedItem::Imported { item, raw, .. } => {
+            if let Some(raw_ref) = raw.as_ref() {
+                if let Some(Item::Record(record)) = module.resolve_imported_raw_item(raw_ref) {
+                    return Some(ResolvedRecordDefinition {
+                        record,
+                        module_identity: raw_ref.module_identity.clone(),
+                        field_source: RecordFieldSource::Raw,
+                    });
+                }
+            }
+            record_definition_from_interface_item(&item)
+        }
+        _ => None,
+    }
+}
+
 pub fn is_record_subtype(
     module: &PreparedModule,
     actual: &Name,
     expected: &Name,
 ) -> Result<bool, RecordResolutionError> {
-    let Some(actual_record) = resolve_record_definition(module, actual) else {
+    let Some(actual_record) = resolve_record_definition_with_identity(module, actual) else {
         return Ok(false);
     };
-    let Some(expected_record) = resolve_record_definition(module, expected) else {
+    let Some(expected_record) = resolve_record_definition_with_identity(module, expected) else {
         return Ok(false);
     };
 
-    if actual_record.name == expected_record.name {
+    if actual_record.record.name == expected_record.record.name {
         return Ok(true);
     }
 
-    let actual_shape = effective_record_shape(module, &actual_record)?;
+    let actual_shape = effective_record_shape_resolved(module, &actual_record)?;
     Ok(actual_shape
         .ancestors
         .iter()
-        .any(|ancestor| ancestor == &expected_record.name))
+        .any(|ancestor| ancestor == &expected_record.record.name))
 }
 
 pub fn validate_record_definitions(module: &PreparedModule) -> Vec<RecordResolutionError> {
@@ -299,7 +398,7 @@ fn validate_record_definition(
 
     let status = match resolve_base_record(module, record) {
         Ok(Some(base_record)) => {
-            if validate_record_definition(module, &base_record, statuses, stack, errors)
+            if validate_record_definition(module, &base_record.record, statuses, stack, errors)
                 == RecordValidationStatus::Invalid
             {
                 RecordValidationStatus::Invalid
@@ -339,11 +438,30 @@ fn push_unique_record_error(errors: &mut Vec<RecordResolutionError>, error: Reco
     }
 }
 
+fn type_alias_target_from_prepared_item(resolved: &ResolvedPreparedItem) -> Option<Name> {
+    match resolved {
+        ResolvedPreparedItem::Raw {
+            item: Item::TypeAlias(alias),
+            ..
+        } => match &alias.ty {
+            ast::TypeRef::Name(target) => Some(target.clone()),
+            _ => None,
+        },
+        ResolvedPreparedItem::Imported { item, .. } => {
+            interface_type_alias(item).and_then(|alias| match &alias.ty {
+                ast::TypeRef::Name(target) => Some(target.clone()),
+                _ => None,
+            })
+        }
+        _ => None,
+    }
+}
+
 fn resolve_record_definition_inner(
     module: &PreparedModule,
     name: &Name,
     seen: &mut FxHashSet<Name>,
-) -> Option<RecordDef> {
+) -> Option<ResolvedRecordDefinition> {
     if !seen.insert(name.clone()) {
         return None;
     }
@@ -352,27 +470,11 @@ fn resolve_record_definition_inner(
         .resolve_binding(PreparedNamespace::Type, name)
         .and_then(|binding| module.resolve_prepared_item(binding))
     {
-        Some(ResolvedPreparedItem::Raw {
-            item: Item::Record(record),
-            ..
-        }) => Some(record),
-        Some(ResolvedPreparedItem::Raw {
-            item: Item::TypeAlias(alias),
-            ..
-        }) => match &alias.ty {
-            ast::TypeRef::Name(target) => resolve_record_definition_inner(module, target, seen),
-            _ => None,
-        },
-        Some(ResolvedPreparedItem::Imported { item, .. }) => {
-            if let Some(record) = interface_record(&item) {
+        Some(resolved) => {
+            if let Some(record) = record_definition_from_prepared_item(module, resolved.clone()) {
                 Some(record)
-            } else if let Some(alias) = interface_type_alias(&item) {
-                match &alias.ty {
-                    ast::TypeRef::Name(target) => {
-                        resolve_record_definition_inner(module, target, seen)
-                    }
-                    _ => None,
-                }
+            } else if let Some(target) = type_alias_target_from_prepared_item(&resolved) {
+                resolve_record_definition_inner(module, &target, seen)
             } else {
                 None
             }
@@ -386,31 +488,32 @@ fn resolve_record_definition_inner(
 
 fn resolve_record_shape_inner(
     module: &PreparedModule,
-    record: &RecordDef,
+    record: &ResolvedRecordDefinition,
     stack: &mut Vec<Name>,
 ) -> Result<ResolvedRecordShape, RecordResolutionError> {
-    if let Some(index) = stack.iter().position(|name| name == &record.name) {
+    if let Some(index) = stack.iter().position(|name| name == &record.record.name) {
         let mut cycle = stack[index..].to_vec();
-        cycle.push(record.name.clone());
+        cycle.push(record.record.name.clone());
         return Err(RecordResolutionError::InheritanceCycle {
-            record: record.name.clone(),
-            span: record.span,
+            record: record.record.name.clone(),
+            span: record.record.span,
             cycle,
         });
     }
 
-    stack.push(record.name.clone());
+    stack.push(record.record.name.clone());
 
-    let result = if let Some(base_record) = resolve_base_record(module, record)? {
+    let result = if let Some(base_record) = resolve_base_record(module, &record.record)? {
         let base_shape = resolve_record_shape_inner(module, &base_record, stack)?;
         let mut fields = base_shape.fields;
+        let declared_fields = record.declared_fields();
 
-        for field in &record.properties {
+        for field in &declared_fields {
             if field.is_content {
                 if let Some(existing) = fields.iter().find(|existing| existing.field.is_content) {
                     stack.pop();
                     return Err(RecordResolutionError::DuplicateContentProperty {
-                        record: record.name.clone(),
+                        record: record.record.name.clone(),
                         existing_field: existing.field.name.clone(),
                         existing_owner: existing.owner.clone(),
                         field: field.name.clone(),
@@ -425,7 +528,7 @@ fn resolve_record_shape_inner(
             {
                 stack.pop();
                 return Err(RecordResolutionError::DuplicateInheritedField {
-                    record: record.name.clone(),
+                    record: record.record.name.clone(),
                     field: field.name.clone(),
                     inherited_from: existing.owner.clone(),
                     span: field.span,
@@ -434,28 +537,28 @@ fn resolve_record_shape_inner(
 
             fields.push(OwnedRecordField {
                 field: field.clone(),
-                owner: record.name.clone(),
+                owner: record.record.name.clone(),
             });
         }
 
-        let mut ancestors = vec![base_record.name.clone()];
+        let mut ancestors = vec![base_record.record.name.clone()];
         ancestors.extend(base_shape.ancestors);
 
         ResolvedRecordShape {
-            record: record.clone(),
+            record: record.record.clone(),
             fields,
             ancestors,
         }
     } else {
+        let declared_fields = record.declared_fields();
         ResolvedRecordShape {
-            record: record.clone(),
-            fields: record
-                .properties
+            record: record.record.clone(),
+            fields: declared_fields
                 .iter()
                 .cloned()
                 .map(|field| OwnedRecordField {
                     field,
-                    owner: record.name.clone(),
+                    owner: record.record.name.clone(),
                 })
                 .collect(),
             ancestors: Vec::new(),
@@ -469,7 +572,7 @@ fn resolve_record_shape_inner(
 fn resolve_base_record(
     module: &PreparedModule,
     record: &RecordDef,
-) -> Result<Option<RecordDef>, RecordResolutionError> {
+) -> Result<Option<ResolvedRecordDefinition>, RecordResolutionError> {
     let Some(base_name) = record.base.as_ref() else {
         return Ok(None);
     };
@@ -483,7 +586,7 @@ fn resolve_base_record_inner(
     record: &RecordDef,
     base_name: &Name,
     seen: &mut FxHashSet<Name>,
-) -> Result<RecordDef, RecordResolutionError> {
+) -> Result<ResolvedRecordDefinition, RecordResolutionError> {
     if !seen.insert(base_name.clone()) {
         return Err(RecordResolutionError::InvalidBase {
             record: record.name.clone(),
@@ -498,48 +601,21 @@ fn resolve_base_record_inner(
         .resolve_binding(PreparedNamespace::Type, base_name)
         .and_then(|binding| module.resolve_prepared_item(binding))
     {
-        Some(ResolvedPreparedItem::Raw {
-            item: Item::Record(base_record),
-            ..
-        }) => validate_base_record(record, base_name, &base_record),
-        Some(ResolvedPreparedItem::Raw {
-            item: Item::TypeAlias(alias),
-            ..
-        }) => match &alias.ty {
-            ast::TypeRef::Name(target) => resolve_base_record_inner(module, record, target, seen),
-            _ => Err(invalid_base(
-                record,
-                base_name,
-                InvalidBaseReason::NotRecord,
-            )),
-        },
-        Some(ResolvedPreparedItem::Imported { item, .. }) => match &item.item {
-            InterfaceItemKind::Record { .. } => {
-                let base_record = interface_record(&item)
-                    .expect("interface record should convert into record definition");
+        Some(resolved) => {
+            if let Some(base_record) =
+                record_definition_from_prepared_item(module, resolved.clone())
+            {
                 validate_base_record(record, base_name, &base_record)
-            }
-            InterfaceItemKind::TypeAlias { ty, .. } => match ty {
-                ast::TypeRef::Name(target) => {
-                    resolve_base_record_inner(module, record, target, seen)
-                }
-                _ => Err(invalid_base(
+            } else if let Some(target) = type_alias_target_from_prepared_item(&resolved) {
+                resolve_base_record_inner(module, record, &target, seen)
+            } else {
+                Err(invalid_base(
                     record,
                     base_name,
                     InvalidBaseReason::NotRecord,
-                )),
-            },
-            _ => Err(invalid_base(
-                record,
-                base_name,
-                InvalidBaseReason::NotRecord,
-            )),
-        },
-        Some(ResolvedPreparedItem::Raw { .. }) => Err(invalid_base(
-            record,
-            base_name,
-            InvalidBaseReason::NotRecord,
-        )),
+                ))
+            }
+        }
         None => Err(invalid_base(record, base_name, InvalidBaseReason::NotFound)),
     };
 
@@ -564,20 +640,20 @@ fn invalid_base(
 fn validate_base_record(
     record: &RecordDef,
     base_name: &Name,
-    base_record: &RecordDef,
-) -> Result<RecordDef, RecordResolutionError> {
-    if base_record.kind != record.kind {
+    base_record: &ResolvedRecordDefinition,
+) -> Result<ResolvedRecordDefinition, RecordResolutionError> {
+    if base_record.record.kind != record.kind {
         return Err(invalid_base(
             record,
             base_name,
             InvalidBaseReason::KindMismatch {
                 expected: record.kind,
-                found: base_record.kind,
+                found: base_record.record.kind,
             },
         ));
     }
 
-    if !base_record.is_abstract {
+    if !base_record.record.is_abstract {
         return Err(invalid_base(
             record,
             base_name,

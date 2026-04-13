@@ -88,6 +88,12 @@ pub enum RuntimeErrorKind {
     /// Attempted to instantiate an abstract record
     AbstractRecordInstantiation { record: SmolStr, operation: String },
 
+    /// Attempted to instantiate an abstract component
+    AbstractComponentInstantiation {
+        component: SmolStr,
+        operation: String,
+    },
+
     /// Required component prop or state field was not provided and has no default
     MissingRequiredComponentField {
         component: SmolStr,
@@ -97,6 +103,12 @@ pub enum RuntimeErrorKind {
 
     /// Operation requires a resolved program runtime to provide stable module identity
     ResolvedProgramRequired { operation: String },
+
+    /// Runtime could not locate one lowered module required for evaluation
+    ModuleNotFound {
+        module_identity: String,
+        operation: String,
+    },
 
     /// Malformed or incompatible component state snapshot
     InvalidComponentStateSnapshot { reason: String },
@@ -171,6 +183,14 @@ impl fmt::Display for RuntimeErrorKind {
                 "Cannot instantiate abstract record '{}' in {}",
                 record, operation
             ),
+            RuntimeErrorKind::AbstractComponentInstantiation {
+                component,
+                operation,
+            } => write!(
+                f,
+                "Cannot instantiate abstract component '{}' in {}",
+                component, operation
+            ),
             RuntimeErrorKind::MissingRequiredComponentField {
                 component,
                 field,
@@ -183,6 +203,14 @@ impl fmt::Display for RuntimeErrorKind {
             RuntimeErrorKind::ResolvedProgramRequired { operation } => {
                 write!(f, "Resolved program runtime required for {}", operation)
             }
+            RuntimeErrorKind::ModuleNotFound {
+                module_identity,
+                operation,
+            } => write!(
+                f,
+                "Cannot perform {}: module '{}' is not available",
+                operation, module_identity
+            ),
             RuntimeErrorKind::InvalidComponentStateSnapshot { reason } => {
                 write!(f, "Invalid component state snapshot: {}", reason)
             }

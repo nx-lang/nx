@@ -200,13 +200,33 @@
     "type": "component_definition",
     "named": true,
     "fields": {
+      "abstract": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "abstract",
+            "named": false
+          }
+        ]
+      },
       "body": {
         "multiple": false,
-        "required": true,
+        "required": false,
         "types": [
           {
             "type": "component_body",
             "named": true
+          }
+        ]
+      },
+      "external": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "external",
+            "named": false
           }
         ]
       },
@@ -236,6 +256,16 @@
     "type": "component_signature",
     "named": true,
     "fields": {
+      "base": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "qualified_name",
+            "named": true
+          }
+        ]
+      },
       "emits": {
         "multiple": false,
         "required": false,
@@ -1107,7 +1137,6 @@
   {
     "type": "module_definition",
     "named": true,
-    "root": true,
     "fields": {},
     "children": {
       "multiple": true,
@@ -2349,8 +2378,7 @@
   },
   {
     "type": "block_comment",
-    "named": true,
-    "extra": true
+    "named": true
   },
   {
     "type": "bool",
@@ -2401,6 +2429,10 @@
     "named": false
   },
   {
+    "type": "external",
+    "named": false
+  },
+  {
     "type": "f32",
     "named": false
   },
@@ -2430,8 +2462,7 @@
   },
   {
     "type": "html_block_comment",
-    "named": true,
-    "extra": true
+    "named": true
   },
   {
     "type": "i32",
@@ -2475,8 +2506,7 @@
   },
   {
     "type": "line_comment",
-    "named": true,
-    "extra": true
+    "named": true
   },
   {
     "type": "null_literal",

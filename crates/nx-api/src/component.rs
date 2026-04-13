@@ -276,6 +276,7 @@ fn lookup_contains_component(lookup: ComponentLookup<'_>, type_name: &str) -> bo
 mod tests {
     use super::*;
     use crate::artifacts::{build_program_artifact_from_source, LibraryRegistry};
+    use nx_hir::{ast::Expr, Item};
     use std::collections::BTreeMap;
     use std::fs;
     use tempfile::TempDir;
@@ -358,6 +359,68 @@ mod tests {
     }
 
     #[test]
+    fn initialize_component_source_supports_external_component_entrypoint() {
+        let source = r#"
+            external component <SearchBox placeholder:string = "Find docs" showSearchIcon:bool = true />
+        "#;
+
+        let result = initialize_component_source(
+            source,
+            "external-component-init.nx",
+            &ProgramBuildContext::empty(),
+            "SearchBox",
+            &empty_record(),
+        );
+        let ComponentInitEvalResult::Ok(result) = result else {
+            panic!("Expected external component initialization to succeed");
+        };
+
+        let NxValue::Record {
+            type_name,
+            properties,
+        } = result.rendered
+        else {
+            panic!("Expected rendered external component record");
+        };
+        assert_eq!(type_name.as_deref(), Some("SearchBox"));
+        assert_eq!(
+            properties.get("placeholder"),
+            Some(&NxValue::String("Find docs".to_string()))
+        );
+        assert_eq!(properties.get("showSearchIcon"), Some(&NxValue::Bool(true)));
+        assert!(!result.state_snapshot.is_empty());
+    }
+
+    #[test]
+    fn initialize_component_source_rejects_abstract_component_entrypoint() {
+        let source = r#"
+            abstract component <SearchBase placeholder:string />
+        "#;
+
+        let result = initialize_component_source(
+            source,
+            "abstract-component-init.nx",
+            &ProgramBuildContext::empty(),
+            "SearchBase",
+            &empty_record(),
+        );
+        let ComponentInitEvalResult::Err(diagnostics) = result else {
+            panic!("Expected abstract component initialization to fail");
+        };
+
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic
+                .message
+                .contains("Cannot instantiate abstract component 'SearchBase'")),
+            "Expected abstract component runtime diagnostic, got {:?}",
+            diagnostics
+                .iter()
+                .map(|diagnostic| (&diagnostic.code, &diagnostic.message))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn dispatch_component_actions_source_round_trips_effects_and_snapshot() {
         let source = r#"
             action SearchSubmitted = { searchString:string }
@@ -414,6 +477,68 @@ mod tests {
                 type_name: Some("DoSearch".to_string()),
                 properties: BTreeMap::from([(
                     "search".to_string(),
+                    NxValue::String("docs".to_string()),
+                )]),
+            }
+        );
+        assert!(!result.state_snapshot.is_empty());
+    }
+
+    #[test]
+    fn dispatch_component_actions_source_supports_external_component_handlers() {
+        let source = r#"
+            action SearchRequested = { query:string }
+            action DoSearch = { query:string }
+
+            external component <SearchBox emits { SearchRequested } />
+
+            let withHandler() = <SearchBox onSearchRequested=<DoSearch query={action.query} /> />
+        "#;
+
+        let program = build_program_artifact_from_source(
+            source,
+            "external-component-dispatch.nx",
+            &ProgramBuildContext::empty(),
+        )
+        .expect("Expected program artifact");
+        let root_module = program
+            .root_modules
+            .first()
+            .and_then(|artifact| artifact.lowered_module.clone())
+            .expect("Expected preserved root module");
+        let interpreter = Interpreter::from_resolved_program(program.resolved_program.clone());
+        let props = interpreter
+            .execute_resolved_program_function("withHandler", vec![])
+            .expect("Expected props function to succeed");
+        let init = interpreter
+            .initialize_component(root_module.as_ref(), "SearchBox", props)
+            .expect("Expected external interpreter initialization to succeed");
+
+        let action = NxValue::Record {
+            type_name: Some("SearchRequested".to_string()),
+            properties: BTreeMap::from([(
+                "query".to_string(),
+                NxValue::String("docs".to_string()),
+            )]),
+        };
+        let result = dispatch_component_actions_source(
+            source,
+            "external-component-dispatch.nx",
+            &ProgramBuildContext::empty(),
+            &init.state_snapshot,
+            &[action],
+        );
+        let ComponentDispatchEvalResult::Ok(result) = result else {
+            panic!("Expected external source-based dispatch to succeed");
+        };
+
+        assert_eq!(result.effects.len(), 1);
+        assert_eq!(
+            result.effects[0],
+            NxValue::Record {
+                type_name: Some("DoSearch".to_string()),
+                properties: BTreeMap::from([(
+                    "query".to_string(),
                     NxValue::String("docs".to_string()),
                 )]),
             }
@@ -670,6 +795,199 @@ let root() = { 0 }"#;
             panic!("Expected rendered element record");
         };
         assert_eq!(type_name.as_deref(), Some("TextInput"));
+        assert_eq!(
+            properties.get("value"),
+            Some(&NxValue::String("Find docs".to_string()))
+        );
+        assert!(!result.state_snapshot.is_empty());
+    }
+
+    #[test]
+    fn imported_component_handler_bindings_from_abstract_base_lower_and_dispatch() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("base.nx"),
+            r#"
+                export abstract component <SearchBase emits { SearchRequested { query:string } } />
+            "#,
+        )
+        .expect("base file");
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("Expected ui registry load");
+        let build_context = registry.build_context();
+
+        let main_path = app_dir.join("main.nx");
+        let source = r#"
+            import "../ui"
+
+            action DoSearch = { query:string }
+
+            component <SearchBox extends SearchBase /> = {
+              <TextInput />
+            }
+
+            let withHandler() = <SearchBox onSearchRequested=<DoSearch query={action.query} /> />
+        "#;
+        fs::write(&main_path, source).expect("main file");
+
+        let program = build_program_artifact_from_source(
+            source,
+            &main_path.display().to_string(),
+            &build_context,
+        )
+        .expect("Expected program artifact");
+        let root_module = program
+            .root_modules
+            .first()
+            .and_then(|artifact| artifact.lowered_module.clone())
+            .expect("Expected preserved root module");
+
+        let handler_property = root_module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Function(function) if function.name.as_str() == "withHandler" => {
+                    match root_module.expr(function.body) {
+                        Expr::Element { element, .. } => {
+                            root_module.element(*element).properties.first()
+                        }
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+            .expect("Expected withHandler property");
+        match root_module.expr(handler_property.value) {
+            Expr::ActionHandler {
+                component,
+                emit,
+                action_name,
+                ..
+            } => {
+                assert_eq!(component.as_str(), "SearchBox");
+                assert_eq!(emit.as_str(), "SearchRequested");
+                assert_eq!(action_name.as_str(), "SearchBase.SearchRequested");
+            }
+            other => panic!(
+                "Expected imported handler binding to lower as ActionHandler, got {:?}",
+                other
+            ),
+        }
+
+        let interpreter = Interpreter::from_resolved_program(program.resolved_program.clone());
+        let props = interpreter
+            .execute_resolved_program_function("withHandler", vec![])
+            .expect("Expected props function to succeed");
+        let init = interpreter
+            .initialize_component(root_module.as_ref(), "SearchBox", props)
+            .expect("Expected component initialization to succeed");
+
+        let action = NxValue::Record {
+            type_name: Some("SearchBase.SearchRequested".to_string()),
+            properties: BTreeMap::from([(
+                "query".to_string(),
+                NxValue::String("docs".to_string()),
+            )]),
+        };
+        let result =
+            dispatch_component_actions_program_artifact(&program, &init.state_snapshot, &[action]);
+        let ComponentDispatchEvalResult::Ok(result) = result else {
+            match result {
+                ComponentDispatchEvalResult::Err(diagnostics) => {
+                    panic!(
+                        "Expected imported inherited handler dispatch to succeed, got {:?}",
+                        diagnostics
+                            .iter()
+                            .map(|diagnostic| (&diagnostic.code, &diagnostic.message))
+                            .collect::<Vec<_>>()
+                    );
+                }
+                ComponentDispatchEvalResult::Ok(_) => unreachable!(),
+            }
+        };
+
+        assert_eq!(result.effects.len(), 1);
+        assert_eq!(
+            result.effects[0],
+            NxValue::Record {
+                type_name: Some("DoSearch".to_string()),
+                properties: BTreeMap::from([(
+                    "query".to_string(),
+                    NxValue::String("docs".to_string()),
+                )]),
+            }
+        );
+    }
+
+    #[test]
+    fn imported_abstract_base_component_defaults_apply_during_initialization() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("base.nx"),
+            r#"
+                export let defaultPlaceholder(): string = { "Find docs" }
+                export abstract component <SearchBase prefix:string = {defaultPlaceholder()} placeholder:string = {prefix} />
+            "#,
+        )
+        .expect("base file");
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("Expected ui registry load");
+        let build_context = registry.build_context();
+
+        let main_path = app_dir.join("main.nx");
+        let source = r#"
+            import "../ui"
+
+            let defaultPlaceholder(): string = { "Wrong" }
+
+            component <SearchBox extends SearchBase /> = {
+              state { query:string = {placeholder} }
+              <TextInput value={query} placeholder={placeholder} />
+            }
+
+            let root() = { <SearchBox /> }
+        "#;
+        fs::write(&main_path, source).expect("main file");
+
+        let program = build_program_artifact_from_source(
+            source,
+            &main_path.display().to_string(),
+            &build_context,
+        )
+        .expect("Expected program artifact");
+        let result = initialize_component_program_artifact(&program, "SearchBox", &empty_record());
+        let ComponentInitEvalResult::Ok(result) = result else {
+            panic!("Expected imported inherited default initialization to succeed");
+        };
+
+        let NxValue::Record {
+            type_name,
+            properties,
+        } = result.rendered
+        else {
+            panic!("Expected rendered element record");
+        };
+        assert_eq!(type_name.as_deref(), Some("TextInput"));
+        assert_eq!(
+            properties.get("placeholder"),
+            Some(&NxValue::String("Find docs".to_string()))
+        );
         assert_eq!(
             properties.get("value"),
             Some(&NxValue::String("Find docs".to_string()))

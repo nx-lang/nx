@@ -593,8 +593,9 @@ mod tests {
         assert!(output.contains("public abstract string __NxType { get; set; }"));
         assert!(output.contains("public string Source { get; set; } = default!;"));
         assert!(output.contains("public sealed class SearchRequested : SearchAction"));
-        assert!(output
-            .contains("public override string __NxType { get; set; } = \"SearchRequested\";"));
+        assert!(
+            output.contains("public override string __NxType { get; set; } = \"SearchRequested\";")
+        );
     }
 
     #[test]

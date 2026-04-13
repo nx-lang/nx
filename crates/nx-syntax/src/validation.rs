@@ -6,9 +6,18 @@
 //! - Error recovery within scopes
 //! - Enhanced error messages with suggestions
 
-use crate::{SyntaxKind, SyntaxNode, SyntaxTree};
+use crate::{AstNode, ComponentDef, SyntaxKind, SyntaxNode, SyntaxTree};
 use nx_diagnostics::{Diagnostic, Label};
 use text_size::TextRange;
+
+const COMPONENT_SIGNATURE_SYNTAX: &str =
+    "Expected: <Name [extends BaseComponent] prop:type emits { ActionName { prop:type } \
+     ActionType } />";
+const COMPONENT_BODY_SYNTAX: &str =
+    "Expected: { state { prop:type } <Element /> } or { <Element /> }";
+const COMPONENT_DEFINITION_SYNTAX: &str =
+    "Expected: [abstract] [external] component <Name [extends BaseComponent] prop:type emits { \
+     ActionName { prop:type } ActionType } /> [= { state { prop:type } <Element /> }]";
 
 /// Validates a syntax tree and returns any semantic errors found.
 ///
@@ -37,7 +46,54 @@ pub fn validate(tree: &SyntaxTree, file_name: &str) -> Vec<Diagnostic> {
     // Validate root definitions (no duplicates between explicit 'root' and top-level element)
     validate_root_definitions(&root, file_name, &mut diagnostics);
 
+    // Validate component declarations that depend on modifier/body combinations.
+    validate_component_definitions(&root, file_name, &mut diagnostics);
+
     diagnostics
+}
+
+fn validate_component_definitions(
+    root: &SyntaxNode,
+    file_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for child in root.children() {
+        let Some(component) = ComponentDef::cast(child) else {
+            continue;
+        };
+
+        let is_abstract = component.is_abstract();
+        let is_external = component.is_external();
+        let has_body = component.body().is_some();
+
+        if !is_abstract && !is_external && !has_body {
+            diagnostics.push(
+                Diagnostic::error("invalid-component-definition")
+                    .with_message("Concrete components must declare a body")
+                    .with_label(
+                        Label::primary(file_name, component.syntax().span())
+                            .with_message("bodyless component declaration"),
+                    )
+                    .with_note(COMPONENT_DEFINITION_SYNTAX)
+                    .build(),
+            );
+        }
+
+        if (is_abstract || is_external) && has_body {
+            diagnostics.push(
+                Diagnostic::error("invalid-component-definition")
+                    .with_message(
+                        "Abstract or external components cannot declare a body or local state",
+                    )
+                    .with_label(
+                        Label::primary(file_name, component.syntax().span())
+                            .with_message("remove the component body"),
+                    )
+                    .with_note(COMPONENT_DEFINITION_SYNTAX)
+                    .build(),
+            );
+        }
+    }
 }
 
 /// Validates that element opening and closing tags match.
@@ -314,10 +370,7 @@ fn analyze_error_context(
             "component_signature" => {
                 return (
                     "Invalid component signature".to_string(),
-                    Some(
-                        "Expected: <Name prop:type emits { ActionName { prop:type } ActionType } />"
-                            .to_string(),
-                    ),
+                    Some(COMPONENT_SIGNATURE_SYNTAX.to_string()),
                 );
             }
             "emits_group" => {
@@ -342,19 +395,13 @@ fn analyze_error_context(
                 if trimmed_error.contains("state") {
                     return (
                         "Invalid state block".to_string(),
-                        Some(
-                            "Expected: { state { prop:type } <Element /> } or { <Element /> }"
-                                .to_string(),
-                        ),
+                        Some(COMPONENT_BODY_SYNTAX.to_string()),
                     );
                 }
 
                 return (
                     "Invalid component body".to_string(),
-                    Some(
-                        "Expected: { state { prop:type } <Element /> } or { <Element /> }"
-                            .to_string(),
-                    ),
+                    Some(COMPONENT_BODY_SYNTAX.to_string()),
                 );
             }
             "state_group" => {
@@ -366,9 +413,7 @@ fn analyze_error_context(
             "component_definition" => {
                 return (
                     "Invalid component definition".to_string(),
-                    Some(
-                        "Expected: component <Name prop:type emits { ActionName { prop:type } ActionType } /> = { state { prop:type } <Element /> }".to_string(),
-                    ),
+                    Some(COMPONENT_DEFINITION_SYNTAX.to_string()),
                 );
             }
             "let_declaration" => {
@@ -386,20 +431,33 @@ fn analyze_error_context(
     }
 
     if trimmed_error.starts_with("component ") {
+        if trimmed_error.contains("extends") && trimmed_error.contains(',') {
+            return (
+                "Invalid component inheritance clause".to_string(),
+                Some(COMPONENT_DEFINITION_SYNTAX.to_string()),
+            );
+        }
+
         if trimmed_error.contains("emits") {
             return (
                 "Invalid component signature".to_string(),
-                Some(
-                    "Expected: component <Name prop:type emits { ActionName { prop:type } ActionType } /> = { state { prop:type } <Element /> }".to_string(),
-                ),
+                Some(COMPONENT_DEFINITION_SYNTAX.to_string()),
             );
         }
 
         return (
             "Invalid component definition".to_string(),
-            Some(
-                "Expected: component <Name prop:type emits { ActionName { prop:type } ActionType } /> = { state { prop:type } <Element /> }".to_string(),
-            ),
+            Some(COMPONENT_DEFINITION_SYNTAX.to_string()),
+        );
+    }
+
+    if trimmed_error.starts_with("abstract component ")
+        || trimmed_error.starts_with("external component ")
+        || trimmed_error.starts_with("abstract external component ")
+    {
+        return (
+            "Invalid component definition".to_string(),
+            Some(COMPONENT_DEFINITION_SYNTAX.to_string()),
         );
     }
 
@@ -753,7 +811,7 @@ mod tests {
             "Expected component state error message, got: {messages}"
         );
         assert!(
-            notes.contains("Expected: { state { prop:type } <Element /> } or { <Element /> }"),
+            notes.contains(COMPONENT_BODY_SYNTAX),
             "Expected state-oriented component hint, got: {notes}"
         );
     }
@@ -839,10 +897,72 @@ mod tests {
             "Expected generic component fallback message, got: {messages}"
         );
         assert!(
-            notes.contains(
-                "Expected: component <Name prop:type emits { ActionName { prop:type } ActionType } /> = { state { prop:type } <Element /> }"
-            ),
+            notes.contains(COMPONENT_DEFINITION_SYNTAX),
             "Expected canonical component fallback hint, got: {notes}"
+        );
+    }
+
+    #[test]
+    fn test_validate_concrete_bodyless_component_is_rejected() {
+        let source = "component <SearchBox placeholder:string />";
+        let result = parse_str(source, "test.nx");
+
+        let messages = result
+            .errors
+            .iter()
+            .map(|diagnostic| diagnostic.message())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let notes = result
+            .errors
+            .iter()
+            .filter_map(|diagnostic| diagnostic.note())
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        assert!(
+            messages.contains("Concrete components must declare a body"),
+            "Expected bodyless concrete component diagnostic, got: {messages}"
+        );
+        assert!(
+            notes.contains(COMPONENT_DEFINITION_SYNTAX),
+            "Expected canonical component syntax hint, got: {notes}"
+        );
+    }
+
+    #[test]
+    fn test_validate_abstract_component_body_is_rejected() {
+        let source = "abstract component <SearchBase /> = { <button /> }";
+        let result = parse_str(source, "test.nx");
+
+        let messages = result
+            .errors
+            .iter()
+            .map(|diagnostic| diagnostic.message())
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        assert!(
+            messages.contains("Abstract or external components cannot declare a body"),
+            "Expected abstract-component body diagnostic, got: {messages}"
+        );
+    }
+
+    #[test]
+    fn test_validate_external_component_body_is_rejected() {
+        let source = "external component <SearchBox /> = { <button /> }";
+        let result = parse_str(source, "test.nx");
+
+        let messages = result
+            .errors
+            .iter()
+            .map(|diagnostic| diagnostic.message())
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        assert!(
+            messages.contains("Abstract or external components cannot declare a body"),
+            "Expected external-component body diagnostic, got: {messages}"
         );
     }
 }

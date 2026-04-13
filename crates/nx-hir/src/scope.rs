@@ -329,19 +329,38 @@ impl<'a> UndefinedIdentifierChecker<'a> {
                 }
                 Item::Component(component) => {
                     let scope = self.scope_manager.create_child(self.scope_manager.root());
-                    let symbols =
+                    let mut symbols =
+                        crate::effective_component_contract_for_name(self.module, &component.name)
+                            .ok()
+                            .flatten()
+                            .map(|contract| {
+                                contract
+                                    .props
+                                    .into_iter()
+                                    .map(|field| (field.name, SymbolKind::Parameter, field.span))
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_else(|| {
+                                component
+                                    .props
+                                    .iter()
+                                    .map(|field| {
+                                        (field.name.clone(), SymbolKind::Parameter, field.span)
+                                    })
+                                    .collect::<Vec<_>>()
+                            });
+                    symbols.extend(
                         component
-                            .props
+                            .state
                             .iter()
-                            .map(|field| (field.name.clone(), SymbolKind::Parameter, field.span))
-                            .chain(component.state.iter().map(|field| {
-                                (field.name.clone(), SymbolKind::Variable, field.span)
-                            }))
-                            .collect::<Vec<_>>();
+                            .map(|field| (field.name.clone(), SymbolKind::Variable, field.span)),
+                    );
                     for (name, kind, span) in symbols {
                         self.scope_manager_define(scope, name, kind, span);
                     }
-                    self.check_expr(component.body, scope);
+                    if let Some(body) = component.body {
+                        self.check_expr(body, scope);
+                    }
                 }
                 Item::TypeAlias(_) | Item::Enum(_) | Item::Record(_) => {}
             }
@@ -711,10 +730,13 @@ mod tests {
         module.add_item(crate::Item::Component(crate::Component {
             name: Name::new("SearchBox"),
             visibility: crate::Visibility::Internal,
+            is_abstract: false,
+            is_external: false,
+            base: None,
             props: Vec::new(),
             emits: Vec::new(),
             state: Vec::new(),
-            body,
+            body: Some(body),
             span,
         }));
 
@@ -812,6 +834,7 @@ mod tests {
             },
             target: PreparedBindingTarget::Imported {
                 item: imported_function,
+                raw: None,
             },
         });
 

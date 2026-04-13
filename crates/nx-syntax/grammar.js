@@ -257,15 +257,23 @@ module.exports = grammar({
 
     component_definition: $ => seq(
       optional(field('visibility', $.visibility_modifier)),
+      optional(field('abstract', 'abstract')),
+      optional(field('external', 'external')),
       'component',
       field('signature', $.component_signature),
-      '=',
-      field('body', $.component_body),
+      optional(seq(
+        '=',
+        field('body', $.component_body),
+      )),
     ),
 
     component_signature: $ => seq(
       '<',
       field('name', $.element_name),
+      optional(seq(
+        'extends',
+        field('base', $.qualified_name),
+      )),
       repeat(field('properties', alias($._component_property_definition, $.property_definition))),
       optional(field('emits', $.emits_group)),
       '/',

@@ -166,6 +166,22 @@ impl ExecutionContext {
         variables
     }
 
+    /// Fork one isolated execution context that keeps limits and accounting but starts with
+    /// a fresh variable scope.
+    pub fn fork_isolated(&self) -> Self {
+        Self {
+            scopes: vec![Scope::new()],
+            call_stack: self.call_stack.clone(),
+            operation_count: self.operation_count,
+            limits: self.limits,
+        }
+    }
+
+    /// Synchronize operation accounting from another context that branched from this one.
+    pub fn sync_usage_from(&mut self, other: &Self) {
+        self.operation_count = other.operation_count;
+    }
+
     /// Update a variable in the scope stack
     pub fn update_variable(&mut self, name: &str, value: Value) -> Result<(), RuntimeError> {
         // Search from innermost to outermost scope

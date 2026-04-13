@@ -1,0 +1,52 @@
+# Review: add-component-inheritance-and-external-components
+
+## Scope
+**Reviewed artifacts:** proposal.md, design.md, tasks.md, specs (component-syntax, component-contract-inheritance, external-components)
+**Reviewed code:** crates/nx-syntax (grammar.js, ast.rs, validation.rs, lib.rs, parser_tests.rs, fixtures), crates/nx-hir (lib.rs, lower.rs, components.rs, scope.rs, prepared.rs), crates/nx-types (check.rs, infer.rs, type_checker_tests.rs), crates/nx-interpreter (interpreter.rs, error.rs), crates/nx-api (artifacts.rs, component.rs, eval.rs)
+
+## Findings
+
+### ✅ Verified - RF1 `component-invalid-emits-reference.nx` is valid syntax left in the `invalid/` fixture directory
+- **Severity:** Medium
+- **Evidence:** The original fixture at `crates/nx-syntax/tests/fixtures/invalid/component-invalid-emits-reference.nx` was changed from invalid content (`ActionType.` with trailing dot) to valid content (`ActionType` without dot). A new fixture `component-invalid-emits-reference-qualifier.nx` was added with the original invalid content. The sweep tests `test_parse_all_valid_fixtures` and `test_parse_all_invalid_fixtures` were patched with ad-hoc skips for the old file (`parser_tests.rs:1858-1864` and `parser_tests.rs:1960-1966`). This leaves a valid file in the `invalid/` directory gated by fragile filename-based skip logic.
+- **Recommendation:** Delete `crates/nx-syntax/tests/fixtures/invalid/component-invalid-emits-reference.nx` (it is now valid and redundant) and remove both skip blocks from the sweep tests. The dedicated `component-invalid-emits-reference-qualifier.nx` fixture and its targeted test already cover the original invalid case.
+- **Fix:** Removed the filename-based skips from the parser sweep tests and deleted the redundant legacy fixture so only the dedicated invalid qualifier fixture remains.
+- **Verification:** Confirmed the legacy fixture `component-invalid-emits-reference.nx` no longer exists, the replacement `component-invalid-emits-reference-qualifier.nx` is present in `invalid/`, and the sweep tests (`test_parse_all_valid_fixtures`, `test_parse_all_invalid_fixtures`) iterate all `.nx` files without any filename-based skip logic. All tests pass.
+
+### ✅ Verified - RF2 `HandlerNameCollision` error sets `emit` field to the prop name instead of the colliding emitted-action name
+- **Severity:** Low
+- **Evidence:** In `crates/nx-hir/src/components.rs:399` and `components.rs:480`, when a local prop collides with a handler name derived from an inherited (or local) emitted action, the error is constructed as `emit: field.name.clone()`. The `emit` field should be the name of the emitted action whose `on<Name>` handler caused the collision, not the prop name. The resulting diagnostic message `"declares prop 'onSearchSubmitted' which collides with emitted action handler 'onSearchSubmitted'"` is technically readable but the `emit` field semantically represents the emitted action name (e.g., `SearchSubmitted`), not the handler prop name.
+- **Recommendation:** Find the actual colliding emit and pass its name. For example, at line 399 replace the `any(...)` with `find(...)` and use `existing.emit.name.clone()` as the `emit` value. Same approach for line 480.
+- **Fix:** `HandlerNameCollision` now stores the actual emitted-action name and formats the diagnostic using the derived handler prop name, keeping the message stable while fixing the underlying error data.
+- **Verification:** Confirmed all three `HandlerNameCollision` construction sites (components.rs:728, :762, :813) pass the actual emitted-action name (`existing.emit.name.clone()` or `emit.name.clone()`) in the `emit` field. The display formatting at line 177 derives the handler prop name via `handler_prop_name(emit.as_str())` for the user-facing message.
+
+### ✅ Verified - RF3 Inherited emit handler bindings from imported bases are not lowered as `ActionHandler` expressions
+- **Severity:** Medium
+- **Evidence:** `LoweringContext::finalize_predeclared_component` (`lower.rs:393-505`) builds `effective_emits` and `handler_props` from same-file predeclared components only. When a component extends an imported abstract base (resolved via `PreparedNamespace`), the imported base's emits are invisible to the lowering phase. Call sites that pass `on<InheritedEmit>=<...>` to such a derived component will have the property lowered as a regular expression rather than an `Expr::ActionHandler`. The type checker (using effective contracts from the prepared module) will accept the binding, but the interpreter would receive a non-handler value during dispatch. The existing cross-library test (`program_artifact_component_inheritance_resolves_imported_abstract_base` in `artifacts.rs`) only asserts zero diagnostics and does not exercise inherited emit handler binding from an imported base.
+- **Recommendation:** Add an integration test that extends an imported abstract component declaring emits, binds an `on<Emit>` handler at the call site, and verifies the lowered expression is `Expr::ActionHandler` with the correct `action_name`. If the test confirms the gap, consider a two-phase approach: either extend the lowering to look up imported base emits from the build context, or add a post-lowering rewrite pass in the prepared module that promotes matching prop bindings to `ActionHandler` expressions.
+- **Fix:** Added a prepared-module rewrite pass that promotes component `on<Emit>` bindings to `Expr::ActionHandler` using the effective component contract, including imported bases. Added an end-to-end regression test that checks the lowered expression metadata and successful dispatch through an imported abstract base emit.
+- **Verification:** Confirmed `promote_component_handler_bindings` in `components.rs:379` uses `effective_component_contract_for_name` (which resolves imported base contracts) to find `on<Emit>` bindings and rewrite them to `Expr::ActionHandler`. The regression test at `component.rs:806` (`imported_component_handler_bindings_from_abstract_base_lower_and_dispatch`) creates an imported abstract base with emits, asserts the binding lowers to `ActionHandler` with correct component/emit/action_name, and dispatches the action through the interpreter. All tests pass.
+
+### ✅ Verified - RF4 No test coverage for multi-level component inheritance chains
+- **Severity:** Low
+- **Evidence:** All inheritance tests use a single-level chain (A extends B). The design and spec mention "base chain" semantics (ordered merge of ancestor props/emits, cycle detection across chains), but no test exercises A extends B extends C. The `resolve_component_contract_inner` recursion in `components.rs` supports arbitrary depth, but is untested beyond depth 1.
+- **Recommendation:** Add at least one type-check or interpreter test with a three-level chain (e.g., `abstract component <Base> / abstract component <Mid extends Base> / component <Leaf extends Mid> = { ... }`) covering prop accumulation, emit accumulation, and duplicate rejection across three levels.
+- **Fix:** Added a type-check regression that exercises a three-level component inheritance chain and verifies accumulated props plus inherited emitted-action handler bindings across the full chain.
+- **Verification:** Confirmed `test_multi_level_component_inheritance_accumulates_props_and_emits` at `type_checker_tests.rs:591` exercises a three-level chain (`SearchBase` -> `SearchChrome` -> `SearchBox`) with props accumulated across all levels (`placeholder`, `showSearchIcon`, `highlight`), inherited emits from the root, and handler bindings. Test passes cleanly.
+
+### ✅ Verified - RF5 Imported abstract base component prop defaults are not preserved through interface metadata
+- **Severity:** Low
+- **Evidence:** `interface_component` in `prepared.rs:497-540` converts `InterfaceField` to `RecordField` with `default: None` because `InterfaceField` does not carry default expressions. This means when a concrete component extends an imported abstract base, inherited props from that base lose their default values. The spec scenario "Base prop default applies to derived component initialization" only tests the same-library case where defaults are preserved in raw HIR. Cross-library default inheritance would silently require all inherited props to be explicitly passed.
+- **Recommendation:** This follows the existing record interface pattern so it may be an accepted limitation. Document it explicitly in the external-components spec or the design as a known cross-library constraint. If defaults should propagate across libraries, `InterfaceField` and `InterfaceItemKind::Component` need to carry serializable default expressions.
+- **Fix:** Added an effective inherited-field model that preserves declaring-module ownership plus qualified default expressions, and updated runtime component/record materialization to evaluate missing defaults in the module that declared each field. Added cross-library regressions for component initialization, normal component element invocation, and record construction, including defaults that reference earlier inherited fields and shadowed helper functions.
+- **Verification:** Confirmed `EffectiveField` (lib.rs:345) carries `module_identity` and `QualifiedExprRef` to evaluate defaults in the declaring module's scope. Cross-library tests in `eval.rs` and `component.rs` verify that inherited defaults from imported bases resolve to the declaring library's function (`"Find docs"` from the UI library, not the local shadow `"Wrong"`), including chained defaults. All tests pass.
+
+## Questions
+- RF3: Was the cross-library handler binding gap a deliberate deferral (the design notes lowering is file-local), or should it be addressed in this change? If deferred, should a follow-up task be tracked?
+
+## Summary
+- The implementation is well-structured and follows the design closely. All 12 tasks are complete and all tests pass.
+- All 5 findings have been verified as fixed. The full test suite passes with no regressions.
+- RF1 (fixture cleanup), RF2 (diagnostic field semantics), and RF4 (multi-level chain coverage) were straightforward fixes confirmed by code inspection.
+- RF3 (cross-library handler binding promotion) was the most significant fix, adding a post-lowering rewrite pass with end-to-end regression coverage.
+- RF5 (cross-library inherited defaults) was the most structurally involved fix, introducing `EffectiveField` with module-scoped qualified defaults and multiple cross-library regressions.

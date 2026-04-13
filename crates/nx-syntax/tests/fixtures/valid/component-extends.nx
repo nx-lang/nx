@@ -1,0 +1,3 @@
+component <NxSearchUi extends SearchBase showSpinner:bool = false /> = {
+    <SearchBox />
+}

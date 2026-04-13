@@ -488,6 +488,140 @@ fn test_abstract_derived_action_instantiation_is_rejected() {
 }
 
 #[test]
+fn test_component_inheritance_accepts_inherited_props_and_content() {
+    let source = r#"
+        abstract component <PanelBase title:string content body:Element />
+
+        component <Panel extends PanelBase /> = {
+          <section>
+            <h1>{title}</h1>
+            {body}
+          </section>
+        }
+
+        let root() = { <Panel title={"Docs"}><Badge /></Panel> }
+    "#;
+
+    let result = check_str(source, "component-inheritance-props-content.nx");
+    assert!(
+        result.errors().is_empty(),
+        "Expected inherited component props/content to type check, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_abstract_component_instantiation_is_rejected() {
+    let source = r#"
+        abstract component <SearchBase placeholder:string />
+        let root() = { <SearchBase placeholder={"docs"} /> }
+    "#;
+
+    let result = check_str(source, "abstract-component-instantiation.nx");
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code() == Some("abstract-component-instantiation")),
+        "Expected abstract-component-instantiation diagnostic, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_duplicate_inherited_component_prop_reports_diagnostic() {
+    let source = r#"
+        abstract component <SearchBase placeholder:string />
+
+        component <SearchBox extends SearchBase placeholder:string /> = {
+          <button />
+        }
+    "#;
+
+    let result = check_str(source, "duplicate-inherited-component-prop.nx");
+    assert!(
+        result.diagnostics.iter().any(|diag| diag
+            .message()
+            .contains("redeclares inherited prop 'placeholder'")),
+        "Expected duplicate inherited component prop diagnostic, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_inherited_component_handler_collision_reports_diagnostic() {
+    let source = r#"
+        action SearchSubmitted = { searchString:string }
+
+        abstract component <SearchBase emits { SearchSubmitted } />
+
+        component <SearchBox extends SearchBase onSearchSubmitted:string /> = {
+          <button />
+        }
+    "#;
+
+    let result = check_str(source, "inherited-component-handler-collision.nx");
+    assert!(
+        result.diagnostics.iter().any(|diag| {
+            diag.message()
+                .contains("collides with emitted action handler 'onSearchSubmitted'")
+        }),
+        "Expected inherited component handler collision diagnostic, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_multi_level_component_inheritance_accumulates_props_and_emits() {
+    let source = r#"
+        action SearchSubmitted = { searchString:string }
+        action DoSearch = { search:string }
+
+        abstract component <SearchBase placeholder:string emits { SearchSubmitted } />
+
+        abstract component <SearchChrome extends SearchBase showSearchIcon:bool = true />
+
+        component <SearchBox extends SearchChrome highlight:bool = false /> = {
+          <TextInput placeholder={placeholder} />
+        }
+
+        let render() = <SearchBox
+          placeholder="docs"
+          showSearchIcon=true
+          highlight=true
+          onSearchSubmitted=<DoSearch search={action.searchString} />
+        />
+    "#;
+
+    let result = check_str(source, "multi-level-component-inheritance.nx");
+    assert!(
+        result.is_ok(),
+        "Expected multi-level component inheritance to type check, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn test_duplicate_inherited_field_reports_diagnostic() {
     let source = r#"
         abstract type UserBase = {

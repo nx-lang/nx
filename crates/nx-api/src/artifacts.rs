@@ -1,10 +1,10 @@
 use nx_diagnostics::{Diagnostic, Label, Severity, TextSize, TextSpan};
 use nx_hir::{
     ast::TypeRef, binding_specs_for_item, local_definition_id, lower, Import, ImportKind,
-    InterfaceField, InterfaceItem, InterfaceItemKind, InterfaceParam, Item, LocalDefinitionId,
-    LoweredModule, LoweringDiagnostic, Name, PreparedBinding, PreparedBindingOrigin,
-    PreparedBindingTarget, PreparedModule, PreparedNamespace, RecordField, SelectiveImport,
-    SourceId, Visibility,
+    ImportedRawRef, InterfaceField, InterfaceItem, InterfaceItemKind, InterfaceParam, Item,
+    LocalDefinitionId, LoweredModule, LoweringDiagnostic, Name, PreparedBinding,
+    PreparedBindingOrigin, PreparedBindingTarget, PreparedModule, PreparedNamespace, RecordField,
+    SelectiveImport, SourceId, Visibility,
 };
 use nx_interpreter::{
     ModuleQualifiedItemRef, ResolvedItemKind, ResolvedModule, ResolvedProgram, RuntimeModuleId,
@@ -901,6 +901,12 @@ fn add_imported_interface_bindings(
     item_indices: &[usize],
     imported_visible_names: &mut FxHashMap<(PreparedNamespace, String), String>,
 ) {
+    for artifact in &library.modules {
+        if let Some(lowered_module) = artifact.lowered_module.as_ref() {
+            module.add_peer_module(artifact.file_name.clone(), lowered_module.clone());
+        }
+    }
+
     let mut candidates = FxHashMap::<PreparedNamespace, Vec<usize>>::default();
 
     for item_index in item_indices {
@@ -954,6 +960,10 @@ fn add_imported_interface_bindings(
             },
             target: PreparedBindingTarget::Imported {
                 item: interface_item,
+                raw: Some(ImportedRawRef {
+                    module_identity: library.interface_items[indices[0]].module_identity.clone(),
+                    definition_id: library.interface_items[indices[0]].definition_id,
+                }),
             },
         });
         imported_visible_names.insert(
@@ -1307,6 +1317,9 @@ fn build_interface_item(
             }
         }
         Item::Component(component) => LibraryInterfaceKind::Component {
+            is_abstract: component.is_abstract,
+            is_external: component.is_external,
+            base: component.base.clone(),
             props: component
                 .props
                 .iter()
@@ -1355,6 +1368,7 @@ fn record_field_to_interface_field(field: &RecordField) -> LibraryInterfaceField
         name: field.name.clone(),
         ty: field.ty.clone(),
         is_content: field.is_content,
+        is_required: field.default.is_none() && !matches!(field.ty, TypeRef::Nullable(_)),
         span: field.span,
     }
 }
@@ -1802,6 +1816,7 @@ export component <Panel content body:object /> = {
                 assert_eq!(properties.len(), 1);
                 assert_eq!(properties[0].name.as_str(), "body");
                 assert!(properties[0].is_content);
+                assert!(properties[0].is_required);
             }
             other => panic!("Expected record interface item, got {other:?}"),
         }
@@ -1812,13 +1827,25 @@ export component <Panel content body:object /> = {
             .find(|item| item.item_name == "Panel")
             .expect("Expected exported component interface item");
         match &panel_item.item {
-            LibraryInterfaceKind::Component { props, state, .. } => {
+            LibraryInterfaceKind::Component {
+                is_abstract,
+                is_external,
+                base,
+                props,
+                state,
+                ..
+            } => {
+                assert!(!is_abstract);
+                assert!(!is_external);
+                assert!(base.is_none());
                 assert_eq!(props.len(), 1);
                 assert_eq!(props[0].name.as_str(), "body");
                 assert!(props[0].is_content);
+                assert!(props[0].is_required);
                 assert_eq!(state.len(), 1);
                 assert_eq!(state[0].name.as_str(), "cached");
                 assert!(state[0].is_content);
+                assert!(!state[0].is_required);
             }
             other => panic!("Expected component interface item, got {other:?}"),
         }
@@ -1922,6 +1949,47 @@ let root() = { 0 }"#;
         assert!(
             !has_error_diagnostics(&artifact.diagnostics),
             "Expected imported abstract record bases to resolve through the build context"
+        );
+    }
+
+    #[test]
+    fn program_artifact_component_inheritance_resolves_imported_abstract_base() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("base.nx"),
+            r#"export abstract component <SearchBase placeholder:string content body:Element />"#,
+        )
+        .expect("base file");
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("Expected ui registry load");
+        let build_context = registry.build_context();
+
+        let main_path = app_dir.join("main.nx");
+        let source = r#"import "../ui"
+component <SearchBox extends SearchBase showSearchIcon:bool = true /> = {
+  <section>{body}</section>
+}
+let root() = { <SearchBox placeholder={"Docs"}><Badge /></SearchBox> }"#;
+        fs::write(&main_path, source).expect("main file");
+
+        let artifact = build_program_artifact_from_source(
+            source,
+            &main_path.display().to_string(),
+            &build_context,
+        )
+        .expect("Expected program artifact");
+
+        assert!(
+            !has_error_diagnostics(&artifact.diagnostics),
+            "Expected imported abstract component bases to resolve through the build context"
         );
     }
 

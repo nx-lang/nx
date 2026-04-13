@@ -1,0 +1,1 @@
+external component <SearchBox placeholder:string showSearchIcon:bool = true />

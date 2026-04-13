@@ -21,6 +21,7 @@
 //! ```
 
 pub mod ast;
+pub mod components;
 pub mod db;
 pub mod lower;
 pub mod prepared;
@@ -34,11 +35,18 @@ use smol_str::SmolStr;
 // Re-export lowering function
 pub use lower::lower;
 pub use prepared::{
-    binding_specs_for_item, interface_enum, interface_function_signature, interface_record,
-    interface_type_alias, local_definition_id, prepared_item_kind, InterfaceField, InterfaceItem,
-    InterfaceItemKind, InterfaceParam, LocalDefinitionId, PreparedBinding, PreparedBindingOrigin,
-    PreparedBindingTarget, PreparedItemKind, PreparedModule, PreparedNamespace,
-    ResolvedPreparedItem,
+    binding_specs_for_item, interface_component, interface_enum, interface_function_signature,
+    interface_record, interface_type_alias, local_definition_id, prepared_item_kind,
+    ImportedRawRef, InterfaceField, InterfaceItem, InterfaceItemKind, InterfaceParam,
+    LocalDefinitionId, PreparedBinding, PreparedBindingOrigin, PreparedBindingTarget,
+    PreparedItemKind, PreparedModule, PreparedNamespace, ResolvedPreparedItem,
+};
+
+pub use components::{
+    effective_component_contract, effective_component_contract_for_name,
+    promote_component_handler_bindings, resolve_component_definition,
+    validate_component_definitions, ComponentResolutionError, EffectiveComponentContract,
+    InvalidComponentBaseReason,
 };
 
 // Re-export database types
@@ -313,6 +321,80 @@ impl RecordField {
     }
 }
 
+/// Reference to an expression together with the lowered module that owns it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QualifiedExprRef {
+    /// Stable prepared-module identity of the expression owner.
+    pub module_identity: String,
+    /// Arena-local expression id within the owning module.
+    pub expr_id: ExprId,
+}
+
+impl QualifiedExprRef {
+    /// Creates one module-qualified expression reference.
+    pub fn new(module_identity: impl Into<String>, expr_id: ExprId) -> Self {
+        Self {
+            module_identity: module_identity.into(),
+            expr_id,
+        }
+    }
+}
+
+/// Effective inherited field metadata used after prepared-module resolution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectiveField {
+    /// Field name
+    pub name: Name,
+    /// Field type
+    pub ty: ast::TypeRef,
+    /// Whether this field receives markup body content for element-style construction.
+    pub is_content: bool,
+    /// Stable identity of the module that declared the field.
+    pub module_identity: String,
+    /// Default expression together with the module that owns it.
+    pub default: Option<QualifiedExprRef>,
+    /// Whether callers must provide this field explicitly.
+    pub is_required: bool,
+    /// Source span
+    pub span: TextSpan,
+}
+
+impl EffectiveField {
+    /// Converts one raw declared field into its effective inherited form.
+    pub fn from_record_field(field: RecordField, module_identity: impl Into<String>) -> Self {
+        let module_identity = module_identity.into();
+        let default = field
+            .default
+            .map(|expr_id| QualifiedExprRef::new(module_identity.clone(), expr_id));
+        let is_required = field.default.is_none() && !matches!(field.ty, ast::TypeRef::Nullable(_));
+        Self {
+            name: field.name,
+            ty: field.ty,
+            is_content: field.is_content,
+            module_identity,
+            default,
+            is_required,
+            span: field.span,
+        }
+    }
+
+    /// Converts imported interface metadata into an effective field without a raw default body.
+    pub fn from_interface_field(
+        field: &crate::prepared::InterfaceField,
+        module_identity: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: field.name.clone(),
+            ty: field.ty.clone(),
+            is_content: field.is_content,
+            module_identity: module_identity.into(),
+            default: None,
+            is_required: field.is_required,
+            span: field.span,
+        }
+    }
+}
+
 /// Distinguishes ordinary records from action records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecordKind {
@@ -387,14 +469,20 @@ pub struct Component {
     pub name: Name,
     /// Declaration visibility
     pub visibility: Visibility,
+    /// Whether this component is contract-only and cannot be instantiated.
+    pub is_abstract: bool,
+    /// Whether this component is implemented outside NX and intentionally bodyless.
+    pub is_external: bool,
+    /// Optional base component name.
+    pub base: Option<Name>,
     /// Declared props, including optional default expressions
     pub props: Vec<RecordField>,
     /// Declared emitted actions
     pub emits: Vec<ComponentEmit>,
     /// Declared state fields, including optional default expressions
     pub state: Vec<RecordField>,
-    /// Lowered component body expression
-    pub body: ExprId,
+    /// Lowered component body expression when this is a concrete NX-bodied component.
+    pub body: Option<ExprId>,
     /// Source span
     pub span: TextSpan,
 }
@@ -558,9 +646,19 @@ impl LoweredModule {
         &self.items
     }
 
+    /// Get mutable access to all top-level items.
+    pub fn items_mut(&mut self) -> &mut [Item] {
+        &mut self.items
+    }
+
     /// Get all lowering diagnostics.
     pub fn diagnostics(&self) -> &[LoweringDiagnostic] {
         &self.diagnostics
+    }
+
+    /// Get mutable access to lowering diagnostics.
+    pub fn diagnostics_mut(&mut self) -> &mut Vec<LoweringDiagnostic> {
+        &mut self.diagnostics
     }
 
     /// Find an item by name.
@@ -598,6 +696,11 @@ impl LoweredModule {
         &self.exprs[id]
     }
 
+    /// Get mutable access to an expression by ID.
+    pub fn expr_mut(&mut self, id: ExprId) -> &mut ast::Expr {
+        &mut self.exprs[id]
+    }
+
     /// Get the number of lowered expressions in the arena.
     pub fn expr_count(&self) -> usize {
         self.exprs.len()
@@ -611,6 +714,11 @@ impl LoweredModule {
     /// Get an element by ID.
     pub fn element(&self, id: ElementId) -> &Element {
         &self.elements[id]
+    }
+
+    /// Get mutable access to an element by ID.
+    pub fn element_mut(&mut self, id: ElementId) -> &mut Element {
+        &mut self.elements[id]
     }
 }
 

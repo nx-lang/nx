@@ -1,0 +1,1 @@
+abstract component <SearchBase placeholder:string emits { SearchRequested } />

@@ -396,6 +396,115 @@ fn test_parse_component_definition() {
 }
 
 #[test]
+fn test_parse_abstract_component_definition() {
+    let path = fixture_path("valid/component-abstract.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(result.is_ok(), "Abstract component fixture should parse");
+    let root = result.root().expect("Should have root node");
+
+    let component = root
+        .children()
+        .find(|c| c.kind() == SyntaxKind::COMPONENT_DEFINITION)
+        .expect("Should find component_definition node");
+
+    assert!(
+        component.child_by_field("abstract").is_some(),
+        "Abstract component should expose abstract modifier"
+    );
+    assert!(
+        component.child_by_field("external").is_none(),
+        "Abstract-only component should omit external modifier"
+    );
+    assert!(
+        component.child_by_field("body").is_none(),
+        "Abstract component should be bodyless"
+    );
+}
+
+#[test]
+fn test_parse_external_component_definition() {
+    let path = fixture_path("valid/component-external.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(result.is_ok(), "External component fixture should parse");
+    let root = result.root().expect("Should have root node");
+
+    let component = root
+        .children()
+        .find(|c| c.kind() == SyntaxKind::COMPONENT_DEFINITION)
+        .expect("Should find component_definition node");
+
+    assert!(
+        component.child_by_field("external").is_some(),
+        "External component should expose external modifier"
+    );
+    assert!(
+        component.child_by_field("body").is_none(),
+        "External component should be bodyless"
+    );
+}
+
+#[test]
+fn test_parse_abstract_external_component_definition() {
+    let path = fixture_path("valid/component-abstract-external.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(
+        result.is_ok(),
+        "Abstract external component fixture should parse"
+    );
+    let root = result.root().expect("Should have root node");
+
+    let component = root
+        .children()
+        .find(|c| c.kind() == SyntaxKind::COMPONENT_DEFINITION)
+        .expect("Should find component_definition node");
+
+    assert!(
+        component.child_by_field("abstract").is_some(),
+        "Abstract external component should expose abstract modifier"
+    );
+    assert!(
+        component.child_by_field("external").is_some(),
+        "Abstract external component should expose external modifier"
+    );
+    assert!(
+        component.child_by_field("body").is_none(),
+        "Abstract external component should be bodyless"
+    );
+}
+
+#[test]
+fn test_parse_component_definition_with_base() {
+    let path = fixture_path("valid/component-extends.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(result.is_ok(), "Derived component fixture should parse");
+    let root = result.root().expect("Should have root node");
+
+    let component = root
+        .children()
+        .find(|c| c.kind() == SyntaxKind::COMPONENT_DEFINITION)
+        .expect("Should find component_definition node");
+    let signature = component
+        .child_by_field("signature")
+        .expect("Component should expose signature field");
+
+    assert_eq!(
+        signature
+            .child_by_field("base")
+            .expect("Derived component should expose base")
+            .text(),
+        "SearchBase"
+    );
+    assert!(
+        component.child_by_field("body").is_some(),
+        "Concrete derived component should preserve its body"
+    );
+}
+
+#[test]
 fn test_parse_component_with_emits() {
     let path = fixture_path("valid/component-emits.nx");
     let result = parse_file(&path).unwrap();
@@ -1578,6 +1687,57 @@ fn test_parse_invalid_component_state_is_error() {
 }
 
 #[test]
+fn test_parse_bodyless_concrete_component_is_error() {
+    let path = fixture_path("invalid/component-concrete-bodyless.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(!result.is_ok(), "Bodyless concrete component should fail");
+    assert!(
+        !result.errors.is_empty(),
+        "Bodyless concrete component should produce diagnostics"
+    );
+}
+
+#[test]
+fn test_parse_abstract_component_with_body_is_error() {
+    let path = fixture_path("invalid/component-abstract-body.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(!result.is_ok(), "Abstract component with body should fail");
+    assert!(
+        !result.errors.is_empty(),
+        "Abstract component with body should produce diagnostics"
+    );
+}
+
+#[test]
+fn test_parse_external_component_with_body_is_error() {
+    let path = fixture_path("invalid/component-external-body.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(!result.is_ok(), "External component with body should fail");
+    assert!(
+        !result.errors.is_empty(),
+        "External component with body should produce diagnostics"
+    );
+}
+
+#[test]
+fn test_parse_multiple_component_bases_is_error() {
+    let path = fixture_path("invalid/component-inheritance-multiple-bases.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(
+        !result.is_ok(),
+        "Malformed multiple-base component syntax should fail"
+    );
+    assert!(
+        !result.errors.is_empty(),
+        "Malformed multiple-base component syntax should produce parse errors"
+    );
+}
+
+#[test]
 fn test_parse_invalid_action_definition_is_error() {
     let path = fixture_path("invalid/action-invalid-declaration.nx");
     let result = parse_file(&path).unwrap();
@@ -1629,7 +1789,7 @@ fn test_parse_multiple_action_bases_is_error() {
 
 #[test]
 fn test_parse_invalid_component_emits_reference_is_error() {
-    let path = fixture_path("invalid/component-invalid-emits-reference.nx");
+    let path = fixture_path("invalid/component-invalid-emits-reference-qualifier.nx");
     let result = parse_file(&path).unwrap();
 
     assert!(

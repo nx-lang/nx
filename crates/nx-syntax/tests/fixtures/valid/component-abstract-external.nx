@@ -1,0 +1,1 @@
+abstract external component <RemoteSearchBase placeholder:string />

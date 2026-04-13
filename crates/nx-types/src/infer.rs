@@ -7,9 +7,10 @@ use crate::{
 };
 use nx_diagnostics::{Diagnostic, Label, TextSpan};
 use nx_hir::{
-    ast, effective_record_shape_for_name, interface_enum, interface_function_signature,
-    interface_type_alias, is_record_subtype, ExprId, InterfaceItemKind, Item, Name,
-    PreparedBindingOrigin, PreparedModule, PreparedNamespace, ResolvedPreparedItem,
+    ast, effective_component_contract_for_name, effective_record_shape_for_name,
+    interface_component, interface_enum, interface_function_signature, interface_type_alias,
+    is_record_subtype, ExprId, InterfaceItemKind, Item, Name, PreparedBindingOrigin,
+    PreparedModule, PreparedNamespace, ResolvedPreparedItem,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -599,14 +600,34 @@ impl<'a> InferenceContext<'a> {
             let effective_shape = self.effective_record_shape(record).ok().flatten();
             for (name, expr_id) in properties {
                 let actual = self.infer_expr(*expr_id);
-                if let Some(field) = effective_shape
-                    .as_ref()
-                    .map(|shape| shape.fields.as_slice())
-                    .unwrap_or(record_def.properties.as_slice())
-                    .iter()
-                    .find(|field| field.name == *name)
-                {
-                    let expected = self.type_from_type_ref(&field.ty);
+                if let Some(field) = if let Some(shape) = effective_shape.as_ref() {
+                    shape
+                        .fields
+                        .iter()
+                        .find(|field| field.name == *name)
+                        .map(|field| {
+                            (
+                                field.name.clone(),
+                                field.ty.clone(),
+                                field.is_content,
+                                field.span,
+                            )
+                        })
+                } else {
+                    record_def
+                        .properties
+                        .iter()
+                        .find(|field| field.name == *name)
+                        .map(|field| {
+                            (
+                                field.name.clone(),
+                                field.ty.clone(),
+                                field.is_content,
+                                field.span,
+                            )
+                        })
+                } {
+                    let expected = self.type_from_type_ref(&field.1);
                     self.check_typed_binding(
                         &actual,
                         &expected,
@@ -665,17 +686,29 @@ impl<'a> InferenceContext<'a> {
                     item: Item::Component(component),
                     ..
                 } => {
+                    if component.is_abstract {
+                        self.error(
+                            "abstract-component-instantiation",
+                            format!("Cannot instantiate abstract component '{}'", component.name),
+                            span,
+                        );
+                    }
                     self.check_element_bindings_against_component(element, &component, span);
                     return Type::named(element.tag.clone());
                 }
                 ResolvedPreparedItem::Imported { item, .. } => {
-                    if let InterfaceItemKind::Component { props, .. } = &item.item {
-                        let spec = self.build_element_binding_spec(
-                            props
-                                .iter()
-                                .map(|field| (&field.name, &field.ty, field.is_content)),
-                        );
-                        self.check_element_bindings(element, span, &spec);
+                    if let Some(component) = interface_component(&item) {
+                        if component.is_abstract {
+                            self.error(
+                                "abstract-component-instantiation",
+                                format!(
+                                    "Cannot instantiate abstract component '{}'",
+                                    component.name
+                                ),
+                                span,
+                            );
+                        }
+                        self.check_element_bindings_against_component(element, &component, span);
                         return Type::named(element.tag.clone());
                     }
                 }
@@ -719,12 +752,25 @@ impl<'a> InferenceContext<'a> {
         component: &nx_hir::Component,
         span: TextSpan,
     ) {
-        let spec = self.build_element_binding_spec(
-            component
-                .props
-                .iter()
-                .map(|field| (&field.name, &field.ty, field.is_content)),
-        );
+        let effective_contract = self
+            .effective_component_contract(&component.name)
+            .ok()
+            .flatten();
+        let spec = if let Some(contract) = effective_contract.as_ref() {
+            self.build_element_binding_spec(
+                contract
+                    .props
+                    .iter()
+                    .map(|field| (&field.name, &field.ty, field.is_content)),
+            )
+        } else {
+            self.build_element_binding_spec(
+                component
+                    .props
+                    .iter()
+                    .map(|field| (&field.name, &field.ty, field.is_content)),
+            )
+        };
         self.check_element_bindings(element, span, &spec);
     }
 
@@ -735,14 +781,21 @@ impl<'a> InferenceContext<'a> {
         span: TextSpan,
     ) {
         let effective_shape = self.effective_record_shape(&record_def.name).ok().flatten();
-        let spec = self.build_element_binding_spec(
-            effective_shape
-                .as_ref()
-                .map(|shape| shape.fields.as_slice())
-                .unwrap_or(record_def.properties.as_slice())
-                .iter()
-                .map(|field| (&field.name, &field.ty, field.is_content)),
-        );
+        let spec = if let Some(shape) = effective_shape.as_ref() {
+            self.build_element_binding_spec(
+                shape
+                    .fields
+                    .iter()
+                    .map(|field| (&field.name, &field.ty, field.is_content)),
+            )
+        } else {
+            self.build_element_binding_spec(
+                record_def
+                    .properties
+                    .iter()
+                    .map(|field| (&field.name, &field.ty, field.is_content)),
+            )
+        };
         self.check_element_bindings(element, span, &spec);
     }
 
@@ -1227,6 +1280,13 @@ impl<'a> InferenceContext<'a> {
         name: &Name,
     ) -> Result<Option<nx_hir::EffectiveRecordShape>, nx_hir::RecordResolutionError> {
         effective_record_shape_for_name(self.module, name)
+    }
+
+    fn effective_component_contract(
+        &self,
+        name: &Name,
+    ) -> Result<Option<nx_hir::EffectiveComponentContract>, nx_hir::ComponentResolutionError> {
+        effective_component_contract_for_name(self.module, name)
     }
 
     fn record_type_satisfies_expected(&self, actual: &Name, expected: &Name) -> bool {

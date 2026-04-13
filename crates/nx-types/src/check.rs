@@ -131,6 +131,14 @@ pub fn analyze_prepared_module(
             span: error.span(),
         });
     }
+    for error in nx_hir::validate_component_definitions(&prepared_module) {
+        prepared_module.add_diagnostic(LoweringDiagnostic {
+            message: error.message(),
+            span: error.span(),
+        });
+    }
+
+    nx_hir::promote_component_handler_bindings(&mut prepared_module);
 
     diagnostics.extend(lowering_diagnostics(
         prepared_module.raw_module().diagnostics(),

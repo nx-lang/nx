@@ -202,6 +202,64 @@ impl<'tree> RecordDef<'tree> {
     }
 }
 
+/// Represents a component definition in the AST.
+#[derive(Debug, Clone, Copy)]
+pub struct ComponentDef<'tree> {
+    syntax: SyntaxNode<'tree>,
+}
+
+impl<'tree> AstNode<'tree> for ComponentDef<'tree> {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::COMPONENT_DEFINITION
+    }
+
+    fn cast(node: SyntaxNode<'tree>) -> Option<Self> {
+        if Self::can_cast(node.kind()) {
+            Some(Self { syntax: node })
+        } else {
+            None
+        }
+    }
+
+    fn syntax(&self) -> SyntaxNode<'tree> {
+        self.syntax
+    }
+}
+
+impl<'tree> ComponentDef<'tree> {
+    /// Returns true when the component was declared with the `abstract` modifier.
+    pub fn is_abstract(&self) -> bool {
+        self.syntax.child_by_field("abstract").is_some()
+    }
+
+    /// Returns true when the component was declared with the `external` modifier.
+    pub fn is_external(&self) -> bool {
+        self.syntax.child_by_field("external").is_some()
+    }
+
+    /// Returns the component signature node.
+    pub fn signature(&self) -> Option<SyntaxNode<'tree>> {
+        self.syntax.child_by_field("signature")
+    }
+
+    /// Returns the component name node.
+    pub fn name(&self) -> Option<SyntaxNode<'tree>> {
+        self.signature()
+            .and_then(|signature| signature.child_by_field("name"))
+    }
+
+    /// Returns the declared base component node, if present.
+    pub fn base(&self) -> Option<SyntaxNode<'tree>> {
+        self.signature()
+            .and_then(|signature| signature.child_by_field("base"))
+    }
+
+    /// Returns the component body node, if present.
+    pub fn body(&self) -> Option<SyntaxNode<'tree>> {
+        self.syntax.child_by_field("body")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,5 +340,25 @@ mod tests {
         assert!(action_def.is_action());
         let props: Vec<_> = action_def.properties().collect();
         assert_eq!(props.len(), 1);
+    }
+
+    #[test]
+    fn test_component_def_cast() {
+        let mut parser = parser();
+        let source =
+            "abstract external component <SearchBox extends ui.SearchBase placeholder:string />";
+        let tree = parser.parse(source, None).unwrap();
+        let root = SyntaxNode::new(tree.root_node(), source);
+
+        let component_node = root.children().next().unwrap();
+        assert!(ComponentDef::can_cast(component_node.kind()));
+
+        let component_def =
+            ComponentDef::cast(component_node).expect("Should cast to ComponentDef");
+        assert!(component_def.is_abstract());
+        assert!(component_def.is_external());
+        assert_eq!(component_def.name().unwrap().text(), "SearchBox");
+        assert_eq!(component_def.base().unwrap().text(), "ui.SearchBase");
+        assert!(component_def.body().is_none());
     }
 }

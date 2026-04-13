@@ -1,6 +1,6 @@
 use crate::{
-    ast, ComponentEmit, EnumMember, Item, LoweredModule, LoweringDiagnostic, Name, Param,
-    RecordField, RecordKind, SourceId, TypeAlias, Visibility,
+    ast, Component, ComponentEmit, EnumMember, Item, LoweredModule, LoweringDiagnostic, Name,
+    Param, RecordField, RecordKind, SourceId, TypeAlias, Visibility,
 };
 use nx_diagnostics::TextSpan;
 use rustc_hash::FxHashMap;
@@ -76,7 +76,15 @@ pub struct InterfaceField {
     pub name: Name,
     pub ty: ast::TypeRef,
     pub is_content: bool,
+    pub is_required: bool,
     pub span: TextSpan,
+}
+
+/// Optional back-reference from imported interface metadata to a raw lowered item.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportedRawRef {
+    pub module_identity: String,
+    pub definition_id: LocalDefinitionId,
 }
 
 /// Interface-only representation of one published declaration.
@@ -92,6 +100,9 @@ pub enum InterfaceItemKind {
         span: TextSpan,
     },
     Component {
+        is_abstract: bool,
+        is_external: bool,
+        base: Option<Name>,
         props: Vec<InterfaceField>,
         emits: Vec<ComponentEmit>,
         state: Vec<InterfaceField>,
@@ -158,6 +169,7 @@ pub enum PreparedBindingTarget {
     },
     Imported {
         item: InterfaceItem,
+        raw: Option<ImportedRawRef>,
     },
 }
 
@@ -179,7 +191,7 @@ impl PreparedBinding {
             PreparedBindingTarget::Peer {
                 module_identity, ..
             } => module_identity,
-            PreparedBindingTarget::Imported { item } => item.module_identity.as_str(),
+            PreparedBindingTarget::Imported { item, .. } => item.module_identity.as_str(),
         }
     }
 
@@ -188,7 +200,7 @@ impl PreparedBinding {
         match &self.target {
             PreparedBindingTarget::Local { definition_id }
             | PreparedBindingTarget::Peer { definition_id, .. } => *definition_id,
-            PreparedBindingTarget::Imported { item } => item.definition_id,
+            PreparedBindingTarget::Imported { item, .. } => item.definition_id,
         }
     }
 }
@@ -204,6 +216,7 @@ pub enum ResolvedPreparedItem {
     },
     Imported {
         item: InterfaceItem,
+        raw: Option<ImportedRawRef>,
         origin: PreparedBindingOrigin,
     },
 }
@@ -304,6 +317,11 @@ impl PreparedModule {
         &self.raw_module
     }
 
+    /// Returns mutable access to the preserved raw lowered module.
+    pub fn raw_module_mut(&mut self) -> &mut LoweredModule {
+        &mut self.raw_module
+    }
+
     /// Consumes the prepared module and returns the preserved raw lowered module.
     pub fn into_raw_module(self) -> LoweredModule {
         self.raw_module
@@ -385,11 +403,19 @@ impl PreparedModule {
                     item,
                     origin: binding.origin.clone(),
                 }),
-            PreparedBindingTarget::Imported { item } => Some(ResolvedPreparedItem::Imported {
+            PreparedBindingTarget::Imported { item, raw } => Some(ResolvedPreparedItem::Imported {
                 item: item.clone(),
+                raw: raw.clone(),
                 origin: binding.origin.clone(),
             }),
         }
+    }
+
+    /// Resolves an imported raw item reference back to a lowered item when available.
+    pub fn resolve_imported_raw_item(&self, raw: &ImportedRawRef) -> Option<Item> {
+        self.peer_modules
+            .get(&raw.module_identity)
+            .and_then(|module| module.item_by_definition(raw.definition_id).cloned())
     }
 
     fn add_local_bindings(&mut self) {
@@ -485,6 +511,51 @@ pub fn interface_record(item: &InterfaceItem) -> Option<crate::RecordDef> {
                     span: field.span,
                 })
                 .collect(),
+            span: *span,
+        }),
+        _ => None,
+    }
+}
+
+/// Converts imported interface metadata into component-like view when possible.
+pub fn interface_component(item: &InterfaceItem) -> Option<Component> {
+    match &item.item {
+        InterfaceItemKind::Component {
+            is_abstract,
+            is_external,
+            base,
+            props,
+            emits,
+            state,
+            span,
+        } => Some(Component {
+            name: Name::new(item.item_name.as_str()),
+            visibility: item.visibility,
+            is_abstract: *is_abstract,
+            is_external: *is_external,
+            base: base.clone(),
+            props: props
+                .iter()
+                .map(|field| RecordField {
+                    name: field.name.clone(),
+                    ty: field.ty.clone(),
+                    is_content: field.is_content,
+                    default: None,
+                    span: field.span,
+                })
+                .collect(),
+            emits: emits.clone(),
+            state: state
+                .iter()
+                .map(|field| RecordField {
+                    name: field.name.clone(),
+                    ty: field.ty.clone(),
+                    is_content: field.is_content,
+                    default: None,
+                    span: field.span,
+                })
+                .collect(),
+            body: None,
             span: *span,
         }),
         _ => None,

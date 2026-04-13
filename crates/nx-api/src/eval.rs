@@ -200,6 +200,7 @@ pub fn eval_source(
 mod tests {
     use super::*;
     use crate::artifacts::{build_program_artifact_from_source, LibraryRegistry};
+    use std::collections::BTreeMap;
     use std::fs;
     use tempfile::TempDir;
 
@@ -292,6 +293,195 @@ let root() = { <Layout.Button /> }"#;
             NxValue::Record {
                 type_name: Some("button".to_string()),
                 properties: Default::default(),
+            }
+        );
+    }
+
+    #[test]
+    fn eval_source_preserves_external_component_identity_props_and_handlers() {
+        let source = r#"
+            action SearchRequested = { query:string }
+            action DoSearch = { query:string }
+
+            external component <SearchBox placeholder:string = "Find docs" emits { SearchRequested } />
+            let root() = { <SearchBox onSearchRequested=<DoSearch query={action.query} /> /> }
+        "#;
+
+        let EvalResult::Ok(value) = eval_source(
+            source,
+            "external-component-root.nx",
+            &ProgramBuildContext::empty(),
+        ) else {
+            panic!("Expected external component evaluation to succeed");
+        };
+
+        assert_eq!(
+            value,
+            NxValue::Record {
+                type_name: Some("SearchBox".to_string()),
+                properties: BTreeMap::from([
+                    (
+                        "onSearchRequested".to_string(),
+                        NxValue::Record {
+                            type_name: Some("ActionHandler".to_string()),
+                            properties: BTreeMap::from([
+                                (
+                                    "action".to_string(),
+                                    NxValue::String("SearchRequested".to_string()),
+                                ),
+                                (
+                                    "component".to_string(),
+                                    NxValue::String("SearchBox".to_string()),
+                                ),
+                                (
+                                    "emit".to_string(),
+                                    NxValue::String("SearchRequested".to_string()),
+                                ),
+                            ]),
+                        },
+                    ),
+                    (
+                        "placeholder".to_string(),
+                        NxValue::String("Find docs".to_string()),
+                    ),
+                ]),
+            }
+        );
+    }
+
+    #[test]
+    fn eval_program_artifact_applies_imported_abstract_base_component_defaults() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("base.nx"),
+            r#"
+                export let defaultPlaceholder(): string = { "Find docs" }
+                export abstract component <SearchBase prefix:string = {defaultPlaceholder()} placeholder:string = {prefix} />
+            "#,
+        )
+        .expect("ui file");
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("Expected registry preload");
+        let build_context = registry.build_context();
+
+        let main_path = app_dir.join("main.nx");
+        let source = r#"
+            import "../ui"
+
+            let defaultPlaceholder(): string = { "Wrong" }
+
+            component <SearchBox extends SearchBase /> = {
+              state { query:string = {placeholder} }
+              <TextInput value={query} placeholder={placeholder} />
+            }
+
+            let root() = { <SearchBox /> }
+        "#;
+        fs::write(&main_path, source).expect("main file");
+
+        let program = build_program_artifact_from_source(
+            source,
+            &main_path.display().to_string(),
+            &build_context,
+        )
+        .expect("Expected program artifact");
+
+        let EvalResult::Ok(value) = eval_program_artifact(&program) else {
+            panic!("Expected imported inherited component defaults to evaluate");
+        };
+
+        assert_eq!(
+            value,
+            NxValue::Record {
+                type_name: Some("SearchBox".to_string()),
+                properties: BTreeMap::from([
+                    (
+                        "placeholder".to_string(),
+                        NxValue::String("Find docs".to_string()),
+                    ),
+                    (
+                        "prefix".to_string(),
+                        NxValue::String("Find docs".to_string()),
+                    ),
+                ]),
+            }
+        );
+    }
+
+    #[test]
+    fn eval_program_artifact_applies_imported_abstract_record_defaults() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("base.nx"),
+            r#"
+                export let defaultPlaceholder(): string = { "Find docs" }
+                export abstract type SearchConfigBase = {
+                  prefix: string = {defaultPlaceholder()}
+                  placeholder: string = {prefix}
+                }
+            "#,
+        )
+        .expect("ui file");
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("Expected registry preload");
+        let build_context = registry.build_context();
+
+        let main_path = app_dir.join("main.nx");
+        let source = r#"
+            import "../ui"
+
+            let defaultPlaceholder(): string = { "Wrong" }
+
+            type SearchConfig extends SearchConfigBase = {
+              showSearchIcon: bool = true
+            }
+
+            let root() = { SearchConfig() }
+        "#;
+        fs::write(&main_path, source).expect("main file");
+
+        let program = build_program_artifact_from_source(
+            source,
+            &main_path.display().to_string(),
+            &build_context,
+        )
+        .expect("Expected program artifact");
+
+        let EvalResult::Ok(value) = eval_program_artifact(&program) else {
+            panic!("Expected imported inherited record defaults to evaluate");
+        };
+
+        assert_eq!(
+            value,
+            NxValue::Record {
+                type_name: Some("SearchConfig".to_string()),
+                properties: BTreeMap::from([
+                    (
+                        "placeholder".to_string(),
+                        NxValue::String("Find docs".to_string())
+                    ),
+                    (
+                        "prefix".to_string(),
+                        NxValue::String("Find docs".to_string())
+                    ),
+                    ("showSearchIcon".to_string(), NxValue::Bool(true)),
+                ]),
             }
         );
     }
