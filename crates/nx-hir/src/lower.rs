@@ -4023,6 +4023,42 @@ enum Mode = light | dark"#;
     }
 
     #[test]
+    fn test_lower_external_component_state_only_body_preserves_state_without_body() {
+        let source = r#"
+            external component <SearchBox placeholder:string /> = {
+              state {
+                query:string
+              }
+            }
+        "#;
+
+        let parse_result = parse_str(source, "component-external-state.nx");
+        let tree = parse_result
+            .tree
+            .expect("External component state source should parse");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let component = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Component(component) if component.name.as_str() == "SearchBox" => {
+                    Some(component)
+                }
+                _ => None,
+            })
+            .expect("Expected lowered external component item");
+
+        assert!(component.is_external);
+        assert!(!component.is_abstract);
+        assert_eq!(component.props.len(), 1);
+        assert_eq!(component.props[0].name.as_str(), "placeholder");
+        assert_eq!(component.state.len(), 1);
+        assert_eq!(component.state[0].name.as_str(), "query");
+        assert!(component.body.is_none());
+    }
+
+    #[test]
     fn test_lower_component_handler_diagnostics_for_collision_and_unknown_emit() {
         let source = r#"
             component <SearchBox onSearchSubmitted:string emits { SearchSubmitted } /> = {

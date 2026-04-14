@@ -661,27 +661,33 @@ impl Interpreter {
         self.bind_top_level_values(module, &mut ctx)?;
         let normalized_props =
             self.normalize_component_props(module, &mut ctx, component, &contract, props)?;
-        let mut visible_fields = normalized_props.clone();
-        let normalized_state = self.materialize_component_state(
-            module,
-            &mut ctx,
-            component,
-            FxHashMap::default(),
-            &mut visible_fields,
-        )?;
-        let rendered = if component.is_external {
-            Value::Record {
-                type_name: component.name.clone(),
-                fields: normalized_props.clone(),
-            }
-        } else if let Some(body) = component.body {
-            self.eval_expr(module, &mut ctx, body)?
+        let (normalized_state, rendered) = if component.is_external {
+            (
+                FxHashMap::default(),
+                Value::Record {
+                    type_name: component.name.clone(),
+                    fields: normalized_props.clone(),
+                },
+            )
         } else {
-            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                expected: "component body".to_string(),
-                actual: "missing".to_string(),
-                operation: format!("component initialization for '{}'", component.name),
-            }));
+            let mut visible_fields = normalized_props.clone();
+            let normalized_state = self.materialize_component_state(
+                module,
+                &mut ctx,
+                component,
+                FxHashMap::default(),
+                &mut visible_fields,
+            )?;
+            let rendered = if let Some(body) = component.body {
+                self.eval_expr(module, &mut ctx, body)?
+            } else {
+                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                    expected: "component body".to_string(),
+                    actual: "missing".to_string(),
+                    operation: format!("component initialization for '{}'", component.name),
+                }));
+            };
+            (normalized_state, rendered)
         };
         let component_module_id =
             self.require_current_module_id(module, "component state snapshot creation")?;
@@ -3776,12 +3782,82 @@ mod tests {
     }
 
     #[test]
+    fn test_initialize_external_component_with_declared_state_skips_state_materialization() {
+        let source = r#"
+            external component <SearchBox placeholder:string = "Find docs" /> = {
+              state { query:string }
+            }
+        "#;
+
+        let (module, interpreter) = lower_module_runtime(source);
+        let init = interpreter
+            .initialize_component(
+                module.as_ref(),
+                "SearchBox",
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::default(),
+                },
+            )
+            .expect("Expected external component initialization with declared state to succeed");
+
+        let Value::Record { type_name, fields } = &init.rendered else {
+            panic!("Expected external component render value");
+        };
+        assert_eq!(type_name.as_str(), "SearchBox");
+        assert_eq!(
+            fields.get("placeholder"),
+            Some(&Value::String(SmolStr::new("Find docs")))
+        );
+        assert!(
+            !fields.contains_key("query"),
+            "Declared external state must not appear in rendered props"
+        );
+
+        let snapshot = interpreter
+            .decode_component_snapshot(module.as_ref(), &init.state_snapshot)
+            .expect("Expected snapshot to decode");
+        assert!(snapshot.state.is_empty(), "Expected empty external state");
+    }
+
+    #[test]
+    fn test_initialize_external_component_rejects_declared_state_as_prop() {
+        let source = r#"
+            external component <SearchBox /> = {
+              state { query:string }
+            }
+        "#;
+
+        let (module, interpreter) = lower_module_runtime(source);
+        let error = interpreter
+            .initialize_component(
+                module.as_ref(),
+                "SearchBox",
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::from_iter([(
+                        SmolStr::new("query"),
+                        Value::String(SmolStr::new("docs")),
+                    )]),
+                },
+            )
+            .expect_err("Expected declared external state to remain a non-prop");
+
+        assert!(matches!(
+            error.kind(),
+            RuntimeErrorKind::TypeMismatch { actual, .. } if actual == "unknown prop 'query'"
+        ));
+    }
+
+    #[test]
     fn test_dispatch_external_component_actions_uses_bound_handlers() {
         let source = r#"
             action SearchRequested = { query:string }
             action DoSearch = { query:string }
 
-            external component <SearchBox emits { SearchRequested } />
+            external component <SearchBox emits { SearchRequested } /> = {
+              state { query:string }
+            }
             let withHandler() = <SearchBox onSearchRequested=<DoSearch query={action.query} /> />
         "#;
 

@@ -446,6 +446,35 @@ fn test_parse_external_component_definition() {
 }
 
 #[test]
+fn test_parse_external_component_with_state_only_body() {
+    let path = fixture_path("valid/component-external-state.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(
+        result.is_ok(),
+        "External component state-only fixture should parse"
+    );
+    let root = result.root().expect("Should have root node");
+
+    let component = root
+        .children()
+        .find(|c| c.kind() == SyntaxKind::COMPONENT_DEFINITION)
+        .expect("Should find component_definition node");
+    let body = component
+        .child_by_field("body")
+        .expect("External component state-only body should be preserved");
+    let state = body
+        .child_by_field("state")
+        .expect("State-only external body should expose state");
+
+    assert_eq!(state.kind(), SyntaxKind::STATE_GROUP);
+    assert!(
+        body.child_by_field("body").is_none(),
+        "State-only external body should omit a rendered body expression"
+    );
+}
+
+#[test]
 fn test_parse_abstract_external_component_definition() {
     let path = fixture_path("valid/component-abstract-external.nx");
     let result = parse_file(&path).unwrap();
@@ -1719,6 +1748,36 @@ fn test_parse_external_component_with_body_is_error() {
     assert!(
         !result.errors.is_empty(),
         "External component with body should produce diagnostics"
+    );
+}
+
+#[test]
+fn test_parse_external_component_with_empty_body_is_error() {
+    let path = fixture_path("invalid/component-external-empty-body.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(
+        !result.is_ok(),
+        "External component with empty body should fail"
+    );
+    assert!(
+        !result.errors.is_empty(),
+        "External component with empty body should produce diagnostics"
+    );
+}
+
+#[test]
+fn test_parse_external_component_with_duplicate_state_groups_is_error() {
+    let path = fixture_path("invalid/component-external-duplicate-state.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(
+        !result.is_ok(),
+        "External component with duplicate state groups should fail"
+    );
+    assert!(
+        !result.errors.is_empty(),
+        "External component with duplicate state groups should produce diagnostics"
     );
 }
 

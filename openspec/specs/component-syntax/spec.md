@@ -6,20 +6,29 @@ TBD - created by archiving change add-component-syntax. Update Purpose after arc
 ### Requirement: Component declaration syntax
 The parser SHALL support top-level component declarations introduced by the `component` keyword. A
 component declaration MAY be preceded by the `abstract` and/or `external` modifiers and MAY declare
-a single `extends BaseComponent` clause inside its element-shaped signature. Concrete component
-declarations SHALL use a block body introduced by `=`, while abstract or external component
-declarations SHALL omit the body and define only their public props and emitted actions.
+a single `extends BaseComponent` clause inside its element-shaped signature. Concrete non-external
+component declarations SHALL use a block body introduced by `=`, abstract component declarations
+SHALL omit the body, and concrete external component declarations MAY omit the body or MAY use a
+body that contains only `state`.
 
 #### Scenario: Minimal component declaration
 - **WHEN** a file contains `component <Button text:string /> = { <button>{text}</button> }`
-- **THEN** the parser SHALL produce a COMPONENT_DEFINITION node with name `Button`, one PROPERTY_DEFINITION for `text`, and a COMPONENT_BODY containing the rendered element
+- **THEN** the parser SHALL produce a COMPONENT_DEFINITION node with name `Button`, one
+  PROPERTY_DEFINITION for `text`, and a COMPONENT_BODY containing the rendered element
 
-#### Scenario: Bodyless abstract and external component declarations
+#### Scenario: Bodyless abstract and bodyless external component declarations
 - **WHEN** a file contains `abstract component <SearchBase placeholder:string emits { SearchRequested } /> external component <SearchBox extends SearchBase showSearchIcon:bool = true /> abstract external component <RemoteSearchBase placeholder:string />`
 - **THEN** the parser SHALL produce three COMPONENT_DEFINITION nodes
 - **AND** SHALL preserve `SearchBase` as abstract with no base and no COMPONENT_BODY
 - **AND** SHALL preserve `SearchBox` as external with base `SearchBase` and no COMPONENT_BODY
 - **AND** SHALL preserve `RemoteSearchBase` as both abstract and external with no COMPONENT_BODY
+
+#### Scenario: External component with a state-only body
+- **WHEN** a file contains `external component <SearchBox placeholder:string /> = { state { query:string } }`
+- **THEN** the parser SHALL produce a COMPONENT_DEFINITION named `SearchBox`
+- **AND** SHALL preserve a COMPONENT_BODY containing a STATE_GROUP with one PROPERTY_DEFINITION
+  named `query`
+- **AND** SHALL preserve no rendered component body expression
 
 #### Scenario: Concrete derived component declaration
 - **WHEN** a file contains `component <NxSearchUi extends SearchBase showSpinner:bool = false /> = { <SearchBox /> }`
@@ -30,9 +39,13 @@ declarations SHALL omit the body and define only their public props and emitted 
 - **WHEN** a file contains `component <SearchBox placeholder:string />`
 - **THEN** parsing or validation SHALL reject the declaration as an invalid component definition
 
-#### Scenario: Abstract or external component body is rejected
-- **WHEN** a file contains `abstract component <SearchBase /> = { <button /> } external component <SearchBox /> = { <button /> }`
-- **THEN** parsing or validation SHALL reject both declarations as invalid component definitions
+#### Scenario: Empty external component body is rejected
+- **WHEN** a file contains `external component <SearchBox placeholder:string /> = { }`
+- **THEN** parsing or validation SHALL reject the declaration as an invalid component definition
+
+#### Scenario: Abstract component body or external rendered body is rejected
+- **WHEN** a file contains `abstract component <SearchBase /> = { <button /> } external component <SearchBox /> = { state { query:string } <button /> }`
+- **THEN** parsing or validation SHALL reject both declarations as an invalid component definition
 
 #### Scenario: Multiple base components are rejected
 - **WHEN** a file contains `component <SearchBox extends SearchBase, QueryBase /> = { <button /> }`
@@ -89,15 +102,25 @@ definitions SHALL remain concrete even when they extend an abstract action base.
   inheritance clause
 
 ### Requirement: Component state group
-A component body SHALL support an optional `state` group before the rendered body expression. The `state` group SHALL use record-style property definitions.
+A component body SHALL support an optional `state` group before the rendered body expression for
+concrete non-external components. For concrete external components, when a body is present it SHALL
+consist only of a `state` group and SHALL NOT include a rendered body expression.
 
 #### Scenario: Component with state group
 - **WHEN** a file contains `component <SearchBox placeholder:string /> = { state { query:string } <TextInput /> }`
-- **THEN** the parser SHALL produce a COMPONENT_BODY containing a STATE_GROUP with one PROPERTY_DEFINITION named `query` followed by the rendered element expression
+- **THEN** the parser SHALL produce a COMPONENT_BODY containing a STATE_GROUP with one
+  PROPERTY_DEFINITION named `query` followed by the rendered element expression
+
+#### Scenario: External component with state-only body
+- **WHEN** a file contains `external component <SearchBox placeholder:string /> = { state { query:string } }`
+- **THEN** the parser SHALL produce a COMPONENT_BODY containing a STATE_GROUP with one
+  PROPERTY_DEFINITION named `query`
+- **AND** SHALL preserve no rendered body expression
 
 #### Scenario: Component body without state group
 - **WHEN** a file contains `component <SearchBox placeholder:string /> = { if isReady { <TextInput /> } else { <Spinner /> } }`
-- **THEN** the parser SHALL produce a valid COMPONENT_DEFINITION with no STATE_GROUP and an `if` expression as the component body
+- **THEN** the parser SHALL produce a valid COMPONENT_DEFINITION with no STATE_GROUP and an `if`
+  expression as the component body
 
 ### Requirement: Component declaration keywords
 The parser SHALL recognize `abstract`, `external`, `component`, `extends`, `emits`, and `state`
@@ -176,3 +199,4 @@ every state field until a later change introduces declarative state-update actio
 - **WHEN** a module contains `component <SearchBox placeholder:string /> = { state { query:string = placeholder } <TextInput value={query} placeholder={placeholder} /> }` and a later dispatch receives a prior state snapshot whose current `query` value differs from `placeholder`
 - **THEN** dispatch SHALL use the stored `query` value from the prior state snapshot as the current component state
 - **AND** SHALL NOT reevaluate `query:string = placeholder`
+

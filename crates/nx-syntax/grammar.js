@@ -307,8 +307,13 @@ module.exports = grammar({
 
     component_body: $ => seq(
       '{',
-      optional(field('state', $.state_group)),
-      field('body', $.value_expression),
+      choice(
+        seq(
+          field('state', $.state_group),
+          optional(field('body', $.value_expression)),
+        ),
+        field('body', $.value_expression),
+      ),
       '}',
     ),
 

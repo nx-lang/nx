@@ -28,6 +28,12 @@ pub struct GeneratedFile {
     pub content: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GeneratedOutput<T> {
+    pub value: T,
+    pub warnings: Vec<String>,
+}
+
 pub fn format_options_from_editorconfig(
     language: TargetLanguage,
     editorconfig_path: &Path,
@@ -53,35 +59,64 @@ pub fn default_library_target_name(language: TargetLanguage) -> &'static str {
     }
 }
 
+#[allow(dead_code)]
 pub fn generate_types(
     module: &LoweredModule,
     source_path: &Path,
     opts: &GenerateTypesOptions,
 ) -> Result<String, String> {
-    let graph = model::ExportedTypeGraph::from_module(module, source_path)?;
+    Ok(generate_types_with_warnings(module, source_path, opts)?.value)
+}
 
-    match opts.language {
+pub fn generate_types_with_warnings(
+    module: &LoweredModule,
+    source_path: &Path,
+    opts: &GenerateTypesOptions,
+) -> Result<GeneratedOutput<String>, String> {
+    let build = model::ExportedTypeGraph::from_module_with_warnings(module, source_path)?;
+    let graph = &build.graph;
+
+    let value = match opts.language {
         TargetLanguage::TypeScript => languages::typescript::emit_single_file(&graph, opts),
         TargetLanguage::CSharp => {
             let namespace = opts.csharp_namespace.as_deref().unwrap_or("Nx.Generated");
             languages::csharp::emit_single_file(&graph, namespace, opts)
         }
-    }
+    }?;
+
+    Ok(GeneratedOutput {
+        value,
+        warnings: build.warnings,
+    })
 }
 
+#[allow(dead_code)]
 pub fn generate_library_types(
     library: &LibraryArtifact,
     opts: &GenerateTypesOptions,
 ) -> Result<Vec<GeneratedFile>, String> {
-    let graph = model::ExportedTypeGraph::from_library(library)?;
+    Ok(generate_library_types_with_warnings(library, opts)?.value)
+}
 
-    match opts.language {
+pub fn generate_library_types_with_warnings(
+    library: &LibraryArtifact,
+    opts: &GenerateTypesOptions,
+) -> Result<GeneratedOutput<Vec<GeneratedFile>>, String> {
+    let build = model::ExportedTypeGraph::from_library_with_warnings(library)?;
+    let graph = &build.graph;
+
+    let value = match opts.language {
         TargetLanguage::TypeScript => languages::typescript::emit_library(&graph, opts),
         TargetLanguage::CSharp => {
             let namespace = opts.csharp_namespace.as_deref().unwrap_or("Nx.Generated");
             languages::csharp::emit_library(&graph, namespace, opts)
         }
-    }
+    }?;
+
+    Ok(GeneratedOutput {
+        value,
+        warnings: build.warnings,
+    })
 }
 
 #[cfg(test)]
@@ -122,6 +157,28 @@ mod tests {
         assert!(output
             .contains("export interface SearchRequested extends NxRecord<\"SearchRequested\">"));
         assert!(!output.contains("Hidden"));
+    }
+
+    #[test]
+    fn generates_typescript_external_component_state_contracts_without_discriminator() {
+        let source = r#"
+            export external component <SearchBox /> = {
+              state { query:string }
+            }
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(output.contains("export interface SearchBox_state"));
+        assert!(output.contains("query: string;"));
+        assert!(!output.contains("NxRecord<\"SearchBox_state\">"));
+        assert!(!output.contains("$type"));
     }
 
     #[test]
@@ -211,6 +268,25 @@ mod tests {
     }
 
     #[test]
+    fn omits_non_exported_external_component_state_contracts() {
+        let source = r#"
+            external component <SearchBox /> = {
+              state { query:string }
+            }
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(!output.contains("SearchBox_state"));
+    }
+
+    #[test]
     fn generates_typescript_library_files_with_cross_module_imports() {
         let temp_dir = TempDir::new().expect("temp dir");
         let library_dir = temp_dir.path().join("ui");
@@ -252,6 +328,92 @@ mod tests {
         assert!(!index.content.contains("NxRecord"));
         assert!(index.content.contains("export * from \"./forms\";"));
         assert!(index.content.contains("export * from \"./theme\";"));
+    }
+
+    #[test]
+    fn generates_typescript_library_files_for_external_component_state_contracts() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let library_dir = temp_dir.path().join("ui");
+        fs::create_dir_all(&library_dir).expect("library dir");
+        fs::write(
+            library_dir.join("theme.nx"),
+            "export enum ThemeMode = | light | dark",
+        )
+        .expect("theme file");
+        fs::write(
+            library_dir.join("search-box.nx"),
+            r#"export external component <SearchBox /> = {
+  state { theme:ThemeMode }
+}"#,
+        )
+        .expect("search-box file");
+
+        let artifact = build_library_artifact_from_directory(&library_dir).expect("library build");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let files = generate_library_types(&artifact, &opts).unwrap();
+        let search_box = files
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("search-box.ts"))
+            .expect("search-box.ts");
+        assert!(search_box
+            .content
+            .contains("import type { ThemeMode } from \"./theme\";"));
+        assert!(search_box
+            .content
+            .contains("export interface SearchBox_state"));
+        assert!(search_box.content.contains("theme: ThemeMode;"));
+        assert!(!search_box.content.contains("$type"));
+    }
+
+    #[test]
+    fn generates_csharp_library_files_for_external_component_state_contracts() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let library_dir = temp_dir.path().join("ui");
+        fs::create_dir_all(&library_dir).expect("library dir");
+        fs::write(
+            library_dir.join("theme.nx"),
+            "export enum ThemeMode = | light | dark",
+        )
+        .expect("theme file");
+        fs::write(
+            library_dir.join("search-box.nx"),
+            r#"export external component <SearchBox /> = {
+  state { theme:ThemeMode }
+}"#,
+        )
+        .expect("search-box file");
+
+        let artifact = build_library_artifact_from_directory(&library_dir).expect("library build");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.Models".to_string()),
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let files = generate_library_types(&artifact, &opts).unwrap();
+        let search_box = files
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("search-box.g.cs"))
+            .expect("search-box.g.cs");
+        assert!(search_box.content.contains("namespace Test.Models"));
+        assert!(search_box
+            .content
+            .contains("public sealed class SearchBox_state"));
+        assert!(search_box
+            .content
+            .contains("public ThemeMode Theme { get; set; }"));
+        assert!(!search_box.content.contains("__NxType"));
+
+        let theme = files
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("theme.g.cs"))
+            .expect("theme.g.cs");
+        assert!(theme.content.contains("public enum ThemeMode"));
     }
 
     #[test]
@@ -535,6 +697,29 @@ mod tests {
     }
 
     #[test]
+    fn generates_csharp_external_component_state_contracts_without_discriminator() {
+        let source = r#"
+            export external component <SearchBox /> = {
+              state { query:string }
+            }
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.Models".to_string()),
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(output.contains("[MessagePackObject]"));
+        assert!(output.contains("public sealed class SearchBox_state"));
+        assert!(output.contains("public string Query { get; set; } = default!;"));
+        assert!(!output.contains("__NxType"));
+        assert!(!output.contains("[Key(\"$type\")]"));
+    }
+
+    #[test]
     fn generates_csharp_record_fields_without_colliding_with_type_discriminator() {
         let source = r#"
             export type Payload = { nx_type: string }
@@ -550,6 +735,32 @@ mod tests {
 
         assert!(output.contains("public string __NxType { get; set; } = \"Payload\";"));
         assert!(output.contains("public string NxType { get; set; } = default!;"));
+    }
+
+    #[test]
+    fn generate_types_warns_and_skips_conflicting_external_component_state_name() {
+        let source = r#"
+            export type SearchBox_state = string
+            export external component <SearchBox /> = {
+              state { query:string }
+            }
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let output = generate_types_with_warnings(&module, Path::new("types.nx"), &opts)
+            .expect("generation output");
+
+        assert!(output
+            .value
+            .contains("export type SearchBox_state = string;"));
+        assert!(!output.value.contains("export interface SearchBox_state"));
+        assert_eq!(output.warnings.len(), 1);
+        assert!(output.warnings[0].contains("SearchBox_state"));
     }
 
     #[test]

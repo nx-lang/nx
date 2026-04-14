@@ -914,3 +914,48 @@ fn validate_base_component(
 fn handler_prop_name(emit_name: &str) -> String {
     format!("on{}", emit_name)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{lower, SourceId};
+    use nx_syntax::parse_str;
+
+    #[test]
+    fn effective_external_component_contract_excludes_declared_state_fields() {
+        let source = r#"
+            abstract external component <SearchBase placeholder:string />
+            external component <SearchBox extends SearchBase showSearchIcon:bool = true /> = {
+              state { query:string }
+            }
+        "#;
+
+        let parse_result = parse_str(source, "component-contract.nx");
+        let tree = parse_result
+            .tree
+            .expect("Expected component contract source to parse");
+        let lowered = lower(tree.root(), SourceId::new(0));
+        let prepared = PreparedModule::standalone("component-contract.nx", lowered);
+
+        let contract = effective_component_contract_for_name(&prepared, &Name::new("SearchBox"))
+            .expect("Expected component contract resolution to succeed")
+            .expect("Expected resolved SearchBox contract");
+
+        let prop_names = contract
+            .props
+            .iter()
+            .map(|field| field.name.as_str().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(prop_names, vec!["placeholder", "showSearchIcon"]);
+        assert!(
+            contract
+                .props
+                .iter()
+                .all(|field| field.name.as_str() != "query"),
+            "Declared external state must not become part of the effective prop contract"
+        );
+        assert_eq!(contract.component.state.len(), 1);
+        assert_eq!(contract.component.state[0].name.as_str(), "query");
+        assert!(contract.component.body.is_none());
+    }
+}

@@ -537,6 +537,28 @@ fn test_abstract_component_instantiation_is_rejected() {
 }
 
 #[test]
+fn test_external_component_state_only_body_type_checks() {
+    let source = r#"
+        external component <SearchBox placeholder:string /> = {
+          state { query:string }
+        }
+
+        let root() = { <SearchBox placeholder={"docs"} /> }
+    "#;
+
+    let result = check_str(source, "external-component-state-only.nx");
+    assert!(
+        result.errors().is_empty(),
+        "Expected external component with state-only body to type check, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn test_duplicate_inherited_component_prop_reports_diagnostic() {
     let source = r#"
         abstract component <SearchBase placeholder:string />

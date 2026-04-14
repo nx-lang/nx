@@ -1,0 +1,55 @@
+# Review: allow-external-component-state
+
+## Scope
+**Reviewed artifacts:** `proposal.md`, `design.md`, `tasks.md`, `specs/component-syntax/spec.md`, `specs/external-components/spec.md`, `specs/cli-code-generation/spec.md`
+
+**Reviewed code:** working-tree diff against `HEAD` for
+- `crates/nx-syntax/grammar.js`, `grammar.json`, `node-types.json`, `src/validation.rs`, `tests/parser_tests.rs`, and the new fixtures under `tests/fixtures/{valid,invalid}/`
+- `crates/nx-hir/src/lower.rs`, `src/components.rs`
+- `crates/nx-interpreter/src/interpreter.rs`
+- `crates/nx-api/src/{artifacts.rs, component.rs, eval.rs}`
+- `crates/nx-types/tests/type_checker_tests.rs`
+- `crates/nx-cli/src/codegen.rs`, `codegen/model.rs`, `codegen/languages/{typescript.rs,csharp.rs}`, `main.rs`
+
+## Findings
+
+### ✅ Verified - RF1 External-component state field `has_default` is collected but never rendered
+- **Severity:** Low
+- **Evidence:** `export_external_state` in [crates/nx-cli/src/codegen/model.rs:343-362](crates/nx-cli/src/codegen/model.rs#L343-L362) populates `ExportedRecordField { has_default: field.default.is_some(), .. }`, but neither the TypeScript emitter [crates/nx-cli/src/codegen/languages/typescript.rs:308-318](crates/nx-cli/src/codegen/languages/typescript.rs#L308-L318) nor the C# emitter [crates/nx-cli/src/codegen/languages/csharp.rs:242-275](crates/nx-cli/src/codegen/languages/csharp.rs#L242-L275) reads `has_default` when emitting the companion state contract. Nothing in the spec requires defaults to surface for external state, so the data is dead.
+- **Recommendation:** Either drop `has_default` from the external-state collection path (keeping it as `false`/ignored) or consciously decide to mirror the record emitters and mark optional properties (e.g., `query?:` in TS). Aligning with the record emitters is the more consistent option; silently collecting and discarding invites future drift.
+- **Fix:** `export_external_state` now clears default metadata for generated external-state fields, and the model regression test covers a defaulted state field to confirm the companion contract does not retain unused `has_default` data.
+- **Verification:** Confirmed in [crates/nx-cli/src/codegen/model.rs:458](crates/nx-cli/src/codegen/model.rs#L458) that field construction hard-codes `has_default: false`, and the `collects_exported_external_component_state_contracts` test now declares `state { query:string = "docs" }` and asserts `!state.fields[0].has_default`. Targeted `cargo test -p nx-cli` run passes.
+
+### ✅ Verified - RF2 No library-level C# test covers cross-module references into a generated external-state type
+- **Severity:** Low
+- **Evidence:** The cli-code-generation spec adds scenarios "TypeScript emits relative imports for external component state contracts" (covered by [crates/nx-cli/src/codegen.rs:297-332](crates/nx-cli/src/codegen.rs#L297-L332) and [main.rs:1161-1195](crates/nx-cli/src/main.rs#L1161-L1195)) and "C# cross-module references remain resolvable". The C# emitter has a new arm for `ExportedType::ExternalState` in [crates/nx-cli/src/codegen/languages/csharp.rs:523-533](crates/nx-cli/src/codegen/languages/csharp.rs#L523-L533), but the C# test suite only exercises single-file external state ([crates/nx-cli/src/codegen.rs:616-635](crates/nx-cli/src/codegen.rs#L616-L635)). There is no library-level C# test where a `.g.cs` file references a generated external-state type in another `.g.cs`.
+- **Recommendation:** Add a C# analog to `generates_typescript_library_files_for_external_component_state_contracts` (e.g., a `search-box.nx` external component whose state references an enum in `theme.nx`) and assert that `search-box.g.cs` resolves `ThemeMode` through the existing namespace/global-using plumbing.
+- **Fix:** Added both codegen and CLI library-generation tests for a `SearchBox_state` contract that references `ThemeMode` from another generated C# file, proving the cross-module type remains resolvable in emitted `.g.cs` output.
+- **Verification:** Confirmed `generates_csharp_library_files_for_external_component_state_contracts` in [crates/nx-cli/src/codegen.rs:374-417](crates/nx-cli/src/codegen.rs#L374-L417) asserts `search-box.g.cs` declares `public sealed class SearchBox_state` with a `ThemeMode Theme` field while `theme.g.cs` declares `public enum ThemeMode`, and `test_cli_generate_library_writes_csharp_external_component_state_output` in [main.rs:1236](crates/nx-cli/src/main.rs#L1236) exercises the same surface end-to-end. Targeted `cargo test -p nx-cli` run passes.
+
+### ✅ Verified - RF3 Collision detection of non-external declarations with pre-existing external state is order-dependent across modules
+- **Severity:** Low
+- **Evidence:** In [crates/nx-cli/src/codegen/model.rs:184-214](crates/nx-cli/src/codegen/model.rs#L184-L214), generated companion names are synthesized rather than source-authored, so any naming policy needs direct regression coverage across module-order permutations to keep warning/skip behavior stable.
+- **Recommendation:** Add a library-level regression test that places a user-authored `SearchBox_state` export in one module and `export external component <SearchBox /> = { state { ... } }` in another, asserting the generated companion is skipped with a warning for both module-order permutations.
+- **Fix:** Added two library-level regression tests that place the exported `SearchBox_state` alias before and after the external component module in sort order, and both permutations now explicitly assert warning-driven skip behavior.
+- **Verification:** The collision pass in [crates/nx-cli/src/codegen/model.rs:204-260](crates/nx-cli/src/codegen/model.rs#L204-L260) now pre-walks all modules to collect explicit exports and generated candidates, then skips generated companions whose name matches any explicit owner regardless of module order. Regression tests `skips_external_component_state_generation_when_alias_module_sorts_first` and `skips_external_component_state_generation_when_component_module_sorts_first` (using `a-*.nx` / `z-*.nx` file names to force both sort orders) assert the explicit export wins and exactly one warning is emitted. A third test covers two external components generating the same companion. Also note the overall policy shifted from hard-error to warning+skip; design.md §5 and the cli-code-generation spec were updated accordingly, so this verification is consistent with the spec as it now stands. Targeted `cargo test -p nx-cli` run passes.
+
+### ✅ Resolved - RF4 No test covers a user-authored record whose field references an external-component state type
+- **Severity:** Low
+- **Evidence:** `collect_module_imports` in [crates/nx-cli/src/codegen/languages/typescript.rs:369-374](crates/nx-cli/src/codegen/languages/typescript.rs#L369-L374) correctly visits field type refs of `ExportedType::ExternalState`, and `add_type_ref_imports` resolves owners uniformly — so a record referencing `SearchBox_state` would pick up a cross-module import if that companion were treated as a source-visible declaration. But the new tests only exercise the reverse direction (external-state field referencing an enum). If a future change accidentally skips `ExternalState` in the graph's owner map, the symmetry would break silently.
+- **Recommendation:** Add a single TypeScript library test: `search-box.nx` exports the external component with state, and a separate `forms.nx` exports a record whose field type is `SearchBox_state`. Assert that `forms.ts` imports `SearchBox_state` from `./search-box`.
+- **Status:** Resolved by design decision. The adopted rule is that generated companion state remains a host-facing generated artifact, not a source-authored NX declaration. If NX later needs a first-class way to name component state in source, the likely direction is a dedicated projection such as `SearchBox.state`; the generated source spelling `SearchBox_state` is intentionally just the emitted host-language name.
+- **Verification:** Confirmed by the follow-up implementation and spec updates. `design.md` now defines companion naming as `<ComponentName>_state`, explicitly ties that to a likely future `Component.state` NX projection, and keeps the companion out of the NX source namespace. The cli-code-generation spec likewise treats `_state` as generated output only and records warning+skip behavior on naming conflicts instead of making the generated companion source-visible.
+
+### ✅ Verified - RF5 Proposal's "reject any other external-component body content" is satisfied only for rendered expressions, not explicitly for arbitrary junk
+- **Severity:** Low
+- **Evidence:** The grammar choice `seq(state_group, optional(value_expression)) | value_expression` in [crates/nx-syntax/grammar.js:310-316](crates/nx-syntax/grammar.js#L310-L316) combined with the validation matrix in [crates/nx-syntax/src/validation.rs:100-121](crates/nx-syntax/src/validation.rs#L100-L121) rejects `= { }`, `= { <x/> }` (external), and `= { state {...} <x/> }`. Other shapes the grammar cannot express (let bindings inside a body, multiple state groups, etc.) are inherently excluded by the grammar, which is the right outcome. No tests assert this explicitly, so a future grammar relaxation could widen external bodies without tripping a regression.
+- **Recommendation:** Optionally add a guard test (e.g., `external component <X /> = { state { q:string } state { r:string } }`) to lock in that repeating/unexpected body shapes fail either parsing or validation.
+- **Fix:** Added an invalid syntax fixture and parser regression test for duplicate `state` groups inside an external component body, so unexpected repeated body content now has an explicit test lock.
+- **Verification:** Confirmed fixture [crates/nx-syntax/tests/fixtures/invalid/component-external-duplicate-state.nx](crates/nx-syntax/tests/fixtures/invalid/component-external-duplicate-state.nx) contains a two-`state`-group external component, and `test_parse_external_component_with_duplicate_state_groups_is_error` in [crates/nx-syntax/tests/parser_tests.rs:1770-1782](crates/nx-syntax/tests/parser_tests.rs#L1770-L1782) asserts parsing fails with diagnostics. Targeted `cargo test -p nx-syntax` run passes.
+
+## Questions
+- None.
+
+## Summary
+Implementation is coherent with the design: grammar relaxation + validation matrix cleanly separates the four body shapes; `nx-hir` lowering preserves `state` with `body == None`; interpreter skips NX state materialization for externals; codegen adds a dedicated `ExportedType::ExternalState` kind with stable `<ComponentName>_state` names, cross-module import wiring, and warning-driven collision skipping. The follow-up semantics decision is now captured as well: generated `_state` companions are host-facing only, while any future NX source-level reference would use dedicated syntax such as `Component.state` rather than the generated host-language identifier. No behavioral or correctness defects remain in the reviewed scope; findings are either verified fixed or resolved by explicit design choice.

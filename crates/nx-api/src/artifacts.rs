@@ -1852,6 +1852,54 @@ export component <Panel content body:object /> = {
     }
 
     #[test]
+    fn library_artifact_interface_items_preserve_external_component_state() {
+        let temp = TempDir::new().expect("temp dir");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("search-box.nx"),
+            r#"export external component <SearchBox placeholder:string /> = {
+  state {
+    query:string
+  }
+}"#,
+        )
+        .expect("search-box file");
+
+        let artifact =
+            build_library_artifact_from_directory(&ui_dir).expect("Expected library artifact");
+
+        assert!(
+            !has_error_diagnostics(&artifact.diagnostics),
+            "Expected external component state fixture to analyze without errors"
+        );
+
+        let search_box_item = artifact
+            .interface_items
+            .iter()
+            .find(|item| item.item_name == "SearchBox")
+            .expect("Expected exported SearchBox component interface item");
+        match &search_box_item.item {
+            LibraryInterfaceKind::Component {
+                is_abstract,
+                is_external,
+                props,
+                state,
+                ..
+            } => {
+                assert!(!is_abstract);
+                assert!(*is_external);
+                assert_eq!(props.len(), 1);
+                assert_eq!(props[0].name.as_str(), "placeholder");
+                assert_eq!(state.len(), 1);
+                assert_eq!(state[0].name.as_str(), "query");
+            }
+            other => panic!("Expected component interface item, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn consumer_imports_only_explicit_exports() {
         let temp = TempDir::new().expect("temp dir");
         let app_dir = temp.path().join("app");

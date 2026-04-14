@@ -14,10 +14,11 @@ const COMPONENT_SIGNATURE_SYNTAX: &str =
     "Expected: <Name [extends BaseComponent] prop:type emits { ActionName { prop:type } \
      ActionType } />";
 const COMPONENT_BODY_SYNTAX: &str =
-    "Expected: { state { prop:type } <Element /> } or { <Element /> }";
+    "Expected: { state { prop:type } <Element /> }, { <Element /> }, or for external components \
+     { state { prop:type } }";
 const COMPONENT_DEFINITION_SYNTAX: &str =
     "Expected: [abstract] [external] component <Name [extends BaseComponent] prop:type emits { \
-     ActionName { prop:type } ActionType } /> [= { state { prop:type } <Element /> }]";
+     ActionName { prop:type } ActionType } /> [= { state { prop:type } [<Element />] }]";
 
 /// Validates a syntax tree and returns any semantic errors found.
 ///
@@ -64,7 +65,14 @@ fn validate_component_definitions(
 
         let is_abstract = component.is_abstract();
         let is_external = component.is_external();
-        let has_body = component.body().is_some();
+        let body = component.body();
+        let has_body = body.is_some();
+        let has_state = body
+            .and_then(|body| body.child_by_field("state"))
+            .is_some_and(|node| !node.raw().is_missing());
+        let has_render_body = body
+            .and_then(|body| body.child_by_field("body"))
+            .is_some_and(|node| !node.raw().is_missing());
 
         if !is_abstract && !is_external && !has_body {
             diagnostics.push(
@@ -79,15 +87,52 @@ fn validate_component_definitions(
             );
         }
 
-        if (is_abstract || is_external) && has_body {
+        if is_abstract && has_body {
             diagnostics.push(
                 Diagnostic::error("invalid-component-definition")
-                    .with_message(
-                        "Abstract or external components cannot declare a body or local state",
-                    )
+                    .with_message("Abstract components cannot declare a body or local state")
                     .with_label(
                         Label::primary(file_name, component.syntax().span())
                             .with_message("remove the component body"),
+                    )
+                    .with_note(COMPONENT_DEFINITION_SYNTAX)
+                    .build(),
+            );
+        }
+
+        if is_external && has_body {
+            if !has_state {
+                diagnostics.push(
+                    Diagnostic::error("invalid-component-definition")
+                        .with_message("External component bodies must declare state")
+                        .with_label(
+                            Label::primary(file_name, component.syntax().span())
+                                .with_message("add a state block or remove the body"),
+                        )
+                        .with_note(COMPONENT_DEFINITION_SYNTAX)
+                        .build(),
+                );
+            } else if has_render_body {
+                diagnostics.push(
+                    Diagnostic::error("invalid-component-definition")
+                        .with_message("External component bodies can only declare state")
+                        .with_label(
+                            Label::primary(file_name, component.syntax().span())
+                                .with_message("remove the rendered body expression"),
+                        )
+                        .with_note(COMPONENT_DEFINITION_SYNTAX)
+                        .build(),
+                );
+            }
+        }
+
+        if !is_abstract && !is_external && has_body && !has_render_body {
+            diagnostics.push(
+                Diagnostic::error("invalid-component-definition")
+                    .with_message("Concrete components must declare a rendered body expression")
+                    .with_label(
+                        Label::primary(file_name, component.syntax().span())
+                            .with_message("add a rendered body expression"),
                     )
                     .with_note(COMPONENT_DEFINITION_SYNTAX)
                     .build(),
@@ -943,13 +988,13 @@ mod tests {
             .join(" ");
 
         assert!(
-            messages.contains("Abstract or external components cannot declare a body"),
+            messages.contains("Abstract components cannot declare a body"),
             "Expected abstract-component body diagnostic, got: {messages}"
         );
     }
 
     #[test]
-    fn test_validate_external_component_body_is_rejected() {
+    fn test_validate_external_component_rendered_body_is_rejected() {
         let source = "external component <SearchBox /> = { <button /> }";
         let result = parse_str(source, "test.nx");
 
@@ -961,8 +1006,71 @@ mod tests {
             .join(" ");
 
         assert!(
-            messages.contains("Abstract or external components cannot declare a body"),
-            "Expected external-component body diagnostic, got: {messages}"
+            messages.contains("External component bodies must declare state"),
+            "Expected external-component rendered-body diagnostic, got: {messages}"
+        );
+    }
+
+    #[test]
+    fn test_validate_external_component_state_only_body_is_allowed() {
+        let source = "external component <SearchBox /> = { state { query:string } }";
+        let result = parse_str(source, "test.nx");
+
+        assert!(
+            result.is_ok(),
+            "Expected external component state-only body to be valid, got {:?}",
+            result
+                .errors
+                .iter()
+                .map(|diagnostic| diagnostic.message())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_validate_external_component_empty_body_is_rejected() {
+        let source = "external component <SearchBox /> = { }";
+        let result = parse_str(source, "test.nx");
+
+        assert!(
+            !result.is_ok(),
+            "Expected empty external-component body to be rejected"
+        );
+    }
+
+    #[test]
+    fn test_validate_external_component_mixed_state_and_render_body_is_rejected() {
+        let source = "external component <SearchBox /> = { state { query:string } <button /> }";
+        let result = parse_str(source, "test.nx");
+
+        let messages = result
+            .errors
+            .iter()
+            .map(|diagnostic| diagnostic.message())
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        assert!(
+            messages.contains("External component bodies can only declare state"),
+            "Expected mixed external-component body diagnostic, got: {messages}"
+        );
+    }
+
+    #[test]
+    fn test_validate_concrete_component_state_only_body_is_rejected() {
+        let source = "component <SearchBox /> = { state { query:string } }";
+        let result = parse_str(source, "test.nx");
+
+        let messages = result
+            .errors
+            .iter()
+            .map(|diagnostic| diagnostic.message())
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        assert!(
+            messages.contains("Concrete components must declare a rendered body expression"),
+            "Expected state-only concrete component diagnostic, got: {messages}"
         );
     }
 }

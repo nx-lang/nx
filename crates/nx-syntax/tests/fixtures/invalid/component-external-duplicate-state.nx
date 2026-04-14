@@ -1,0 +1,4 @@
+external component <SearchBox /> = {
+  state { query:string }
+  state { theme:string }
+}

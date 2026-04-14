@@ -1,5 +1,6 @@
 use crate::codegen::model::{
-    ExportedAlias, ExportedEnum, ExportedModule, ExportedRecord, ExportedType, ExportedTypeGraph,
+    ExportedAlias, ExportedEnum, ExportedExternalState, ExportedModule, ExportedRecord,
+    ExportedType, ExportedTypeGraph,
 };
 use crate::codegen::writer::CodeWriter;
 use crate::codegen::{GenerateTypesOptions, GeneratedFile};
@@ -131,6 +132,7 @@ fn emit_declaration(
         ExportedType::Alias(_) => {}
         ExportedType::Enum(enum_def) => emit_enum(writer, enum_def),
         ExportedType::Record(record) => emit_record(writer, record, context),
+        ExportedType::ExternalState(state) => emit_external_state(writer, state, context),
     }
 }
 
@@ -235,6 +237,42 @@ fn emit_record_discriminator(
             escape_csharp_string_literal(&record.name)
         ));
     }
+}
+
+fn emit_external_state(
+    writer: &mut CodeWriter,
+    state: &ExportedExternalState,
+    context: &CSharpRenderContext<'_>,
+) {
+    writer.line("[MessagePackObject]");
+    writer.block(
+        &format!(
+            "public sealed class {}",
+            sanitize_csharp_identifier(&state.name)
+        ),
+        |writer| {
+            for field in &state.fields {
+                let field_type = csharp_type(&field.ty, context);
+                let field_name = sanitize_csharp_member_name(&field.name);
+
+                writer.line(&format!(
+                    "[Key(\"{}\")]",
+                    escape_csharp_string_literal(&field.name)
+                ));
+                if field_type.is_reference && !field_type.is_nullable {
+                    writer.line(&format!(
+                        "public {} {} {{ get; set; }} = default!;",
+                        field_type.text, field_name
+                    ));
+                } else {
+                    writer.line(&format!(
+                        "public {} {} {{ get; set; }}",
+                        field_type.text, field_name
+                    ));
+                }
+            }
+        },
+    );
 }
 
 fn emit_enum_messagepack_formatter(writer: &mut CodeWriter, enum_def: &ExportedEnum) {
@@ -475,6 +513,15 @@ fn csharp_type_name_inner(
                         is_nullable: false,
                     },
                     ExportedType::Record(_) => CSharpType {
+                        text: generated_type_name(
+                            other,
+                            context.namespace,
+                            context.qualify_generated_types,
+                        ),
+                        is_reference: true,
+                        is_nullable: false,
+                    },
+                    ExportedType::ExternalState(_) => CSharpType {
                         text: generated_type_name(
                             other,
                             context.namespace,

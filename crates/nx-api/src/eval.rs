@@ -350,6 +350,35 @@ let root() = { <Layout.Button /> }"#;
     }
 
     #[test]
+    fn eval_source_external_component_state_only_body_omits_state_fields() {
+        let source = r#"
+            external component <SearchBox placeholder:string = "Find docs" /> = {
+              state { query:string }
+            }
+            let root() = { <SearchBox /> }
+        "#;
+
+        let EvalResult::Ok(value) = eval_source(
+            source,
+            "external-component-state-root.nx",
+            &ProgramBuildContext::empty(),
+        ) else {
+            panic!("Expected external component evaluation with state-only body to succeed");
+        };
+
+        assert_eq!(
+            value,
+            NxValue::Record {
+                type_name: Some("SearchBox".to_string()),
+                properties: BTreeMap::from([(
+                    "placeholder".to_string(),
+                    NxValue::String("Find docs".to_string()),
+                )]),
+            }
+        );
+    }
+
+    #[test]
     fn eval_program_artifact_applies_imported_abstract_base_component_defaults() {
         let temp = TempDir::new().expect("temp dir");
         let app_dir = temp.path().join("app");

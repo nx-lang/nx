@@ -329,16 +329,17 @@ fn generate_types_from_file(
         Err(exit_code) => return exit_code,
     };
 
-    let output_text = match codegen::generate_types(&module, path, opts) {
-        Ok(text) => text,
+    let generated = match codegen::generate_types_with_warnings(&module, path, opts) {
+        Ok(output) => output,
         Err(message) => {
             eprintln!("Error: {}", message);
             return ExitCode::from(1);
         }
     };
+    render_generate_warnings(&generated.warnings);
 
     if let Some(output_path) = output {
-        if let Err(error) = std::fs::write(output_path, output_text) {
+        if let Err(error) = std::fs::write(output_path, generated.value) {
             eprintln!(
                 "Error writing output to '{}': {}",
                 output_path.display(),
@@ -347,7 +348,7 @@ fn generate_types_from_file(
             return ExitCode::from(1);
         }
     } else {
-        print!("{}", output_text);
+        print!("{}", generated.value);
     }
 
     ExitCode::SUCCESS
@@ -382,13 +383,14 @@ fn generate_types_from_library(
         return ExitCode::from(1);
     }
 
-    let generated_files = match codegen::generate_library_types(library.as_ref(), opts) {
-        Ok(files) => files,
+    let generated = match codegen::generate_library_types_with_warnings(library.as_ref(), opts) {
+        Ok(output) => output,
         Err(message) => {
             eprintln!("Error: {}", message);
             return ExitCode::from(1);
         }
     };
+    render_generate_warnings(&generated.warnings);
 
     if let Err(error) = std::fs::create_dir_all(output_root) {
         eprintln!(
@@ -399,7 +401,7 @@ fn generate_types_from_library(
         return ExitCode::from(1);
     }
 
-    for file in generated_files {
+    for file in generated.value {
         let target_path = match resolve_generated_output_path(output_root, &file.relative_path) {
             Ok(path) => path,
             Err(message) => {
@@ -429,6 +431,12 @@ fn generate_types_from_library(
     }
 
     ExitCode::SUCCESS
+}
+
+fn render_generate_warnings(warnings: &[String]) {
+    for warning in warnings {
+        eprintln!("Warning: {}", warning);
+    }
 }
 
 fn resolve_generated_output_path(
@@ -1010,6 +1018,62 @@ let root() = { Ui.title() }"#,
     }
 
     #[test]
+    fn test_cli_generate_file_emits_external_component_state_contract() {
+        let source = r#"
+            export external component <SearchBox /> = {
+              state { query:string }
+            }
+        "#;
+        let (_dir, path) = create_temp_nx_file(source);
+
+        let output = run_cli(&[
+            "generate",
+            path.to_str().unwrap(),
+            "--language",
+            "typescript",
+        ]);
+
+        assert!(
+            output.status.success(),
+            "CLI should generate external component state contract for .nx file input"
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("export interface SearchBox_state"));
+        assert!(stdout.contains("query: string;"));
+        assert!(!stdout.contains("$type"));
+    }
+
+    #[test]
+    fn test_cli_generate_file_warns_and_skips_conflicting_external_component_state_contract() {
+        let source = r#"
+            export type SearchBox_state = string
+            export external component <SearchBox /> = {
+              state { query:string }
+            }
+        "#;
+        let (_dir, path) = create_temp_nx_file(source);
+
+        let output = run_cli(&[
+            "generate",
+            path.to_str().unwrap(),
+            "--language",
+            "typescript",
+        ]);
+
+        assert!(
+            output.status.success(),
+            "CLI should succeed when generated external component state conflicts with an explicit export"
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        assert!(stdout.contains("export type SearchBox_state = string;"));
+        assert!(!stdout.contains("export interface SearchBox_state"));
+        assert!(stderr.contains("Warning:"));
+        assert!(stderr.contains("SearchBox_state"));
+    }
+
+    #[test]
     fn test_cli_generate_rejects_non_nx_files() {
         let dir = TempDir::new().unwrap();
         let file_path = dir.path().join("README.md");
@@ -1130,6 +1194,81 @@ let root() = { Ui.title() }"#,
         assert!(theme.contains("export type ThemeMode = \"light\" | \"dark\";"));
         assert!(index.contains("export * from \"./forms\";"));
         assert!(index.contains("export * from \"./theme\";"));
+    }
+
+    #[test]
+    fn test_cli_generate_library_writes_external_component_state_output() {
+        let (dir, library_path) = create_temp_library(&[
+            ("theme.nx", "export enum ThemeMode = | light | dark"),
+            (
+                "search-box.nx",
+                r#"export external component <SearchBox /> = {
+  state { theme:ThemeMode }
+}"#,
+            ),
+        ]);
+        let output_path = dir.path().join("generated-ts");
+
+        let output = run_cli(&[
+            "generate",
+            library_path.to_str().unwrap(),
+            "--language",
+            "typescript",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        assert!(
+            output.status.success(),
+            "CLI should write TypeScript external component state output"
+        );
+        let search_box = fs::read_to_string(output_path.join("search-box.ts")).unwrap();
+        let index = fs::read_to_string(output_path.join("index.ts")).unwrap();
+
+        assert!(search_box.contains("import type { ThemeMode } from \"./theme\";"));
+        assert!(search_box.contains("export interface SearchBox_state"));
+        assert!(search_box.contains("theme: ThemeMode;"));
+        assert!(!search_box.contains("$type"));
+        assert!(index.contains("export * from \"./search-box\";"));
+    }
+
+    #[test]
+    fn test_cli_generate_library_writes_csharp_external_component_state_output() {
+        let (dir, library_path) = create_temp_library(&[
+            ("theme.nx", "export enum ThemeMode = | light | dark"),
+            (
+                "search-box.nx",
+                r#"export external component <SearchBox /> = {
+  state { theme:ThemeMode }
+}"#,
+            ),
+        ]);
+        let output_path = dir.path().join("generated-cs");
+
+        let output = run_cli(&[
+            "generate",
+            library_path.to_str().unwrap(),
+            "--language",
+            "csharp",
+            "--csharp-namespace",
+            "MyApp.Models",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        assert!(
+            output.status.success(),
+            "CLI should write C# external component state output"
+        );
+        let search_box = fs::read_to_string(output_path.join("search-box.g.cs")).unwrap();
+        let theme = fs::read_to_string(output_path.join("theme.g.cs")).unwrap();
+
+        assert!(search_box.contains("namespace MyApp.Models"));
+        assert!(search_box.contains("public sealed class SearchBox_state"));
+        assert!(search_box.contains("public ThemeMode Theme { get; set; }"));
+        assert!(!search_box.contains("__NxType"));
+        assert!(theme.contains("namespace MyApp.Models"));
+        assert!(theme.contains("public enum ThemeMode"));
     }
 
     #[test]

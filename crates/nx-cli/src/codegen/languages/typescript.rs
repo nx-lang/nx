@@ -1,5 +1,6 @@
 use crate::codegen::model::{
-    ExportedAlias, ExportedEnum, ExportedModule, ExportedRecord, ExportedType, ExportedTypeGraph,
+    ExportedAlias, ExportedEnum, ExportedExternalState, ExportedModule, ExportedRecord,
+    ExportedType, ExportedTypeGraph,
 };
 use crate::codegen::writer::CodeWriter;
 use crate::codegen::{GenerateTypesOptions, GeneratedFile};
@@ -195,6 +196,7 @@ fn emit_declaration(
         ExportedType::Alias(alias) => emit_alias(writer, alias),
         ExportedType::Enum(enum_def) => emit_enum(writer, enum_def),
         ExportedType::Record(record) => emit_record(writer, record, graph),
+        ExportedType::ExternalState(state) => emit_external_state(writer, state),
     }
 }
 
@@ -303,6 +305,19 @@ fn emit_concrete_record(
     });
 }
 
+fn emit_external_state(writer: &mut CodeWriter, state: &ExportedExternalState) {
+    writer.block(
+        &format!("export interface {}", sanitize_ts_type_name(&state.name)),
+        |writer| {
+            for field in &state.fields {
+                let key = ts_property_key(&field.name);
+                let ty = ts_type(&field.ty);
+                writer.line(&format!("{key}: {ty};"));
+            }
+        },
+    );
+}
+
 fn module_needs_nx_record(module: &ExportedModule) -> bool {
     module.declarations.iter().any(|declaration| {
         matches!(
@@ -349,6 +364,11 @@ fn collect_module_imports(
                             &mut imports,
                         );
                     }
+                }
+            }
+            ExportedType::ExternalState(state) => {
+                for field in &state.fields {
+                    add_type_ref_imports(graph, module, &field.ty, &mut imports);
                 }
             }
         }

@@ -392,6 +392,81 @@ mod tests {
     }
 
     #[test]
+    fn initialize_component_source_supports_external_component_state_only_entrypoint() {
+        let source = r#"
+            external component <SearchBox placeholder:string = "Find docs" /> = {
+              state { query:string }
+            }
+        "#;
+
+        let result = initialize_component_source(
+            source,
+            "external-component-state-init.nx",
+            &ProgramBuildContext::empty(),
+            "SearchBox",
+            &empty_record(),
+        );
+        let ComponentInitEvalResult::Ok(result) = result else {
+            panic!("Expected external component state-only initialization to succeed");
+        };
+
+        let NxValue::Record {
+            type_name,
+            properties,
+        } = result.rendered
+        else {
+            panic!("Expected rendered external component record");
+        };
+        assert_eq!(type_name.as_deref(), Some("SearchBox"));
+        assert_eq!(
+            properties.get("placeholder"),
+            Some(&NxValue::String("Find docs".to_string()))
+        );
+        assert!(
+            !properties.contains_key("query"),
+            "Declared external state must not be returned as an invocable prop"
+        );
+        assert!(!result.state_snapshot.is_empty());
+    }
+
+    #[test]
+    fn initialize_component_source_rejects_external_state_as_host_prop() {
+        let source = r#"
+            external component <SearchBox /> = {
+              state { query:string }
+            }
+        "#;
+
+        let result = initialize_component_source(
+            source,
+            "external-component-state-prop.nx",
+            &ProgramBuildContext::empty(),
+            "SearchBox",
+            &NxValue::Record {
+                type_name: None,
+                properties: BTreeMap::from([(
+                    "query".to_string(),
+                    NxValue::String("docs".to_string()),
+                )]),
+            },
+        );
+        let ComponentInitEvalResult::Err(diagnostics) = result else {
+            panic!("Expected external state-as-prop initialization to fail");
+        };
+
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("unknown prop 'query'")),
+            "Expected unknown-prop runtime diagnostic, got {:?}",
+            diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.message.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn initialize_component_source_rejects_abstract_component_entrypoint() {
         let source = r#"
             abstract component <SearchBase placeholder:string />
@@ -490,7 +565,9 @@ mod tests {
             action SearchRequested = { query:string }
             action DoSearch = { query:string }
 
-            external component <SearchBox emits { SearchRequested } />
+            external component <SearchBox emits { SearchRequested } /> = {
+              state { query:string }
+            }
 
             let withHandler() = <SearchBox onSearchRequested=<DoSearch query={action.query} /> />
         "#;

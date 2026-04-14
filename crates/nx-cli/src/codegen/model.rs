@@ -1,8 +1,9 @@
 use nx_api::LibraryArtifact;
 use nx_hir::{
-    ast::TypeRef, EnumDef, Item, LoweredModule, RecordDef, RecordKind, TypeAlias, Visibility,
+    ast::TypeRef, Component, EnumDef, Item, LoweredModule, RecordDef, RecordKind, TypeAlias,
+    Visibility,
 };
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -35,10 +36,18 @@ pub struct ExportedRecord {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExportedExternalState {
+    pub component_name: String,
+    pub name: String,
+    pub fields: Vec<ExportedRecordField>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExportedType {
     Alias(ExportedAlias),
     Enum(ExportedEnum),
     Record(ExportedRecord),
+    ExternalState(ExportedExternalState),
 }
 
 impl ExportedType {
@@ -47,6 +56,7 @@ impl ExportedType {
             Self::Alias(alias) => &alias.name,
             Self::Enum(enum_def) => &enum_def.name,
             Self::Record(record) => &record.name,
+            Self::ExternalState(state) => &state.name,
         }
     }
 }
@@ -75,20 +85,50 @@ pub struct ExportedTypeGraph {
     owners: FxHashMap<String, PathBuf>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExportedTypeGraphBuild {
+    pub graph: ExportedTypeGraph,
+    pub warnings: Vec<String>,
+}
+
 impl ExportedTypeGraph {
+    #[allow(dead_code)]
     pub fn from_module(module: &LoweredModule, source_path: &Path) -> Result<Self, String> {
+        Ok(Self::from_module_with_warnings(module, source_path)?.graph)
+    }
+
+    pub fn from_module_with_warnings(
+        module: &LoweredModule,
+        source_path: &Path,
+    ) -> Result<ExportedTypeGraphBuild, String> {
         let file_name = source_path
             .file_name()
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("types.nx"));
         let module_path = module_output_stem(&file_name)?;
-        Ok(Self::from_exported_modules(vec![ExportedModule {
-            module_path,
+        let mut build = Self::build_from_exported_modules(vec![ExportedModule {
+            module_path: module_path.clone(),
             declarations: collect_exported_declarations(module),
-        }]))
+        }])?;
+
+        if build.graph.modules.is_empty() {
+            build.graph.modules.push(ExportedModule {
+                module_path,
+                declarations: Vec::new(),
+            });
+        }
+
+        Ok(build)
     }
 
+    #[allow(dead_code)]
     pub fn from_library(library: &LibraryArtifact) -> Result<Self, String> {
+        Ok(Self::from_library_with_warnings(library)?.graph)
+    }
+
+    pub fn from_library_with_warnings(
+        library: &LibraryArtifact,
+    ) -> Result<ExportedTypeGraphBuild, String> {
         let mut modules = Vec::new();
 
         for artifact in &library.modules {
@@ -117,7 +157,7 @@ impl ExportedTypeGraph {
         }
 
         modules.sort_by(|left, right| left.module_path.cmp(&right.module_path));
-        Ok(Self::from_exported_modules(modules))
+        Self::build_from_exported_modules(modules)
     }
 
     pub fn owner_module(&self, type_name: &str) -> Option<&Path> {
@@ -172,16 +212,120 @@ impl ExportedTypeGraph {
             .collect()
     }
 
-    fn from_exported_modules(modules: Vec<ExportedModule>) -> Self {
-        let mut owners = FxHashMap::default();
+    fn build_from_exported_modules(
+        modules: Vec<ExportedModule>,
+    ) -> Result<ExportedTypeGraphBuild, String> {
+        let mut explicit_owners = FxHashMap::default();
+        let mut generated_candidates = FxHashMap::<String, Vec<(usize, usize)>>::default();
+        let mut warnings = Vec::new();
 
-        for module in &modules {
-            for declaration in &module.declarations {
-                owners.insert(declaration.name().to_string(), module.module_path.clone());
+        for (module_index, module) in modules.iter().enumerate() {
+            for (declaration_index, declaration) in module.declarations.iter().enumerate() {
+                let name = declaration.name().to_string();
+                match &declaration.item {
+                    ExportedType::ExternalState(_) => {
+                        generated_candidates
+                            .entry(name)
+                            .or_default()
+                            .push((module_index, declaration_index));
+                    }
+                    _ => {
+                        explicit_owners
+                            .entry(name)
+                            .or_insert_with(|| module.module_path.clone());
+                    }
+                }
             }
         }
 
-        Self { modules, owners }
+        let mut generated_names_to_skip = FxHashSet::default();
+        for (name, candidates) in &generated_candidates {
+            if explicit_owners.contains_key(name) {
+                generated_names_to_skip.insert(name.clone());
+                for (module_index, declaration_index) in candidates {
+                    let Some(ExportedType::ExternalState(state)) = modules[*module_index]
+                        .declarations
+                        .get(*declaration_index)
+                        .map(|declaration| &declaration.item)
+                    else {
+                        continue;
+                    };
+                    warnings.push(format!(
+                        "Skipping generated component state contract '{}' for external component '{}' because it conflicts with exported declaration '{}'",
+                        state.name, state.component_name, state.name
+                    ));
+                }
+                continue;
+            }
+
+            if candidates.len() > 1 {
+                generated_names_to_skip.insert(name.clone());
+                for (module_index, declaration_index) in candidates {
+                    let Some(ExportedType::ExternalState(state)) = modules[*module_index]
+                        .declarations
+                        .get(*declaration_index)
+                        .map(|declaration| &declaration.item)
+                    else {
+                        continue;
+                    };
+                    warnings.push(format!(
+                        "Skipping generated component state contract '{}' for external component '{}' because another exported external component would generate the same companion name",
+                        state.name, state.component_name
+                    ));
+                }
+            }
+        }
+
+        let mut owners = FxHashMap::default();
+        let mut filtered_modules = Vec::with_capacity(modules.len());
+
+        for module in modules {
+            let declarations = module
+                .declarations
+                .into_iter()
+                .filter(|declaration| match &declaration.item {
+                    ExportedType::ExternalState(state) => {
+                        !generated_names_to_skip.contains(&state.name)
+                    }
+                    _ => true,
+                })
+                .collect::<Vec<_>>();
+
+            if declarations.is_empty() {
+                continue;
+            }
+
+            for declaration in &declarations {
+                if !matches!(declaration.item, ExportedType::ExternalState(_)) {
+                    owners
+                        .entry(declaration.name().to_string())
+                        .or_insert_with(|| module.module_path.clone());
+                }
+            }
+
+            filtered_modules.push(ExportedModule {
+                module_path: module.module_path,
+                declarations,
+            });
+        }
+
+        for module in &filtered_modules {
+            for declaration in &module.declarations {
+                if matches!(declaration.item, ExportedType::ExternalState(_)) {
+                    owners
+                        .entry(declaration.name().to_string())
+                        .or_insert_with(|| module.module_path.clone());
+                }
+            }
+        }
+
+        Ok(ExportedTypeGraphBuild {
+            graph: Self {
+                modules: filtered_modules,
+                owners,
+            },
+            warnings,
+        })
     }
 
     fn resolve_named_type_declaration<'a>(
@@ -259,6 +403,12 @@ fn collect_exported_declarations(module: &LoweredModule) -> Vec<ExportedTypeDecl
                 visibility: record.visibility,
                 item: ExportedType::Record(export_record(record)),
             }),
+            Item::Component(component) => {
+                export_external_state(component).map(|item| ExportedTypeDecl {
+                    visibility: component.visibility,
+                    item: ExportedType::ExternalState(item),
+                })
+            }
             _ => None,
         };
 
@@ -304,6 +454,26 @@ fn export_record(def: &RecordDef) -> ExportedRecord {
             })
             .collect(),
     }
+}
+
+fn export_external_state(component: &Component) -> Option<ExportedExternalState> {
+    if !component.is_external || component.state.is_empty() {
+        return None;
+    }
+
+    Some(ExportedExternalState {
+        component_name: component.name.as_str().to_string(),
+        name: format!("{}_state", component.name.as_str()),
+        fields: component
+            .state
+            .iter()
+            .map(|field| ExportedRecordField {
+                name: field.name.as_str().to_string(),
+                ty: field.ty.clone(),
+                has_default: false,
+            })
+            .collect(),
+    })
 }
 
 fn module_output_stem(path: &Path) -> Result<PathBuf, String> {
@@ -389,5 +559,158 @@ mod tests {
                 .expect("short text module"),
             Path::new("short-text")
         );
+    }
+
+    #[test]
+    fn collects_exported_external_component_state_contracts() {
+        let source = r#"
+            export external component <SearchBox placeholder:string /> = {
+              state { query:string = "docs" }
+            }
+        "#;
+        let module = lower_module(source, "components.nx");
+        let graph = ExportedTypeGraph::from_module(&module, Path::new("components.nx")).unwrap();
+
+        let declaration = graph
+            .declaration("SearchBox_state")
+            .expect("SearchBox_state declaration");
+        match &declaration.item {
+            ExportedType::ExternalState(state) => {
+                assert_eq!(state.component_name, "SearchBox");
+                assert_eq!(state.fields.len(), 1);
+                assert_eq!(state.fields[0].name, "query");
+                assert!(!state.fields[0].has_default);
+            }
+            other => panic!("Expected generated external state contract, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn skips_external_component_state_generation_when_name_conflicts_with_export() {
+        let source = r#"
+            export type SearchBox_state = string
+            export external component <SearchBox /> = {
+              state { query:string }
+            }
+        "#;
+        let module = lower_module(source, "components.nx");
+        let build =
+            ExportedTypeGraph::from_module_with_warnings(&module, Path::new("components.nx"))
+                .expect("graph build");
+
+        assert!(build.graph.declaration("SearchBox_state").is_some());
+        assert!(
+            !matches!(
+                build
+                    .graph
+                    .declaration("SearchBox_state")
+                    .map(|declaration| &declaration.item),
+                Some(ExportedType::ExternalState(_))
+            ),
+            "explicit export should win when generated state collides"
+        );
+        assert_eq!(build.warnings.len(), 1);
+        assert!(build.warnings[0].contains("SearchBox_state"));
+    }
+
+    #[test]
+    fn skips_external_component_state_generation_when_alias_module_sorts_first() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let library_dir = temp_dir.path().join("ui");
+        fs::create_dir_all(&library_dir).expect("library dir");
+        fs::write(
+            library_dir.join("a-alias.nx"),
+            "export type SearchBox_state = string",
+        )
+        .expect("alias file");
+        fs::write(
+            library_dir.join("z-search-box.nx"),
+            r#"export external component <SearchBox /> = {
+  state { query:string }
+}"#,
+        )
+        .expect("component file");
+
+        let artifact = build_library_artifact_from_directory(&library_dir).expect("library build");
+        let build = ExportedTypeGraph::from_library_with_warnings(&artifact).expect("graph build");
+
+        assert!(
+            !matches!(
+                build
+                    .graph
+                    .declaration("SearchBox_state")
+                    .map(|declaration| &declaration.item),
+                Some(ExportedType::ExternalState(_))
+            ),
+            "explicit export should win when alias module sorts first"
+        );
+        assert_eq!(build.warnings.len(), 1);
+        assert!(build.warnings[0].contains("SearchBox_state"));
+    }
+
+    #[test]
+    fn skips_external_component_state_generation_when_component_module_sorts_first() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let library_dir = temp_dir.path().join("ui");
+        fs::create_dir_all(&library_dir).expect("library dir");
+        fs::write(
+            library_dir.join("a-search-box.nx"),
+            r#"export external component <SearchBox /> = {
+  state { query:string }
+}"#,
+        )
+        .expect("component file");
+        fs::write(
+            library_dir.join("z-alias.nx"),
+            "export type SearchBox_state = string",
+        )
+        .expect("alias file");
+
+        let artifact = build_library_artifact_from_directory(&library_dir).expect("library build");
+        let build = ExportedTypeGraph::from_library_with_warnings(&artifact).expect("graph build");
+
+        assert!(
+            !matches!(
+                build
+                    .graph
+                    .declaration("SearchBox_state")
+                    .map(|declaration| &declaration.item),
+                Some(ExportedType::ExternalState(_))
+            ),
+            "explicit export should win when component module sorts first"
+        );
+        assert_eq!(build.warnings.len(), 1);
+        assert!(build.warnings[0].contains("SearchBox_state"));
+    }
+
+    #[test]
+    fn skips_external_component_state_generation_when_multiple_components_share_name() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let library_dir = temp_dir.path().join("ui");
+        fs::create_dir_all(&library_dir).expect("library dir");
+        fs::write(
+            library_dir.join("a-search-box.nx"),
+            r#"export external component <SearchBox /> = {
+  state { query:string }
+}"#,
+        )
+        .expect("component file");
+        fs::write(
+            library_dir.join("z-search-box.nx"),
+            r#"export external component <SearchBox /> = {
+  state { theme:string }
+}"#,
+        )
+        .expect("component file");
+
+        let artifact = build_library_artifact_from_directory(&library_dir).expect("library build");
+        let build = ExportedTypeGraph::from_library_with_warnings(&artifact).expect("graph build");
+
+        assert!(build.graph.declaration("SearchBox_state").is_none());
+        assert_eq!(build.warnings.len(), 2);
+        assert!(build
+            .warnings
+            .iter()
+            .all(|warning| warning.contains("SearchBox_state")));
     }
 }

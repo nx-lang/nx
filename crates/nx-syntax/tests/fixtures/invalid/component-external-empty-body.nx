@@ -1,0 +1,2 @@
+external component <SearchBox /> = {
+}

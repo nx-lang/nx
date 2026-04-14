@@ -1,8 +1,5 @@
-# external-components Specification
+## MODIFIED Requirements
 
-## Purpose
-Defines external component declarations that expose public UI contracts without NX implementation, including evaluation as typed component records, stateless lifecycle bindings, and host serialization identity preservation.
-## Requirements
 ### Requirement: External components expose public UI contracts without NX implementation
 The system SHALL treat an `external component` declaration as a component contract consisting of its
 effective props, prop defaults, content props, emitted actions, and optional declared host-managed
@@ -66,14 +63,3 @@ NX-managed local state.
 - **WHEN** a component instance created from `external component <SearchBox emits { SearchRequested } /> = { state { query:string } }` with bound handler `onSearchRequested=<DoSearch query={action.query} />` dispatches `<SearchRequested query="docs" />`
 - **THEN** dispatch SHALL return an effect action list containing exactly one `DoSearch` action with `query="docs"`
 - **AND** SHALL return a next component-state snapshot representing the same empty NX-managed external-component state
-
-### Requirement: External component values preserve component identity across host serialization
-The system SHALL preserve the component identity and normalized prop fields when a host serializes
-the result of evaluating a concrete external component value to JSON or another wire format so that
-a client can instantiate the corresponding UI component.
-
-#### Scenario: JSON serialization preserves external component identity and props
-- **WHEN** a host serializes the result of evaluating source containing `external component <SearchBox placeholder:string showSearchIcon:bool /> let render() = <SearchBox placeholder="Docs" showSearchIcon=true />` to JSON
-- **THEN** the serialized payload SHALL preserve component identity `SearchBox`
-- **AND** SHALL preserve normalized prop fields `placeholder="Docs"` and `showSearchIcon=true`
-

@@ -1,0 +1,5 @@
+external component <SearchBox placeholder:string /> = {
+  state {
+    query:string
+  }
+}

@@ -1212,25 +1212,43 @@
           "type": "CHOICE",
           "members": [
             {
-              "type": "FIELD",
-              "name": "state",
-              "content": {
-                "type": "SYMBOL",
-                "name": "state_group"
-              }
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "FIELD",
+                  "name": "state",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "state_group"
+                  }
+                },
+                {
+                  "type": "CHOICE",
+                  "members": [
+                    {
+                      "type": "FIELD",
+                      "name": "body",
+                      "content": {
+                        "type": "SYMBOL",
+                        "name": "value_expression"
+                      }
+                    },
+                    {
+                      "type": "BLANK"
+                    }
+                  ]
+                }
+              ]
             },
             {
-              "type": "BLANK"
+              "type": "FIELD",
+              "name": "body",
+              "content": {
+                "type": "SYMBOL",
+                "name": "value_expression"
+              }
             }
           ]
-        },
-        {
-          "type": "FIELD",
-          "name": "body",
-          "content": {
-            "type": "SYMBOL",
-            "name": "value_expression"
-          }
         },
         {
           "type": "STRING",
