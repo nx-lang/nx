@@ -130,6 +130,20 @@ byte[] resultBytes = NxRuntime.EvaluateBytes("let root() = { 42 }");
 int value = MessagePackSerializer.Deserialize<int>(resultBytes);
 ```
 
+The raw-byte APIs now let you choose the returned wire format per call. `MessagePack` remains the
+default:
+
+```csharp
+using System.Text;
+using NxLang.Nx;
+
+byte[] jsonBytes = NxRuntime.EvaluateBytes(
+    "let root() = { { answer: 42 } }",
+    NxOutputFormat.Json);
+
+string json = Encoding.UTF8.GetString(jsonBytes);
+```
+
 ### Reusable Program Artifacts
 
 ```csharp
@@ -155,23 +169,25 @@ selected loaded snapshots instead of reading libraries from disk on demand. The 
 `NxProgramArtifact.Build(source, fileName)` convenience still exists, but it now creates a
 transient empty registry/build-context pair internally before calling the native build API.
 
-### Optional JSON Debug Output
+### Direct JSON Output
 
 ```csharp
+using System.Text.Json;
 using NxLang.Nx;
 
-byte[] resultBytes = NxRuntime.EvaluateBytes("let root() = { 42 }");
-string json = NxRuntime.ValueBytesToJson(resultBytes);
+JsonElement json = NxRuntime.EvaluateJson("let root() = { { answer: 42 } }");
+int answer = json.GetProperty("answer").GetInt32();
 ```
 
-The native NX host interface uses MessagePack as its canonical wire format. `ValueBytesToJson`,
-`DiagnosticsBytesToJson`, `ComponentInitResultBytesToJson`, and `ComponentDispatchResultBytesToJson`
-convert canonical byte payloads into JSON for debugging or logging.
+Use the JSON convenience APIs when C# needs a parsed JSON view without introducing MessagePack into
+that call path. Use the raw-byte overloads with `NxOutputFormat.Json` when you want UTF-8 JSON
+bytes that can be forwarded directly to another client.
 
 ### Component Lifecycle
 
 ```csharp
 using NxLang.Nx;
+using System.Text.Json;
 
 string source = """
     action SearchSubmitted = { searchString:string }
@@ -204,6 +220,29 @@ NxComponentDispatchResult<SearchSubmittedAction> dispatch =
         });
 ```
 
+If the host wants JSON results instead of typed MessagePack models:
+
+```csharp
+NxComponentInitResult<JsonElement> initJson =
+    NxRuntime.InitializeComponentJson(
+        source,
+        "SearchBox",
+        new SearchBoxProps { Placeholder = "Find docs" });
+
+NxComponentDispatchResult<JsonElement> dispatchJson =
+    NxRuntime.DispatchComponentActionsJson(
+        source,
+        initJson.StateSnapshot,
+        new[]
+        {
+            new SearchSubmittedAction
+            {
+                Type = "SearchSubmitted",
+                SearchString = "docs"
+            }
+        });
+```
+
 - Initialization returns the rendered element plus an opaque `StateSnapshot` byte array that the host owns.
 - Dispatch consumes that saved snapshot and an ordered action list, then returns effect actions plus the next snapshot.
 - Reuse a saved `StateSnapshot` only with the exact same `NxProgramArtifact` revision that produced it.
@@ -211,10 +250,10 @@ NxComponentDispatchResult<SearchSubmittedAction> dispatch =
 - The managed source-based component helpers build transient `NxProgramArtifact`s internally and then
   call the native program-artifact component APIs. The public native C ABI itself is artifact-first.
 - State defaults run only during initialization in this change. Declarative state-update actions are still a follow-up, so dispatch currently preserves state values while still producing effect actions from bound handlers.
-- Component lifecycle APIs in the managed binding use canonical NX bytes. Persist the returned `StateSnapshot`
-  bytes and pass them back on later dispatch calls.
-- The native Rust FFI exposes separate MessagePack-to-JSON debug helpers for tooling and logging, but
-  JSON is no longer a primary transport for init/dispatch.
+- Component lifecycle inputs remain MessagePack-only in this phase. Typed prop/action overloads still
+  serialize those inputs as MessagePack before calling the runtime.
+- JSON component results encode `state_snapshot` as base64 on the wire, and the managed binding
+  decodes that back to `StateSnapshot` bytes for later dispatch calls.
 
 ### Error Handling
 

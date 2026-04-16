@@ -6,13 +6,12 @@ use nx_api::{
 };
 use nx_ffi::{
     nx_build_program_artifact, nx_component_dispatch_actions_program_artifact,
-    nx_component_dispatch_result_msgpack_to_json, nx_component_init_program_artifact,
-    nx_component_init_result_msgpack_to_json, nx_create_library_registry,
-    nx_create_program_build_context, nx_diagnostics_msgpack_to_json, nx_eval_program_artifact,
-    nx_eval_source, nx_ffi_abi_version, nx_free_buffer, nx_free_library_registry,
-    nx_free_program_artifact, nx_free_program_build_context, nx_load_library_into_registry,
-    nx_value_msgpack_to_json, NxBuffer, NxEvalStatus, NxLibraryRegistryHandle,
-    NxProgramArtifactHandle, NxProgramBuildContextHandle, NX_FFI_ABI_VERSION,
+    nx_component_init_program_artifact, nx_create_library_registry,
+    nx_create_program_build_context, nx_eval_program_artifact, nx_eval_source, nx_ffi_abi_version,
+    nx_free_buffer, nx_free_library_registry, nx_free_program_artifact,
+    nx_free_program_build_context, nx_load_library_into_registry, NxBuffer, NxEvalStatus,
+    NxLibraryRegistryHandle, NxOutputFormat, NxProgramArtifactHandle, NxProgramBuildContextHandle,
+    NX_FFI_ABI_VERSION,
 };
 use nx_interpreter::Interpreter;
 use nx_value::NxValue;
@@ -37,7 +36,15 @@ fn copy_and_free_buffer(buffer: NxBuffer) -> Vec<u8> {
     bytes
 }
 
-fn eval_msgpack_with_file_name(source: &str, file_name: &str) -> (NxEvalStatus, Vec<u8>) {
+fn output_format_value(output_format: NxOutputFormat) -> u32 {
+    output_format as u32
+}
+
+fn eval_with_output_format_with_file_name(
+    source: &str,
+    file_name: &str,
+    output_format: NxOutputFormat,
+) -> (NxEvalStatus, Vec<u8>) {
     let source_bytes = source.as_bytes();
     let file_name_bytes = file_name.as_bytes();
     let mut out = empty_buffer();
@@ -47,14 +54,25 @@ fn eval_msgpack_with_file_name(source: &str, file_name: &str) -> (NxEvalStatus, 
         source_bytes.len(),
         file_name_bytes.as_ptr(),
         file_name_bytes.len(),
+        output_format_value(output_format),
         &mut out as *mut NxBuffer,
     );
 
     (status, copy_and_free_buffer(out))
 }
 
+fn eval_msgpack_with_file_name(source: &str, file_name: &str) -> (NxEvalStatus, Vec<u8>) {
+    eval_with_output_format_with_file_name(source, file_name, NxOutputFormat::MessagePack)
+}
+
 fn eval_msgpack(source: &str) -> (NxEvalStatus, Vec<u8>) {
     eval_msgpack_with_file_name(source, "test.nx")
+}
+
+fn eval_json(source: &str) -> (NxEvalStatus, String) {
+    let (status, bytes) =
+        eval_with_output_format_with_file_name(source, "test.nx", NxOutputFormat::Json);
+    (status, String::from_utf8(bytes).unwrap())
 }
 
 fn create_library_registry() -> *mut NxLibraryRegistryHandle {
@@ -132,10 +150,28 @@ fn eval_msgpack_with_program_artifact(
 
     let status = nx_eval_program_artifact(
         program_artifact as *const NxProgramArtifactHandle,
+        output_format_value(NxOutputFormat::MessagePack),
         &mut out as *mut NxBuffer,
     );
 
     (status, copy_and_free_buffer(out))
+}
+
+fn eval_json_with_program_artifact(
+    program_artifact: *mut NxProgramArtifactHandle,
+) -> (NxEvalStatus, String) {
+    let mut out = empty_buffer();
+
+    let status = nx_eval_program_artifact(
+        program_artifact as *const NxProgramArtifactHandle,
+        output_format_value(NxOutputFormat::Json),
+        &mut out as *mut NxBuffer,
+    );
+
+    (
+        status,
+        String::from_utf8(copy_and_free_buffer(out)).unwrap(),
+    )
 }
 
 fn component_init_msgpack_with_program_artifact(
@@ -156,10 +192,39 @@ fn component_init_msgpack_with_program_artifact(
         component_name_bytes.len(),
         props_ptr,
         props_len,
+        output_format_value(NxOutputFormat::MessagePack),
         &mut out as *mut NxBuffer,
     );
 
     (status, copy_and_free_buffer(out))
+}
+
+fn component_init_json_with_program_artifact(
+    program_artifact: *mut NxProgramArtifactHandle,
+    component_name: &str,
+    props: Option<&[u8]>,
+) -> (NxEvalStatus, String) {
+    let component_name_bytes = component_name.as_bytes();
+    let mut out = empty_buffer();
+
+    let (props_ptr, props_len) = props
+        .map(|bytes| (bytes.as_ptr(), bytes.len()))
+        .unwrap_or((std::ptr::null(), 0));
+
+    let status = nx_component_init_program_artifact(
+        program_artifact as *const NxProgramArtifactHandle,
+        component_name_bytes.as_ptr(),
+        component_name_bytes.len(),
+        props_ptr,
+        props_len,
+        output_format_value(NxOutputFormat::Json),
+        &mut out as *mut NxBuffer,
+    );
+
+    (
+        status,
+        String::from_utf8(copy_and_free_buffer(out)).unwrap(),
+    )
 }
 
 fn component_dispatch_msgpack_with_program_artifact(
@@ -175,20 +240,34 @@ fn component_dispatch_msgpack_with_program_artifact(
         state_snapshot.len(),
         actions_msgpack.as_ptr(),
         actions_msgpack.len(),
+        output_format_value(NxOutputFormat::MessagePack),
         &mut out as *mut NxBuffer,
     );
 
     (status, copy_and_free_buffer(out))
 }
 
-fn json_from_msgpack(
-    payload: &[u8],
-    converter: unsafe extern "C" fn(*const u8, usize, *mut NxBuffer) -> NxEvalStatus,
+fn component_dispatch_json_with_program_artifact(
+    program_artifact: *mut NxProgramArtifactHandle,
+    state_snapshot: &[u8],
+    actions_msgpack: &[u8],
 ) -> (NxEvalStatus, String) {
     let mut out = empty_buffer();
-    let status = unsafe { converter(payload.as_ptr(), payload.len(), &mut out as *mut NxBuffer) };
-    let json = String::from_utf8(copy_and_free_buffer(out)).unwrap();
-    (status, json)
+
+    let status = nx_component_dispatch_actions_program_artifact(
+        program_artifact as *const NxProgramArtifactHandle,
+        state_snapshot.as_ptr(),
+        state_snapshot.len(),
+        actions_msgpack.as_ptr(),
+        actions_msgpack.len(),
+        output_format_value(NxOutputFormat::Json),
+        &mut out as *mut NxBuffer,
+    );
+
+    (
+        status,
+        String::from_utf8(copy_and_free_buffer(out)).unwrap(),
+    )
 }
 
 #[derive(Deserialize)]
@@ -211,6 +290,13 @@ fn ffi_msgpack_success_round_trip() {
         NxValue::from_msgpack_slice(&bytes).unwrap(),
         NxValue::Int(42)
     );
+}
+
+#[test]
+fn ffi_json_success_round_trip() {
+    let (status, json) = eval_json("let root() = { 42 }");
+    assert!(matches!(status, NxEvalStatus::Ok));
+    assert_eq!(json, "42");
 }
 
 #[test]
@@ -258,6 +344,24 @@ let root() = { answer() }"#;
         NxValue::from_msgpack_slice(&eval_bytes).unwrap(),
         NxValue::Int(42)
     );
+}
+
+#[test]
+fn ffi_eval_program_artifact_returns_json_success_directly() {
+    let build_context = create_empty_build_context();
+    let (program, build_status, build_bytes) =
+        build_program_artifact_handle(build_context, "let root() = { 42 }", "root.nx");
+    nx_free_program_build_context(build_context);
+
+    assert!(matches!(build_status, NxEvalStatus::Ok));
+    assert!(build_bytes.is_empty());
+    assert!(!program.is_null());
+
+    let (status, json) = eval_json_with_program_artifact(program);
+    nx_free_program_artifact(program);
+
+    assert!(matches!(status, NxEvalStatus::Ok));
+    assert_eq!(json, "42");
 }
 
 #[test]
@@ -367,7 +471,11 @@ fn ffi_program_artifact_entry_points_reject_null_handles() {
     let _ = copy_and_free_buffer(out);
 
     let mut out = empty_buffer();
-    let status = nx_eval_program_artifact(std::ptr::null(), &mut out as *mut NxBuffer);
+    let status = nx_eval_program_artifact(
+        std::ptr::null(),
+        output_format_value(NxOutputFormat::MessagePack),
+        &mut out as *mut NxBuffer,
+    );
     assert!(matches!(status, NxEvalStatus::InvalidArgument));
     let _ = copy_and_free_buffer(out);
 
@@ -378,6 +486,7 @@ fn ffi_program_artifact_entry_points_reject_null_handles() {
         "SearchBox".len(),
         std::ptr::null(),
         0,
+        output_format_value(NxOutputFormat::MessagePack),
         &mut out as *mut NxBuffer,
     );
     assert!(matches!(status, NxEvalStatus::InvalidArgument));
@@ -390,6 +499,7 @@ fn ffi_program_artifact_entry_points_reject_null_handles() {
         0,
         std::ptr::null(),
         0,
+        output_format_value(NxOutputFormat::MessagePack),
         &mut out as *mut NxBuffer,
     );
     assert!(matches!(status, NxEvalStatus::InvalidArgument));
@@ -468,7 +578,94 @@ let root() = { 0 }"#;
 }
 
 #[test]
-fn ffi_component_dispatch_round_trips_effect_payloads_in_msgpack_and_debug_json() {
+fn ffi_eval_program_artifact_returns_json_diagnostics_directly() {
+    let build_context = create_empty_build_context();
+    let (program, build_status, build_bytes) =
+        build_program_artifact_handle(build_context, "let helper() = { 42 }", "no-root.nx");
+    nx_free_program_build_context(build_context);
+
+    assert!(matches!(build_status, NxEvalStatus::Ok));
+    assert!(build_bytes.is_empty());
+    assert!(!program.is_null());
+
+    let (status, json) = eval_json_with_program_artifact(program);
+    nx_free_program_artifact(program);
+
+    assert!(matches!(status, NxEvalStatus::Error));
+    let diagnostics: Vec<NxDiagnostic> = serde_json::from_str(&json).unwrap();
+    assert!(!diagnostics.is_empty());
+}
+
+#[test]
+fn ffi_value_entry_points_reject_unknown_output_format() {
+    let mut out = empty_buffer();
+    let status = nx_eval_source(
+        b"let root() = { 42 }".as_ptr(),
+        "let root() = { 42 }".len(),
+        b"input.nx".as_ptr(),
+        "input.nx".len(),
+        42,
+        &mut out as *mut NxBuffer,
+    );
+    assert!(matches!(status, NxEvalStatus::InvalidArgument));
+    assert!(copy_and_free_buffer(out).is_empty());
+
+    let component_source = r#"
+        action SearchSubmitted = { searchString:string }
+
+        component <SearchBox placeholder:string = "Find docs" emits { SearchSubmitted } /> = {
+          state { query:string = {placeholder} }
+          <TextInput value={query} placeholder={placeholder} />
+        }
+
+        let root() = { 0 }
+    "#;
+    let build_context = create_empty_build_context();
+    let (program, build_status, build_bytes) =
+        build_program_artifact_handle(build_context, component_source, "component.nx");
+    nx_free_program_build_context(build_context);
+
+    assert!(matches!(build_status, NxEvalStatus::Ok));
+    assert!(build_bytes.is_empty());
+    assert!(!program.is_null());
+
+    let mut out = empty_buffer();
+    let status = nx_eval_program_artifact(program as *const NxProgramArtifactHandle, 42, &mut out);
+    assert!(matches!(status, NxEvalStatus::InvalidArgument));
+    assert!(copy_and_free_buffer(out).is_empty());
+
+    let mut out = empty_buffer();
+    let status = nx_component_init_program_artifact(
+        program as *const NxProgramArtifactHandle,
+        b"SearchBox".as_ptr(),
+        "SearchBox".len(),
+        std::ptr::null(),
+        0,
+        42,
+        &mut out,
+    );
+    assert!(matches!(status, NxEvalStatus::InvalidArgument));
+    assert!(copy_and_free_buffer(out).is_empty());
+
+    let actions_msgpack = rmp_serde::to_vec_named(&Vec::<NxValue>::new()).unwrap();
+    let mut out = empty_buffer();
+    let status = nx_component_dispatch_actions_program_artifact(
+        program as *const NxProgramArtifactHandle,
+        std::ptr::null(),
+        0,
+        actions_msgpack.as_ptr(),
+        actions_msgpack.len(),
+        42,
+        &mut out,
+    );
+    nx_free_program_artifact(program);
+
+    assert!(matches!(status, NxEvalStatus::InvalidArgument));
+    assert!(copy_and_free_buffer(out).is_empty());
+}
+
+#[test]
+fn ffi_component_dispatch_round_trips_effect_payloads_in_msgpack_and_json() {
     let source = r#"
         action SearchSubmitted = { searchString:string }
         action DoSearch = { search:string }
@@ -518,8 +715,20 @@ fn ffi_component_dispatch_round_trips_effect_payloads_in_msgpack_and_debug_json(
     let dispatch_result: ComponentDispatchResult = rmp_serde::from_slice(&msgpack_bytes).unwrap();
     assert_eq!(dispatch_result.effects.len(), 1);
 
-    let (json_status, json_payload) =
-        json_from_msgpack(&msgpack_bytes, nx_component_dispatch_result_msgpack_to_json);
+    let build_context = create_empty_build_context();
+    let (json_handle, status, bytes) =
+        build_program_artifact_handle(build_context, source, "ffi-dispatch.nx");
+    nx_free_program_build_context(build_context);
+    assert!(matches!(status, NxEvalStatus::Ok));
+    assert!(bytes.is_empty());
+    assert!(!json_handle.is_null());
+
+    let (json_status, json_payload) = component_dispatch_json_with_program_artifact(
+        json_handle,
+        &init.state_snapshot,
+        &actions_msgpack,
+    );
+    nx_free_program_artifact(json_handle);
     assert!(matches!(json_status, NxEvalStatus::Ok));
     let dispatch_result: JsonComponentDispatchResult = serde_json::from_str(&json_payload).unwrap();
     assert_eq!(dispatch_result.effects.len(), 1);
@@ -532,24 +741,15 @@ fn ffi_component_dispatch_round_trips_effect_payloads_in_msgpack_and_debug_json(
 }
 
 #[test]
-fn ffi_value_and_diagnostics_json_converters_round_trip() {
-    let (status, bytes) = eval_msgpack("let root() = { 42 }");
-    assert!(matches!(status, NxEvalStatus::Ok));
-
-    let (json_status, json) = json_from_msgpack(&bytes, nx_value_msgpack_to_json);
-    assert!(matches!(json_status, NxEvalStatus::Ok));
-    assert_eq!(json, "42");
-
-    let (status, bytes) = eval_msgpack("let x = ");
+fn ffi_source_eval_returns_json_diagnostics_directly() {
+    let (status, json) = eval_json("let x = ");
     assert!(matches!(status, NxEvalStatus::Error));
-    let (json_status, json) = json_from_msgpack(&bytes, nx_diagnostics_msgpack_to_json);
-    assert!(matches!(json_status, NxEvalStatus::Ok));
     let diagnostics: Vec<NxDiagnostic> = serde_json::from_str(&json).unwrap();
     assert!(!diagnostics.is_empty());
 }
 
 #[test]
-fn ffi_component_init_round_trips_state_snapshot_debug_json() {
+fn ffi_component_init_round_trips_state_snapshot_in_json_with_msgpack_props() {
     let source = r#"
         component <SearchBox placeholder:string = "Find docs" /> = {
           state { query:string = {placeholder} }
@@ -579,8 +779,17 @@ fn ffi_component_init_round_trips_state_snapshot_debug_json() {
     let init_result: ComponentInitResult = rmp_serde::from_slice(&msgpack_bytes).unwrap();
     assert!(!init_result.state_snapshot.is_empty());
 
+    let build_context = create_empty_build_context();
+    let (json_program, build_status, build_bytes) =
+        build_program_artifact_handle(build_context, source, "ffi-component-init-json.nx");
+    nx_free_program_build_context(build_context);
+    assert!(matches!(build_status, NxEvalStatus::Ok));
+    assert!(build_bytes.is_empty());
+    assert!(!json_program.is_null());
+
     let (json_status, json_payload) =
-        json_from_msgpack(&msgpack_bytes, nx_component_init_result_msgpack_to_json);
+        component_init_json_with_program_artifact(json_program, "SearchBox", Some(&props_msgpack));
+    nx_free_program_artifact(json_program);
     assert!(matches!(json_status, NxEvalStatus::Ok));
     let init_result: JsonComponentInitResult = serde_json::from_str(&json_payload).unwrap();
     assert!(!init_result.state_snapshot.is_empty());

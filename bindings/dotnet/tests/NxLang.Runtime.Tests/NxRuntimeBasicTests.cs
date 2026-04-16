@@ -2,6 +2,8 @@
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
 using System;
+using System.Text;
+using System.Text.Json;
 using MessagePack;
 using NxLang.Nx;
 using Xunit;
@@ -22,14 +24,47 @@ public class NxRuntimeBasicTests
     }
 
     [Fact]
-    public void ValueBytesToJson_SimpleInteger_ReturnsCorrectJson()
+    public void EvaluateBytes_JsonOutput_ReturnsCorrectJson()
     {
         string source = "let root() = { 42 }";
 
-        byte[] result = NxRuntime.EvaluateBytes(source);
-        string json = NxRuntime.ValueBytesToJson(result);
+        byte[] result = NxRuntime.EvaluateBytes(source, NxOutputFormat.Json);
+        string json = Encoding.UTF8.GetString(result);
 
         Assert.Equal("42", json);
+    }
+
+    [Fact]
+    public void EvaluateJson_SimpleInteger_ReturnsCorrectJsonElement()
+    {
+        string source = "let root() = { 42 }";
+
+        JsonElement result = NxRuntime.EvaluateJson(source);
+
+        Assert.Equal(42, result.GetInt32());
+    }
+
+    [Fact]
+    public void EvaluateJson_WithBuildContext_ReturnsCorrectJsonElement()
+    {
+        string source = "let root() = { 42 }";
+
+        using NxLibraryRegistry registry = new();
+        using NxProgramBuildContext buildContext = registry.CreateBuildContext();
+        JsonElement result = NxRuntime.EvaluateJson(source, buildContext);
+
+        Assert.Equal(42, result.GetInt32());
+    }
+
+    [Fact]
+    public void EvaluateJson_WithProgramArtifact_ReturnsCorrectJsonElement()
+    {
+        string source = "let root() = { 42 }";
+
+        using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source);
+        JsonElement result = NxRuntime.EvaluateJson(programArtifact);
+
+        Assert.Equal(42, result.GetInt32());
     }
 
     [Fact]
@@ -76,12 +111,12 @@ public class NxRuntimeBasicTests
     }
 
     [Fact]
-    public void ValueBytesToJson_WithFileName_DoesNotThrow()
+    public void EvaluateBytes_JsonOutput_WithFileName_DoesNotThrow()
     {
         string source = "let root() = { 42 }";
 
-        byte[] resultBytes = NxRuntime.EvaluateBytes(source, "test.nx");
-        string result = NxRuntime.ValueBytesToJson(resultBytes);
+        byte[] resultBytes = NxRuntime.EvaluateBytes(source, NxOutputFormat.Json, "test.nx");
+        string result = Encoding.UTF8.GetString(resultBytes);
 
         Assert.Equal("42", result);
     }

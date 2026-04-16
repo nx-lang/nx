@@ -11,12 +11,11 @@ use nx_api::{
     NxSeverity, ProgramArtifact, ProgramBuildContext,
 };
 use nx_value::NxValue;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::any::Any;
 use std::panic;
 
-pub const NX_FFI_ABI_VERSION: u32 = 7;
+pub const NX_FFI_ABI_VERSION: u32 = 8;
 
 #[repr(C)]
 pub struct NxBuffer {
@@ -61,6 +60,25 @@ pub enum NxEvalStatus {
     Panic = 255,
 }
 
+#[repr(u32)]
+#[derive(Clone, Copy)]
+pub enum NxOutputFormat {
+    MessagePack = 0,
+    Json = 1,
+}
+
+impl TryFrom<u32> for NxOutputFormat {
+    type Error = NxEvalStatus;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::MessagePack),
+            1 => Ok(Self::Json),
+            _ => Err(NxEvalStatus::InvalidArgument),
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct JsonComponentInitResult<'a> {
     rendered: &'a NxValue,
@@ -71,6 +89,20 @@ struct JsonComponentInitResult<'a> {
 struct JsonComponentDispatchResult<'a> {
     effects: &'a [NxValue],
     state_snapshot: String,
+}
+
+enum FfiPayload {
+    Msgpack(Vec<u8>),
+    Json(String),
+}
+
+impl FfiPayload {
+    fn write(self, out_buffer: *mut NxBuffer) {
+        match self {
+            Self::Msgpack(payload) => write_msgpack_payload(out_buffer, payload),
+            Self::Json(payload) => write_json_payload(out_buffer, payload),
+        }
+    }
 }
 
 #[no_mangle]
@@ -121,6 +153,10 @@ fn prepare_out_buffer(out_buffer: *mut NxBuffer) -> Result<(), NxEvalStatus> {
     }
 
     Ok(())
+}
+
+fn parse_output_format(output_format: u32) -> Result<NxOutputFormat, NxEvalStatus> {
+    NxOutputFormat::try_from(output_format)
 }
 
 fn prepare_out_program_artifact_handle(
@@ -184,18 +220,21 @@ fn finish_msgpack_entry(
     }
 }
 
-fn finish_json_entry(
+fn finish_output_entry(
     out_buffer: *mut NxBuffer,
-    result: Result<Result<(NxEvalStatus, String), String>, Box<dyn Any + Send>>,
+    output_format: NxOutputFormat,
+    result: Result<Result<(NxEvalStatus, FfiPayload), String>, Box<dyn Any + Send>>,
 ) -> NxEvalStatus {
     match result {
         Ok(Ok((status, payload))) => {
-            write_json_payload(out_buffer, payload);
+            payload.write(out_buffer);
             status
         }
         Ok(Err(message)) => {
-            if let Ok(payload) = serde_json::to_string(&ffi_error_diagnostics(message)) {
-                write_json_payload(out_buffer, payload);
+            if let Ok(payload) =
+                serialize_diagnostics_payload(output_format, &ffi_error_diagnostics(message))
+            {
+                payload.write(out_buffer);
             }
             NxEvalStatus::Error
         }
@@ -259,10 +298,6 @@ fn json_component_init_payload(result: &ComponentInitResult) -> Result<String, S
     .map_err(|e| format!("json serialize failed: {e}"))
 }
 
-fn decode_msgpack_payload<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, String> {
-    rmp_serde::from_slice(bytes).map_err(|e| format!("messagepack decode failed: {e}"))
-}
-
 fn json_component_dispatch_payload(result: &ComponentDispatchResult) -> Result<String, String> {
     serde_json::to_string(&JsonComponentDispatchResult {
         effects: &result.effects,
@@ -271,40 +306,102 @@ fn json_component_dispatch_payload(result: &ComponentDispatchResult) -> Result<S
     .map_err(|e| format!("json serialize failed: {e}"))
 }
 
+fn serialize_eval_payload(
+    output_format: NxOutputFormat,
+    value: &NxValue,
+) -> Result<FfiPayload, String> {
+    match output_format {
+        NxOutputFormat::MessagePack => Ok(FfiPayload::Msgpack(
+            rmp_serde::to_vec(value).map_err(|e| format!("messagepack serialize failed: {e}"))?,
+        )),
+        NxOutputFormat::Json => Ok(FfiPayload::Json(
+            value
+                .to_json_string()
+                .map_err(|e| format!("json serialize failed: {e}"))?,
+        )),
+    }
+}
+
+fn serialize_diagnostics_payload(
+    output_format: NxOutputFormat,
+    diagnostics: &[NxDiagnostic],
+) -> Result<FfiPayload, String> {
+    match output_format {
+        NxOutputFormat::MessagePack => Ok(FfiPayload::Msgpack(
+            rmp_serde::to_vec_named(diagnostics)
+                .map_err(|e| format!("messagepack serialize failed: {e}"))?,
+        )),
+        NxOutputFormat::Json => Ok(FfiPayload::Json(
+            serde_json::to_string(diagnostics)
+                .map_err(|e| format!("json serialize failed: {e}"))?,
+        )),
+    }
+}
+
+fn serialize_component_init_payload(
+    output_format: NxOutputFormat,
+    result: &ComponentInitResult,
+) -> Result<FfiPayload, String> {
+    match output_format {
+        NxOutputFormat::MessagePack => Ok(FfiPayload::Msgpack(
+            rmp_serde::to_vec_named(result)
+                .map_err(|e| format!("messagepack serialize failed: {e}"))?,
+        )),
+        NxOutputFormat::Json => Ok(FfiPayload::Json(json_component_init_payload(result)?)),
+    }
+}
+
+fn serialize_component_dispatch_payload(
+    output_format: NxOutputFormat,
+    result: &ComponentDispatchResult,
+) -> Result<FfiPayload, String> {
+    match output_format {
+        NxOutputFormat::MessagePack => Ok(FfiPayload::Msgpack(
+            rmp_serde::to_vec_named(result)
+                .map_err(|e| format!("messagepack serialize failed: {e}"))?,
+        )),
+        NxOutputFormat::Json => Ok(FfiPayload::Json(json_component_dispatch_payload(result)?)),
+    }
+}
+
 #[no_mangle]
 pub extern "C" fn nx_eval_source(
     source_ptr: *const u8,
     source_len: usize,
     file_name_ptr: *const u8,
     file_name_len: usize,
+    output_format: u32,
     out_buffer: *mut NxBuffer,
 ) -> NxEvalStatus {
     if let Err(status) = prepare_out_buffer(out_buffer) {
         return status;
     }
 
+    let output_format = match parse_output_format(output_format) {
+        Ok(output_format) => output_format,
+        Err(status) => return status,
+    };
+
     let result = panic::catch_unwind(|| {
         let source = unsafe { slice_to_str(source_ptr, source_len) }?;
         let file_name = parse_file_name(file_name_ptr, file_name_len)?;
         let build_context = ProgramBuildContext::empty();
 
-        let bytes = match eval_source(source, &file_name, &build_context) {
-            EvalResult::Ok(value) => {
-                let payload = rmp_serde::to_vec(&value)
-                    .map_err(|e| format!("messagepack serialize failed: {e}"))?;
-                (NxEvalStatus::Ok, payload)
-            }
-            EvalResult::Err(diagnostics) => {
-                let payload = rmp_serde::to_vec_named(&diagnostics)
-                    .map_err(|e| format!("messagepack serialize failed: {e}"))?;
-                (NxEvalStatus::Error, payload)
-            }
+        let payload = match eval_source(source, &file_name, &build_context) {
+            EvalResult::Ok(value) => (
+                NxEvalStatus::Ok,
+                serialize_eval_payload(output_format, &value)?,
+            ),
+            EvalResult::Err(diagnostics) => (
+                NxEvalStatus::Error,
+                serialize_diagnostics_payload(output_format, &diagnostics)?,
+            ),
         };
 
-        Ok(bytes)
+        Ok(payload)
     });
 
-    finish_msgpack_entry(out_buffer, result)
+    finish_output_entry(out_buffer, output_format, result)
 }
 
 #[no_mangle]
@@ -475,36 +572,40 @@ pub extern "C" fn nx_free_program_artifact(handle: *mut NxProgramArtifactHandle)
 #[no_mangle]
 pub extern "C" fn nx_eval_program_artifact(
     program_artifact_ptr: *const NxProgramArtifactHandle,
+    output_format: u32,
     out_buffer: *mut NxBuffer,
 ) -> NxEvalStatus {
     if let Err(status) = prepare_out_buffer(out_buffer) {
         return status;
     }
 
+    let output_format = match parse_output_format(output_format) {
+        Ok(output_format) => output_format,
+        Err(status) => return status,
+    };
+
     if program_artifact_ptr.is_null() {
         return NxEvalStatus::InvalidArgument;
     }
 
     let result = panic::catch_unwind(|| {
-        let bytes = with_program_artifact(program_artifact_ptr, |program_artifact| {
+        let payload = with_program_artifact(program_artifact_ptr, |program_artifact| {
             match api_eval_program_artifact(program_artifact) {
-                EvalResult::Ok(value) => {
-                    let payload = rmp_serde::to_vec(&value)
-                        .map_err(|e| format!("messagepack serialize failed: {e}"))?;
-                    Ok((NxEvalStatus::Ok, payload))
-                }
-                EvalResult::Err(diagnostics) => {
-                    let payload = rmp_serde::to_vec_named(&diagnostics)
-                        .map_err(|e| format!("messagepack serialize failed: {e}"))?;
-                    Ok((NxEvalStatus::Error, payload))
-                }
+                EvalResult::Ok(value) => Ok((
+                    NxEvalStatus::Ok,
+                    serialize_eval_payload(output_format, &value)?,
+                )),
+                EvalResult::Err(diagnostics) => Ok((
+                    NxEvalStatus::Error,
+                    serialize_diagnostics_payload(output_format, &diagnostics)?,
+                )),
             }
         })?;
 
-        Ok(bytes)
+        Ok(payload)
     });
 
-    finish_msgpack_entry(out_buffer, result)
+    finish_output_entry(out_buffer, output_format, result)
 }
 
 #[no_mangle]
@@ -514,11 +615,17 @@ pub extern "C" fn nx_component_init_program_artifact(
     component_name_len: usize,
     props_ptr: *const u8,
     props_len: usize,
+    output_format: u32,
     out_buffer: *mut NxBuffer,
 ) -> NxEvalStatus {
     if let Err(status) = prepare_out_buffer(out_buffer) {
         return status;
     }
+
+    let output_format = match parse_output_format(output_format) {
+        Ok(output_format) => output_format,
+        Err(status) => return status,
+    };
 
     if program_artifact_ptr.is_null() {
         return NxEvalStatus::InvalidArgument;
@@ -533,29 +640,27 @@ pub extern "C" fn nx_component_init_program_artifact(
             parse_msgpack_value(bytes)?
         };
 
-        let bytes = with_program_artifact(program_artifact_ptr, |program_artifact| {
+        let payload = with_program_artifact(program_artifact_ptr, |program_artifact| {
             match api_initialize_component_program_artifact(
                 program_artifact,
                 component_name,
                 &props,
             ) {
-                ComponentInitEvalResult::Ok(result) => {
-                    let payload = rmp_serde::to_vec_named(&result)
-                        .map_err(|e| format!("messagepack serialize failed: {e}"))?;
-                    Ok((NxEvalStatus::Ok, payload))
-                }
-                ComponentInitEvalResult::Err(diagnostics) => {
-                    let payload = rmp_serde::to_vec_named(&diagnostics)
-                        .map_err(|e| format!("messagepack serialize failed: {e}"))?;
-                    Ok((NxEvalStatus::Error, payload))
-                }
+                ComponentInitEvalResult::Ok(result) => Ok((
+                    NxEvalStatus::Ok,
+                    serialize_component_init_payload(output_format, &result)?,
+                )),
+                ComponentInitEvalResult::Err(diagnostics) => Ok((
+                    NxEvalStatus::Error,
+                    serialize_diagnostics_payload(output_format, &diagnostics)?,
+                )),
             }
         })?;
 
-        Ok(bytes)
+        Ok(payload)
     });
 
-    finish_msgpack_entry(out_buffer, result)
+    finish_output_entry(out_buffer, output_format, result)
 }
 
 #[no_mangle]
@@ -565,11 +670,17 @@ pub extern "C" fn nx_component_dispatch_actions_program_artifact(
     state_snapshot_len: usize,
     actions_ptr: *const u8,
     actions_len: usize,
+    output_format: u32,
     out_buffer: *mut NxBuffer,
 ) -> NxEvalStatus {
     if let Err(status) = prepare_out_buffer(out_buffer) {
         return status;
     }
+
+    let output_format = match parse_output_format(output_format) {
+        Ok(output_format) => output_format,
+        Err(status) => return status,
+    };
 
     if program_artifact_ptr.is_null() {
         return NxEvalStatus::InvalidArgument;
@@ -588,114 +699,27 @@ pub extern "C" fn nx_component_dispatch_actions_program_artifact(
             parse_msgpack_actions(bytes)?
         };
 
-        let bytes = with_program_artifact(program_artifact_ptr, |program_artifact| {
+        let payload = with_program_artifact(program_artifact_ptr, |program_artifact| {
             match api_dispatch_component_actions_program_artifact(
                 program_artifact,
                 state_snapshot,
                 &actions,
             ) {
-                ComponentDispatchEvalResult::Ok(result) => {
-                    let payload = rmp_serde::to_vec_named(&result)
-                        .map_err(|e| format!("messagepack serialize failed: {e}"))?;
-                    Ok((NxEvalStatus::Ok, payload))
-                }
-                ComponentDispatchEvalResult::Err(diagnostics) => {
-                    let payload = rmp_serde::to_vec_named(&diagnostics)
-                        .map_err(|e| format!("messagepack serialize failed: {e}"))?;
-                    Ok((NxEvalStatus::Error, payload))
-                }
+                ComponentDispatchEvalResult::Ok(result) => Ok((
+                    NxEvalStatus::Ok,
+                    serialize_component_dispatch_payload(output_format, &result)?,
+                )),
+                ComponentDispatchEvalResult::Err(diagnostics) => Ok((
+                    NxEvalStatus::Error,
+                    serialize_diagnostics_payload(output_format, &diagnostics)?,
+                )),
             }
         })?;
 
-        Ok(bytes)
+        Ok(payload)
     });
 
-    finish_msgpack_entry(out_buffer, result)
-}
-
-#[no_mangle]
-pub extern "C" fn nx_value_msgpack_to_json(
-    payload_ptr: *const u8,
-    payload_len: usize,
-    out_buffer: *mut NxBuffer,
-) -> NxEvalStatus {
-    if let Err(status) = prepare_out_buffer(out_buffer) {
-        return status;
-    }
-
-    let result = panic::catch_unwind(|| {
-        let payload = unsafe { slice_to_bytes(payload_ptr, payload_len) }?;
-        let value: NxValue = decode_msgpack_payload(payload)?;
-        Ok((
-            NxEvalStatus::Ok,
-            value
-                .to_json_string()
-                .map_err(|e| format!("json serialize failed: {e}"))?,
-        ))
-    });
-
-    finish_json_entry(out_buffer, result)
-}
-
-#[no_mangle]
-pub extern "C" fn nx_diagnostics_msgpack_to_json(
-    payload_ptr: *const u8,
-    payload_len: usize,
-    out_buffer: *mut NxBuffer,
-) -> NxEvalStatus {
-    if let Err(status) = prepare_out_buffer(out_buffer) {
-        return status;
-    }
-
-    let result = panic::catch_unwind(|| {
-        let payload = unsafe { slice_to_bytes(payload_ptr, payload_len) }?;
-        let diagnostics: Vec<NxDiagnostic> = decode_msgpack_payload(payload)?;
-        Ok((
-            NxEvalStatus::Ok,
-            serde_json::to_string(&diagnostics)
-                .map_err(|e| format!("json serialize failed: {e}"))?,
-        ))
-    });
-
-    finish_json_entry(out_buffer, result)
-}
-
-#[no_mangle]
-pub extern "C" fn nx_component_init_result_msgpack_to_json(
-    payload_ptr: *const u8,
-    payload_len: usize,
-    out_buffer: *mut NxBuffer,
-) -> NxEvalStatus {
-    if let Err(status) = prepare_out_buffer(out_buffer) {
-        return status;
-    }
-
-    let result = panic::catch_unwind(|| {
-        let payload = unsafe { slice_to_bytes(payload_ptr, payload_len) }?;
-        let result: ComponentInitResult = decode_msgpack_payload(payload)?;
-        Ok((NxEvalStatus::Ok, json_component_init_payload(&result)?))
-    });
-
-    finish_json_entry(out_buffer, result)
-}
-
-#[no_mangle]
-pub extern "C" fn nx_component_dispatch_result_msgpack_to_json(
-    payload_ptr: *const u8,
-    payload_len: usize,
-    out_buffer: *mut NxBuffer,
-) -> NxEvalStatus {
-    if let Err(status) = prepare_out_buffer(out_buffer) {
-        return status;
-    }
-
-    let result = panic::catch_unwind(|| {
-        let payload = unsafe { slice_to_bytes(payload_ptr, payload_len) }?;
-        let result: ComponentDispatchResult = decode_msgpack_payload(payload)?;
-        Ok((NxEvalStatus::Ok, json_component_dispatch_payload(&result)?))
-    });
-
-    finish_json_entry(out_buffer, result)
+    finish_output_entry(out_buffer, output_format, result)
 }
 
 unsafe fn slice_to_str<'a>(ptr: *const u8, len: usize) -> Result<&'a str, String> {

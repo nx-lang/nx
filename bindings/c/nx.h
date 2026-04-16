@@ -13,7 +13,7 @@
 #endif
 
 
-#define NX_FFI_ABI_VERSION 7
+#define NX_FFI_ABI_VERSION 8
 
 enum NxEvalStatus
 #ifdef __cplusplus
@@ -27,6 +27,18 @@ enum NxEvalStatus
 };
 #ifndef __cplusplus
 typedef uint32_t NxEvalStatus;
+#endif // __cplusplus
+
+enum NxOutputFormat
+#ifdef __cplusplus
+  : uint32_t
+#endif // __cplusplus
+ {
+  NxOutputFormat_MessagePack = 0,
+  NxOutputFormat_Json = 1,
+};
+#ifndef __cplusplus
+typedef uint32_t NxOutputFormat;
 #endif // __cplusplus
 
 typedef struct NxLibraryRegistryHandle NxLibraryRegistryHandle;
@@ -54,6 +66,7 @@ NxEvalStatus nx_eval_source(const uint8_t *source_ptr,
                             size_t source_len,
                             const uint8_t *file_name_ptr,
                             size_t file_name_len,
+                            uint32_t output_format,
                             struct NxBuffer *out_buffer);
 
 NX_FFI_EXPORT
@@ -85,6 +98,7 @@ NX_FFI_EXPORT void nx_free_program_artifact(struct NxProgramArtifactHandle *hand
 
 NX_FFI_EXPORT
 NxEvalStatus nx_eval_program_artifact(const struct NxProgramArtifactHandle *program_artifact_ptr,
+                                      uint32_t output_format,
                                       struct NxBuffer *out_buffer);
 
 NX_FFI_EXPORT
@@ -93,6 +107,7 @@ NxEvalStatus nx_component_init_program_artifact(const struct NxProgramArtifactHa
                                                 size_t component_name_len,
                                                 const uint8_t *props_ptr,
                                                 size_t props_len,
+                                                uint32_t output_format,
                                                 struct NxBuffer *out_buffer);
 
 NX_FFI_EXPORT
@@ -101,27 +116,8 @@ NxEvalStatus nx_component_dispatch_actions_program_artifact(const struct NxProgr
                                                             size_t state_snapshot_len,
                                                             const uint8_t *actions_ptr,
                                                             size_t actions_len,
+                                                            uint32_t output_format,
                                                             struct NxBuffer *out_buffer);
-
-NX_FFI_EXPORT
-NxEvalStatus nx_value_msgpack_to_json(const uint8_t *payload_ptr,
-                                      size_t payload_len,
-                                      struct NxBuffer *out_buffer);
-
-NX_FFI_EXPORT
-NxEvalStatus nx_diagnostics_msgpack_to_json(const uint8_t *payload_ptr,
-                                            size_t payload_len,
-                                            struct NxBuffer *out_buffer);
-
-NX_FFI_EXPORT
-NxEvalStatus nx_component_init_result_msgpack_to_json(const uint8_t *payload_ptr,
-                                                      size_t payload_len,
-                                                      struct NxBuffer *out_buffer);
-
-NX_FFI_EXPORT
-NxEvalStatus nx_component_dispatch_result_msgpack_to_json(const uint8_t *payload_ptr,
-                                                          size_t payload_len,
-                                                          struct NxBuffer *out_buffer);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -3,6 +3,7 @@
 
 using System;
 using System.IO;
+using System.Text;
 using NxLang.Nx;
 using NxLang.Nx.Interop;
 using Xunit;
@@ -58,12 +59,12 @@ public class NxEndToEndTests
     }
 
     [Fact]
-    public void ValueBytesToJson_ComplexExpression_ReturnsValidJson()
+    public void EvaluateBytes_JsonOutput_ComplexExpression_ReturnsValidJson()
     {
         string source = "let root() = { 10 + 32 }";
 
-        byte[] resultBytes = NxRuntime.EvaluateBytes(source);
-        string json = NxRuntime.ValueBytesToJson(resultBytes);
+        byte[] resultBytes = NxRuntime.EvaluateBytes(source, NxOutputFormat.Json);
+        string json = Encoding.UTF8.GetString(resultBytes);
 
         Assert.Equal("42", json);
     }
@@ -93,7 +94,7 @@ public class NxEndToEndTests
             File.WriteAllText(
                 Path.Combine(libraryRoot, "QuestionFlow.nx"),
                 """
-                let answer() = { 42 }
+                export let answer() = { 42 }
                 """);
 
             string source = """
@@ -137,7 +138,7 @@ public class NxEndToEndTests
             File.WriteAllText(
                 Path.Combine(libraryRoot, "QuestionFlow.nx"),
                 """
-                let answer() = { 42 }
+                export let answer() = { 42 }
                 """);
 
             string source = """
@@ -222,7 +223,7 @@ public class NxEndToEndTests
             File.WriteAllText(
                 Path.Combine(libraryRoot, "QuestionFlow.nx"),
                 """
-                let answer() = { 42 }
+                export let answer() = { 42 }
                 """);
             string source = """
                 import "../question-flow"

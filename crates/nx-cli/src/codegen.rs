@@ -182,6 +182,29 @@ mod tests {
     }
 
     #[test]
+    fn generates_typescript_external_component_props_with_discriminators() {
+        let source = r#"
+            export abstract external component <Question label:string />
+            export external component <ShortTextQuestion extends Question placeholder:string? />
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(output.contains("export interface QuestionBase {"));
+        assert!(output.contains("label: string;"));
+        assert!(output.contains("export type Question = ShortTextQuestion;"));
+        assert!(output
+            .contains("export interface ShortTextQuestion extends QuestionBase, NxRecord<\"ShortTextQuestion\">"));
+        assert!(output.contains("placeholder: string | null;"));
+    }
+
+    #[test]
     fn generates_typescript_concrete_root_records_with_discriminators() {
         let source = r#"
             export type Payload = { data:string }
@@ -284,6 +307,23 @@ mod tests {
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
 
         assert!(!output.contains("SearchBox_state"));
+    }
+
+    #[test]
+    fn omits_non_exported_external_component_props_contracts() {
+        let source = r#"
+            external component <SearchBox placeholder:string />
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(!output.contains("SearchBox"));
     }
 
     #[test]
@@ -414,6 +454,29 @@ mod tests {
             .find(|file| file.relative_path == PathBuf::from("theme.g.cs"))
             .expect("theme.g.cs");
         assert!(theme.content.contains("public enum ThemeMode"));
+    }
+
+    #[test]
+    fn generates_csharp_external_component_props_with_discriminators() {
+        let source = r#"
+            export abstract external component <Question label:string />
+            export external component <ShortTextQuestion extends Question placeholder:string? />
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.Models".to_string()),
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(output.contains("public abstract class Question"));
+        assert!(output.contains("[Key(\"label\")]"));
+        assert!(output.contains("public string Label { get; set; } = default!;"));
+        assert!(output.contains("public sealed class ShortTextQuestion : Question"));
+        assert!(output.contains("public override string __NxType { get; set; } = \"ShortTextQuestion\";"));
+        assert!(output.contains("public string? Placeholder { get; set; }"));
     }
 
     #[test]
@@ -778,6 +841,7 @@ mod tests {
 
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
 
+        assert!(output.contains("[Union(0, typeof(ShortTextQuestion))]"));
         assert!(output.contains("public abstract class Question"));
         assert!(output.contains("public abstract string __NxType { get; set; }"));
         assert!(output.contains("public sealed class ShortTextQuestion : Question"));
@@ -800,6 +864,7 @@ mod tests {
 
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
 
+        assert!(output.contains("[Union(0, typeof(SearchRequested))]"));
         assert!(output.contains("public abstract class SearchAction"));
         assert!(output.contains("public abstract string __NxType { get; set; }"));
         assert!(output.contains("public string Source { get; set; } = default!;"));
@@ -825,6 +890,7 @@ mod tests {
 
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
 
+        assert!(output.contains("[Union(0, typeof(ShortTextQuestion))]"));
         assert!(output.contains("public abstract class Question"));
         assert!(output.contains("public abstract string __NxType { get; set; }"));
         assert!(output.contains("public abstract class TextQuestion : Question"));

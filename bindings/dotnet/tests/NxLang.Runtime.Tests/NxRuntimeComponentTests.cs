@@ -103,7 +103,7 @@ public class NxRuntimeComponentTests
     }
 
     [Fact]
-    public void ComponentResultBytesToJson_DebugConvertersReturnExpectedJson()
+    public void ComponentJsonWorkflows_ReturnExpectedJson()
     {
         string source = """
             action SearchSubmitted = { searchString:string }
@@ -114,39 +114,30 @@ public class NxRuntimeComponentTests
             }
             """;
 
-        byte[] propsBytes = MessagePackSerializer.Serialize(
-            new SearchBoxProps { Placeholder = "Find docs" },
-            cancellationToken: TestContext.Current.CancellationToken);
-        byte[] initBytes = NxRuntime.InitializeComponentBytes(source, "SearchBox", propsBytes);
-        string initJson = NxRuntime.ComponentInitResultBytesToJson(initBytes);
+        NxComponentInitResult<JsonElement> initResult =
+            NxRuntime.InitializeComponentJson(
+                source,
+                "SearchBox",
+                new SearchBoxProps { Placeholder = "Find docs" });
 
-        using JsonDocument initDocument = JsonDocument.Parse(initJson);
-        JsonElement initRoot = initDocument.RootElement;
-        Assert.Equal("Find docs", initRoot.GetProperty("rendered").GetProperty("value").GetString());
-        Assert.Equal("Find docs", initRoot.GetProperty("rendered").GetProperty("placeholder").GetString());
+        Assert.Equal("Find docs", initResult.Rendered.GetProperty("value").GetString());
+        Assert.Equal("Find docs", initResult.Rendered.GetProperty("placeholder").GetString());
+        Assert.NotEmpty(initResult.StateSnapshot);
 
-        string? stateSnapshot = initRoot.GetProperty("state_snapshot").GetString();
-        Assert.False(string.IsNullOrWhiteSpace(stateSnapshot));
-
-        byte[] actionsBytes = MessagePackSerializer.Serialize(
-            new[]
-            {
-                new SearchSubmittedAction
+        NxComponentDispatchResult<JsonElement> dispatchResult =
+            NxRuntime.DispatchComponentActionsJson(
+                source,
+                initResult.StateSnapshot,
+                new[]
                 {
-                    SearchString = "docs"
-                }
-            },
-            cancellationToken: TestContext.Current.CancellationToken);
-        byte[] dispatchBytes = NxRuntime.DispatchComponentActionsBytes(
-            source,
-            Convert.FromBase64String(stateSnapshot!),
-            actionsBytes);
-        string dispatchJson = NxRuntime.ComponentDispatchResultBytesToJson(dispatchBytes);
+                    new SearchSubmittedAction
+                    {
+                        SearchString = "docs"
+                    }
+                });
 
-        using JsonDocument dispatchDocument = JsonDocument.Parse(dispatchJson);
-        JsonElement dispatchRoot = dispatchDocument.RootElement;
-        Assert.Equal(0, dispatchRoot.GetProperty("effects").GetArrayLength());
-        Assert.False(string.IsNullOrWhiteSpace(dispatchRoot.GetProperty("state_snapshot").GetString()));
+        Assert.Empty(dispatchResult.Effects);
+        Assert.NotEmpty(dispatchResult.StateSnapshot);
     }
 
     [Fact]
@@ -201,9 +192,9 @@ public class NxRuntimeComponentTests
             File.WriteAllText(
                 Path.Combine(libraryRoot, "QuestionFlow.nx"),
                 """
-                action SearchSubmitted = { searchString:string }
+                export action SearchSubmitted = { searchString:string }
 
-                component <SearchBox placeholder:string = "Find docs" emits { SearchSubmitted } /> = {
+                export component <SearchBox placeholder:string = "Find docs" emits { SearchSubmitted } /> = {
                   state { query:string = {placeholder} }
                   <TextInput value={query} placeholder={placeholder} />
                 }
@@ -253,9 +244,9 @@ public class NxRuntimeComponentTests
             File.WriteAllText(
                 Path.Combine(libraryRoot, "QuestionFlow.nx"),
                 """
-                action SearchSubmitted = { searchString:string }
+                export action SearchSubmitted = { searchString:string }
 
-                component <SearchBox placeholder:string = "Find docs" emits { SearchSubmitted } /> = {
+                export component <SearchBox placeholder:string = "Find docs" emits { SearchSubmitted } /> = {
                   state { query:string = {placeholder} }
                   <TextInput value={query} placeholder={placeholder} />
                 }
@@ -317,9 +308,9 @@ public class NxRuntimeComponentTests
             File.WriteAllText(
                 Path.Combine(libraryRoot, "QuestionFlow.nx"),
                 """
-                action SearchSubmitted = { searchString:string }
+                export action SearchSubmitted = { searchString:string }
 
-                component <SearchBox placeholder:string = "Find docs" emits { SearchSubmitted } /> = {
+                export component <SearchBox placeholder:string = "Find docs" emits { SearchSubmitted } /> = {
                   state { query:string = {placeholder} }
                   <TextInput value={query} placeholder={placeholder} />
                 }
@@ -367,9 +358,9 @@ public class NxRuntimeComponentTests
             File.WriteAllText(
                 Path.Combine(libraryRoot, "QuestionFlow.nx"),
                 """
-                action SearchSubmitted = { searchString:string }
+                export action SearchSubmitted = { searchString:string }
 
-                component <SearchBox placeholder:string = "Find docs" emits { SearchSubmitted } /> = {
+                export component <SearchBox placeholder:string = "Find docs" emits { SearchSubmitted } /> = {
                   state { query:string = {placeholder} }
                   <TextInput value={query} placeholder={placeholder} />
                 }

@@ -2,7 +2,6 @@
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
 using System.Linq;
-using MessagePack;
 using NxLang.Nx;
 using Xunit;
 
@@ -139,24 +138,23 @@ public class NxRuntimeErrorTests
     }
 
     [Fact]
-    public void DiagnosticsBytesToJson_ManualPayload_ReturnsCorrectJson()
+    public void EvaluateBytes_JsonOutput_SyntaxError_ThrowsNxEvaluationException()
     {
-        NxDiagnostic[] diagnostics =
-        {
-            new()
-            {
-                Severity = NxSeverity.Error,
-                Code = "test-error",
-                Message = "Expected a root function."
-            }
-        };
+        string source = "let x = ";
 
-        byte[] payload = MessagePackSerializer.Serialize(
-            diagnostics,
-            cancellationToken: TestContext.Current.CancellationToken);
-        string json = NxRuntime.DiagnosticsBytesToJson(payload);
+        NxEvaluationException ex = Assert.Throws<NxEvaluationException>(
+            () => NxRuntime.EvaluateBytes(source, NxOutputFormat.Json));
 
-        Assert.Contains("\"code\":\"test-error\"", json);
-        Assert.Contains("\"message\":\"Expected a root function.\"", json);
+        Assert.NotEmpty(ex.Diagnostics);
+        Assert.All(ex.Diagnostics, diagnostic => Assert.Equal(NxSeverity.Error, diagnostic.Severity));
+    }
+
+    [Fact]
+    public void NxRuntime_DoesNotExposeLegacyJsonConverterHelpers()
+    {
+        Assert.Null(typeof(NxRuntime).GetMethod("ValueBytesToJson"));
+        Assert.Null(typeof(NxRuntime).GetMethod("DiagnosticsBytesToJson"));
+        Assert.Null(typeof(NxRuntime).GetMethod("ComponentInitResultBytesToJson"));
+        Assert.Null(typeof(NxRuntime).GetMethod("ComponentDispatchResultBytesToJson"));
     }
 }

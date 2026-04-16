@@ -390,31 +390,36 @@ fn collect_exported_declarations(module: &LoweredModule) -> Vec<ExportedTypeDecl
             continue;
         }
 
-        let declaration = match item {
-            Item::TypeAlias(alias) => Some(ExportedTypeDecl {
+        match item {
+            Item::TypeAlias(alias) => declarations.push(ExportedTypeDecl {
                 visibility: alias.visibility,
                 item: ExportedType::Alias(export_alias(alias)),
             }),
-            Item::Enum(enum_def) => Some(ExportedTypeDecl {
+            Item::Enum(enum_def) => declarations.push(ExportedTypeDecl {
                 visibility: enum_def.visibility,
                 item: ExportedType::Enum(export_enum(enum_def)),
             }),
-            Item::Record(record) => Some(ExportedTypeDecl {
+            Item::Record(record) => declarations.push(ExportedTypeDecl {
                 visibility: record.visibility,
                 item: ExportedType::Record(export_record(record)),
             }),
             Item::Component(component) => {
-                export_external_state(component).map(|item| ExportedTypeDecl {
-                    visibility: component.visibility,
-                    item: ExportedType::ExternalState(item),
-                })
-            }
-            _ => None,
-        };
+                if let Some(record) = export_external_component_contract(component) {
+                    declarations.push(ExportedTypeDecl {
+                        visibility: component.visibility,
+                        item: ExportedType::Record(record),
+                    });
+                }
 
-        if let Some(declaration) = declaration {
-            declarations.push(declaration);
-        }
+                if let Some(state) = export_external_state(component) {
+                    declarations.push(ExportedTypeDecl {
+                        visibility: component.visibility,
+                        item: ExportedType::ExternalState(state),
+                    });
+                }
+            }
+            _ => {}
+        };
     }
 
     declarations
@@ -454,6 +459,28 @@ fn export_record(def: &RecordDef) -> ExportedRecord {
             })
             .collect(),
     }
+}
+
+fn export_external_component_contract(component: &Component) -> Option<ExportedRecord> {
+    if !component.is_external {
+        return None;
+    }
+
+    Some(ExportedRecord {
+        name: component.name.as_str().to_string(),
+        kind: RecordKind::Plain,
+        is_abstract: component.is_abstract,
+        base: component.base.as_ref().map(|name| name.as_str().to_string()),
+        fields: component
+            .props
+            .iter()
+            .map(|field| ExportedRecordField {
+                name: field.name.as_str().to_string(),
+                ty: field.ty.clone(),
+                has_default: field.default.is_some(),
+            })
+            .collect(),
+    })
 }
 
 fn export_external_state(component: &Component) -> Option<ExportedExternalState> {

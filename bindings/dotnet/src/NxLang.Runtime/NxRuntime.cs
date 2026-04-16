@@ -4,6 +4,7 @@
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
 using MessagePack;
 using NxLang.Nx.Interop;
 
@@ -11,14 +12,12 @@ namespace NxLang.Nx;
 
 /// <summary>
 /// Provides methods for evaluating NX source code and interacting with components through the
-/// native MessagePack-based NX runtime.
+/// native NX runtime.
 /// </summary>
 public static class NxRuntime
 {
     private static readonly MessagePackSerializerOptions MessagePackOptions =
         MessagePackSerializerOptions.Standard.WithSecurity(MessagePackSecurity.UntrustedData);
-    private static readonly UTF8Encoding StrictUtf8 =
-        new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     /// <summary>
     /// Evaluates NX source code and returns the raw result bytes in the canonical MessagePack wire format.
@@ -28,11 +27,24 @@ public static class NxRuntime
     /// <returns>The evaluation result serialized as canonical NX bytes.</returns>
     public static byte[] EvaluateBytes(string source, string? fileName = null)
     {
-        byte[] payload = InvokeSourceNativeCall(source, fileName, NxNativeMethods.nx_eval_source, out NxEvalStatus status);
+        return EvaluateBytes(source, NxOutputFormat.MessagePack, fileName);
+    }
+
+    /// <summary>
+    /// Evaluates NX source code and returns the raw result bytes in the requested output format.
+    /// </summary>
+    public static byte[] EvaluateBytes(string source, NxOutputFormat outputFormat, string? fileName = null)
+    {
+        byte[] payload = InvokeSourceNativeCall(
+            source,
+            fileName,
+            outputFormat,
+            NxNativeMethods.nx_eval_source,
+            out NxEvalStatus status);
         return status switch
         {
             NxEvalStatus.Ok => payload,
-            NxEvalStatus.Error => throw CreateEvaluationExceptionFromMessagePack(payload),
+            NxEvalStatus.Error => throw CreateEvaluationException(payload, outputFormat),
             _ => throw CreateInteropStatusException(status),
         };
     }
@@ -42,10 +54,22 @@ public static class NxRuntime
     /// </summary>
     public static byte[] EvaluateBytes(string source, NxProgramBuildContext buildContext, string? fileName = null)
     {
+        return EvaluateBytes(source, buildContext, NxOutputFormat.MessagePack, fileName);
+    }
+
+    /// <summary>
+    /// Evaluates NX source code against a caller-supplied build context in the requested output format.
+    /// </summary>
+    public static byte[] EvaluateBytes(
+        string source,
+        NxProgramBuildContext buildContext,
+        NxOutputFormat outputFormat,
+        string? fileName = null)
+    {
         ArgumentNullException.ThrowIfNull(buildContext);
 
         using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, buildContext, fileName);
-        return EvaluateBytes(programArtifact);
+        return EvaluateBytes(programArtifact, outputFormat);
     }
 
     /// <summary>
@@ -53,38 +77,61 @@ public static class NxRuntime
     /// </summary>
     public static byte[] EvaluateBytes(NxProgramArtifact programArtifact)
     {
+        return EvaluateBytes(programArtifact, NxOutputFormat.MessagePack);
+    }
+
+    /// <summary>
+    /// Evaluates the <c>root()</c> entrypoint of a previously built program artifact in the requested output format.
+    /// </summary>
+    public static byte[] EvaluateBytes(NxProgramArtifact programArtifact, NxOutputFormat outputFormat)
+    {
         byte[] payload = InvokeProgramArtifactNativeCall(
             programArtifact,
+            outputFormat,
             NxNativeMethods.nx_eval_program_artifact,
             out NxEvalStatus status);
         return status switch
         {
             NxEvalStatus.Ok => payload,
-            NxEvalStatus.Error => throw CreateEvaluationExceptionFromMessagePack(payload),
+            NxEvalStatus.Error => throw CreateEvaluationException(payload, outputFormat),
             _ => throw CreateInteropStatusException(status),
         };
     }
 
     /// <summary>
-    /// Converts canonical NX value bytes into a JSON string for debugging or inspection.
+    /// Evaluates NX source code and returns the JSON result as a <see cref="JsonElement"/>.
     /// </summary>
-    public static string ValueBytesToJson(byte[] valueBytes)
+    public static JsonElement EvaluateJson(string source, string? fileName = null)
     {
-        return ConvertMessagePackPayloadToJson(
-            valueBytes,
-            NxNativeMethods.nx_value_msgpack_to_json,
-            "NX native runtime returned an invalid evaluation MessagePack value payload.");
+        byte[] payload = EvaluateBytes(source, NxOutputFormat.Json, fileName);
+        return DeserializeJsonElement(
+            payload,
+            "NX native runtime returned an invalid evaluation JSON payload.");
     }
 
     /// <summary>
-    /// Converts canonical NX diagnostic bytes into a JSON string for debugging or inspection.
+    /// Evaluates NX source code against a caller-supplied build context and returns the JSON result.
     /// </summary>
-    public static string DiagnosticsBytesToJson(byte[] diagnosticsBytes)
+    public static JsonElement EvaluateJson(
+        string source,
+        NxProgramBuildContext buildContext,
+        string? fileName = null)
     {
-        return ConvertMessagePackPayloadToJson(
-            diagnosticsBytes,
-            NxNativeMethods.nx_diagnostics_msgpack_to_json,
-            "NX native runtime returned an invalid evaluation MessagePack diagnostics payload.");
+        byte[] payload = EvaluateBytes(source, buildContext, NxOutputFormat.Json, fileName);
+        return DeserializeJsonElement(
+            payload,
+            "NX native runtime returned an invalid evaluation JSON payload.");
+    }
+
+    /// <summary>
+    /// Evaluates the <c>root()</c> entrypoint of a previously built program artifact and returns the JSON result.
+    /// </summary>
+    public static JsonElement EvaluateJson(NxProgramArtifact programArtifact)
+    {
+        byte[] payload = EvaluateBytes(programArtifact, NxOutputFormat.Json);
+        return DeserializeJsonElement(
+            payload,
+            "NX native runtime returned an invalid evaluation JSON payload.");
     }
 
     /// <summary>
@@ -123,8 +170,26 @@ public static class NxRuntime
         byte[]? propsBytes = null,
         string? fileName = null)
     {
+        return InitializeComponentBytes(
+            source,
+            componentName,
+            NxOutputFormat.MessagePack,
+            propsBytes,
+            fileName);
+    }
+
+    /// <summary>
+    /// Initializes a named component and returns the raw result bytes in the requested output format.
+    /// </summary>
+    public static byte[] InitializeComponentBytes(
+        string source,
+        string componentName,
+        NxOutputFormat outputFormat,
+        byte[]? propsBytes = null,
+        string? fileName = null)
+    {
         using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, fileName);
-        return InitializeComponentBytes(programArtifact, componentName, propsBytes);
+        return InitializeComponentBytes(programArtifact, componentName, outputFormat, propsBytes);
     }
 
     /// <summary>
@@ -137,10 +202,31 @@ public static class NxRuntime
         byte[]? propsBytes = null,
         string? fileName = null)
     {
+        return InitializeComponentBytes(
+            source,
+            componentName,
+            buildContext,
+            NxOutputFormat.MessagePack,
+            propsBytes,
+            fileName);
+    }
+
+    /// <summary>
+    /// Initializes a named component from source text against a caller-supplied build context in the requested output
+    /// format.
+    /// </summary>
+    public static byte[] InitializeComponentBytes(
+        string source,
+        string componentName,
+        NxProgramBuildContext buildContext,
+        NxOutputFormat outputFormat,
+        byte[]? propsBytes = null,
+        string? fileName = null)
+    {
         ArgumentNullException.ThrowIfNull(buildContext);
 
         using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, buildContext, fileName);
-        return InitializeComponentBytes(programArtifact, componentName, propsBytes);
+        return InitializeComponentBytes(programArtifact, componentName, outputFormat, propsBytes);
     }
 
     /// <summary>
@@ -151,29 +237,141 @@ public static class NxRuntime
         string componentName,
         byte[]? propsBytes = null)
     {
+        return InitializeComponentBytes(
+            programArtifact,
+            componentName,
+            NxOutputFormat.MessagePack,
+            propsBytes);
+    }
+
+    /// <summary>
+    /// Initializes a named component from a previously built program artifact and returns the raw result bytes in the
+    /// requested output format.
+    /// </summary>
+    public static byte[] InitializeComponentBytes(
+        NxProgramArtifact programArtifact,
+        string componentName,
+        NxOutputFormat outputFormat,
+        byte[]? propsBytes = null)
+    {
         byte[] payload = InvokeComponentInitProgramArtifactNativeCall(
             programArtifact,
             componentName,
+            outputFormat,
             propsBytes,
             NxNativeMethods.nx_component_init_program_artifact,
             out NxEvalStatus status);
         return status switch
         {
             NxEvalStatus.Ok => payload,
-            NxEvalStatus.Error => throw CreateEvaluationExceptionFromMessagePack(payload),
+            NxEvalStatus.Error => throw CreateEvaluationException(payload, outputFormat),
             _ => throw CreateInteropStatusException(status),
         };
     }
 
     /// <summary>
-    /// Converts canonical component initialization result bytes into a JSON string for debugging or inspection.
+    /// Initializes a named component using no explicit props and returns the JSON result.
     /// </summary>
-    public static string ComponentInitResultBytesToJson(byte[] resultBytes)
+    public static NxComponentInitResult<JsonElement> InitializeComponentJson(
+        string source,
+        string componentName,
+        string? fileName = null)
     {
-        return ConvertMessagePackPayloadToJson(
-            resultBytes,
-            NxNativeMethods.nx_component_init_result_msgpack_to_json,
-            "NX native runtime returned an invalid component initialization MessagePack payload.");
+        byte[] payload = InitializeComponentBytes(source, componentName, NxOutputFormat.Json, null, fileName);
+        return DeserializeJsonComponentInitResult(
+            payload,
+            "NX native runtime returned an invalid component initialization JSON payload.");
+    }
+
+    /// <summary>
+    /// Initializes a named component from source text using a caller-supplied build context and returns the JSON
+    /// result.
+    /// </summary>
+    public static NxComponentInitResult<JsonElement> InitializeComponentJson(
+        string source,
+        string componentName,
+        NxProgramBuildContext buildContext,
+        string? fileName = null)
+    {
+        byte[] payload = InitializeComponentBytes(source, componentName, buildContext, NxOutputFormat.Json, null, fileName);
+        return DeserializeJsonComponentInitResult(
+            payload,
+            "NX native runtime returned an invalid component initialization JSON payload.");
+    }
+
+    /// <summary>
+    /// Initializes a named component from a program artifact using no explicit props and returns the JSON result.
+    /// </summary>
+    public static NxComponentInitResult<JsonElement> InitializeComponentJson(
+        NxProgramArtifact programArtifact,
+        string componentName)
+    {
+        byte[] payload = InitializeComponentBytes(programArtifact, componentName, NxOutputFormat.Json, null);
+        return DeserializeJsonComponentInitResult(
+            payload,
+            "NX native runtime returned an invalid component initialization JSON payload.");
+    }
+
+    /// <summary>
+    /// Initializes a named component with MessagePack-serializable props and returns the JSON result.
+    /// </summary>
+    public static NxComponentInitResult<JsonElement> InitializeComponentJson<TProps>(
+        string source,
+        string componentName,
+        TProps props,
+        string? fileName = null)
+    {
+        byte[] payload = InitializeComponentBytes(
+            source,
+            componentName,
+            NxOutputFormat.Json,
+            SerializeMessagePackInput(props),
+            fileName);
+        return DeserializeJsonComponentInitResult(
+            payload,
+            "NX native runtime returned an invalid component initialization JSON payload.");
+    }
+
+    /// <summary>
+    /// Initializes a named component with MessagePack-serializable props against a caller-supplied build context and
+    /// returns the JSON result.
+    /// </summary>
+    public static NxComponentInitResult<JsonElement> InitializeComponentJson<TProps>(
+        string source,
+        string componentName,
+        NxProgramBuildContext buildContext,
+        TProps props,
+        string? fileName = null)
+    {
+        byte[] payload = InitializeComponentBytes(
+            source,
+            componentName,
+            buildContext,
+            NxOutputFormat.Json,
+            SerializeMessagePackInput(props),
+            fileName);
+        return DeserializeJsonComponentInitResult(
+            payload,
+            "NX native runtime returned an invalid component initialization JSON payload.");
+    }
+
+    /// <summary>
+    /// Initializes a named component from a program artifact with MessagePack-serializable props and returns the JSON
+    /// result.
+    /// </summary>
+    public static NxComponentInitResult<JsonElement> InitializeComponentJson<TProps>(
+        NxProgramArtifact programArtifact,
+        string componentName,
+        TProps props)
+    {
+        byte[] payload = InitializeComponentBytes(
+            programArtifact,
+            componentName,
+            NxOutputFormat.Json,
+            SerializeMessagePackInput(props));
+        return DeserializeJsonComponentInitResult(
+            payload,
+            "NX native runtime returned an invalid component initialization JSON payload.");
     }
 
     /// <summary>
@@ -227,9 +425,7 @@ public static class NxRuntime
         TProps props,
         string? fileName = null)
     {
-        byte[] propsBytes = props is null
-            ? Array.Empty<byte>()
-            : MessagePackSerializer.Serialize(props, MessagePackOptions);
+        byte[] propsBytes = SerializeMessagePackInput(props);
         byte[] payload = InitializeComponentBytes(source, componentName, propsBytes, fileName);
         return DeserializeMessagePackResult<NxComponentInitResult<TElement>>(
             payload,
@@ -246,9 +442,7 @@ public static class NxRuntime
         TProps props,
         string? fileName = null)
     {
-        byte[] propsBytes = props is null
-            ? Array.Empty<byte>()
-            : MessagePackSerializer.Serialize(props, MessagePackOptions);
+        byte[] propsBytes = SerializeMessagePackInput(props);
         byte[] payload = InitializeComponentBytes(source, componentName, buildContext, propsBytes, fileName);
         return DeserializeMessagePackResult<NxComponentInitResult<TElement>>(
             payload,
@@ -263,9 +457,7 @@ public static class NxRuntime
         string componentName,
         TProps props)
     {
-        byte[] propsBytes = props is null
-            ? Array.Empty<byte>()
-            : MessagePackSerializer.Serialize(props, MessagePackOptions);
+        byte[] propsBytes = SerializeMessagePackInput(props);
         byte[] payload = InitializeComponentBytes(programArtifact, componentName, propsBytes);
         return DeserializeMessagePackResult<NxComponentInitResult<TElement>>(
             payload,
@@ -282,8 +474,27 @@ public static class NxRuntime
         byte[]? actionsBytes = null,
         string? fileName = null)
     {
+        return DispatchComponentActionsBytes(
+            source,
+            stateSnapshot,
+            NxOutputFormat.MessagePack,
+            actionsBytes,
+            fileName);
+    }
+
+    /// <summary>
+    /// Dispatches actions against a prior component state snapshot and returns the raw result bytes in the requested
+    /// output format.
+    /// </summary>
+    public static byte[] DispatchComponentActionsBytes(
+        string source,
+        byte[] stateSnapshot,
+        NxOutputFormat outputFormat,
+        byte[]? actionsBytes = null,
+        string? fileName = null)
+    {
         using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, fileName);
-        return DispatchComponentActionsBytes(programArtifact, stateSnapshot, actionsBytes);
+        return DispatchComponentActionsBytes(programArtifact, stateSnapshot, outputFormat, actionsBytes);
     }
 
     /// <summary>
@@ -296,10 +507,31 @@ public static class NxRuntime
         byte[]? actionsBytes = null,
         string? fileName = null)
     {
+        return DispatchComponentActionsBytes(
+            source,
+            stateSnapshot,
+            buildContext,
+            NxOutputFormat.MessagePack,
+            actionsBytes,
+            fileName);
+    }
+
+    /// <summary>
+    /// Dispatches actions against source text using a caller-supplied build context and returns the raw result bytes
+    /// in the requested output format.
+    /// </summary>
+    public static byte[] DispatchComponentActionsBytes(
+        string source,
+        byte[] stateSnapshot,
+        NxProgramBuildContext buildContext,
+        NxOutputFormat outputFormat,
+        byte[]? actionsBytes = null,
+        string? fileName = null)
+    {
         ArgumentNullException.ThrowIfNull(buildContext);
 
         using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, buildContext, fileName);
-        return DispatchComponentActionsBytes(programArtifact, stateSnapshot, actionsBytes);
+        return DispatchComponentActionsBytes(programArtifact, stateSnapshot, outputFormat, actionsBytes);
     }
 
     /// <summary>
@@ -310,29 +542,149 @@ public static class NxRuntime
         byte[] stateSnapshot,
         byte[]? actionsBytes = null)
     {
+        return DispatchComponentActionsBytes(
+            programArtifact,
+            stateSnapshot,
+            NxOutputFormat.MessagePack,
+            actionsBytes);
+    }
+
+    /// <summary>
+    /// Dispatches actions against a prior component state snapshot for a previously built program artifact and returns
+    /// the raw result bytes in the requested output format.
+    /// </summary>
+    public static byte[] DispatchComponentActionsBytes(
+        NxProgramArtifact programArtifact,
+        byte[] stateSnapshot,
+        NxOutputFormat outputFormat,
+        byte[]? actionsBytes = null)
+    {
         byte[] payload = InvokeComponentDispatchProgramArtifactNativeCall(
             programArtifact,
             stateSnapshot,
+            outputFormat,
             actionsBytes,
             NxNativeMethods.nx_component_dispatch_actions_program_artifact,
             out NxEvalStatus status);
         return status switch
         {
             NxEvalStatus.Ok => payload,
-            NxEvalStatus.Error => throw CreateEvaluationExceptionFromMessagePack(payload),
+            NxEvalStatus.Error => throw CreateEvaluationException(payload, outputFormat),
             _ => throw CreateInteropStatusException(status),
         };
     }
 
     /// <summary>
-    /// Converts canonical component dispatch result bytes into a JSON string for debugging or inspection.
+    /// Dispatches no actions against a prior component state snapshot and returns the JSON result.
     /// </summary>
-    public static string ComponentDispatchResultBytesToJson(byte[] resultBytes)
+    public static NxComponentDispatchResult<JsonElement> DispatchComponentActionsJson(
+        string source,
+        byte[] stateSnapshot,
+        string? fileName = null)
     {
-        return ConvertMessagePackPayloadToJson(
-            resultBytes,
-            NxNativeMethods.nx_component_dispatch_result_msgpack_to_json,
-            "NX native runtime returned an invalid component dispatch MessagePack payload.");
+        byte[] payload = DispatchComponentActionsBytes(source, stateSnapshot, NxOutputFormat.Json, null, fileName);
+        return DeserializeJsonComponentDispatchResult(
+            payload,
+            "NX native runtime returned an invalid component dispatch JSON payload.");
+    }
+
+    /// <summary>
+    /// Dispatches no actions against a prior component state snapshot using a caller-supplied build context and
+    /// returns the JSON result.
+    /// </summary>
+    public static NxComponentDispatchResult<JsonElement> DispatchComponentActionsJson(
+        string source,
+        byte[] stateSnapshot,
+        NxProgramBuildContext buildContext,
+        string? fileName = null)
+    {
+        byte[] payload = DispatchComponentActionsBytes(
+            source,
+            stateSnapshot,
+            buildContext,
+            NxOutputFormat.Json,
+            null,
+            fileName);
+        return DeserializeJsonComponentDispatchResult(
+            payload,
+            "NX native runtime returned an invalid component dispatch JSON payload.");
+    }
+
+    /// <summary>
+    /// Dispatches no actions against a prior component state snapshot for a previously built program artifact and
+    /// returns the JSON result.
+    /// </summary>
+    public static NxComponentDispatchResult<JsonElement> DispatchComponentActionsJson(
+        NxProgramArtifact programArtifact,
+        byte[] stateSnapshot)
+    {
+        byte[] payload = DispatchComponentActionsBytes(programArtifact, stateSnapshot, NxOutputFormat.Json, null);
+        return DeserializeJsonComponentDispatchResult(
+            payload,
+            "NX native runtime returned an invalid component dispatch JSON payload.");
+    }
+
+    /// <summary>
+    /// Dispatches MessagePack-serializable actions against a prior component state snapshot and returns the JSON
+    /// result.
+    /// </summary>
+    public static NxComponentDispatchResult<JsonElement> DispatchComponentActionsJson<TActions>(
+        string source,
+        byte[] stateSnapshot,
+        TActions actions,
+        string? fileName = null)
+    {
+        byte[] payload = DispatchComponentActionsBytes(
+            source,
+            stateSnapshot,
+            NxOutputFormat.Json,
+            SerializeMessagePackInput(actions),
+            fileName);
+        return DeserializeJsonComponentDispatchResult(
+            payload,
+            "NX native runtime returned an invalid component dispatch JSON payload.");
+    }
+
+    /// <summary>
+    /// Dispatches MessagePack-serializable actions against source text using a caller-supplied build context and
+    /// returns the JSON result.
+    /// </summary>
+    public static NxComponentDispatchResult<JsonElement> DispatchComponentActionsJson<TActions>(
+        string source,
+        byte[] stateSnapshot,
+        NxProgramBuildContext buildContext,
+        TActions actions,
+        string? fileName = null)
+    {
+        byte[] payload = DispatchComponentActionsBytes(
+            source,
+            stateSnapshot,
+            buildContext,
+            NxOutputFormat.Json,
+            SerializeMessagePackInput(actions),
+            fileName);
+        return DeserializeJsonComponentDispatchResult(
+            payload,
+            "NX native runtime returned an invalid component dispatch JSON payload.");
+    }
+
+    /// <summary>
+    /// Dispatches MessagePack-serializable actions against a prior component state snapshot for a previously built
+    /// program artifact and returns the JSON result.
+    /// </summary>
+    public static NxComponentDispatchResult<JsonElement> DispatchComponentActionsJson<TActions>(
+        NxProgramArtifact programArtifact,
+        byte[] stateSnapshot,
+        TActions actions)
+    {
+        byte[] payload = DispatchComponentActionsBytes(
+            programArtifact,
+            stateSnapshot,
+            NxOutputFormat.Json,
+            SerializeMessagePackInput(actions));
+        return DeserializeJsonComponentDispatchResult(
+            payload,
+            "NX native runtime returned an invalid component dispatch JSON payload.");
     }
 
     /// <summary>
@@ -386,9 +738,7 @@ public static class NxRuntime
         TActions actions,
         string? fileName = null)
     {
-        byte[] actionsBytes = actions is null
-            ? Array.Empty<byte>()
-            : MessagePackSerializer.Serialize(actions, MessagePackOptions);
+        byte[] actionsBytes = SerializeMessagePackInput(actions);
         byte[] payload = DispatchComponentActionsBytes(source, stateSnapshot, actionsBytes, fileName);
         return DeserializeMessagePackResult<NxComponentDispatchResult<TEffect>>(
             payload,
@@ -405,9 +755,7 @@ public static class NxRuntime
         TActions actions,
         string? fileName = null)
     {
-        byte[] actionsBytes = actions is null
-            ? Array.Empty<byte>()
-            : MessagePackSerializer.Serialize(actions, MessagePackOptions);
+        byte[] actionsBytes = SerializeMessagePackInput(actions);
         byte[] payload = DispatchComponentActionsBytes(source, stateSnapshot, buildContext, actionsBytes, fileName);
         return DeserializeMessagePackResult<NxComponentDispatchResult<TEffect>>(
             payload,
@@ -422,9 +770,7 @@ public static class NxRuntime
         byte[] stateSnapshot,
         TActions actions)
     {
-        byte[] actionsBytes = actions is null
-            ? Array.Empty<byte>()
-            : MessagePackSerializer.Serialize(actions, MessagePackOptions);
+        byte[] actionsBytes = SerializeMessagePackInput(actions);
         byte[] payload = DispatchComponentActionsBytes(programArtifact, stateSnapshot, actionsBytes);
         return DeserializeMessagePackResult<NxComponentDispatchResult<TEffect>>(
             payload,
@@ -436,10 +782,12 @@ public static class NxRuntime
         nuint sourceLength,
         byte[] fileNameBytes,
         nuint fileNameLength,
+        NxOutputFormat outputFormat,
         out NxBuffer buffer);
 
     private delegate NxEvalStatus EvalProgramArtifactCallback(
         NxProgramArtifactSafeHandle programArtifactHandle,
+        NxOutputFormat outputFormat,
         out NxBuffer buffer);
 
     private delegate NxEvalStatus ComponentInitProgramArtifactCallback(
@@ -448,6 +796,7 @@ public static class NxRuntime
         nuint componentNameLength,
         byte[] propsBytes,
         nuint propsLength,
+        NxOutputFormat outputFormat,
         out NxBuffer buffer);
 
     private delegate NxEvalStatus ComponentDispatchProgramArtifactCallback(
@@ -456,16 +805,13 @@ public static class NxRuntime
         nuint stateSnapshotLength,
         byte[] actionsBytes,
         nuint actionsLength,
-        out NxBuffer buffer);
-
-    private delegate NxEvalStatus MsgpackToJsonCallback(
-        byte[] payloadBytes,
-        nuint payloadLength,
+        NxOutputFormat outputFormat,
         out NxBuffer buffer);
 
     private static byte[] InvokeSourceNativeCall(
         string source,
         string? fileName,
+        NxOutputFormat outputFormat,
         EvalSourceCallback callback,
         out NxEvalStatus status)
     {
@@ -480,12 +826,14 @@ public static class NxRuntime
             (nuint)sourceBytes.Length,
             fileNameBytes,
             (nuint)fileNameBytes.Length,
+            outputFormat,
             out NxBuffer buffer);
         return CopyAndFreeBuffer(buffer);
     }
 
     private static byte[] InvokeProgramArtifactNativeCall(
         NxProgramArtifact programArtifact,
+        NxOutputFormat outputFormat,
         EvalProgramArtifactCallback callback,
         out NxEvalStatus status)
     {
@@ -495,6 +843,7 @@ public static class NxRuntime
 
         status = callback(
             programArtifact.SafeHandle,
+            outputFormat,
             out NxBuffer buffer);
         return CopyAndFreeBuffer(buffer);
     }
@@ -502,6 +851,7 @@ public static class NxRuntime
     private static byte[] InvokeComponentInitProgramArtifactNativeCall(
         NxProgramArtifact programArtifact,
         string componentName,
+        NxOutputFormat outputFormat,
         byte[]? propsBytes,
         ComponentInitProgramArtifactCallback callback,
         out NxEvalStatus status)
@@ -520,6 +870,7 @@ public static class NxRuntime
             (nuint)componentNameBytes.Length,
             payloadBytes,
             (nuint)payloadBytes.Length,
+            outputFormat,
             out NxBuffer buffer);
         return CopyAndFreeBuffer(buffer);
     }
@@ -527,6 +878,7 @@ public static class NxRuntime
     private static byte[] InvokeComponentDispatchProgramArtifactNativeCall(
         NxProgramArtifact programArtifact,
         byte[] stateSnapshot,
+        NxOutputFormat outputFormat,
         byte[]? actionsBytes,
         ComponentDispatchProgramArtifactCallback callback,
         out NxEvalStatus status)
@@ -544,32 +896,21 @@ public static class NxRuntime
             (nuint)stateSnapshot.Length,
             payloadBytes,
             (nuint)payloadBytes.Length,
+            outputFormat,
             out NxBuffer buffer);
         return CopyAndFreeBuffer(buffer);
     }
 
-    private static string ConvertMessagePackPayloadToJson(
+    internal static NxEvaluationException CreateEvaluationException(
         byte[] payload,
-        MsgpackToJsonCallback callback,
-        string invalidPayloadMessage)
+        NxOutputFormat outputFormat)
     {
-        ArgumentNullException.ThrowIfNull(payload);
-
-        NxNativeLibrary.EnsureLoaded();
-
-        NxEvalStatus status = callback(
-            payload,
-            (nuint)payload.Length,
-            out NxBuffer buffer);
-
-        byte[] jsonBytes = CopyAndFreeBuffer(buffer);
-        string json = DecodeUtf8Payload(jsonBytes, invalidPayloadMessage);
-
-        return status switch
+        return outputFormat switch
         {
-            NxEvalStatus.Ok => json,
-            NxEvalStatus.Error => throw new InvalidOperationException($"{invalidPayloadMessage} Details: {json}"),
-            _ => throw CreateInteropStatusException(status),
+            NxOutputFormat.MessagePack => CreateEvaluationExceptionFromMessagePack(payload),
+            NxOutputFormat.Json => CreateEvaluationExceptionFromJson(payload),
+            _ => throw new InvalidOperationException(
+                $"NX native runtime returned an unsupported output format: {outputFormat}."),
         };
     }
 
@@ -588,6 +929,26 @@ public static class NxRuntime
         }
     }
 
+    internal static NxEvaluationException CreateEvaluationExceptionFromJson(byte[] payload)
+    {
+        try
+        {
+            NxDiagnostic[]? diagnostics = JsonSerializer.Deserialize<NxDiagnostic[]>(payload);
+            if (diagnostics is null)
+            {
+                throw new JsonException("Expected JSON diagnostics payload.");
+            }
+
+            return new NxEvaluationException("NX evaluation failed.", diagnostics);
+        }
+        catch (JsonException e)
+        {
+            throw new InvalidOperationException(
+                "NX native runtime returned an invalid JSON diagnostics payload.",
+                e);
+        }
+    }
+
     private static T DeserializeMessagePackResult<T>(byte[] payload, string message)
     {
         try
@@ -598,6 +959,109 @@ public static class NxRuntime
         {
             throw new InvalidOperationException(message, e);
         }
+    }
+
+    private static JsonElement DeserializeJsonElement(byte[] payload, string message)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(payload);
+            return document.RootElement.Clone();
+        }
+        catch (JsonException e)
+        {
+            throw new InvalidOperationException(message, e);
+        }
+    }
+
+    private static NxComponentInitResult<JsonElement> DeserializeJsonComponentInitResult(
+        byte[] payload,
+        string message)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(payload);
+            JsonElement root = document.RootElement;
+            if (!root.TryGetProperty("rendered", out JsonElement rendered))
+            {
+                throw new JsonException("Expected rendered property.");
+            }
+
+            if (!root.TryGetProperty("state_snapshot", out JsonElement stateSnapshotElement) ||
+                stateSnapshotElement.ValueKind is not JsonValueKind.String)
+            {
+                throw new JsonException("Expected state_snapshot string property.");
+            }
+
+            string? stateSnapshotBase64 = stateSnapshotElement.GetString();
+            if (stateSnapshotBase64 is null)
+            {
+                throw new JsonException("Expected state_snapshot string value.");
+            }
+
+            return new NxComponentInitResult<JsonElement>
+            {
+                Rendered = rendered.Clone(),
+                StateSnapshot = Convert.FromBase64String(stateSnapshotBase64),
+            };
+        }
+        catch (Exception e) when (e is JsonException or FormatException)
+        {
+            throw new InvalidOperationException(message, e);
+        }
+    }
+
+    private static NxComponentDispatchResult<JsonElement> DeserializeJsonComponentDispatchResult(
+        byte[] payload,
+        string message)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(payload);
+            JsonElement root = document.RootElement;
+            if (!root.TryGetProperty("effects", out JsonElement effectsElement) ||
+                effectsElement.ValueKind is not JsonValueKind.Array)
+            {
+                throw new JsonException("Expected effects array property.");
+            }
+
+            if (!root.TryGetProperty("state_snapshot", out JsonElement stateSnapshotElement) ||
+                stateSnapshotElement.ValueKind is not JsonValueKind.String)
+            {
+                throw new JsonException("Expected state_snapshot string property.");
+            }
+
+            string? stateSnapshotBase64 = stateSnapshotElement.GetString();
+            if (stateSnapshotBase64 is null)
+            {
+                throw new JsonException("Expected state_snapshot string value.");
+            }
+
+            int effectCount = effectsElement.GetArrayLength();
+            JsonElement[] effects = new JsonElement[effectCount];
+            int index = 0;
+            foreach (JsonElement effect in effectsElement.EnumerateArray())
+            {
+                effects[index++] = effect.Clone();
+            }
+
+            return new NxComponentDispatchResult<JsonElement>
+            {
+                Effects = effects,
+                StateSnapshot = Convert.FromBase64String(stateSnapshotBase64),
+            };
+        }
+        catch (Exception e) when (e is JsonException or FormatException)
+        {
+            throw new InvalidOperationException(message, e);
+        }
+    }
+
+    private static byte[] SerializeMessagePackInput<T>(T value)
+    {
+        return value is null
+            ? Array.Empty<byte>()
+            : MessagePackSerializer.Serialize(value, MessagePackOptions);
     }
 
     internal static InvalidOperationException CreateInteropStatusException(NxEvalStatus status)
@@ -613,18 +1077,6 @@ public static class NxRuntime
         };
 
         return new InvalidOperationException(message);
-    }
-
-    private static string DecodeUtf8Payload(byte[] payload, string message)
-    {
-        try
-        {
-            return StrictUtf8.GetString(payload);
-        }
-        catch (DecoderFallbackException e)
-        {
-            throw new InvalidOperationException(message, e);
-        }
     }
 
     internal static byte[] CopyAndFreeBuffer(NxBuffer buffer)

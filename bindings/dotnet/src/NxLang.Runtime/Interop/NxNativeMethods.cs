@@ -19,6 +19,7 @@ internal static class NxNativeMethods
         nuint sourceLen,
         byte[] fileNamePtr,
         nuint fileNameLen,
+        global::NxLang.Nx.NxOutputFormat outputFormat,
         out NxBuffer outBuffer);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
@@ -58,6 +59,7 @@ internal static class NxNativeMethods
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NxEvalStatus nx_eval_program_artifact(
         NxProgramArtifactSafeHandle programArtifactPtr,
+        global::NxLang.Nx.NxOutputFormat outputFormat,
         out NxBuffer outBuffer);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
@@ -67,6 +69,7 @@ internal static class NxNativeMethods
         nuint componentNameLen,
         byte[] propsPtr,
         nuint propsLen,
+        global::NxLang.Nx.NxOutputFormat outputFormat,
         out NxBuffer outBuffer);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
@@ -76,30 +79,7 @@ internal static class NxNativeMethods
         nuint stateSnapshotLen,
         byte[] actionsPtr,
         nuint actionsLen,
-        out NxBuffer outBuffer);
-
-    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-    internal static extern NxEvalStatus nx_value_msgpack_to_json(
-        byte[] payloadPtr,
-        nuint payloadLen,
-        out NxBuffer outBuffer);
-
-    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-    internal static extern NxEvalStatus nx_diagnostics_msgpack_to_json(
-        byte[] payloadPtr,
-        nuint payloadLen,
-        out NxBuffer outBuffer);
-
-    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-    internal static extern NxEvalStatus nx_component_init_result_msgpack_to_json(
-        byte[] payloadPtr,
-        nuint payloadLen,
-        out NxBuffer outBuffer);
-
-    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-    internal static extern NxEvalStatus nx_component_dispatch_result_msgpack_to_json(
-        byte[] payloadPtr,
-        nuint payloadLen,
+        global::NxLang.Nx.NxOutputFormat outputFormat,
         out NxBuffer outBuffer);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
