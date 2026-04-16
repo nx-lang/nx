@@ -53,6 +53,14 @@ fn render_module(
     }
 
     writer.line("using System;");
+    if module.declarations.iter().any(|declaration| {
+        !matches!(
+            declaration.item,
+            ExportedType::Alias(_) | ExportedType::Enum(_)
+        )
+    }) {
+        writer.line("using System.Text.Json.Serialization;");
+    }
     writer.line("using MessagePack;");
     writer.line("using MessagePack.Formatters;");
     writer.blank_line();
@@ -162,6 +170,8 @@ fn emit_record(
     record: &ExportedRecord,
     context: &CSharpRenderContext<'_>,
 ) {
+    emit_record_json_polymorphism_attributes(writer, record, context);
+
     if record.is_abstract {
         for (index, descendant) in context
             .graph
@@ -204,10 +214,7 @@ fn emit_record(
             let field_type = csharp_type(&field.ty, context);
             let field_name = sanitize_csharp_member_name(&field.name);
 
-            writer.line(&format!(
-                "[Key(\"{}\")]",
-                escape_csharp_string_literal(&field.name)
-            ));
+            emit_dual_wire_name_attributes(writer, &field.name);
             if field_type.is_reference && !field_type.is_nullable {
                 writer.line(&format!(
                     "public {} {} {{ get; set; }} = default!;",
@@ -233,14 +240,14 @@ fn emit_record_discriminator(
             return;
         }
 
-        writer.line("[Key(\"$type\")]");
+        emit_dual_wire_name_attributes(writer, "$type");
         writer.line(&format!(
             "public abstract string {NX_TYPE_DISCRIMINATOR_PROPERTY} {{ get; set; }}"
         ));
         return;
     }
 
-    writer.line("[Key(\"$type\")]");
+    emit_dual_wire_name_attributes(writer, "$type");
     if graph_resolves_record_base(context, record) {
         writer.line(&format!(
             "public override string {NX_TYPE_DISCRIMINATOR_PROPERTY} {{ get; set; }} = \"{}\";",
@@ -270,10 +277,7 @@ fn emit_external_state(
                 let field_type = csharp_type(&field.ty, context);
                 let field_name = sanitize_csharp_member_name(&field.name);
 
-                writer.line(&format!(
-                    "[Key(\"{}\")]",
-                    escape_csharp_string_literal(&field.name)
-                ));
+                emit_dual_wire_name_attributes(writer, &field.name);
                 if field_type.is_reference && !field_type.is_nullable {
                     writer.line(&format!(
                         "public {} {} {{ get; set; }} = default!;",
@@ -288,6 +292,31 @@ fn emit_external_state(
             }
         },
     );
+}
+
+fn emit_record_json_polymorphism_attributes(
+    writer: &mut CodeWriter,
+    record: &ExportedRecord,
+    context: &CSharpRenderContext<'_>,
+) {
+    if !record.is_abstract || graph_resolves_record_base(context, record) {
+        return;
+    }
+
+    writer.line("[JsonPolymorphic(TypeDiscriminatorPropertyName = \"$type\")]");
+    for descendant in context.graph.concrete_descendants(&record.name).iter() {
+        writer.line(&format!(
+            "[JsonDerivedType(typeof({}), \"{}\")]",
+            sanitize_csharp_identifier(&descendant.name),
+            escape_csharp_string_literal(&descendant.name)
+        ));
+    }
+}
+
+fn emit_dual_wire_name_attributes(writer: &mut CodeWriter, name: &str) {
+    let escaped_name = escape_csharp_string_literal(name);
+    writer.line(&format!("[Key(\"{escaped_name}\")]"));
+    writer.line(&format!("[JsonPropertyName(\"{escaped_name}\")]"));
 }
 
 fn emit_enum_messagepack_formatter(writer: &mut CodeWriter, enum_def: &ExportedEnum) {

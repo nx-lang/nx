@@ -470,7 +470,10 @@ fn export_external_component_contract(component: &Component) -> Option<ExportedR
         name: component.name.as_str().to_string(),
         kind: RecordKind::Plain,
         is_abstract: component.is_abstract,
-        base: component.base.as_ref().map(|name| name.as_str().to_string()),
+        base: component
+            .base
+            .as_ref()
+            .map(|name| name.as_str().to_string()),
         fields: component
             .props
             .iter()

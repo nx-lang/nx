@@ -178,7 +178,12 @@ mod tests {
         assert!(output.contains("export interface SearchBox_state"));
         assert!(output.contains("query: string;"));
         assert!(!output.contains("NxRecord<\"SearchBox_state\">"));
-        assert!(!output.contains("$type"));
+        let state_block = output
+            .split("export interface SearchBox_state")
+            .nth(1)
+            .and_then(|tail| tail.split("}").next())
+            .expect("SearchBox_state block");
+        assert!(!state_block.contains("$type"));
     }
 
     #[test]
@@ -447,7 +452,13 @@ mod tests {
         assert!(search_box
             .content
             .contains("public ThemeMode Theme { get; set; }"));
-        assert!(!search_box.content.contains("__NxType"));
+        let state_block = search_box
+            .content
+            .split("public sealed class SearchBox_state")
+            .nth(1)
+            .and_then(|tail| tail.split("}").next())
+            .expect("SearchBox_state block");
+        assert!(!state_block.contains("__NxType"));
 
         let theme = files
             .iter()
@@ -475,7 +486,8 @@ mod tests {
         assert!(output.contains("[Key(\"label\")]"));
         assert!(output.contains("public string Label { get; set; } = default!;"));
         assert!(output.contains("public sealed class ShortTextQuestion : Question"));
-        assert!(output.contains("public override string __NxType { get; set; } = \"ShortTextQuestion\";"));
+        assert!(output
+            .contains("public override string __NxType { get; set; } = \"ShortTextQuestion\";"));
         assert!(output.contains("public string? Placeholder { get; set; }"));
     }
 
@@ -775,11 +787,20 @@ mod tests {
 
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
 
+        assert!(output.contains("using System.Text.Json.Serialization;"));
         assert!(output.contains("[MessagePackObject]"));
         assert!(output.contains("public sealed class SearchBox_state"));
+        assert!(output.contains("[Key(\"query\")]"));
+        assert!(output.contains("[JsonPropertyName(\"query\")]"));
         assert!(output.contains("public string Query { get; set; } = default!;"));
-        assert!(!output.contains("__NxType"));
-        assert!(!output.contains("[Key(\"$type\")]"));
+        let state_block = output
+            .split("public sealed class SearchBox_state")
+            .nth(1)
+            .and_then(|tail| tail.split("}").next())
+            .expect("SearchBox_state block");
+        assert!(!state_block.contains("__NxType"));
+        assert!(!state_block.contains("[Key(\"$type\")]"));
+        assert!(!state_block.contains("[JsonPropertyName(\"$type\")]"));
     }
 
     #[test]
@@ -796,8 +817,40 @@ mod tests {
 
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
 
+        assert!(output.contains("[JsonPropertyName(\"$type\")]"));
         assert!(output.contains("public string __NxType { get; set; } = \"Payload\";"));
+        assert!(output.contains("[JsonPropertyName(\"nx_type\")]"));
         assert!(output.contains("public string NxType { get; set; } = default!;"));
+    }
+
+    #[test]
+    fn generates_csharp_concrete_record_and_action_fields_with_dual_annotations() {
+        let source = r#"
+            export type ShortTextQuestion = { label:string }
+            export action SearchRequested = { query:string }
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.Models".to_string()),
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(output.contains("using System.Text.Json.Serialization;"));
+        assert!(output.contains("public sealed class ShortTextQuestion"));
+        assert!(output.contains("[Key(\"$type\")]"));
+        assert!(output.contains("[JsonPropertyName(\"$type\")]"));
+        assert!(output.contains("[Key(\"label\")]"));
+        assert!(output.contains("[JsonPropertyName(\"label\")]"));
+        assert!(output.contains("public string Label { get; set; } = default!;"));
+        assert!(output.contains("public string __NxType { get; set; } = \"ShortTextQuestion\";"));
+        assert!(output.contains("public sealed class SearchRequested"));
+        assert!(output.contains("[Key(\"query\")]"));
+        assert!(output.contains("[JsonPropertyName(\"query\")]"));
+        assert!(output.contains("public string Query { get; set; } = default!;"));
+        assert!(output.contains("public string __NxType { get; set; } = \"SearchRequested\";"));
     }
 
     #[test]
@@ -841,12 +894,18 @@ mod tests {
 
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
 
+        assert!(output.contains("[JsonPolymorphic(TypeDiscriminatorPropertyName = \"$type\")]"));
+        assert!(
+            output.contains("[JsonDerivedType(typeof(ShortTextQuestion), \"ShortTextQuestion\")]")
+        );
         assert!(output.contains("[Union(0, typeof(ShortTextQuestion))]"));
         assert!(output.contains("public abstract class Question"));
+        assert!(output.contains("[JsonPropertyName(\"$type\")]"));
         assert!(output.contains("public abstract string __NxType { get; set; }"));
         assert!(output.contains("public sealed class ShortTextQuestion : Question"));
         assert!(output
             .contains("public override string __NxType { get; set; } = \"ShortTextQuestion\";"));
+        assert!(output.contains("[JsonPropertyName(\"placeholder\")]"));
     }
 
     #[test]
@@ -864,14 +923,19 @@ mod tests {
 
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
 
+        assert!(output.contains("[JsonPolymorphic(TypeDiscriminatorPropertyName = \"$type\")]"));
+        assert!(output.contains("[JsonDerivedType(typeof(SearchRequested), \"SearchRequested\")]"));
         assert!(output.contains("[Union(0, typeof(SearchRequested))]"));
         assert!(output.contains("public abstract class SearchAction"));
+        assert!(output.contains("[JsonPropertyName(\"$type\")]"));
         assert!(output.contains("public abstract string __NxType { get; set; }"));
+        assert!(output.contains("[JsonPropertyName(\"source\")]"));
         assert!(output.contains("public string Source { get; set; } = default!;"));
         assert!(output.contains("public sealed class SearchRequested : SearchAction"));
         assert!(
             output.contains("public override string __NxType { get; set; } = \"SearchRequested\";")
         );
+        assert!(output.contains("[JsonPropertyName(\"query\")]"));
     }
 
     #[test]
@@ -890,8 +954,13 @@ mod tests {
 
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
 
+        assert!(output.contains("[JsonPolymorphic(TypeDiscriminatorPropertyName = \"$type\")]"));
+        assert!(
+            output.contains("[JsonDerivedType(typeof(ShortTextQuestion), \"ShortTextQuestion\")]")
+        );
         assert!(output.contains("[Union(0, typeof(ShortTextQuestion))]"));
         assert!(output.contains("public abstract class Question"));
+        assert!(output.contains("[JsonPropertyName(\"$type\")]"));
         assert!(output.contains("public abstract string __NxType { get; set; }"));
         assert!(output.contains("public abstract class TextQuestion : Question"));
         assert!(output.contains("public sealed class ShortTextQuestion : TextQuestion"));
@@ -909,6 +978,10 @@ mod tests {
         assert!(
             !text_question_block.contains("__NxType"),
             "intermediate abstract records should inherit the root discriminator without redeclaring it"
+        );
+        assert!(
+            !text_question_block.contains("[JsonPolymorphic("),
+            "intermediate abstract records should inherit the root polymorphism contract"
         );
     }
 

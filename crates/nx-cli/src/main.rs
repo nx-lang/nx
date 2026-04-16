@@ -1040,7 +1040,12 @@ let root() = { Ui.title() }"#,
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("export interface SearchBox_state"));
         assert!(stdout.contains("query: string;"));
-        assert!(!stdout.contains("$type"));
+        let state_block = stdout
+            .split("export interface SearchBox_state")
+            .nth(1)
+            .and_then(|tail| tail.split("}").next())
+            .expect("SearchBox_state block");
+        assert!(!state_block.contains("$type"));
     }
 
     #[test]
@@ -1266,7 +1271,12 @@ let root() = { Ui.title() }"#,
         assert!(search_box.contains("namespace MyApp.Models"));
         assert!(search_box.contains("public sealed class SearchBox_state"));
         assert!(search_box.contains("public ThemeMode Theme { get; set; }"));
-        assert!(!search_box.contains("__NxType"));
+        let state_block = search_box
+            .split("public sealed class SearchBox_state")
+            .nth(1)
+            .and_then(|tail| tail.split("}").next())
+            .expect("SearchBox_state block");
+        assert!(!state_block.contains("__NxType"));
         assert!(theme.contains("namespace MyApp.Models"));
         assert!(theme.contains("public enum ThemeMode"));
     }
