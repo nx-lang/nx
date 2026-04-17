@@ -1,10 +1,11 @@
 use crate::codegen::model::{
     ExportedAlias, ExportedEnum, ExportedExternalState, ExportedModule, ExportedRecord,
-    ExportedRecordField, ExportedType, ExportedTypeGraph,
+    ExportedRecordField, ExportedType, ExportedTypeGraph, ImportedType,
 };
 use crate::codegen::writer::CodeWriter;
 use crate::codegen::{GenerateTypesOptions, GeneratedFile};
 use nx_hir::ast::TypeRef;
+use rustc_hash::FxHashMap;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -37,6 +38,48 @@ pub fn emit_library(
     Ok(files)
 }
 
+pub(crate) fn collect_warnings(graph: &ExportedTypeGraph, namespace: &str) -> Vec<String> {
+    let mut warnings = Vec::new();
+    let mut warned_dependency_namespaces = BTreeSet::new();
+
+    for module in &graph.modules {
+        for imported_type in &module.imported_types {
+            let assumed_namespace =
+                assumed_dependency_namespace_for_library(namespace, &imported_type.library_name);
+            if warned_dependency_namespaces.insert((
+                imported_type.library_name.clone(),
+                assumed_namespace.clone(),
+            )) {
+                warnings.push(format!(
+                    "Generated C# cross-library references for dependency '{}' assume namespace '{}' derived from the dependency directory name. If that library was generated with a different --csharp-namespace, regenerate with matching namespaces or update the generated namespace manually.",
+                    imported_type.library_name, assumed_namespace
+                ));
+            }
+        }
+
+        for declaration in &module.declarations {
+            let ExportedType::Record(record) = &declaration.item else {
+                continue;
+            };
+
+            if !record.is_abstract || graph.resolved_record_base(record).is_some() {
+                continue;
+            }
+
+            if !graph.concrete_descendants(&record.name).is_empty() {
+                continue;
+            }
+
+            warnings.push(format!(
+                "Generated C# abstract type '{}' has no concrete exported descendants; omitting JsonPolymorphic metadata because System.Text.Json requires at least one derived type registration.",
+                record.name
+            ));
+        }
+    }
+
+    warnings
+}
+
 fn render_module(
     graph: &ExportedTypeGraph,
     module: &ExportedModule,
@@ -50,6 +93,43 @@ fn render_module(
         return writer.finish();
     }
 
+    let aliases = module
+        .declarations
+        .iter()
+        .filter_map(|declaration| match &declaration.item {
+            ExportedType::Alias(alias) => Some(alias),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let imported_type_lookup = module
+        .imported_types
+        .iter()
+        .cloned()
+        .map(|imported_type| (imported_type.visible_name.clone(), imported_type))
+        .collect::<FxHashMap<_, _>>();
+    let dependency_usings = collect_dependency_namespaces(&module.imported_types, namespace);
+
+    let global_context = CSharpRenderContext {
+        namespace,
+        graph,
+        imported_types_by_visible_name: &imported_type_lookup,
+        qualify_generated_types: true,
+    };
+    let namespace_context = CSharpRenderContext {
+        namespace,
+        graph,
+        imported_types_by_visible_name: &imported_type_lookup,
+        qualify_generated_types: false,
+    };
+
+    for alias in &aliases {
+        emit_alias(&mut writer, alias, &global_context);
+    }
+
+    if !aliases.is_empty() {
+        writer.blank_line();
+    }
+
     writer.line("using System;");
     if module.declarations.iter().any(|declaration| {
         !matches!(
@@ -61,40 +141,21 @@ fn render_module(
     }
     writer.line("using MessagePack;");
     writer.line("using MessagePack.Formatters;");
-    writer.blank_line();
 
-    let global_context = CSharpRenderContext {
-        namespace,
-        graph,
-        qualify_generated_types: true,
-    };
-    let namespace_context = CSharpRenderContext {
-        namespace,
-        graph,
-        qualify_generated_types: false,
-    };
-
-    let aliases = module
-        .declarations
-        .iter()
-        .filter_map(|declaration| match &declaration.item {
-            ExportedType::Alias(alias) => Some(alias),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    for alias in &aliases {
-        emit_alias(&mut writer, alias, &global_context);
+    for dependency_namespace in &dependency_usings {
+        writer.line(&format!(
+            "using {};",
+            sanitize_csharp_qualified_name(dependency_namespace)
+        ));
     }
+
+    writer.blank_line();
 
     let body_items = module
         .declarations
         .iter()
         .filter(|declaration| !matches!(declaration.item, ExportedType::Alias(_)))
         .collect::<Vec<_>>();
-
-    if !aliases.is_empty() && !body_items.is_empty() {
-        writer.blank_line();
-    }
 
     if !body_items.is_empty() {
         writer.block(
@@ -185,12 +246,8 @@ fn emit_record(
     }
 
     if should_emit_missing_polymorphism_hint(record, context) {
-        writer.line(
-            "// No JsonPolymorphic metadata was generated because this abstract type had",
-        );
-        writer.line(
-            "// no concrete exported descendants at code-generation time.",
-        );
+        writer.line("// No JsonPolymorphic metadata was generated because this abstract type had");
+        writer.line("// no concrete exported descendants at code-generation time.");
     }
 
     writer.line("[MessagePackObject]");
@@ -441,6 +498,7 @@ struct CSharpType {
 struct CSharpRenderContext<'a> {
     namespace: &'a str,
     graph: &'a ExportedTypeGraph,
+    imported_types_by_visible_name: &'a FxHashMap<String, ImportedType>,
     qualify_generated_types: bool,
 }
 
@@ -579,6 +637,20 @@ fn csharp_type_name_inner(
                         is_nullable: false,
                     },
                 }
+            } else if let Some(imported_type) = context.imported_types_by_visible_name.get(other) {
+                let dependency_namespace = assumed_dependency_namespace_for_library(
+                    context.namespace,
+                    &imported_type.library_name,
+                );
+                CSharpType {
+                    text: generated_type_name(
+                        &imported_type.exported_name,
+                        &dependency_namespace,
+                        true,
+                    ),
+                    is_reference: imported_type.is_reference,
+                    is_nullable: false,
+                }
             } else {
                 CSharpType {
                     text: sanitize_csharp_qualified_name(other),
@@ -601,6 +673,37 @@ fn generated_type_name(name: &str, namespace: &str, qualify: bool) -> String {
     } else {
         identifier
     }
+}
+
+fn collect_dependency_namespaces(
+    imported_types: &[ImportedType],
+    current_namespace: &str,
+) -> BTreeSet<String> {
+    imported_types
+        .iter()
+        .map(|imported_type| {
+            assumed_dependency_namespace_for_library(current_namespace, &imported_type.library_name)
+        })
+        .filter(|dependency_namespace| dependency_namespace != current_namespace)
+        .collect()
+}
+
+// Cross-library C# references currently assume sibling namespaces derived from dependency
+// directory names because nx modules do not publish an explicit external namespace mapping yet.
+fn assumed_dependency_namespace_for_library(current_namespace: &str, library_name: &str) -> String {
+    let dependency_segment = sanitize_csharp_member_name(library_name);
+    let mut namespace_parts = current_namespace
+        .split('.')
+        .filter(|part| !part.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+
+    if !namespace_parts.is_empty() {
+        namespace_parts.pop();
+    }
+
+    namespace_parts.push(dependency_segment);
+    namespace_parts.join(".")
 }
 
 fn module_output_path(module_path: &Path) -> PathBuf {

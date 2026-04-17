@@ -22,6 +22,14 @@ pub struct GenerateTypesOptions {
     pub format: FormatOptions,
 }
 
+impl GenerateTypesOptions {
+    fn csharp_namespace_or_default(&self) -> &str {
+        self.csharp_namespace
+            .as_deref()
+            .unwrap_or(DEFAULT_CSHARP_NAMESPACE)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GeneratedFile {
     pub relative_path: PathBuf,
@@ -33,6 +41,8 @@ pub struct GeneratedOutput<T> {
     pub value: T,
     pub warnings: Vec<String>,
 }
+
+const DEFAULT_CSHARP_NAMESPACE: &str = "Nx.Generated";
 
 pub fn format_options_from_editorconfig(
     language: TargetLanguage,
@@ -79,18 +89,14 @@ pub fn generate_types_with_warnings(
     let value = match opts.language {
         TargetLanguage::TypeScript => languages::typescript::emit_single_file(&graph, opts),
         TargetLanguage::CSharp => {
-            let namespace = opts.csharp_namespace.as_deref().unwrap_or("Nx.Generated");
-            languages::csharp::emit_single_file(&graph, namespace, opts)
+            languages::csharp::emit_single_file(&graph, opts.csharp_namespace_or_default(), opts)
         }
     }?;
 
     let mut warnings = build.warnings;
-    warnings.extend(collect_language_warnings(graph, opts.language));
+    warnings.extend(collect_language_warnings(graph, opts));
 
-    Ok(GeneratedOutput {
-        value,
-        warnings,
-    })
+    Ok(GeneratedOutput { value, warnings })
 }
 
 #[allow(dead_code)]
@@ -111,55 +117,26 @@ pub fn generate_library_types_with_warnings(
     let value = match opts.language {
         TargetLanguage::TypeScript => languages::typescript::emit_library(&graph, opts),
         TargetLanguage::CSharp => {
-            let namespace = opts.csharp_namespace.as_deref().unwrap_or("Nx.Generated");
-            languages::csharp::emit_library(&graph, namespace, opts)
+            languages::csharp::emit_library(&graph, opts.csharp_namespace_or_default(), opts)
         }
     }?;
 
     let mut warnings = build.warnings;
-    warnings.extend(collect_language_warnings(graph, opts.language));
+    warnings.extend(collect_language_warnings(graph, opts));
 
-    Ok(GeneratedOutput {
-        value,
-        warnings,
-    })
+    Ok(GeneratedOutput { value, warnings })
 }
 
 fn collect_language_warnings(
     graph: &model::ExportedTypeGraph,
-    language: TargetLanguage,
+    opts: &GenerateTypesOptions,
 ) -> Vec<String> {
-    match language {
-        TargetLanguage::CSharp => collect_csharp_warnings(graph),
+    match opts.language {
+        TargetLanguage::CSharp => {
+            languages::csharp::collect_warnings(graph, opts.csharp_namespace_or_default())
+        }
         TargetLanguage::TypeScript => Vec::new(),
     }
-}
-
-fn collect_csharp_warnings(graph: &model::ExportedTypeGraph) -> Vec<String> {
-    let mut warnings = Vec::new();
-
-    for module in &graph.modules {
-        for declaration in &module.declarations {
-            let model::ExportedType::Record(record) = &declaration.item else {
-                continue;
-            };
-
-            if !record.is_abstract || graph.resolved_record_base(record).is_some() {
-                continue;
-            }
-
-            if !graph.concrete_descendants(&record.name).is_empty() {
-                continue;
-            }
-
-            warnings.push(format!(
-                "Generated C# abstract type '{}' has no concrete exported descendants; omitting JsonPolymorphic metadata because System.Text.Json requires at least one derived type registration.",
-                record.name
-            ));
-        }
-    }
-
-    warnings
 }
 
 #[cfg(test)]
@@ -336,6 +313,26 @@ mod tests {
 
         assert!(output.contains("global using Count = long;"));
         assert!(output.contains("global using Name = string;"));
+    }
+
+    #[test]
+    fn generates_csharp_global_aliases_before_non_global_usings() {
+        let source = r#"
+            export type Count = int
+            export type Payload = { count: Count }
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.Models".to_string()),
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+        let global_using_index = output.find("global using Count = long;").unwrap();
+        let using_system_index = output.find("using System;").unwrap();
+
+        assert!(global_using_index < using_system_index);
     }
 
     #[test]
@@ -1004,6 +1001,35 @@ mod tests {
     }
 
     #[test]
+    fn generate_types_warns_when_imported_library_cannot_be_resolved() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let source_path = temp_dir.path().join("chat-link.nx");
+        let module = lower_module(
+            r#"import "../question-flow"
+
+export type QuestionFlowInitialExperience = {
+  questionFlow: QuestionFlow
+}
+"#,
+            source_path.to_str().expect("source path"),
+        );
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.Models.ChatLink".to_string()),
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let output =
+            generate_types_with_warnings(&module, &source_path, &opts).expect("generation output");
+
+        assert_eq!(output.warnings.len(), 1);
+        assert!(output.warnings[0].contains("../question-flow"));
+        assert!(output
+            .value
+            .contains("public QuestionFlow QuestionFlow { get; set; } = default!;"));
+    }
+
+    #[test]
     fn generates_csharp_abstract_record_polymorphism_metadata_for_concrete_descendants() {
         let source = r#"
             export abstract type Question = { label:string }
@@ -1164,5 +1190,112 @@ mod tests {
         assert!(aliases
             .content
             .contains("global using ThemeAlias = global::Test.Models.ThemeMode;"));
+    }
+
+    #[test]
+    fn generates_csharp_library_files_with_dependency_namespace_usings() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let question_flow_dir = temp_dir.path().join("question-flow");
+        let chat_link_dir = temp_dir.path().join("chat-link");
+        fs::create_dir_all(&question_flow_dir).expect("question-flow dir");
+        fs::create_dir_all(&chat_link_dir).expect("chat-link dir");
+
+        fs::write(
+            question_flow_dir.join("QuestionFlow.nx"),
+            "export type QuestionFlow = { id:string }",
+        )
+        .expect("question-flow file");
+        fs::write(
+            chat_link_dir.join("ChatLinkConfig.nx"),
+            r#"import "../question-flow"
+
+export type QuestionFlowInitialExperience = {
+  questionFlow: QuestionFlow
+}
+"#,
+        )
+        .expect("chat-link file");
+
+        let artifact =
+            build_library_artifact_from_directory(&chat_link_dir).expect("library build");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.Models.ChatLink".to_string()),
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let output = generate_library_types_with_warnings(&artifact, &opts).unwrap();
+        let chat_link = output
+            .value
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("ChatLinkConfig.g.cs"))
+            .expect("ChatLinkConfig.g.cs");
+
+        assert_eq!(output.warnings.len(), 1);
+        assert!(output.warnings[0].contains("question-flow"));
+        assert!(output.warnings[0].contains("Test.Models.QuestionFlow"));
+        assert!(chat_link
+            .content
+            .contains("using Test.Models.QuestionFlow;"));
+        assert!(chat_link
+            .content
+            .contains(
+                "public global::Test.Models.QuestionFlow.QuestionFlow QuestionFlow { get; set; } = default!;"
+            ));
+    }
+
+    #[test]
+    fn csharp_dependency_namespace_warning_matches_emitted_namespace_for_digit_prefixed_library() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let dependency_dir = temp_dir.path().join("123dep");
+        let chat_link_dir = temp_dir.path().join("chat-link");
+        fs::create_dir_all(&dependency_dir).expect("dependency dir");
+        fs::create_dir_all(&chat_link_dir).expect("chat-link dir");
+
+        fs::write(
+            dependency_dir.join("QuestionFlow.nx"),
+            "export type QuestionFlow = { id:string }",
+        )
+        .expect("dependency file");
+        fs::write(
+            chat_link_dir.join("ChatLinkConfig.nx"),
+            r#"import "../123dep"
+
+export type QuestionFlowInitialExperience = {
+  questionFlow: QuestionFlow
+}
+"#,
+        )
+        .expect("chat-link file");
+
+        let artifact =
+            build_library_artifact_from_directory(&chat_link_dir).expect("library build");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.Models.ChatLink".to_string()),
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let output = generate_library_types_with_warnings(&artifact, &opts).unwrap();
+        let chat_link = output
+            .value
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("ChatLinkConfig.g.cs"))
+            .expect("ChatLinkConfig.g.cs");
+        let dependency_using = chat_link
+            .content
+            .lines()
+            .find(|line| line.starts_with("using Test.Models."))
+            .expect("dependency using");
+        let expected_namespace = dependency_using
+            .strip_prefix("using ")
+            .and_then(|line| line.strip_suffix(';'))
+            .expect("dependency namespace");
+
+        assert_eq!(output.warnings.len(), 1);
+        assert!(output.warnings[0].contains(&expected_namespace));
+        assert!(chat_link.content.contains(&format!(
+            "public global::{expected_namespace}.QuestionFlow QuestionFlow {{ get; set; }} = default!;"
+        )));
     }
 }
