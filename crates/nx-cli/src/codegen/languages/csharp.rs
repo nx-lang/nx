@@ -1,6 +1,6 @@
 use crate::codegen::model::{
     ExportedAlias, ExportedEnum, ExportedExternalState, ExportedModule, ExportedRecord,
-    ExportedType, ExportedTypeGraph,
+    ExportedRecordField, ExportedType, ExportedTypeGraph,
 };
 use crate::codegen::writer::CodeWriter;
 use crate::codegen::{GenerateTypesOptions, GeneratedFile};
@@ -208,57 +208,46 @@ fn emit_record(
     };
 
     writer.block(&header, |writer| {
-        emit_record_discriminator(writer, record, context);
-
-        for field in &record.fields {
-            let field_type = csharp_type(&field.ty, context);
-            let field_name = sanitize_csharp_member_name(&field.name);
-
-            emit_dual_wire_name_attributes(writer, &field.name);
-            if field_type.is_reference && !field_type.is_nullable {
-                writer.line(&format!(
-                    "public {} {} {{ get; set; }} = default!;",
-                    field_type.text, field_name
-                ));
-            } else {
-                writer.line(&format!(
-                    "public {} {} {{ get; set; }}",
-                    field_type.text, field_name
-                ));
-            }
-        }
+        let has_emitted_property = emit_record_discriminator(writer, record, context);
+        emit_record_fields(writer, &record.fields, context, has_emitted_property);
     });
 }
 
+/// Returns `true` when a discriminator property was emitted for the current record.
 fn emit_record_discriminator(
     writer: &mut CodeWriter,
     record: &ExportedRecord,
     context: &CSharpRenderContext<'_>,
-) {
+) -> bool {
+    let resolves_base = graph_resolves_record_base(context, record);
+
     if record.is_abstract {
-        if graph_resolves_record_base(context, record) {
-            return;
+        if resolves_base {
+            return false;
         }
 
-        emit_dual_wire_name_attributes(writer, "$type");
-        writer.line(&format!(
-            "public abstract string {NX_TYPE_DISCRIMINATOR_PROPERTY} {{ get; set; }}"
-        ));
-        return;
+        emit_dual_annotated_auto_property(
+            writer,
+            "$type",
+            &format!("public abstract string {NX_TYPE_DISCRIMINATOR_PROPERTY} {{ get; set; }}"),
+            false,
+        );
+        return true;
     }
 
-    emit_dual_wire_name_attributes(writer, "$type");
-    if graph_resolves_record_base(context, record) {
-        writer.line(&format!(
+    let property_declaration = if resolves_base {
+        format!(
             "public override string {NX_TYPE_DISCRIMINATOR_PROPERTY} {{ get; set; }} = \"{}\";",
             escape_csharp_string_literal(&record.name)
-        ));
+        )
     } else {
-        writer.line(&format!(
+        format!(
             "public string {NX_TYPE_DISCRIMINATOR_PROPERTY} {{ get; set; }} = \"{}\";",
             escape_csharp_string_literal(&record.name)
-        ));
-    }
+        )
+    };
+    emit_dual_annotated_auto_property(writer, "$type", &property_declaration, false);
+    true
 }
 
 fn emit_external_state(
@@ -273,23 +262,7 @@ fn emit_external_state(
             sanitize_csharp_identifier(&state.name)
         ),
         |writer| {
-            for field in &state.fields {
-                let field_type = csharp_type(&field.ty, context);
-                let field_name = sanitize_csharp_member_name(&field.name);
-
-                emit_dual_wire_name_attributes(writer, &field.name);
-                if field_type.is_reference && !field_type.is_nullable {
-                    writer.line(&format!(
-                        "public {} {} {{ get; set; }} = default!;",
-                        field_type.text, field_name
-                    ));
-                } else {
-                    writer.line(&format!(
-                        "public {} {} {{ get; set; }}",
-                        field_type.text, field_name
-                    ));
-                }
-            }
+            emit_record_fields(writer, &state.fields, context, false);
         },
     );
 }
@@ -317,6 +290,49 @@ fn emit_dual_wire_name_attributes(writer: &mut CodeWriter, name: &str) {
     let escaped_name = escape_csharp_string_literal(name);
     writer.line(&format!("[Key(\"{escaped_name}\")]"));
     writer.line(&format!("[JsonPropertyName(\"{escaped_name}\")]"));
+}
+
+fn emit_record_fields(
+    writer: &mut CodeWriter,
+    fields: &[ExportedRecordField],
+    context: &CSharpRenderContext<'_>,
+    mut has_emitted_property: bool,
+) {
+    for field in fields {
+        let field_type = csharp_type(&field.ty, context);
+        let field_name = sanitize_csharp_member_name(&field.name);
+
+        let property_declaration = if field_type.is_reference && !field_type.is_nullable {
+            format!(
+                "public {} {} {{ get; set; }} = default!;",
+                field_type.text, field_name
+            )
+        } else {
+            format!("public {} {} {{ get; set; }}", field_type.text, field_name)
+        };
+
+        emit_dual_annotated_auto_property(
+            writer,
+            &field.name,
+            &property_declaration,
+            has_emitted_property,
+        );
+        has_emitted_property = true;
+    }
+}
+
+fn emit_dual_annotated_auto_property(
+    writer: &mut CodeWriter,
+    wire_name: &str,
+    declaration: &str,
+    has_emitted_property: bool,
+) {
+    if has_emitted_property {
+        writer.blank_line();
+    }
+
+    emit_dual_wire_name_attributes(writer, wire_name);
+    writer.line(declaration);
 }
 
 fn emit_enum_messagepack_formatter(writer: &mut CodeWriter, enum_def: &ExportedEnum) {

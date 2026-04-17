@@ -775,7 +775,7 @@ mod tests {
     fn generates_csharp_external_component_state_contracts_without_discriminator() {
         let source = r#"
             export external component <SearchBox /> = {
-              state { query:string }
+              state { query:string theme:string? }
             }
         "#;
         let module = lower_module(source, "types.nx");
@@ -790,9 +790,21 @@ mod tests {
         assert!(output.contains("using System.Text.Json.Serialization;"));
         assert!(output.contains("[MessagePackObject]"));
         assert!(output.contains("public sealed class SearchBox_state"));
-        assert!(output.contains("[Key(\"query\")]"));
-        assert!(output.contains("[JsonPropertyName(\"query\")]"));
-        assert!(output.contains("public string Query { get; set; } = default!;"));
+        let nl = opts.format.newline_str();
+        let expected = [
+            "public sealed class SearchBox_state",
+            "    {",
+            "        [Key(\"query\")]",
+            "        [JsonPropertyName(\"query\")]",
+            "        public string Query { get; set; } = default!;",
+            "",
+            "        [Key(\"theme\")]",
+            "        [JsonPropertyName(\"theme\")]",
+            "        public string? Theme { get; set; }",
+            "    }",
+        ]
+        .join(nl);
+        assert!(output.contains(&expected));
         let state_block = output
             .split("public sealed class SearchBox_state")
             .nth(1)
@@ -826,7 +838,7 @@ mod tests {
     #[test]
     fn generates_csharp_concrete_record_and_action_fields_with_dual_annotations() {
         let source = r#"
-            export type ShortTextQuestion = { label:string }
+            export type ShortTextQuestion = { label:string placeholder:string? }
             export action SearchRequested = { query:string }
         "#;
         let module = lower_module(source, "types.nx");
@@ -840,12 +852,25 @@ mod tests {
 
         assert!(output.contains("using System.Text.Json.Serialization;"));
         assert!(output.contains("public sealed class ShortTextQuestion"));
-        assert!(output.contains("[Key(\"$type\")]"));
-        assert!(output.contains("[JsonPropertyName(\"$type\")]"));
-        assert!(output.contains("[Key(\"label\")]"));
-        assert!(output.contains("[JsonPropertyName(\"label\")]"));
-        assert!(output.contains("public string Label { get; set; } = default!;"));
-        assert!(output.contains("public string __NxType { get; set; } = \"ShortTextQuestion\";"));
+        let nl = opts.format.newline_str();
+        let expected = [
+            "public sealed class ShortTextQuestion",
+            "    {",
+            "        [Key(\"$type\")]",
+            "        [JsonPropertyName(\"$type\")]",
+            "        public string __NxType { get; set; } = \"ShortTextQuestion\";",
+            "",
+            "        [Key(\"label\")]",
+            "        [JsonPropertyName(\"label\")]",
+            "        public string Label { get; set; } = default!;",
+            "",
+            "        [Key(\"placeholder\")]",
+            "        [JsonPropertyName(\"placeholder\")]",
+            "        public string? Placeholder { get; set; }",
+            "    }",
+        ]
+        .join(nl);
+        assert!(output.contains(&expected));
         assert!(output.contains("public sealed class SearchRequested"));
         assert!(output.contains("[Key(\"query\")]"));
         assert!(output.contains("[JsonPropertyName(\"query\")]"));
