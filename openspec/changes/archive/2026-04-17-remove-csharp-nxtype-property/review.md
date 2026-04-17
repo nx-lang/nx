@@ -1,0 +1,46 @@
+# Review: remove-csharp-nxtype-property
+
+## Scope
+**Reviewed artifacts:** proposal.md, design.md, specs/cli-code-generation/spec.md, tasks.md
+**Reviewed code:**
+- [crates/nx-cli/src/codegen/languages/csharp.rs](crates/nx-cli/src/codegen/languages/csharp.rs) (emitter)
+- [crates/nx-cli/src/codegen.rs](crates/nx-cli/src/codegen.rs) (unit tests)
+- [crates/nx-cli/src/main.rs](crates/nx-cli/src/main.rs) (CLI integration tests)
+
+Test run: `cargo test -p nx-cli` → 87 passed, 0 failed.
+
+## Findings
+
+### ✅ Verified - RF1 tasks.md checkboxes left unchecked despite completed implementation
+- **Severity:** Low
+- **Evidence:** [openspec/changes/remove-csharp-nxtype-property/tasks.md:1-10](openspec/changes/remove-csharp-nxtype-property/tasks.md) shows all five tasks (1.1, 1.2, 2.1, 2.2, 2.3) as `[ ]`, yet `openspec status` reports `isComplete: true` and the corresponding code/test changes are present in the working tree. `openspec instructions apply` reports `progress: { total: 5, complete: 0, remaining: 5 }`, which conflicts with the actual implementation state.
+- **Recommendation:** Mark the five tasks as `[x]` in [tasks.md](openspec/changes/remove-csharp-nxtype-property/tasks.md) before archiving so progress tracking reflects reality.
+- **Fix:** Updated all five task checkboxes to `[x]`, and `openspec instructions apply --change "remove-csharp-nxtype-property" --json` now reports `progress: { total: 5, complete: 5, remaining: 0 }`.
+- **Verification:** Confirmed. All five tasks in [tasks.md](openspec/changes/remove-csharp-nxtype-property/tasks.md) are `[x]`, and re-running `openspec instructions apply --change "remove-csharp-nxtype-property" --json` returns `progress: { total: 5, complete: 5, remaining: 0 }` with `state: "all_done"`.
+
+### ✅ Verified - RF2 `has_emitted_property` parameter no longer meaningfully tracks state across the function boundary
+- **Severity:** Low
+- **Evidence:** After the refactor at [crates/nx-cli/src/codegen/languages/csharp.rs:255-283](crates/nx-cli/src/codegen/languages/csharp.rs#L255-L283), `emit_record_fields` initializes `has_emitted_property = false` locally and toggles it inside the loop purely to insert blank lines between consecutive fields. The variable name is a carryover from when callers seeded it with the discriminator emission state; it now functions as "not the first iteration" only. The logic is correct, but the name overstates what the flag represents.
+- **Recommendation:** Optional cleanup — rename to `needs_leading_blank_line` (or similar) or replace with an index-based check when iterating, to reduce reader confusion. No functional change needed.
+- **Fix:** Renamed the local flag in `emit_record_fields` from `has_emitted_property` to `needs_leading_blank_line` so the name matches its current role.
+- **Verification:** Confirmed. At [crates/nx-cli/src/codegen/languages/csharp.rs:287](crates/nx-cli/src/codegen/languages/csharp.rs#L287) the local now reads `let mut needs_leading_blank_line = false;`, the loop sets it to `true` after emitting each property, and the same name is passed into `emit_dual_annotated_auto_property`. Behavior is unchanged and all 87 tests still pass.
+
+### ✅ Verified - RF3 Spec scenario “Concrete C# record emits only declared fields” is not covered by a test using the exact spec source
+- **Severity:** Low
+- **Evidence:** The ADDED scenario at [specs/cli-code-generation/spec.md:11-14](openspec/changes/remove-csharp-nxtype-property/specs/cli-code-generation/spec.md#L11-L14) uses the minimal source `export type ShortTextQuestion = { label:string }`. The closest unit test, `generates_csharp_concrete_record_and_action_fields_with_dual_annotations` at [crates/nx-cli/src/codegen.rs:838-875](crates/nx-cli/src/codegen.rs#L838-L875), uses `{ label:string placeholder:string? }` plus an action. It does assert `!output.contains("__NxType")` and verifies the `Label` dual annotations, so the scenario’s behavior is effectively covered, just not with the literal spec input.
+- **Recommendation:** Not blocking. If you want 1:1 scenario coverage, add a small test that uses the exact source from the spec (`label:string` only) and asserts both the absence of a `$type`-mapped member and the `Label` dual annotations. Otherwise, tighten the spec wording to allow additional fields.
+- **Fix:** Added `generates_csharp_minimal_concrete_record_without_discriminator_member`, which uses the exact spec source `export type ShortTextQuestion = { label:string }` and asserts both the `Label` dual annotations and the absence of any generated `$type`/`__NxType` member.
+- **Verification:** Confirmed. The new test at [crates/nx-cli/src/codegen.rs:882](crates/nx-cli/src/codegen.rs#L882) uses the exact spec source (`export type ShortTextQuestion = { label:string }`), asserts the block `public sealed class ShortTextQuestion { [Key("label")] [JsonPropertyName("label")] public string Label { get; set; } = default!; }`, and asserts `!output.contains("__NxType")`. Test passes. Scenario is now covered 1:1.
+
+### ✅ Verified - RF4 Pre-existing: `[JsonPolymorphic]` is emitted on abstract roots that have zero concrete descendants
+- **Severity:** Low
+- **Evidence:** In [crates/nx-cli/src/codegen/languages/csharp.rs:230-247](crates/nx-cli/src/codegen/languages/csharp.rs#L230-L247), `emit_record_json_polymorphism_attributes` unconditionally emits `[JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]` for any abstract record that is a root, even when `concrete_descendants` returns an empty slice (no `[JsonDerivedType]` lines follow). This produces an orphaned polymorphism attribute. Not introduced by this change, but the removal of `__NxType` makes the residual attribute more visible (previously the abstract member was the main discriminator signal).
+- **Recommendation:** Optional — guard the attribute emission on `!concrete_descendants.is_empty()` so orphan abstract roots (intermediate typeless abstractions during development, or authoring errors) don’t advertise empty polymorphism metadata. Out of scope for this change; file as a follow-up if desired.
+- **Fix:** Guarded C# `[JsonPolymorphic]`/`[JsonDerivedType]` emission on `concrete_descendants.is_empty()`, and added a C#-only generator warning when an abstract root has no concrete exported descendants because STJ requires at least one derived-type registration for polymorphic contracts.
+- **Verification:** Confirmed. The guard is encoded in `should_emit_json_polymorphism_attributes` at [crates/nx-cli/src/codegen/languages/csharp.rs:258-265](crates/nx-cli/src/codegen/languages/csharp.rs#L258-L265) (requires `!concrete_descendants.is_empty()`). The explanatory comment is emitted via `should_emit_missing_polymorphism_hint` at [crates/nx-cli/src/codegen/languages/csharp.rs:267-274](crates/nx-cli/src/codegen/languages/csharp.rs#L267-L274) and rendered in `emit_record` at [crates/nx-cli/src/codegen/languages/csharp.rs:187-194](crates/nx-cli/src/codegen/languages/csharp.rs#L187-L194). The generator warning flows through the existing `generate_types_with_warnings` pipeline via `collect_csharp_warnings` at [crates/nx-cli/src/codegen.rs:138-163](crates/nx-cli/src/codegen.rs#L138-L163), which the CLI surfaces as `Warning: …`. A new spec scenario at [specs/cli-code-generation/spec.md:34-41](openspec/changes/remove-csharp-nxtype-property/specs/cli-code-generation/spec.md#L34-L41) and a paragraph in [design.md:62-64](openspec/changes/remove-csharp-nxtype-property/design.md#L62-L64) document the new behavior, and two new tests cover it: `generate_types_warns_when_csharp_abstract_root_has_no_concrete_descendants` at [crates/nx-cli/src/codegen.rs:978-1004](crates/nx-cli/src/codegen.rs#L978-L1004) and `test_cli_generate_file_warns_for_csharp_abstract_root_without_concrete_descendants` at [crates/nx-cli/src/main.rs:1082-1114](crates/nx-cli/src/main.rs#L1082-L1114). All 87 tests pass.
+
+## Questions
+- None blocking. The implementation matches the proposal and design intent, and no non-generated consumers reference `__NxType` anywhere in the Nexara monorepo (confirmed by a grep across `backend/` and `frontend/` excluding `/Generated/` paths), so the breaking-change impact is limited to regenerating the existing `.g.cs` outputs.
+
+## Summary
+The change cleanly removes `__NxType`/`$type` data-member emission from generated C# records, actions, and external state contracts while preserving `[JsonPolymorphic]`/`[JsonDerivedType]` on abstract roots that actually have concrete descendants and `[Union(...)]` on abstract hierarchies. All 87 nx-cli tests pass, unit tests were renamed and rewritten to assert discriminator-free output, CLI integration tests keep matching negative assertions, a new minimal concrete-record test now matches the spec scenario exactly, and the abstract-root/zero-descendant edge case now omits invalid STJ polymorphism metadata while warning the caller. The refactor in [crates/nx-cli/src/codegen/languages/csharp.rs](crates/nx-cli/src/codegen/languages/csharp.rs) also deletes dead code (the `NX_TYPE_DISCRIMINATOR_PROPERTY` constant and `emit_record_discriminator` helper), clarifies the local blank-line flag naming, and keeps `emit_record_fields` simpler than the prior discriminator-seeded version.

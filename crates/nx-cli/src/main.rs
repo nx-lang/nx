@@ -1079,6 +1079,41 @@ let root() = { Ui.title() }"#,
     }
 
     #[test]
+    fn test_cli_generate_file_warns_for_csharp_abstract_root_without_concrete_descendants() {
+        let source = r#"
+            export abstract type Question = { label:string }
+        "#;
+        let (_dir, path) = create_temp_nx_file(source);
+
+        let output = run_cli(&[
+            "generate",
+            path.to_str().unwrap(),
+            "--language",
+            "csharp",
+            "--csharp-namespace",
+            "MyApp.Models",
+        ]);
+
+        assert!(
+            output.status.success(),
+            "CLI should still generate C# output for abstract roots without concrete descendants"
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        assert!(stdout.contains("public abstract class Question"));
+        assert!(!stdout.contains("[JsonPolymorphic("));
+        assert!(!stdout.contains("[JsonDerivedType("));
+        assert!(stdout.contains(
+            "// No JsonPolymorphic metadata was generated because this abstract type had"
+        ));
+        assert!(stdout.contains("// no concrete exported descendants at code-generation time."));
+        assert!(stderr.contains("Warning:"));
+        assert!(stderr.contains("Question"));
+        assert!(stderr.contains("no concrete exported descendants"));
+    }
+
+    #[test]
     fn test_cli_generate_rejects_non_nx_files() {
         let dir = TempDir::new().unwrap();
         let file_path = dir.path().join("README.md");
@@ -1310,6 +1345,9 @@ let root() = { Ui.title() }"#,
         assert!(forms.contains("namespace MyApp.Models"));
         assert!(forms.contains("public sealed class FormState"));
         assert!(forms.contains("public ThemeMode Theme { get; set; }"));
+        assert!(!forms.contains("__NxType"));
+        assert!(!forms.contains("[Key(\"$type\")]"));
+        assert!(!forms.contains("[JsonPropertyName(\"$type\")]"));
         assert!(theme.contains("namespace MyApp.Models"));
         assert!(theme.contains("public enum ThemeMode"));
     }

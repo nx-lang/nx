@@ -84,9 +84,12 @@ pub fn generate_types_with_warnings(
         }
     }?;
 
+    let mut warnings = build.warnings;
+    warnings.extend(collect_language_warnings(graph, opts.language));
+
     Ok(GeneratedOutput {
         value,
-        warnings: build.warnings,
+        warnings,
     })
 }
 
@@ -113,10 +116,50 @@ pub fn generate_library_types_with_warnings(
         }
     }?;
 
+    let mut warnings = build.warnings;
+    warnings.extend(collect_language_warnings(graph, opts.language));
+
     Ok(GeneratedOutput {
         value,
-        warnings: build.warnings,
+        warnings,
     })
+}
+
+fn collect_language_warnings(
+    graph: &model::ExportedTypeGraph,
+    language: TargetLanguage,
+) -> Vec<String> {
+    match language {
+        TargetLanguage::CSharp => collect_csharp_warnings(graph),
+        TargetLanguage::TypeScript => Vec::new(),
+    }
+}
+
+fn collect_csharp_warnings(graph: &model::ExportedTypeGraph) -> Vec<String> {
+    let mut warnings = Vec::new();
+
+    for module in &graph.modules {
+        for declaration in &module.declarations {
+            let model::ExportedType::Record(record) = &declaration.item else {
+                continue;
+            };
+
+            if !record.is_abstract || graph.resolved_record_base(record).is_some() {
+                continue;
+            }
+
+            if !graph.concrete_descendants(&record.name).is_empty() {
+                continue;
+            }
+
+            warnings.push(format!(
+                "Generated C# abstract type '{}' has no concrete exported descendants; omitting JsonPolymorphic metadata because System.Text.Json requires at least one derived type registration.",
+                record.name
+            ));
+        }
+    }
+
+    warnings
 }
 
 #[cfg(test)]
@@ -468,7 +511,7 @@ mod tests {
     }
 
     #[test]
-    fn generates_csharp_external_component_props_with_discriminators() {
+    fn generates_csharp_external_component_props_without_generated_discriminator_member() {
         let source = r#"
             export abstract external component <Question label:string />
             export external component <ShortTextQuestion extends Question placeholder:string? />
@@ -483,11 +526,11 @@ mod tests {
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
 
         assert!(output.contains("public abstract class Question"));
+        assert!(output.contains("[JsonPolymorphic(TypeDiscriminatorPropertyName = \"$type\")]"));
         assert!(output.contains("[Key(\"label\")]"));
         assert!(output.contains("public string Label { get; set; } = default!;"));
         assert!(output.contains("public sealed class ShortTextQuestion : Question"));
-        assert!(output
-            .contains("public override string __NxType { get; set; } = \"ShortTextQuestion\";"));
+        assert!(!output.contains("__NxType"));
         assert!(output.contains("public string? Placeholder { get; set; }"));
     }
 
@@ -816,7 +859,7 @@ mod tests {
     }
 
     #[test]
-    fn generates_csharp_record_fields_without_colliding_with_type_discriminator() {
+    fn generates_csharp_record_fields_without_synthetic_discriminator_collision() {
         let source = r#"
             export type Payload = { nx_type: string }
         "#;
@@ -829,10 +872,41 @@ mod tests {
 
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
 
-        assert!(output.contains("[JsonPropertyName(\"$type\")]"));
-        assert!(output.contains("public string __NxType { get; set; } = \"Payload\";"));
+        assert!(!output.contains("[JsonPropertyName(\"$type\")]"));
+        assert!(!output.contains("__NxType"));
         assert!(output.contains("[JsonPropertyName(\"nx_type\")]"));
         assert!(output.contains("public string NxType { get; set; } = default!;"));
+    }
+
+    #[test]
+    fn generates_csharp_minimal_concrete_record_without_discriminator_member() {
+        let source = r#"
+            export type ShortTextQuestion = { label:string }
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.Models".to_string()),
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        let nl = opts.format.newline_str();
+        let expected = [
+            "public sealed class ShortTextQuestion",
+            "    {",
+            "        [Key(\"label\")]",
+            "        [JsonPropertyName(\"label\")]",
+            "        public string Label { get; set; } = default!;",
+            "    }",
+        ]
+        .join(nl);
+
+        assert!(output.contains(&expected));
+        assert!(!output.contains("__NxType"));
+        assert!(!output.contains("[Key(\"$type\")]"));
+        assert!(!output.contains("[JsonPropertyName(\"$type\")]"));
     }
 
     #[test]
@@ -856,10 +930,6 @@ mod tests {
         let expected = [
             "public sealed class ShortTextQuestion",
             "    {",
-            "        [Key(\"$type\")]",
-            "        [JsonPropertyName(\"$type\")]",
-            "        public string __NxType { get; set; } = \"ShortTextQuestion\";",
-            "",
             "        [Key(\"label\")]",
             "        [JsonPropertyName(\"label\")]",
             "        public string Label { get; set; } = default!;",
@@ -875,7 +945,7 @@ mod tests {
         assert!(output.contains("[Key(\"query\")]"));
         assert!(output.contains("[JsonPropertyName(\"query\")]"));
         assert!(output.contains("public string Query { get; set; } = default!;"));
-        assert!(output.contains("public string __NxType { get; set; } = \"SearchRequested\";"));
+        assert!(!output.contains("__NxType"));
     }
 
     #[test]
@@ -905,7 +975,36 @@ mod tests {
     }
 
     #[test]
-    fn generates_csharp_abstract_record_discriminators_for_concrete_descendants() {
+    fn generate_types_warns_when_csharp_abstract_root_has_no_concrete_descendants() {
+        let source = r#"
+            export abstract type Question = { label:string }
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.Models".to_string()),
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let output = generate_types_with_warnings(&module, Path::new("types.nx"), &opts)
+            .expect("generation output");
+
+        assert!(output.value.contains("public abstract class Question"));
+        assert!(!output.value.contains("[JsonPolymorphic("));
+        assert!(!output.value.contains("[JsonDerivedType("));
+        assert!(output.value.contains(
+            "// No JsonPolymorphic metadata was generated because this abstract type had"
+        ));
+        assert!(output
+            .value
+            .contains("// no concrete exported descendants at code-generation time."));
+        assert_eq!(output.warnings.len(), 1);
+        assert!(output.warnings[0].contains("Question"));
+        assert!(output.warnings[0].contains("no concrete exported descendants"));
+    }
+
+    #[test]
+    fn generates_csharp_abstract_record_polymorphism_metadata_for_concrete_descendants() {
         let source = r#"
             export abstract type Question = { label:string }
             export type ShortTextQuestion extends Question = { placeholder:string? }
@@ -925,16 +1024,13 @@ mod tests {
         );
         assert!(output.contains("[Union(0, typeof(ShortTextQuestion))]"));
         assert!(output.contains("public abstract class Question"));
-        assert!(output.contains("[JsonPropertyName(\"$type\")]"));
-        assert!(output.contains("public abstract string __NxType { get; set; }"));
         assert!(output.contains("public sealed class ShortTextQuestion : Question"));
-        assert!(output
-            .contains("public override string __NxType { get; set; } = \"ShortTextQuestion\";"));
+        assert!(!output.contains("__NxType"));
         assert!(output.contains("[JsonPropertyName(\"placeholder\")]"));
     }
 
     #[test]
-    fn generates_csharp_abstract_action_discriminators_for_concrete_descendants() {
+    fn generates_csharp_abstract_action_polymorphism_metadata_for_concrete_descendants() {
         let source = r#"
             export abstract action SearchAction = { source:string }
             export action SearchRequested extends SearchAction = { query:string }
@@ -952,19 +1048,15 @@ mod tests {
         assert!(output.contains("[JsonDerivedType(typeof(SearchRequested), \"SearchRequested\")]"));
         assert!(output.contains("[Union(0, typeof(SearchRequested))]"));
         assert!(output.contains("public abstract class SearchAction"));
-        assert!(output.contains("[JsonPropertyName(\"$type\")]"));
-        assert!(output.contains("public abstract string __NxType { get; set; }"));
         assert!(output.contains("[JsonPropertyName(\"source\")]"));
         assert!(output.contains("public string Source { get; set; } = default!;"));
         assert!(output.contains("public sealed class SearchRequested : SearchAction"));
-        assert!(
-            output.contains("public override string __NxType { get; set; } = \"SearchRequested\";")
-        );
+        assert!(!output.contains("__NxType"));
         assert!(output.contains("[JsonPropertyName(\"query\")]"));
     }
 
     #[test]
-    fn generates_csharp_multi_level_abstract_record_discriminators() {
+    fn generates_csharp_multi_level_abstract_record_polymorphism_metadata() {
         let source = r#"
             export abstract type Question = { label:string }
             export abstract type TextQuestion extends Question = { placeholder:string? }
@@ -985,12 +1077,9 @@ mod tests {
         );
         assert!(output.contains("[Union(0, typeof(ShortTextQuestion))]"));
         assert!(output.contains("public abstract class Question"));
-        assert!(output.contains("[JsonPropertyName(\"$type\")]"));
-        assert!(output.contains("public abstract string __NxType { get; set; }"));
         assert!(output.contains("public abstract class TextQuestion : Question"));
         assert!(output.contains("public sealed class ShortTextQuestion : TextQuestion"));
-        assert!(output
-            .contains("public override string __NxType { get; set; } = \"ShortTextQuestion\";"));
+        assert!(!output.contains("__NxType"));
 
         let text_question_block = output
             .split("public abstract class TextQuestion : Question")

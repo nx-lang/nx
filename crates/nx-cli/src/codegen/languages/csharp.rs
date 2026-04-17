@@ -8,8 +8,6 @@ use nx_hir::ast::TypeRef;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-const NX_TYPE_DISCRIMINATOR_PROPERTY: &str = "__NxType";
-
 pub fn emit_single_file(
     graph: &ExportedTypeGraph,
     namespace: &str,
@@ -186,6 +184,15 @@ fn emit_record(
         }
     }
 
+    if should_emit_missing_polymorphism_hint(record, context) {
+        writer.line(
+            "// No JsonPolymorphic metadata was generated because this abstract type had",
+        );
+        writer.line(
+            "// no concrete exported descendants at code-generation time.",
+        );
+    }
+
     writer.line("[MessagePackObject]");
     let class_modifier = if record.is_abstract {
         "public abstract class"
@@ -208,46 +215,8 @@ fn emit_record(
     };
 
     writer.block(&header, |writer| {
-        let has_emitted_property = emit_record_discriminator(writer, record, context);
-        emit_record_fields(writer, &record.fields, context, has_emitted_property);
+        emit_record_fields(writer, &record.fields, context);
     });
-}
-
-/// Returns `true` when a discriminator property was emitted for the current record.
-fn emit_record_discriminator(
-    writer: &mut CodeWriter,
-    record: &ExportedRecord,
-    context: &CSharpRenderContext<'_>,
-) -> bool {
-    let resolves_base = graph_resolves_record_base(context, record);
-
-    if record.is_abstract {
-        if resolves_base {
-            return false;
-        }
-
-        emit_dual_annotated_auto_property(
-            writer,
-            "$type",
-            &format!("public abstract string {NX_TYPE_DISCRIMINATOR_PROPERTY} {{ get; set; }}"),
-            false,
-        );
-        return true;
-    }
-
-    let property_declaration = if resolves_base {
-        format!(
-            "public override string {NX_TYPE_DISCRIMINATOR_PROPERTY} {{ get; set; }} = \"{}\";",
-            escape_csharp_string_literal(&record.name)
-        )
-    } else {
-        format!(
-            "public string {NX_TYPE_DISCRIMINATOR_PROPERTY} {{ get; set; }} = \"{}\";",
-            escape_csharp_string_literal(&record.name)
-        )
-    };
-    emit_dual_annotated_auto_property(writer, "$type", &property_declaration, false);
-    true
 }
 
 fn emit_external_state(
@@ -262,7 +231,7 @@ fn emit_external_state(
             sanitize_csharp_identifier(&state.name)
         ),
         |writer| {
-            emit_record_fields(writer, &state.fields, context, false);
+            emit_record_fields(writer, &state.fields, context);
         },
     );
 }
@@ -272,18 +241,36 @@ fn emit_record_json_polymorphism_attributes(
     record: &ExportedRecord,
     context: &CSharpRenderContext<'_>,
 ) {
-    if !record.is_abstract || graph_resolves_record_base(context, record) {
+    if !should_emit_json_polymorphism_attributes(record, context) {
         return;
     }
 
     writer.line("[JsonPolymorphic(TypeDiscriminatorPropertyName = \"$type\")]");
-    for descendant in context.graph.concrete_descendants(&record.name).iter() {
+    for descendant in context.graph.concrete_descendants(&record.name) {
         writer.line(&format!(
             "[JsonDerivedType(typeof({}), \"{}\")]",
             sanitize_csharp_identifier(&descendant.name),
             escape_csharp_string_literal(&descendant.name)
         ));
     }
+}
+
+fn should_emit_json_polymorphism_attributes(
+    record: &ExportedRecord,
+    context: &CSharpRenderContext<'_>,
+) -> bool {
+    record.is_abstract
+        && !graph_resolves_record_base(context, record)
+        && !context.graph.concrete_descendants(&record.name).is_empty()
+}
+
+fn should_emit_missing_polymorphism_hint(
+    record: &ExportedRecord,
+    context: &CSharpRenderContext<'_>,
+) -> bool {
+    record.is_abstract
+        && !graph_resolves_record_base(context, record)
+        && context.graph.concrete_descendants(&record.name).is_empty()
 }
 
 fn emit_dual_wire_name_attributes(writer: &mut CodeWriter, name: &str) {
@@ -296,8 +283,9 @@ fn emit_record_fields(
     writer: &mut CodeWriter,
     fields: &[ExportedRecordField],
     context: &CSharpRenderContext<'_>,
-    mut has_emitted_property: bool,
 ) {
+    let mut needs_leading_blank_line = false;
+
     for field in fields {
         let field_type = csharp_type(&field.ty, context);
         let field_name = sanitize_csharp_member_name(&field.name);
@@ -315,9 +303,9 @@ fn emit_record_fields(
             writer,
             &field.name,
             &property_declaration,
-            has_emitted_property,
+            needs_leading_blank_line,
         );
-        has_emitted_property = true;
+        needs_leading_blank_line = true;
     }
 }
 
