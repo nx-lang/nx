@@ -234,7 +234,8 @@ fn validate_host_input_value_at_path(
         | NxValue::Int(_)
         | NxValue::Float32(_)
         | NxValue::Float(_)
-        | NxValue::String(_) => Ok(()),
+        | NxValue::String(_)
+        | NxValue::EnumValue { .. } => Ok(()),
         NxValue::Array(values) => {
             for (index, value) in values.iter().enumerate() {
                 validate_host_input_value_at_path(lookup, value, &format!("{path}[{index}]"))?;
@@ -553,6 +554,124 @@ mod tests {
                 properties: BTreeMap::from([(
                     "search".to_string(),
                     NxValue::String("docs".to_string()),
+                )]),
+            }
+        );
+        assert!(!result.state_snapshot.is_empty());
+    }
+
+    #[test]
+    fn initialize_component_source_round_trips_enum_props_in_rendered_output() {
+        let source = r#"
+            enum ThemeMode = | light | dark
+
+            external component <SearchBox theme:ThemeMode />
+        "#;
+
+        let props = NxValue::Record {
+            type_name: None,
+            properties: BTreeMap::from([(
+                "theme".to_string(),
+                NxValue::EnumValue {
+                    type_name: "ThemeMode".to_string(),
+                    member: "light".to_string(),
+                },
+            )]),
+        };
+
+        let result = initialize_component_source(
+            source,
+            "component-enum-props.nx",
+            &ProgramBuildContext::empty(),
+            "SearchBox",
+            &props,
+        );
+        let ComponentInitEvalResult::Ok(result) = result else {
+            panic!("Expected enum-bearing component initialization to succeed");
+        };
+
+        assert_eq!(
+            result.rendered,
+            NxValue::Record {
+                type_name: Some("SearchBox".to_string()),
+                properties: BTreeMap::from([(
+                    "theme".to_string(),
+                    NxValue::EnumValue {
+                        type_name: "ThemeMode".to_string(),
+                        member: "light".to_string(),
+                    },
+                )]),
+            }
+        );
+        assert!(!result.state_snapshot.is_empty());
+    }
+
+    #[test]
+    fn dispatch_component_actions_source_round_trips_enum_effects_and_snapshot() {
+        let source = r#"
+            enum ThemeMode = | light | dark
+
+            action SearchSubmitted = { theme:ThemeMode }
+            action DoSearch = { theme:ThemeMode }
+
+            component <SearchBox emits { SearchSubmitted } /> = {
+              <TextInput />
+            }
+
+            let withHandler() = { <SearchBox onSearchSubmitted=<DoSearch theme={action.theme} /> /> }
+        "#;
+
+        let program = build_program_artifact_from_source(
+            source,
+            "component-enum-dispatch.nx",
+            &ProgramBuildContext::empty(),
+        )
+        .expect("Expected program artifact");
+        let root_module = program
+            .root_modules
+            .first()
+            .and_then(|artifact| artifact.lowered_module.clone())
+            .expect("Expected preserved root module");
+        let interpreter = Interpreter::from_resolved_program(program.resolved_program.clone());
+        let props = interpreter
+            .execute_resolved_program_function("withHandler", vec![])
+            .expect("Expected props function to succeed");
+        let init = interpreter
+            .initialize_component(root_module.as_ref(), "SearchBox", props)
+            .expect("Expected interpreter initialization to succeed");
+
+        let action = NxValue::Record {
+            type_name: Some("SearchSubmitted".to_string()),
+            properties: BTreeMap::from([(
+                "theme".to_string(),
+                NxValue::EnumValue {
+                    type_name: "ThemeMode".to_string(),
+                    member: "dark".to_string(),
+                },
+            )]),
+        };
+        let result = dispatch_component_actions_source(
+            source,
+            "component-enum-dispatch.nx",
+            &ProgramBuildContext::empty(),
+            &init.state_snapshot,
+            &[action],
+        );
+        let ComponentDispatchEvalResult::Ok(result) = result else {
+            panic!("Expected enum-bearing source-based dispatch to succeed");
+        };
+
+        assert_eq!(result.effects.len(), 1);
+        assert_eq!(
+            result.effects[0],
+            NxValue::Record {
+                type_name: Some("DoSearch".to_string()),
+                properties: BTreeMap::from([(
+                    "theme".to_string(),
+                    NxValue::EnumValue {
+                        type_name: "ThemeMode".to_string(),
+                        member: "dark".to_string(),
+                    },
                 )]),
             }
         );

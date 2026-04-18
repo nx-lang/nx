@@ -70,9 +70,9 @@ enum SerializedValue {
     Boolean(bool),
     Null,
     Array(Vec<SerializedValue>),
-    EnumVariant {
+    EnumValue {
         type_name: String,
-        variant: String,
+        member: String,
     },
     Record {
         type_name: String,
@@ -1254,9 +1254,9 @@ impl Interpreter {
             Value::Array(values) => {
                 SerializedValue::Array(values.iter().map(Self::serialize_runtime_value).collect())
             }
-            Value::EnumVariant { type_name, variant } => SerializedValue::EnumVariant {
+            Value::EnumValue { type_name, member } => SerializedValue::EnumValue {
                 type_name: type_name.as_str().to_string(),
-                variant: variant.to_string(),
+                member: member.to_string(),
             },
             Value::Record { type_name, fields } => SerializedValue::Record {
                 type_name: type_name.as_str().to_string(),
@@ -1305,9 +1305,9 @@ impl Interpreter {
                     .map(|value| self.deserialize_runtime_value(module, value))
                     .collect::<Result<Vec<_>, _>>()?,
             )),
-            SerializedValue::EnumVariant { type_name, variant } => Ok(Value::EnumVariant {
+            SerializedValue::EnumValue { type_name, member } => Ok(Value::EnumValue {
                 type_name: Name::new(&type_name),
-                variant: SmolStr::new(variant.as_str()),
+                member: SmolStr::new(member.as_str()),
             }),
             SerializedValue::Record { type_name, fields } => Ok(Value::Record {
                 type_name: Name::new(&type_name),
@@ -2186,7 +2186,7 @@ impl Interpreter {
                     Type::array(current)
                 }
             }
-            Value::EnumVariant { type_name, .. } => Type::named(type_name.clone()),
+            Value::EnumValue { type_name, .. } => Type::named(type_name.clone()),
             Value::Record { type_name, .. } => Type::named(type_name.clone()),
             // Handlers are opaque runtime callback objects rather than first-class typed functions.
             Value::ActionHandler { .. } => Type::named("action_handler"),
@@ -2249,9 +2249,9 @@ impl Interpreter {
                     .iter()
                     .any(|m| m.name.as_str() == member.as_str())
                 {
-                    return Ok(Value::EnumVariant {
+                    return Ok(Value::EnumValue {
                         type_name: enum_def.name.clone(),
-                        variant: SmolStr::new(member.as_str()),
+                        member: SmolStr::new(member.as_str()),
                     });
                 } else {
                     return Err(RuntimeError::new(RuntimeErrorKind::EnumMemberNotFound {
@@ -2274,9 +2274,9 @@ impl Interpreter {
                     .iter()
                     .any(|m| m.name.as_str() == member.as_str())
                 {
-                    return Ok(Value::EnumVariant {
+                    return Ok(Value::EnumValue {
                         type_name: enum_def.name.clone(),
-                        variant: SmolStr::new(member.as_str()),
+                        member: SmolStr::new(member.as_str()),
                     });
                 }
 
@@ -2309,7 +2309,7 @@ impl Interpreter {
                     }))
                 }
             }
-            Value::EnumVariant { .. } => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+            Value::EnumValue { .. } => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
                 expected: "record".to_string(),
                 actual: "enum".to_string(),
                 operation: format!("member access .{}", member.as_str()),

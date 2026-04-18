@@ -130,13 +130,20 @@ fn render_module(
         writer.blank_line();
     }
 
+    let needs_json_namespace = module
+        .declarations
+        .iter()
+        .any(|declaration| matches!(declaration.item, ExportedType::Enum(_)));
+    let needs_json_serialization = module
+        .declarations
+        .iter()
+        .any(|declaration| !matches!(declaration.item, ExportedType::Alias(_)));
+
     writer.line("using System;");
-    if module.declarations.iter().any(|declaration| {
-        !matches!(
-            declaration.item,
-            ExportedType::Alias(_) | ExportedType::Enum(_)
-        )
-    }) {
+    if needs_json_namespace {
+        writer.line("using System.Text.Json;");
+    }
+    if needs_json_serialization {
         writer.line("using System.Text.Json.Serialization;");
     }
     writer.line("using MessagePack;");
@@ -207,6 +214,9 @@ fn emit_declaration(
 fn emit_enum(writer: &mut CodeWriter, enum_def: &ExportedEnum) {
     let enum_name = sanitize_csharp_identifier(&enum_def.name);
     writer.line(&format!(
+        "[JsonConverter(typeof({enum_name}JsonConverter))]"
+    ));
+    writer.line(&format!(
         "[MessagePackFormatter(typeof({enum_name}MessagePackFormatter))]"
     ));
     writer.block(&format!("public enum {enum_name}"), |writer| {
@@ -219,6 +229,12 @@ fn emit_enum(writer: &mut CodeWriter, enum_def: &ExportedEnum) {
             writer.line(&format!("{}{}", sanitize_csharp_member_name(member), comma));
         }
     });
+
+    writer.blank_line();
+    emit_enum_wire_format(writer, enum_def);
+
+    writer.blank_line();
+    emit_enum_json_converter(writer, enum_def);
 
     writer.blank_line();
     emit_enum_messagepack_formatter(writer, enum_def);
@@ -392,7 +408,9 @@ fn emit_enum_messagepack_formatter(writer: &mut CodeWriter, enum_def: &ExportedE
                     "public void Serialize(ref MessagePackWriter writer, {enum_name} value, MessagePackSerializerOptions options)"
                 ),
                 |writer| {
-                    writer.line("writer.Write(ToVariantString(value));");
+                    writer.line(&format!(
+                        "writer.Write({enum_name}WireFormat.Format(value));"
+                    ));
                 },
             );
 
@@ -403,71 +421,36 @@ fn emit_enum_messagepack_formatter(writer: &mut CodeWriter, enum_def: &ExportedE
                     "public {enum_name} Deserialize(ref MessagePackReader reader, MessagePackSerializerOptions options)"
                 ),
                 |writer| {
-                    writer.block("if (reader.TryReadNil())", |writer| {
-                        writer.line("return default;");
-                    });
-                    writer.blank_line();
-
-                    writer.block("switch (reader.NextMessagePackType)", |writer| {
-                        writer.block("case MessagePackType.String:", |writer| {
-                            writer.line("string variant = reader.ReadString()!;");
-                            writer.line("return ParseVariant(variant);");
-                        });
-                        writer.block("case MessagePackType.Map:", |writer| {
-                            writer.line("int count = reader.ReadMapHeader();");
-                            writer.line("string? variant = null;");
-                            writer.block("for (int i = 0; i < count; i++)", |writer| {
-                                writer.line("string key = reader.ReadString()!;");
-                                writer.block("if (key == \"$variant\")", |writer| {
-                                    writer.line("variant = reader.ReadString();");
-                                });
-                                writer.block("else", |writer| {
-                                    writer.line("reader.Skip();");
-                                });
-                            });
-                            writer.blank_line();
-                            writer.block("if (variant is null)", |writer| {
-                                writer.line(
-                                    "throw new MessagePackSerializationException(\"Expected NX enum map with \\\"$variant\\\".\");",
-                                );
-                            });
-                            writer.blank_line();
-                            writer.line("return ParseVariant(variant);");
-                        });
-                        writer.block("default:", |writer| {
+                    writer.block(
+                        "if (reader.TryReadNil() || reader.NextMessagePackType is not MessagePackType.String)",
+                        |writer| {
                             writer.line(
-                                "throw new MessagePackSerializationException(\"Expected string or map for NX enum.\");",
+                                "throw new MessagePackSerializationException(\"Expected NX enum to be encoded as a MessagePack string.\");",
                             );
-                        });
+                        },
+                    );
+                    writer.blank_line();
+                    writer.line("string value = reader.ReadString()!;");
+                    writer.blank_line();
+                    writer.block("try", |writer| {
+                        writer.line(&format!("return {enum_name}WireFormat.Parse(value);"));
+                    });
+                    writer.block("catch (FormatException e)", |writer| {
+                        writer.line("throw new MessagePackSerializationException(e.Message, e);");
                     });
                 },
             );
+        },
+    );
+}
 
-            writer.blank_line();
-
+fn emit_enum_wire_format(writer: &mut CodeWriter, enum_def: &ExportedEnum) {
+    let enum_name = sanitize_csharp_identifier(&enum_def.name);
+    writer.block(
+        &format!("internal static class {enum_name}WireFormat"),
+        |writer| {
             writer.block(
-                &format!("private static {enum_name} ParseVariant(string variant)"),
-                |writer| {
-                    writer.block("switch (variant)", |writer| {
-                        for member in &enum_def.members {
-                            let member_literal = escape_csharp_string_literal(member);
-                            let member_ident = sanitize_csharp_member_name(member);
-                            writer.line(&format!(
-                                "case \"{member_literal}\": return {enum_name}.{member_ident};"
-                            ));
-                        }
-                        writer.line("default:");
-                        writer.line(
-                            "throw new MessagePackSerializationException(\"Unknown NX enum variant.\");",
-                        );
-                    });
-                },
-            );
-
-            writer.blank_line();
-
-            writer.block(
-                &format!("private static string ToVariantString({enum_name} value)"),
+                &format!("internal static string Format({enum_name} value)"),
                 |writer| {
                     writer.block("switch (value)", |writer| {
                         for member in &enum_def.members {
@@ -478,10 +461,73 @@ fn emit_enum_messagepack_formatter(writer: &mut CodeWriter, enum_def: &ExportedE
                             ));
                         }
                         writer.line("default:");
-                        writer.line(
-                            "throw new MessagePackSerializationException(\"Unknown NX enum value.\");",
-                        );
+                        writer.line("throw new FormatException(\"Unknown NX enum value.\");");
                     });
+                },
+            );
+
+            writer.blank_line();
+
+            writer.block(
+                &format!("internal static {enum_name} Parse(string value)"),
+                |writer| {
+                    writer.block("switch (value)", |writer| {
+                        for member in &enum_def.members {
+                            let member_literal = escape_csharp_string_literal(member);
+                            let member_ident = sanitize_csharp_member_name(member);
+                            writer.line(&format!(
+                                "case \"{member_literal}\": return {enum_name}.{member_ident};"
+                            ));
+                        }
+                        writer.line("default:");
+                        writer.line("throw new FormatException(\"Unknown NX enum member.\");");
+                    });
+                },
+            );
+        },
+    );
+}
+
+fn emit_enum_json_converter(writer: &mut CodeWriter, enum_def: &ExportedEnum) {
+    let enum_name = sanitize_csharp_identifier(&enum_def.name);
+    writer.block(
+        &format!("public sealed class {enum_name}JsonConverter : JsonConverter<{enum_name}>"),
+        |writer| {
+            writer.block(
+                &format!(
+                    "public override {enum_name} Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)"
+                ),
+                |writer| {
+                    writer.block(
+                        "if (reader.TokenType is not JsonTokenType.String)",
+                        |writer| {
+                            writer.line(
+                                "throw new JsonException(\"Expected NX enum to be encoded as a JSON string.\");",
+                            );
+                        },
+                    );
+                    writer.blank_line();
+                    writer.line("string value = reader.GetString()!;");
+                    writer.blank_line();
+                    writer.block("try", |writer| {
+                        writer.line(&format!("return {enum_name}WireFormat.Parse(value);"));
+                    });
+                    writer.block("catch (FormatException e)", |writer| {
+                        writer.line("throw new JsonException(e.Message, e);");
+                    });
+                },
+            );
+
+            writer.blank_line();
+
+            writer.block(
+                &format!(
+                    "public override void Write(Utf8JsonWriter writer, {enum_name} value, JsonSerializerOptions options)"
+                ),
+                |writer| {
+                    writer.line(&format!(
+                        "writer.WriteStringValue({enum_name}WireFormat.Format(value));"
+                    ));
                 },
             );
         },

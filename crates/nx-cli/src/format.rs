@@ -31,9 +31,9 @@ fn format_value_inner(value: &Value, output: &mut String, indent: usize) {
         Value::Boolean(b) => write!(output, "{}", b).unwrap(),
         Value::Null => output.push_str("null"),
 
-        // Enum variant
-        Value::EnumVariant { type_name, variant } => {
-            write!(output, "{}.{}", type_name, variant).unwrap();
+        // Enum value
+        Value::EnumValue { type_name, member } => {
+            write!(output, "{}.{}", type_name, member).unwrap();
         }
 
         // Array - print each element
@@ -221,8 +221,8 @@ fn format_attribute_value(value: &Value, output: &mut String) {
         Value::Float(f) => write!(output, "\"{}\"", f).unwrap(),
         Value::Boolean(b) => write!(output, "\"{}\"", b).unwrap(),
         Value::Null => output.push_str("\"null\""),
-        Value::EnumVariant { type_name, variant } => {
-            write!(output, "\"{}.{}\"", type_name, variant).unwrap()
+        Value::EnumValue { type_name, member } => {
+            write!(output, "\"{}.{}\"", type_name, member).unwrap()
         }
         Value::ActionHandler { .. } | Value::Array(_) | Value::Record { .. } => {
             // Complex values shouldn't be formatted as attributes
@@ -301,10 +301,10 @@ mod tests {
     }
 
     #[test]
-    fn test_format_enum_variant() {
-        let value = Value::EnumVariant {
+    fn test_format_enum_value() {
+        let value = Value::EnumValue {
             type_name: nx_hir::Name::new("Status"),
-            variant: SmolStr::new("active"),
+            member: SmolStr::new("active"),
         };
         assert_eq!(format_value(&value), "Status.active");
     }

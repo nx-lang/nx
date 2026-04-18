@@ -68,6 +68,23 @@ public class NxRuntimeBasicTests
     }
 
     [Fact]
+    public void EvaluateJson_EnumValue_ReturnsCanonicalEnumObject()
+    {
+        string source = """
+            enum ThemeMode = | light | dark
+
+            let root() = { ThemeMode.dark }
+            """;
+
+        JsonElement result = NxRuntime.EvaluateJson(source);
+
+        Assert.Equal(JsonValueKind.Object, result.ValueKind);
+        Assert.Equal("ThemeMode", result.GetProperty("$enum").GetString());
+        Assert.Equal("dark", result.GetProperty("$member").GetString());
+        Assert.False(result.TryGetProperty("$variant", out JsonElement _));
+    }
+
+    [Fact]
     public void Evaluate_SimpleInteger_ReturnsCorrectValue()
     {
         string source = "let root() = { 42 }";

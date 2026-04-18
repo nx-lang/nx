@@ -260,25 +260,25 @@ fn test_void_value() {
 // Enum Edge Cases
 // ============================================================================
 
-/// Test enum variant value access
+/// Test enum value access
 #[test]
-fn test_enum_variant_access() {
+fn test_enum_value_access() {
     let source = r#"enum Color = red | green | blue
 let <color /> = { Color.green }"#;
 
     let result = execute_function(source, "color", vec![]).unwrap_or_else(|e| panic!("{}", e));
     match result {
-        Value::EnumVariant { type_name, variant } => {
+        Value::EnumValue { type_name, member } => {
             assert_eq!(type_name.as_str(), "Color");
-            assert_eq!(variant.as_str(), "green");
+            assert_eq!(member.as_str(), "green");
         }
-        other => panic!("Expected EnumVariant, got {:?}", other),
+        other => panic!("Expected EnumValue, got {:?}", other),
     }
 }
 
-/// Test undefined enum variant (should error)
+/// Test undefined enum member (should error)
 #[test]
-fn test_undefined_enum_variant() {
+fn test_undefined_enum_member() {
     let source = r#"enum Color = red | green | blue
 let <color /> = { Color.yellow }"#;
 

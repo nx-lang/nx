@@ -300,6 +300,42 @@ fn ffi_json_success_round_trip() {
 }
 
 #[test]
+fn ffi_msgpack_enum_value_round_trip() {
+    let (status, bytes) = eval_msgpack(
+        r#"
+            enum Status = | active | disabled
+            let root() = { Status.active }
+        "#,
+    );
+    assert!(matches!(status, NxEvalStatus::Ok));
+    assert_eq!(
+        NxValue::from_msgpack_slice(&bytes).unwrap(),
+        NxValue::EnumValue {
+            type_name: "Status".to_string(),
+            member: "active".to_string(),
+        }
+    );
+}
+
+#[test]
+fn ffi_json_enum_value_round_trip() {
+    let (status, json) = eval_json(
+        r#"
+            enum Status = | active | disabled
+            let root() = { Status.active }
+        "#,
+    );
+    assert!(matches!(status, NxEvalStatus::Ok));
+    assert_eq!(
+        NxValue::from_json_str(&json).unwrap(),
+        NxValue::EnumValue {
+            type_name: "Status".to_string(),
+            member: "active".to_string(),
+        }
+    );
+}
+
+#[test]
 fn ffi_registry_backed_program_build_reuses_preloaded_library() {
     let temp = TempDir::new().expect("temp dir");
     let app_root = temp.path().join("app");
@@ -732,6 +768,194 @@ fn ffi_component_dispatch_round_trips_effect_payloads_in_msgpack_and_json() {
     assert!(matches!(json_status, NxEvalStatus::Ok));
     let dispatch_result: JsonComponentDispatchResult = serde_json::from_str(&json_payload).unwrap();
     assert_eq!(dispatch_result.effects.len(), 1);
+    assert_eq!(
+        BASE64_STANDARD
+            .decode(dispatch_result.state_snapshot)
+            .unwrap(),
+        init.state_snapshot
+    );
+}
+
+#[test]
+fn ffi_component_init_round_trips_enum_props_in_msgpack_and_json() {
+    let source = r#"
+        enum ThemeMode = | light | dark
+
+        external component <SearchBox theme:ThemeMode />
+    "#;
+
+    let props = NxValue::Record {
+        type_name: None,
+        properties: std::collections::BTreeMap::from([(
+            "theme".to_string(),
+            NxValue::EnumValue {
+                type_name: "ThemeMode".to_string(),
+                member: "light".to_string(),
+            },
+        )]),
+    };
+    let props_msgpack = props.to_msgpack_vec().unwrap();
+
+    let build_context = create_empty_build_context();
+    let (program, build_status, build_bytes) =
+        build_program_artifact_handle(build_context, source, "ffi-component-enum-init.nx");
+    nx_free_program_build_context(build_context);
+    assert!(matches!(build_status, NxEvalStatus::Ok));
+    assert!(build_bytes.is_empty());
+    assert!(!program.is_null());
+
+    let (msgpack_status, msgpack_bytes) =
+        component_init_msgpack_with_program_artifact(program, "SearchBox", Some(&props_msgpack));
+    nx_free_program_artifact(program);
+    assert!(matches!(msgpack_status, NxEvalStatus::Ok));
+
+    let init_result: ComponentInitResult = rmp_serde::from_slice(&msgpack_bytes).unwrap();
+    assert_eq!(
+        init_result.rendered,
+        NxValue::Record {
+            type_name: Some("SearchBox".to_string()),
+            properties: std::collections::BTreeMap::from([(
+                "theme".to_string(),
+                NxValue::EnumValue {
+                    type_name: "ThemeMode".to_string(),
+                    member: "light".to_string(),
+                },
+            )]),
+        }
+    );
+    assert!(!init_result.state_snapshot.is_empty());
+
+    let build_context = create_empty_build_context();
+    let (json_program, build_status, build_bytes) =
+        build_program_artifact_handle(build_context, source, "ffi-component-enum-init-json.nx");
+    nx_free_program_build_context(build_context);
+    assert!(matches!(build_status, NxEvalStatus::Ok));
+    assert!(build_bytes.is_empty());
+    assert!(!json_program.is_null());
+
+    let (json_status, json_payload) =
+        component_init_json_with_program_artifact(json_program, "SearchBox", Some(&props_msgpack));
+    nx_free_program_artifact(json_program);
+    assert!(matches!(json_status, NxEvalStatus::Ok));
+
+    let init_result: JsonComponentInitResult = serde_json::from_str(&json_payload).unwrap();
+    assert_eq!(
+        init_result.rendered,
+        NxValue::Record {
+            type_name: Some("SearchBox".to_string()),
+            properties: std::collections::BTreeMap::from([(
+                "theme".to_string(),
+                NxValue::EnumValue {
+                    type_name: "ThemeMode".to_string(),
+                    member: "light".to_string(),
+                },
+            )]),
+        }
+    );
+    assert!(!BASE64_STANDARD
+        .decode(init_result.state_snapshot)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn ffi_component_dispatch_round_trips_enum_effect_payloads_in_msgpack_and_json() {
+    let source = r#"
+        enum ThemeMode = | light | dark
+
+        action SearchSubmitted = { theme:ThemeMode }
+        action DoSearch = { theme:ThemeMode }
+
+        component <SearchBox emits { SearchSubmitted } /> = {
+          <TextInput />
+        }
+
+        let withHandler() = { <SearchBox onSearchSubmitted=<DoSearch theme={action.theme} /> /> }
+    "#;
+
+    let program =
+        load_program_artifact_from_source(source, "ffi-enum-dispatch.nx", &ProgramBuildContext::empty())
+            .expect("Expected program artifact");
+    let interpreter = Interpreter::from_resolved_program(program.resolved_program.clone());
+    let props = interpreter
+        .execute_resolved_program_function("withHandler", vec![])
+        .expect("Expected props function to succeed");
+    let init = interpreter
+        .initialize_resolved_component("SearchBox", props)
+        .expect("Expected component initialization to succeed");
+
+    let build_context = create_empty_build_context();
+    let (handle, status, bytes) =
+        build_program_artifact_handle(build_context, source, "ffi-enum-dispatch.nx");
+    nx_free_program_build_context(build_context);
+    assert!(matches!(status, NxEvalStatus::Ok));
+    assert!(bytes.is_empty());
+    assert!(!handle.is_null());
+
+    let actions = vec![NxValue::Record {
+        type_name: Some("SearchSubmitted".to_string()),
+        properties: std::collections::BTreeMap::from([(
+            "theme".to_string(),
+            NxValue::EnumValue {
+                type_name: "ThemeMode".to_string(),
+                member: "dark".to_string(),
+            },
+        )]),
+    }];
+    let actions_msgpack = rmp_serde::to_vec_named(&actions).unwrap();
+    let (msgpack_status, msgpack_bytes) = component_dispatch_msgpack_with_program_artifact(
+        handle,
+        &init.state_snapshot,
+        &actions_msgpack,
+    );
+    nx_free_program_artifact(handle);
+    assert!(matches!(msgpack_status, NxEvalStatus::Ok));
+
+    let dispatch_result: ComponentDispatchResult = rmp_serde::from_slice(&msgpack_bytes).unwrap();
+    assert_eq!(
+        dispatch_result.effects,
+        vec![NxValue::Record {
+            type_name: Some("DoSearch".to_string()),
+            properties: std::collections::BTreeMap::from([(
+                "theme".to_string(),
+                NxValue::EnumValue {
+                    type_name: "ThemeMode".to_string(),
+                    member: "dark".to_string(),
+                },
+            )]),
+        }]
+    );
+
+    let build_context = create_empty_build_context();
+    let (json_handle, status, bytes) =
+        build_program_artifact_handle(build_context, source, "ffi-enum-dispatch.nx");
+    nx_free_program_build_context(build_context);
+    assert!(matches!(status, NxEvalStatus::Ok));
+    assert!(bytes.is_empty());
+    assert!(!json_handle.is_null());
+
+    let (json_status, json_payload) = component_dispatch_json_with_program_artifact(
+        json_handle,
+        &init.state_snapshot,
+        &actions_msgpack,
+    );
+    nx_free_program_artifact(json_handle);
+    assert!(matches!(json_status, NxEvalStatus::Ok));
+
+    let dispatch_result: JsonComponentDispatchResult = serde_json::from_str(&json_payload).unwrap();
+    assert_eq!(
+        dispatch_result.effects,
+        vec![NxValue::Record {
+            type_name: Some("DoSearch".to_string()),
+            properties: std::collections::BTreeMap::from([(
+                "theme".to_string(),
+                NxValue::EnumValue {
+                    type_name: "ThemeMode".to_string(),
+                    member: "dark".to_string(),
+                },
+            )]),
+        }]
+    );
     assert_eq!(
         BASE64_STANDARD
             .decode(dispatch_result.state_snapshot)

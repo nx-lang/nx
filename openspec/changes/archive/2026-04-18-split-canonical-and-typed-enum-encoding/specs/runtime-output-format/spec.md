@@ -1,8 +1,5 @@
-# runtime-output-format Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change support-selectable-runtime-output-format. Update Purpose after archive.
-## Requirements
 ### Requirement: Native runtime calls support caller-selected output formats
 The public NX native runtime SHALL allow hosts to request either MessagePack or JSON from
 value-returning runtime calls on a per-call basis. The selected format SHALL apply to both
@@ -33,3 +30,4 @@ semantics, including explicit enum identity for raw enum values.
   collapsing the value to a bare string
 - **AND** the JSON and MessagePack payloads SHALL agree on the logical enum shape with
   `"$enum": "Status"` and `"$member": "active"`
+

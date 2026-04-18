@@ -209,9 +209,9 @@ fn test_enum_member_return() {
     let result = execute_function(source, "north", vec![]).unwrap_or_else(|err| panic!("{}", err));
     assert_eq!(
         result,
-        Value::EnumVariant {
+        Value::EnumValue {
             type_name: nx_hir::Name::new("Direction"),
-            variant: SmolStr::new("north")
+            member: SmolStr::new("north")
         }
     );
 }
@@ -226,9 +226,9 @@ fn test_enum_comparison() {
     let result = execute_function(
         source,
         "isNorth",
-        vec![Value::EnumVariant {
+        vec![Value::EnumValue {
             type_name: nx_hir::Name::new("Direction"),
-            variant: SmolStr::new("north"),
+            member: SmolStr::new("north"),
         }],
     )
     .unwrap_or_else(|err| panic!("{}", err));

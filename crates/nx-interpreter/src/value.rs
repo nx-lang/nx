@@ -62,14 +62,14 @@ pub enum Value {
     /// Represents a collection of values, used for iteration and collections
     Array(Vec<Value>),
 
-    /// Enum variant value
+    /// Enum value
     ///
     /// Stores the enum type name and selected member.
-    EnumVariant {
+    EnumValue {
         /// Enum type name
         type_name: Name,
-        /// Variant name
-        variant: SmolStr,
+        /// Member name
+        member: SmolStr,
     },
 
     /// Record value (always typed).
@@ -152,7 +152,7 @@ impl Value {
             Value::Boolean(_) => "bool",
             Value::Null => "null",
             Value::Array(_) => "array",
-            Value::EnumVariant { .. } => "enum",
+            Value::EnumValue { .. } => "enum",
             Value::Record { .. } => "record",
             Value::ActionHandler { .. } => "action_handler",
         }
@@ -179,7 +179,7 @@ impl std::fmt::Display for Value {
                 }
                 write!(f, "]")
             }
-            Value::EnumVariant { type_name, variant } => write!(f, "{}.{}", type_name, variant),
+            Value::EnumValue { type_name, member } => write!(f, "{}.{}", type_name, member),
             Value::Record { type_name, fields } => {
                 write!(f, "{}{{ ", type_name)?;
                 for (i, (k, v)) in fields.iter().enumerate() {
@@ -243,9 +243,9 @@ mod tests {
         assert_eq!(Value::Boolean(true).to_string(), "true");
         assert_eq!(Value::Null.to_string(), "null");
         assert_eq!(
-            Value::EnumVariant {
+            Value::EnumValue {
                 type_name: Name::new("Status"),
-                variant: SmolStr::new("active")
+                member: SmolStr::new("active")
             }
             .to_string(),
             "Status.active"

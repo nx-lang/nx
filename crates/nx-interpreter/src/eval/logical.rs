@@ -89,15 +89,15 @@ fn eval_eq(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
         (Value::String(a), Value::String(b)) => a == b,
         (Value::Boolean(a), Value::Boolean(b)) => a == b,
         (
-            Value::EnumVariant {
+            Value::EnumValue {
                 type_name: a_type,
-                variant: a_variant,
+                member: a_member,
             },
-            Value::EnumVariant {
+            Value::EnumValue {
                 type_name: b_type,
-                variant: b_variant,
+                member: b_member,
             },
-        ) => a_type == b_type && a_variant == b_variant,
+        ) => a_type == b_type && a_member == b_member,
         (Value::Null, Value::Null) => true,
         _ => false,
     };

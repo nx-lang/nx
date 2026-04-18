@@ -559,6 +559,49 @@ mod tests {
     }
 
     #[test]
+    fn generates_csharp_enums_with_shared_json_and_messagepack_string_converters() {
+        let source = r#"
+            export enum DealStage = | draft | pending_review | closed_won
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.Models".to_string()),
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(output.contains("using System.Text.Json;"));
+        assert!(output.contains("using System.Text.Json.Serialization;"));
+        assert!(output.contains("[JsonConverter(typeof(DealStageJsonConverter))]"));
+        assert!(output.contains("[MessagePackFormatter(typeof(DealStageMessagePackFormatter))]"));
+        assert!(output.contains("internal static class DealStageWireFormat"));
+        assert!(output.contains(
+            "case DealStage.PendingReview: return \"pending_review\";"
+        ));
+        assert!(output.contains(
+            "case \"pending_review\": return DealStage.PendingReview;"
+        ));
+        assert!(output.contains(
+            "public sealed class DealStageJsonConverter : JsonConverter<DealStage>"
+        ));
+        assert!(output.contains(
+            "writer.WriteStringValue(DealStageWireFormat.Format(value));"
+        ));
+        assert!(output.contains(
+            "public sealed class DealStageMessagePackFormatter : IMessagePackFormatter<DealStage>"
+        ));
+        assert!(output.contains("writer.Write(DealStageWireFormat.Format(value));"));
+        assert!(output.contains(
+            "Expected NX enum to be encoded as a MessagePack string."
+        ));
+        assert!(!output.contains("MessagePackType.Map"));
+        assert!(!output.contains("$variant"));
+        assert!(!output.contains("Expected string or map for NX enum."));
+    }
+
+    #[test]
     fn generates_typescript_library_files_for_nested_modules() {
         let temp_dir = TempDir::new().expect("temp dir");
         let library_dir = temp_dir.path().join("ui");

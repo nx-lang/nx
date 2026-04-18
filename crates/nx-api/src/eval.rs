@@ -552,4 +552,26 @@ let root() = { answer() }"#;
 
         assert_eq!(value, NxValue::Int(42));
     }
+
+    #[test]
+    fn eval_source_returns_canonical_enum_value() {
+        let source = r#"
+            enum Status = | active | disabled
+            let root() = { Status.active }
+        "#;
+
+        let EvalResult::Ok(value) =
+            eval_source(source, "enum-root.nx", &ProgramBuildContext::empty())
+        else {
+            panic!("Expected enum source evaluation to succeed");
+        };
+
+        assert_eq!(
+            value,
+            NxValue::EnumValue {
+                type_name: "Status".to_string(),
+                member: "active".to_string(),
+            }
+        );
+    }
 }
