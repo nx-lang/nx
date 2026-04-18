@@ -130,24 +130,23 @@ fn render_module(
         writer.blank_line();
     }
 
-    let needs_json_namespace = module
-        .declarations
-        .iter()
-        .any(|declaration| matches!(declaration.item, ExportedType::Enum(_)));
     let needs_json_serialization = module
         .declarations
         .iter()
         .any(|declaration| !matches!(declaration.item, ExportedType::Alias(_)));
+    let needs_enum_serialization_helpers = module
+        .declarations
+        .iter()
+        .any(|declaration| matches!(declaration.item, ExportedType::Enum(_)));
 
     writer.line("using System;");
-    if needs_json_namespace {
-        writer.line("using System.Text.Json;");
-    }
     if needs_json_serialization {
         writer.line("using System.Text.Json.Serialization;");
     }
     writer.line("using MessagePack;");
-    writer.line("using MessagePack.Formatters;");
+    if needs_enum_serialization_helpers {
+        writer.line("using NxLang.Nx.Serialization;");
+    }
 
     for dependency_namespace in &dependency_usings {
         writer.line(&format!(
@@ -214,10 +213,10 @@ fn emit_declaration(
 fn emit_enum(writer: &mut CodeWriter, enum_def: &ExportedEnum) {
     let enum_name = sanitize_csharp_identifier(&enum_def.name);
     writer.line(&format!(
-        "[JsonConverter(typeof({enum_name}JsonConverter))]"
+        "[JsonConverter(typeof(NxEnumJsonConverter<{enum_name}, {enum_name}WireFormat>))]"
     ));
     writer.line(&format!(
-        "[MessagePackFormatter(typeof({enum_name}MessagePackFormatter))]"
+        "[MessagePackFormatter(typeof(NxEnumMessagePackFormatter<{enum_name}, {enum_name}WireFormat>))]"
     ));
     writer.block(&format!("public enum {enum_name}"), |writer| {
         for (index, member) in enum_def.members.iter().enumerate() {
@@ -232,12 +231,6 @@ fn emit_enum(writer: &mut CodeWriter, enum_def: &ExportedEnum) {
 
     writer.blank_line();
     emit_enum_wire_format(writer, enum_def);
-
-    writer.blank_line();
-    emit_enum_json_converter(writer, enum_def);
-
-    writer.blank_line();
-    emit_enum_messagepack_formatter(writer, enum_def);
 }
 
 fn emit_record(
@@ -396,140 +389,48 @@ fn emit_dual_annotated_auto_property(
     writer.line(declaration);
 }
 
-fn emit_enum_messagepack_formatter(writer: &mut CodeWriter, enum_def: &ExportedEnum) {
-    let enum_name = sanitize_csharp_identifier(&enum_def.name);
-    writer.block(
-        &format!(
-            "public sealed class {enum_name}MessagePackFormatter : IMessagePackFormatter<{enum_name}>"
-        ),
-        |writer| {
-            writer.block(
-                &format!(
-                    "public void Serialize(ref MessagePackWriter writer, {enum_name} value, MessagePackSerializerOptions options)"
-                ),
-                |writer| {
-                    writer.line(&format!(
-                        "writer.Write({enum_name}WireFormat.Format(value));"
-                    ));
-                },
-            );
-
-            writer.blank_line();
-
-            writer.block(
-                &format!(
-                    "public {enum_name} Deserialize(ref MessagePackReader reader, MessagePackSerializerOptions options)"
-                ),
-                |writer| {
-                    writer.block(
-                        "if (reader.TryReadNil() || reader.NextMessagePackType is not MessagePackType.String)",
-                        |writer| {
-                            writer.line(
-                                "throw new MessagePackSerializationException(\"Expected NX enum to be encoded as a MessagePack string.\");",
-                            );
-                        },
-                    );
-                    writer.blank_line();
-                    writer.line("string value = reader.ReadString()!;");
-                    writer.blank_line();
-                    writer.block("try", |writer| {
-                        writer.line(&format!("return {enum_name}WireFormat.Parse(value);"));
-                    });
-                    writer.block("catch (FormatException e)", |writer| {
-                        writer.line("throw new MessagePackSerializationException(e.Message, e);");
-                    });
-                },
-            );
-        },
-    );
-}
-
 fn emit_enum_wire_format(writer: &mut CodeWriter, enum_def: &ExportedEnum) {
     let enum_name = sanitize_csharp_identifier(&enum_def.name);
     writer.block(
-        &format!("internal static class {enum_name}WireFormat"),
+        &format!("internal sealed class {enum_name}WireFormat : INxEnumWireFormat<{enum_name}>"),
         |writer| {
-            writer.block(
-                &format!("internal static string Format({enum_name} value)"),
-                |writer| {
-                    writer.block("switch (value)", |writer| {
-                        for member in &enum_def.members {
-                            let member_literal = escape_csharp_string_literal(member);
-                            let member_ident = sanitize_csharp_member_name(member);
-                            writer.line(&format!(
-                                "case {enum_name}.{member_ident}: return \"{member_literal}\";"
-                            ));
-                        }
-                        writer.line("default:");
-                        writer.line("throw new FormatException(\"Unknown NX enum value.\");");
-                    });
-                },
-            );
+            writer.line(&format!(
+                "public static string Format({enum_name} value) =>"
+            ));
+            writer.indent();
+            writer.line("value switch");
+            writer.line("{");
+            writer.indent();
+            for member in &enum_def.members {
+                let member_literal = escape_csharp_string_literal(member);
+                let member_ident = sanitize_csharp_member_name(member);
+                writer.line(&format!(
+                    "{enum_name}.{member_ident} => \"{member_literal}\","
+                ));
+            }
+            writer.line("_ => throw new FormatException(\"Unknown NX enum value.\"),");
+            writer.dedent();
+            writer.line("};");
+            writer.dedent();
 
             writer.blank_line();
 
-            writer.block(
-                &format!("internal static {enum_name} Parse(string value)"),
-                |writer| {
-                    writer.block("switch (value)", |writer| {
-                        for member in &enum_def.members {
-                            let member_literal = escape_csharp_string_literal(member);
-                            let member_ident = sanitize_csharp_member_name(member);
-                            writer.line(&format!(
-                                "case \"{member_literal}\": return {enum_name}.{member_ident};"
-                            ));
-                        }
-                        writer.line("default:");
-                        writer.line("throw new FormatException(\"Unknown NX enum member.\");");
-                    });
-                },
-            );
-        },
-    );
-}
-
-fn emit_enum_json_converter(writer: &mut CodeWriter, enum_def: &ExportedEnum) {
-    let enum_name = sanitize_csharp_identifier(&enum_def.name);
-    writer.block(
-        &format!("public sealed class {enum_name}JsonConverter : JsonConverter<{enum_name}>"),
-        |writer| {
-            writer.block(
-                &format!(
-                    "public override {enum_name} Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)"
-                ),
-                |writer| {
-                    writer.block(
-                        "if (reader.TokenType is not JsonTokenType.String)",
-                        |writer| {
-                            writer.line(
-                                "throw new JsonException(\"Expected NX enum to be encoded as a JSON string.\");",
-                            );
-                        },
-                    );
-                    writer.blank_line();
-                    writer.line("string value = reader.GetString()!;");
-                    writer.blank_line();
-                    writer.block("try", |writer| {
-                        writer.line(&format!("return {enum_name}WireFormat.Parse(value);"));
-                    });
-                    writer.block("catch (FormatException e)", |writer| {
-                        writer.line("throw new JsonException(e.Message, e);");
-                    });
-                },
-            );
-
-            writer.blank_line();
-
-            writer.block(
-                &format!(
-                    "public override void Write(Utf8JsonWriter writer, {enum_name} value, JsonSerializerOptions options)"
-                ),
-                |writer| {
-                    writer.line(&format!(
-                        "writer.WriteStringValue({enum_name}WireFormat.Format(value));"
-                    ));
-                },
-            );
+            writer.line(&format!("public static {enum_name} Parse(string value) =>"));
+            writer.indent();
+            writer.line("value switch");
+            writer.line("{");
+            writer.indent();
+            for member in &enum_def.members {
+                let member_literal = escape_csharp_string_literal(member);
+                let member_ident = sanitize_csharp_member_name(member);
+                writer.line(&format!(
+                    "\"{member_literal}\" => {enum_name}.{member_ident},"
+                ));
+            }
+            writer.line("_ => throw new FormatException(\"Unknown NX enum member.\"),");
+            writer.dedent();
+            writer.line("};");
+            writer.dedent();
         },
     );
 }

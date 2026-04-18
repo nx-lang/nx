@@ -196,8 +196,9 @@ That applies to raw evaluation and raw component JSON flows such as `EvaluateByt
 `EvaluateJson`, `InitializeComponentJson`, and `DispatchComponentActionsJson`.
 
 Typed generated DTOs use schema-aware enum strings instead. When a generated model knows a property
-is `ThemeMode`, both the generated JSON converter and the generated MessagePack formatter encode the
-value as the authored member string:
+is `ThemeMode`, the generated enum emits an explicit wire-format mapping type and relies on
+`NxEnumJsonConverter<TEnum, TWire>` and `NxEnumMessagePackFormatter<TEnum, TWire>` from
+`NxLang.Runtime` to encode the value as the authored member string:
 
 ```json
 "dark"
@@ -318,7 +319,12 @@ nxlang generate ./models --language csharp --csharp-namespace MyApp.Models --out
 Generation now honors NX export visibility, so only declarations marked `export` are emitted.
 Library generation writes one `.g.cs` file per contributing module under the requested output
 directory. Generated enums use the authored NX member spellings for both JSON and MessagePack, while
-raw runtime payloads keep the canonical self-describing `"$enum"` plus `"$member"` form.
+raw runtime payloads keep the canonical self-describing `"$enum"` plus `"$member"` form. Generated
+C# enums now rely on shared helpers from `NxLang.Runtime` under `NxLang.Nx.Serialization`, so the
+project that compiles the generated files must reference `NxLang.Runtime` in addition to the
+serializer packages it already uses. The generated output emits the enum itself plus an explicit
+wire-format mapping type; the JSON converter and MessagePack formatter implementation now comes from
+the shared runtime assembly.
 
 ## Troubleshooting
 

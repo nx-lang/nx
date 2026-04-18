@@ -559,7 +559,7 @@ mod tests {
     }
 
     #[test]
-    fn generates_csharp_enums_with_shared_json_and_messagepack_string_converters() {
+    fn generates_csharp_enums_with_shared_runtime_enum_serialization_helpers() {
         let source = r#"
             export enum DealStage = | draft | pending_review | closed_won
         "#;
@@ -572,33 +572,47 @@ mod tests {
 
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
 
-        assert!(output.contains("using System.Text.Json;"));
         assert!(output.contains("using System.Text.Json.Serialization;"));
-        assert!(output.contains("[JsonConverter(typeof(DealStageJsonConverter))]"));
-        assert!(output.contains("[MessagePackFormatter(typeof(DealStageMessagePackFormatter))]"));
-        assert!(output.contains("internal static class DealStageWireFormat"));
+        assert!(output.contains("using NxLang.Nx.Serialization;"));
         assert!(output.contains(
-            "case DealStage.PendingReview: return \"pending_review\";"
+            "[JsonConverter(typeof(NxEnumJsonConverter<DealStage, DealStageWireFormat>))]"
         ));
         assert!(output.contains(
-            "case \"pending_review\": return DealStage.PendingReview;"
+            "[MessagePackFormatter(typeof(NxEnumMessagePackFormatter<DealStage, DealStageWireFormat>))]"
         ));
-        assert!(output.contains(
-            "public sealed class DealStageJsonConverter : JsonConverter<DealStage>"
-        ));
-        assert!(output.contains(
-            "writer.WriteStringValue(DealStageWireFormat.Format(value));"
-        ));
-        assert!(output.contains(
-            "public sealed class DealStageMessagePackFormatter : IMessagePackFormatter<DealStage>"
-        ));
-        assert!(output.contains("writer.Write(DealStageWireFormat.Format(value));"));
-        assert!(output.contains(
-            "Expected NX enum to be encoded as a MessagePack string."
-        ));
+        assert!(output
+            .contains("internal sealed class DealStageWireFormat : INxEnumWireFormat<DealStage>"));
+        assert!(output.contains("public static string Format(DealStage value) =>"));
+        assert!(output.contains("public static DealStage Parse(string value) =>"));
+        assert!(output.contains("DealStage.PendingReview => \"pending_review\","));
+        assert!(output.contains("\"pending_review\" => DealStage.PendingReview,"));
+        assert!(!output.contains("public sealed class DealStageJsonConverter"));
+        assert!(!output.contains("public sealed class DealStageMessagePackFormatter"));
         assert!(!output.contains("MessagePackType.Map"));
         assert!(!output.contains("$variant"));
         assert!(!output.contains("Expected string or map for NX enum."));
+    }
+
+    #[test]
+    fn generates_csharp_enum_wire_mappings_when_clr_member_names_are_normalized() {
+        let source = r#"
+            export enum BuildTarget = | web_api | ios_app
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.Models".to_string()),
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(output.contains("WebApi,"));
+        assert!(output.contains("IosApp"));
+        assert!(output.contains("BuildTarget.WebApi => \"web_api\","));
+        assert!(output.contains("BuildTarget.IosApp => \"ios_app\","));
+        assert!(output.contains("\"web_api\" => BuildTarget.WebApi,"));
+        assert!(output.contains("\"ios_app\" => BuildTarget.IosApp,"));
     }
 
     #[test]

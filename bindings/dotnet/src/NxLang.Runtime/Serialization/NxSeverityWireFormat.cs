@@ -5,11 +5,10 @@ using System;
 
 namespace NxLang.Nx.Serialization;
 
-internal static class NxSeverityWireFormat
+internal sealed class NxSeverityWireFormat : INxEnumWireFormat<NxSeverity>
 {
-    internal static string Format(NxSeverity value)
-    {
-        return value switch
+    public static string Format(NxSeverity value) =>
+        value switch
         {
             NxSeverity.Error => "error",
             NxSeverity.Warning => "warning",
@@ -17,11 +16,9 @@ internal static class NxSeverityWireFormat
             NxSeverity.Hint => "hint",
             _ => throw new FormatException("Unknown NX severity value."),
         };
-    }
 
-    internal static NxSeverity Parse(string value)
-    {
-        return value switch
+    public static NxSeverity Parse(string value) =>
+        value switch
         {
             "error" => NxSeverity.Error,
             "warning" => NxSeverity.Warning,
@@ -29,5 +26,4 @@ internal static class NxSeverityWireFormat
             "hint" => NxSeverity.Hint,
             _ => throw new FormatException("Unknown NX severity value."),
         };
-    }
 }

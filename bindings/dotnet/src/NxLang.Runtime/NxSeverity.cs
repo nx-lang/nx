@@ -10,8 +10,8 @@ namespace NxLang.Nx;
 /// <summary>
 /// Defines the severity level of a diagnostic emitted by the NX runtime.
 /// </summary>
-[JsonConverter(typeof(NxSeverityJsonConverter))]
-[MessagePackFormatter(typeof(NxSeverityMessagePackFormatter))]
+[JsonConverter(typeof(NxEnumJsonConverter<NxSeverity, NxSeverityWireFormat>))]
+[MessagePackFormatter(typeof(NxEnumMessagePackFormatter<NxSeverity, NxSeverityWireFormat>))]
 public enum NxSeverity
 {
     Error,
