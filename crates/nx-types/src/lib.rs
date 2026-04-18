@@ -98,7 +98,7 @@
 //!
 //! ## Compound Types
 //!
-//! - **Arrays**: `int[]`, `string[][]`
+//! - **Arrays**: `int[]`, `string[][]`, `string[]?`, `string?[]`
 //! - **Functions**: `(int, string) => bool`
 //! - **Nullable**: `int?`, `string?`
 //! - **Named types**: User-defined types and element names

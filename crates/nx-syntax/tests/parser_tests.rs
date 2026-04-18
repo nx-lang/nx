@@ -885,6 +885,88 @@ fn test_parse_type_annotations() {
 }
 
 #[test]
+fn test_parse_composed_type_suffixes() {
+    let source = r#"
+        type Matrix = string[][]
+        type MaybeNames = string[]?
+        type NameHistory = string?[]
+
+        type SearchState = {
+          queries: string[]?
+          aliases: string?[]
+          grouped: string[][]
+        }
+
+        let loadUsers(users: User[][]): User[][] = {users}
+        let maybeUsers(): User[]? = null
+    "#;
+    let result = parse_str(source, "composed-types.nx");
+
+    assert!(
+        result.is_ok(),
+        "Composed postfix type suffixes should parse. Errors: {:?}",
+        result.errors
+    );
+    let root = result.root().expect("Should have syntax tree root");
+
+    let aliases: Vec<_> = root
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::TYPE_DEFINITION)
+        .collect();
+    assert_eq!(
+        aliases[0]
+            .child_by_field("type")
+            .expect("Matrix alias should have type")
+            .text(),
+        "string[][]"
+    );
+    assert_eq!(
+        aliases[1]
+            .child_by_field("type")
+            .expect("MaybeNames alias should have type")
+            .text(),
+        "string[]?"
+    );
+    assert_eq!(
+        aliases[2]
+            .child_by_field("type")
+            .expect("NameHistory alias should have type")
+            .text(),
+        "string?[]"
+    );
+
+    let record = root
+        .children()
+        .find(|c| c.kind() == SyntaxKind::RECORD_DEFINITION)
+        .expect("Should find record definition");
+    let field_types: Vec<_> = record
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::PROPERTY_DEFINITION)
+        .map(|field| {
+            field
+                .child_by_field("type")
+                .expect("Field should have type")
+                .text()
+                .to_string()
+        })
+        .collect();
+    assert_eq!(field_types, vec!["string[]?", "string?[]", "string[][]"]);
+
+    let maybe_users = root
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::FUNCTION_DEFINITION)
+        .find(|func| {
+            func.child_by_field("name")
+                .is_some_and(|name| name.text() == "maybeUsers")
+        })
+        .expect("Should find maybeUsers function_definition node");
+    let return_type = maybe_users
+        .child_by_field("return_type")
+        .expect("Function should capture return type annotation");
+    assert_eq!(return_type.text(), "User[]?");
+}
+
+#[test]
 fn test_parse_record_definition() {
     let path = fixture_path("valid/record-definition.nx");
     let result = parse_file(&path).expect("record fixture should load");

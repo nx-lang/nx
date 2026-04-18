@@ -391,8 +391,8 @@ impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Type::Primitive(p) => write!(f, "{}", p),
-            Type::Array(elem) => write!(f, "{}[]", elem),
-            Type::Nullable(inner) => write!(f, "{}?", inner),
+            Type::Array(elem) => write_postfix_type(f, elem, "[]"),
+            Type::Nullable(inner) => write_postfix_type(f, inner, "?"),
             Type::Function { params, ret } => {
                 write!(f, "(")?;
                 for (i, param) in params.iter().enumerate() {
@@ -409,6 +409,13 @@ impl fmt::Display for Type {
             Type::Unknown => write!(f, "?"),
             Type::Error => write!(f, "<error>"),
         }
+    }
+}
+
+fn write_postfix_type(f: &mut fmt::Formatter<'_>, inner: &Type, suffix: &str) -> fmt::Result {
+    match inner {
+        Type::Function { .. } => write!(f, "({inner}){suffix}"),
+        _ => write!(f, "{inner}{suffix}"),
     }
 }
 
@@ -684,7 +691,15 @@ mod tests {
         let nested = Type::array(Type::nullable(Type::int()));
         assert_eq!(nested.to_string(), "int?[]");
 
+        let nullable_list = Type::nullable(Type::array(Type::string()));
+        assert_eq!(nullable_list.to_string(), "string[]?");
+        assert!(!nested.is_compatible_with(&nullable_list));
+        assert!(!nullable_list.is_compatible_with(&nested));
+
         let func_array = Type::array(Type::function(vec![Type::int()], Type::string()));
-        assert_eq!(func_array.to_string(), "(int) => string[]");
+        assert_eq!(func_array.to_string(), "((int) => string)[]");
+
+        let nullable_func = Type::nullable(Type::function(vec![Type::int()], Type::string()));
+        assert_eq!(nullable_func.to_string(), "((int) => string)?");
     }
 }

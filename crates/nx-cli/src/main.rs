@@ -1079,6 +1079,68 @@ let root() = { Ui.title() }"#,
     }
 
     #[test]
+    fn test_cli_generate_file_preserves_composed_typescript_list_suffixes() {
+        let source = r#"
+            export type Matrix = string[][]
+            export type MaybeNames = string[]?
+            export type Payload = {
+              aliases:string?[]
+              maybeNames:string[]?
+              matrix:string[][]
+            }
+        "#;
+        let (_dir, path) = create_temp_nx_file(source);
+
+        let output = run_cli(&[
+            "generate",
+            path.to_str().unwrap(),
+            "--language",
+            "typescript",
+        ]);
+
+        assert!(
+            output.status.success(),
+            "CLI should generate composed TypeScript list suffixes for .nx file input"
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("export type Matrix = string[][];"));
+        assert!(stdout.contains("export type MaybeNames = string[] | null;"));
+        assert!(stdout.contains("aliases: (string | null)[];"));
+        assert!(stdout.contains("maybeNames: string[] | null;"));
+        assert!(stdout.contains("matrix: string[][];"));
+    }
+
+    #[test]
+    fn test_cli_generate_file_preserves_composed_csharp_list_suffixes() {
+        let source = r#"
+            export type Payload = {
+              matrix:string[][]
+              maybeNames:string[]?
+              aliases:string?[]
+            }
+        "#;
+        let (_dir, path) = create_temp_nx_file(source);
+
+        let output = run_cli(&[
+            "generate",
+            path.to_str().unwrap(),
+            "--language",
+            "csharp",
+            "--csharp-namespace",
+            "MyApp.Models",
+        ]);
+
+        assert!(
+            output.status.success(),
+            "CLI should generate composed C# list suffixes for .nx file input"
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("public string[][] Matrix { get; set; } = default!;"));
+        assert!(stdout.contains("public string[]? MaybeNames { get; set; }"));
+        assert!(stdout.contains("public string?[] Aliases { get; set; } = default!;"));
+    }
+
+    #[test]
     fn test_cli_generate_file_warns_for_csharp_abstract_root_without_concrete_descendants() {
         let source = r#"
             export abstract type Question = { label:string }

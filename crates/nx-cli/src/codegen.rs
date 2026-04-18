@@ -249,6 +249,33 @@ mod tests {
     }
 
     #[test]
+    fn generates_typescript_composed_list_and_nullable_types() {
+        let source = r#"
+            export type Matrix = string[][]
+            export type MaybeNames = string[]?
+            export type Payload = {
+              aliases:string?[]
+              maybeNames:string[]?
+              matrix:string[][]
+            }
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(output.contains("export type Matrix = string[][];"));
+        assert!(output.contains("export type MaybeNames = string[] | null;"));
+        assert!(output.contains("aliases: (string | null)[];"));
+        assert!(output.contains("maybeNames: string[] | null;"));
+        assert!(output.contains("matrix: string[][];"));
+    }
+
+    #[test]
     fn generates_typescript_abstract_record_runtime_unions() {
         let source = r#"
             export abstract type Question = { label:string }
@@ -1079,6 +1106,29 @@ export type QuestionFlowInitialExperience = {
         assert!(output.contains("public sealed class SearchRequested : SearchAction"));
         assert!(!output.contains("__NxType"));
         assert!(output.contains("[JsonPropertyName(\"query\")]"));
+    }
+
+    #[test]
+    fn generates_csharp_composed_list_and_nullable_field_types() {
+        let source = r#"
+            export type Payload = {
+              matrix:string[][]
+              maybeNames:string[]?
+              aliases:string?[]
+            }
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.Models".to_string()),
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(output.contains("public string[][] Matrix { get; set; } = default!;"));
+        assert!(output.contains("public string[]? MaybeNames { get; set; }"));
+        assert!(output.contains("public string?[] Aliases { get; set; } = default!;"));
     }
 
     #[test]

@@ -1402,8 +1402,8 @@ impl LoweringContext {
                             ty = TypeRef::nullable(ty);
                         }
                         SyntaxKind::LBRACKET => {
-                            // The grammar only supports `[]` (sequence/list), so we treat the
-                            // presence of `[` as an array type suffix.
+                            // Type suffixes compose in source order, so each `[` token from a
+                            // `[]` pair wraps the current type in one more array layer.
                             ty = TypeRef::array(ty);
                         }
                         _ => {}
@@ -2795,6 +2795,10 @@ enum Mode = light | dark"#;
             type User = {
               tags: string[]
               age: int?
+              aliases: string?[]
+              grouped: string[][]
+              backupTags: string[]?
+              maybeAliases: string?[]?
             }
         "#;
         let parse_result = parse_str(source, "record-types.nx");
@@ -2835,6 +2839,76 @@ enum Mode = light | dark"#;
                 other => panic!("Expected int inner type, got {:?}", other),
             },
             other => panic!("Expected nullable type, got {:?}", other),
+        }
+
+        let aliases = record
+            .properties
+            .iter()
+            .find(|field| field.name.as_str() == "aliases")
+            .expect("Expected aliases field");
+        match &aliases.ty {
+            TypeRef::Array(inner) => match inner.as_ref() {
+                TypeRef::Nullable(nullable_inner) => match nullable_inner.as_ref() {
+                    TypeRef::Name(name) => assert_eq!(name.as_str(), "string"),
+                    other => panic!("Expected string alias element type, got {:?}", other),
+                },
+                other => panic!("Expected nullable alias element type, got {:?}", other),
+            },
+            other => panic!("Expected array alias type, got {:?}", other),
+        }
+
+        let grouped = record
+            .properties
+            .iter()
+            .find(|field| field.name.as_str() == "grouped")
+            .expect("Expected grouped field");
+        match &grouped.ty {
+            TypeRef::Array(outer) => match outer.as_ref() {
+                TypeRef::Array(inner) => match inner.as_ref() {
+                    TypeRef::Name(name) => assert_eq!(name.as_str(), "string"),
+                    other => panic!("Expected grouped inner string type, got {:?}", other),
+                },
+                other => panic!("Expected grouped inner array type, got {:?}", other),
+            },
+            other => panic!("Expected grouped outer array type, got {:?}", other),
+        }
+
+        let backup_tags = record
+            .properties
+            .iter()
+            .find(|field| field.name.as_str() == "backupTags")
+            .expect("Expected backupTags field");
+        match &backup_tags.ty {
+            TypeRef::Nullable(inner) => match inner.as_ref() {
+                TypeRef::Array(array_inner) => match array_inner.as_ref() {
+                    TypeRef::Name(name) => assert_eq!(name.as_str(), "string"),
+                    other => panic!("Expected backupTags array string type, got {:?}", other),
+                },
+                other => panic!("Expected backupTags inner array type, got {:?}", other),
+            },
+            other => panic!("Expected nullable backupTags type, got {:?}", other),
+        }
+
+        let maybe_aliases = record
+            .properties
+            .iter()
+            .find(|field| field.name.as_str() == "maybeAliases")
+            .expect("Expected maybeAliases field");
+        match &maybe_aliases.ty {
+            TypeRef::Nullable(inner) => match inner.as_ref() {
+                TypeRef::Array(array_inner) => match array_inner.as_ref() {
+                    TypeRef::Nullable(nullable_inner) => match nullable_inner.as_ref() {
+                        TypeRef::Name(name) => assert_eq!(name.as_str(), "string"),
+                        other => panic!("Expected maybeAliases inner string type, got {:?}", other),
+                    },
+                    other => panic!(
+                        "Expected maybeAliases nullable array element type, got {:?}",
+                        other
+                    ),
+                },
+                other => panic!("Expected maybeAliases inner array type, got {:?}", other),
+            },
+            other => panic!("Expected nullable maybeAliases type, got {:?}", other),
         }
     }
 

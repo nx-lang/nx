@@ -19,6 +19,9 @@ const COMPONENT_BODY_SYNTAX: &str =
 const COMPONENT_DEFINITION_SYNTAX: &str =
     "Expected: [abstract] [external] component <Name [extends BaseComponent] prop:type emits { \
      ActionName { prop:type } ActionType } /> [= { state { prop:type } [<Element />] }]";
+const DUPLICATE_NULLABLE_SUFFIX_NOTE: &str =
+    "A nullable suffix can only be applied once per type layer. `string?[]?` is valid because \
+     `[]` creates a new outer list layer.";
 
 /// Validates a syntax tree and returns any semantic errors found.
 ///
@@ -41,6 +44,9 @@ pub fn validate(tree: &SyntaxTree, file_name: &str) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let root = tree.root();
 
+    // Validate semantic constraints on type suffix composition.
+    validate_type_suffixes(&root, file_name, &mut diagnostics);
+
     // Validate element tag matching
     validate_element_tags(&root, tree, file_name, &mut diagnostics);
 
@@ -51,6 +57,58 @@ pub fn validate(tree: &SyntaxTree, file_name: &str) -> Vec<Diagnostic> {
     validate_component_definitions(&root, file_name, &mut diagnostics);
 
     diagnostics
+}
+
+fn validate_type_suffixes(node: &SyntaxNode, file_name: &str, diagnostics: &mut Vec<Diagnostic>) {
+    if node.kind() == SyntaxKind::TYPE && !node.has_error() {
+        validate_type_suffix_chain(node, file_name, diagnostics);
+    }
+
+    for child in node.children() {
+        validate_type_suffixes(&child, file_name, diagnostics);
+    }
+}
+
+fn validate_type_suffix_chain(
+    node: &SyntaxNode,
+    file_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut children = node.children_with_tokens();
+    let Some(_) = children.next() else {
+        return;
+    };
+
+    let mut current_nullable_suffix: Option<TextRange> = None;
+
+    for child in children {
+        match child.kind() {
+            SyntaxKind::QUESTION => {
+                if let Some(previous_nullable_suffix) = current_nullable_suffix {
+                    diagnostics.push(
+                        Diagnostic::error("duplicate-nullable-suffix")
+                            .with_message("Type is already nullable at this layer")
+                            .with_label(
+                                Label::primary(file_name, child.span())
+                                    .with_message("remove this redundant `?`"),
+                            )
+                            .with_label(
+                                Label::secondary(file_name, previous_nullable_suffix)
+                                    .with_message("this `?` already made the type nullable"),
+                            )
+                            .with_note(DUPLICATE_NULLABLE_SUFFIX_NOTE)
+                            .build(),
+                    );
+                } else {
+                    current_nullable_suffix = Some(child.span());
+                }
+            }
+            SyntaxKind::LBRACKET => {
+                current_nullable_suffix = None;
+            }
+            _ => {}
+        }
+    }
 }
 
 fn validate_component_definitions(
@@ -594,6 +652,122 @@ mod tests {
                 assert!(tag_errors[0].message().contains("does not match"));
             }
         }
+    }
+
+    #[test]
+    fn test_validate_allows_composed_nullable_suffixes_across_layers() {
+        let source = "type MaybeAliases = string?[]?";
+        let result = parse_str(source, "test.nx");
+
+        let duplicate_errors: Vec<_> = result
+            .errors
+            .iter()
+            .filter(|d| d.code() == Some("duplicate-nullable-suffix"))
+            .collect();
+
+        assert!(
+            duplicate_errors.is_empty(),
+            "Expected no duplicate-nullable diagnostics, got: {duplicate_errors:?}"
+        );
+        assert!(
+            result.is_ok(),
+            "Composed nullable suffixes across distinct layers should remain valid"
+        );
+    }
+
+    #[test]
+    fn test_validate_rejects_duplicate_nullable_suffixes_on_same_layer() {
+        for source in [
+            "type TooNullable = string??",
+            "type TooNullableList = string[]??",
+            "type TooNullableNested = string?[]??",
+        ] {
+            let result = parse_str(source, "test.nx");
+
+            let duplicate_errors: Vec<_> = result
+                .errors
+                .iter()
+                .filter(|d| d.code() == Some("duplicate-nullable-suffix"))
+                .collect();
+
+            assert_eq!(
+                duplicate_errors.len(),
+                1,
+                "Expected exactly one duplicate-nullable diagnostic for {source}, got: {duplicate_errors:?}"
+            );
+            assert!(
+                duplicate_errors[0]
+                    .message()
+                    .contains("already nullable at this layer"),
+                "Unexpected duplicate-nullable message for {source}: {}",
+                duplicate_errors[0].message()
+            );
+            assert!(
+                !result.is_ok(),
+                "Duplicate nullable suffixes should make the parse result invalid for {source}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_reports_each_redundant_nullable_suffix_on_its_own_layer() {
+        let same_layer = parse_str("type TooNullable = string???", "test.nx");
+        let same_layer_errors: Vec<_> = same_layer
+            .errors
+            .iter()
+            .filter(|d| d.code() == Some("duplicate-nullable-suffix"))
+            .collect();
+
+        assert_eq!(
+            same_layer_errors.len(),
+            2,
+            "Expected one diagnostic per redundant same-layer `?`, got: {same_layer_errors:?}"
+        );
+
+        let same_layer_secondary_ranges: Vec<_> = same_layer_errors
+            .iter()
+            .map(|diagnostic| {
+                diagnostic
+                    .labels()
+                    .iter()
+                    .find(|label| !label.primary)
+                    .expect("duplicate-nullable diagnostics should include a secondary label")
+                    .range
+            })
+            .collect();
+        assert_eq!(
+            same_layer_secondary_ranges[0], same_layer_secondary_ranges[1],
+            "All same-layer redundant `?` diagnostics should point back to the original nullable suffix"
+        );
+
+        let multi_layer = parse_str("type TooNullable = string??[]??", "test.nx");
+        let multi_layer_errors: Vec<_> = multi_layer
+            .errors
+            .iter()
+            .filter(|d| d.code() == Some("duplicate-nullable-suffix"))
+            .collect();
+
+        assert_eq!(
+            multi_layer_errors.len(),
+            2,
+            "Expected independent redundant-`?` diagnostics per layer, got: {multi_layer_errors:?}"
+        );
+
+        let multi_layer_secondary_ranges: Vec<_> = multi_layer_errors
+            .iter()
+            .map(|diagnostic| {
+                diagnostic
+                    .labels()
+                    .iter()
+                    .find(|label| !label.primary)
+                    .expect("duplicate-nullable diagnostics should include a secondary label")
+                    .range
+            })
+            .collect();
+        assert_ne!(
+            multi_layer_secondary_ranges[0], multi_layer_secondary_ranges[1],
+            "Redundant `?` diagnostics from different layers should point at the first `?` of each layer"
+        );
     }
 
     #[test]

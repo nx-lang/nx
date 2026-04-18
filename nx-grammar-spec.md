@@ -247,14 +247,17 @@ ValueDefinitionTypeOpt
 - ValueDefinitionTypeOpt → ε
 
 Type (AST: TypeSyntax)
-- Type → PrimitiveType TypeOptModifier
-- Type → UserDefinedType TypeOptModifier
-  - fields: kind: "primitive"|"user", name: string (qualified), modifier?: "nullable"|"sequence"
+- Type → PrimitiveType TypeSuffix*
+- Type → UserDefinedType TypeSuffix*
+  - fields: kind: "primitive"|"user", name: string (qualified), suffixes: ("nullable"|"sequence")[]
 
-TypeOptModifier
-- TypeOptModifier → QMARK
-- TypeOptModifier → LBRACK RBRACK
-- TypeOptModifier → ε
+TypeSuffix
+- TypeSuffix → QMARK
+- TypeSuffix → LBRACK RBRACK
+
+Semantic note: `TypeSuffix*` preserves source-order composition, but post-parse validation rejects
+reapplying `QMARK` to the same outer type layer. `string?[]?` is valid; `string??` and
+`string?[]??` are invalid.
 
 PrimitiveType (AST: PrimitiveTypeSyntax)
 - PrimitiveType → STRING | I32 | I64 | INT | F32 | F64 | FLOAT | BOOL | VOID | OBJECT
@@ -659,7 +662,7 @@ This section lists the AST node types with fields for implementers.
 - ActionDefinitionSyntax: visibility?: "private"|"export", isAbstract: bool, name: string, base?: QualifiedNameSyntax, properties: RecordPropertyDefinitionSyntax[]
 - RecordPropertyDefinitionSyntax: modifier?: "content", name: string, type: TypeSyntax, default?: ExpressionSyntax
 - ValueDefinitionSyntax: visibility?: "private"|"export", name: string, type?: TypeSyntax, value: ExpressionSyntax
-- TypeSyntax: kind: "primitive"|"user", name: string (qualified), modifier?: "nullable"|"sequence"
+- TypeSyntax: kind: "primitive"|"user", name: string (qualified), suffixes: ("nullable"|"sequence")[]
 - PrimitiveTypeSyntax: name: string
 - UserTypeSyntax: name: QualifiedNameSyntax
 - FunctionDefinitionSyntax: ElementFunctionDefinitionSyntax | ParenFunctionDefinitionSyntax
@@ -752,7 +755,7 @@ This section lists the AST node types with fields for implementers.
 - SelectiveImport aliases must contain exactly one DOT and the final identifier must match the imported name.
 - Omitted visibility on top-level declarations defaults to internal; `private` is file-scoped,
   omitted visibility is library-scoped or program-scoped, and `export` is visible to consumers.
-- Type modifiers: at most one of QMARK or LBRACK RBRACK.
+- Type suffixes: zero or more of QMARK or LBRACK RBRACK, applied in source order.
 - Switch expressions (property variants): at least one case; patterns per case must be non-empty.
 - ValueIfMatchExpression / ElementsIfMatchExpression / PropertyListIfMatchExpression: at least one pattern arm; each arm requires ≥1 pattern.
 - ValueIfConditionListExpression / ElementsIfConditionListExpression / PropertyListIfConditionListExpression: at least one condition arm.

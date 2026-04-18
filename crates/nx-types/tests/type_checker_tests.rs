@@ -751,6 +751,37 @@ fn test_type_mismatch_in_array() {
     assert!(result.errors().is_empty() || result.errors().len() < 2);
 }
 
+#[test]
+fn test_composed_list_type_mismatch_diagnostics_preserve_rendered_shapes() {
+    let source = r#"
+        let nullableList: string[]? = null
+        let rejectAliases(items:string?[]): string[]? = { items }
+        let rejectMaybeNames(items:string[]?): string?[] = { items }
+    "#;
+
+    let result = check_str(source, "composed-list-mismatch.nx");
+    let messages = result
+        .errors()
+        .iter()
+        .map(|diagnostic| diagnostic.message())
+        .collect::<Vec<_>>();
+
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("expects string[]?, found list string?[]")),
+        "Expected list-of-nullable vs nullable-list mismatch message, got {:?}",
+        messages
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("expects string?[], found string[]?")),
+        "Expected nullable-list vs list-of-nullable mismatch message, got {:?}",
+        messages
+    );
+}
+
 // ============================================================================
 // Undefined Identifier Detection Tests (T133)
 // ============================================================================

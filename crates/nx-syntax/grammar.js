@@ -204,7 +204,7 @@ module.exports = grammar({
         $.primitive_type,
         $.user_defined_type,
       ),
-      optional(choice(
+      repeat(choice(
         '?',          // nullable
         seq('[', ']'), // sequence/list
       )),

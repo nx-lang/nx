@@ -89,12 +89,12 @@ VisibilityModifier ::=
     | "export"
 
 TypeDeclaration ::=
-    PrimitiveType [TypeModifier]
-    | UserDefinedType [TypeModifier]
+    PrimitiveType {TypeSuffix}
+    | UserDefinedType {TypeSuffix}
 
-TypeModifier ::=
-    "?"             (* nullable: 0 or 1 *)
-    | "[]"          (* sequence: 0 or more *)
+TypeSuffix ::=
+    "?"             (* nullable wrapper *)
+    | "[]"          (* sequence/list wrapper *)
 
 PrimitiveType ::=
     "string"
@@ -106,6 +106,12 @@ PrimitiveType ::=
 UserDefinedType ::=
     QualifiedName
 ```
+
+Type suffixes compose in source order. `string?[]` means a list of nullable strings, while
+`string[]?` means a nullable list of strings.
+A nullable suffix may only be applied once per outer type layer. `string?[]?` is valid because
+`[]` introduces a new list layer before the final `?`, while `string?[]??` is rejected during
+post-parse validation as a redundant nullable suffix.
 
 Record and action declarations reserve the `abstract` and `extends` keywords. `abstract type Name = { ... }`
 declares a non-instantiable record root, `abstract type Name extends Base = { ... }` declares an
