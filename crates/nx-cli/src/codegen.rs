@@ -1073,8 +1073,14 @@ mod tests {
         assert!(output.value.contains("public abstract class Question"));
         assert!(!output.value.contains("[JsonPolymorphic("));
         assert!(!output.value.contains("[JsonDerivedType("));
+        assert!(!output
+            .value
+            .contains("NxPolymorphicMessagePackFormatter<Question>"));
+        assert!(!output
+            .value
+            .contains("NxPolymorphicConcreteMessagePackFormatter"));
         assert!(output.value.contains(
-            "// No JsonPolymorphic metadata was generated because this abstract type had"
+            "// No polymorphism metadata (JSON or MessagePack) was generated because this abstract type had"
         ));
         assert!(output
             .value
@@ -1132,7 +1138,12 @@ export type QuestionFlowInitialExperience = {
         assert!(
             output.contains("[JsonDerivedType(typeof(ShortTextQuestion), \"ShortTextQuestion\")]")
         );
-        assert!(output.contains("[Union(0, typeof(ShortTextQuestion))]"));
+        assert!(output.contains(
+            "[MessagePackFormatter(typeof(NxPolymorphicMessagePackFormatter<Question>))]"
+        ));
+        assert!(output.contains(
+            "[MessagePackFormatter(typeof(NxPolymorphicConcreteMessagePackFormatter<Question, ShortTextQuestion>))]"
+        ));
         assert!(output.contains("public abstract class Question"));
         assert!(output.contains("public sealed class ShortTextQuestion : Question"));
         assert!(!output.contains("__NxType"));
@@ -1156,7 +1167,12 @@ export type QuestionFlowInitialExperience = {
 
         assert!(output.contains("[JsonPolymorphic(TypeDiscriminatorPropertyName = \"$type\")]"));
         assert!(output.contains("[JsonDerivedType(typeof(SearchRequested), \"SearchRequested\")]"));
-        assert!(output.contains("[Union(0, typeof(SearchRequested))]"));
+        assert!(output.contains(
+            "[MessagePackFormatter(typeof(NxPolymorphicMessagePackFormatter<SearchAction>))]"
+        ));
+        assert!(output.contains(
+            "[MessagePackFormatter(typeof(NxPolymorphicConcreteMessagePackFormatter<SearchAction, SearchRequested>))]"
+        ));
         assert!(output.contains("public abstract class SearchAction"));
         assert!(output.contains("[JsonPropertyName(\"source\")]"));
         assert!(output.contains("public string Source { get; set; } = default!;"));
@@ -1208,7 +1224,15 @@ export type QuestionFlowInitialExperience = {
         assert!(
             output.contains("[JsonDerivedType(typeof(ShortTextQuestion), \"ShortTextQuestion\")]")
         );
-        assert!(output.contains("[Union(0, typeof(ShortTextQuestion))]"));
+        assert!(output.contains(
+            "[MessagePackFormatter(typeof(NxPolymorphicMessagePackFormatter<Question>))]"
+        ));
+        assert!(output.contains(
+            "[MessagePackFormatter(typeof(NxPolymorphicConcreteMessagePackFormatter<Question, TextQuestion>))]"
+        ));
+        assert!(output.contains(
+            "[MessagePackFormatter(typeof(NxPolymorphicConcreteMessagePackFormatter<Question, ShortTextQuestion>))]"
+        ));
         assert!(output.contains("public abstract class Question"));
         assert!(output.contains("public abstract class TextQuestion : Question"));
         assert!(output.contains("public sealed class ShortTextQuestion : TextQuestion"));

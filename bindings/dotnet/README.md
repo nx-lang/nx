@@ -237,7 +237,6 @@ NxComponentDispatchResult<SearchSubmittedAction> dispatch =
         {
             new SearchSubmittedAction
             {
-                Type = "SearchSubmitted",
                 SearchString = "docs"
             }
         });
@@ -260,11 +259,20 @@ NxComponentDispatchResult<JsonElement> dispatchJson =
         {
             new SearchSubmittedAction
             {
-                Type = "SearchSubmitted",
                 SearchString = "docs"
             }
         });
 ```
+
+### MessagePack Polymorphism Migration
+
+Generated C# polymorphic DTOs now use the canonical NX MessagePack map shape with a `$type`
+string key instead of MessagePack `Union` envelopes.
+
+- Remove any custom host assumptions that polymorphic records/actions are encoded as `Union` arrays.
+- Keep generated action/record DTO classes free of explicit `Type`/`$type` data members.
+- Ensure abstract polymorphic roots keep the generated polymorphism attributes so runtime
+  serialization can resolve concrete descendants from `$type`.
 
 - Initialization returns the rendered element plus an opaque `StateSnapshot` byte array that the host owns.
 - Dispatch consumes that saved snapshot and an ordered action list, then returns effect actions plus the next snapshot.

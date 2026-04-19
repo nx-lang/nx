@@ -1,8 +1,5 @@
-# runtime-output-format Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change support-selectable-runtime-output-format. Update Purpose after archive.
-## Requirements
 ### Requirement: Native runtime calls support caller-selected output formats
 The public NX native runtime SHALL allow hosts to request either MessagePack or JSON from
 value-returning runtime calls on a per-call basis. The selected format SHALL apply to both

@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
 using System;
+using System.Buffers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MessagePack;
@@ -96,16 +97,59 @@ public sealed class TextInputElement
     public string Placeholder { get; set; } = string.Empty;
 }
 
-[MessagePackObject]
-public sealed class SearchSubmittedAction
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
+[JsonDerivedType(typeof(SearchSubmitted), "SearchSubmitted")]
+[JsonDerivedType(typeof(ValueChanged), "ValueChanged")]
+[MessagePackFormatter(typeof(NxPolymorphicMessagePackFormatter<SearchAction>))]
+public abstract class SearchAction
 {
-    [Key("$type")]
-    [JsonPropertyName("$type")]
-    public string Type { get; set; } = "SearchSubmitted";
+}
 
+[MessagePackFormatter(typeof(NxPolymorphicConcreteMessagePackFormatter<SearchAction, SearchSubmitted>))]
+public sealed class SearchSubmitted : SearchAction
+{
     [Key("searchString")]
     [JsonPropertyName("searchString")]
     public string SearchString { get; set; } = string.Empty;
+}
+
+[MessagePackFormatter(typeof(NxPolymorphicConcreteMessagePackFormatter<SearchAction, ValueChanged>))]
+public sealed class ValueChanged : SearchAction
+{
+    [Key("value")]
+    [JsonPropertyName("value")]
+    public string Value { get; set; } = string.Empty;
+}
+
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
+[JsonDerivedType(typeof(ShortTextQuestion), "ShortTextQuestion")]
+[MessagePackFormatter(typeof(NxPolymorphicMessagePackFormatter<Question>))]
+public abstract class Question
+{
+}
+
+[MessagePackFormatter(typeof(NxPolymorphicConcreteMessagePackFormatter<Question, ShortTextQuestion>))]
+public sealed class ShortTextQuestion : Question
+{
+    [Key("label")]
+    [JsonPropertyName("label")]
+    public string Label { get; set; } = string.Empty;
+}
+
+[MessagePackObject]
+public sealed class SurveyPayload
+{
+    [Key("primaryAction")]
+    [JsonPropertyName("primaryAction")]
+    public SearchAction PrimaryAction { get; set; } = new SearchSubmitted();
+
+    [Key("actions")]
+    [JsonPropertyName("actions")]
+    public SearchAction[] Actions { get; set; } = Array.Empty<SearchAction>();
+
+    [Key("question")]
+    [JsonPropertyName("question")]
+    public Question Question { get; set; } = new ShortTextQuestion();
 }
 
 [MessagePackObject]
@@ -192,13 +236,13 @@ public class NxRuntimeComponentTests
                 new SearchBoxProps { Placeholder = "Find docs" });
 
         byte[] persistedSnapshot = initResult.StateSnapshot.ToArray();
-        NxComponentDispatchResult<SearchSubmittedAction> dispatchResult =
-            NxRuntime.DispatchComponentActions<SearchSubmittedAction[], SearchSubmittedAction>(
+        NxComponentDispatchResult<SearchSubmitted> dispatchResult =
+            NxRuntime.DispatchComponentActions<SearchSubmitted[], SearchSubmitted>(
                 source,
                 persistedSnapshot,
                 new[]
                 {
-                    new SearchSubmittedAction
+                    new SearchSubmitted
                     {
                         SearchString = "docs"
                     }
@@ -236,7 +280,7 @@ public class NxRuntimeComponentTests
                 initResult.StateSnapshot,
                 new[]
                 {
-                    new SearchSubmittedAction
+                    new SearchSubmitted
                     {
                         SearchString = "docs"
                     }
@@ -266,21 +310,234 @@ public class NxRuntimeComponentTests
                 new SearchBoxProps { Placeholder = "Find docs" });
 
         NxEvaluationException error = Assert.Throws<NxEvaluationException>(
-            () => NxRuntime.DispatchComponentActions<SearchSubmittedAction[], SearchSubmittedAction>(
+            () => NxRuntime.DispatchComponentActions<SearchAction[], SearchAction>(
                 source,
                 initResult.StateSnapshot,
                 new[]
                 {
-                    new SearchSubmittedAction
+                    new ValueChanged
                     {
-                        Type = "ValueChanged",
-                        SearchString = "docs"
+                        Value = "docs"
                     }
                 }));
 
         Assert.Contains(
             error.Diagnostics,
             diagnostic => diagnostic.Message.Contains("does not declare emitted action 'ValueChanged'"));
+    }
+
+    [Fact]
+    public void PolymorphicTypedAction_SerializesAsMapWithTypeDiscriminator()
+    {
+        SearchAction action = new SearchSubmitted
+        {
+            SearchString = "docs"
+        };
+
+        byte[] bytes = MessagePackSerializer.Serialize(action);
+        MessagePackReader reader = new(new ReadOnlySequence<byte>(bytes));
+        Assert.Equal(MessagePackType.Map, reader.NextMessagePackType);
+
+        var payload = MessagePackSerializer.Deserialize<Dictionary<string, object?>>(bytes);
+        Assert.Equal("SearchSubmitted", Assert.IsType<string>(payload["$type"]));
+        Assert.True(payload.ContainsKey("searchString"));
+    }
+
+    [Fact]
+    public void PolymorphicTypedAction_RawToTypedRoundTrip_PreservesConcreteType()
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["$type"] = "SearchSubmitted",
+            ["searchString"] = "docs",
+        };
+
+        SearchAction action =
+            MessagePackSerializer.Deserialize<SearchAction>(MessagePackSerializer.Serialize(payload));
+
+        SearchSubmitted typed = Assert.IsType<SearchSubmitted>(action);
+        Assert.Equal("docs", typed.SearchString);
+    }
+
+    [Fact]
+    public void PolymorphicTypedPayload_RoundTripsNestedAndCollectionValues()
+    {
+        var payload = new SurveyPayload
+        {
+            PrimaryAction = new SearchSubmitted
+            {
+                SearchString = "docs",
+            },
+            Actions = new SearchAction[]
+            {
+                new SearchSubmitted
+                {
+                    SearchString = "docs",
+                },
+                new ValueChanged
+                {
+                    Value = "updated",
+                },
+            },
+            Question = new ShortTextQuestion
+            {
+                Label = "What are you looking for?",
+            },
+        };
+
+        byte[] bytes = MessagePackSerializer.Serialize(payload);
+        SurveyPayload roundTripped = MessagePackSerializer.Deserialize<SurveyPayload>(bytes);
+
+        SearchSubmitted primaryAction = Assert.IsType<SearchSubmitted>(roundTripped.PrimaryAction);
+        Assert.Equal("docs", primaryAction.SearchString);
+        Assert.Collection(
+            roundTripped.Actions,
+            action =>
+            {
+                SearchSubmitted typed = Assert.IsType<SearchSubmitted>(action);
+                Assert.Equal("docs", typed.SearchString);
+            },
+            action =>
+            {
+                ValueChanged typed = Assert.IsType<ValueChanged>(action);
+                Assert.Equal("updated", typed.Value);
+            });
+        ShortTextQuestion question = Assert.IsType<ShortTextQuestion>(roundTripped.Question);
+        Assert.Equal("What are you looking for?", question.Label);
+    }
+
+    [Fact]
+    public void PolymorphicTypedAction_DeserializesRuntimeProducedCanonicalBytes()
+    {
+        string source = """
+            action SearchSubmitted = { searchString:string }
+
+            let root() = <SearchSubmitted searchString={"docs"} />
+            """;
+
+        byte[] bytes = NxRuntime.EvaluateBytes(source);
+        SearchAction action = MessagePackSerializer.Deserialize<SearchAction>(bytes);
+
+        SearchSubmitted typed = Assert.IsType<SearchSubmitted>(action);
+        Assert.Equal("docs", typed.SearchString);
+    }
+
+    [Fact]
+    public void PolymorphicTypedAction_DeserializesPayloadWhenDiscriminatorIsNotFirstKey()
+    {
+        byte[] bytes = BuildPolymorphicMapBytes(
+            ("searchString", "docs"),
+            ("$type", "SearchSubmitted"));
+
+        SearchAction action = MessagePackSerializer.Deserialize<SearchAction>(bytes);
+
+        SearchSubmitted typed = Assert.IsType<SearchSubmitted>(action);
+        Assert.Equal("docs", typed.SearchString);
+    }
+
+    [Fact]
+    public void PolymorphicTypedAction_DeserializesPayloadWhenDiscriminatorIsLastKey()
+    {
+        byte[] bytes = BuildPolymorphicMapBytes(
+            ("ignored", "extra"),
+            ("searchString", "docs"),
+            ("$type", "SearchSubmitted"));
+
+        SearchAction action = MessagePackSerializer.Deserialize<SearchAction>(bytes);
+
+        SearchSubmitted typed = Assert.IsType<SearchSubmitted>(action);
+        Assert.Equal("docs", typed.SearchString);
+    }
+
+    [Fact]
+    public void PolymorphicTypedAction_DeserializeIgnoresUnknownKeys()
+    {
+        byte[] bytes = BuildPolymorphicMapBytes(
+            ("$type", "SearchSubmitted"),
+            ("searchString", "docs"),
+            ("unknownField", "should-be-skipped"));
+
+        SearchAction action = MessagePackSerializer.Deserialize<SearchAction>(bytes);
+
+        SearchSubmitted typed = Assert.IsType<SearchSubmitted>(action);
+        Assert.Equal("docs", typed.SearchString);
+    }
+
+    [Fact]
+    public void PolymorphicTypedAction_DeserializeThrowsWhenDiscriminatorIsMissing()
+    {
+        byte[] bytes = BuildPolymorphicMapBytes(
+            ("searchString", "docs"));
+
+        MessagePackSerializationException outer = Assert.Throws<MessagePackSerializationException>(
+            () => MessagePackSerializer.Deserialize<SearchAction>(bytes));
+
+        MessagePackSerializationException inner = Assert.IsType<MessagePackSerializationException>(outer.InnerException);
+        Assert.Contains("'$type'", inner.Message);
+    }
+
+    [Fact]
+    public void PolymorphicTypedAction_DeserializeThrowsWhenPayloadIsNotAMap()
+    {
+        byte[] bytes = MessagePackSerializer.Serialize("not-a-map");
+
+        MessagePackSerializationException outer = Assert.Throws<MessagePackSerializationException>(
+            () => MessagePackSerializer.Deserialize<SearchAction>(bytes));
+
+        MessagePackSerializationException inner = Assert.IsType<MessagePackSerializationException>(outer.InnerException);
+        Assert.Contains("map", inner.Message);
+    }
+
+    [Fact]
+    public void PolymorphicTypedPayload_RoundTripsNestedPayloadsWhenDiscriminatorIsNotFirst()
+    {
+        byte[] innerBytes = BuildPolymorphicMapBytes(
+            ("searchString", "docs"),
+            ("$type", "SearchSubmitted"));
+        byte[] outerBytes = BuildMapWithRawEntries(
+            ("primaryAction", innerBytes),
+            ("actions", MessagePackSerializer.Serialize(Array.Empty<SearchAction>())),
+            ("question", MessagePackSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["$type"] = "ShortTextQuestion",
+                ["label"] = "Pick one",
+            })));
+
+        SurveyPayload payload = MessagePackSerializer.Deserialize<SurveyPayload>(outerBytes);
+
+        SearchSubmitted primary = Assert.IsType<SearchSubmitted>(payload.PrimaryAction);
+        Assert.Equal("docs", primary.SearchString);
+        Assert.Empty(payload.Actions);
+        ShortTextQuestion question = Assert.IsType<ShortTextQuestion>(payload.Question);
+        Assert.Equal("Pick one", question.Label);
+    }
+
+    private static byte[] BuildPolymorphicMapBytes(params (string Key, string Value)[] entries)
+    {
+        ArrayBufferWriter<byte> buffer = new();
+        MessagePackWriter writer = new(buffer);
+        writer.WriteMapHeader(entries.Length);
+        foreach ((string key, string value) in entries)
+        {
+            writer.Write(key);
+            writer.Write(value);
+        }
+        writer.Flush();
+        return buffer.WrittenSpan.ToArray();
+    }
+
+    private static byte[] BuildMapWithRawEntries(params (string Key, byte[] ValueBytes)[] entries)
+    {
+        ArrayBufferWriter<byte> buffer = new();
+        MessagePackWriter writer = new(buffer);
+        writer.WriteMapHeader(entries.Length);
+        foreach ((string key, byte[] valueBytes) in entries)
+        {
+            writer.Write(key);
+            writer.WriteRaw(valueBytes);
+        }
+        writer.Flush();
+        return buffer.WrittenSpan.ToArray();
     }
 
     [Fact]
@@ -376,14 +633,14 @@ public class NxRuntimeComponentTests
                     buildContext,
                     mainPath);
 
-            NxComponentDispatchResult<SearchSubmittedAction> dispatchResult =
-                NxRuntime.DispatchComponentActions<SearchSubmittedAction[], SearchSubmittedAction>(
+            NxComponentDispatchResult<SearchSubmitted> dispatchResult =
+                NxRuntime.DispatchComponentActions<SearchSubmitted[], SearchSubmitted>(
                     source,
                     initResult.StateSnapshot,
                     buildContext,
                     new[]
                     {
-                        new SearchSubmittedAction
+                        new SearchSubmitted
                         {
                             SearchString = "docs"
                         }
@@ -588,13 +845,13 @@ public class NxRuntimeComponentTests
                     programArtifact,
                     "SearchBox");
 
-            NxComponentDispatchResult<SearchSubmittedAction> dispatchResult =
-                NxRuntime.DispatchComponentActions<SearchSubmittedAction[], SearchSubmittedAction>(
+            NxComponentDispatchResult<SearchSubmitted> dispatchResult =
+                NxRuntime.DispatchComponentActions<SearchSubmitted[], SearchSubmitted>(
                     programArtifact,
                     initResult.StateSnapshot,
                     new[]
                     {
-                        new SearchSubmittedAction
+                        new SearchSubmitted
                         {
                             SearchString = "docs"
                         }

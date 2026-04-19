@@ -71,7 +71,7 @@ pub(crate) fn collect_warnings(graph: &ExportedTypeGraph, namespace: &str) -> Ve
             }
 
             warnings.push(format!(
-                "Generated C# abstract type '{}' has no concrete exported descendants; omitting JsonPolymorphic metadata because System.Text.Json requires at least one derived type registration.",
+                "Generated C# abstract type '{}' has no concrete exported descendants; omitting polymorphism metadata (JSON and MessagePack) because derived type registrations are required.",
                 record.name
             ));
         }
@@ -138,13 +138,20 @@ fn render_module(
         .declarations
         .iter()
         .any(|declaration| matches!(declaration.item, ExportedType::Enum(_)));
+    let needs_polymorphic_serialization_helpers = module.declarations.iter().any(|declaration| {
+        let ExportedType::Record(record) = &declaration.item else {
+            return false;
+        };
+
+        polymorphic_message_pack_root_name(record, &namespace_context).is_some()
+    });
 
     writer.line("using System;");
     if needs_json_serialization {
         writer.line("using System.Text.Json.Serialization;");
     }
     writer.line("using MessagePack;");
-    if needs_enum_serialization_helpers {
+    if needs_enum_serialization_helpers || needs_polymorphic_serialization_helpers {
         writer.line("using NxLang.Nx.Serialization;");
     }
 
@@ -240,26 +247,31 @@ fn emit_record(
 ) {
     emit_record_json_polymorphism_attributes(writer, record, context);
 
-    if record.is_abstract {
-        for (index, descendant) in context
-            .graph
-            .concrete_descendants(&record.name)
-            .iter()
-            .enumerate()
-        {
+    let polymorphic_root = polymorphic_message_pack_root_name(record, context);
+    if let Some(root_name) = polymorphic_root.as_ref() {
+        let safe_root = sanitize_csharp_identifier(root_name);
+        let safe_name = sanitize_csharp_identifier(&record.name);
+        if root_name == &record.name {
             writer.line(&format!(
-                "[Union({index}, typeof({}))]",
-                sanitize_csharp_identifier(&descendant.name)
+                "[MessagePackFormatter(typeof(NxPolymorphicMessagePackFormatter<{safe_root}>))]"
+            ));
+        } else {
+            writer.line(&format!(
+                "[MessagePackFormatter(typeof(NxPolymorphicConcreteMessagePackFormatter<{safe_root}, {safe_name}>))]"
             ));
         }
     }
 
     if should_emit_missing_polymorphism_hint(record, context) {
-        writer.line("// No JsonPolymorphic metadata was generated because this abstract type had");
+        writer.line(
+            "// No polymorphism metadata (JSON or MessagePack) was generated because this abstract type had",
+        );
         writer.line("// no concrete exported descendants at code-generation time.");
     }
 
-    writer.line("[MessagePackObject]");
+    if polymorphic_root.is_none() {
+        writer.line("[MessagePackObject]");
+    }
     let class_modifier = if record.is_abstract {
         "public abstract class"
     } else {
@@ -328,6 +340,21 @@ fn should_emit_json_polymorphism_attributes(
     record.is_abstract
         && !graph_resolves_record_base(context, record)
         && !context.graph.concrete_descendants(&record.name).is_empty()
+}
+
+/// Polymorphic MessagePack uses a root formatter plus per-declared-type wrappers so MessagePack can resolve
+/// `IMessagePackFormatter<T>` for concrete and intermediate types, not only the abstract root.
+fn polymorphic_message_pack_root_name(
+    record: &ExportedRecord,
+    context: &CSharpRenderContext<'_>,
+) -> Option<String> {
+    let mut current = record;
+    loop {
+        if should_emit_json_polymorphism_attributes(current, context) {
+            return Some(current.name.clone());
+        }
+        current = context.graph.resolved_record_base(current)?;
+    }
 }
 
 fn should_emit_missing_polymorphism_hint(

@@ -170,8 +170,8 @@ C# code generation SHALL emit generated record and action DTO classes that can s
 deserialize with both MessagePack and `System.Text.Json` without declaring a generated data member
 mapped to wire key `$type`. Generated data members SHALL preserve their NX wire names across both
 serializers, generated abstract records and actions SHALL remain inheritable, abstract roots SHALL
-advertise JSON polymorphism using `$type` and their concrete descendants, and MessagePack
-polymorphism SHALL continue to use generated `[Union(...)]` metadata.
+advertise polymorphism using `$type` and their concrete descendants for both serializers, and
+MessagePack polymorphism SHALL use the same `$type`-keyed map contract as canonical `NxValue`.
 
 #### Scenario: Concrete C# record emits only declared fields
 - **WHEN** source contains `export type ShortTextQuestion = { label:string }`
@@ -186,22 +186,24 @@ polymorphism SHALL continue to use generated `[Union(...)]` metadata.
 #### Scenario: Abstract C# record root advertises polymorphism without a discriminator member
 - **WHEN** source contains `export abstract type Question = { label:string } export type ShortTextQuestion extends Question = { placeholder:string? }`
 - **THEN** generated C# SHALL emit `Question` as an inheritable abstract generated record type
-- **AND** `Question` SHALL advertise JSON polymorphism using `$type` and its concrete descendants
+- **AND** `Question` SHALL advertise polymorphism using `$type` and its concrete descendants
 - **AND** generated `ShortTextQuestion` SHALL not declare a generated member mapped to `$type`
 
 #### Scenario: Intermediate abstract C# records inherit the root metadata without redeclaring a member
 - **WHEN** source contains `export abstract type Question = { label:string } export abstract type TextQuestion extends Question = { placeholder:string? } export type ShortTextQuestion extends TextQuestion = { maxLength:int? }`
-- **THEN** the generated root abstract type SHALL advertise JSON polymorphism for its concrete
+- **THEN** the generated root abstract type SHALL advertise polymorphism for its concrete
   descendants using `$type`
 - **AND** intermediate abstract generated records SHALL inherit that metadata without redeclaring a
   generated member mapped to `$type`
 
 #### Scenario: Abstract C# root without concrete descendants omits invalid polymorphism metadata and warns
 - **WHEN** source contains `export abstract type Question = { label:string }`
-- **THEN** generated C# SHALL emit `Question` without `[JsonPolymorphic]` or `[JsonDerivedType]`
-  metadata
-- **AND** generated C# SHALL include a comment explaining that no `JsonPolymorphic` metadata was
-  generated because the abstract type had no concrete exported descendants at code-generation time
+- **THEN** generated C# SHALL emit `Question` without `[JsonPolymorphic]`, `[JsonDerivedType]`, or
+  polymorphic MessagePack formatter metadata (`NxPolymorphicMessagePackFormatter` /
+  `NxPolymorphicConcreteMessagePackFormatter`)
+- **AND** generated C# SHALL include a comment explaining that no polymorphism metadata (JSON or
+  MessagePack) was generated because the abstract type had no concrete exported descendants at
+  code-generation time
 - **AND** the generator SHALL emit a warning that `Question` has no concrete exported descendants
   for C# polymorphic generation
 
