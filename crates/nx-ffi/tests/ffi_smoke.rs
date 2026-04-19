@@ -300,7 +300,7 @@ fn ffi_json_success_round_trip() {
 }
 
 #[test]
-fn ffi_msgpack_enum_value_round_trip() {
+fn ffi_msgpack_enum_value_emits_bare_authored_member_string() {
     let (status, bytes) = eval_msgpack(
         r#"
             enum Status = | active | disabled
@@ -310,15 +310,12 @@ fn ffi_msgpack_enum_value_round_trip() {
     assert!(matches!(status, NxEvalStatus::Ok));
     assert_eq!(
         NxValue::from_msgpack_slice(&bytes).unwrap(),
-        NxValue::EnumValue {
-            type_name: "Status".to_string(),
-            member: "active".to_string(),
-        }
+        NxValue::String("active".to_string())
     );
 }
 
 #[test]
-fn ffi_json_enum_value_round_trip() {
+fn ffi_json_enum_value_emits_bare_authored_member_string() {
     let (status, json) = eval_json(
         r#"
             enum Status = | active | disabled
@@ -326,12 +323,10 @@ fn ffi_json_enum_value_round_trip() {
         "#,
     );
     assert!(matches!(status, NxEvalStatus::Ok));
+    assert_eq!(json, "\"active\"");
     assert_eq!(
         NxValue::from_json_str(&json).unwrap(),
-        NxValue::EnumValue {
-            type_name: "Status".to_string(),
-            member: "active".to_string(),
-        }
+        NxValue::String("active".to_string())
     );
 }
 
@@ -788,10 +783,7 @@ fn ffi_component_init_round_trips_enum_props_in_msgpack_and_json() {
         type_name: None,
         properties: std::collections::BTreeMap::from([(
             "theme".to_string(),
-            NxValue::EnumValue {
-                type_name: "ThemeMode".to_string(),
-                member: "light".to_string(),
-            },
+            NxValue::String("light".to_string()),
         )]),
     };
     let props_msgpack = props.to_msgpack_vec().unwrap();
@@ -816,10 +808,7 @@ fn ffi_component_init_round_trips_enum_props_in_msgpack_and_json() {
             type_name: Some("SearchBox".to_string()),
             properties: std::collections::BTreeMap::from([(
                 "theme".to_string(),
-                NxValue::EnumValue {
-                    type_name: "ThemeMode".to_string(),
-                    member: "light".to_string(),
-                },
+                NxValue::String("light".to_string()),
             )]),
         }
     );
@@ -845,10 +834,7 @@ fn ffi_component_init_round_trips_enum_props_in_msgpack_and_json() {
             type_name: Some("SearchBox".to_string()),
             properties: std::collections::BTreeMap::from([(
                 "theme".to_string(),
-                NxValue::EnumValue {
-                    type_name: "ThemeMode".to_string(),
-                    member: "light".to_string(),
-                },
+                NxValue::String("light".to_string()),
             )]),
         }
     );
@@ -896,10 +882,7 @@ fn ffi_component_dispatch_round_trips_enum_effect_payloads_in_msgpack_and_json()
         type_name: Some("SearchSubmitted".to_string()),
         properties: std::collections::BTreeMap::from([(
             "theme".to_string(),
-            NxValue::EnumValue {
-                type_name: "ThemeMode".to_string(),
-                member: "dark".to_string(),
-            },
+            NxValue::String("dark".to_string()),
         )]),
     }];
     let actions_msgpack = rmp_serde::to_vec_named(&actions).unwrap();
@@ -918,10 +901,7 @@ fn ffi_component_dispatch_round_trips_enum_effect_payloads_in_msgpack_and_json()
             type_name: Some("DoSearch".to_string()),
             properties: std::collections::BTreeMap::from([(
                 "theme".to_string(),
-                NxValue::EnumValue {
-                    type_name: "ThemeMode".to_string(),
-                    member: "dark".to_string(),
-                },
+                NxValue::String("dark".to_string()),
             )]),
         }]
     );
@@ -949,10 +929,7 @@ fn ffi_component_dispatch_round_trips_enum_effect_payloads_in_msgpack_and_json()
             type_name: Some("DoSearch".to_string()),
             properties: std::collections::BTreeMap::from([(
                 "theme".to_string(),
-                NxValue::EnumValue {
-                    type_name: "ThemeMode".to_string(),
-                    member: "dark".to_string(),
-                },
+                NxValue::String("dark".to_string()),
             )]),
         }]
     );

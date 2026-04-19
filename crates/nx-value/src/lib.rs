@@ -14,6 +14,11 @@ use serde::ser::{SerializeMap, SerializeSeq};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A JSON-like tree value used as the stable NX API value type.
+///
+/// Enum values are represented as [`NxValue::String`] carrying the bare authored member name.
+/// The declaring enum type is recovered from the target schema (declared NX type, typed DTO
+/// property, or other type annotation) at the point where the value is consumed; the IR itself
+/// carries no in-payload enum type wrapper.
 #[derive(Debug, Clone, PartialEq)]
 pub enum NxValue {
     Null,
@@ -22,15 +27,13 @@ pub enum NxValue {
     Int(i64),
     Float32(f32),
     Float(f64),
+    /// String value.
+    ///
+    /// A string value may represent either a plain string or an enum member. The two are
+    /// distinguishable only against the target schema — a schema-less consumer cannot tell
+    /// them apart from the payload alone.
     String(String),
     Array(Vec<NxValue>),
-    /// Enum value.
-    ///
-    /// When serialized, enum values use `"$enum"` and `"$member"` string properties.
-    EnumValue {
-        type_name: String,
-        member: String,
-    },
     /// Record value (ordered properties).
     ///
     /// When serialized to JSON, `type_name` is encoded as a `"$type"` string property if present.
@@ -116,12 +119,6 @@ impl Serialize for NxValue {
                     seq.serialize_element(element)?;
                 }
                 seq.end()
-            }
-            NxValue::EnumValue { type_name, member } => {
-                let mut map = serializer.serialize_map(Some(2))?;
-                map.serialize_entry("$enum", type_name)?;
-                map.serialize_entry("$member", member)?;
-                map.end()
             }
             NxValue::Record {
                 type_name,
@@ -209,8 +206,6 @@ impl<'de> Deserialize<'de> for NxValue {
 
             fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
                 let mut type_name = None;
-                let mut enum_type_name = None;
-                let mut enum_member = None;
                 let mut properties = BTreeMap::new();
                 while let Some((key, value)) = map.next_entry::<String, NxValue>()? {
                     if key == "$type" {
@@ -228,58 +223,7 @@ impl<'de> Deserialize<'de> for NxValue {
                         continue;
                     }
 
-                    if key == "$enum" {
-                        match value {
-                            NxValue::String(name) => {
-                                enum_type_name = Some(name);
-                            }
-                            other => {
-                                return Err(A::Error::custom(format!(
-                                    "expected \"$enum\" to be a string, got {:?}",
-                                    other
-                                )));
-                            }
-                        }
-                        continue;
-                    }
-
-                    if key == "$member" {
-                        match value {
-                            NxValue::String(name) => {
-                                enum_member = Some(name);
-                            }
-                            other => {
-                                return Err(A::Error::custom(format!(
-                                    "expected \"$member\" to be a string, got {:?}",
-                                    other
-                                )));
-                            }
-                        }
-                        continue;
-                    }
-
                     properties.insert(key, value);
-                }
-
-                if enum_type_name.is_some() || enum_member.is_some() {
-                    if type_name.is_some() {
-                        return Err(A::Error::custom(
-                            "enum values cannot also declare \"$type\"",
-                        ));
-                    }
-
-                    if !properties.is_empty() {
-                        return Err(A::Error::custom(
-                            "enum values cannot include additional properties",
-                        ));
-                    }
-
-                    return Ok(NxValue::EnumValue {
-                        type_name: enum_type_name
-                            .ok_or_else(|| A::Error::custom("expected enum value to include \"$enum\""))?,
-                        member: enum_member
-                            .ok_or_else(|| A::Error::custom("expected enum value to include \"$member\""))?,
-                    });
                 }
 
                 Ok(NxValue::Record {
@@ -366,13 +310,6 @@ mod tests {
             ("\"hello\"", NxValue::String("hello".to_string())),
             ("[]", NxValue::Array(vec![])),
             (
-                "{\"$enum\":\"Status\",\"$member\":\"active\"}",
-                NxValue::EnumValue {
-                    type_name: "Status".to_string(),
-                    member: "active".to_string(),
-                },
-            ),
-            (
                 "{}",
                 NxValue::Record {
                     type_name: None,
@@ -418,14 +355,11 @@ mod tests {
     }
 
     #[test]
-    fn json_round_trip_enum_value() {
-        let value = NxValue::EnumValue {
-            type_name: "Status".to_string(),
-            member: "active".to_string(),
-        };
+    fn json_round_trip_enum_member_as_bare_string() {
+        let value = NxValue::String("active".to_string());
 
         let json = value.to_json_string().unwrap();
-        assert_eq!(json, "{\"$enum\":\"Status\",\"$member\":\"active\"}");
+        assert_eq!(json, "\"active\"");
         let decoded = NxValue::from_json_str(&json).unwrap();
         assert_eq!(decoded, value);
     }
@@ -559,11 +493,8 @@ mod tests {
     }
 
     #[test]
-    fn msgpack_round_trip_enum_value() {
-        let value = NxValue::EnumValue {
-            type_name: "Status".to_string(),
-            member: "active".to_string(),
-        };
+    fn msgpack_round_trip_enum_member_as_bare_string() {
+        let value = NxValue::String("active".to_string());
 
         let bytes = value.to_msgpack_vec().unwrap();
         let decoded = NxValue::from_msgpack_slice(&bytes).unwrap();

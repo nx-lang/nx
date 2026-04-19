@@ -2110,6 +2110,29 @@ impl Interpreter {
             };
         }
 
+        // Enum values arrive from host input as bare authored member strings. When the declared
+        // target type is an enum, resolve the string against the enum's member set and lift it
+        // into Value::EnumValue; unknown members surface through the standard TypeMismatch path.
+        if let (Value::String(member), Type::Named(expected_name)) = (&value, expected) {
+            if let Some(enum_def) = self.resolve_enum_definition(module, expected_name) {
+                if enum_def
+                    .members
+                    .iter()
+                    .any(|m| m.name.as_str() == member.as_str())
+                {
+                    return Ok(Value::EnumValue {
+                        type_name: enum_def.name.clone(),
+                        member: member.clone(),
+                    });
+                }
+                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                    expected: expected.to_string(),
+                    actual: format!("unknown enum member '{}'", member),
+                    operation: operation.to_string(),
+                }));
+            }
+        }
+
         // Ordinary record-typed parameters preserve the caller-supplied object shape. Typed record
         // construction is reserved for explicit external input boundaries such as handler
         // invocation so defaults and required-field validation do not run on every function call.

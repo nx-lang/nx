@@ -68,7 +68,7 @@ public class NxRuntimeBasicTests
     }
 
     [Fact]
-    public void EvaluateJson_EnumValue_ReturnsCanonicalEnumObject()
+    public void EvaluateJson_EnumValue_ReturnsBareAuthoredMemberString()
     {
         string source = """
             enum ThemeMode = | light | dark
@@ -78,10 +78,8 @@ public class NxRuntimeBasicTests
 
         JsonElement result = NxRuntime.EvaluateJson(source);
 
-        Assert.Equal(JsonValueKind.Object, result.ValueKind);
-        Assert.Equal("ThemeMode", result.GetProperty("$enum").GetString());
-        Assert.Equal("dark", result.GetProperty("$member").GetString());
-        Assert.False(result.TryGetProperty("$variant", out JsonElement _));
+        Assert.Equal(JsonValueKind.String, result.ValueKind);
+        Assert.Equal("dark", result.GetString());
     }
 
     [Fact]

@@ -234,8 +234,7 @@ fn validate_host_input_value_at_path(
         | NxValue::Int(_)
         | NxValue::Float32(_)
         | NxValue::Float(_)
-        | NxValue::String(_)
-        | NxValue::EnumValue { .. } => Ok(()),
+        | NxValue::String(_) => Ok(()),
         NxValue::Array(values) => {
             for (index, value) in values.iter().enumerate() {
                 validate_host_input_value_at_path(lookup, value, &format!("{path}[{index}]"))?;
@@ -572,10 +571,7 @@ mod tests {
             type_name: None,
             properties: BTreeMap::from([(
                 "theme".to_string(),
-                NxValue::EnumValue {
-                    type_name: "ThemeMode".to_string(),
-                    member: "light".to_string(),
-                },
+                NxValue::String("light".to_string()),
             )]),
         };
 
@@ -596,14 +592,50 @@ mod tests {
                 type_name: Some("SearchBox".to_string()),
                 properties: BTreeMap::from([(
                     "theme".to_string(),
-                    NxValue::EnumValue {
-                        type_name: "ThemeMode".to_string(),
-                        member: "light".to_string(),
-                    },
+                    NxValue::String("light".to_string()),
                 )]),
             }
         );
         assert!(!result.state_snapshot.is_empty());
+    }
+
+    #[test]
+    fn initialize_component_source_rejects_unknown_enum_member_in_prop() {
+        let source = r#"
+            enum ThemeMode = | light | dark
+
+            external component <SearchBox theme:ThemeMode />
+        "#;
+
+        let props = NxValue::Record {
+            type_name: None,
+            properties: BTreeMap::from([(
+                "theme".to_string(),
+                NxValue::String("sparkly".to_string()),
+            )]),
+        };
+
+        let result = initialize_component_source(
+            source,
+            "component-enum-unknown.nx",
+            &ProgramBuildContext::empty(),
+            "SearchBox",
+            &props,
+        );
+        let ComponentInitEvalResult::Err(diagnostics) = result else {
+            panic!("Expected unknown enum member to be rejected");
+        };
+
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic
+                .message
+                .contains("unknown enum member 'sparkly'")),
+            "Expected unknown-enum-member diagnostic, got {:?}",
+            diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.message.as_str())
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -644,10 +676,7 @@ mod tests {
             type_name: Some("SearchSubmitted".to_string()),
             properties: BTreeMap::from([(
                 "theme".to_string(),
-                NxValue::EnumValue {
-                    type_name: "ThemeMode".to_string(),
-                    member: "dark".to_string(),
-                },
+                NxValue::String("dark".to_string()),
             )]),
         };
         let result = dispatch_component_actions_source(
@@ -668,10 +697,7 @@ mod tests {
                 type_name: Some("DoSearch".to_string()),
                 properties: BTreeMap::from([(
                     "theme".to_string(),
-                    NxValue::EnumValue {
-                        type_name: "ThemeMode".to_string(),
-                        member: "dark".to_string(),
-                    },
+                    NxValue::String("dark".to_string()),
                 )]),
             }
         );

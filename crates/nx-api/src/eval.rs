@@ -554,7 +554,7 @@ let root() = { answer() }"#;
     }
 
     #[test]
-    fn eval_source_returns_canonical_enum_value() {
+    fn eval_source_returns_bare_authored_enum_member_string() {
         let source = r#"
             enum Status = | active | disabled
             let root() = { Status.active }
@@ -566,12 +566,6 @@ let root() = { answer() }"#;
             panic!("Expected enum source evaluation to succeed");
         };
 
-        assert_eq!(
-            value,
-            NxValue::EnumValue {
-                type_name: "Status".to_string(),
-                member: "active".to_string(),
-            }
-        );
+        assert_eq!(value, NxValue::String("active".to_string()));
     }
 }

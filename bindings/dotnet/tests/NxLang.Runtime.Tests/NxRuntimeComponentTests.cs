@@ -6,9 +6,75 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using MessagePack;
 using NxLang.Nx;
+using NxLang.Nx.Serialization;
 using Xunit;
 
 namespace NxLang.Nx.Tests;
+
+[JsonConverter(typeof(NxEnumJsonConverter<ComponentDealStage, ComponentDealStageWireFormat>))]
+[MessagePackFormatter(typeof(NxEnumMessagePackFormatter<ComponentDealStage, ComponentDealStageWireFormat>))]
+public enum ComponentDealStage
+{
+    Draft,
+    PendingReview,
+    ClosedWon,
+}
+
+internal sealed class ComponentDealStageWireFormat : INxEnumWireFormat<ComponentDealStage>
+{
+    public static string Format(ComponentDealStage value)
+    {
+        return value switch
+        {
+            ComponentDealStage.Draft => "draft",
+            ComponentDealStage.PendingReview => "pending_review",
+            ComponentDealStage.ClosedWon => "closed_won",
+            _ => throw new FormatException("Unknown NX enum value."),
+        };
+    }
+
+    public static ComponentDealStage Parse(string value)
+    {
+        return value switch
+        {
+            "draft" => ComponentDealStage.Draft,
+            "pending_review" => ComponentDealStage.PendingReview,
+            "closed_won" => ComponentDealStage.ClosedWon,
+            _ => throw new FormatException("Unknown NX enum member."),
+        };
+    }
+}
+
+[JsonConverter(typeof(NxEnumJsonConverter<RestrictedDealStage, RestrictedDealStageWireFormat>))]
+[MessagePackFormatter(typeof(NxEnumMessagePackFormatter<RestrictedDealStage, RestrictedDealStageWireFormat>))]
+public enum RestrictedDealStage
+{
+    Draft,
+    ClosedWon,
+}
+
+internal sealed class RestrictedDealStageWireFormat : INxEnumWireFormat<RestrictedDealStage>
+{
+    public static string Format(RestrictedDealStage value)
+    {
+        return value switch
+        {
+            RestrictedDealStage.Draft => "draft",
+            RestrictedDealStage.ClosedWon => "closed_won",
+            _ => throw new FormatException("Unknown NX enum value."),
+        };
+    }
+
+    public static RestrictedDealStage Parse(string value)
+    {
+        return value switch
+        {
+            "draft" => RestrictedDealStage.Draft,
+            "closed_won" => RestrictedDealStage.ClosedWon,
+            _ => throw new FormatException("Unknown NX enum member."),
+        };
+    }
+}
 
 [MessagePackObject]
 public sealed class SearchBoxProps
@@ -40,6 +106,46 @@ public sealed class SearchSubmittedAction
     [Key("searchString")]
     [JsonPropertyName("searchString")]
     public string SearchString { get; set; } = string.Empty;
+}
+
+[MessagePackObject]
+public sealed class ThemeModeProps
+{
+    [Key("theme")]
+    [JsonPropertyName("theme")]
+    public string Theme { get; set; } = string.Empty;
+}
+
+[MessagePackObject]
+public sealed class ThemeModeElement
+{
+    [Key("theme")]
+    [JsonPropertyName("theme")]
+    public string Theme { get; set; } = string.Empty;
+}
+
+[MessagePackObject]
+public sealed class DealStageProps
+{
+    [Key("stage")]
+    [JsonPropertyName("stage")]
+    public ComponentDealStage Stage { get; set; } = ComponentDealStage.Draft;
+}
+
+[MessagePackObject]
+public sealed class DealStageElement
+{
+    [Key("stage")]
+    [JsonPropertyName("stage")]
+    public ComponentDealStage Stage { get; set; } = ComponentDealStage.Draft;
+}
+
+[MessagePackObject]
+public sealed class RestrictedDealStageElement
+{
+    [Key("stage")]
+    [JsonPropertyName("stage")]
+    public RestrictedDealStage Stage { get; set; } = RestrictedDealStage.Draft;
 }
 
 public class NxRuntimeComponentTests
@@ -341,6 +447,107 @@ public class NxRuntimeComponentTests
         {
             Directory.Delete(tempPath, recursive: true);
         }
+    }
+
+    [Fact]
+    public void InitializeComponent_WithBareStringEnumProp_ReturnsBareStringInRenderedOutput()
+    {
+        string source = """
+            enum ThemeMode = | light | dark
+
+            external component <ThemePicker theme:ThemeMode />
+            """;
+
+        NxComponentInitResult<ThemeModeElement> result =
+            NxRuntime.InitializeComponent<ThemeModeProps, ThemeModeElement>(
+                source,
+                "ThemePicker",
+                new ThemeModeProps { Theme = "light" });
+
+        Assert.Equal("light", result.Rendered.Theme);
+    }
+
+    [Fact]
+    public void InitializeComponent_WithUnknownEnumMember_ThrowsEvaluationException()
+    {
+        string source = """
+            enum ThemeMode = | light | dark
+
+            external component <ThemePicker theme:ThemeMode />
+            """;
+
+        NxEvaluationException error = Assert.Throws<NxEvaluationException>(
+            () => NxRuntime.InitializeComponent<ThemeModeProps, ThemeModeElement>(
+                source,
+                "ThemePicker",
+                new ThemeModeProps { Theme = "sparkly" }));
+
+        Assert.Contains(
+            error.Diagnostics,
+            diagnostic => diagnostic.Message.Contains("unknown enum member 'sparkly'"));
+    }
+
+    [Fact]
+    public void InitializeComponent_WithEnumTypedDto_RoundTripsEnumThroughRuntimeWrapper()
+    {
+        string source = """
+            enum DealStage = | draft | pending_review | closed_won
+
+            external component <Pipeline stage:DealStage />
+            """;
+
+        NxComponentInitResult<DealStageElement> result =
+            NxRuntime.InitializeComponent<DealStageProps, DealStageElement>(
+                source,
+                "Pipeline",
+                new DealStageProps { Stage = ComponentDealStage.PendingReview });
+
+        Assert.Equal(ComponentDealStage.PendingReview, result.Rendered.Stage);
+    }
+
+    [Fact]
+    public void InitializeComponentJson_RawEnumResult_CanBeMappedToEnumTypedDto()
+    {
+        string source = """
+            enum DealStage = | draft | pending_review | closed_won
+
+            external component <Pipeline stage:DealStage />
+            """;
+
+        NxComponentInitResult<JsonElement> result =
+            NxRuntime.InitializeComponentJson(
+                source,
+                "Pipeline",
+                new DealStageProps { Stage = ComponentDealStage.PendingReview });
+
+        DealStageElement? rendered = JsonSerializer.Deserialize<DealStageElement>(result.Rendered.GetRawText());
+
+        Assert.NotNull(rendered);
+        Assert.Equal(ComponentDealStage.PendingReview, rendered!.Stage);
+    }
+
+    [Fact]
+    public void InitializeComponent_WithEnumTypedDtoMismatch_ThrowsWrappedSerializationError()
+    {
+        string source = """
+            enum DealStage = | draft | pending_review | closed_won
+
+            external component <Pipeline stage:DealStage />
+            """;
+
+        InvalidOperationException error = Assert.Throws<InvalidOperationException>(
+            () => NxRuntime.InitializeComponent<DealStageProps, RestrictedDealStageElement>(
+                source,
+                "Pipeline",
+                new DealStageProps { Stage = ComponentDealStage.PendingReview }));
+
+        Assert.Contains("invalid component initialization MessagePack payload", error.Message, StringComparison.OrdinalIgnoreCase);
+
+        MessagePackSerializationException outer = Assert.IsType<MessagePackSerializationException>(error.InnerException);
+        MessagePackSerializationException inner = Assert.IsType<MessagePackSerializationException>(outer.InnerException);
+
+        Assert.Equal("Unknown NX enum member.", inner.Message);
+        Assert.IsType<FormatException>(inner.InnerException);
     }
 
     [Fact]

@@ -45,11 +45,9 @@ impl Error for FromNxValueError {}
 /// Record values become [`NxValue::Record`] with their `type_name` preserved and fields
 /// sorted alphabetically (via [`BTreeMap`]).
 ///
-/// Enum values map directly to [`NxValue::EnumValue`]:
-/// - `$enum` — the enum type name
-/// - `$member` — the enum member name
-///
-/// For example, `Color.red` becomes `EnumValue { type_name: "Color", member: "red" }`.
+/// Enum values become [`NxValue::String`] carrying the bare authored member name. The
+/// declaring enum type is not preserved on the wire; consumers recover it from the target
+/// schema (declared NX type, typed DTO property, or other type annotation).
 ///
 /// `Value::ActionHandler` is encoded as a record for display and inspection only. That shape is
 /// intentionally not round-trippable through [`from_nx_value`].
@@ -63,10 +61,7 @@ pub fn to_nx_value(value: &Value) -> NxValue {
         Value::Float(value) => NxValue::Float(*value),
         Value::String(value) => NxValue::String(value.to_string()),
         Value::Array(elements) => NxValue::Array(elements.iter().map(to_nx_value).collect()),
-        Value::EnumValue { type_name, member } => NxValue::EnumValue {
-            type_name: type_name.as_str().to_string(),
-            member: member.to_string(),
-        },
+        Value::EnumValue { member, .. } => NxValue::String(member.to_string()),
         Value::Record { type_name, fields } => NxValue::Record {
             type_name: Some(type_name.as_str().to_string()),
             properties: fields_to_properties(fields),
@@ -120,10 +115,6 @@ fn from_nx_value_at_path(value: &NxValue, path: &str) -> Result<Value, FromNxVal
                 .map(|(index, element)| from_nx_value_at_path(element, &format!("{path}[{index}]")))
                 .collect::<Result<Vec<_>, _>>()?,
         )),
-        NxValue::EnumValue { type_name, member } => Ok(Value::EnumValue {
-            type_name: Name::new(type_name),
-            member: SmolStr::new(member.as_str()),
-        }),
         NxValue::Record {
             type_name,
             properties,
@@ -187,14 +178,13 @@ mod tests {
     }
 
     #[test]
-    fn enum_value_round_trips_through_interpreter_value() {
-        let value = NxValue::EnumValue {
-            type_name: "Status".to_string(),
-            member: "active".to_string(),
+    fn interpreter_enum_value_lowers_to_bare_authored_member_string() {
+        let runtime = Value::EnumValue {
+            type_name: Name::new("Status"),
+            member: SmolStr::new("active"),
         };
 
-        let runtime = from_nx_value(&value).expect("Expected NxValue conversion to succeed");
-        assert_eq!(to_nx_value(&runtime), value);
+        assert_eq!(to_nx_value(&runtime), NxValue::String("active".to_string()));
     }
 
     #[test]

@@ -185,27 +185,26 @@ bytes that can be forwarded directly to another client.
 
 ### Enum Encoding
 
-Raw runtime APIs preserve canonical enum identity in both JSON and MessagePack because they expose
-the schema-free `NxValue` contract:
-
-```json
-{ "$enum": "ThemeMode", "$member": "dark" }
-```
-
-That applies to raw evaluation and raw component JSON flows such as `EvaluateBytes`,
-`EvaluateJson`, `InitializeComponentJson`, and `DispatchComponentActionsJson`.
-
-Typed generated DTOs use schema-aware enum strings instead. When a generated model knows a property
-is `ThemeMode`, the generated enum emits an explicit wire-format mapping type and relies on
-`NxEnumJsonConverter<TEnum, TWire>` and `NxEnumMessagePackFormatter<TEnum, TWire>` from
-`NxLang.Runtime` to encode the value as the authored member string:
+NX enum values are encoded as the bare authored member string on the wire, both in raw and typed
+layers, for JSON and MessagePack alike:
 
 ```json
 "dark"
 ```
 
-Use the raw APIs when you need a lossless generic value tree. Use typed generated models when you
-want ergonomic host-side enums.
+Raw APIs (`EvaluateBytes`, `EvaluateJson`, `InitializeComponentJson`,
+`DispatchComponentActionsJson`) emit the member string directly. When the host feeds a raw value
+back into the runtime for a slot whose declared NX type is an enum, the runtime resolves the string
+against that enum's member list. Unknown members surface through the standard argument
+type-mismatch error path.
+
+Typed generated DTOs use the same member-string contract. Generated enums emit an explicit
+wire-format mapping type and rely on `NxEnumJsonConverter<TEnum, TWire>` and
+`NxEnumMessagePackFormatter<TEnum, TWire>` from `NxLang.Runtime` to (de)serialize the authored
+member string.
+
+Use the raw APIs when you need a schema-free value tree. Use typed generated models when you want
+ergonomic host-side enums.
 
 ### Component Lifecycle
 
@@ -318,13 +317,12 @@ nxlang generate ./models --language csharp --csharp-namespace MyApp.Models --out
 
 Generation now honors NX export visibility, so only declarations marked `export` are emitted.
 Library generation writes one `.g.cs` file per contributing module under the requested output
-directory. Generated enums use the authored NX member spellings for both JSON and MessagePack, while
-raw runtime payloads keep the canonical self-describing `"$enum"` plus `"$member"` form. Generated
-C# enums now rely on shared helpers from `NxLang.Runtime` under `NxLang.Nx.Serialization`, so the
-project that compiles the generated files must reference `NxLang.Runtime` in addition to the
-serializer packages it already uses. The generated output emits the enum itself plus an explicit
-wire-format mapping type; the JSON converter and MessagePack formatter implementation now comes from
-the shared runtime assembly.
+directory. Generated enums use the authored NX member spellings for both JSON and MessagePack, the
+same bare-string shape raw runtime payloads carry. Generated C# enums now rely on shared helpers
+from `NxLang.Runtime` under `NxLang.Nx.Serialization`, so the project that compiles the generated
+files must reference `NxLang.Runtime` in addition to the serializer packages it already uses. The
+generated output emits the enum itself plus an explicit wire-format mapping type; the JSON
+converter and MessagePack formatter implementation now comes from the shared runtime assembly.
 
 ## Troubleshooting
 

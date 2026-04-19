@@ -1,10 +1,5 @@
-# enum-values Specification
+## MODIFIED Requirements
 
-## Purpose
-Defines how NX preserves enum member spelling across runtime behavior, tooling, examples, and
-documentation.
-
-## Requirements
 ### Requirement: Enum member spellings are preserved exactly across runtime and tooling
 NX enum members SHALL preserve the exact identifier spelling written in source across lowering,
 type analysis, runtime values, formatting, code generation, and host-facing value conversion. The
@@ -29,14 +24,3 @@ or other type annotation) rather than from an in-payload wrapper.
   authored-member-string contract
 - **AND** the consumer SHALL reject unknown member strings with a type mismatch error rather than
   silently accepting them as plain strings
-
-### Requirement: First-party enum examples and fixtures use snake_case by convention
-First-party NX examples, docs, test fixtures, and grammar tests that introduce enum members SHALL
-use `snake_case` member names by convention instead of `PascalCase`.
-
-#### Scenario: Repository examples follow the documented enum convention
-- **WHEN** the repository adds or updates an enum example such as `Status`, `Direction`, or
-  `DealStage`
-- **THEN** those first-party examples SHALL use member names such as `active`, `north`, or
-  `pending_review`
-- **AND** the documented convention for enum members SHALL be `snake_case`

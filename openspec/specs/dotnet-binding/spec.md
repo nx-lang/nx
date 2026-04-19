@@ -178,25 +178,35 @@ by converting previously returned MessagePack bytes through public helper APIs.
   `DiagnosticsBytesToJson`, `ComponentInitResultBytesToJson`, or
   `ComponentDispatchResultBytesToJson` methods
 
-### Requirement: Managed raw-value and typed-model enum workflows remain distinct
-The managed NX binding SHALL preserve canonical raw `NxValue` enum payloads for raw runtime result
-workflows, while schema-aware typed model workflows SHALL use strong managed enums encoded as plain
-member strings. The binding SHALL document and test that raw JSON/MessagePack payloads and typed
-DTO serialization are intentionally different layers rather than interchangeable enum contracts.
+### Requirement: Managed raw-value and typed-model enum workflows share a single bare-string wire shape
+The managed NX binding SHALL represent enum values as the bare authored NX member string across
+both raw `NxValue` runtime-result workflows and schema-aware typed-model workflows. JSON and
+MessagePack output from raw runtime calls, typed DTO serialization, and the shared
+`NxEnumJsonConverter` / `NxEnumMessagePackFormatter` helpers SHALL produce and consume the same
+string representation for a given enum member. The binding SHALL document and test that the raw
+and typed layers share this wire shape rather than presenting it as two distinct enum contracts.
 
-#### Scenario: Managed JSON raw-value workflow preserves canonical enum identity
+#### Scenario: Managed JSON raw-value workflow emits a bare authored member string
 - **WHEN** a C# caller evaluates NX source to `JsonElement` and the result is an enum value such as
   `ThemeMode.dark`
-- **THEN** the returned JSON SHALL expose the canonical raw enum object with
-  `"$enum": "ThemeMode"` and `"$member": "dark"`
-- **AND** the binding SHALL NOT collapse that raw JSON result to the bare string `"dark"`
+- **THEN** the returned JSON SHALL be the bare string `"dark"` in the slot typed as `ThemeMode`
+- **AND** the binding SHALL NOT wrap that raw JSON result in a `"$enum"` / `"$member"` object
 
-#### Scenario: Managed typed MessagePack workflow uses strong enums as plain member strings
+#### Scenario: Managed typed MessagePack workflow matches the raw-value wire shape
 - **WHEN** a C# caller serializes or deserializes a generated typed DTO that contains
   `ThemeMode.Dark`
-- **THEN** the managed typed workflow SHALL use the plain member string `dark` for MessagePack and
-  JSON
-- **AND** the typed DTO workflow SHALL NOT require the canonical raw enum object shape
+- **THEN** the managed typed workflow SHALL use the plain member string `"dark"` for MessagePack
+  and JSON
+- **AND** the typed DTO wire output SHALL be bit-equivalent to the raw-value wire output for the
+  same enum member at the same slot
+
+#### Scenario: Managed consumer of a raw enum string resolves it through the target type
+- **WHEN** a C# caller receives a raw JSON or MessagePack result that contains the bare string
+  `"dark"` at a slot whose target typed DTO property is `ThemeMode`
+- **THEN** the binding SHALL map that string to `ThemeMode.Dark` through the shared
+  `NxEnumJsonConverter<ThemeMode, ThemeModeWireFormat>` / `NxEnumMessagePackFormatter<...>` helpers
+- **AND** SHALL reject unknown member strings with the helpers' existing
+  `JsonException` / `MessagePackSerializationException` error path
 
 ### Requirement: Managed binding exposes reusable enum serialization helpers for typed DTOs
 `NxLang.Runtime` SHALL expose public generic enum serialization helpers in
