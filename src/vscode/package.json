@@ -24,6 +24,11 @@
     "url": "https://github.com/nx-lang/nx/issues"
   },
   "homepage": "https://github.com/nx-lang/nx/tree/main/src/vscode",
+  "exports": {
+    "./grammar": "./syntaxes/nx.tmLanguage.json",
+    "./language-configuration": "./language-configuration.json",
+    "./package.json": "./package.json"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },

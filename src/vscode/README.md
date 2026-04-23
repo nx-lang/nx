@@ -45,6 +45,15 @@ Basic syntax highlighting and language configuration for the NX language using a
 - `snippets/nx.json` — Handy snippets for elements, control-flow, and braced value expressions.
 - `samples/` — Example NX files.
 
+## Package Exports
+
+The published package also exposes the language assets for browser consumers:
+
+- `nx-language/grammar` — NX TextMate grammar JSON
+- `nx-language/language-configuration` — NX language configuration JSON
+
+This allows web editors and docs tooling to reuse the same highlighting assets without copying them into another repository.
+
 ## Roadmap
 
 - Expand grammar coverage from `nx-grammar-spec.md` and `nx-grammar.md`.
