@@ -1293,6 +1293,32 @@ impl<'a> InferenceContext<'a> {
         is_record_subtype(self.module, actual, expected).unwrap_or(false)
     }
 
+    fn component_type_satisfies_expected(&self, actual: &Name, expected: &Name) -> bool {
+        let actual_contract = match self.effective_component_contract(actual) {
+            Ok(Some(contract)) => contract,
+            _ => return false,
+        };
+
+        let expected_contract = match self.effective_component_contract(expected) {
+            Ok(Some(contract)) => contract,
+            _ => return false,
+        };
+
+        if actual_contract.component.name == expected_contract.component.name {
+            return true;
+        }
+
+        actual_contract
+            .ancestors
+            .iter()
+            .any(|ancestor| ancestor == &expected_contract.component.name)
+    }
+
+    fn named_type_satisfies_expected(&self, actual: &Name, expected: &Name) -> bool {
+        self.record_type_satisfies_expected(actual, expected)
+            || self.component_type_satisfies_expected(actual, expected)
+    }
+
     fn named_type_is_element_like(&self, name: &Name) -> bool {
         if name.as_str() == "Element" {
             return true;
@@ -1324,7 +1350,7 @@ impl<'a> InferenceContext<'a> {
                 self.named_type_is_element_like(actual_name)
             }
             (Type::Named(actual_name), Type::Named(expected_name)) => {
-                self.record_type_satisfies_expected(actual_name, expected_name)
+                self.named_type_satisfies_expected(actual_name, expected_name)
             }
             (Type::Named(_), Type::Nullable(expected_inner)) => {
                 self.type_satisfies_expected(actual, expected_inner)
@@ -1363,6 +1389,7 @@ impl<'a> InferenceContext<'a> {
             }
             (Type::Named(lhs_name), Type::Named(rhs_name)) => self
                 .common_record_supertype(lhs_name, rhs_name)
+                .or_else(|| self.common_component_supertype(lhs_name, rhs_name))
                 .unwrap_or_else(|| generic_common_supertype(lhs, rhs)),
             _ => generic_common_supertype(lhs, rhs),
         }
@@ -1377,6 +1404,22 @@ impl<'a> InferenceContext<'a> {
 
         let mut rhs_lineage = vec![rhs_shape.record.name];
         rhs_lineage.extend(rhs_shape.ancestors);
+
+        lhs_lineage
+            .into_iter()
+            .find(|candidate| rhs_lineage.iter().any(|other| other == candidate))
+            .map(Type::named)
+    }
+
+    fn common_component_supertype(&self, lhs: &Name, rhs: &Name) -> Option<Type> {
+        let lhs_contract = self.effective_component_contract(lhs).ok().flatten()?;
+        let rhs_contract = self.effective_component_contract(rhs).ok().flatten()?;
+
+        let mut lhs_lineage = vec![lhs_contract.component.name];
+        lhs_lineage.extend(lhs_contract.ancestors);
+
+        let mut rhs_lineage = vec![rhs_contract.component.name];
+        rhs_lineage.extend(rhs_contract.ancestors);
 
         lhs_lineage
             .into_iter()

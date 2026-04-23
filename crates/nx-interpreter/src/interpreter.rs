@@ -6,7 +6,8 @@ use crate::resolved_program::{ResolvedItemKind, ResolvedProgram, RuntimeModuleId
 use crate::value::Value;
 use la_arena::RawIdx;
 use nx_hir::{
-    ast, effective_component_contract, effective_record_shape_for_name,
+    ast, effective_component_contract, effective_component_contract_for_name,
+    effective_record_shape_for_name,
     resolve_record_definition as resolve_hir_record_definition, EffectiveField, ElementId, ExprId,
     Function, Item, LoweredModule, Name, PreparedBinding, PreparedBindingOrigin,
     PreparedBindingTarget, PreparedItemKind, PreparedModule, RecordKind,
@@ -2476,6 +2477,26 @@ impl Interpreter {
         })
     }
 
+    fn effective_component_contract_by_name(
+        &self,
+        module: &LoweredModule,
+        name: &Name,
+    ) -> Result<nx_hir::EffectiveComponentContract, RuntimeError> {
+        let target_module = self
+            .resolve_item(module, name.as_str())
+            .map(|(target_module, _)| target_module)
+            .unwrap_or(module);
+        let prepared = self.runtime_prepared_module(target_module);
+        let contract = effective_component_contract_for_name(prepared.as_ref(), name)
+            .map_err(|error| self.component_resolution_runtime_error(error))?;
+
+        contract.ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorKind::ComponentNotFound {
+                name: SmolStr::new(name.as_str()),
+            })
+        })
+    }
+
     fn record_resolution_runtime_error(
         &self,
         error: nx_hir::RecordResolutionError,
@@ -2484,6 +2505,17 @@ impl Interpreter {
             expected: "valid record definition".to_string(),
             actual: error.message(),
             operation: "record resolution".to_string(),
+        })
+    }
+
+    fn component_resolution_runtime_error(
+        &self,
+        error: nx_hir::ComponentResolutionError,
+    ) -> RuntimeError {
+        RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+            expected: "valid component definition".to_string(),
+            actual: error.message(),
+            operation: "component resolution".to_string(),
         })
     }
 
@@ -2502,6 +2534,33 @@ impl Interpreter {
             .unwrap_or(false)
     }
 
+    fn component_type_satisfies_expected(
+        &self,
+        module: &LoweredModule,
+        actual: &Name,
+        expected: &Name,
+    ) -> bool {
+        if actual == expected {
+            return true;
+        }
+
+        let (Ok(actual_contract), Ok(expected_contract)) = (
+            self.effective_component_contract_by_name(module, actual),
+            self.effective_component_contract_by_name(module, expected),
+        ) else {
+            return false;
+        };
+
+        if actual_contract.component.name == expected_contract.component.name {
+            return true;
+        }
+
+        actual_contract
+            .ancestors
+            .iter()
+            .any(|ancestor| ancestor == &expected_contract.component.name)
+    }
+
     fn record_value_matches_expected_type(
         &self,
         module: &LoweredModule,
@@ -2513,6 +2572,11 @@ impl Interpreter {
             || match expected {
                 Type::Named(expected_name) => {
                     self.record_type_satisfies_expected(module, actual_type_name, expected_name)
+                        || self.component_type_satisfies_expected(
+                            module,
+                            actual_type_name,
+                            expected_name,
+                        )
                 }
                 Type::Nullable(expected_inner) => self.record_value_matches_expected_type(
                     module,
@@ -3841,6 +3905,85 @@ mod tests {
             .decode_component_snapshot(module.as_ref(), &init.state_snapshot)
             .expect("Expected snapshot to decode");
         assert!(snapshot.state.is_empty(), "Expected empty external state");
+    }
+
+    #[test]
+    fn test_typed_value_binding_accepts_derived_external_component_value() {
+        let source = r#"
+            abstract external component <Question label:string />
+            external component <ShortTextQuestion extends Question placeholder:string? />
+
+            let question: Question = <ShortTextQuestion label={"Name"} placeholder={"Enter your name"} />
+            let render() = { question }
+        "#;
+
+        let (module, interpreter) = lower_module_runtime(source);
+        let value = interpreter
+            .execute_function(module.as_ref(), "render", vec![])
+            .expect("Expected derived external component value binding to evaluate");
+
+        let Value::Record { type_name, .. } = value else {
+            panic!("Expected external component record value");
+        };
+
+        assert_eq!(type_name.as_str(), "ShortTextQuestion");
+    }
+
+    #[test]
+    fn test_typed_value_binding_accepts_mixed_derived_external_component_sequence() {
+        let source = r#"
+            abstract external component <Question label:string />
+            external component <ShortTextQuestion extends Question />
+            external component <LongTextQuestion extends Question />
+
+            let questions: Question[] = {
+              <ShortTextQuestion label={"Name"} />
+              <LongTextQuestion label={"Details"} />
+            }
+
+            let render() = { questions }
+        "#;
+
+        let (module, interpreter) = lower_module_runtime(source);
+        let value = interpreter
+            .execute_function(module.as_ref(), "render", vec![])
+            .expect("Expected mixed derived external component sequence to evaluate");
+
+        let Value::Array(values) = value else {
+            panic!("Expected sequence value");
+        };
+
+        assert_eq!(values.len(), 2);
+        assert!(matches!(
+            &values[0],
+            Value::Record { type_name, .. } if type_name.as_str() == "ShortTextQuestion"
+        ));
+        assert!(matches!(
+            &values[1],
+            Value::Record { type_name, .. } if type_name.as_str() == "LongTextQuestion"
+        ));
+    }
+
+    #[test]
+    fn test_function_call_rejects_unrelated_external_component_for_abstract_base_param() {
+        let source = r#"
+            abstract external component <A label:string />
+            external component <C label:string />
+
+            let take(a: A): string = { "ok" }
+            let render() = { take(<C label={"x"} />) }
+        "#;
+
+        let (module, interpreter) = lower_module_runtime(source);
+        let err = interpreter
+            .execute_function(module.as_ref(), "render", vec![])
+            .expect_err("Expected unrelated external arg to fail parameter coercion");
+
+        assert!(
+            matches!(err.kind(), RuntimeErrorKind::TypeMismatch { .. }),
+            "Expected TypeMismatch from parameter coercion, got {:?}",
+            err.kind()
+        );
     }
 
     #[test]

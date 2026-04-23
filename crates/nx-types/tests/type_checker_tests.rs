@@ -559,6 +559,74 @@ fn test_external_component_state_only_body_type_checks() {
 }
 
 #[test]
+fn test_external_component_value_satisfies_abstract_base_type() {
+    let source = r#"
+        abstract external component <Question label:string />
+        external component <ShortTextQuestion extends Question placeholder:string? />
+
+        let question: Question = <ShortTextQuestion label={"Name"} placeholder={"Enter your name"} />
+    "#;
+
+    let result = check_str(source, "external-component-base-type.nx");
+    assert!(
+        result.errors().is_empty(),
+        "Expected derived external component value to satisfy abstract base type, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_external_component_sequence_uses_common_base_type() {
+    let source = r#"
+        abstract external component <Question label:string />
+        external component <ShortTextQuestion extends Question />
+        external component <LongTextQuestion extends Question />
+
+        let questions: Question[] = {
+          <ShortTextQuestion label={"Name"} />
+          <LongTextQuestion label={"Details"} />
+        }
+    "#;
+
+    let result = check_str(source, "external-component-common-base-sequence.nx");
+    assert!(
+        result.errors().is_empty(),
+        "Expected mixed derived external component sequence to satisfy Question[], got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_external_component_rejects_unrelated_for_abstract_base() {
+    let source = r#"
+        abstract external component <A label:string />
+        external component <B extends A />
+        external component <C label:string />
+
+        let x: A = <C label={"x"} />
+    "#;
+
+    let result = check_str(source, "external-component-unrelated-base.nx");
+    assert!(
+        !result.errors().is_empty(),
+        "Expected type errors when unrelated external component is assigned to abstract base, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn test_duplicate_inherited_component_prop_reports_diagnostic() {
     let source = r#"
         abstract component <SearchBase placeholder:string />
