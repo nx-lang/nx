@@ -18,7 +18,7 @@ pub use error::{RuntimeError, RuntimeErrorKind};
 pub use interpreter::{ComponentDispatchResult, ComponentInitResult, Interpreter};
 pub use resolved_program::{
     ModuleQualifiedExprRef, ModuleQualifiedItemRef, ResolvedItemKind, ResolvedModule,
-    ResolvedProgram, RuntimeModuleId,
+    ResolvedModuleSource, ResolvedProgram, RuntimeModuleId,
 };
 pub use value::Value;
 

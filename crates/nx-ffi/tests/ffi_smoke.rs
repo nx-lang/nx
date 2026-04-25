@@ -5,13 +5,13 @@ use nx_api::{
     ProgramBuildContext,
 };
 use nx_ffi::{
-    nx_build_program_artifact, nx_component_dispatch_actions_program_artifact,
-    nx_component_init_program_artifact, nx_create_library_registry,
-    nx_create_program_build_context, nx_eval_program_artifact, nx_eval_source, nx_ffi_abi_version,
-    nx_free_buffer, nx_free_library_registry, nx_free_program_artifact,
-    nx_free_program_build_context, nx_load_library_into_registry, NxBuffer, NxEvalStatus,
-    NxLibraryRegistryHandle, NxOutputFormat, NxProgramArtifactHandle, NxProgramBuildContextHandle,
-    NX_FFI_ABI_VERSION,
+    nx_build_program_artifact, nx_build_workspace_program_artifact,
+    nx_component_dispatch_actions_program_artifact, nx_component_init_program_artifact,
+    nx_create_library_registry, nx_create_program_build_context, nx_eval_program_artifact,
+    nx_eval_source, nx_ffi_abi_version, nx_free_buffer, nx_free_library_registry,
+    nx_free_program_artifact, nx_free_program_build_context, nx_load_library_into_registry,
+    nx_validate_workspace, NxBuffer, NxEvalStatus, NxLibraryRegistryHandle, NxOutputFormat,
+    NxProgramArtifactHandle, NxProgramBuildContextHandle, NxWorkspaceModule, NX_FFI_ABI_VERSION,
 };
 use nx_interpreter::Interpreter;
 use nx_value::NxValue;
@@ -136,6 +136,68 @@ fn build_program_artifact_handle(
         source_bytes.len(),
         file_name_bytes.as_ptr(),
         file_name_bytes.len(),
+        &mut out_handle as *mut *mut NxProgramArtifactHandle,
+        &mut out as *mut NxBuffer,
+    );
+
+    (out_handle, status, copy_and_free_buffer(out))
+}
+
+fn workspace_descriptors(
+    modules: &[(&[u8], &[u8])],
+) -> (Vec<Vec<u8>>, Vec<Vec<u8>>, Vec<NxWorkspaceModule>) {
+    let identities = modules
+        .iter()
+        .map(|(identity, _)| identity.to_vec())
+        .collect::<Vec<_>>();
+    let sources = modules
+        .iter()
+        .map(|(_, source)| source.to_vec())
+        .collect::<Vec<_>>();
+    let descriptors = identities
+        .iter()
+        .zip(sources.iter())
+        .map(|(identity, source)| NxWorkspaceModule {
+            identity_ptr: identity.as_ptr(),
+            identity_len: identity.len(),
+            source_utf8_ptr: source.as_ptr(),
+            source_utf8_len: source.len(),
+        })
+        .collect::<Vec<_>>();
+
+    (identities, sources, descriptors)
+}
+
+fn validate_workspace_handle(
+    build_context: *const NxProgramBuildContextHandle,
+    descriptors: &[NxWorkspaceModule],
+) -> (NxEvalStatus, Vec<u8>) {
+    let mut out = empty_buffer();
+    let status = nx_validate_workspace(
+        build_context,
+        descriptors.as_ptr(),
+        descriptors.len(),
+        &mut out as *mut NxBuffer,
+    );
+
+    (status, copy_and_free_buffer(out))
+}
+
+fn build_workspace_artifact_handle(
+    build_context: *const NxProgramBuildContextHandle,
+    descriptors: &[NxWorkspaceModule],
+    entry_identity: &str,
+) -> (*mut NxProgramArtifactHandle, NxEvalStatus, Vec<u8>) {
+    let entry_bytes = entry_identity.as_bytes();
+    let mut out_handle: *mut NxProgramArtifactHandle = std::ptr::null_mut();
+    let mut out = empty_buffer();
+
+    let status = nx_build_workspace_program_artifact(
+        build_context,
+        descriptors.as_ptr(),
+        descriptors.len(),
+        entry_bytes.as_ptr(),
+        entry_bytes.len(),
         &mut out_handle as *mut *mut NxProgramArtifactHandle,
         &mut out as *mut NxBuffer,
     );
@@ -424,12 +486,188 @@ let root() = { answer() }"#;
     assert!(program.is_null());
     assert!(matches!(build_status, NxEvalStatus::Error));
     let diagnostics: Vec<NxDiagnostic> = rmp_serde::from_slice(&build_bytes).unwrap();
-    assert!(diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.message.contains("Missing loaded library")));
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic
+        .message
+        .contains("Missing workspace module or loaded library")));
 
     nx_free_program_build_context(build_context);
     nx_free_library_registry(registry);
+}
+
+#[test]
+fn ffi_validate_workspace_returns_ok_with_diagnostics_payload() {
+    let build_context = create_empty_build_context();
+    let (_identities, _sources, descriptors) =
+        workspace_descriptors(&[(b"main.nx", br#"let broken(): int = { "oops" }"#)]);
+
+    let (status, bytes) = validate_workspace_handle(build_context, &descriptors);
+    nx_free_program_build_context(build_context);
+
+    assert!(matches!(status, NxEvalStatus::Ok));
+    let diagnostics: Vec<NxDiagnostic> = rmp_serde::from_slice(&bytes).unwrap();
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code.as_deref() == Some("return-type-mismatch")));
+}
+
+#[test]
+fn ffi_validate_workspace_returns_empty_diagnostics_payload_for_valid_workspace() {
+    let build_context = create_empty_build_context();
+    let (_identities, _sources, descriptors) =
+        workspace_descriptors(&[(b"main.nx", br#"let root(): int = { 42 }"#)]);
+
+    let (status, bytes) = validate_workspace_handle(build_context, &descriptors);
+    nx_free_program_build_context(build_context);
+
+    assert!(matches!(status, NxEvalStatus::Ok));
+    let diagnostics: Vec<NxDiagnostic> = rmp_serde::from_slice(&bytes).unwrap();
+    assert!(diagnostics.is_empty());
+}
+
+#[test]
+fn ffi_validate_workspace_rejects_null_module_array_with_count() {
+    let build_context = create_empty_build_context();
+    let mut out = empty_buffer();
+
+    let status = nx_validate_workspace(
+        build_context as *const NxProgramBuildContextHandle,
+        std::ptr::null(),
+        1,
+        &mut out as *mut NxBuffer,
+    );
+    nx_free_program_build_context(build_context);
+
+    assert!(matches!(status, NxEvalStatus::InvalidArgument));
+}
+
+#[test]
+fn ffi_validate_workspace_rejects_non_empty_null_module_fields() {
+    let build_context = create_empty_build_context();
+    let identity = b"main.nx";
+    let source = br#"let root(): int = { 42 }"#;
+
+    let null_identity = NxWorkspaceModule {
+        identity_ptr: std::ptr::null(),
+        identity_len: identity.len(),
+        source_utf8_ptr: source.as_ptr(),
+        source_utf8_len: source.len(),
+    };
+    let (identity_status, identity_bytes) =
+        validate_workspace_handle(build_context, &[null_identity]);
+
+    let null_source = NxWorkspaceModule {
+        identity_ptr: identity.as_ptr(),
+        identity_len: identity.len(),
+        source_utf8_ptr: std::ptr::null(),
+        source_utf8_len: source.len(),
+    };
+    let (source_status, source_bytes) = validate_workspace_handle(build_context, &[null_source]);
+    nx_free_program_build_context(build_context);
+
+    assert!(matches!(identity_status, NxEvalStatus::InvalidArgument));
+    assert!(identity_bytes.is_empty());
+    assert!(matches!(source_status, NxEvalStatus::InvalidArgument));
+    assert!(source_bytes.is_empty());
+}
+
+#[test]
+fn ffi_validate_workspace_rejects_invalid_utf8() {
+    let build_context = create_empty_build_context();
+    let (_identities, _sources, descriptors) = workspace_descriptors(&[(b"main.nx", &[0xff])]);
+
+    let (status, bytes) = validate_workspace_handle(build_context, &descriptors);
+    nx_free_program_build_context(build_context);
+
+    assert!(matches!(status, NxEvalStatus::InvalidArgument));
+    assert!(bytes.is_empty());
+}
+
+#[test]
+fn ffi_validate_workspace_rejects_duplicate_normalized_identities() {
+    let build_context = create_empty_build_context();
+    let (_identities, _sources, descriptors) = workspace_descriptors(&[
+        (b"shared/value.nx", br#"let root() = { 1 }"#),
+        (b"shared/./value.nx", br#"let root() = { 2 }"#),
+    ]);
+
+    let (status, bytes) = validate_workspace_handle(build_context, &descriptors);
+    nx_free_program_build_context(build_context);
+
+    assert!(matches!(status, NxEvalStatus::InvalidArgument));
+    assert!(bytes.is_empty());
+}
+
+#[test]
+fn ffi_build_workspace_program_artifact_reports_missing_entry_identity() {
+    let build_context = create_empty_build_context();
+    let (_identities, _sources, descriptors) =
+        workspace_descriptors(&[(b"main.nx", br#"let root(): int = { 42 }"#)]);
+
+    let (program, status, bytes) = build_workspace_artifact_handle(
+        build_context as *const NxProgramBuildContextHandle,
+        &descriptors,
+        "missing.nx",
+    );
+    nx_free_program_build_context(build_context);
+
+    assert!(program.is_null());
+    assert!(matches!(status, NxEvalStatus::Error));
+    let diagnostics: Vec<NxDiagnostic> = rmp_serde::from_slice(&bytes).unwrap();
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code.as_deref() == Some("workspace-entry-not-found")));
+}
+
+#[test]
+fn ffi_build_workspace_program_artifact_evaluates_after_buffers_are_dropped() {
+    let build_context = create_empty_build_context();
+    let (program, build_status, build_bytes) = {
+        let (_identities, _sources, descriptors) = workspace_descriptors(&[
+            (
+                b"app/main.nx",
+                br#"import { answer } from "../shared/value.nx"
+let root(): int = { answer() }"#,
+            ),
+            (b"shared/value.nx", br#"export let answer(): int = { 42 }"#),
+        ]);
+        build_workspace_artifact_handle(
+            build_context as *const NxProgramBuildContextHandle,
+            &descriptors,
+            "app/main.nx",
+        )
+    };
+    nx_free_program_build_context(build_context);
+
+    assert!(matches!(build_status, NxEvalStatus::Ok));
+    assert!(build_bytes.is_empty());
+    assert!(!program.is_null());
+
+    let (eval_status, eval_bytes) = eval_msgpack_with_program_artifact(program);
+    nx_free_program_artifact(program);
+    assert!(matches!(eval_status, NxEvalStatus::Ok));
+    let value: NxValue = rmp_serde::from_slice(&eval_bytes).unwrap();
+    assert_eq!(value, NxValue::Int(42));
+}
+
+#[test]
+fn ffi_build_workspace_program_artifact_returns_static_diagnostics() {
+    let build_context = create_empty_build_context();
+    let (_identities, _sources, descriptors) =
+        workspace_descriptors(&[(b"main.nx", br#"let root(): int = { "oops" }"#)]);
+
+    let (program, status, bytes) = build_workspace_artifact_handle(
+        build_context as *const NxProgramBuildContextHandle,
+        &descriptors,
+        "main.nx",
+    );
+    nx_free_program_build_context(build_context);
+
+    assert!(program.is_null());
+    assert!(matches!(status, NxEvalStatus::Error));
+    let diagnostics: Vec<NxDiagnostic> = rmp_serde::from_slice(&bytes).unwrap();
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code.as_deref() == Some("return-type-mismatch")));
 }
 
 #[test]
@@ -859,9 +1097,12 @@ fn ffi_component_dispatch_round_trips_enum_effect_payloads_in_msgpack_and_json()
         let withHandler() = { <SearchBox onSearchSubmitted=<DoSearch theme={action.theme} /> /> }
     "#;
 
-    let program =
-        load_program_artifact_from_source(source, "ffi-enum-dispatch.nx", &ProgramBuildContext::empty())
-            .expect("Expected program artifact");
+    let program = load_program_artifact_from_source(
+        source,
+        "ffi-enum-dispatch.nx",
+        &ProgramBuildContext::empty(),
+    )
+    .expect("Expected program artifact");
     let interpreter = Interpreter::from_resolved_program(program.resolved_program.clone());
     let props = interpreter
         .execute_resolved_program_function("withHandler", vec![])

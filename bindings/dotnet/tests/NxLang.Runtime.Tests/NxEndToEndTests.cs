@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using NxLang.Nx;
@@ -200,12 +201,144 @@ public class NxEndToEndTests
 
             Assert.Contains(
                 exception.Diagnostics,
-                diagnostic => diagnostic.Message.Contains("Missing loaded library", StringComparison.Ordinal));
+                diagnostic => diagnostic.Message.Contains(
+                    "Missing workspace module or loaded library",
+                    StringComparison.Ordinal));
         }
         finally
         {
             Directory.Delete(tempPath, recursive: true);
         }
+    }
+
+    [Fact]
+    public void ValidateWorkspace_WithByteBackedModules_ReturnsNoDiagnostics()
+    {
+        NxWorkspace workspace = new([
+            new NxWorkspaceModule(
+                "app/main.nx",
+                Encoding.UTF8.GetBytes("""
+                import { answer } from "../shared/value.nx"
+                let root(): int = { answer() }
+                """)),
+            NxWorkspaceModule.FromSourceText(
+                "shared/value.nx",
+                "export let answer(): int = { 42 }"),
+        ]);
+        using NxLibraryRegistry registry = new();
+        using NxProgramBuildContext buildContext = registry.CreateBuildContext();
+
+        IReadOnlyList<NxDiagnostic> diagnostics = NxRuntime.ValidateWorkspace(workspace, buildContext);
+
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public void ValidateWorkspace_ReturnsStructuredDiagnostics()
+    {
+        NxWorkspace workspace = new([
+            NxWorkspaceModule.FromSourceText(
+                "main.nx",
+                "let root(): int = { \"oops\" }"),
+        ]);
+        using NxLibraryRegistry registry = new();
+        using NxProgramBuildContext buildContext = registry.CreateBuildContext();
+
+        IReadOnlyList<NxDiagnostic> diagnostics = NxRuntime.ValidateWorkspace(workspace, buildContext);
+
+        Assert.Contains(
+            diagnostics,
+            diagnostic => diagnostic.Code == "return-type-mismatch");
+    }
+
+    [Fact]
+    public void ValidateWorkspace_WithDuplicateNormalizedIdentity_ThrowsInteropException()
+    {
+        NxWorkspace workspace = new([
+            NxWorkspaceModule.FromSourceText("shared/value.nx", "let root() = { 1 }"),
+            NxWorkspaceModule.FromSourceText("shared/./value.nx", "let root() = { 2 }"),
+        ]);
+        using NxLibraryRegistry registry = new();
+        using NxProgramBuildContext buildContext = registry.CreateBuildContext();
+
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
+            () => NxRuntime.ValidateWorkspace(workspace, buildContext));
+
+        Assert.Contains("interop arguments were invalid", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildWorkspace_WithMissingEntry_ThrowsEvaluationException()
+    {
+        NxWorkspace workspace = new([
+            NxWorkspaceModule.FromSourceText("main.nx", "let root() = { 42 }"),
+        ]);
+        using NxLibraryRegistry registry = new();
+        using NxProgramBuildContext buildContext = registry.CreateBuildContext();
+
+        NxEvaluationException exception = Assert.Throws<NxEvaluationException>(
+            () => NxProgramArtifact.BuildWorkspace(workspace, "missing.nx", buildContext));
+
+        Assert.Contains(
+            exception.Diagnostics,
+            diagnostic => diagnostic.Code == "workspace-entry-not-found");
+    }
+
+    [Fact]
+    public void Evaluate_WithWorkspaceProgramArtifact_UsesSelectedEntryRoot()
+    {
+        NxWorkspace workspace = new([
+            NxWorkspaceModule.FromSourceText("a.nx", "let root() = { \"a\" }"),
+            NxWorkspaceModule.FromSourceText("b.nx", "let root() = { \"b\" }"),
+        ]);
+        using NxLibraryRegistry registry = new();
+        using NxProgramBuildContext buildContext = registry.CreateBuildContext();
+        using NxProgramArtifact artifact = NxProgramArtifact.BuildWorkspace(workspace, "b.nx", buildContext);
+
+        string result = NxRuntime.Evaluate<string>(artifact);
+
+        Assert.Equal("b", result);
+    }
+
+    [Fact]
+    public void Evaluate_WithWorkspaceProgramArtifact_RemainsExecutableAfterWorkspaceBuffersAreReleased()
+    {
+        NxProgramArtifact artifact;
+        using (NxLibraryRegistry registry = new())
+        {
+            using NxProgramBuildContext buildContext = registry.CreateBuildContext();
+            byte[] source = Encoding.UTF8.GetBytes("let root() = { 42 }");
+            NxWorkspace workspace = new([
+                new NxWorkspaceModule("main.nx", source),
+            ]);
+            artifact = NxProgramArtifact.BuildWorkspace(workspace, "main.nx", buildContext);
+        }
+
+        using (artifact)
+        {
+            int result = NxRuntime.Evaluate<int>(artifact);
+            Assert.Equal(42, result);
+        }
+    }
+
+    [Fact]
+    public void WorkspaceApis_ValidateArgumentsBeforeNativeCall()
+    {
+        Assert.Throws<ArgumentException>(
+            () => NxWorkspaceModule.FromSourceText(string.Empty, "let root() = { 42 }"));
+
+        NxWorkspace workspace = new([
+            NxWorkspaceModule.FromSourceText("main.nx", "let root() = { 42 }"),
+        ]);
+        using NxLibraryRegistry registry = new();
+        using NxProgramBuildContext buildContext = registry.CreateBuildContext();
+
+        Assert.Throws<ArgumentNullException>(
+            () => NxRuntime.ValidateWorkspace(null!, buildContext));
+        Assert.Throws<ArgumentNullException>(
+            () => NxRuntime.ValidateWorkspace(workspace, null!));
+        Assert.Throws<ArgumentException>(
+            () => NxProgramArtifact.BuildWorkspace(workspace, string.Empty, buildContext));
     }
 
     [Fact]

@@ -1,6 +1,7 @@
 use nx_hir::{LocalDefinitionId, LoweredModule};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// Stable identifier for one lowered module within a resolved program.
@@ -49,8 +50,53 @@ pub struct ModuleQualifiedExprRef {
 #[derive(Debug, Clone)]
 pub struct ResolvedModule {
     pub id: RuntimeModuleId,
-    pub identity: String,
+    pub source: ResolvedModuleSource,
     pub lowered_module: Arc<LoweredModule>,
+}
+
+/// Provenance for a lowered module preserved inside a resolved program.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolvedModuleSource {
+    /// A source-provider module, keyed by a normalized logical identity.
+    SourceProvider { identity: String },
+    /// A module loaded from a library artifact on disk.
+    Library {
+        root_path: PathBuf,
+        module_path: PathBuf,
+    },
+}
+
+impl ResolvedModuleSource {
+    pub fn source_provider_identity(&self) -> Option<&str> {
+        match self {
+            Self::SourceProvider { identity } => Some(identity),
+            Self::Library { .. } => None,
+        }
+    }
+
+    pub fn module_path(&self) -> Option<&Path> {
+        match self {
+            Self::SourceProvider { .. } => None,
+            Self::Library { module_path, .. } => Some(module_path.as_path()),
+        }
+    }
+
+    pub fn prepared_module_identity(&self) -> String {
+        match self {
+            Self::SourceProvider { identity } => identity.clone(),
+            Self::Library { module_path, .. } => module_path.display().to_string(),
+        }
+    }
+}
+
+impl ResolvedModule {
+    pub fn source_provider_identity(&self) -> Option<&str> {
+        self.source.source_provider_identity()
+    }
+
+    pub fn prepared_module_identity(&self) -> String {
+        self.source.prepared_module_identity()
+    }
 }
 
 /// Runtime-facing resolved executable view built from multiple lowered modules.
@@ -59,6 +105,8 @@ pub struct ResolvedProgram {
     pub fingerprint: u64,
     root_modules: Vec<RuntimeModuleId>,
     modules: Vec<ResolvedModule>,
+    source_provider_modules: FxHashMap<String, RuntimeModuleId>,
+    prepared_modules: FxHashMap<String, RuntimeModuleId>,
     local_items: FxHashMap<RuntimeModuleId, FxHashMap<String, ModuleQualifiedItemRef>>,
     pub entry_functions: FxHashMap<String, ModuleQualifiedItemRef>,
     pub entry_components: FxHashMap<String, ModuleQualifiedItemRef>,
@@ -79,11 +127,15 @@ impl ResolvedProgram {
         entry_enums: FxHashMap<String, ModuleQualifiedItemRef>,
         imports: FxHashMap<RuntimeModuleId, FxHashMap<String, ModuleQualifiedItemRef>>,
     ) -> Self {
+        let source_provider_modules = build_source_provider_modules(&modules);
+        let prepared_modules = build_prepared_modules(&modules);
         let local_items = build_local_items(&modules);
         Self {
             fingerprint,
             root_modules,
             modules,
+            source_provider_modules,
+            prepared_modules,
             local_items,
             entry_functions,
             entry_components,
@@ -105,7 +157,9 @@ impl ResolvedProgram {
             vec![module_id],
             vec![ResolvedModule {
                 id: module_id,
-                identity: identity.into(),
+                source: ResolvedModuleSource::SourceProvider {
+                    identity: identity.into(),
+                },
                 lowered_module,
             }],
             FxHashMap::default(),
@@ -129,6 +183,28 @@ impl ResolvedProgram {
     /// Returns the resolved module for a module identifier, if present.
     pub fn module(&self, module_id: RuntimeModuleId) -> Option<&ResolvedModule> {
         self.modules.iter().find(|module| module.id == module_id)
+    }
+
+    /// Returns the source-provider module identifier with the supplied logical identity.
+    pub fn source_provider_module_id(&self, identity: &str) -> Option<RuntimeModuleId> {
+        self.source_provider_modules.get(identity).copied()
+    }
+
+    /// Returns the source-provider module with the supplied logical identity, if present.
+    pub fn module_by_source_provider_identity(&self, identity: &str) -> Option<&ResolvedModule> {
+        self.source_provider_module_id(identity)
+            .and_then(|module_id| self.module(module_id))
+    }
+
+    /// Returns the module with the supplied prepared-module identity, if present.
+    ///
+    /// Prepared-module identities are only used to reconnect lowered peer bindings while
+    /// interpreting an already resolved program. Runtime entrypoint dispatch should use
+    /// [`RuntimeModuleId`] instead.
+    pub fn module_by_prepared_identity(&self, identity: &str) -> Option<&ResolvedModule> {
+        self.prepared_modules
+            .get(identity)
+            .and_then(|module_id| self.module(*module_id))
     }
 
     /// Looks up an entrypoint function by name.
@@ -170,6 +246,32 @@ impl ResolvedProgram {
     ) -> Option<&FxHashMap<String, ModuleQualifiedItemRef>> {
         self.imports.get(&module_id)
     }
+}
+
+fn build_source_provider_modules(modules: &[ResolvedModule]) -> FxHashMap<String, RuntimeModuleId> {
+    let mut source_provider_modules = FxHashMap::default();
+
+    for module in modules {
+        if let Some(identity) = module.source_provider_identity() {
+            source_provider_modules
+                .entry(identity.to_string())
+                .or_insert(module.id);
+        }
+    }
+
+    source_provider_modules
+}
+
+fn build_prepared_modules(modules: &[ResolvedModule]) -> FxHashMap<String, RuntimeModuleId> {
+    let mut prepared_modules = FxHashMap::default();
+
+    for module in modules {
+        prepared_modules
+            .entry(module.prepared_module_identity())
+            .or_insert(module.id);
+    }
+
+    prepared_modules
 }
 
 fn build_local_items(

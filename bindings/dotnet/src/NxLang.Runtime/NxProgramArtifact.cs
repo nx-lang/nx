@@ -42,6 +42,18 @@ public sealed class NxProgramArtifact : IDisposable
     }
 
     /// <summary>
+    /// Builds a reusable program artifact from an in-memory workspace.
+    /// </summary>
+    public static NxProgramArtifact BuildWorkspace(
+        NxWorkspace workspace,
+        string entryIdentity,
+        NxProgramBuildContext buildContext)
+    {
+        ArgumentNullException.ThrowIfNull(buildContext);
+        return BuildWorkspaceCore(workspace, entryIdentity, buildContext.SafeHandle);
+    }
+
+    /// <summary>
     /// Builds a reusable program artifact from NX source text against a preloaded build context.
     /// </summary>
     /// <param name="source">The NX source code to build.</param>
@@ -84,6 +96,57 @@ public sealed class NxProgramArtifact : IDisposable
             return status switch
             {
                 NxEvalStatus.Ok when handle != IntPtr.Zero => new NxProgramArtifact(handle, normalizedFileName),
+                NxEvalStatus.Ok => throw new InvalidOperationException(
+                    "NX native runtime returned success without a program artifact handle."),
+                NxEvalStatus.Error => throw NxRuntime.CreateEvaluationExceptionFromMessagePack(payload),
+                _ => throw NxRuntime.CreateInteropStatusException(status),
+            };
+        }
+        catch
+        {
+            if (handle != IntPtr.Zero)
+            {
+                NxNativeMethods.nx_free_program_artifact(handle);
+            }
+
+            throw;
+        }
+    }
+
+    private static NxProgramArtifact BuildWorkspaceCore(
+        NxWorkspace workspace,
+        string entryIdentity,
+        NxProgramBuildContextSafeHandle? buildContextHandle)
+    {
+        ArgumentNullException.ThrowIfNull(workspace);
+        ArgumentNullException.ThrowIfNull(entryIdentity);
+        if (entryIdentity.Length == 0)
+        {
+            throw new ArgumentException("Workspace entry identity must not be empty.", nameof(entryIdentity));
+        }
+
+        NxNativeLibrary.EnsureLoaded();
+
+        byte[] entryIdentityBytes = Encoding.UTF8.GetBytes(entryIdentity);
+        IntPtr handle = IntPtr.Zero;
+
+        try
+        {
+            using NxWorkspaceDescriptorScope descriptors = new(workspace);
+            NxEvalStatus status = NxNativeMethods.nx_build_workspace_program_artifact(
+                buildContextHandle,
+                descriptors.Pointer,
+                descriptors.Count,
+                entryIdentityBytes,
+                (nuint)entryIdentityBytes.Length,
+                out handle,
+                out NxBuffer buffer);
+
+            byte[] payload = NxRuntime.CopyAndFreeBuffer(buffer);
+
+            return status switch
+            {
+                NxEvalStatus.Ok when handle != IntPtr.Zero => new NxProgramArtifact(handle, entryIdentity),
                 NxEvalStatus.Ok => throw new InvalidOperationException(
                     "NX native runtime returned success without a program artifact handle."),
                 NxEvalStatus.Error => throw NxRuntime.CreateEvaluationExceptionFromMessagePack(payload),

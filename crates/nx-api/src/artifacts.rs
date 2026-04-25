@@ -1,3 +1,10 @@
+use crate::diagnostics::{diagnostics_to_api, diagnostics_to_api_with_sources};
+use crate::source_graph::{
+    LogicalModuleGraph, LogicalSourceModule, SourceProvider, SourceProviderError,
+    WorkspaceSourceProvider,
+};
+use crate::workspace::{normalize_workspace_identity, normalize_workspace_import_identity};
+use crate::{NxDiagnostic, NxWorkspace};
 use nx_diagnostics::{Diagnostic, Label, Severity, TextSize, TextSpan};
 use nx_hir::{
     ast::TypeRef, binding_specs_for_item, local_definition_id, lower, Import, ImportKind,
@@ -7,7 +14,8 @@ use nx_hir::{
     SelectiveImport, SourceId, Visibility,
 };
 use nx_interpreter::{
-    ModuleQualifiedItemRef, ResolvedItemKind, ResolvedModule, ResolvedProgram, RuntimeModuleId,
+    ModuleQualifiedItemRef, ResolvedItemKind, ResolvedModule, ResolvedModuleSource,
+    ResolvedProgram, RuntimeModuleId,
 };
 use nx_syntax::parse_str as syntax_parse_str;
 use nx_types::{analyze_prepared_module, ModuleArtifact, Type, TypeEnvironment};
@@ -16,7 +24,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 /// Export metadata for one symbol provided by a library artifact.
@@ -50,11 +58,24 @@ pub struct LibraryArtifact {
 /// File-preserving artifact for one resolved NX program.
 #[derive(Debug, Clone)]
 pub struct ProgramArtifact {
+    /// Analyzed root modules submitted by the source provider.
+    ///
+    /// Workspace builds currently preserve every submitted module analyzed for the build, not only
+    /// the transitive import closure of the selected entry module.
     pub root_modules: Vec<ModuleArtifact>,
+    /// Normalized identity of the module whose `root()` entrypoint is selected for evaluation.
+    pub entry_identity: String,
+    /// Runtime module id for the selected entry module when it lowered successfully.
+    pub entry_module_id: Option<RuntimeModuleId>,
+    /// Library snapshots selected from the build context for this artifact.
     pub libraries: Vec<Arc<LibraryArtifact>>,
+    /// Static diagnostics produced while constructing the artifact.
     pub diagnostics: Vec<Diagnostic>,
+    /// Fingerprint derived from entry identity, source-provider modules, and selected libraries.
     pub fingerprint: u64,
+    /// Runtime-ready resolved program for this artifact.
     pub resolved_program: ResolvedProgram,
+    pub(crate) source_map: FxHashMap<String, Arc<str>>,
 }
 
 #[derive(Debug, Default)]
@@ -271,6 +292,49 @@ impl ProgramBuildContext {
 
         self.registry.get_loaded_library(root)
     }
+
+    fn visible_library_by_logical_identity(&self, identity: &str) -> LogicalLibraryResolution {
+        let mut visible_roots = self.visible_roots.iter().collect::<Vec<_>>();
+        visible_roots.sort();
+        let suffix = format!("/{}", identity);
+        let mut exact_matches = Vec::new();
+        let mut suffix_matches = Vec::new();
+
+        for root in visible_roots {
+            let Some(root_identity) = logical_identity_for_path(root) else {
+                continue;
+            };
+            let Some(library) = self.registry.get_loaded_library(root) else {
+                continue;
+            };
+
+            if root_identity == identity {
+                exact_matches.push((root.clone(), library));
+            } else if root_identity.ends_with(&suffix) {
+                suffix_matches.push((root.clone(), library));
+            };
+        }
+
+        match exact_matches.len() {
+            1 => {
+                let (root, library) = exact_matches.remove(0);
+                LogicalLibraryResolution::Found(root, library)
+            }
+            count if count > 1 => LogicalLibraryResolution::Ambiguous(
+                exact_matches.into_iter().map(|(root, _)| root).collect(),
+            ),
+            _ => match suffix_matches.len() {
+                1 => {
+                    let (root, library) = suffix_matches.remove(0);
+                    LogicalLibraryResolution::Found(root, library)
+                }
+                count if count > 1 => LogicalLibraryResolution::Ambiguous(
+                    suffix_matches.into_iter().map(|(root, _)| root).collect(),
+                ),
+                _ => LogicalLibraryResolution::Missing,
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -314,10 +378,40 @@ struct ProgramLibrarySelection {
     diagnostics: Vec<Diagnostic>,
 }
 
-struct PreparedRootModule {
-    artifact: ModuleArtifact,
-    libraries: Vec<Arc<LibraryArtifact>>,
+#[derive(Debug, Clone)]
+enum LogicalLibraryResolution {
+    Found(PathBuf, Arc<LibraryArtifact>),
+    Ambiguous(Vec<PathBuf>),
+    Missing,
+}
+
+#[derive(Debug, Clone)]
+struct GraphSourceFile {
+    identity: String,
+    source: Arc<str>,
+    source_id: SourceId,
     diagnostics: Vec<Diagnostic>,
+    preserved_module: Option<LoweredModule>,
+}
+
+#[derive(Debug, Default)]
+struct LogicalProgramAnalysis {
+    modules: Vec<ModuleArtifact>,
+    libraries: Vec<Arc<LibraryArtifact>>,
+    source_map: FxHashMap<String, Arc<str>>,
+}
+
+impl LogicalProgramAnalysis {
+    fn diagnostics(&self) -> Vec<Diagnostic> {
+        let mut diagnostics = Vec::new();
+        for module in &self.modules {
+            diagnostics.extend(module.diagnostics.iter().cloned());
+        }
+        for library in &self.libraries {
+            diagnostics.extend(library.diagnostics.iter().cloned());
+        }
+        diagnostics
+    }
 }
 
 /// Builds a file-preserving library artifact from a local directory.
@@ -327,6 +421,75 @@ pub fn build_library_artifact_from_directory(
     let registry = LibraryRegistry::new();
     let artifact = registry.load_library_from_directory_internal(root_path.as_ref())?;
     Ok((*artifact).clone())
+}
+
+/// Validates an in-memory logical workspace against a caller-supplied program build context.
+pub fn validate_workspace(
+    workspace: &NxWorkspace,
+    build_context: &ProgramBuildContext,
+) -> Vec<NxDiagnostic> {
+    let provider = WorkspaceSourceProvider::new(workspace);
+    let graph = match provider.load_graph() {
+        Ok(graph) => graph,
+        Err(error) => {
+            return diagnostics_to_api(&[source_provider_error_diagnostic(&error)], "");
+        }
+    };
+
+    let analysis = analyze_logical_module_graph(&graph, build_context);
+    diagnostics_to_api_with_sources(&analysis.diagnostics(), "", &analysis.source_map)
+}
+
+/// Builds a reusable [`ProgramArtifact`] from a logical workspace and explicit entry identity.
+pub fn build_workspace_program_artifact(
+    workspace: &NxWorkspace,
+    entry_identity: &str,
+    build_context: &ProgramBuildContext,
+) -> Result<ProgramArtifact, Vec<NxDiagnostic>> {
+    let provider = WorkspaceSourceProvider::new(workspace);
+    let graph = match provider.load_graph() {
+        Ok(graph) => graph,
+        Err(error) => {
+            return Err(diagnostics_to_api(
+                &[source_provider_error_diagnostic(&error)],
+                "",
+            ));
+        }
+    };
+    let entry_identity = match normalize_workspace_identity(entry_identity) {
+        Ok(identity) => identity,
+        Err(error) => {
+            let diagnostic = Diagnostic::error("workspace-entry-identity-error")
+                .with_message(format!("Workspace entry identity is invalid: {}", error))
+                .build();
+            return Err(diagnostics_to_api(&[diagnostic], ""));
+        }
+    };
+    if !graph
+        .modules()
+        .iter()
+        .any(|module| module.identity == entry_identity)
+    {
+        let diagnostic = Diagnostic::error("workspace-entry-not-found")
+            .with_message(format!(
+                "Workspace entry module '{}' was not found",
+                entry_identity
+            ))
+            .build();
+        return Err(diagnostics_to_api(&[diagnostic], ""));
+    }
+
+    let artifact = build_program_artifact_from_graph(&graph, &entry_identity, build_context);
+    if has_error_diagnostics(&artifact.diagnostics) {
+        let source_map = graph.source_map();
+        return Err(diagnostics_to_api_with_sources(
+            &artifact.diagnostics,
+            "",
+            &source_map,
+        ));
+    }
+
+    Ok(artifact)
 }
 
 fn build_library_artifact_with_registry(
@@ -594,88 +757,461 @@ fn apply_current_library_items(
     }
 }
 
+fn analyze_logical_module_graph(
+    graph: &LogicalModuleGraph,
+    build_context: &ProgramBuildContext,
+) -> LogicalProgramAnalysis {
+    let source_files = parse_logical_source_files(graph);
+    let source_map = graph.source_map();
+    let mut modules = Vec::with_capacity(source_files.len());
+    let mut libraries_by_root = FxHashMap::<PathBuf, Arc<LibraryArtifact>>::default();
+
+    for index in 0..source_files.len() {
+        let (mut artifact, libraries, selection_diagnostics) =
+            analyze_logical_source_file(&source_files, build_context, index);
+        artifact.diagnostics.extend(selection_diagnostics);
+        modules.push(artifact);
+
+        for library in libraries {
+            libraries_by_root
+                .entry(library.root_path.clone())
+                .or_insert(library);
+        }
+    }
+
+    let mut libraries = libraries_by_root.into_values().collect::<Vec<_>>();
+    libraries.sort_by(|lhs, rhs| lhs.root_path.cmp(&rhs.root_path));
+
+    LogicalProgramAnalysis {
+        modules,
+        libraries,
+        source_map,
+    }
+}
+
+fn parse_logical_source_files(graph: &LogicalModuleGraph) -> Vec<GraphSourceFile> {
+    graph
+        .modules()
+        .iter()
+        .map(|module| {
+            let parse_result = syntax_parse_str(module.source.as_ref(), &module.identity);
+            let source_id = SourceId::new(parse_result.source_id.as_u32());
+            let diagnostics =
+                normalize_diagnostics_file_name(parse_result.errors, &module.identity);
+            let preserved_module = parse_result.tree.map(|tree| lower(tree.root(), source_id));
+
+            GraphSourceFile {
+                identity: module.identity.clone(),
+                source: module.source.clone(),
+                source_id,
+                diagnostics,
+                preserved_module,
+            }
+        })
+        .collect()
+}
+
+fn analyze_logical_source_file(
+    source_files: &[GraphSourceFile],
+    build_context: &ProgramBuildContext,
+    current_file_index: usize,
+) -> (ModuleArtifact, Vec<Arc<LibraryArtifact>>, Vec<Diagnostic>) {
+    let source_file = &source_files[current_file_index];
+    let diagnostics = source_file.diagnostics.clone();
+    let Some(preserved_module) = source_file.preserved_module.clone() else {
+        return (
+            parse_failure_artifact(&source_file.identity, source_file.source_id, diagnostics),
+            Vec::new(),
+            Vec::new(),
+        );
+    };
+
+    let mut prepared_module = PreparedModule::new(&source_file.identity, preserved_module);
+    add_graph_peer_modules(&mut prepared_module, source_files, current_file_index);
+    let resolved_imports = apply_graph_imports(
+        &mut prepared_module,
+        source_files,
+        current_file_index,
+        build_context,
+    );
+    let selection = selected_program_libraries(
+        &resolved_imports,
+        &source_file.identity,
+        source_file.source.as_ref(),
+        build_context,
+    );
+
+    (
+        finalize_module_artifact(&source_file.identity, prepared_module, diagnostics),
+        selection.libraries,
+        selection.diagnostics,
+    )
+}
+
+fn add_graph_peer_modules(
+    module: &mut PreparedModule,
+    source_files: &[GraphSourceFile],
+    current_file_index: usize,
+) {
+    for (index, source_file) in source_files.iter().enumerate() {
+        if index == current_file_index {
+            continue;
+        }
+
+        if let Some(peer_module) = source_file.preserved_module.as_ref() {
+            module.add_peer_module(source_file.identity.clone(), Arc::new(peer_module.clone()));
+        }
+    }
+}
+
+fn apply_graph_imports(
+    module: &mut PreparedModule,
+    source_files: &[GraphSourceFile],
+    current_file_index: usize,
+    build_context: &ProgramBuildContext,
+) -> Vec<ResolvedBuildContextImport> {
+    let source_file = &source_files[current_file_index];
+    let identity_to_index = source_files
+        .iter()
+        .enumerate()
+        .map(|(index, source_file)| (source_file.identity.clone(), index))
+        .collect::<FxHashMap<_, _>>();
+    let mut seen_import_targets = FxHashMap::default();
+    let mut imported_visible_names = FxHashMap::default();
+    let mut resolved_imports = Vec::new();
+
+    for import in module.raw_module().imports.clone() {
+        if is_git_library_path(&import.library_path) {
+            module.add_diagnostic(LoweringDiagnostic {
+                message: format!(
+                    "Git library imports are not yet supported: '{}'",
+                    import.library_path
+                ),
+                span: import.span,
+            });
+            continue;
+        }
+
+        if is_http_library_path(&import.library_path) {
+            module.add_diagnostic(LoweringDiagnostic {
+                message: format!(
+                    "HTTP zip library imports are not yet supported: '{}'",
+                    import.library_path
+                ),
+                span: import.span,
+            });
+            continue;
+        }
+
+        let target_identity = match normalize_workspace_import_identity(
+            &source_file.identity,
+            &import.library_path,
+        ) {
+            Ok(identity) => identity,
+            Err(error) => {
+                module.add_diagnostic(LoweringDiagnostic {
+                    message: format!(
+                        "Workspace import '{}' is invalid: {}",
+                        import.library_path, error
+                    ),
+                    span: import.span,
+                });
+                continue;
+            }
+        };
+
+        if let Some(first_import_span) =
+            seen_import_targets.insert(target_identity.clone(), import.span)
+        {
+            let first_import_location =
+                line_col_for_span(source_file.source.as_ref(), first_import_span)
+                    .map(|(line, column)| {
+                        format!("; first imported at line {}, column {}", line, column)
+                    })
+                    .unwrap_or_default();
+            module.add_diagnostic(LoweringDiagnostic {
+                message: format!(
+                    "Module or library '{}' is imported more than once in this file{}",
+                    target_identity, first_import_location
+                ),
+                span: import.span,
+            });
+            continue;
+        }
+
+        if let Some(target_index) = identity_to_index.get(&target_identity).copied() {
+            add_workspace_import_bindings(
+                module,
+                &source_files[target_index],
+                &import,
+                &mut imported_visible_names,
+            );
+            continue;
+        }
+
+        match build_context.visible_library_by_logical_identity(&target_identity) {
+            LogicalLibraryResolution::Found(normalized_root, library) => {
+                resolved_imports.push(ResolvedBuildContextImport {
+                    normalized_root,
+                    library: library.clone(),
+                });
+
+                match &import.kind {
+                    ImportKind::Wildcard { alias } => {
+                        let mut export_names =
+                            library.exported_items.keys().cloned().collect::<Vec<_>>();
+                        export_names.sort();
+
+                        for export_name in export_names {
+                            let visible_name = alias
+                                .as_ref()
+                                .map(|prefix| format!("{}.{}", prefix.as_str(), export_name))
+                                .unwrap_or_else(|| export_name.clone());
+
+                            let Some(item_indices) = library.exported_items.get(&export_name)
+                            else {
+                                continue;
+                            };
+                            add_imported_interface_bindings(
+                                module,
+                                &visible_name,
+                                import.span,
+                                &library,
+                                item_indices,
+                                &mut imported_visible_names,
+                            );
+                        }
+                    }
+                    ImportKind::Selective { entries } => {
+                        for entry in entries {
+                            let Some(item_indices) =
+                                library.exported_items.get(entry.name.as_str())
+                            else {
+                                module.add_diagnostic(LoweringDiagnostic {
+                                    message: format!(
+                                        "Library '{}' does not export '{}'",
+                                        library.root_path.display(),
+                                        entry.name.as_str()
+                                    ),
+                                    span: entry.span,
+                                });
+                                continue;
+                            };
+
+                            let visible_name = visible_name_for_selective(entry);
+                            add_imported_interface_bindings(
+                                module,
+                                &visible_name,
+                                entry.span,
+                                &library,
+                                item_indices,
+                                &mut imported_visible_names,
+                            );
+                        }
+                    }
+                }
+                continue;
+            }
+            LogicalLibraryResolution::Ambiguous(roots) => {
+                module.add_diagnostic(LoweringDiagnostic {
+                    message: format!(
+                        "Ambiguous loaded library import '{}' matches multiple visible library roots: {}",
+                        target_identity,
+                        format_library_roots(&roots)
+                    ),
+                    span: import.span,
+                });
+                continue;
+            }
+            LogicalLibraryResolution::Missing => {}
+        }
+
+        module.add_diagnostic(LoweringDiagnostic {
+            message: format!(
+                "Missing workspace module or loaded library '{}' in the supplied build context",
+                target_identity
+            ),
+            span: import.span,
+        });
+    }
+
+    resolved_imports
+}
+
+fn add_workspace_import_bindings(
+    module: &mut PreparedModule,
+    target_source_file: &GraphSourceFile,
+    import: &Import,
+    imported_visible_names: &mut FxHashMap<(PreparedNamespace, String), String>,
+) {
+    let Some(target_module) = target_source_file.preserved_module.as_ref() else {
+        module.add_diagnostic(LoweringDiagnostic {
+            message: format!(
+                "Workspace import '{}' targets a module that did not parse successfully",
+                target_source_file.identity
+            ),
+            span: import.span,
+        });
+        return;
+    };
+
+    match &import.kind {
+        ImportKind::Wildcard { alias } => {
+            for (item_index, item) in target_module.items().iter().enumerate() {
+                if item.visibility() != Visibility::Export {
+                    continue;
+                }
+
+                let visible_name = alias
+                    .as_ref()
+                    .map(|prefix| format!("{}.{}", prefix.as_str(), item.name().as_str()))
+                    .unwrap_or_else(|| item.name().as_str().to_string());
+                add_workspace_item_bindings(
+                    module,
+                    &target_source_file.identity,
+                    item_index,
+                    item,
+                    &visible_name,
+                    import.span,
+                    imported_visible_names,
+                );
+            }
+        }
+        ImportKind::Selective { entries } => {
+            for entry in entries {
+                let Some((item_index, item)) =
+                    target_module.items().iter().enumerate().find(|(_, item)| {
+                        item.visibility() == Visibility::Export
+                            && item.name().as_str() == entry.name.as_str()
+                    })
+                else {
+                    module.add_diagnostic(LoweringDiagnostic {
+                        message: format!(
+                            "Workspace module '{}' does not export '{}'",
+                            target_source_file.identity,
+                            entry.name.as_str()
+                        ),
+                        span: entry.span,
+                    });
+                    continue;
+                };
+
+                let visible_name = visible_name_for_selective(entry);
+                add_workspace_item_bindings(
+                    module,
+                    &target_source_file.identity,
+                    item_index,
+                    item,
+                    &visible_name,
+                    entry.span,
+                    imported_visible_names,
+                );
+            }
+        }
+    }
+}
+
+fn add_workspace_item_bindings(
+    module: &mut PreparedModule,
+    target_module_identity: &str,
+    item_index: usize,
+    item: &Item,
+    visible_name: &str,
+    span: TextSpan,
+    imported_visible_names: &mut FxHashMap<(PreparedNamespace, String), String>,
+) {
+    let visible_name_ref = Name::new(visible_name);
+
+    for (namespace, kind) in binding_specs_for_item(item) {
+        if module.has_binding(namespace, &visible_name_ref) {
+            continue;
+        }
+
+        if let Some(previous_origin) =
+            imported_visible_names.get(&(namespace, visible_name.to_string()))
+        {
+            module.add_diagnostic(LoweringDiagnostic {
+                message: format!(
+                    "Imported name '{}' is provided by both {} and {}. Use aliases to disambiguate.",
+                    visible_name, previous_origin, target_module_identity
+                ),
+                span,
+            });
+            continue;
+        }
+
+        module.insert_binding(PreparedBinding {
+            visible_name: visible_name_ref.clone(),
+            namespace,
+            kind,
+            origin: PreparedBindingOrigin::Peer {
+                module_identity: target_module_identity.to_string(),
+            },
+            target: PreparedBindingTarget::Peer {
+                module_identity: target_module_identity.to_string(),
+                definition_id: local_definition_id(item_index),
+            },
+        });
+        imported_visible_names.insert(
+            (namespace, visible_name.to_string()),
+            target_module_identity.to_string(),
+        );
+    }
+}
+
 /// Builds a file-preserving program artifact from source text against a caller-supplied build context.
 pub fn build_program_artifact_from_source(
     source: &str,
     file_name: &str,
     build_context: &ProgramBuildContext,
 ) -> io::Result<ProgramArtifact> {
-    let source_path = Path::new(file_name);
-    let root_path = source_path.exists().then_some(source_path);
-    let PreparedRootModule {
-        artifact: root_artifact,
-        mut libraries,
-        diagnostics: mut selection_diagnostics,
-    } = prepare_root_module_with_context(source, file_name, root_path, build_context);
+    let identity = logical_source_identity(file_name);
+    let graph = LogicalModuleGraph::from_modules(vec![LogicalSourceModule {
+        identity: identity.clone(),
+        source: Arc::<str>::from(source),
+    }])
+    .map_err(source_provider_error_to_io)?;
+    Ok(build_program_artifact_from_graph(
+        &graph,
+        &identity,
+        build_context,
+    ))
+}
 
+fn build_program_artifact_from_graph(
+    graph: &LogicalModuleGraph,
+    entry_identity: &str,
+    build_context: &ProgramBuildContext,
+) -> ProgramArtifact {
+    let analysis = analyze_logical_module_graph(graph, build_context);
     let mut hasher = DefaultHasher::new();
-    file_name.hash(&mut hasher);
-    source.hash(&mut hasher);
-
-    if root_path.is_some() {
-        libraries.sort_by(|lhs, rhs| lhs.root_path.cmp(&rhs.root_path));
-        for library in &libraries {
-            hasher.write_u64(library.fingerprint);
-        }
+    entry_identity.hash(&mut hasher);
+    for module in graph.modules() {
+        module.identity.hash(&mut hasher);
+        module.source.hash(&mut hasher);
+    }
+    for library in &analysis.libraries {
+        hasher.write_u64(library.fingerprint);
     }
 
-    let root_modules = vec![root_artifact];
-    let mut diagnostics = root_modules[0].diagnostics.clone();
-    diagnostics.append(&mut selection_diagnostics);
-    for library in &libraries {
-        diagnostics.extend(library.diagnostics.iter().cloned());
-    }
+    let diagnostics = analysis.diagnostics();
+    let root_modules = analysis.modules;
+    let libraries = analysis.libraries;
+    let source_map = analysis.source_map;
 
     let fingerprint = hasher.finish();
     let resolved_program = build_resolved_program(&root_modules, &libraries, fingerprint);
+    let entry_module_id = resolved_program.source_provider_module_id(entry_identity);
 
-    Ok(ProgramArtifact {
+    ProgramArtifact {
         root_modules,
+        entry_identity: entry_identity.to_string(),
+        entry_module_id,
         libraries,
         diagnostics,
         fingerprint,
         resolved_program,
-    })
-}
-
-fn prepare_root_module_with_context(
-    source: &str,
-    file_name: &str,
-    source_path: Option<&Path>,
-    build_context: &ProgramBuildContext,
-) -> PreparedRootModule {
-    let parse_result = syntax_parse_str(source, file_name);
-    let source_id = SourceId::new(parse_result.source_id.as_u32());
-    let mut diagnostics = normalize_diagnostics_file_name(parse_result.errors, file_name);
-
-    let Some(tree) = parse_result.tree else {
-        return PreparedRootModule {
-            artifact: parse_failure_artifact(file_name, source_id, diagnostics),
-            libraries: Vec::new(),
-            diagnostics: Vec::new(),
-        };
-    };
-
-    let preserved_module = lower(tree.root(), source_id);
-    let mut prepared_module = PreparedModule::new(file_name, preserved_module);
-    let mut libraries = Vec::new();
-    let mut selection_diagnostics = Vec::new();
-
-    if let Some(path) = source_path {
-        let resolved_imports =
-            apply_build_context_imports(&mut prepared_module, path, build_context, source);
-        let selection =
-            selected_program_libraries(&resolved_imports, file_name, source, build_context);
-        libraries = selection.libraries;
-        selection_diagnostics = selection.diagnostics;
-    } else if !prepared_module.raw_module().imports.is_empty() {
-        diagnostics.push(library_imports_require_path_diagnostic(source, file_name));
-    }
-
-    PreparedRootModule {
-        artifact: finalize_module_artifact(file_name, prepared_module, diagnostics),
-        libraries,
-        diagnostics: selection_diagnostics,
+        source_map,
     }
 }
 
@@ -1060,7 +1596,9 @@ fn build_resolved_program(
         root_module_ids.push(module_id);
         modules.push(ResolvedModule {
             id: module_id,
-            identity: artifact.file_name.clone(),
+            source: ResolvedModuleSource::SourceProvider {
+                identity: artifact.file_name.clone(),
+            },
             lowered_module: module,
         });
     }
@@ -1075,7 +1613,10 @@ fn build_resolved_program(
             module_ids.insert(artifact.file_name.clone(), module_id);
             modules.push(ResolvedModule {
                 id: module_id,
-                identity: artifact.file_name.clone(),
+                source: ResolvedModuleSource::Library {
+                    root_path: library.root_path.clone(),
+                    module_path: PathBuf::from(&artifact.file_name),
+                },
                 lowered_module: module,
             });
         }
@@ -1145,6 +1686,10 @@ fn build_resolved_program(
                 .map(move |artifact| (artifact.file_name.clone(), library.clone()))
         })
         .collect::<FxHashMap<_, _>>();
+    let root_module_by_identity = root_modules
+        .iter()
+        .map(|artifact| (artifact.file_name.clone(), artifact))
+        .collect::<FxHashMap<_, _>>();
 
     for artifact in root_modules
         .iter()
@@ -1157,12 +1702,29 @@ fn build_resolved_program(
         let mut visible_imports = FxHashMap::default();
 
         for import in &artifact.imports {
-            let Some(normalized_root) =
-                normalize_supported_library_path(module_file, &import.library_path)
-            else {
+            let target_identity =
+                normalize_workspace_import_identity(&artifact.file_name, &import.library_path).ok();
+            if let Some(target_artifact) = target_identity
+                .as_ref()
+                .and_then(|identity| root_module_by_identity.get(identity))
+            {
+                add_graph_resolved_imports(
+                    &mut visible_imports,
+                    &module_ids,
+                    target_artifact,
+                    import,
+                );
                 continue;
-            };
-            let Some(library) = library_by_root.get(&normalized_root) else {
+            }
+
+            let library = normalize_supported_library_path(module_file, &import.library_path)
+                .and_then(|normalized_root| library_by_root.get(&normalized_root))
+                .or_else(|| {
+                    target_identity
+                        .as_ref()
+                        .and_then(|identity| logical_library_by_identity(libraries, identity))
+                });
+            let Some(library) = library else {
                 continue;
             };
 
@@ -1270,6 +1832,87 @@ fn build_resolved_program(
         entry_enums,
         imports,
     )
+}
+
+fn add_graph_resolved_imports(
+    visible_imports: &mut FxHashMap<String, ModuleQualifiedItemRef>,
+    module_ids: &FxHashMap<String, RuntimeModuleId>,
+    target_artifact: &ModuleArtifact,
+    import: &Import,
+) {
+    let Some(target_module) = target_artifact.lowered_module.as_ref() else {
+        return;
+    };
+    let Some(&target_module_id) = module_ids.get(&target_artifact.file_name) else {
+        return;
+    };
+
+    match &import.kind {
+        ImportKind::Wildcard { alias } => {
+            for (item_index, item) in target_module.items().iter().enumerate() {
+                if item.visibility() != Visibility::Export {
+                    continue;
+                }
+
+                let visible_name = alias
+                    .as_ref()
+                    .map(|prefix| format!("{}.{}", prefix.as_str(), item.name().as_str()))
+                    .unwrap_or_else(|| item.name().as_str().to_string());
+                visible_imports
+                    .entry(visible_name)
+                    .or_insert_with(|| ModuleQualifiedItemRef {
+                        module_id: target_module_id,
+                        definition_id: local_definition_id(item_index),
+                        kind: resolved_item_kind(item),
+                    });
+            }
+        }
+        ImportKind::Selective { entries } => {
+            for entry in entries {
+                let Some((item_index, item)) =
+                    target_module.items().iter().enumerate().find(|(_, item)| {
+                        item.visibility() == Visibility::Export
+                            && item.name().as_str() == entry.name.as_str()
+                    })
+                else {
+                    continue;
+                };
+
+                visible_imports
+                    .entry(visible_name_for_selective(entry))
+                    .or_insert_with(|| ModuleQualifiedItemRef {
+                        module_id: target_module_id,
+                        definition_id: local_definition_id(item_index),
+                        kind: resolved_item_kind(item),
+                    });
+            }
+        }
+    }
+}
+
+fn logical_library_by_identity<'a>(
+    libraries: &'a [Arc<LibraryArtifact>],
+    identity: &str,
+) -> Option<&'a Arc<LibraryArtifact>> {
+    let suffix = format!("/{}", identity);
+    let mut suffix_match = None;
+
+    for library in libraries {
+        let Some(root_identity) = logical_identity_for_path(&library.root_path) else {
+            continue;
+        };
+        if root_identity == identity {
+            return Some(library);
+        }
+        if root_identity.ends_with(&suffix) {
+            if suffix_match.is_some() {
+                return None;
+            }
+            suffix_match = Some(library);
+        }
+    }
+
+    suffix_match
 }
 
 fn build_interface_item(
@@ -1458,6 +2101,14 @@ fn interface_origin(root_path: &Path, item: &LibraryInterfaceItem) -> String {
     format!("{} ({})", item.item_name, relative.display())
 }
 
+fn format_library_roots(roots: &[PathBuf]) -> String {
+    roots
+        .iter()
+        .map(|root| root.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn collect_library_dependencies(
     imports: &[Import],
     source_file: &Path,
@@ -1516,6 +2167,34 @@ fn normalize_local_library_path(base_file: &Path, library_path: &str) -> io::Res
     fs::canonicalize(candidate)
 }
 
+fn logical_source_identity(file_name: &str) -> String {
+    normalize_workspace_identity(file_name)
+        .map_err(|_| ())
+        .or_else(|_| {
+            let path = Path::new(file_name);
+            logical_identity_for_path(path).ok_or(())
+        })
+        .unwrap_or_else(|_| "input.nx".to_string())
+}
+
+fn logical_identity_for_path(path: &Path) -> Option<String> {
+    let identity = path
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(value) => Some(value.to_string_lossy().to_string()),
+            Component::CurDir => Some(".".to_string()),
+            Component::ParentDir => Some("..".to_string()),
+            Component::RootDir | Component::Prefix(_) => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/");
+    normalize_workspace_identity(&identity).ok()
+}
+
+fn source_provider_error_to_io(error: SourceProviderError) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, error.to_string())
+}
+
 fn visible_name_for_selective(entry: &SelectiveImport) -> String {
     match entry.qualifier.as_ref() {
         Some(prefix) => format!("{}.{}", prefix.as_str(), entry.name.as_str()),
@@ -1553,11 +2232,13 @@ fn full_source_span(source: &str) -> TextSpan {
     TextSpan::new(TextSize::from(0), TextSize::from(source_len))
 }
 
-fn library_imports_require_path_diagnostic(source: &str, file_name: &str) -> Diagnostic {
-    Diagnostic::error("library-imports-require-path")
-        .with_message("Library imports require an on-disk source path")
-        .with_label(Label::primary(file_name, full_source_span(source)))
-        .with_help("Pass a real file path as file_name or use a file-based entry point.")
+fn source_provider_error_diagnostic(error: &SourceProviderError) -> Diagnostic {
+    let code = match error {
+        SourceProviderError::Identity(_) => "workspace-identity-error",
+        SourceProviderError::Io { .. } => "workspace-source-load-error",
+    };
+    Diagnostic::error(code)
+        .with_message(error.to_string())
         .build()
 }
 
@@ -1641,8 +2322,18 @@ pub(crate) fn has_error_diagnostics(diagnostics: &[Diagnostic]) -> bool {
 mod tests {
     use super::*;
     use crate::eval::eval_program_artifact;
+    use crate::source_graph::FilesystemSourceProvider;
     use crate::EvalResult;
+    use crate::NxWorkspaceModule;
     use tempfile::TempDir;
+
+    fn workspace_module(identity: &str, source: impl Into<Vec<u8>>) -> NxWorkspaceModule {
+        NxWorkspaceModule::from_utf8(identity, source.into()).expect("workspace module")
+    }
+
+    fn workspace(modules: Vec<NxWorkspaceModule>) -> NxWorkspace {
+        NxWorkspace::new(modules).expect("workspace")
+    }
 
     #[test]
     fn library_artifact_preserves_modules_and_exports_separately() {
@@ -2271,10 +2962,9 @@ let root() = { <Button /> }"#;
         )
         .expect("Expected program artifact with diagnostics");
 
-        assert!(artifact
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.message().contains("Missing loaded library")));
+        assert!(artifact.diagnostics.iter().any(|diagnostic| diagnostic
+            .message()
+            .contains("Missing workspace module or loaded library")));
     }
 
     #[test]
@@ -2483,7 +3173,9 @@ let root() = { secret() }"#;
         assert!(hidden_artifact
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.message().contains("Missing loaded library")));
+            .any(|diagnostic| diagnostic
+                .message()
+                .contains("Missing workspace module or loaded library")));
     }
 
     #[test]
@@ -2544,5 +3236,450 @@ let root() = { answer() }"#;
             diagnostic.code() == Some("library-dependency-closure-incomplete")
                 && diagnostic.message().contains(&expected_chain)
         }));
+    }
+
+    #[test]
+    fn validate_workspace_accepts_valid_relative_imports() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "app/main.nx",
+                br#"import { answer } from "../shared/value.nx"
+let root(): int = { answer }"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "shared/value.nx",
+                br#"export let answer: int = 42"#.to_vec(),
+            ),
+        ]);
+
+        let diagnostics = validate_workspace(&workspace, &ProgramBuildContext::empty());
+
+        assert_eq!(diagnostics, Vec::<NxDiagnostic>::new());
+    }
+
+    #[test]
+    fn validate_workspace_reports_duplicate_identities() {
+        let result = NxWorkspace::new(vec![
+            workspace_module("shared/value.nx", b"let root() = { 1 }".to_vec()),
+            workspace_module("shared/./value.nx", b"let root() = { 2 }".to_vec()),
+        ]);
+
+        assert!(matches!(
+            result,
+            Err(crate::NxWorkspaceInputError::DuplicateIdentity { ref identity })
+                if identity == "shared/value.nx"
+        ));
+    }
+
+    #[test]
+    fn validate_workspace_reports_invalid_source_bytes() {
+        assert!(matches!(
+            NxWorkspaceModule::from_utf8("main.nx", vec![0xff]),
+            Err(crate::NxWorkspaceInputError::InvalidSourceUtf8 { ref identity })
+                if identity == "main.nx"
+        ));
+    }
+
+    #[test]
+    fn validate_workspace_reports_missing_import_without_disk_probe() {
+        let workspace = workspace(vec![workspace_module(
+            "app/main.nx",
+            br#"import { answer } from "../shared/missing.nx"
+let root(): int = { answer }"#
+                .to_vec(),
+        )]);
+
+        let diagnostics = validate_workspace(&workspace, &ProgramBuildContext::empty());
+
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("shared/missing.nx")
+                && diagnostic
+                    .message
+                    .contains("Missing workspace module or loaded library")
+        }));
+    }
+
+    #[test]
+    fn validate_workspace_reports_ambiguous_library_basename_fallback() {
+        let temp = TempDir::new().expect("temp dir");
+        let first_ui_dir = temp.path().join("tenant-a").join("ui");
+        let second_ui_dir = temp.path().join("tenant-b").join("ui");
+        fs::create_dir_all(&first_ui_dir).expect("first ui dir");
+        fs::create_dir_all(&second_ui_dir).expect("second ui dir");
+        fs::write(
+            first_ui_dir.join("answer.nx"),
+            r#"export let answer(): int = { 1 }"#,
+        )
+        .expect("first ui file");
+        fs::write(
+            second_ui_dir.join("answer.nx"),
+            r#"export let answer(): int = { 2 }"#,
+        )
+        .expect("second ui file");
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&first_ui_dir)
+            .expect("first library load");
+        registry
+            .load_library_from_directory(&second_ui_dir)
+            .expect("second library load");
+        let build_context = registry.build_context();
+        let workspace = workspace(vec![workspace_module(
+            "app/main.nx",
+            br#"import { answer } from "../ui"
+let root(): int = { answer() }"#
+                .to_vec(),
+        )]);
+
+        let diagnostics = validate_workspace(&workspace, &build_context);
+
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("Ambiguous loaded library import 'ui'")
+                && diagnostic
+                    .message
+                    .contains(&first_ui_dir.display().to_string())
+                && diagnostic
+                    .message
+                    .contains(&second_ui_dir.display().to_string())
+        }));
+    }
+
+    #[test]
+    fn validate_workspace_reports_root_escaping_imports() {
+        let workspace = workspace(vec![workspace_module(
+            "app/main.nx",
+            br#"import { answer } from "../../outside.nx"
+let root(): int = { answer }"#
+                .to_vec(),
+        )]);
+
+        let diagnostics = validate_workspace(&workspace, &ProgramBuildContext::empty());
+
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.message.contains("escapes the workspace root") }));
+    }
+
+    #[test]
+    fn validate_workspace_aggregates_diagnostics_across_modules() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "app/main.nx",
+                br#"import { answer } from "../shared/missing.nx"
+let root(): int = { answer }"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "shared/value.nx",
+                br#"let broken(): int = { "oops" }"#.to_vec(),
+            ),
+        ]);
+
+        let diagnostics = validate_workspace(&workspace, &ProgramBuildContext::empty());
+
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("shared/missing.nx")));
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code.as_deref() == Some("return-type-mismatch")));
+    }
+
+    #[test]
+    fn logical_graph_validation_matches_file_backed_provider_for_relative_imports() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        let shared_dir = temp.path().join("shared");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&shared_dir).expect("shared dir");
+
+        let main_path = app_dir.join("main.nx");
+        let value_path = shared_dir.join("value.nx");
+        let main_source = r#"import { answer } from "../shared/value.nx"
+let root(): int = { answer }"#;
+        let value_source = r#"export let answer: int = 42"#;
+        fs::write(&main_path, main_source).expect("main file");
+        fs::write(&value_path, value_source).expect("value file");
+
+        let workspace = workspace(vec![
+            workspace_module("app/main.nx", main_source.as_bytes().to_vec()),
+            workspace_module("shared/value.nx", value_source.as_bytes().to_vec()),
+        ]);
+        let workspace_graph = WorkspaceSourceProvider::new(&workspace)
+            .load_graph()
+            .expect("workspace graph");
+        let filesystem_graph = FilesystemSourceProvider::from_root(temp.path())
+            .expect("filesystem provider")
+            .load_graph()
+            .expect("filesystem graph");
+
+        let workspace_analysis =
+            analyze_logical_module_graph(&workspace_graph, &ProgramBuildContext::empty());
+        let filesystem_analysis =
+            analyze_logical_module_graph(&filesystem_graph, &ProgramBuildContext::empty());
+
+        assert_eq!(
+            workspace_analysis
+                .diagnostics()
+                .iter()
+                .filter(|diagnostic| diagnostic.severity() == Severity::Error)
+                .count(),
+            0
+        );
+        assert_eq!(
+            filesystem_analysis
+                .diagnostics()
+                .iter()
+                .filter(|diagnostic| diagnostic.severity() == Severity::Error)
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn build_workspace_program_artifact_records_selected_entry_identity() {
+        let workspace = workspace(vec![workspace_module(
+            "app/./main.nx",
+            br#"let root() = { 42 }"#.to_vec(),
+        )]);
+
+        let artifact = build_workspace_program_artifact(
+            &workspace,
+            "app/main.nx",
+            &ProgramBuildContext::empty(),
+        )
+        .expect("workspace artifact");
+
+        assert_eq!(artifact.entry_identity, "app/main.nx");
+    }
+
+    #[test]
+    fn resolved_program_separates_source_provider_identities_from_library_provenance() {
+        let temp = TempDir::new().expect("temp dir");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+        fs::write(
+            ui_dir.join("answer.nx"),
+            r#"export let answer(): int = { 42 }"#,
+        )
+        .expect("answer file");
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("library artifact");
+        let build_context = registry.build_context();
+        let workspace = workspace(vec![workspace_module(
+            "app/main.nx",
+            br#"import { answer } from "../ui"
+let root(): int = { answer() }"#
+                .to_vec(),
+        )]);
+
+        let artifact = build_workspace_program_artifact(&workspace, "app/main.nx", &build_context)
+            .expect("workspace artifact");
+
+        let entry_module_id = artifact.entry_module_id.expect("entry module id");
+        assert_eq!(
+            Some(entry_module_id),
+            artifact
+                .resolved_program
+                .source_provider_module_id("app/main.nx")
+        );
+
+        let entry_module = artifact
+            .resolved_program
+            .module(entry_module_id)
+            .expect("entry module");
+        assert!(matches!(
+            &entry_module.source,
+            ResolvedModuleSource::SourceProvider { identity } if identity == "app/main.nx"
+        ));
+
+        let canonical_ui_dir = fs::canonicalize(&ui_dir).expect("canonical ui dir");
+        let library_module = artifact
+            .resolved_program
+            .modules()
+            .iter()
+            .find(|module| {
+                matches!(
+                    &module.source,
+                    ResolvedModuleSource::Library {
+                        root_path,
+                        module_path
+                    } if root_path == &canonical_ui_dir && module_path.ends_with("answer.nx")
+                )
+            })
+            .expect("library module provenance");
+
+        assert!(
+            artifact
+                .resolved_program
+                .module_by_source_provider_identity(&library_module.prepared_module_identity())
+                .is_none(),
+            "library module paths must not be source-provider lookup identities"
+        );
+    }
+
+    #[test]
+    fn build_workspace_program_artifact_reports_missing_entry() {
+        let workspace = workspace(vec![workspace_module(
+            "main.nx",
+            br#"let root() = { 42 }"#.to_vec(),
+        )]);
+
+        let diagnostics = build_workspace_program_artifact(
+            &workspace,
+            "missing.nx",
+            &ProgramBuildContext::empty(),
+        )
+        .expect_err("missing entry should fail");
+
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.code.as_deref() == Some("workspace-entry-not-found")
+                && diagnostic.message.contains("missing.nx")
+        }));
+    }
+
+    #[test]
+    fn eval_workspace_artifact_uses_selected_entry_root() {
+        let workspace = workspace(vec![
+            workspace_module("a.nx", br#"let root() = { "a" }"#.to_vec()),
+            workspace_module("b.nx", br#"let root() = { "b" }"#.to_vec()),
+        ]);
+
+        let artifact =
+            build_workspace_program_artifact(&workspace, "b.nx", &ProgramBuildContext::empty())
+                .expect("workspace artifact");
+
+        let EvalResult::Ok(value) = eval_program_artifact(&artifact) else {
+            panic!("Expected selected root evaluation to succeed");
+        };
+        assert_eq!(value, nx_value::NxValue::String("b".to_string()));
+    }
+
+    #[test]
+    fn eval_workspace_artifact_reports_no_root_for_selected_entry() {
+        let workspace = workspace(vec![
+            workspace_module("entry.nx", br#"let helper() = { 1 }"#.to_vec()),
+            workspace_module("other.nx", br#"let root() = { 2 }"#.to_vec()),
+        ]);
+
+        let artifact =
+            build_workspace_program_artifact(&workspace, "entry.nx", &ProgramBuildContext::empty())
+                .expect("workspace artifact");
+
+        let EvalResult::Err(diagnostics) = eval_program_artifact(&artifact) else {
+            panic!("Expected missing root diagnostic");
+        };
+
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.code.as_deref() == Some("no-root")
+                && diagnostic
+                    .labels
+                    .iter()
+                    .any(|label| label.file == "entry.nx" && label.span.end_column > 1)
+        }));
+    }
+
+    #[test]
+    fn eval_workspace_artifact_executes_across_workspace_imports() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "app/main.nx",
+                br#"import { answer } from "../shared/value.nx"
+let root(): int = { answer() }"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "shared/value.nx",
+                br#"export let answer(): int = { 42 }"#.to_vec(),
+            ),
+        ]);
+
+        let artifact = build_workspace_program_artifact(
+            &workspace,
+            "app/main.nx",
+            &ProgramBuildContext::empty(),
+        )
+        .expect("workspace artifact");
+
+        let EvalResult::Ok(value) = eval_program_artifact(&artifact) else {
+            panic!("Expected workspace import evaluation to succeed");
+        };
+        assert_eq!(value, nx_value::NxValue::Int(42));
+    }
+
+    #[test]
+    fn file_backed_program_artifact_records_explicit_entry_identity() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        let main_path = app_dir.join("main.nx");
+        let source = r#"let root() = { 42 }"#;
+        fs::write(&main_path, source).expect("main file");
+
+        let artifact = build_program_artifact_from_source(
+            source,
+            &main_path.display().to_string(),
+            &ProgramBuildContext::empty(),
+        )
+        .expect("program artifact");
+
+        assert!(artifact.entry_identity.ends_with("app/main.nx"));
+    }
+
+    #[test]
+    fn workspace_program_artifact_survives_workspace_drop() {
+        let artifact = {
+            let workspace = workspace(vec![workspace_module(
+                "main.nx",
+                br#"let root() = { 42 }"#.to_vec(),
+            )]);
+            build_workspace_program_artifact(&workspace, "main.nx", &ProgramBuildContext::empty())
+                .expect("workspace artifact")
+        };
+
+        let EvalResult::Ok(value) = eval_program_artifact(&artifact) else {
+            panic!("Expected artifact evaluation to succeed after workspace drop");
+        };
+        assert_eq!(value, nx_value::NxValue::Int(42));
+    }
+
+    #[test]
+    fn workspace_program_artifact_survives_build_context_drop() {
+        let temp = TempDir::new().expect("temp dir");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+        fs::write(
+            ui_dir.join("answer.nx"),
+            r#"export let answer(): int = { 42 }"#,
+        )
+        .expect("ui file");
+
+        let artifact = {
+            let registry = LibraryRegistry::new();
+            registry
+                .load_library_from_directory(&ui_dir)
+                .expect("library preload");
+            let build_context = registry.build_context();
+            let workspace = workspace(vec![workspace_module(
+                "app/main.nx",
+                br#"import { answer } from "../ui"
+let root(): int = { answer() }"#
+                    .to_vec(),
+            )]);
+            build_workspace_program_artifact(&workspace, "app/main.nx", &build_context)
+                .expect("workspace artifact")
+        };
+
+        let EvalResult::Ok(value) = eval_program_artifact(&artifact) else {
+            panic!("Expected artifact evaluation to succeed after build context drop");
+        };
+        assert_eq!(value, nx_value::NxValue::Int(42));
     }
 }

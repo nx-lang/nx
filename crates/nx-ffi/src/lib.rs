@@ -3,25 +3,35 @@
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 use nx_api::{
+    build_workspace_program_artifact,
     dispatch_component_actions_program_artifact as api_dispatch_component_actions_program_artifact,
     eval_program_artifact as api_eval_program_artifact, eval_source,
     initialize_component_program_artifact as api_initialize_component_program_artifact,
-    load_program_artifact_from_source, ComponentDispatchEvalResult, ComponentDispatchResult,
-    ComponentInitEvalResult, ComponentInitResult, EvalResult, LibraryRegistry, NxDiagnostic,
-    NxSeverity, ProgramArtifact, ProgramBuildContext,
+    load_program_artifact_from_source, validate_workspace, ComponentDispatchEvalResult,
+    ComponentDispatchResult, ComponentInitEvalResult, ComponentInitResult, EvalResult,
+    LibraryRegistry, NxDiagnostic, NxSeverity, NxWorkspace,
+    NxWorkspaceModule as ApiNxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
 };
 use nx_value::NxValue;
 use serde::Serialize;
 use std::any::Any;
 use std::panic;
 
-pub const NX_FFI_ABI_VERSION: u32 = 8;
+pub const NX_FFI_ABI_VERSION: u32 = 9;
 
 #[repr(C)]
 pub struct NxBuffer {
     pub ptr: *mut u8,
     pub len: usize,
     pub cap: usize,
+}
+
+#[repr(C)]
+pub struct NxWorkspaceModule {
+    pub identity_ptr: *const u8,
+    pub identity_len: usize,
+    pub source_utf8_ptr: *const u8,
+    pub source_utf8_len: usize,
 }
 
 pub struct NxProgramArtifactHandle;
@@ -251,6 +261,46 @@ fn parse_file_name(file_name_ptr: *const u8, file_name_len: usize) -> Result<Str
     }
 }
 
+fn parse_workspace_modules(
+    modules_ptr: *const NxWorkspaceModule,
+    module_count: usize,
+) -> Result<NxWorkspace, NxEvalStatus> {
+    if module_count > 0 && modules_ptr.is_null() {
+        return Err(NxEvalStatus::InvalidArgument);
+    }
+
+    let descriptors = if module_count == 0 {
+        &[][..]
+    } else {
+        unsafe { std::slice::from_raw_parts(modules_ptr, module_count) }
+    };
+    let mut modules = Vec::with_capacity(descriptors.len());
+    for descriptor in descriptors {
+        let identity = unsafe {
+            slice_to_str(descriptor.identity_ptr, descriptor.identity_len)
+                .map_err(|_| NxEvalStatus::InvalidArgument)?
+        };
+        let source_utf8 = unsafe {
+            slice_to_bytes(descriptor.source_utf8_ptr, descriptor.source_utf8_len)
+                .map_err(|_| NxEvalStatus::InvalidArgument)?
+        };
+        let source = std::str::from_utf8(source_utf8).map_err(|_| NxEvalStatus::InvalidArgument)?;
+
+        modules.push(
+            ApiNxWorkspaceModule::from_source(identity, source)
+                .map_err(|_| NxEvalStatus::InvalidArgument)?,
+        );
+    }
+
+    NxWorkspace::new(modules).map_err(|_| NxEvalStatus::InvalidArgument)
+}
+
+fn parse_required_utf8(ptr: *const u8, len: usize) -> Result<String, NxEvalStatus> {
+    unsafe { slice_to_str(ptr, len) }
+        .map(str::to_string)
+        .map_err(|_| NxEvalStatus::InvalidArgument)
+}
+
 fn with_program_artifact<T>(
     handle_ptr: *const NxProgramArtifactHandle,
     f: impl FnOnce(&ProgramArtifact) -> Result<T, String>,
@@ -433,6 +483,89 @@ pub extern "C" fn nx_build_program_artifact(
         let build_context = handle.build_context.clone();
 
         match load_program_artifact_from_source(source, &file_name, &build_context) {
+            Ok(program_artifact) => {
+                let handle = Box::new(ProgramArtifactHandleInner { program_artifact });
+                unsafe {
+                    *out_handle = Box::into_raw(handle).cast::<NxProgramArtifactHandle>();
+                }
+                Ok((NxEvalStatus::Ok, Vec::new()))
+            }
+            Err(diagnostics) => {
+                let payload = rmp_serde::to_vec_named(&diagnostics)
+                    .map_err(|e| format!("messagepack serialize failed: {e}"))?;
+                Ok((NxEvalStatus::Error, payload))
+            }
+        }
+    });
+
+    finish_msgpack_entry(out_buffer, result)
+}
+
+#[no_mangle]
+pub extern "C" fn nx_validate_workspace(
+    build_context_ptr: *const NxProgramBuildContextHandle,
+    modules_ptr: *const NxWorkspaceModule,
+    module_count: usize,
+    out_buffer: *mut NxBuffer,
+) -> NxEvalStatus {
+    if let Err(status) = prepare_out_buffer(out_buffer) {
+        return status;
+    }
+
+    if build_context_ptr.is_null() {
+        return NxEvalStatus::InvalidArgument;
+    }
+
+    let workspace = match parse_workspace_modules(modules_ptr, module_count) {
+        Ok(workspace) => workspace,
+        Err(status) => return status,
+    };
+
+    let result = panic::catch_unwind(|| {
+        let handle = unsafe { &*build_context_ptr.cast::<ProgramBuildContextHandleInner>() };
+        let diagnostics = validate_workspace(&workspace, &handle.build_context);
+        let payload = rmp_serde::to_vec_named(&diagnostics)
+            .map_err(|e| format!("messagepack serialize failed: {e}"))?;
+        Ok((NxEvalStatus::Ok, payload))
+    });
+
+    finish_msgpack_entry(out_buffer, result)
+}
+
+#[no_mangle]
+pub extern "C" fn nx_build_workspace_program_artifact(
+    build_context_ptr: *const NxProgramBuildContextHandle,
+    modules_ptr: *const NxWorkspaceModule,
+    module_count: usize,
+    entry_identity_ptr: *const u8,
+    entry_identity_len: usize,
+    out_handle: *mut *mut NxProgramArtifactHandle,
+    out_buffer: *mut NxBuffer,
+) -> NxEvalStatus {
+    if let Err(status) = prepare_out_program_artifact_handle(out_handle) {
+        return status;
+    }
+
+    if let Err(status) = prepare_out_buffer(out_buffer) {
+        return status;
+    }
+
+    if build_context_ptr.is_null() {
+        return NxEvalStatus::InvalidArgument;
+    }
+
+    let workspace = match parse_workspace_modules(modules_ptr, module_count) {
+        Ok(workspace) => workspace,
+        Err(status) => return status,
+    };
+    let entry_identity = match parse_required_utf8(entry_identity_ptr, entry_identity_len) {
+        Ok(entry_identity) => entry_identity,
+        Err(status) => return status,
+    };
+
+    let result = panic::catch_unwind(|| {
+        let handle = unsafe { &*build_context_ptr.cast::<ProgramBuildContextHandleInner>() };
+        match build_workspace_program_artifact(&workspace, &entry_identity, &handle.build_context) {
             Ok(program_artifact) => {
                 let handle = Box::new(ProgramArtifactHandleInner { program_artifact });
                 unsafe {

@@ -1,7 +1,10 @@
 use nx_diagnostics::{Diagnostic, Severity};
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 use text_size::TextRange;
 
 /// The severity level of a diagnostic message.
@@ -94,24 +97,53 @@ pub struct NxDiagnostic {
 /// `source` must be the same source text that was parsed to produce `diagnostics`; otherwise
 /// the computed line/column positions will be incorrect.
 pub fn diagnostics_to_api(diagnostics: &[Diagnostic], source: &str) -> Vec<NxDiagnostic> {
+    diagnostics_to_api_with_source_map(diagnostics, source, None)
+}
+
+pub(crate) fn diagnostics_to_api_with_sources(
+    diagnostics: &[Diagnostic],
+    fallback_source: &str,
+    sources: &FxHashMap<String, Arc<str>>,
+) -> Vec<NxDiagnostic> {
+    diagnostics_to_api_with_source_map(diagnostics, fallback_source, Some(sources))
+}
+
+fn diagnostics_to_api_with_source_map(
+    diagnostics: &[Diagnostic],
+    fallback_source: &str,
+    sources: Option<&FxHashMap<String, Arc<str>>>,
+) -> Vec<NxDiagnostic> {
     diagnostics
         .iter()
-        .map(|d| diagnostic_to_api(d, source))
+        .map(|d| diagnostic_to_api(d, fallback_source, sources))
         .collect()
 }
 
-fn diagnostic_to_api(diagnostic: &Diagnostic, fallback_source: &str) -> NxDiagnostic {
+fn diagnostic_to_api(
+    diagnostic: &Diagnostic,
+    fallback_source: &str,
+    sources: Option<&FxHashMap<String, Arc<str>>>,
+) -> NxDiagnostic {
     let mut labels = Vec::with_capacity(diagnostic.labels().len());
     for label in diagnostic.labels() {
-        let label_source = if !label.file.is_empty() && Path::new(&label.file).is_file() {
-            fs::read_to_string(&label.file).unwrap_or_else(|_| fallback_source.to_string())
-        } else {
-            fallback_source.to_string()
-        };
-        let index = LineIndex::new(&label_source);
+        let label_source = sources
+            .and_then(|sources| sources.get(&label.file))
+            .map(|source| Cow::Borrowed(source.as_ref()))
+            .unwrap_or_else(|| {
+                if !label.file.is_empty() && Path::new(&label.file).is_file() {
+                    Cow::Owned(
+                        fs::read_to_string(&label.file)
+                            .unwrap_or_else(|_| fallback_source.to_string()),
+                    )
+                } else {
+                    Cow::Borrowed(fallback_source)
+                }
+            });
+        let label_source = label_source.as_ref();
+        let index = LineIndex::new(label_source);
         labels.push(NxDiagnosticLabel {
             file: label.file.clone(),
-            span: text_range_to_span(label.range, &label_source, &index),
+            span: text_range_to_span(label.range, label_source, &index),
             message: label.message.clone(),
             primary: label.primary,
         });
@@ -124,6 +156,39 @@ fn diagnostic_to_api(diagnostic: &Diagnostic, fallback_source: &str) -> NxDiagno
         labels,
         help: diagnostic.help().map(ToString::to_string),
         note: diagnostic.note().map(ToString::to_string),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nx_diagnostics::Label;
+    use tempfile::TempDir;
+    use text_size::{TextRange, TextSize};
+
+    #[test]
+    fn source_map_takes_precedence_over_file_backed_fallback() {
+        let temp = TempDir::new().expect("temp dir");
+        let source_path = temp.path().join("config.nx");
+        fs::write(&source_path, "disk line 1\nsecond line").expect("disk source");
+
+        let source_file = source_path.display().to_string();
+        let diagnostic = Diagnostic::error("test")
+            .with_message("uses provider source")
+            .with_label(Label::primary(
+                &source_file,
+                TextRange::new(TextSize::from(10), TextSize::from(14)),
+            ))
+            .build();
+        let mut sources = FxHashMap::default();
+        sources.insert(source_file, Arc::<str>::from("provider source text"));
+
+        let diagnostics = diagnostics_to_api_with_sources(&[diagnostic], "", &sources);
+
+        assert_eq!(diagnostics[0].labels[0].span.start_line, 1);
+        assert_eq!(diagnostics[0].labels[0].span.start_column, 11);
+        assert_eq!(diagnostics[0].labels[0].span.end_line, 1);
+        assert_eq!(diagnostics[0].labels[0].span.end_column, 15);
     }
 }
 

@@ -2,6 +2,7 @@
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
@@ -70,6 +71,33 @@ public static class NxRuntime
 
         using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, buildContext, fileName);
         return EvaluateBytes(programArtifact, outputFormat);
+    }
+
+    /// <summary>
+    /// Validates an in-memory workspace and returns all diagnostics reported by NX.
+    /// </summary>
+    public static IReadOnlyList<NxDiagnostic> ValidateWorkspace(
+        NxWorkspace workspace,
+        NxProgramBuildContext buildContext)
+    {
+        ArgumentNullException.ThrowIfNull(workspace);
+        ArgumentNullException.ThrowIfNull(buildContext);
+
+        NxNativeLibrary.EnsureLoaded();
+
+        using NxWorkspaceDescriptorScope descriptors = new(workspace);
+        NxEvalStatus status = NxNativeMethods.nx_validate_workspace(
+            buildContext.SafeHandle,
+            descriptors.Pointer,
+            descriptors.Count,
+            out NxBuffer buffer);
+        byte[] payload = CopyAndFreeBuffer(buffer);
+
+        return status switch
+        {
+            NxEvalStatus.Ok => DeserializeMessagePackDiagnostics(payload),
+            _ => throw CreateInteropStatusException(status),
+        };
     }
 
     /// <summary>
@@ -920,6 +948,20 @@ public static class NxRuntime
         {
             NxDiagnostic[] diagnostics = MessagePackSerializer.Deserialize<NxDiagnostic[]>(payload, MessagePackOptions);
             return new NxEvaluationException("NX evaluation failed.", diagnostics);
+        }
+        catch (MessagePackSerializationException e)
+        {
+            throw new InvalidOperationException(
+                "NX native runtime returned an invalid MessagePack diagnostics payload.",
+                e);
+        }
+    }
+
+    private static NxDiagnostic[] DeserializeMessagePackDiagnostics(byte[] payload)
+    {
+        try
+        {
+            return MessagePackSerializer.Deserialize<NxDiagnostic[]>(payload, MessagePackOptions);
         }
         catch (MessagePackSerializationException e)
         {

@@ -627,9 +627,9 @@ mod tests {
         };
 
         assert!(
-            diagnostics.iter().any(|diagnostic| diagnostic
-                .message
-                .contains("unknown enum member 'sparkly'")),
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("unknown enum member 'sparkly'")),
             "Expected unknown-enum-member diagnostic, got {:?}",
             diagnostics
                 .iter()

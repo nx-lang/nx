@@ -2,7 +2,7 @@ use crate::artifacts::{
     build_library_artifact_from_directory, build_program_artifact_from_source, LibraryArtifact,
     ProgramArtifact, ProgramBuildContext,
 };
-use crate::diagnostics::diagnostics_to_api;
+use crate::diagnostics::{diagnostics_to_api, diagnostics_to_api_with_sources};
 use crate::value::to_nx_value;
 use crate::NxDiagnostic;
 use nx_diagnostics::{Diagnostic, Label, Severity};
@@ -86,16 +86,24 @@ pub(crate) fn program_artifact_error_diagnostics(
     program: &ProgramArtifact,
     fallback_source: &str,
 ) -> Option<Vec<NxDiagnostic>> {
-    has_error_diagnostics(&program.diagnostics)
-        .then(|| diagnostics_to_api(&program.diagnostics, fallback_source))
+    has_error_diagnostics(&program.diagnostics).then(|| {
+        diagnostics_to_api_with_sources(&program.diagnostics, fallback_source, &program.source_map)
+    })
 }
 
 pub(crate) fn program_root_source(program: &ProgramArtifact) -> String {
-    let Some(root_module) = program.root_modules.first() else {
+    let Some(root_module) = program
+        .root_modules
+        .iter()
+        .find(|module| module.file_name == program.entry_identity)
+        .or_else(|| program.root_modules.first())
+    else {
         return String::new();
     };
 
-    if Path::new(&root_module.file_name).is_file() {
+    if let Some(source) = program.source_map.get(&root_module.file_name) {
+        source.to_string()
+    } else if Path::new(&root_module.file_name).is_file() {
         fs::read_to_string(&root_module.file_name).unwrap_or_default()
     } else {
         String::new()
@@ -128,10 +136,21 @@ fn eval_program_artifact_with_source(program: &ProgramArtifact, source: &str) ->
         return EvalResult::Err(diagnostics);
     }
 
-    let Some(root_module) = program.root_modules.first() else {
+    let Some(root_module) = program
+        .root_modules
+        .iter()
+        .find(|module| module.file_name == program.entry_identity)
+    else {
         return EvalResult::Err(no_root_diagnostics("input.nx", source));
     };
-    let Some(module) = root_module.lowered_module.as_ref() else {
+    let Some(entry_module_id) = program.entry_module_id else {
+        return EvalResult::Err(no_root_diagnostics(&root_module.file_name, source));
+    };
+    let Some(module) = program
+        .resolved_program
+        .module(entry_module_id)
+        .map(|module| module.lowered_module.as_ref())
+    else {
         return EvalResult::Err(no_root_diagnostics(&root_module.file_name, source));
     };
 
@@ -144,7 +163,7 @@ fn eval_program_artifact_with_source(program: &ProgramArtifact, source: &str) ->
     }
 
     let interpreter = Interpreter::from_resolved_program(program.resolved_program.clone());
-    match interpreter.execute_resolved_program_function("root", vec![]) {
+    match interpreter.execute_resolved_program_module_function(entry_module_id, "root", vec![]) {
         Ok(value) => EvalResult::Ok(to_nx_value(&value)),
         Err(error) => EvalResult::Err(runtime_error_diagnostics(source, error)),
     }
@@ -243,7 +262,7 @@ mod tests {
     }
 
     #[test]
-    fn eval_source_reports_imports_require_path_when_source_is_not_on_disk() {
+    fn eval_source_reports_missing_import_when_source_is_not_on_disk() {
         let source = r#"import { Button as Layout.Button } from "../ui"
 let root() = { <Layout.Button /> }"#;
 
@@ -253,9 +272,9 @@ let root() = { <Layout.Button /> }"#;
             panic!("Expected virtual import source to fail");
         };
 
-        assert!(diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code.as_deref() == Some("library-imports-require-path")));
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic
+            .message
+            .contains("Missing workspace module or loaded library")));
     }
 
     #[test]

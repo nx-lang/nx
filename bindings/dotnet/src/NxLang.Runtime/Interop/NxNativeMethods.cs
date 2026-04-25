@@ -33,6 +33,23 @@ internal static class NxNativeMethods
         out NxBuffer outBuffer);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NxEvalStatus nx_validate_workspace(
+        NxProgramBuildContextSafeHandle? buildContextPtr,
+        IntPtr modulesPtr,
+        nuint moduleCount,
+        out NxBuffer outBuffer);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NxEvalStatus nx_build_workspace_program_artifact(
+        NxProgramBuildContextSafeHandle? buildContextPtr,
+        IntPtr modulesPtr,
+        nuint moduleCount,
+        byte[] entryIdentityPtr,
+        nuint entryIdentityLen,
+        out IntPtr outHandle,
+        out NxBuffer outBuffer);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern void nx_free_program_artifact(IntPtr handle);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]

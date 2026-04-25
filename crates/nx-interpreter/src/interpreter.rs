@@ -7,10 +7,9 @@ use crate::value::Value;
 use la_arena::RawIdx;
 use nx_hir::{
     ast, effective_component_contract, effective_component_contract_for_name,
-    effective_record_shape_for_name,
-    resolve_record_definition as resolve_hir_record_definition, EffectiveField, ElementId, ExprId,
-    Function, Item, LoweredModule, Name, PreparedBinding, PreparedBindingOrigin,
-    PreparedBindingTarget, PreparedItemKind, PreparedModule, RecordKind,
+    effective_record_shape_for_name, resolve_record_definition as resolve_hir_record_definition,
+    EffectiveField, ElementId, ExprId, Function, Item, LoweredModule, Name, PreparedBinding,
+    PreparedBindingOrigin, PreparedBindingTarget, PreparedItemKind, PreparedModule, RecordKind,
 };
 use nx_types::{
     common_supertype, is_object_type, resolve_type_ref_with, resolve_type_ref_with_seen,
@@ -246,6 +245,63 @@ impl Interpreter {
         self.execute_function_with_limits(module.lowered_module.as_ref(), target_name, args, limits)
     }
 
+    /// Execute a resolved-program function from a specific module id.
+    pub fn execute_resolved_program_module_function(
+        &self,
+        module_id: RuntimeModuleId,
+        function_name: &str,
+        args: Vec<Value>,
+    ) -> Result<Value, RuntimeError> {
+        self.execute_resolved_program_module_function_with_limits(
+            module_id,
+            function_name,
+            args,
+            ResourceLimits::default(),
+        )
+    }
+
+    /// Execute a resolved-program function from a specific module id with custom limits.
+    pub fn execute_resolved_program_module_function_with_limits(
+        &self,
+        module_id: RuntimeModuleId,
+        function_name: &str,
+        args: Vec<Value>,
+        limits: ResourceLimits,
+    ) -> Result<Value, RuntimeError> {
+        let program = self.program.as_ref().ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorKind::FunctionNotFound {
+                name: SmolStr::new(function_name),
+            })
+        })?;
+        let module = program.module(module_id).ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorKind::FunctionNotFound {
+                name: SmolStr::new(function_name),
+            })
+        })?;
+        let entry = program
+            .local_item(module.id, function_name)
+            .filter(|entry| entry.kind == ResolvedItemKind::Function)
+            .ok_or_else(|| {
+                RuntimeError::new(RuntimeErrorKind::FunctionNotFound {
+                    name: SmolStr::new(function_name),
+                })
+            })?;
+        let item = module
+            .lowered_module
+            .item_by_definition(entry.definition_id)
+            .ok_or_else(|| {
+                RuntimeError::new(RuntimeErrorKind::FunctionNotFound {
+                    name: SmolStr::new(function_name),
+                })
+            })?;
+        let target_name = match item {
+            Item::Function(function) => function.name.as_str(),
+            _ => function_name,
+        };
+
+        self.execute_function_with_limits(module.lowered_module.as_ref(), target_name, args, limits)
+    }
+
     /// Initialize a resolved-program component entrypoint.
     pub fn initialize_resolved_component(
         &self,
@@ -411,9 +467,7 @@ impl Interpreter {
         };
 
         program
-            .modules()
-            .iter()
-            .find(|module| module.identity == module_identity)
+            .module_by_prepared_identity(module_identity)
             .map(|module| module.lowered_module.as_ref())
             .ok_or_else(|| {
                 RuntimeError::new(RuntimeErrorKind::ModuleNotFound {
@@ -431,7 +485,7 @@ impl Interpreter {
                 self.current_module_id(module).and_then(|module_id| {
                     program
                         .module(module_id)
-                        .map(|resolved_module| resolved_module.identity.clone())
+                        .map(|resolved_module| resolved_module.prepared_module_identity())
                 })
             })
             .unwrap_or_else(|| "<runtime>".to_string());
@@ -463,9 +517,10 @@ impl Interpreter {
             let Some(kind) = runtime_prepared_item_kind(item_ref.kind) else {
                 continue;
             };
+            let target_module_identity = target_module.prepared_module_identity();
 
             prepared.add_peer_module(
-                target_module.identity.clone(),
+                target_module_identity.clone(),
                 target_module.lowered_module.clone(),
             );
 
@@ -475,10 +530,10 @@ impl Interpreter {
                     namespace: *namespace,
                     kind,
                     origin: PreparedBindingOrigin::Peer {
-                        module_identity: target_module.identity.clone(),
+                        module_identity: target_module_identity.clone(),
                     },
                     target: PreparedBindingTarget::Peer {
-                        module_identity: target_module.identity.clone(),
+                        module_identity: target_module_identity.clone(),
                         definition_id: item_ref.definition_id,
                     },
                 });

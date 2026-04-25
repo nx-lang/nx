@@ -1,7 +1,7 @@
 use nx_hir::{lower_source_module, LoweredModule, Name};
 use nx_interpreter::{
-    Interpreter, ModuleQualifiedItemRef, ResolvedItemKind, ResolvedModule, ResolvedProgram,
-    RuntimeErrorKind, RuntimeModuleId, Value,
+    Interpreter, ModuleQualifiedItemRef, ResolvedItemKind, ResolvedModule, ResolvedModuleSource,
+    ResolvedProgram, RuntimeErrorKind, RuntimeModuleId, Value,
 };
 use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
@@ -102,12 +102,17 @@ fn build_resolved_program(
     let modules = vec![
         ResolvedModule {
             id: root_module_id,
-            identity: "app/main.nx".to_string(),
+            source: ResolvedModuleSource::SourceProvider {
+                identity: "app/main.nx".to_string(),
+            },
             lowered_module: root_module.clone(),
         },
         ResolvedModule {
             id: library_module_id,
-            identity: "ui/search-box.nx".to_string(),
+            source: ResolvedModuleSource::Library {
+                root_path: ui_dir,
+                module_path: library_path,
+            },
             lowered_module: library_module.clone(),
         },
     ];

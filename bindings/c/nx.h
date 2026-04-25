@@ -13,7 +13,7 @@
 #endif
 
 
-#define NX_FFI_ABI_VERSION 8
+#define NX_FFI_ABI_VERSION 9
 
 enum NxEvalStatus
 #ifdef __cplusplus
@@ -53,6 +53,13 @@ typedef struct NxBuffer {
   size_t cap;
 } NxBuffer;
 
+typedef struct NxWorkspaceModule {
+  const uint8_t *identity_ptr;
+  size_t identity_len;
+  const uint8_t *source_utf8_ptr;
+  size_t source_utf8_len;
+} NxWorkspaceModule;
+
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
@@ -77,6 +84,21 @@ NxEvalStatus nx_build_program_artifact(const struct NxProgramBuildContextHandle 
                                        size_t file_name_len,
                                        struct NxProgramArtifactHandle **out_handle,
                                        struct NxBuffer *out_buffer);
+
+NX_FFI_EXPORT
+NxEvalStatus nx_validate_workspace(const struct NxProgramBuildContextHandle *build_context_ptr,
+                                   const struct NxWorkspaceModule *modules_ptr,
+                                   size_t module_count,
+                                   struct NxBuffer *out_buffer);
+
+NX_FFI_EXPORT
+NxEvalStatus nx_build_workspace_program_artifact(const struct NxProgramBuildContextHandle *build_context_ptr,
+                                                 const struct NxWorkspaceModule *modules_ptr,
+                                                 size_t module_count,
+                                                 const uint8_t *entry_identity_ptr,
+                                                 size_t entry_identity_len,
+                                                 struct NxProgramArtifactHandle **out_handle,
+                                                 struct NxBuffer *out_buffer);
 
 NX_FFI_EXPORT NxEvalStatus nx_create_library_registry(struct NxLibraryRegistryHandle **out_handle);
 

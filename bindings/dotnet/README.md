@@ -169,6 +169,43 @@ selected loaded snapshots instead of reading libraries from disk on demand. The 
 `NxProgramArtifact.Build(source, fileName)` convenience still exists, but it now creates a
 transient empty registry/build-context pair internally before calling the native build API.
 
+### In-Memory Workspaces
+
+Use `NxWorkspace` when source modules come from editor buffers, database rows, or other logical
+records and should not be written to temporary files:
+
+```csharp
+using NxLang.Nx;
+
+NxWorkspace workspace = new([
+    NxWorkspaceModule.FromSourceText(
+        "app/main.nx",
+        """
+        import { answer } from "../shared/value.nx"
+        let root(): int = { answer() }
+        """),
+    NxWorkspaceModule.FromSourceText(
+        "shared/value.nx",
+        "export let answer(): int = { 42 }"),
+]);
+
+using NxLibraryRegistry registry = new();
+using NxProgramBuildContext buildContext = registry.CreateBuildContext();
+
+IReadOnlyList<NxDiagnostic> diagnostics = NxRuntime.ValidateWorkspace(workspace, buildContext);
+using NxProgramArtifact program =
+    NxProgramArtifact.BuildWorkspace(workspace, "app/main.nx", buildContext);
+```
+
+Workspace identities are logical names, not filesystem paths. NX uses `/` separators, normalizes
+`.` and `..`, rejects identities or imports that escape the workspace root, and resolves imports by
+exact normalized identity before falling back to libraries already visible in the supplied
+`NxProgramBuildContext`. Diagnostics preserve normalized workspace identities and calculate spans
+from the submitted source bytes. Workspace validation returns NX source diagnostics as data;
+malformed workspace inputs such as duplicate normalized identities are rejected as interop argument
+errors. Workspace artifact builds throw `NxEvaluationException` when static diagnostics or a missing
+entry identity prevent artifact creation.
+
 ### Direct JSON Output
 
 ```csharp
