@@ -71,6 +71,7 @@ module.exports = grammar({
       repeat(choice(
         $.record_definition,
         $.action_definition,
+        $.union_definition,
         $.type_definition,
         $.enum_definition,
         $.value_definition,
@@ -168,6 +169,30 @@ module.exports = grammar({
       field('name', $.identifier),
       '=',
       field('type', $.type),
+    ),
+
+    union_definition: $ => seq(
+      optional(field('visibility', $.visibility_modifier)),
+      'type',
+      field('name', $.identifier),
+      optional(seq(
+        'extends',
+        field('base', $.qualified_name),
+      )),
+      '=',
+      field('cases', $.union_case_list),
+    ),
+
+    union_case_list: $ => repeat1($.union_case),
+
+    union_case: $ => seq(
+      '|',
+      field('name', $.identifier),
+      optional(seq(
+        '{',
+        repeat(field('properties', $.property_definition)),
+        '}',
+      )),
     ),
 
     enum_definition: $ => seq(

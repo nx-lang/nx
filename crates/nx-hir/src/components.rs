@@ -442,6 +442,15 @@ fn collect_handler_rewrites_in_item(
                 }
             }
         }
+        Item::Union(union_def) => {
+            for case in &union_def.cases {
+                for field in &case.fields {
+                    if let Some(default) = field.default {
+                        collect_handler_rewrites_in_expr(module, default, rewrites);
+                    }
+                }
+            }
+        }
         Item::TypeAlias(_) | Item::Enum(_) => {}
     }
 }
@@ -474,6 +483,23 @@ fn collect_handler_rewrites_in_expr(
         } => {
             collect_handler_rewrites_in_expr(module, *condition, rewrites);
             collect_handler_rewrites_in_expr(module, *then_branch, rewrites);
+            if let Some(else_branch) = else_branch {
+                collect_handler_rewrites_in_expr(module, *else_branch, rewrites);
+            }
+        }
+        ast::Expr::Match {
+            scrutinee,
+            arms,
+            else_branch,
+            ..
+        } => {
+            collect_handler_rewrites_in_expr(module, *scrutinee, rewrites);
+            for arm in arms {
+                for pattern in &arm.patterns {
+                    collect_handler_rewrites_in_expr(module, *pattern, rewrites);
+                }
+                collect_handler_rewrites_in_expr(module, arm.body, rewrites);
+            }
             if let Some(else_branch) = else_branch {
                 collect_handler_rewrites_in_expr(module, *else_branch, rewrites);
             }

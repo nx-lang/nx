@@ -270,9 +270,10 @@ fn symbol_kind_from_prepared_kind(kind: PreparedItemKind) -> SymbolKind {
         PreparedItemKind::Function => SymbolKind::Function,
         PreparedItemKind::Value => SymbolKind::Variable,
         PreparedItemKind::Component => SymbolKind::Component,
-        PreparedItemKind::TypeAlias | PreparedItemKind::Enum | PreparedItemKind::Record => {
-            SymbolKind::Type
-        }
+        PreparedItemKind::TypeAlias
+        | PreparedItemKind::Enum
+        | PreparedItemKind::Union
+        | PreparedItemKind::Record => SymbolKind::Type,
     }
 }
 
@@ -284,6 +285,7 @@ fn resolved_item_span(item: &crate::ResolvedPreparedItem) -> Option<TextSpan> {
             Item::Component(component) => component.span,
             Item::TypeAlias(alias) => alias.span,
             Item::Enum(enum_def) => enum_def.span,
+            Item::Union(union_def) => union_def.span,
             Item::Record(record) => record.span,
         }),
         crate::ResolvedPreparedItem::Imported { item, .. } => Some(match &item.item {
@@ -292,6 +294,7 @@ fn resolved_item_span(item: &crate::ResolvedPreparedItem) -> Option<TextSpan> {
             | crate::InterfaceItemKind::Component { span, .. }
             | crate::InterfaceItemKind::TypeAlias { span, .. }
             | crate::InterfaceItemKind::Enum { span, .. }
+            | crate::InterfaceItemKind::Union { span, .. }
             | crate::InterfaceItemKind::Record { span, .. } => *span,
         }),
     }
@@ -362,7 +365,7 @@ impl<'a> UndefinedIdentifierChecker<'a> {
                         self.check_expr(body, scope);
                     }
                 }
-                Item::TypeAlias(_) | Item::Enum(_) | Item::Record(_) => {}
+                Item::TypeAlias(_) | Item::Enum(_) | Item::Union(_) | Item::Record(_) => {}
             }
         }
     }
@@ -436,6 +439,23 @@ impl<'a> UndefinedIdentifierChecker<'a> {
             } => {
                 self.check_expr(*condition, scope);
                 self.check_expr(*then_branch, scope);
+                if let Some(else_branch) = else_branch {
+                    self.check_expr(*else_branch, scope);
+                }
+            }
+            ast::Expr::Match {
+                scrutinee,
+                arms,
+                else_branch,
+                ..
+            } => {
+                self.check_expr(*scrutinee, scope);
+                for arm in arms {
+                    for pattern in &arm.patterns {
+                        self.check_expr(*pattern, scope);
+                    }
+                    self.check_expr(arm.body, scope);
+                }
                 if let Some(else_branch) = else_branch {
                     self.check_expr(*else_branch, scope);
                 }

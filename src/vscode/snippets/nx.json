@@ -22,6 +22,22 @@
       "<${1:Element} $0/>"
     ]
   },
+  "Discriminated Union": {
+    "prefix": "nxunion",
+    "description": "Define a discriminated union",
+    "body": [
+      "type ${1:LoadState} =",
+      "\t| ${2:idle}",
+      "\t| ${3:failed} { ${4:message}:${5:string} }"
+    ]
+  },
+  "Union Case Constructor": {
+    "prefix": "nxcase",
+    "description": "Construct a discriminated union case",
+    "body": [
+      "<${1:LoadState}.${2:failed} ${3:message}={${4:value}} />"
+    ]
+  },
   "Embed Text Element": {
     "prefix": "nxembed",
     "description": "Embed typed text content",
@@ -82,6 +98,16 @@
       "if ${1:scrutinee} is {",
       "\t${2:pattern} => ${3:expr}",
       "\telse => ${0:expr}",
+      "}"
+    ]
+  },
+  "Union Match (value)": {
+    "prefix": "nxmatchu",
+    "description": "Match a discriminated union value",
+    "body": [
+      "if ${1:state} is {",
+      "\t${2:LoadState}.${3:idle} => ${4:expr}",
+      "\t${2:LoadState}.${5:failed} => ${0:expr}",
       "}"
     ]
   },

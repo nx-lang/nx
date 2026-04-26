@@ -1,6 +1,7 @@
 use crate::codegen::model::{
-    ExportedAlias, ExportedEnum, ExportedExternalState, ExportedModule, ExportedRecord,
-    ExportedType, ExportedTypeGraph,
+    ExportedAlias, ExportedEnum, ExportedExternalState, ExportedModule,
+    ExportedPolymorphicDescendant, ExportedRecord, ExportedType, ExportedTypeGraph, ExportedUnion,
+    ExportedUnionCase,
 };
 use crate::codegen::writer::CodeWriter;
 use crate::codegen::{GenerateTypesOptions, GeneratedFile};
@@ -195,6 +196,7 @@ fn emit_declaration(
     match declaration {
         ExportedType::Alias(alias) => emit_alias(writer, alias),
         ExportedType::Enum(enum_def) => emit_enum(writer, enum_def),
+        ExportedType::Union(union_def) => emit_union(writer, union_def, graph),
         ExportedType::Record(record) => emit_record(writer, record, graph),
         ExportedType::ExternalState(state) => emit_external_state(writer, state),
     }
@@ -261,13 +263,13 @@ fn emit_abstract_record(
 
     writer.blank_line();
 
-    let descendants = graph.concrete_descendants(&record.name);
+    let descendants = graph.polymorphic_descendants(&record.name);
     let runtime_surface = if descendants.is_empty() {
         base_contract_name
     } else {
         descendants
             .iter()
-            .map(|record| sanitize_ts_type_name(&record.name))
+            .map(ts_polymorphic_descendant_type_name)
             .collect::<Vec<_>>()
             .join(" | ")
     };
@@ -305,6 +307,71 @@ fn emit_concrete_record(
     });
 }
 
+fn emit_union(writer: &mut CodeWriter, union_def: &ExportedUnion, graph: &ExportedTypeGraph) {
+    for (index, case) in union_def.cases.iter().enumerate() {
+        emit_union_case(writer, union_def, case, graph);
+        if index + 1 != union_def.cases.len() {
+            writer.blank_line();
+        }
+    }
+
+    if !union_def.cases.is_empty() {
+        writer.blank_line();
+    }
+
+    let rhs = if union_def.cases.is_empty() {
+        "never".to_string()
+    } else {
+        union_def
+            .cases
+            .iter()
+            .map(|case| ts_union_case_type_name(&union_def.name, &case.name))
+            .collect::<Vec<_>>()
+            .join(" | ")
+    };
+
+    writer.line(&format!(
+        "export type {} = {};",
+        sanitize_ts_type_name(&union_def.name),
+        rhs
+    ));
+}
+
+fn emit_union_case(
+    writer: &mut CodeWriter,
+    union_def: &ExportedUnion,
+    case: &ExportedUnionCase,
+    graph: &ExportedTypeGraph,
+) {
+    let mut bases = Vec::new();
+    if let Some(base_name) = union_def.base.as_deref() {
+        if let Some(base_record) = graph.resolve_record(base_name) {
+            bases.push(ts_base_contract_name(&base_record.name));
+        } else {
+            bases.push(ts_type_name(base_name));
+        }
+    }
+    bases.push(format!(
+        "NxRecord<\"{}.{}\">",
+        escape_ts_string(&union_def.name),
+        escape_ts_string(&case.name)
+    ));
+
+    let header = format!(
+        "export interface {} extends {}",
+        ts_union_case_type_name(&union_def.name, &case.name),
+        bases.join(", ")
+    );
+
+    writer.block(&header, |writer| {
+        for field in &case.fields {
+            let key = ts_property_key(&field.name);
+            let ty = ts_type(&field.ty);
+            writer.line(&format!("{key}: {ty};"));
+        }
+    });
+}
+
 fn emit_external_state(writer: &mut CodeWriter, state: &ExportedExternalState) {
     writer.block(
         &format!("export interface {}", sanitize_ts_type_name(&state.name)),
@@ -319,12 +386,14 @@ fn emit_external_state(writer: &mut CodeWriter, state: &ExportedExternalState) {
 }
 
 fn module_needs_nx_record(module: &ExportedModule) -> bool {
-    module.declarations.iter().any(|declaration| {
-        matches!(
-            &declaration.item,
-            ExportedType::Record(record) if !record.is_abstract
-        )
-    })
+    module
+        .declarations
+        .iter()
+        .any(|declaration| match &declaration.item {
+            ExportedType::Union(_) => true,
+            ExportedType::Record(record) => !record.is_abstract,
+            _ => false,
+        })
 }
 
 fn collect_module_imports(
@@ -339,6 +408,33 @@ fn collect_module_imports(
                 add_type_ref_imports(graph, module, &alias.target, &mut imports);
             }
             ExportedType::Enum(_) => {}
+            ExportedType::Union(union_def) => {
+                if let Some(base_name) = union_def.base.as_deref() {
+                    if let Some(base_record) = graph.resolve_record(base_name) {
+                        add_imported_symbol(
+                            graph,
+                            module,
+                            &base_record.name,
+                            ts_base_contract_name(&base_record.name),
+                            &mut imports,
+                        );
+                    } else {
+                        add_imported_symbol(
+                            graph,
+                            module,
+                            base_name,
+                            ts_type_name(base_name),
+                            &mut imports,
+                        );
+                    }
+                }
+
+                for case in &union_def.cases {
+                    for field in &case.fields {
+                        add_type_ref_imports(graph, module, &field.ty, &mut imports);
+                    }
+                }
+            }
             ExportedType::Record(record) => {
                 if let Some(base_record) = graph.resolved_record_base(record) {
                     add_imported_symbol(
@@ -355,14 +451,8 @@ fn collect_module_imports(
                 }
 
                 if record.is_abstract {
-                    for descendant in graph.concrete_descendants(&record.name) {
-                        add_imported_symbol(
-                            graph,
-                            module,
-                            &descendant.name,
-                            sanitize_ts_type_name(&descendant.name),
-                            &mut imports,
-                        );
+                    for descendant in graph.polymorphic_descendants(&record.name) {
+                        add_polymorphic_descendant_import(graph, module, &descendant, &mut imports);
                     }
                 }
             }
@@ -375,6 +465,31 @@ fn collect_module_imports(
     }
 
     imports
+}
+
+fn add_polymorphic_descendant_import(
+    graph: &ExportedTypeGraph,
+    module: &ExportedModule,
+    descendant: &ExportedPolymorphicDescendant,
+    imports: &mut BTreeMap<PathBuf, BTreeSet<String>>,
+) {
+    match descendant {
+        ExportedPolymorphicDescendant::Record { name } => {
+            add_imported_symbol(graph, module, name, sanitize_ts_type_name(name), imports);
+        }
+        ExportedPolymorphicDescendant::UnionCase {
+            union_name,
+            case_name,
+        } => {
+            add_imported_symbol(
+                graph,
+                module,
+                union_name,
+                ts_union_case_type_name(union_name, case_name),
+                imports,
+            );
+        }
+    }
 }
 
 fn add_type_ref_imports(
@@ -431,6 +546,24 @@ fn collect_type_ref_names(ty: &TypeRef, out: &mut BTreeSet<String>) {
 
 fn ts_base_contract_name(name: &str) -> String {
     format!("{}Base", sanitize_ts_type_name(name))
+}
+
+fn ts_polymorphic_descendant_type_name(descendant: &ExportedPolymorphicDescendant) -> String {
+    match descendant {
+        ExportedPolymorphicDescendant::Record { name } => sanitize_ts_type_name(name),
+        ExportedPolymorphicDescendant::UnionCase {
+            union_name,
+            case_name,
+        } => ts_union_case_type_name(union_name, case_name),
+    }
+}
+
+fn ts_union_case_type_name(union_name: &str, case_name: &str) -> String {
+    format!(
+        "{}{}",
+        sanitize_ts_type_name(union_name),
+        sanitize_ts_member_name(case_name)
+    )
 }
 
 fn ts_type(ty: &TypeRef) -> String {
@@ -512,6 +645,26 @@ fn sanitize_ts_type_name(name: &str) -> String {
     } else {
         out
     }
+}
+
+fn sanitize_ts_member_name(name: &str) -> String {
+    let mut out = String::new();
+    let mut capitalize_next = true;
+
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '$' {
+            if capitalize_next {
+                out.push(ch.to_ascii_uppercase());
+                capitalize_next = false;
+            } else {
+                out.push(ch);
+            }
+        } else {
+            capitalize_next = true;
+        }
+    }
+
+    sanitize_ts_type_name(&out)
 }
 
 fn escape_ts_string(value: &str) -> String {

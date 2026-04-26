@@ -44,7 +44,25 @@ let dashboard = if accessLevel is {
 
 - Arms never fall through; each case is independent.
 - Multiple patterns can share a result: `"saturday", "sunday" => <Weekend/>`.
-- Omitting `else` is allowed but failing to match will raise an error at runtime, so reserve it for exhaustive sets.
+- Enum and scalar matches may use `else` for fallbacks. For discriminated union scrutinees, omitting
+  `else` requires every union case to be covered.
+- A union case arm narrows the matched identifier inside that arm.
+
+```nx
+type LoadState =
+  | idle
+  | failed { message:string }
+  | loaded { count:int }
+
+let state: LoadState =
+  <LoadState.failed message={"Offline"} />
+
+let label = if state is {
+  LoadState.idle => "Idle"
+  LoadState.failed => state.message
+  LoadState.loaded => "Loaded"
+}
+```
 
 ## Iteration Expressions
 `for` yields a new sequence by looping over an input sequence. Both value-only and index/value forms exist.

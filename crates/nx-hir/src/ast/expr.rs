@@ -98,6 +98,15 @@ pub enum UnOp {
     Not,
 }
 
+/// One arm of a match-style `if value is { ... }` expression.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchArm {
+    /// Patterns accepted by this arm.
+    pub patterns: Vec<ExprId>,
+    /// Body evaluated when any pattern matches.
+    pub body: ExprId,
+}
+
 /// Expression AST node.
 ///
 /// All expressions are stored in an arena and referenced by `ExprId`.
@@ -148,6 +157,16 @@ pub enum Expr {
     If {
         condition: ExprId,
         then_branch: ExprId,
+        else_branch: Option<ExprId>,
+        span: TextSpan,
+    },
+
+    /// Match-style if expression.
+    ///
+    /// Example: `if state is { LoadState.failed => state.message else => "" }`
+    Match {
+        scrutinee: ExprId,
+        arms: Vec<MatchArm>,
         else_branch: Option<ExprId>,
         span: TextSpan,
     },
@@ -266,6 +285,7 @@ impl Expr {
             Expr::UnaryOp { span, .. } => *span,
             Expr::Call { span, .. } => *span,
             Expr::If { span, .. } => *span,
+            Expr::Match { span, .. } => *span,
             Expr::Let { span, .. } => *span,
             Expr::Block { span, .. } => *span,
             Expr::Array { span, .. } => *span,

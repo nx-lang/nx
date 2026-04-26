@@ -193,9 +193,9 @@ than once in a single file, regardless of import form.
 - **THEN** analysis SHALL report a duplicate-library-import compile error after path normalization
 
 ### Requirement: Ambiguous imported names are diagnosed on use
-When two different imported libraries expose the same unqualified declaration name, the compiler
-SHALL allow the imports to coexist and SHALL report a compile error only when that ambiguous
-unqualified name is used.
+The compiler SHALL allow imports from two different libraries that expose the same unqualified
+declaration name to coexist, and SHALL report a compile error only when that ambiguous unqualified
+name is used.
 
 #### Scenario: Unused ambiguity does not fail compilation
 - **WHEN** a file imports `../ui` and `../forms`, both libraries export `Button`, and the file does

@@ -11,7 +11,7 @@ use nx_hir::{
     ImportedRawRef, InterfaceField, InterfaceItem, InterfaceItemKind, InterfaceParam, Item,
     LocalDefinitionId, LoweredModule, LoweringDiagnostic, Name, PreparedBinding,
     PreparedBindingOrigin, PreparedBindingTarget, PreparedModule, PreparedNamespace, RecordField,
-    SelectiveImport, SourceId, Visibility,
+    SelectiveImport, SourceId, UnionCaseField, Visibility,
 };
 use nx_interpreter::{
     ModuleQualifiedItemRef, ResolvedItemKind, ResolvedModule, ResolvedModuleSource,
@@ -1984,6 +1984,23 @@ fn build_interface_item(
             members: enum_def.members.clone(),
             span: enum_def.span,
         },
+        Item::Union(union_def) => LibraryInterfaceKind::Union {
+            base: union_def.base.clone(),
+            cases: union_def
+                .cases
+                .iter()
+                .map(|case| nx_hir::InterfaceUnionCase {
+                    name: case.name.clone(),
+                    fields: case
+                        .fields
+                        .iter()
+                        .map(union_case_field_to_interface_field)
+                        .collect(),
+                    span: case.span,
+                })
+                .collect(),
+            span: union_def.span,
+        },
         Item::Record(record_def) => LibraryInterfaceKind::Record {
             kind: record_def.kind,
             is_abstract: record_def.is_abstract,
@@ -2016,6 +2033,16 @@ fn record_field_to_interface_field(field: &RecordField) -> LibraryInterfaceField
     }
 }
 
+fn union_case_field_to_interface_field(field: &UnionCaseField) -> LibraryInterfaceField {
+    LibraryInterfaceField {
+        name: field.name.clone(),
+        ty: field.ty.clone(),
+        is_content: field.is_content,
+        is_required: field.default.is_none() && !matches!(field.ty, TypeRef::Nullable(_)),
+        span: field.span,
+    }
+}
+
 fn type_from_function_binding(ty: &Type) -> Option<TypeRef> {
     match ty {
         Type::Function { ret, .. } => type_to_type_ref(ret),
@@ -2037,6 +2064,11 @@ fn type_to_type_ref(ty: &Type) -> Option<TypeRef> {
         )),
         Type::Named(name) => Some(TypeRef::name(name.clone())),
         Type::Enum(enum_type) => Some(TypeRef::name(enum_type.name.clone())),
+        Type::Union(union_type) => Some(TypeRef::name(union_type.name.clone())),
+        Type::UnionCase(case_type) => {
+            let qualified_name = format!("{}.{}", case_type.union, case_type.case);
+            Some(TypeRef::name(qualified_name))
+        }
         Type::Variable(_) | Type::Unknown | Type::Error => None,
     }
 }
@@ -2065,6 +2097,11 @@ fn insert_entry_symbol(
                 .entry(visible_name.to_string())
                 .or_insert(item_ref);
         }
+        ResolvedItemKind::Union => {
+            entry_records
+                .entry(visible_name.to_string())
+                .or_insert(item_ref);
+        }
         ResolvedItemKind::Enum => {
             entry_enums
                 .entry(visible_name.to_string())
@@ -2080,6 +2117,7 @@ fn resolved_item_kind_from_interface(kind: nx_hir::PreparedItemKind) -> Resolved
         nx_hir::PreparedItemKind::Component => ResolvedItemKind::Component,
         nx_hir::PreparedItemKind::TypeAlias => ResolvedItemKind::TypeAlias,
         nx_hir::PreparedItemKind::Enum => ResolvedItemKind::Enum,
+        nx_hir::PreparedItemKind::Union => ResolvedItemKind::Union,
         nx_hir::PreparedItemKind::Record => ResolvedItemKind::Record,
     }
 }
@@ -2091,6 +2129,7 @@ fn resolved_item_kind(item: &Item) -> ResolvedItemKind {
         Item::Component(_) => ResolvedItemKind::Component,
         Item::TypeAlias(_) => ResolvedItemKind::TypeAlias,
         Item::Enum(_) => ResolvedItemKind::Enum,
+        Item::Union(_) => ResolvedItemKind::Union,
         Item::Record(_) => ResolvedItemKind::Record,
     }
 }
@@ -2587,6 +2626,93 @@ export component <Panel content body:object /> = {
                 assert_eq!(state[0].name.as_str(), "query");
             }
             other => panic!("Expected component interface item, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn library_artifact_interface_items_preserve_union_metadata() {
+        let temp = TempDir::new().expect("temp dir");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("events.nx"),
+            r#"export abstract type EventBase = { source:string = "ui" }
+export type UiEvent extends EventBase =
+  | clicked {
+      x:int
+      y:int
+      retryable:bool = true
+    }
+  | closed
+type InternalState = | idle
+private type HiddenState = | hidden"#,
+        )
+        .expect("events file");
+
+        let artifact =
+            build_library_artifact_from_directory(&ui_dir).expect("Expected library artifact");
+
+        assert!(
+            !has_error_diagnostics(&artifact.diagnostics),
+            "Expected union metadata fixture to analyze without errors: {:?}",
+            artifact.diagnostics
+        );
+        assert_eq!(
+            artifact.exports.get("UiEvent").map(|export| export.kind),
+            Some(ResolvedItemKind::Union)
+        );
+        assert_eq!(
+            artifact.exported_items.get("UiEvent").map(Vec::len),
+            Some(1),
+            "Exported unions should be importable by dependent libraries"
+        );
+        assert_eq!(
+            artifact
+                .visible_to_library_items
+                .get("InternalState")
+                .map(Vec::len),
+            Some(1),
+            "Default-internal unions should be visible within the same library"
+        );
+        assert!(
+            artifact.exported_items.get("InternalState").is_none(),
+            "Default-internal unions should not be externally exported"
+        );
+        assert!(
+            artifact
+                .visible_to_library_items
+                .get("HiddenState")
+                .is_none(),
+            "Private unions should stay file-local"
+        );
+        assert!(
+            artifact.exported_items.get("HiddenState").is_none(),
+            "Private unions should not be externally exported"
+        );
+
+        let union_item = artifact
+            .interface_items
+            .iter()
+            .find(|item| item.item_name == "UiEvent")
+            .expect("Expected exported union interface item");
+        match &union_item.item {
+            LibraryInterfaceKind::Union { base, cases, .. } => {
+                assert_eq!(base.as_ref().map(|name| name.as_str()), Some("EventBase"));
+                assert_eq!(cases.len(), 2);
+                assert_eq!(cases[0].name.as_str(), "clicked");
+                assert_eq!(cases[0].fields.len(), 3);
+                assert_eq!(cases[0].fields[0].name.as_str(), "x");
+                assert!(cases[0].fields[0].is_required);
+                assert_eq!(cases[0].fields[2].name.as_str(), "retryable");
+                assert!(
+                    !cases[0].fields[2].is_required,
+                    "Defaulted union case fields should not be required in interface metadata"
+                );
+                assert_eq!(cases[1].name.as_str(), "closed");
+                assert!(cases[1].fields.is_empty());
+            }
+            other => panic!("Expected union interface item, got {other:?}"),
         }
     }
 

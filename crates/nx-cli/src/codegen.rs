@@ -324,6 +324,46 @@ mod tests {
     }
 
     #[test]
+    fn generates_typescript_discriminated_unions() {
+        let source = r#"
+            export abstract type EventBase = { source:string }
+            export type LoadState =
+              | idle
+              | failed { message:string retryable:bool = true }
+            export type UiEvent extends EventBase =
+              | clicked { x:int }
+              | closed
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(
+            output.contains("export interface LoadStateIdle extends NxRecord<\"LoadState.idle\">")
+        );
+        assert!(output
+            .contains("export interface LoadStateFailed extends NxRecord<\"LoadState.failed\">"));
+        assert!(output.contains("message: string;"));
+        assert!(output.contains("retryable: boolean;"));
+        assert!(output.contains("export type LoadState = LoadStateIdle | LoadStateFailed;"));
+        assert!(output.contains("export interface EventBaseBase {"));
+        assert!(output.contains("source: string;"));
+        assert!(output.contains(
+            "export interface UiEventClicked extends EventBaseBase, NxRecord<\"UiEvent.clicked\">"
+        ));
+        assert!(output.contains(
+            "export interface UiEventClosed extends EventBaseBase, NxRecord<\"UiEvent.closed\">"
+        ));
+        assert!(output.contains("export type EventBase = UiEventClicked | UiEventClosed;"));
+        assert!(output.contains("export type UiEvent = UiEventClicked | UiEventClosed;"));
+    }
+
+    #[test]
     fn generates_csharp_global_aliases() {
         let source = r#"
             export type Count = int
@@ -440,6 +480,44 @@ mod tests {
         assert!(!index.content.contains("NxRecord"));
         assert!(index.content.contains("export * from \"./forms\";"));
         assert!(index.content.contains("export * from \"./theme\";"));
+    }
+
+    #[test]
+    fn generates_typescript_library_files_for_cross_module_union_fields() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let library_dir = temp_dir.path().join("ui");
+        fs::create_dir_all(&library_dir).expect("library dir");
+        fs::write(
+            library_dir.join("items.nx"),
+            "export type Item = { name:string }",
+        )
+        .expect("items file");
+        fs::write(
+            library_dir.join("state.nx"),
+            "export type LoadState = | loaded { items:Item[] }",
+        )
+        .expect("state file");
+
+        let artifact = build_library_artifact_from_directory(&library_dir).expect("library build");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let files = generate_library_types(&artifact, &opts).unwrap();
+        let state = files
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("state.ts"))
+            .expect("state.ts");
+
+        assert!(state
+            .content
+            .contains("import type { Item } from \"./items\";"));
+        assert!(state.content.contains("items: Item[];"));
+        assert!(state
+            .content
+            .contains("export type LoadState = LoadStateLoaded;"));
     }
 
     #[test]
@@ -613,6 +691,52 @@ mod tests {
         assert!(output.contains("BuildTarget.IosApp => \"ios_app\","));
         assert!(output.contains("\"web_api\" => BuildTarget.WebApi,"));
         assert!(output.contains("\"ios_app\" => BuildTarget.IosApp,"));
+    }
+
+    #[test]
+    fn generates_csharp_discriminated_unions() {
+        let source = r#"
+            export enum CardSortMode = | closed | open
+            export abstract type EventBase = { source:string }
+            export type LoadState =
+              | idle
+              | failed { message:string retryable:bool = true }
+            export type UiEvent extends EventBase =
+              | clicked { x:int }
+              | closed
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.Models".to_string()),
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(output.contains(
+            "[JsonConverter(typeof(NxEnumJsonConverter<CardSortMode, CardSortModeWireFormat>))]"
+        ));
+        assert!(output.contains("[JsonPolymorphic(TypeDiscriminatorPropertyName = \"$type\")]"));
+        assert!(output.contains("[JsonDerivedType(typeof(LoadStateIdle), \"LoadState.idle\")]"));
+        assert!(output.contains("[JsonDerivedType(typeof(LoadStateFailed), \"LoadState.failed\")]"));
+        assert!(output.contains(
+            "[MessagePackFormatter(typeof(NxPolymorphicMessagePackFormatter<LoadState>))]"
+        ));
+        assert!(output.contains("public abstract class LoadState"));
+        assert!(output.contains("public sealed class LoadStateIdle : LoadState"));
+        assert!(output.contains("public sealed class LoadStateFailed : LoadState"));
+        assert!(output.contains("[Key(\"message\")]"));
+        assert!(output.contains("public string Message { get; set; } = default!;"));
+        let normalized = output.replace("\r\n", "\n");
+        assert!(normalized.contains(
+            "[JsonDerivedType(typeof(UiEventClicked), \"UiEvent.clicked\")]\n    [JsonDerivedType(typeof(UiEventClosed), \"UiEvent.closed\")]\n    [MessagePackFormatter(typeof(NxPolymorphicMessagePackFormatter<EventBase>))]\n    public abstract class EventBase"
+        ));
+        assert!(output.contains("public abstract class UiEvent : EventBase"));
+        assert!(output.contains("public sealed class UiEventClicked : UiEvent"));
+        assert!(output.contains("public sealed class UiEventClosed : UiEvent"));
+        assert!(output.contains("[Key(\"source\")]"));
+        assert!(output.contains("public string Source { get; set; } = default!;"));
     }
 
     #[test]

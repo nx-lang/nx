@@ -5,12 +5,12 @@ type MaybeUser = User?
 type UserList = UserBase[]
 type EntityList = Entity[]
 
-// Enums
-enum Foo = abc | def | ghi
-enum Bar =
-  | abc
-  | def
-  | ghi
+// Enums model scalar choices
+enum CardSortMode = open | closed
+enum DealStage =
+  | draft
+  | pending_review
+  | closed_won
 
 // Records
 abstract type Entity = {
@@ -35,6 +35,13 @@ type UserCard = {
   user: UserBase
 }
 
+// Discriminated unions model states with optional per-case payloads
+type LoadState =
+  | idle
+  | loading
+  | failed { message:string retryable:bool = true }
+  | loaded { users:UserList }
+
 let <UserCard
   user: UserBase
 /> =
@@ -48,7 +55,7 @@ let <UserCard
     <p:>Age: {user.age}</p>
   </div>
 
-let describe(user: UserBase) = user.name
+let describe(user: UserBase) = { user.name }
 
 let currentUser: User =
   <User id={1} name={"Ada"} email={"ada@example.com"} />
@@ -58,3 +65,17 @@ let currentStaff: StaffUser =
 
 let labels: UserList =
   { currentUser currentStaff }
+
+let sortMode: CardSortMode = { CardSortMode.closed }
+
+let loadState: LoadState =
+  <LoadState.failed message={"Network unavailable"} />
+
+let loadStatus = {
+  if loadState is {
+    LoadState.idle => "Idle"
+    LoadState.loading => "Loading"
+    LoadState.failed => loadState.message
+    LoadState.loaded => "Loaded"
+  }
+}

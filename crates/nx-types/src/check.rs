@@ -137,6 +137,19 @@ pub fn analyze_prepared_module(
             span: error.span(),
         });
     }
+    let suppress_hir_duplicate_union_cases = diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code() == Some("duplicate-union-case"));
+    for error in nx_hir::validate_union_definitions(&prepared_module) {
+        if suppress_hir_duplicate_union_cases && error.code() == "union-duplicate-case" {
+            continue;
+        }
+
+        prepared_module.add_diagnostic(LoweringDiagnostic {
+            message: error.message(),
+            span: error.span(),
+        });
+    }
 
     nx_hir::promote_component_handler_bindings(&mut prepared_module);
 
@@ -171,6 +184,7 @@ pub fn analyze_prepared_module(
             nx_hir::Item::TypeAlias(_) => {}
             nx_hir::Item::Record(_) => {}
             nx_hir::Item::Enum(_) => {}
+            nx_hir::Item::Union(_) => {}
         }
     }
 

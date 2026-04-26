@@ -118,6 +118,106 @@ fn test_string_concat() {
     assert_eq!(result, Value::String(SmolStr::new("hello world")));
 }
 
+#[test]
+fn test_payload_union_case_construction_applies_defaults() {
+    let source = r#"
+        type LoadState =
+          | idle
+          | failed {
+              message: string
+              retryable: bool = true
+              code: int?
+            }
+
+        let make(): LoadState = { <LoadState.failed message={"Offline"} /> }
+    "#;
+
+    let result = execute_function(source, "make", vec![])
+        .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+
+    let Value::Record { type_name, fields } = result else {
+        panic!("Expected union case record value");
+    };
+    assert_eq!(type_name.as_str(), "LoadState.failed");
+    assert_eq!(
+        fields.get("message"),
+        Some(&Value::String(SmolStr::new("Offline")))
+    );
+    assert_eq!(fields.get("retryable"), Some(&Value::Boolean(true)));
+    assert_eq!(fields.get("code"), Some(&Value::Null));
+}
+
+#[test]
+fn test_fieldless_union_case_shorthand_constructs_record_value() {
+    let source = r#"
+        type LoadState = | idle | loading
+        let make(): LoadState = { LoadState.idle }
+    "#;
+
+    let result = execute_function(source, "make", vec![])
+        .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+
+    let Value::Record { type_name, fields } = result else {
+        panic!("Expected fieldless union case record value");
+    };
+    assert_eq!(type_name.as_str(), "LoadState.idle");
+    assert!(fields.is_empty());
+}
+
+#[test]
+fn test_union_case_inherits_abstract_base_defaults() {
+    let source = r#"
+        abstract type EventBase = {
+          source: string = "ui"
+          correlation: string?
+        }
+        type UiEvent extends EventBase = | clicked { x:int }
+
+        let make(): EventBase = { <UiEvent.clicked x={1} /> }
+    "#;
+
+    let result = execute_function(source, "make", vec![])
+        .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+
+    let Value::Record { type_name, fields } = result else {
+        panic!("Expected inherited union case record value");
+    };
+    assert_eq!(type_name.as_str(), "UiEvent.clicked");
+    assert_eq!(
+        fields.get("source"),
+        Some(&Value::String(SmolStr::new("ui")))
+    );
+    assert_eq!(fields.get("correlation"), Some(&Value::Null));
+    assert_eq!(fields.get("x"), Some(&Value::Int(1)));
+}
+
+#[test]
+fn test_union_match_compares_case_discriminator() {
+    let source = r#"
+        type LoadState = | idle | failed { message:string }
+        let view(state: LoadState): string = {
+            if state is {
+                LoadState.idle => "idle"
+                LoadState.failed => state.message
+            }
+        }
+    "#;
+
+    let mut fields = FxHashMap::default();
+    fields.insert(
+        SmolStr::new("message"),
+        Value::String(SmolStr::new("Offline")),
+    );
+    let failed = Value::Record {
+        type_name: nx_hir::Name::new("LoadState.failed"),
+        fields,
+    };
+
+    let result = execute_function(source, "view", vec![failed])
+        .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+    assert_eq!(result, Value::String(SmolStr::new("Offline")));
+}
+
 // ============================================================================
 // Error Handling Tests
 // ============================================================================

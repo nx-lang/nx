@@ -2,15 +2,17 @@
 
 use crate::{
     common_supertype as generic_common_supertype, is_object_type, resolve_type_ref_with,
-    resolve_type_ref_with_seen, ty::EnumType,
+    resolve_type_ref_with_seen,
+    ty::{EnumType, UnionCaseType, UnionType},
     type_satisfies_expected as generic_type_satisfies_expected, Type, TypeEnvironment,
 };
 use nx_diagnostics::{Diagnostic, Label, TextSpan};
 use nx_hir::{
     ast, effective_component_contract_for_name, effective_record_shape_for_name,
     interface_component, interface_enum, interface_function_signature, interface_type_alias,
-    is_record_subtype, ExprId, InterfaceItemKind, Item, Name, PreparedBindingOrigin,
-    PreparedModule, PreparedNamespace, ResolvedPreparedItem,
+    interface_union, is_record_subtype, ExprId, InterfaceItemKind, Item, Name,
+    PreparedBindingOrigin, PreparedModule, PreparedNamespace, ResolvedPreparedItem, UnionCaseDef,
+    UnionDef,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -45,6 +47,8 @@ pub struct InferenceContext<'a> {
     type_aliases: FxHashMap<Name, TypeAliasInfo>,
     /// Registered enum definitions
     enum_defs: FxHashMap<Name, EnumType>,
+    /// Registered discriminated union definitions.
+    union_defs: FxHashMap<Name, UnionDef>,
 }
 
 impl<'a> InferenceContext<'a> {
@@ -64,11 +68,13 @@ impl<'a> InferenceContext<'a> {
             function_return_placeholders: FxHashMap::default(),
             type_aliases: FxHashMap::default(),
             enum_defs: FxHashMap::default(),
+            union_defs: FxHashMap::default(),
         };
         ctx.register_type_definitions();
         ctx.register_function_signatures();
         ctx.register_value_bindings();
         ctx.validate_local_record_defaults();
+        ctx.validate_local_union_defaults();
         ctx
     }
 
@@ -163,6 +169,13 @@ impl<'a> InferenceContext<'a> {
                 }
             }
 
+            ast::Expr::Match {
+                scrutinee,
+                arms,
+                else_branch,
+                span,
+            } => self.infer_match_expr(*scrutinee, arms, *else_branch, *span),
+
             // Arrays
             ast::Expr::Array { elements, span } => {
                 if elements.is_empty() {
@@ -209,6 +222,25 @@ impl<'a> InferenceContext<'a> {
                 if let Some(name) = self.flattened_expr_name(expr_id) {
                     if let Some(ty) = self.env.lookup(&name) {
                         ty.clone()
+                    } else if let Some((union_def, case)) =
+                        self.union_case_from_qualified_name(&name)
+                    {
+                        let union_name = union_def.name.clone();
+                        let case_name = case.name.clone();
+                        let is_fieldless = case.fields.is_empty();
+                        if is_fieldless {
+                            Type::union_case_type(union_name, case_name)
+                        } else {
+                            self.error(
+                                "payload-union-case-requires-constructor",
+                                format!(
+                                    "Union case '{}.{}' requires element-style payload construction",
+                                    union_name, case_name
+                                ),
+                                *span,
+                            );
+                            Type::Error
+                        }
                     } else if let Some(enum_info) =
                         self.enum_info_from_name(&name, &mut FxHashSet::default())
                     {
@@ -228,13 +260,8 @@ impl<'a> InferenceContext<'a> {
                             Type::Error
                         }
                     } else {
-                        let _base_ty = self.infer_expr(*base);
-                        self.error(
-                            "not-implemented",
-                            format!("Member access not yet implemented: .{}", member),
-                            *span,
-                        );
-                        Type::Error
+                        let base_ty = self.infer_expr(*base);
+                        self.infer_member_access(&base_ty, member, *span)
                     }
                 } else if let Some(enum_info) = self.enum_info_for_expr(*base) {
                     if enum_info.members.iter().any(|m| m == member) {
@@ -248,13 +275,8 @@ impl<'a> InferenceContext<'a> {
                         Type::Error
                     }
                 } else {
-                    let _base_ty = self.infer_expr(*base);
-                    self.error(
-                        "not-implemented",
-                        format!("Member access not yet implemented: .{}", member),
-                        *span,
-                    );
-                    Type::Error
+                    let base_ty = self.infer_expr(*base);
+                    self.infer_member_access(&base_ty, member, *span)
                 }
             }
 
@@ -394,6 +416,183 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
+    fn infer_match_expr(
+        &mut self,
+        scrutinee: ExprId,
+        arms: &[ast::MatchArm],
+        else_branch: Option<ExprId>,
+        span: TextSpan,
+    ) -> Type {
+        let scrutinee_ty = self.infer_expr(scrutinee);
+        let scrutinee_name = match self.module.raw_module().expr(scrutinee) {
+            ast::Expr::Ident(name) => Some(name.clone()),
+            _ => None,
+        };
+        let union_ty = match &scrutinee_ty {
+            Type::Union(union_ty) => Some(union_ty.clone()),
+            _ => None,
+        };
+
+        let mut covered_cases = FxHashSet::default();
+        let mut result_tys = Vec::new();
+
+        for arm in arms {
+            let pattern_tys = arm
+                .patterns
+                .iter()
+                .map(|pattern| {
+                    let pattern_ty = self.infer_match_pattern(*pattern);
+                    self.check_match_pattern(
+                        &scrutinee_ty,
+                        union_ty.as_ref(),
+                        &pattern_ty,
+                        &mut covered_cases,
+                        self.module.raw_module().expr(*pattern).span(),
+                    );
+                    pattern_ty
+                })
+                .collect::<Vec<_>>();
+
+            let narrowed_case = self.match_arm_narrowed_case(union_ty.as_ref(), &pattern_tys);
+            let body_ty =
+                if let (Some(name), Some(case_ty)) = (scrutinee_name.as_ref(), narrowed_case) {
+                    self.env.push_scope();
+                    self.env.bind(name.clone(), Type::UnionCase(case_ty));
+                    let ty = self.infer_expr(arm.body);
+                    self.env.pop_scope();
+                    ty
+                } else {
+                    self.infer_expr(arm.body)
+                };
+
+            result_tys.push(body_ty);
+        }
+
+        let is_exhaustive = union_ty.as_ref().is_some_and(|union_ty| {
+            union_ty
+                .cases
+                .iter()
+                .all(|case| covered_cases.contains(case))
+        });
+
+        if let Some(else_id) = else_branch {
+            result_tys.push(self.infer_expr(else_id));
+        } else if let Some(union_ty) = union_ty.as_ref() {
+            if !is_exhaustive {
+                let missing = union_ty
+                    .cases
+                    .iter()
+                    .filter(|case| !covered_cases.contains(*case))
+                    .map(|case| case.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                self.error(
+                    "non-exhaustive-union-match",
+                    format!(
+                        "Union match on '{}' is missing cases: {}",
+                        union_ty.name, missing
+                    ),
+                    span,
+                );
+                result_tys.push(Type::void());
+            }
+        } else {
+            result_tys.push(Type::void());
+        }
+
+        self.common_result_type(&result_tys)
+    }
+
+    fn infer_match_pattern(&mut self, pattern: ExprId) -> Type {
+        if let Some(name) = self.flattened_expr_name(pattern) {
+            if let Some((union_def, case)) = self.union_case_from_qualified_name(&name) {
+                let ty = Type::union_case_type(union_def.name.clone(), case.name.clone());
+                self.env.set_expr_type(pattern, ty.clone());
+                return ty;
+            }
+        }
+
+        self.infer_expr(pattern)
+    }
+
+    fn check_match_pattern(
+        &mut self,
+        scrutinee_ty: &Type,
+        union_ty: Option<&UnionType>,
+        pattern_ty: &Type,
+        covered_cases: &mut FxHashSet<Name>,
+        span: TextSpan,
+    ) {
+        if pattern_ty.is_error() || scrutinee_ty.is_error() {
+            return;
+        }
+
+        if let Some(union_ty) = union_ty {
+            match pattern_ty {
+                Type::UnionCase(case_ty) if case_ty.union == union_ty.name => {
+                    covered_cases.insert(case_ty.case.clone());
+                }
+                Type::UnionCase(case_ty) => {
+                    self.error(
+                        "wrong-union-pattern",
+                        format!(
+                            "Pattern '{}.{}' is not a case of union '{}'",
+                            case_ty.union, case_ty.case, union_ty.name
+                        ),
+                        span,
+                    );
+                }
+                _ => {
+                    self.error(
+                        "invalid-union-case-pattern",
+                        format!(
+                            "Union match on '{}' requires union case patterns",
+                            union_ty.name
+                        ),
+                        span,
+                    );
+                }
+            }
+            return;
+        }
+
+        if !self.type_satisfies_expected(scrutinee_ty, pattern_ty)
+            && !self.type_satisfies_expected(pattern_ty, scrutinee_ty)
+        {
+            self.error(
+                "type-mismatch",
+                format!("Cannot compare types {} and {}", scrutinee_ty, pattern_ty),
+                span,
+            );
+        }
+    }
+
+    fn match_arm_narrowed_case(
+        &self,
+        union_ty: Option<&UnionType>,
+        pattern_tys: &[Type],
+    ) -> Option<UnionCaseType> {
+        if pattern_tys.len() != 1 {
+            return None;
+        }
+
+        let union_ty = union_ty?;
+        match &pattern_tys[0] {
+            Type::UnionCase(case_ty) if case_ty.union == union_ty.name => Some(case_ty.clone()),
+            _ => None,
+        }
+    }
+
+    fn common_result_type(&self, result_tys: &[Type]) -> Type {
+        let mut current = result_tys.first().cloned().unwrap_or_else(Type::void);
+
+        for ty in result_tys.iter().skip(1) {
+            current = self.common_supertype(&current, ty);
+        }
+
+        current
+    }
+
     /// Infers the result type of a binary operation.
     fn infer_binop(
         &mut self,
@@ -443,7 +642,8 @@ impl<'a> InferenceContext<'a> {
 
             // Comparison: T × T → bool (where T supports comparison)
             Eq | Ne | Lt | Le | Gt | Ge => {
-                if lhs.is_compatible_with(rhs) {
+                if self.type_satisfies_expected(lhs, rhs) || self.type_satisfies_expected(rhs, lhs)
+                {
                     Type::bool()
                 } else {
                     self.error(
@@ -580,6 +780,97 @@ impl<'a> InferenceContext<'a> {
                 Type::Error
             }
         }
+    }
+
+    fn infer_member_access(&mut self, base_ty: &Type, member: &Name, span: TextSpan) -> Type {
+        match base_ty {
+            Type::Union(union_ty) => {
+                if let Some(ty) = self.union_shared_field_type(&union_ty.name, member) {
+                    return ty;
+                }
+
+                if self.union_has_case_field(&union_ty.name, member) {
+                    self.error(
+                        "union-case-field-requires-narrowing",
+                        format!(
+                            "Field '{}' is case-specific on union '{}' and requires narrowing",
+                            member, union_ty.name
+                        ),
+                        span,
+                    );
+                    Type::Error
+                } else {
+                    self.error(
+                        "unknown-union-field",
+                        format!("Union '{}' has no shared field '{}'", union_ty.name, member),
+                        span,
+                    );
+                    Type::Error
+                }
+            }
+            Type::UnionCase(case_ty) => self
+                .union_case_field_type(&case_ty.union, &case_ty.case, member)
+                .unwrap_or_else(|| {
+                    self.error(
+                        "unknown-union-case-field",
+                        format!(
+                            "Union case '{}.{}' has no field '{}'",
+                            case_ty.union, case_ty.case, member
+                        ),
+                        span,
+                    );
+                    Type::Error
+                }),
+            Type::Error => Type::Error,
+            _ => {
+                self.error(
+                    "not-implemented",
+                    format!("Member access not yet implemented: .{}", member),
+                    span,
+                );
+                Type::Error
+            }
+        }
+    }
+
+    fn union_shared_field_type(&mut self, union_name: &Name, member: &Name) -> Option<Type> {
+        let base_name = self.union_defs.get(union_name)?.base.clone()?;
+        let shape = effective_record_shape_for_name(self.module, &base_name)
+            .ok()
+            .flatten()?;
+        let field = shape.fields.iter().find(|field| field.name == *member)?;
+        Some(self.type_from_type_ref(&field.ty))
+    }
+
+    fn union_has_case_field(&self, union_name: &Name, member: &Name) -> bool {
+        self.union_defs
+            .get(union_name)
+            .map(|union_def| {
+                union_def
+                    .cases
+                    .iter()
+                    .any(|case| case.fields.iter().any(|field| field.name == *member))
+            })
+            .unwrap_or(false)
+    }
+
+    fn union_case_field_type(
+        &mut self,
+        union_name: &Name,
+        case_name: &Name,
+        member: &Name,
+    ) -> Option<Type> {
+        if let Some(ty) = self.union_shared_field_type(union_name, member) {
+            return Some(ty);
+        }
+
+        let union_def = self.union_defs.get(union_name)?.clone();
+        let case = union_def
+            .cases
+            .iter()
+            .find(|case| case.name == *case_name)?;
+        let field = case.fields.iter().find(|field| field.name == *member)?;
+        Some(self.type_from_type_ref(&field.ty))
     }
 
     fn infer_record_literal(
@@ -728,6 +1019,13 @@ impl<'a> InferenceContext<'a> {
             return Type::named(element.tag.clone());
         }
 
+        if let Some((union_def, case)) = self.union_case_from_qualified_name(&element.tag) {
+            let union_def = union_def.clone();
+            let case = case.clone();
+            self.check_element_bindings_against_union_case(element, &union_def, &case, span);
+            return Type::union_case_type(union_def.name, case.name);
+        }
+
         Type::named(element.tag.clone())
     }
 
@@ -797,6 +1095,120 @@ impl<'a> InferenceContext<'a> {
             )
         };
         self.check_element_bindings(element, span, &spec);
+    }
+
+    fn check_element_bindings_against_union_case(
+        &mut self,
+        element: &nx_hir::Element,
+        union_def: &UnionDef,
+        case: &UnionCaseDef,
+        span: TextSpan,
+    ) {
+        let mut content_property: Option<Name> = None;
+        let mut properties = FxHashMap::<Name, (Type, bool)>::default();
+
+        if let Some(base_name) = union_def.base.as_ref() {
+            if let Ok(Some(shape)) = effective_record_shape_for_name(self.module, base_name) {
+                for field in shape.fields {
+                    let ty = self.type_from_type_ref(&field.ty);
+                    if field.is_content {
+                        content_property = Some(field.name.clone());
+                    }
+                    properties.insert(field.name, (ty, field.is_required));
+                }
+            }
+        }
+
+        for field in &case.fields {
+            let ty = self.type_from_type_ref(&field.ty);
+            let is_required =
+                field.default.is_none() && !matches!(field.ty, ast::TypeRef::Nullable(_));
+            if field.is_content {
+                content_property = Some(field.name.clone());
+            }
+            properties.insert(field.name.clone(), (ty, is_required));
+        }
+
+        let mut provided = FxHashSet::<Name>::default();
+        if !element.content.is_empty() {
+            if let Some(content_name) = content_property.as_ref() {
+                if element
+                    .properties
+                    .iter()
+                    .any(|prop| prop.key == *content_name)
+                {
+                    self.error(
+                        "content-binding-conflict",
+                        format!(
+                            "Union case '{}.{}' passes content for '{}' both as a property and as body content",
+                            union_def.name, case.name, content_name
+                        ),
+                        span,
+                    );
+                } else if let Some((expected, _)) = properties.get(content_name).cloned() {
+                    let actual = self.normalized_sequence_type(&element.content, span);
+                    self.check_typed_binding(
+                        &actual,
+                        &expected,
+                        span,
+                        "content-type-mismatch",
+                        format!(
+                            "Content for '{}.{}' binds to '{}'",
+                            union_def.name, case.name, content_name
+                        ),
+                    );
+                    provided.insert(content_name.clone());
+                }
+            } else {
+                self.error(
+                    "missing-content-property",
+                    format!(
+                        "Union case '{}.{}' receives body content but does not declare a content field",
+                        union_def.name, case.name
+                    ),
+                    span,
+                );
+            }
+        }
+
+        for property in &element.properties {
+            if let Some((expected, _)) = properties.get(&property.key).cloned() {
+                let actual = self.infer_expr(property.value);
+                self.check_typed_binding(
+                    &actual,
+                    &expected,
+                    property.span,
+                    "union-case-field-type-mismatch",
+                    format!(
+                        "Field '{}' on union case '{}.{}'",
+                        property.key, union_def.name, case.name
+                    ),
+                );
+                provided.insert(property.key.clone());
+            } else {
+                self.error(
+                    "unknown-union-case-field",
+                    format!(
+                        "Union case '{}.{}' has no field '{}'",
+                        union_def.name, case.name, property.key
+                    ),
+                    property.span,
+                );
+            }
+        }
+
+        for (name, (_, is_required)) in properties {
+            if is_required && !provided.contains(&name) {
+                self.error(
+                    "missing-union-case-field",
+                    format!(
+                        "Union case '{}.{}' requires field '{}'",
+                        union_def.name, case.name, name
+                    ),
+                    span,
+                );
+            }
+        }
     }
 
     fn build_element_binding_spec<'b, I>(&mut self, bindings: I) -> ElementBindingSpec
@@ -1000,6 +1412,10 @@ impl<'a> InferenceContext<'a> {
                             binding.visible_name.clone(),
                             EnumType::new(binding.visible_name.clone(), members),
                         );
+                    } else if let Some(mut union_def) = interface_union(&item) {
+                        union_def.name = binding.visible_name.clone();
+                        self.union_defs
+                            .insert(binding.visible_name.clone(), union_def);
                     }
                 }
                 ResolvedPreparedItem::Raw {
@@ -1015,6 +1431,14 @@ impl<'a> InferenceContext<'a> {
                         binding.visible_name.clone(),
                         EnumType::new(binding.visible_name.clone(), members),
                     );
+                }
+                ResolvedPreparedItem::Raw {
+                    item: Item::Union(mut union_def),
+                    ..
+                } => {
+                    union_def.name = binding.visible_name.clone();
+                    self.union_defs
+                        .insert(binding.visible_name.clone(), union_def);
                 }
                 _ => {}
             }
@@ -1036,6 +1460,32 @@ impl<'a> InferenceContext<'a> {
                             "record-default-type-mismatch",
                             format!("Default value for record property '{}'", prop.name),
                         );
+                    }
+                }
+            }
+        }
+    }
+
+    fn validate_local_union_defaults(&mut self) {
+        let local_items = self.module.raw_module().items().to_vec();
+        for item in local_items {
+            if let Item::Union(union_def) = item {
+                for case in &union_def.cases {
+                    for field in &case.fields {
+                        if let Some(default_expr) = field.default {
+                            let expected = self.type_from_type_ref(&field.ty);
+                            let actual = self.infer_expr(default_expr);
+                            self.check_typed_binding(
+                                &actual,
+                                &expected,
+                                field.span,
+                                "union-case-default-type-mismatch",
+                                format!(
+                                    "Default value for union case field '{}.{}.{}'",
+                                    union_def.name, case.name, field.name
+                                ),
+                            );
+                        }
                     }
                 }
             }
@@ -1225,6 +1675,30 @@ impl<'a> InferenceContext<'a> {
         None
     }
 
+    fn union_type_from_def(&self, union_def: &UnionDef) -> Type {
+        Type::union_type(
+            union_def.name.clone(),
+            union_def
+                .cases
+                .iter()
+                .map(|case| case.name.clone())
+                .collect(),
+            union_def.base.clone(),
+        )
+    }
+
+    fn union_case_from_qualified_name<'info>(
+        &'info self,
+        name: &Name,
+    ) -> Option<(&'info UnionDef, &'info UnionCaseDef)> {
+        let (union_name, case_name) = name.as_str().rsplit_once('.')?;
+        let union_name = Name::new(union_name);
+        let case_name = Name::new(case_name);
+        let union_def = self.union_defs.get(&union_name)?;
+        let case = union_def.cases.iter().find(|case| case.name == case_name)?;
+        Some((union_def, case))
+    }
+
     fn type_from_type_ref(&mut self, type_ref: &ast::TypeRef) -> Type {
         resolve_type_ref_with(type_ref, &mut |name, seen| {
             self.resolve_named_type(name, seen)
@@ -1252,6 +1726,18 @@ impl<'a> InferenceContext<'a> {
 
         if let Some(enum_ty) = self.enum_defs.get(name) {
             return Type::Enum(enum_ty.clone());
+        }
+
+        if let Some(union_def) = self.union_defs.get(name) {
+            return Type::union_type(
+                union_def.name.clone(),
+                union_def
+                    .cases
+                    .iter()
+                    .map(|case| case.name.clone())
+                    .collect(),
+                union_def.base.clone(),
+            );
         }
 
         Type::named(name.clone())
@@ -1319,6 +1805,20 @@ impl<'a> InferenceContext<'a> {
             || self.component_type_satisfies_expected(actual, expected)
     }
 
+    fn union_type_satisfies_record(&self, union_name: &Name, expected: &Name) -> bool {
+        let Some(union_def) = self.union_defs.get(union_name) else {
+            return false;
+        };
+        let Some(base) = union_def.base.as_ref() else {
+            return false;
+        };
+
+        base == expected
+            || is_record_subtype(self.module, base, expected)
+                .ok()
+                .unwrap_or(false)
+    }
+
     fn named_type_is_element_like(&self, name: &Name) -> bool {
         if name.as_str() == "Element" {
             return true;
@@ -1351,6 +1851,13 @@ impl<'a> InferenceContext<'a> {
             }
             (Type::Named(actual_name), Type::Named(expected_name)) => {
                 self.named_type_satisfies_expected(actual_name, expected_name)
+            }
+            (Type::UnionCase(case), Type::Union(union)) => case.union == union.name,
+            (Type::UnionCase(case), Type::Named(expected_name)) => {
+                self.union_type_satisfies_record(&case.union, expected_name)
+            }
+            (Type::Union(union), Type::Named(expected_name)) => {
+                self.union_type_satisfies_record(&union.name, expected_name)
             }
             (Type::Named(_), Type::Nullable(expected_inner)) => {
                 self.type_satisfies_expected(actual, expected_inner)
@@ -1386,6 +1893,20 @@ impl<'a> InferenceContext<'a> {
             }
             (Type::Nullable(lhs_inner), Type::Nullable(rhs_inner)) => {
                 Type::nullable(self.common_supertype(lhs_inner, rhs_inner))
+            }
+            (Type::UnionCase(lhs_case), Type::UnionCase(rhs_case))
+                if lhs_case.union == rhs_case.union =>
+            {
+                self.union_defs
+                    .get(&lhs_case.union)
+                    .map(|union_def| self.union_type_from_def(union_def))
+                    .unwrap_or_else(|| generic_common_supertype(lhs, rhs))
+            }
+            (Type::UnionCase(case), Type::Union(union))
+            | (Type::Union(union), Type::UnionCase(case))
+                if case.union == union.name =>
+            {
+                Type::Union(union.clone())
             }
             (Type::Named(lhs_name), Type::Named(rhs_name)) => self
                 .common_record_supertype(lhs_name, rhs_name)

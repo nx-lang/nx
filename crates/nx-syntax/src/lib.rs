@@ -8,7 +8,9 @@ mod syntax_kind;
 mod syntax_node;
 mod validation;
 
-pub use ast::{AstNode, ComponentDef, Element, FunctionDef, RecordDef, SyntaxNodeExt, TypeDef};
+pub use ast::{
+    AstNode, ComponentDef, Element, FunctionDef, RecordDef, SyntaxNodeExt, TypeDef, UnionDef,
+};
 pub use syntax_kind::{syntax_kind_from_str, SyntaxKind};
 pub use syntax_node::SyntaxNode;
 pub use validation::validate;

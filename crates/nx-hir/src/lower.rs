@@ -3,11 +3,12 @@
 //! This module converts the tree-sitter Concrete Syntax Tree (CST) into
 //! our typed High-level Intermediate Representation (HIR).
 
-use crate::ast::{BinOp, Expr, Literal, OrderedFloat, Stmt, TypeRef, UnOp};
+use crate::ast::{BinOp, Expr, Literal, MatchArm, OrderedFloat, Stmt, TypeRef, UnOp};
 use crate::{
     Component, ComponentEmit, ComponentEmitKind, Element, EnumDef, EnumMember, ExprId, Function,
     Import, ImportKind, Item, LoweredModule, LoweringDiagnostic, Name, Param, Property, RecordDef,
-    RecordField, RecordKind, SelectiveImport, SourceId, TypeAlias, ValueDef, Visibility,
+    RecordField, RecordKind, SelectiveImport, SourceId, TypeAlias, UnionCaseDef, UnionCaseField,
+    UnionDef, ValueDef, Visibility,
 };
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_syntax::{SyntaxKind, SyntaxNode};
@@ -128,6 +129,41 @@ impl LoweringContext {
     /// Creates an error expression for malformed CST nodes.
     fn error_expr(&mut self, span: TextSpan) -> ExprId {
         self.alloc_expr(Expr::Error(span))
+    }
+
+    fn lower_qualified_name_expr(&mut self, node: SyntaxNode) -> ExprId {
+        let mut parts = node
+            .text()
+            .split('.')
+            .filter(|part| !part.is_empty())
+            .map(Name::new);
+
+        let Some(first) = parts.next() else {
+            return self.error_expr(node.span());
+        };
+
+        let mut expr = self.alloc_expr(Expr::Ident(first.clone()));
+        let ty = self.lookup_name(&first);
+        self.set_expr_type(expr, ty);
+
+        for member in parts {
+            expr = self.alloc_expr(Expr::Member {
+                base: expr,
+                member,
+                span: node.span(),
+            });
+        }
+
+        expr
+    }
+
+    fn lower_pattern_expr(&mut self, node: SyntaxNode) -> ExprId {
+        let pattern_node = node.children().next().unwrap_or(node);
+        if pattern_node.kind() == SyntaxKind::QUALIFIED_NAME {
+            self.lower_qualified_name_expr(pattern_node)
+        } else {
+            self.lower_expr(pattern_node)
+        }
     }
 
     fn push_scope(&mut self) {
@@ -833,6 +869,8 @@ impl LoweringContext {
             }
 
             // Identifier
+            SyntaxKind::QUALIFIED_NAME => self.lower_qualified_name_expr(node),
+
             SyntaxKind::IDENTIFIER | SyntaxKind::IDENTIFIER_EXPRESSION => {
                 // For identifier expressions, get the actual identifier child
                 if let Some(id_node) = node
@@ -1248,22 +1286,13 @@ impl LoweringContext {
             }
 
             // Match expression: if scrutinee is { pattern => expr, ... }
-            // We lower this to: let $match = scrutinee in (nested if-else with equality checks)
-            // This ensures the scrutinee is evaluated only once.
             SyntaxKind::VALUE_IF_MATCH_EXPRESSION | SyntaxKind::ELEMENTS_IF_MATCH_EXPRESSION => {
-                // Get the scrutinee expression
                 let scrutinee_expr = node
                     .child_by_field("scrutinee")
                     .map(|n| self.lower_expr(n))
                     .unwrap_or_else(|| self.error_expr(node.span()));
 
-                // Generate a unique name for the scrutinee binding
-                let scrutinee_name = Name::new("$match");
-                let scrutinee_ref = self.alloc_expr(Expr::Ident(scrutinee_name.clone()));
-
-                // Collect all match arms
-                let mut arms: Vec<(Vec<ExprId>, ExprId)> = Vec::new();
-                let mut else_expr: Option<ExprId> = None;
+                let mut arms: Vec<MatchArm> = Vec::new();
 
                 for child in node.children() {
                     if matches!(
@@ -1272,97 +1301,31 @@ impl LoweringContext {
                     ) {
                         // Each arm can have multiple patterns (comma-separated)
                         let mut patterns: Vec<ExprId> = Vec::new();
-                        let mut body: Option<ExprId> = None;
 
                         for arm_child in child.children() {
-                            match arm_child.kind() {
-                                SyntaxKind::PATTERN => {
-                                    // Lower the pattern as an expression (literal or qualified name)
-                                    let pattern_expr = arm_child
-                                        .children()
-                                        .next()
-                                        .map(|n| self.lower_expr(n))
-                                        .unwrap_or_else(|| self.lower_expr(arm_child));
-                                    patterns.push(pattern_expr);
-                                }
-                                _ => {
-                                    // The last non-pattern child is the body
-                                    if !arm_child.text().is_empty()
-                                        && arm_child.text() != "=>"
-                                        && arm_child.text() != ","
-                                    {
-                                        body = Some(self.lower_expr(arm_child));
-                                    }
-                                }
+                            if arm_child.kind() == SyntaxKind::PATTERN {
+                                patterns.push(self.lower_pattern_expr(arm_child));
                             }
                         }
 
                         if !patterns.is_empty() {
-                            arms.push((
+                            arms.push(MatchArm {
                                 patterns,
-                                body.unwrap_or_else(|| self.error_expr(child.span())),
-                            ));
+                                body: child
+                                    .child_by_field("body")
+                                    .map(|n| self.lower_expr(n))
+                                    .unwrap_or_else(|| self.error_expr(child.span())),
+                            });
                         }
                     }
                 }
 
-                // Check for else branch
-                if let Some(else_node) = node.child_by_field("else") {
-                    else_expr = Some(self.lower_expr(else_node));
-                }
+                let else_branch = node.child_by_field("else").map(|n| self.lower_expr(n));
 
-                // Build nested if-else from the arms (in reverse order)
-                // if x is { 1 => a, 2, 3 => b, else => c } becomes:
-                // let $match = x in (if $match == 1 { a } else { if $match == 2 || $match == 3 { b } else { c } })
-                let mut result = else_expr;
-                for (patterns, body) in arms.into_iter().rev() {
-                    // Build OR condition for multiple patterns: $match == p1 || $match == p2 ...
-                    let condition = if patterns.len() == 1 {
-                        self.alloc_expr(Expr::BinaryOp {
-                            lhs: scrutinee_ref,
-                            op: BinOp::Eq,
-                            rhs: patterns[0],
-                            span: node.span(),
-                        })
-                    } else {
-                        // Multiple patterns: build OR chain
-                        let mut or_expr = self.alloc_expr(Expr::BinaryOp {
-                            lhs: scrutinee_ref,
-                            op: BinOp::Eq,
-                            rhs: patterns[0],
-                            span: node.span(),
-                        });
-                        for pattern in patterns.into_iter().skip(1) {
-                            let eq_expr = self.alloc_expr(Expr::BinaryOp {
-                                lhs: scrutinee_ref,
-                                op: BinOp::Eq,
-                                rhs: pattern,
-                                span: node.span(),
-                            });
-                            or_expr = self.alloc_expr(Expr::BinaryOp {
-                                lhs: or_expr,
-                                op: BinOp::Or,
-                                rhs: eq_expr,
-                                span: node.span(),
-                            });
-                        }
-                        or_expr
-                    };
-
-                    result = Some(self.alloc_expr(Expr::If {
-                        condition,
-                        then_branch: body,
-                        else_branch: result,
-                        span: node.span(),
-                    }));
-                }
-
-                // Wrap in Let expression to evaluate scrutinee once
-                let match_body = result.unwrap_or_else(|| self.error_expr(node.span()));
-                self.alloc_expr(Expr::Let {
-                    name: scrutinee_name,
-                    value: scrutinee_expr,
-                    body: match_body,
+                self.alloc_expr(Expr::Match {
+                    scrutinee: scrutinee_expr,
+                    arms,
+                    else_branch,
                     span: node.span(),
                 })
             }
@@ -1523,6 +1486,52 @@ impl LoweringContext {
             name,
             visibility: Self::lower_visibility(node),
             members,
+            span: node.span(),
+        }
+    }
+
+    /// Lowers a discriminated union definition node.
+    pub fn lower_union_definition(&mut self, node: SyntaxNode) -> UnionDef {
+        let name = node
+            .child_by_field("name")
+            .map(|n| Name::new(n.text()))
+            .unwrap_or_else(|| Name::new("unknown"));
+        let cases = node
+            .child_by_field("cases")
+            .map(|cases| {
+                cases
+                    .children()
+                    .filter(|child| child.kind() == SyntaxKind::UNION_CASE)
+                    .map(|case| self.lower_union_case(case))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        UnionDef {
+            name,
+            visibility: Self::lower_visibility(node),
+            base: node
+                .child_by_field("base")
+                .map(|base| Name::new(base.text())),
+            cases,
+            span: node.span(),
+        }
+    }
+
+    fn lower_union_case(&mut self, node: SyntaxNode) -> UnionCaseDef {
+        let name = node
+            .child_by_field("name")
+            .map(|name| Name::new(name.text()))
+            .unwrap_or_else(|| Name::new("unknown"));
+        let fields = self
+            .lower_record_fields_from_node(node, false)
+            .into_iter()
+            .map(UnionCaseField::from_record_field)
+            .collect();
+
+        UnionCaseDef {
+            name,
+            fields,
             span: node.span(),
         }
     }
@@ -1812,6 +1821,10 @@ impl LoweringContext {
                     let enum_def = self.lower_enum_definition(child);
                     self.module.add_item(Item::Enum(enum_def));
                 }
+                SyntaxKind::UNION_DEFINITION => {
+                    let union_def = self.lower_union_definition(child);
+                    self.module.add_item(Item::Union(union_def));
+                }
                 SyntaxKind::ELEMENT => {
                     // Top-level element becomes an implicit 'root' function
                     let span = child.span();
@@ -1856,7 +1869,10 @@ pub fn lower(root: SyntaxNode, source_id: SourceId) -> LoweredModule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{effective_record_shape, validate_record_definitions, PreparedModule};
+    use crate::{
+        effective_record_shape, validate_record_definitions, validate_union_definitions,
+        PreparedItemKind, PreparedModule, PreparedNamespace,
+    };
     use nx_syntax::parse_str;
     mod tree_helpers {
         include!(concat!(
@@ -1869,6 +1885,14 @@ mod tests {
     fn prepared_record_validation_messages(module: &LoweredModule) -> Vec<String> {
         let prepared = PreparedModule::standalone("record-validation.nx", module.clone());
         validate_record_definitions(&prepared)
+            .into_iter()
+            .map(|error| error.message())
+            .collect()
+    }
+
+    fn prepared_union_validation_messages(module: &LoweredModule) -> Vec<String> {
+        let prepared = PreparedModule::standalone("union-validation.nx", module.clone());
+        validate_union_definitions(&prepared)
             .into_iter()
             .map(|error| error.message())
             .collect()
@@ -2316,6 +2340,208 @@ enum Mode = light | dark"#;
             }
             other => panic!("Expected enum definition, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_lower_union_definition() {
+        let source = r#"
+            abstract type EventBase = { source:string = "ui" }
+            export type UiEvent extends EventBase =
+              | clicked {
+                  x:int
+                  y:int
+                  retryable:bool = true
+                }
+              | closed
+        "#;
+        let parse_result = parse_str(source, "union-hir.nx");
+        assert!(
+            parse_result.is_ok(),
+            "Union source should parse: {:?}",
+            parse_result.errors
+        );
+        let tree = parse_result.tree.expect("Should parse union source");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let union = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Union(union) => Some(union),
+                _ => None,
+            })
+            .expect("Expected union item");
+
+        assert_eq!(union.name.as_str(), "UiEvent");
+        assert_eq!(union.visibility, Visibility::Export);
+        assert_eq!(
+            union.base.as_ref().map(|name| name.as_str()),
+            Some("EventBase")
+        );
+        assert_eq!(union.cases.len(), 2);
+        assert_eq!(union.cases[0].name.as_str(), "clicked");
+        assert_eq!(union.cases[0].fields.len(), 3);
+        assert_eq!(union.cases[0].fields[0].name.as_str(), "x");
+        assert!(
+            union.cases[0].fields[2].default.is_some(),
+            "Case field default should be preserved"
+        );
+        assert_eq!(union.cases[1].name.as_str(), "closed");
+        assert!(union.cases[1].is_fieldless());
+    }
+
+    #[test]
+    fn test_prepared_union_binds_only_union_name_in_type_namespace() {
+        let source = "export type LoadState = | idle | failed { message:string }";
+        let parse_result = parse_str(source, "union-binding.nx");
+        assert!(parse_result.is_ok(), "Union source should parse");
+        let tree = parse_result.tree.expect("Should parse union source");
+        let module = lower(tree.root(), SourceId::new(0));
+        let prepared = PreparedModule::standalone("union-binding.nx", module);
+        let union_name = Name::new("LoadState");
+        let case_name = Name::new("LoadState.idle");
+
+        let binding = prepared
+            .resolve_binding(PreparedNamespace::Type, &union_name)
+            .expect("Union name should bind in type namespace");
+        assert_eq!(binding.kind, PreparedItemKind::Union);
+        assert!(
+            prepared
+                .resolve_binding(PreparedNamespace::Element, &union_name)
+                .is_none(),
+            "Union name should not bind as an element constructor"
+        );
+        assert!(
+            prepared
+                .resolve_binding(PreparedNamespace::Type, &case_name)
+                .is_none(),
+            "Cases should not be exposed as top-level type bindings"
+        );
+        assert!(
+            prepared
+                .resolve_binding(PreparedNamespace::Element, &case_name)
+                .is_none(),
+            "Cases should not be exposed as top-level element bindings"
+        );
+    }
+
+    #[test]
+    fn test_validate_union_base_must_be_abstract_record() {
+        let source = r#"
+            type Concrete = { source:string }
+            type BadUnion extends Concrete = | failed { message:string }
+        "#;
+        let parse_result = parse_str(source, "bad-union-base.nx");
+        assert!(parse_result.is_ok(), "Union source should parse");
+        let tree = parse_result.tree.expect("Should parse union source");
+        let module = lower(tree.root(), SourceId::new(0));
+        let messages = prepared_union_validation_messages(&module);
+
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("only abstract records may be extended")),
+            "Expected invalid union base diagnostic, got {:?}",
+            messages
+        );
+    }
+
+    #[test]
+    fn test_validate_union_base_cannot_be_union() {
+        let source = r#"
+            type LoadState = | idle
+            type MoreLoadState extends LoadState = | failed { message:string }
+        "#;
+        let parse_result = parse_str(source, "union-extends-union.nx");
+        assert!(parse_result.is_ok(), "Union source should parse");
+        let tree = parse_result.tree.expect("Should parse union source");
+        let module = lower(tree.root(), SourceId::new(0));
+        let messages = prepared_union_validation_messages(&module);
+
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("does not resolve to an abstract record")),
+            "Expected union-base diagnostic, got {:?}",
+            messages
+        );
+    }
+
+    #[test]
+    fn test_validate_union_rejects_inherited_case_field_collision() {
+        let source = r#"
+            abstract type EventBase = { source:string }
+            type UiEvent extends EventBase = | clicked { source:string x:int }
+        "#;
+        let parse_result = parse_str(source, "union-inherited-collision.nx");
+        assert!(parse_result.is_ok(), "Union source should parse");
+        let tree = parse_result.tree.expect("Should parse union source");
+        let module = lower(tree.root(), SourceId::new(0));
+        let messages = prepared_union_validation_messages(&module);
+
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("redeclares inherited field 'source'")),
+            "Expected inherited-field collision diagnostic, got {:?}",
+            messages
+        );
+    }
+
+    #[test]
+    fn test_validate_union_inherited_content_field_collision_reports_once() {
+        let source = r#"
+            abstract type EventBase = { content body:string }
+            type UiEvent extends EventBase = | clicked { content body:string }
+        "#;
+        let parse_result = parse_str(source, "union-inherited-content-collision.nx");
+        assert!(parse_result.is_ok(), "Union source should parse");
+        let tree = parse_result.tree.expect("Should parse union source");
+        let module = lower(tree.root(), SourceId::new(0));
+        let messages = prepared_union_validation_messages(&module);
+
+        let inherited_field_count = messages
+            .iter()
+            .filter(|message| message.contains("redeclares inherited field 'body'"))
+            .count();
+        let content_property_count = messages
+            .iter()
+            .filter(|message| message.contains("already the content property"))
+            .count();
+
+        assert_eq!(
+            inherited_field_count, 1,
+            "Expected one inherited-field diagnostic, got {:?}",
+            messages
+        );
+        assert_eq!(
+            content_property_count, 0,
+            "Inherited content field collision should not also report a content-property diagnostic, got {:?}",
+            messages
+        );
+    }
+
+    #[test]
+    fn test_validate_union_rejects_duplicate_case_content_fields() {
+        let source = r#"
+            type LoadState = | failed {
+              content message:string
+              content details:string
+            }
+        "#;
+        let parse_result = parse_str(source, "union-content-collision.nx");
+        assert!(parse_result.is_ok(), "Union source should parse");
+        let tree = parse_result.tree.expect("Should parse union source");
+        let module = lower(tree.root(), SourceId::new(0));
+        let messages = prepared_union_validation_messages(&module);
+
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("already the content property")),
+            "Expected content-field collision diagnostic, got {:?}",
+            messages
+        );
     }
 
     #[test]
@@ -3754,6 +3980,61 @@ enum Mode = light | dark"#;
                         assert!(else_branch.is_none(), "Expected no else branch");
                     }
                     other => panic!("Expected If expression, got {:?}", other),
+                }
+            }
+            _ => panic!("Expected Function item"),
+        }
+    }
+
+    #[test]
+    fn test_lower_match_expression_preserves_arms() {
+        let source = r#"
+            let describe(x:int): string = {
+                if x is {
+                    0 => "zero"
+                    1, 2 => "small"
+                    else => "many"
+                }
+            }
+        "#;
+        let parse_result = parse_str(source, "test.nx");
+
+        assert!(
+            parse_result.errors.is_empty(),
+            "parse errors: {:?}",
+            parse_result.errors
+        );
+
+        let tree = parse_result.tree.unwrap();
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+
+        assert_eq!(module.items().len(), 1);
+
+        match &module.items()[0] {
+            Item::Function(func) => {
+                let match_expr = match module.expr(func.body) {
+                    Expr::Match { .. } => module.expr(func.body),
+                    Expr::Block { expr: Some(e), .. } => module.expr(*e),
+                    other => panic!("Expected Match or Block expression, got {:?}", other),
+                };
+
+                match match_expr {
+                    Expr::Match {
+                        scrutinee,
+                        arms,
+                        else_branch,
+                        ..
+                    } => {
+                        assert!(
+                            matches!(module.expr(*scrutinee), Expr::Ident(name) if name.as_str() == "x")
+                        );
+                        assert_eq!(arms.len(), 2);
+                        assert_eq!(arms[0].patterns.len(), 1);
+                        assert_eq!(arms[1].patterns.len(), 2);
+                        assert!(else_branch.is_some());
+                    }
+                    other => panic!("Expected Match expression, got {:?}", other),
                 }
             }
             _ => panic!("Expected Function item"),

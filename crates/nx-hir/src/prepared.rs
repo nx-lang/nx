@@ -1,6 +1,7 @@
 use crate::{
     ast, Component, ComponentEmit, EnumMember, Item, LoweredModule, LoweringDiagnostic, Name,
-    Param, RecordField, RecordKind, SourceId, TypeAlias, Visibility,
+    Param, RecordField, RecordKind, SourceId, TypeAlias, UnionCaseDef, UnionCaseField, UnionDef,
+    Visibility,
 };
 use nx_diagnostics::TextSpan;
 use rustc_hash::FxHashMap;
@@ -44,6 +45,7 @@ pub enum PreparedItemKind {
     Component,
     TypeAlias,
     Enum,
+    Union,
     Record,
 }
 
@@ -56,6 +58,7 @@ impl PreparedItemKind {
             PreparedItemKind::Component => &[PreparedNamespace::Element],
             PreparedItemKind::TypeAlias => &[PreparedNamespace::Type],
             PreparedItemKind::Enum => &[PreparedNamespace::Type],
+            PreparedItemKind::Union => &[PreparedNamespace::Type],
             PreparedItemKind::Record => &[PreparedNamespace::Type, PreparedNamespace::Element],
         }
     }
@@ -77,6 +80,14 @@ pub struct InterfaceField {
     pub ty: ast::TypeRef,
     pub is_content: bool,
     pub is_required: bool,
+    pub span: TextSpan,
+}
+
+/// Imported discriminated union case metadata published through a library interface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InterfaceUnionCase {
+    pub name: Name,
+    pub fields: Vec<InterfaceField>,
     pub span: TextSpan,
 }
 
@@ -116,6 +127,11 @@ pub enum InterfaceItemKind {
         members: Vec<EnumMember>,
         span: TextSpan,
     },
+    Union {
+        base: Option<Name>,
+        cases: Vec<InterfaceUnionCase>,
+        span: TextSpan,
+    },
     Record {
         kind: RecordKind,
         is_abstract: bool,
@@ -134,6 +150,7 @@ impl InterfaceItemKind {
             Self::Component { .. } => PreparedItemKind::Component,
             Self::TypeAlias { .. } => PreparedItemKind::TypeAlias,
             Self::Enum { .. } => PreparedItemKind::Enum,
+            Self::Union { .. } => PreparedItemKind::Union,
             Self::Record { .. } => PreparedItemKind::Record,
         }
     }
@@ -459,6 +476,7 @@ pub fn prepared_item_kind(item: &Item) -> PreparedItemKind {
         Item::Component(_) => PreparedItemKind::Component,
         Item::TypeAlias(_) => PreparedItemKind::TypeAlias,
         Item::Enum(_) => PreparedItemKind::Enum,
+        Item::Union(_) => PreparedItemKind::Union,
         Item::Record(_) => PreparedItemKind::Record,
     }
 }
@@ -569,6 +587,37 @@ pub fn interface_enum(item: &InterfaceItem) -> Option<crate::EnumDef> {
             name: Name::new(item.item_name.as_str()),
             visibility: item.visibility,
             members: members.clone(),
+            span: *span,
+        }),
+        _ => None,
+    }
+}
+
+/// Converts imported interface metadata into union-like view when possible.
+pub fn interface_union(item: &InterfaceItem) -> Option<UnionDef> {
+    match &item.item {
+        InterfaceItemKind::Union { base, cases, span } => Some(UnionDef {
+            name: Name::new(item.item_name.as_str()),
+            visibility: item.visibility,
+            base: base.clone(),
+            cases: cases
+                .iter()
+                .map(|case| UnionCaseDef {
+                    name: case.name.clone(),
+                    fields: case
+                        .fields
+                        .iter()
+                        .map(|field| UnionCaseField {
+                            name: field.name.clone(),
+                            ty: field.ty.clone(),
+                            is_content: field.is_content,
+                            default: None,
+                            span: field.span,
+                        })
+                        .collect(),
+                    span: case.span,
+                })
+                .collect(),
             span: *span,
         }),
         _ => None,

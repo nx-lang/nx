@@ -1988,6 +1988,149 @@ fn test_parse_enum_definition() {
 }
 
 #[test]
+fn test_parse_union_definition() {
+    let path = fixture_path("valid/union-definition.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(
+        result.is_ok(),
+        "Union definition file should parse. Errors: {:?}",
+        result.errors
+    );
+    let root = result.root().expect("Should produce root node");
+
+    let unions: Vec<_> = root
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::UNION_DEFINITION)
+        .collect();
+    assert_eq!(unions.len(), 2, "Expected two union definitions");
+
+    let load_state = unions.first().expect("First union should exist");
+    assert_eq!(
+        load_state
+            .child_by_field("name")
+            .expect("Union should expose name field")
+            .text(),
+        "LoadState"
+    );
+
+    let cases = load_state
+        .child_by_field("cases")
+        .expect("Union should expose case list");
+    let case_names: Vec<_> = cases
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::UNION_CASE)
+        .map(|case| {
+            case.child_by_field("name")
+                .expect("Union case should expose name")
+                .text()
+                .to_string()
+        })
+        .collect();
+    assert_eq!(case_names, vec!["idle", "loading", "failed", "loaded"]);
+
+    let failed = cases
+        .children()
+        .find(|case| {
+            case.child_by_field("name")
+                .is_some_and(|name| name.text() == "failed")
+        })
+        .expect("Expected failed case");
+    let failed_fields: Vec<_> = failed
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::PROPERTY_DEFINITION)
+        .collect();
+    assert_eq!(failed_fields.len(), 2, "Expected two failed-case fields");
+    assert!(
+        failed_fields[1].child_by_field("default").is_some(),
+        "Case field default should be preserved"
+    );
+
+    let ui_event = unions.get(1).expect("Second union should exist");
+    assert_eq!(
+        ui_event
+            .child_by_field("base")
+            .expect("Union should expose inherited abstract base")
+            .text(),
+        "EventBase"
+    );
+}
+
+#[test]
+fn test_parse_union_definition_requires_leading_pipe() {
+    let path = fixture_path("invalid/union-missing-leading-pipe.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(
+        !result.is_ok(),
+        "Union-looking type declaration without leading pipe should fail"
+    );
+    assert!(
+        !result.errors.is_empty(),
+        "Missing leading pipe should produce diagnostics"
+    );
+    let messages = result
+        .errors
+        .iter()
+        .map(|diagnostic| diagnostic.message())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let notes = result
+        .errors
+        .iter()
+        .filter_map(|diagnostic| diagnostic.note())
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        messages.contains("Invalid discriminated union definition"),
+        "Missing leading pipe should produce a union-specific diagnostic, got: {messages}"
+    );
+    assert!(
+        notes.contains("Expected: type UnionName"),
+        "Missing leading pipe should include the union syntax hint, got: {notes}"
+    );
+}
+
+#[test]
+fn test_parse_union_definition_rejects_duplicate_cases() {
+    let path = fixture_path("invalid/union-duplicate-cases.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(
+        !result.is_ok(),
+        "Duplicate union case should fail validation"
+    );
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|diagnostic| diagnostic.code() == Some("duplicate-union-case")),
+        "Duplicate union case should produce a dedicated diagnostic"
+    );
+}
+
+#[test]
+fn test_parse_union_definition_rejects_malformed_cases() {
+    for fixture in [
+        "invalid/union-empty-case-list.nx",
+        "invalid/union-malformed-case-payload.nx",
+        "invalid/union-invalid-extends-clause.nx",
+    ] {
+        let path = fixture_path(fixture);
+        let result = parse_file(&path).unwrap();
+
+        assert!(
+            !result.is_ok(),
+            "{fixture} should fail parsing or validation"
+        );
+        assert!(
+            !result.errors.is_empty(),
+            "{fixture} should produce diagnostics"
+        );
+    }
+}
+
+#[test]
 fn test_parse_all_valid_fixtures() {
     let valid_dir = fixture_path("valid");
 
@@ -2293,6 +2436,39 @@ fn test_snapshot_error_diagnostics() {
         .collect();
 
     insta::assert_debug_snapshot!(errors);
+}
+
+#[test]
+fn test_snapshot_union_definition() {
+    let result = parse_str(
+        "type LoadState = | idle | failed { message:string retryable:bool = true }",
+        "test.nx",
+    );
+    let root = result.root().expect("Should have root");
+    let union = root
+        .children()
+        .find(|child| child.kind() == SyntaxKind::UNION_DEFINITION)
+        .expect("Should find union definition");
+    let case_list = union
+        .child_by_field("cases")
+        .expect("Union should expose case list");
+    let case_summaries: Vec<_> = case_list
+        .children()
+        .map(|case| {
+            let name = case
+                .child_by_field("name")
+                .expect("Union case should expose name")
+                .text()
+                .to_string();
+            let field_count = case
+                .children()
+                .filter(|child| child.kind() == SyntaxKind::PROPERTY_DEFINITION)
+                .count();
+            (name, field_count)
+        })
+        .collect();
+
+    insta::assert_debug_snapshot!(case_summaries);
 }
 
 // ============================================================================

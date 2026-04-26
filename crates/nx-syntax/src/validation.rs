@@ -6,7 +6,7 @@
 //! - Error recovery within scopes
 //! - Enhanced error messages with suggestions
 
-use crate::{AstNode, ComponentDef, SyntaxKind, SyntaxNode, SyntaxTree};
+use crate::{AstNode, ComponentDef, SyntaxKind, SyntaxNode, SyntaxTree, UnionDef};
 use nx_diagnostics::{Diagnostic, Label};
 use text_size::TextRange;
 
@@ -22,6 +22,8 @@ const COMPONENT_DEFINITION_SYNTAX: &str =
 const DUPLICATE_NULLABLE_SUFFIX_NOTE: &str =
     "A nullable suffix can only be applied once per type layer. `string?[]?` is valid because \
      `[]` creates a new outer list layer.";
+const UNION_DEFINITION_SYNTAX: &str =
+    "Expected: type UnionName [extends AbstractRecord] = | caseName | payloadCase { prop:type }";
 
 /// Validates a syntax tree and returns any semantic errors found.
 ///
@@ -55,6 +57,9 @@ pub fn validate(tree: &SyntaxTree, file_name: &str) -> Vec<Diagnostic> {
 
     // Validate component declarations that depend on modifier/body combinations.
     validate_component_definitions(&root, file_name, &mut diagnostics);
+
+    // Validate union declarations that depend on complete case metadata.
+    validate_union_definitions(&root, file_name, &mut diagnostics);
 
     diagnostics
 }
@@ -195,6 +200,57 @@ fn validate_component_definitions(
                     .with_note(COMPONENT_DEFINITION_SYNTAX)
                     .build(),
             );
+        }
+    }
+}
+
+fn validate_union_definitions(
+    root: &SyntaxNode,
+    file_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for child in root.children() {
+        let Some(union_def) = UnionDef::cast(child) else {
+            continue;
+        };
+
+        let mut seen_cases: Vec<(String, TextRange)> = Vec::new();
+
+        for case in union_def.case_definitions() {
+            let Some(name) = case.child_by_field("name") else {
+                continue;
+            };
+            let case_name = name.text().to_string();
+
+            if let Some((_, first_span)) = seen_cases
+                .iter()
+                .find(|(previous_name, _)| previous_name == &case_name)
+            {
+                let union_name = union_def
+                    .name()
+                    .map(|name| name.text().to_string())
+                    .unwrap_or_else(|| "<unknown>".to_string());
+
+                diagnostics.push(
+                    Diagnostic::error("duplicate-union-case")
+                        .with_message(format!(
+                            "Duplicate case '{}' in union '{}'",
+                            case_name, union_name
+                        ))
+                        .with_label(
+                            Label::primary(file_name, name.span())
+                                .with_message("duplicate case declared here"),
+                        )
+                        .with_label(
+                            Label::secondary(file_name, *first_span)
+                                .with_message("first case declared here"),
+                        )
+                        .with_note("Each discriminated union case name must be unique.")
+                        .build(),
+                );
+            } else {
+                seen_cases.push((case_name, name.span()));
+            }
         }
     }
 }
@@ -389,17 +445,18 @@ fn walk_and_collect_errors(
     errors: &mut Vec<Diagnostic>,
 ) {
     if node.is_error() || node.is_missing() {
-        let start = u32::try_from(node.start_byte())
+        let raw_start = u32::try_from(node.start_byte())
             .expect("NX source size should be validated before collecting syntax diagnostics");
-        let end = u32::try_from(node.end_byte())
+        let raw_end = u32::try_from(node.end_byte())
             .expect("NX source size should be validated before collecting syntax diagnostics");
-        let range = TextRange::new(start.into(), end.into());
 
         // Get the text of the error node for context
-        let error_text = &source[start as usize..end.min(source.len() as u32) as usize];
+        let error_text = &source[raw_start as usize..raw_end.min(source.len() as u32) as usize];
 
         // Generate context-aware error message
         let (message, suggestion) = analyze_error_context(&node, error_text, source);
+        let (start, end) = refine_error_range(raw_start, raw_end, error_text, &message);
+        let range = TextRange::new(start.into(), end.into());
 
         let mut diagnostic_builder = Diagnostic::error("syntax-error")
             .with_message(message)
@@ -419,11 +476,34 @@ fn walk_and_collect_errors(
     }
 }
 
+fn refine_error_range(start: u32, end: u32, error_text: &str, message: &str) -> (u32, u32) {
+    let delimiter = match message {
+        "Unclosed brace" => Some('{'),
+        "Unclosed parenthesis" => Some('('),
+        "Unclosed bracket" => Some('['),
+        _ => None,
+    };
+
+    if let Some(delimiter) = delimiter {
+        if let Some(offset) = error_text.rfind(delimiter) {
+            let offset = u32::try_from(offset)
+                .expect("NX source size should be validated before collecting syntax diagnostics");
+            let narrowed_start = start.saturating_add(offset);
+            let narrowed_end = narrowed_start
+                .saturating_add(delimiter.len_utf8() as u32)
+                .min(end.max(narrowed_start.saturating_add(1)));
+            return (narrowed_start, narrowed_end);
+        }
+    }
+
+    (start, end)
+}
+
 /// Analyzes the error context and provides helpful messages and suggestions.
 fn analyze_error_context(
     node: &tree_sitter::Node,
     error_text: &str,
-    _source: &str,
+    source: &str,
 ) -> (String, Option<String>) {
     let trimmed_error = error_text.trim_start();
 
@@ -468,6 +548,12 @@ fn analyze_error_context(
                         "Expected: [abstract] type RecordName [extends BaseRecord] = { prop:type }"
                             .to_string(),
                     ),
+                );
+            }
+            "union_definition" | "union_case_list" | "union_case" => {
+                return (
+                    "Invalid discriminated union definition".to_string(),
+                    Some(UNION_DEFINITION_SYNTAX.to_string()),
                 );
             }
             "component_signature" => {
@@ -585,6 +671,15 @@ fn analyze_error_context(
         );
     }
 
+    if (trimmed_error.starts_with("type ") && trimmed_error.contains('|'))
+        || (trimmed_error.starts_with('|') && looks_like_type_definition_prefix(node, source))
+    {
+        return (
+            "Invalid discriminated union definition".to_string(),
+            Some(UNION_DEFINITION_SYNTAX.to_string()),
+        );
+    }
+
     // Common error patterns
     if error_text.contains('{') && !error_text.contains('}') {
         return (
@@ -612,6 +707,18 @@ fn analyze_error_context(
         "Syntax error".to_string(),
         Some("Check the syntax and try again".to_string()),
     )
+}
+
+fn looks_like_type_definition_prefix(node: &tree_sitter::Node, source: &str) -> bool {
+    let Some(prefix) = source.get(..node.start_byte()) else {
+        return false;
+    };
+    let line_prefix = prefix.rsplit('\n').next().unwrap_or("").trim_start();
+    let starts_with_type = line_prefix.starts_with("type ")
+        || line_prefix.starts_with("export type ")
+        || line_prefix.starts_with("private type ");
+
+    starts_with_type && line_prefix.contains('=')
 }
 
 #[cfg(test)]

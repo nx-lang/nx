@@ -10,6 +10,7 @@ use nx_hir::{
     effective_record_shape_for_name, resolve_record_definition as resolve_hir_record_definition,
     EffectiveField, ElementId, ExprId, Function, Item, LoweredModule, Name, PreparedBinding,
     PreparedBindingOrigin, PreparedBindingTarget, PreparedItemKind, PreparedModule, RecordKind,
+    UnionCaseDef, UnionCaseField, UnionDef,
 };
 use nx_types::{
     common_supertype, is_object_type, resolve_type_ref_with, resolve_type_ref_with_seen,
@@ -1450,6 +1451,12 @@ impl Interpreter {
                 else_branch,
                 ..
             } => self.eval_if(module, ctx, *condition, *then_branch, *else_branch),
+            ast::Expr::Match {
+                scrutinee,
+                arms,
+                else_branch,
+                ..
+            } => self.eval_match(module, ctx, *scrutinee, arms, *else_branch),
             ast::Expr::Let {
                 name, value, body, ..
             } => self.eval_let(module, ctx, name, *value, *body),
@@ -1724,6 +1731,78 @@ impl Interpreter {
         }
     }
 
+    fn eval_match(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        scrutinee: ExprId,
+        arms: &[ast::MatchArm],
+        else_branch: Option<ExprId>,
+    ) -> Result<Value, RuntimeError> {
+        let scrutinee_value = self.eval_expr(module, ctx, scrutinee)?;
+
+        for arm in arms {
+            for pattern in &arm.patterns {
+                let pattern_value = self.eval_match_pattern(module, ctx, *pattern)?;
+                if self.values_match(&scrutinee_value, &pattern_value)? {
+                    return self.eval_expr(module, ctx, arm.body);
+                }
+            }
+        }
+
+        if let Some(else_expr) = else_branch {
+            self.eval_expr(module, ctx, else_expr)
+        } else {
+            Ok(Value::Null)
+        }
+    }
+
+    fn eval_match_pattern(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        pattern: ExprId,
+    ) -> Result<Value, RuntimeError> {
+        if let Some(qualified_name) = self.flattened_expr_name(module, pattern) {
+            if self
+                .resolve_union_case_definition(module, qualified_name.as_str())
+                .is_some()
+            {
+                return Ok(Value::Record {
+                    type_name: Name::new(&qualified_name),
+                    fields: FxHashMap::default(),
+                });
+            }
+        }
+
+        self.eval_expr(module, ctx, pattern)
+    }
+
+    fn values_match(&self, scrutinee: &Value, pattern: &Value) -> Result<bool, RuntimeError> {
+        if let (
+            Value::Record {
+                type_name: scrutinee_type,
+                ..
+            },
+            Value::Record {
+                type_name: pattern_type,
+                ..
+            },
+        ) = (scrutinee, pattern)
+        {
+            return Ok(scrutinee_type == pattern_type);
+        }
+
+        match crate::eval::logical::eval_comparison_op(
+            scrutinee.clone(),
+            ast::BinOp::Eq,
+            pattern.clone(),
+        )? {
+            Value::Boolean(matches) => Ok(matches),
+            _ => Ok(false),
+        }
+    }
+
     /// Evaluate a let binding expression
     ///
     /// Evaluates the value expression once, binds it to the name in a new scope,
@@ -1909,6 +1988,20 @@ impl Interpreter {
 
         let content_values = self.eval_content_expressions(module, ctx, &element.content)?;
         let normalized_content = self.normalize_content_values(content_values);
+
+        if let Some((target_module, union_def, case)) =
+            self.resolve_union_case_definition(module, tag_name)
+        {
+            return self.build_union_case_value(
+                target_module,
+                ctx,
+                union_def,
+                case,
+                Name::new(tag_name),
+                fields,
+                normalized_content,
+            );
+        }
 
         if let Some((target_module, Item::Function(function))) = self.resolve_item(module, tag_name)
         {
@@ -2294,6 +2387,15 @@ impl Interpreter {
                     self.resolve_runtime_named_type(target_module, nested_name, nested_seen)
                 })
             }
+            Some((_, Item::Union(union_def))) => Type::union_type(
+                name.clone(),
+                union_def
+                    .cases
+                    .iter()
+                    .map(|case| case.name.clone())
+                    .collect(),
+                union_def.base.clone(),
+            ),
             _ => Type::named(name.clone()),
         };
 
@@ -2320,6 +2422,21 @@ impl Interpreter {
             // Prefer runtime value if variable exists
             if let Some(var_value) = ctx.try_lookup_variable(base_name.as_str()) {
                 return self.project_member(var_value, member, Some(base_name.as_str()));
+            }
+
+            let qualified_case_name = format!("{}.{}", base_name.as_str(), member.as_str());
+            if let Some((target_module, union_def, case)) =
+                self.resolve_union_case_definition(module, &qualified_case_name)
+            {
+                return self.build_union_case_value(
+                    target_module,
+                    ctx,
+                    union_def,
+                    case,
+                    Name::new(&qualified_case_name),
+                    FxHashMap::default(),
+                    None,
+                );
             }
 
             if let Some(enum_def) = self.resolve_enum_definition(module, base_name) {
@@ -2486,6 +2603,23 @@ impl Interpreter {
         }
     }
 
+    fn resolve_union_case_definition<'a>(
+        &'a self,
+        module: &'a LoweredModule,
+        qualified_name: &str,
+    ) -> Option<(&'a LoweredModule, &'a UnionDef, &'a UnionCaseDef)> {
+        let (union_name, case_name) = qualified_name.rsplit_once('.')?;
+        let (target_module, item) = self.resolve_item(module, union_name)?;
+        let Item::Union(union_def) = item else {
+            return None;
+        };
+        let case = union_def
+            .cases
+            .iter()
+            .find(|case| case.name.as_str() == case_name)?;
+        Some((target_module, union_def, case))
+    }
+
     fn resolve_enum_definition_inner<'a>(
         &'a self,
         module: &'a LoweredModule,
@@ -2622,6 +2756,10 @@ impl Interpreter {
         actual_type_name: &Name,
         expected: &Type,
     ) -> bool {
+        if self.union_case_value_matches_expected_type(module, actual_type_name, expected) {
+            return true;
+        }
+
         let actual = Type::named(actual_type_name.clone());
         type_satisfies_expected(&actual, expected)
             || match expected {
@@ -2640,6 +2778,47 @@ impl Interpreter {
                 ),
                 _ => false,
             }
+    }
+
+    fn union_case_value_matches_expected_type(
+        &self,
+        module: &LoweredModule,
+        actual_type_name: &Name,
+        expected: &Type,
+    ) -> bool {
+        let Some((actual_union_name, _)) = actual_type_name.as_str().rsplit_once('.') else {
+            return false;
+        };
+        let Some((target_module, union_def, _)) =
+            self.resolve_union_case_definition(module, actual_type_name.as_str())
+        else {
+            return false;
+        };
+
+        match expected {
+            Type::Union(expected_union) => {
+                expected_union.name.as_str() == actual_union_name
+                    || expected_union.name == union_def.name
+            }
+            Type::Named(expected_name) => {
+                expected_name.as_str() == actual_union_name
+                    || expected_name == &union_def.name
+                    || union_def.base.as_ref().is_some_and(|base| {
+                        base == expected_name
+                            || self.record_type_satisfies_expected(
+                                target_module,
+                                base,
+                                expected_name,
+                            )
+                    })
+            }
+            Type::Nullable(expected_inner) => self.union_case_value_matches_expected_type(
+                module,
+                actual_type_name,
+                expected_inner,
+            ),
+            _ => false,
+        }
     }
 
     fn abstract_record_instantiation_error(
@@ -2839,6 +3018,7 @@ fn runtime_prepared_item_kind(kind: ResolvedItemKind) -> Option<PreparedItemKind
         ResolvedItemKind::Component => Some(PreparedItemKind::Component),
         ResolvedItemKind::TypeAlias => Some(PreparedItemKind::TypeAlias),
         ResolvedItemKind::Enum => Some(PreparedItemKind::Enum),
+        ResolvedItemKind::Union => Some(PreparedItemKind::Union),
         ResolvedItemKind::Record => Some(PreparedItemKind::Record),
     }
 }
@@ -2858,6 +3038,151 @@ impl Interpreter {
         }
 
         self.build_record_value(module, ctx, record.as_str(), overrides)
+    }
+
+    fn build_union_case_value(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        union_def: &UnionDef,
+        case: &UnionCaseDef,
+        discriminator: Name,
+        mut overrides: FxHashMap<SmolStr, Value>,
+        normalized_content: Option<Value>,
+    ) -> Result<Value, RuntimeError> {
+        let base_shape = if let Some(base) = union_def.base.as_ref() {
+            Some(self.effective_record_shape(module, base)?)
+        } else {
+            None
+        };
+
+        let content_property_name = base_shape
+            .as_ref()
+            .and_then(|shape| shape.content_property())
+            .map(|field| field.name.clone())
+            .or_else(|| {
+                case.fields
+                    .iter()
+                    .find(|field| field.is_content)
+                    .map(|field| field.name.clone())
+            });
+
+        self.inject_element_content_field(
+            &mut overrides,
+            normalized_content,
+            content_property_name.as_ref().map(|name| name.as_str()),
+            "union case without a declared content field",
+            "union case construction",
+        )?;
+
+        let mut materialized = FxHashMap::default();
+
+        if let Some(base_shape) = base_shape {
+            for field in &base_shape.fields {
+                let value = if let Some(value) = overrides.remove(field.name.as_str()) {
+                    value
+                } else if field.default.is_some() {
+                    self.eval_effective_field_default(
+                        module,
+                        ctx,
+                        field,
+                        &materialized,
+                        &format!("union case field '{}.{}'", discriminator, field.name),
+                    )?
+                } else if matches!(&field.ty, ast::TypeRef::Nullable(_)) {
+                    Value::Null
+                } else if !field.is_required {
+                    return Err(self.unavailable_effective_field_default_error(
+                        &field.name,
+                        &format!("union case field '{}.{}'", discriminator, field.name),
+                    ));
+                } else {
+                    return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                        expected: format!("union case field '{}.{}'", discriminator, field.name),
+                        actual: "missing".to_string(),
+                        operation: "union case construction".to_string(),
+                    }));
+                };
+
+                let owner_module = self.owner_module_for_effective_field(
+                    module,
+                    field,
+                    &format!("union case field '{}.{}'", discriminator, field.name),
+                )?;
+                let value = self.coerce_value_to_type(
+                    owner_module,
+                    value,
+                    &field.ty,
+                    &format!("union case field '{}.{}'", discriminator, field.name),
+                )?;
+                materialized.insert(SmolStr::new(field.name.as_str()), value);
+            }
+        }
+
+        for field in &case.fields {
+            let value = if let Some(value) = overrides.remove(field.name.as_str()) {
+                value
+            } else if field.default.is_some() {
+                self.eval_union_case_field_default(
+                    module,
+                    ctx,
+                    field,
+                    &materialized,
+                    &format!("union case field '{}.{}'", discriminator, field.name),
+                )?
+            } else if matches!(&field.ty, ast::TypeRef::Nullable(_)) {
+                Value::Null
+            } else {
+                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                    expected: format!("union case field '{}.{}'", discriminator, field.name),
+                    actual: "missing".to_string(),
+                    operation: "union case construction".to_string(),
+                }));
+            };
+
+            let value = self.coerce_value_to_type(
+                module,
+                value,
+                &field.ty,
+                &format!("union case field '{}.{}'", discriminator, field.name),
+            )?;
+            materialized.insert(SmolStr::new(field.name.as_str()), value);
+        }
+
+        if let Some(unknown) = overrides.keys().next() {
+            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: format!("known fields for union case '{}'", discriminator),
+                actual: format!("unknown field '{}'", unknown),
+                operation: "union case construction".to_string(),
+            }));
+        }
+
+        Ok(Value::Record {
+            type_name: discriminator,
+            fields: materialized,
+        })
+    }
+
+    fn eval_union_case_field_default(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        field: &UnionCaseField,
+        visible_fields: &FxHashMap<SmolStr, Value>,
+        operation: &str,
+    ) -> Result<Value, RuntimeError> {
+        let Some(default_expr) = field.default else {
+            return Err(self.unavailable_effective_field_default_error(&field.name, operation));
+        };
+
+        let mut default_ctx = ctx.fork_isolated();
+        self.bind_top_level_values(module, &mut default_ctx)?;
+        for (name, value) in visible_fields {
+            default_ctx.define_variable(name.clone(), value.clone());
+        }
+        let result = self.eval_expr(module, &mut default_ctx, default_expr);
+        ctx.sync_usage_from(&default_ctx);
+        result
     }
 
     fn build_record_value(

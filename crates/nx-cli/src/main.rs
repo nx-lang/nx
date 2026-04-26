@@ -543,6 +543,13 @@ fn render_source_diagnostics(
 ) -> ExitCode {
     let mut sources = HashMap::new();
     sources.insert(file_name.to_string(), source.to_string());
+    for diagnostic in diagnostics {
+        for label in diagnostic.labels() {
+            sources
+                .entry(label.file.clone())
+                .or_insert_with(|| source.to_string());
+        }
+    }
     let rendered = render_diagnostics_cli(diagnostics, &sources);
     eprint!("{}", rendered);
     ExitCode::from(1)
@@ -1167,7 +1174,7 @@ let root() = { Ui.title() }"#,
         assert!(!stdout.contains("[JsonPolymorphic("));
         assert!(!stdout.contains("[JsonDerivedType("));
         assert!(stdout.contains(
-            "// No JsonPolymorphic metadata was generated because this abstract type had"
+            "// No polymorphism metadata (JSON or MessagePack) was generated because this abstract type had"
         ));
         assert!(stdout.contains("// no concrete exported descendants at code-generation time."));
         assert!(stderr.contains("Warning:"));

@@ -27,6 +27,7 @@ pub mod lower;
 pub mod prepared;
 pub mod records;
 pub mod scope;
+pub mod unions;
 
 use la_arena::{Arena, Idx};
 use nx_diagnostics::{Diagnostic, Label, Severity, TextSpan};
@@ -36,10 +37,11 @@ use smol_str::SmolStr;
 pub use lower::lower;
 pub use prepared::{
     binding_specs_for_item, interface_component, interface_enum, interface_function_signature,
-    interface_record, interface_type_alias, local_definition_id, prepared_item_kind,
-    ImportedRawRef, InterfaceField, InterfaceItem, InterfaceItemKind, InterfaceParam,
-    LocalDefinitionId, PreparedBinding, PreparedBindingOrigin, PreparedBindingTarget,
-    PreparedItemKind, PreparedModule, PreparedNamespace, ResolvedPreparedItem,
+    interface_record, interface_type_alias, interface_union, local_definition_id,
+    prepared_item_kind, ImportedRawRef, InterfaceField, InterfaceItem, InterfaceItemKind,
+    InterfaceParam, InterfaceUnionCase, LocalDefinitionId, PreparedBinding, PreparedBindingOrigin,
+    PreparedBindingTarget, PreparedItemKind, PreparedModule, PreparedNamespace,
+    ResolvedPreparedItem,
 };
 
 pub use components::{
@@ -60,6 +62,10 @@ pub use records::{
 };
 pub use scope::{
     build_scopes, check_undefined_identifiers, Scope, ScopeId, ScopeManager, Symbol, SymbolKind,
+};
+pub use unions::{
+    resolve_union_definition, validate_union_definitions, InvalidUnionBaseReason,
+    UnionValidationError,
 };
 
 /// Parses, lowers, and validates a module from source text.
@@ -283,6 +289,84 @@ pub struct EnumDef {
     pub visibility: Visibility,
     /// Members for the enum
     pub members: Vec<EnumMember>,
+    /// Source span
+    pub span: TextSpan,
+}
+
+/// Field declared on one discriminated union case.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnionCaseField {
+    /// Field name
+    pub name: Name,
+    /// Field type
+    pub ty: ast::TypeRef,
+    /// Whether this field receives markup body content for element-style construction.
+    pub is_content: bool,
+    /// Default value expression, if present.
+    pub default: Option<ExprId>,
+    /// Source span
+    pub span: TextSpan,
+}
+
+impl UnionCaseField {
+    /// Creates a union case field with explicit content metadata.
+    pub fn with_content(
+        name: Name,
+        ty: ast::TypeRef,
+        is_content: bool,
+        default: Option<ExprId>,
+        span: TextSpan,
+    ) -> Self {
+        Self {
+            name,
+            ty,
+            is_content,
+            default,
+            span,
+        }
+    }
+
+    /// Converts a record-style field parsed from a case payload into union case metadata.
+    pub fn from_record_field(field: RecordField) -> Self {
+        Self {
+            name: field.name,
+            ty: field.ty,
+            is_content: field.is_content,
+            default: field.default,
+            span: field.span,
+        }
+    }
+}
+
+/// One case in a discriminated union declaration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnionCaseDef {
+    /// Case name scoped to the owning union.
+    pub name: Name,
+    /// Case-specific payload fields.
+    pub fields: Vec<UnionCaseField>,
+    /// Source span
+    pub span: TextSpan,
+}
+
+impl UnionCaseDef {
+    /// Returns true when this case has no payload fields.
+    pub fn is_fieldless(&self) -> bool {
+        self.fields.is_empty()
+    }
+}
+
+/// Discriminated union definition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnionDef {
+    /// Union name
+    pub name: Name,
+    /// Declaration visibility
+    pub visibility: Visibility,
+    /// Optional abstract record base inherited by every case.
+    pub base: Option<Name>,
+    /// Cases in source order.
+    pub cases: Vec<UnionCaseDef>,
     /// Source span
     pub span: TextSpan,
 }
@@ -533,6 +617,8 @@ pub enum Item {
     TypeAlias(TypeAlias),
     /// Enum declaration
     Enum(EnumDef),
+    /// Discriminated union declaration
+    Union(UnionDef),
     /// Record declaration
     Record(RecordDef),
 }
@@ -546,6 +632,7 @@ impl Item {
             Item::Component(component) => &component.name,
             Item::TypeAlias(alias) => &alias.name,
             Item::Enum(enum_def) => &enum_def.name,
+            Item::Union(union_def) => &union_def.name,
             Item::Record(record_def) => &record_def.name,
         }
     }
@@ -558,6 +645,7 @@ impl Item {
             Item::Component(component) => component.visibility,
             Item::TypeAlias(alias) => alias.visibility,
             Item::Enum(enum_def) => enum_def.visibility,
+            Item::Union(union_def) => union_def.visibility,
             Item::Record(record_def) => record_def.visibility,
         }
     }

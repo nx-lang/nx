@@ -146,6 +146,55 @@ impl<'tree> TypeDef<'tree> {
     }
 }
 
+/// Represents a discriminated union definition in the AST.
+#[derive(Debug, Clone, Copy)]
+pub struct UnionDef<'tree> {
+    syntax: SyntaxNode<'tree>,
+}
+
+impl<'tree> AstNode<'tree> for UnionDef<'tree> {
+    fn can_cast(kind: SyntaxKind) -> bool {
+        kind == SyntaxKind::UNION_DEFINITION
+    }
+
+    fn cast(node: SyntaxNode<'tree>) -> Option<Self> {
+        if Self::can_cast(node.kind()) {
+            Some(Self { syntax: node })
+        } else {
+            None
+        }
+    }
+
+    fn syntax(&self) -> SyntaxNode<'tree> {
+        self.syntax
+    }
+}
+
+impl<'tree> UnionDef<'tree> {
+    /// Returns the union name.
+    pub fn name(&self) -> Option<SyntaxNode<'tree>> {
+        self.syntax.child_by_field("name")
+    }
+
+    /// Returns the abstract record base name when this union extends one.
+    pub fn base(&self) -> Option<SyntaxNode<'tree>> {
+        self.syntax.child_by_field("base")
+    }
+
+    /// Returns the case-list node.
+    pub fn cases(&self) -> Option<SyntaxNode<'tree>> {
+        self.syntax.child_by_field("cases")
+    }
+
+    /// Returns an iterator over union case definitions.
+    pub fn case_definitions(&self) -> impl Iterator<Item = SyntaxNode<'tree>> + 'tree {
+        self.cases()
+            .into_iter()
+            .flat_map(|cases| cases.children())
+            .filter(|node| node.kind() == SyntaxKind::UNION_CASE)
+    }
+}
+
 /// Represents a record definition in the AST.
 #[derive(Debug, Clone, Copy)]
 pub struct RecordDef<'tree> {

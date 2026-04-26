@@ -107,6 +107,339 @@ fn test_record_default_type_mismatch_diagnostic() {
 }
 
 #[test]
+fn test_union_case_default_type_mismatch_diagnostic() {
+    let source = r#"
+        type LoadState =
+          | idle
+          | failed {
+              message: string = 123
+              retryable: bool = true
+            }
+    "#;
+
+    let result = check_str(source, "union-default.nx");
+    let errors = result.errors();
+    assert!(
+        errors
+            .iter()
+            .any(|diag| diag.code() == Some("union-case-default-type-mismatch")),
+        "Expected union-case-default-type-mismatch diagnostic, got {:?}",
+        errors
+            .iter()
+            .map(|d| d.code().unwrap_or("<none>"))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_union_payload_case_construction_type_checks() {
+    let source = r#"
+        type LoadState =
+          | idle
+          | failed {
+              message: string
+              retryable: bool = true
+              code: int?
+            }
+
+        let state: LoadState = <LoadState.failed message={"Offline"} />
+    "#;
+
+    let result = check_str(source, "union-construction.nx");
+    assert!(
+        result.is_ok(),
+        "Expected payload union case construction to type check, got {:?}",
+        result.errors()
+    );
+}
+
+#[test]
+fn test_union_fieldless_case_shorthand_type_checks() {
+    let source = r#"
+        type LoadState = | idle | loading
+        let state: LoadState = { LoadState.idle }
+    "#;
+
+    let result = check_str(source, "union-fieldless.nx");
+    assert!(
+        result.is_ok(),
+        "Expected fieldless union case shorthand to type check, got {:?}",
+        result.errors()
+    );
+}
+
+#[test]
+fn test_payload_union_case_shorthand_is_rejected() {
+    let source = r#"
+        type LoadState = | failed { message:string }
+        let state: LoadState = { LoadState.failed }
+    "#;
+
+    let result = check_str(source, "union-payload-shorthand.nx");
+    let errors = result.errors();
+    assert!(
+        errors
+            .iter()
+            .any(|diag| diag.code() == Some("payload-union-case-requires-constructor")),
+        "Expected payload-union-case-requires-constructor diagnostic, got {:?}",
+        errors
+    );
+}
+
+#[test]
+fn test_union_case_construction_rejects_missing_and_unknown_fields() {
+    let missing = check_str(
+        r#"
+            type LoadState = | failed { message:string retryable:bool = true }
+            let state: LoadState = <LoadState.failed />
+        "#,
+        "union-missing-field.nx",
+    );
+    assert!(
+        missing
+            .errors()
+            .iter()
+            .any(|diag| diag.code() == Some("missing-union-case-field")),
+        "Expected missing-union-case-field diagnostic, got {:?}",
+        missing.errors()
+    );
+
+    let unknown = check_str(
+        r#"
+            type LoadState = | failed { message:string }
+            let state: LoadState = <LoadState.failed message={"Offline"} code={500} />
+        "#,
+        "union-unknown-field.nx",
+    );
+    assert!(
+        unknown
+            .errors()
+            .iter()
+            .any(|diag| diag.code() == Some("unknown-union-case-field")),
+        "Expected unknown-union-case-field diagnostic, got {:?}",
+        unknown.errors()
+    );
+}
+
+#[test]
+fn test_union_case_construction_rejects_field_type_mismatch() {
+    let source = r#"
+        type LoadState = | failed { message:string }
+        let state: LoadState = <LoadState.failed message={500} />
+    "#;
+
+    let result = check_str(source, "union-field-mismatch.nx");
+    let errors = result.errors();
+    assert!(
+        errors
+            .iter()
+            .any(|diag| diag.code() == Some("union-case-field-type-mismatch")),
+        "Expected union-case-field-type-mismatch diagnostic, got {:?}",
+        errors
+    );
+}
+
+#[test]
+fn test_union_cases_satisfy_extended_abstract_record() {
+    let source = r#"
+        abstract type EventBase = { source:string = "ui" }
+        type UiEvent extends EventBase = | clicked { x:int }
+        let event: EventBase = <UiEvent.clicked x={1} />
+    "#;
+
+    let result = check_str(source, "union-base-compat.nx");
+    assert!(
+        result.is_ok(),
+        "Expected union case to satisfy extended abstract record, got {:?}",
+        result.errors()
+    );
+}
+
+#[test]
+fn test_union_cases_compare_with_extended_abstract_record() {
+    let source = r#"
+        abstract type EventBase = { source:string = "ui" }
+        type UiEvent extends EventBase = | clicked { x:int } | closed
+        let compareUnion(event: UiEvent, base: EventBase): bool = { event == base }
+        let compareCase(base: EventBase): bool = { <UiEvent.clicked x={1} /> != base }
+    "#;
+
+    let result = check_str(source, "union-base-comparison.nx");
+    assert!(
+        result.is_ok(),
+        "Expected union and union case comparisons against abstract base to type check, got {:?}",
+        result.errors()
+    );
+}
+
+#[test]
+fn test_duplicate_union_case_syntax_diagnostic_suppresses_hir_duplicate() {
+    let source = "type LoadState = | idle | idle";
+
+    let result = check_str(source, "union-duplicate-case.nx");
+    let duplicate_diagnostics = result
+        .all_diagnostics()
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic.code() == Some("duplicate-union-case")
+                || diagnostic
+                    .message()
+                    .contains("declares case 'idle' more than once")
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        duplicate_diagnostics.len(),
+        1,
+        "Expected one duplicate-case diagnostic, got {:?}",
+        result
+            .all_diagnostics()
+            .iter()
+            .map(|diagnostic| (diagnostic.code(), diagnostic.message()))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        duplicate_diagnostics[0].code(),
+        Some("duplicate-union-case")
+    );
+}
+
+#[test]
+fn test_union_sibling_cases_infer_owning_union_in_sequences() {
+    let source = r#"
+        type LoadState = | idle | failed { message:string }
+        let states: LoadState[] = { LoadState.idle <LoadState.failed message={"Offline"} /> }
+    "#;
+
+    let result = check_str(source, "union-common-supertype.nx");
+    assert!(
+        result.is_ok(),
+        "Expected sibling union cases to infer owning union, got {:?}",
+        result.errors()
+    );
+}
+
+#[test]
+fn test_union_shared_inherited_field_is_accessible() {
+    let source = r#"
+        abstract type EventBase = { source:string }
+        type UiEvent extends EventBase = | clicked { x:int } | closed
+        let read(event: UiEvent): string = { event.source }
+    "#;
+
+    let result = check_str(source, "union-shared-field.nx");
+    assert!(
+        result.is_ok(),
+        "Expected inherited union field access to type check, got {:?}",
+        result.errors()
+    );
+}
+
+#[test]
+fn test_union_case_field_requires_narrowing() {
+    let source = r#"
+        type LoadState = | failed { message:string } | loaded { count:int }
+        let read(state: LoadState): string = { state.message }
+    "#;
+
+    let result = check_str(source, "union-case-field-access.nx");
+    let errors = result.errors();
+    assert!(
+        errors
+            .iter()
+            .any(|diag| diag.code() == Some("union-case-field-requires-narrowing")),
+        "Expected union-case-field-requires-narrowing diagnostic, got {:?}",
+        errors
+    );
+}
+
+#[test]
+fn test_exhaustive_union_match_narrows_identifier() {
+    let source = r#"
+        type LoadState = | idle | failed { message:string }
+        let view(state: LoadState): string = {
+            if state is {
+                LoadState.idle => ""
+                LoadState.failed => state.message
+            }
+        }
+    "#;
+
+    let result = check_str(source, "union-match-narrowing.nx");
+    assert!(
+        result.is_ok(),
+        "Expected exhaustive union match to narrow the identifier, got {:?}",
+        result.errors()
+    );
+}
+
+#[test]
+fn test_non_exhaustive_union_match_without_else_is_rejected() {
+    let source = r#"
+        type LoadState = | idle | failed { message:string }
+        let view(state: LoadState): string = {
+            if state is {
+                LoadState.idle => ""
+            }
+        }
+    "#;
+
+    let result = check_str(source, "union-match-non-exhaustive.nx");
+    let errors = result.errors();
+    assert!(
+        errors
+            .iter()
+            .any(|diag| diag.code() == Some("non-exhaustive-union-match")),
+        "Expected non-exhaustive-union-match diagnostic, got {:?}",
+        errors
+    );
+}
+
+#[test]
+fn test_union_match_else_allows_partial_coverage() {
+    let source = r#"
+        type LoadState = | idle | failed { message:string }
+        let view(state: LoadState): string = {
+            if state is {
+                LoadState.idle => ""
+                else => "fallback"
+            }
+        }
+    "#;
+
+    let result = check_str(source, "union-match-else.nx");
+    assert!(
+        result.is_ok(),
+        "Expected else arm to allow partial union match coverage, got {:?}",
+        result.errors()
+    );
+}
+
+#[test]
+fn test_union_match_rejects_pattern_from_other_union() {
+    let source = r#"
+        type LoadState = | idle
+        type SaveState = | idle
+        let view(state: LoadState): string = {
+            if state is {
+                SaveState.idle => ""
+                else => "fallback"
+            }
+        }
+    "#;
+
+    let result = check_str(source, "union-match-wrong-union.nx");
+    let errors = result.errors();
+    assert!(
+        errors
+            .iter()
+            .any(|diag| diag.code() == Some("wrong-union-pattern")),
+        "Expected wrong-union-pattern diagnostic, got {:?}",
+        errors
+    );
+}
+
+#[test]
 #[ignore = "Array literals are not yet accepted as RHS expressions (parser limitation)"]
 fn test_record_in_collections_type_checks() {
     let source = r#"

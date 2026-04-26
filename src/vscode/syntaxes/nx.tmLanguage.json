@@ -160,6 +160,30 @@
     "type-definition": {
       "patterns": [
         {
+          "name": "meta.definition.type.union.nx",
+          "begin": "^(\\s*)((private|export)\\s+)?(type)\\s+([A-Za-z_][A-Za-z0-9_]*)(?:\\s+(extends)\\s+([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*))?\\s*(=)\\s*(?=\\||$)",
+          "beginCaptures": {
+            "3": { "name": "storage.modifier.visibility.nx" },
+            "4": { "name": "keyword.declaration.type.nx" },
+            "5": { "name": "entity.name.type.nx" },
+            "6": { "name": "keyword.declaration.extends.nx" },
+            "7": { "name": "entity.name.type.nx" },
+            "8": { "name": "keyword.operator.assignment.nx" }
+          },
+          "end": "(?=^\\s*(?:(?:private|export)\\s+)?(?:(?:abstract)\\s+)?(?:type|enum|action|component|let)\\b)",
+          "patterns": [
+            { "include": "#union-case" },
+            { "include": "#comments" },
+            { "include": "#strings" },
+            { "include": "#numbers" },
+            { "include": "#keywords-core" },
+            { "include": "#keywords-control" },
+            { "include": "#types" },
+            { "include": "#operators" },
+            { "include": "#qualifiers" }
+          ]
+        },
+        {
           "name": "meta.definition.type.record.nx",
           "begin": "^(\\s*)((private|export)\\s+)?((abstract)\\s+)?(type)\\s+([A-Za-z_][A-Za-z0-9_]*)(?:\\s+(extends)\\s+([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*))?\\s*(=)\\s*(\\{)",
           "beginCaptures": {
@@ -227,6 +251,44 @@
         }
       ]
     },
+    "union-case": {
+      "patterns": [
+        {
+          "name": "meta.definition.type.union.case.nx",
+          "begin": "(\\|)\\s*([A-Za-z_][A-Za-z0-9_]*)",
+          "beginCaptures": {
+            "1": { "name": "punctuation.separator.union-case.nx" },
+            "2": { "name": "entity.name.type.union.case.nx" }
+          },
+          "end": "(?=\\||^\\s*(?:(?:private|export)\\s+)?(?:(?:abstract)\\s+)?(?:type|enum|action|component|let)\\b)",
+          "patterns": [
+            {
+              "begin": "\\{",
+              "beginCaptures": { "0": { "name": "punctuation.section.block.begin.nx" } },
+              "end": "\\}",
+              "endCaptures": { "0": { "name": "punctuation.section.block.end.nx" } },
+              "patterns": [
+                { "include": "#record-body" }
+              ]
+            },
+            { "include": "#comments" },
+            { "include": "#strings" },
+            { "include": "#numbers" },
+            { "include": "#value-if" },
+            { "include": "#value-for" },
+            { "include": "#elements-if" },
+            { "include": "#elements-for" },
+            { "include": "#tags" },
+            { "include": "#values-braced-expression" },
+            { "include": "#keywords-core" },
+            { "include": "#keywords-control" },
+            { "include": "#types" },
+            { "include": "#operators" },
+            { "include": "#qualifiers" }
+          ]
+        }
+      ]
+    },
     "record-body": {
       "patterns": [
         { "include": "#record-property" },
@@ -289,6 +351,14 @@
     },
     "qualifiers": {
       "patterns": [
+        {
+          "match": "\\b([A-Z][A-Za-z0-9_]*)(\\.)([a-z_][A-Za-z0-9_-]*)\\b",
+          "captures": {
+            "1": { "name": "entity.name.type.union.nx" },
+            "2": { "name": "punctuation.separator.dot.nx" },
+            "3": { "name": "entity.name.type.union.case.nx" }
+          }
+        },
         {
           "name": "entity.name.qualifier.nx",
           "match": "[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*"
@@ -513,6 +583,14 @@
       "name": "meta.tag.start.nx",
       "patterns": [
         {
+          "match": "\\G([A-Z][A-Za-z0-9_]*)(\\.)([a-z_][A-Za-z0-9_-]*)",
+          "captures": {
+            "1": { "name": "entity.name.type.union.nx" },
+            "2": { "name": "punctuation.separator.dot.nx" },
+            "3": { "name": "entity.name.type.union.case.nx" }
+          }
+        },
+        {
           "name": "entity.name.tag.nx",
           "match": "\\G[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*"
         },
@@ -583,13 +661,15 @@
             { "include": "#values-braced-expression" },
             { "include": "#keywords-control" },
             { "include": "#types" },
-            { "include": "#operators" }
+            { "include": "#operators" },
+            { "include": "#qualifiers" }
           ]
         },
         { "include": "#values-braced-expression" },
         { "include": "#keywords-control" },
         { "include": "#types" },
-        { "include": "#operators" }
+        { "include": "#operators" },
+        { "include": "#qualifiers" }
       ]
     },
     "value-if": {
@@ -623,13 +703,15 @@
             { "include": "#values-braced-expression" },
             { "include": "#keywords-control" },
             { "include": "#types" },
-            { "include": "#operators" }
+            { "include": "#operators" },
+            { "include": "#qualifiers" }
           ]
         },
         { "include": "#values-braced-expression" },
         { "include": "#keywords-control" },
         { "include": "#types" },
-        { "include": "#operators" }
+        { "include": "#operators" },
+        { "include": "#qualifiers" }
       ]
     },
     "elements-for": {
@@ -807,13 +889,15 @@
             { "include": "#values-braced-expression" },
             { "include": "#keywords-control" },
             { "include": "#types" },
-            { "include": "#operators" }
+            { "include": "#operators" },
+            { "include": "#qualifiers" }
           ]
         },
         { "include": "#values-braced-expression" },
         { "include": "#keywords-control" },
         { "include": "#types" },
-        { "include": "#operators" }
+        { "include": "#operators" },
+        { "include": "#qualifiers" }
       ]
     }
   }

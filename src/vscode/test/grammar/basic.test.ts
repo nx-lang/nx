@@ -127,6 +127,44 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(line, tokens, '|')).to.include('punctuation.separator.enum.nx');
   });
 
+  it('highlights discriminated union definitions and case fields', function () {
+    const lines = [
+      'export type LoadState =',
+      '  | idle',
+      '  | failed { message:string retryable:bool = true }'
+    ];
+
+    let ruleStack: StateStack | null = null;
+
+    const start = grammar.tokenizeLine(lines[0], ruleStack);
+    ruleStack = start.ruleStack;
+    expect(scopesForSubstring(lines[0], start.tokens, 'export')).to.include('storage.modifier.visibility.nx');
+    expect(scopesForSubstring(lines[0], start.tokens, 'type')).to.include('keyword.declaration.type.nx');
+    expect(scopesForSubstring(lines[0], start.tokens, 'LoadState')).to.include('entity.name.type.nx');
+    expect(scopesForSubstring(lines[0], start.tokens, '=')).to.include('keyword.operator.assignment.nx');
+
+    const idle = grammar.tokenizeLine(lines[1], ruleStack);
+    ruleStack = idle.ruleStack;
+    expect(scopesForSubstring(lines[1], idle.tokens, '|')).to.include('punctuation.separator.union-case.nx');
+    expect(scopesForSubstring(lines[1], idle.tokens, 'idle')).to.include('entity.name.type.union.case.nx');
+
+    const failed = grammar.tokenizeLine(lines[2], ruleStack);
+    expect(scopesForSubstring(lines[2], failed.tokens, '|')).to.include('punctuation.separator.union-case.nx');
+    expect(scopesForSubstring(lines[2], failed.tokens, 'failed')).to.include('entity.name.type.union.case.nx');
+    expect(scopesForSubstring(lines[2], failed.tokens, 'message')).to.include('variable.other.property.nx');
+    expect(scopesForSubstring(lines[2], failed.tokens, 'string')).to.include('storage.type.primitive.nx');
+    expect(scopesForSubstring(lines[2], failed.tokens, '=')).to.include('keyword.operator.assignment.nx');
+  });
+
+  it('highlights scoped union case constructors', function () {
+    const line = 'let state = <LoadState.failed message={"Offline"} />';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    expect(scopesForSubstring(line, tokens, 'LoadState.failed')).to.include('meta.tag.start.nx');
+    expect(scopesForSubstring(line, tokens, 'LoadState')).to.include('entity.name.type.union.nx');
+    expect(scopesForSubstring(line, tokens, 'failed')).to.include('entity.name.type.union.case.nx');
+    expect(scopesForSubstring(line, tokens, 'message')).to.include('entity.other.attribute-name.nx');
+  });
+
   it('highlights record definitions and fields', function () {
     const lines = ['type User = {', '  name: string', '  profile: models.Profile', '  age: int = 0', '}'];
 

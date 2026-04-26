@@ -47,6 +47,28 @@ Enum members conventionally use `snake_case`. NX serializes enum values using th
 written, so `snake_case` keeps the source aligned with JSON or database values such as
 `"pending_review"`.
 
+## Discriminated unions
+
+Use discriminated unions when each state belongs to a fixed set, but some states need their own
+payload fields.
+
+```nx
+type LoadState =
+  | idle
+  | loading
+  | failed { message:string retryable:bool = true }
+  | loaded { count:int }
+
+let state: LoadState =
+  <LoadState.failed message={"Network unavailable"} />
+```
+
+- A union declaration uses `type Name =` followed by one or more leading-pipe cases.
+- Fieldless cases can be referenced with `LoadState.idle`.
+- Payload cases are constructed with element syntax such as
+  `<LoadState.failed message={"Network unavailable"} />`.
+- Simple scalar choices should stay as `enum`; even fieldless unions serialize as `$type` records.
+
 ## Type aliases for collections
 
 ```nx
@@ -71,9 +93,21 @@ let badgeTone = if stage is {
   DealStage.pending_review => "warning"
   else => "success"
 }
+
+let state: LoadState =
+  <LoadState.failed message={"Network unavailable"} />
+
+let loadLabel = if state is {
+  LoadState.idle => "Idle"
+  LoadState.loading => "Loading"
+  LoadState.failed => state.message
+  LoadState.loaded => "Loaded"
+}
 ```
 
-Type annotations are optional when inference is obvious; add them for clarity or to surface diagnostics early.
+Union matches narrow the matched identifier inside each case arm, so `state.message` is available in
+the `LoadState.failed` arm. Type annotations are optional when inference is obvious; add them for
+clarity or to surface diagnostics early.
 
 ## See also (Reference/Grammar)
 - Reference: [Types](/reference/syntax/types)

@@ -334,11 +334,15 @@ public class NxRuntimeComponentTests
             SearchString = "docs"
         };
 
-        byte[] bytes = MessagePackSerializer.Serialize(action);
+        byte[] bytes = MessagePackSerializer.Serialize(
+            action,
+            cancellationToken: TestContext.Current.CancellationToken);
         MessagePackReader reader = new(new ReadOnlySequence<byte>(bytes));
         Assert.Equal(MessagePackType.Map, reader.NextMessagePackType);
 
-        var payload = MessagePackSerializer.Deserialize<Dictionary<string, object?>>(bytes);
+        var payload = MessagePackSerializer.Deserialize<Dictionary<string, object?>>(
+            bytes,
+            cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("SearchSubmitted", Assert.IsType<string>(payload["$type"]));
         Assert.True(payload.ContainsKey("searchString"));
     }
@@ -352,8 +356,12 @@ public class NxRuntimeComponentTests
             ["searchString"] = "docs",
         };
 
-        SearchAction action =
-            MessagePackSerializer.Deserialize<SearchAction>(MessagePackSerializer.Serialize(payload));
+        byte[] bytes = MessagePackSerializer.Serialize(
+            payload,
+            cancellationToken: TestContext.Current.CancellationToken);
+        SearchAction action = MessagePackSerializer.Deserialize<SearchAction>(
+            bytes,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         SearchSubmitted typed = Assert.IsType<SearchSubmitted>(action);
         Assert.Equal("docs", typed.SearchString);
@@ -385,8 +393,12 @@ public class NxRuntimeComponentTests
             },
         };
 
-        byte[] bytes = MessagePackSerializer.Serialize(payload);
-        SurveyPayload roundTripped = MessagePackSerializer.Deserialize<SurveyPayload>(bytes);
+        byte[] bytes = MessagePackSerializer.Serialize(
+            payload,
+            cancellationToken: TestContext.Current.CancellationToken);
+        SurveyPayload roundTripped = MessagePackSerializer.Deserialize<SurveyPayload>(
+            bytes,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         SearchSubmitted primaryAction = Assert.IsType<SearchSubmitted>(roundTripped.PrimaryAction);
         Assert.Equal("docs", primaryAction.SearchString);
@@ -416,7 +428,9 @@ public class NxRuntimeComponentTests
             """;
 
         byte[] bytes = NxRuntime.EvaluateBytes(source);
-        SearchAction action = MessagePackSerializer.Deserialize<SearchAction>(bytes);
+        SearchAction action = MessagePackSerializer.Deserialize<SearchAction>(
+            bytes,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         SearchSubmitted typed = Assert.IsType<SearchSubmitted>(action);
         Assert.Equal("docs", typed.SearchString);
@@ -429,7 +443,9 @@ public class NxRuntimeComponentTests
             ("searchString", "docs"),
             ("$type", "SearchSubmitted"));
 
-        SearchAction action = MessagePackSerializer.Deserialize<SearchAction>(bytes);
+        SearchAction action = MessagePackSerializer.Deserialize<SearchAction>(
+            bytes,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         SearchSubmitted typed = Assert.IsType<SearchSubmitted>(action);
         Assert.Equal("docs", typed.SearchString);
@@ -443,7 +459,9 @@ public class NxRuntimeComponentTests
             ("searchString", "docs"),
             ("$type", "SearchSubmitted"));
 
-        SearchAction action = MessagePackSerializer.Deserialize<SearchAction>(bytes);
+        SearchAction action = MessagePackSerializer.Deserialize<SearchAction>(
+            bytes,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         SearchSubmitted typed = Assert.IsType<SearchSubmitted>(action);
         Assert.Equal("docs", typed.SearchString);
@@ -457,7 +475,9 @@ public class NxRuntimeComponentTests
             ("searchString", "docs"),
             ("unknownField", "should-be-skipped"));
 
-        SearchAction action = MessagePackSerializer.Deserialize<SearchAction>(bytes);
+        SearchAction action = MessagePackSerializer.Deserialize<SearchAction>(
+            bytes,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         SearchSubmitted typed = Assert.IsType<SearchSubmitted>(action);
         Assert.Equal("docs", typed.SearchString);
@@ -470,7 +490,9 @@ public class NxRuntimeComponentTests
             ("searchString", "docs"));
 
         MessagePackSerializationException outer = Assert.Throws<MessagePackSerializationException>(
-            () => MessagePackSerializer.Deserialize<SearchAction>(bytes));
+            () => MessagePackSerializer.Deserialize<SearchAction>(
+                bytes,
+                cancellationToken: TestContext.Current.CancellationToken));
 
         MessagePackSerializationException inner = Assert.IsType<MessagePackSerializationException>(outer.InnerException);
         Assert.Contains("'$type'", inner.Message);
@@ -479,10 +501,14 @@ public class NxRuntimeComponentTests
     [Fact]
     public void PolymorphicTypedAction_DeserializeThrowsWhenPayloadIsNotAMap()
     {
-        byte[] bytes = MessagePackSerializer.Serialize("not-a-map");
+        byte[] bytes = MessagePackSerializer.Serialize(
+            "not-a-map",
+            cancellationToken: TestContext.Current.CancellationToken);
 
         MessagePackSerializationException outer = Assert.Throws<MessagePackSerializationException>(
-            () => MessagePackSerializer.Deserialize<SearchAction>(bytes));
+            () => MessagePackSerializer.Deserialize<SearchAction>(
+                bytes,
+                cancellationToken: TestContext.Current.CancellationToken));
 
         MessagePackSerializationException inner = Assert.IsType<MessagePackSerializationException>(outer.InnerException);
         Assert.Contains("map", inner.Message);
@@ -496,14 +522,20 @@ public class NxRuntimeComponentTests
             ("$type", "SearchSubmitted"));
         byte[] outerBytes = BuildMapWithRawEntries(
             ("primaryAction", innerBytes),
-            ("actions", MessagePackSerializer.Serialize(Array.Empty<SearchAction>())),
-            ("question", MessagePackSerializer.Serialize(new Dictionary<string, object?>
-            {
-                ["$type"] = "ShortTextQuestion",
-                ["label"] = "Pick one",
-            })));
+            ("actions", MessagePackSerializer.Serialize(
+                Array.Empty<SearchAction>(),
+                cancellationToken: TestContext.Current.CancellationToken)),
+            ("question", MessagePackSerializer.Serialize(
+                new Dictionary<string, object?>
+                {
+                    ["$type"] = "ShortTextQuestion",
+                    ["label"] = "Pick one",
+                },
+                cancellationToken: TestContext.Current.CancellationToken)));
 
-        SurveyPayload payload = MessagePackSerializer.Deserialize<SurveyPayload>(outerBytes);
+        SurveyPayload payload = MessagePackSerializer.Deserialize<SurveyPayload>(
+            outerBytes,
+            cancellationToken: TestContext.Current.CancellationToken);
 
         SearchSubmitted primary = Assert.IsType<SearchSubmitted>(payload.PrimaryAction);
         Assert.Equal("docs", primary.SearchString);

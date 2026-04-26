@@ -69,6 +69,15 @@ describe('NX if-forms (scrutinee vs condition-list)', function () {
     expect(scopesForSubstring(line, tokens, '=>')).to.include('keyword.operator.arrow.nx');
   });
 
+  it('value if: union case patterns highlight qualified cases', function () {
+    const line = 'let label = if state is { LoadState.idle => "Idle" LoadState.failed => state.message }';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    expect(scopesForSubstring(line, tokens, 'LoadState')).to.include('entity.name.type.union.nx');
+    expect(scopesForSubstring(line, tokens, 'idle')).to.include('entity.name.type.union.case.nx');
+    expect(scopesForSubstring(line, tokens, 'failed')).to.include('entity.name.type.union.case.nx');
+    expect(scopesForSubstring(line, tokens, '=>')).to.include('keyword.operator.arrow.nx');
+  });
+
   it('value if: condition-list form has no scrutinee between if and {', function () {
     const line = 'let result = if { x > 0 => 1 else => 0 }';
     const { tokens } = grammar.tokenizeLine(line, null);

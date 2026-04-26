@@ -65,11 +65,21 @@ non-library program builds, default visibility remains visible throughout the sa
 ```ebnf
 TypeDefinition ::=
     RecordDefinition
+    | UnionDefinition
     | EnumDefinition
     | TypeAliasDefinition
 
 EnumDefinition ::=
     [VisibilityModifier] "enum" Identifier "=" ["|"] Identifier { "|" Identifier }
+
+UnionDefinition ::=
+    [VisibilityModifier] "type" Identifier ["extends" QualifiedName] "=" UnionCaseList
+
+UnionCaseList ::=
+    UnionCase+
+
+UnionCase ::=
+    "|" Identifier ["{" {PropertyDefinition} "}"]
 
 RecordDefinition ::=
     [VisibilityModifier] ["abstract"] "type" Identifier ["extends" QualifiedName] "=" "{"
@@ -113,10 +123,17 @@ A nullable suffix may only be applied once per outer type layer. `string?[]?` is
 `[]` introduces a new list layer before the final `?`, while `string?[]??` is rejected during
 post-parse validation as a redundant nullable suffix.
 
+Simple scalar choices should use `enum`. Discriminated unions use `type Name =` followed by
+required leading-pipe cases. A union may contain fieldless cases and payload cases with the same
+`PropertyDefinition` shape used by records. The leading `|` is required so `type Result = Success |
+Failure` remains invalid today and available for a future alias-oriented feature.
+
 Record and action declarations reserve the `abstract` and `extends` keywords. `abstract type Name = { ... }`
 declares a non-instantiable record root, `abstract type Name extends Base = { ... }` declares an
 abstract derived record, and `type Name extends Base = { ... }` declares a concrete derived record.
-Only abstract records and actions may appear in the `extends` clause.
+Only abstract records and actions may appear in the `extends` clause. A discriminated union may
+extend an abstract record to inherit fields shared by every case, but unions cannot extend other
+unions or concrete records.
 
 Action inheritance example:
 
@@ -282,7 +299,7 @@ PrefixUnaryExpression ::=
 BinaryExpression ::=
     ValueExpression ( "+" | "-" | "*" | "/" | "%" | ">" | "<" | ">=" | "<=" | "==" | "!=" | "&&" | "||" ) ValueExpression
 MemberAccess ::=
-    ValueExpression "." Identifier  (* includes both property/field access and enum member access; semantic analysis distinguishes *)
+    ValueExpression "." Identifier  (* includes property/field access, enum member access, and fieldless union case shorthand; semantic analysis distinguishes *)
 ParenFunctionCall ::=
     ValueExpression "(" [ ValueExpression { "," ValueExpression } ] ")"
 
@@ -301,6 +318,16 @@ Literal ::=
     | NullLiteral
 
 ```
+
+Element-style construction can target regular markup elements and scoped payload union cases. A
+payload union case is constructed with its qualified case name, for example
+`<LoadState.failed message={"Offline"} />`. A fieldless union case can be written as member access,
+for example `LoadState.idle`, and may also use an empty scoped constructor.
+
+Match-style `if value is { ... }` arms accept qualified union case patterns such as
+`LoadState.failed`. When the scrutinee is a local identifier, a matching arm narrows that identifier
+to the selected case inside the arm body. A match over a union-typed scrutinee must cover all cases
+unless it has an `else` arm.
 
 <a id="elements"></a>
 ## Elements

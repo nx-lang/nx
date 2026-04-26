@@ -181,6 +181,12 @@ pub enum Type {
     /// Enum type (nominal with fixed set of members)
     Enum(EnumType),
 
+    /// Discriminated union type (nominal with fixed set of cases)
+    Union(UnionType),
+
+    /// Discriminated union case type scoped to an owning union.
+    UnionCase(UnionCaseType),
+
     /// Type variable for inference (e.g., T0, T1, T2)
     ///
     /// Used during type inference before the concrete type is known.
@@ -271,6 +277,16 @@ impl Type {
         Type::Enum(EnumType::new(name.into(), members))
     }
 
+    /// Creates a discriminated union type.
+    pub fn union_type(name: impl Into<Name>, cases: Vec<Name>, base: Option<Name>) -> Self {
+        Type::Union(UnionType::new(name.into(), cases, base))
+    }
+
+    /// Creates a discriminated union case type.
+    pub fn union_case_type(union: impl Into<Name>, case: impl Into<Name>) -> Self {
+        Type::UnionCase(UnionCaseType::new(union.into(), case.into()))
+    }
+
     /// Creates a type variable.
     pub fn var(id: TypeId) -> Self {
         Type::Variable(id)
@@ -349,6 +365,10 @@ impl Type {
             }
         }
 
+        if let (Type::UnionCase(case), Type::Union(union)) = (self, other) {
+            return case.union == union.name;
+        }
+
         // Arrays: T[] is compatible with U[] if T is compatible with U
         if let (Type::Array(t1), Type::Array(t2)) = (self, other) {
             return t1.is_compatible_with(t2);
@@ -405,6 +425,8 @@ impl fmt::Display for Type {
             }
             Type::Named(name) => write!(f, "{}", name),
             Type::Enum(enum_ty) => write!(f, "{}", enum_ty.name),
+            Type::Union(union_ty) => write!(f, "{}", union_ty.name),
+            Type::UnionCase(case_ty) => write!(f, "{}.{}", case_ty.union, case_ty.case),
             Type::Variable(id) => write!(f, "T{}", id),
             Type::Unknown => write!(f, "?"),
             Type::Error => write!(f, "<error>"),
@@ -426,6 +448,40 @@ pub struct EnumType {
     pub name: Name,
     /// Ordered member names
     pub members: Vec<Name>,
+}
+
+/// Describes a discriminated union type with its cases.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct UnionType {
+    /// Union name
+    pub name: Name,
+    /// Ordered case names
+    pub cases: Vec<Name>,
+    /// Optional abstract record base.
+    pub base: Option<Name>,
+}
+
+impl UnionType {
+    /// Creates a new discriminated union type definition.
+    pub fn new(name: Name, cases: Vec<Name>, base: Option<Name>) -> Self {
+        Self { name, cases, base }
+    }
+}
+
+/// Describes a discriminated union case type.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct UnionCaseType {
+    /// Owning union name.
+    pub union: Name,
+    /// Case name scoped under the owning union.
+    pub case: Name,
+}
+
+impl UnionCaseType {
+    /// Creates a new union case type.
+    pub fn new(union: Name, case: Name) -> Self {
+        Self { union, case }
+    }
 }
 
 impl EnumType {

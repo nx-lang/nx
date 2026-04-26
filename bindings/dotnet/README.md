@@ -243,6 +243,47 @@ member string.
 Use the raw APIs when you need a schema-free value tree. Use typed generated models when you want
 ergonomic host-side enums.
 
+### Discriminated Union Encoding
+
+NX discriminated union cases are encoded as canonical maps with a `$type` discriminator whose value
+is the fully scoped case name. Payload fields keep their authored NX wire names:
+
+```json
+{
+  "$type": "LoadState.failed",
+  "message": "Offline"
+}
+```
+
+Raw APIs expose the same shape for JSON and MessagePack. A fieldless case such as `LoadState.idle`
+is still a map, not a bare string:
+
+```json
+{
+  "$type": "LoadState.idle"
+}
+```
+
+Generated C# union roots use `JsonPolymorphic`/`JsonDerivedType` for JSON and
+`NxPolymorphicMessagePackFormatter<T>` for MessagePack, so serializing or deserializing through the
+generated union root type preserves the same `$type` map contract:
+
+```csharp
+LoadState state = new LoadStateFailed
+{
+    Message = "Offline"
+};
+
+string json = JsonSerializer.Serialize(state);
+byte[] bytes = MessagePackSerializer.Serialize(state);
+
+LoadState fromJson = JsonSerializer.Deserialize<LoadState>(json)!;
+LoadState fromMessagePack = MessagePackSerializer.Deserialize<LoadState>(bytes);
+```
+
+Enums and discriminated unions intentionally remain separate wire contracts: enums are bare authored
+member strings, while union cases are `$type` maps.
+
 ### Component Lifecycle
 
 ```csharp
@@ -363,11 +404,13 @@ nxlang generate ./models --language csharp --csharp-namespace MyApp.Models --out
 Generation now honors NX export visibility, so only declarations marked `export` are emitted.
 Library generation writes one `.g.cs` file per contributing module under the requested output
 directory. Generated enums use the authored NX member spellings for both JSON and MessagePack, the
-same bare-string shape raw runtime payloads carry. Generated C# enums now rely on shared helpers
-from `NxLang.Runtime` under `NxLang.Nx.Serialization`, so the project that compiles the generated
-files must reference `NxLang.Runtime` in addition to the serializer packages it already uses. The
-generated output emits the enum itself plus an explicit wire-format mapping type; the JSON
-converter and MessagePack formatter implementation now comes from the shared runtime assembly.
+same bare-string shape raw runtime payloads carry. Generated discriminated unions emit an abstract
+root plus sealed case DTOs whose JSON and MessagePack attributes use the canonical `$type` map
+shape. Generated C# enums and unions rely on shared helpers from `NxLang.Runtime` under
+`NxLang.Nx.Serialization`, so the project that compiles the generated files must reference
+`NxLang.Runtime` in addition to the serializer packages it already uses. The generated enum output
+emits the enum itself plus an explicit wire-format mapping type; the JSON converter and MessagePack
+formatter implementation comes from the shared runtime assembly.
 
 ## Troubleshooting
 

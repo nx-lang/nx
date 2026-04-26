@@ -1,7 +1,7 @@
 use nx_api::{build_library_artifact_from_directory, LibraryArtifact};
 use nx_hir::{
     ast::TypeRef, Component, EnumDef, ImportKind, Item, LoweredModule, PreparedItemKind, RecordDef,
-    RecordKind, SelectiveImport, TypeAlias, Visibility,
+    RecordKind, SelectiveImport, TypeAlias, UnionCaseDef, UnionDef, Visibility,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeSet;
@@ -37,6 +37,30 @@ pub struct ExportedRecord {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExportedUnionCase {
+    pub name: String,
+    pub fields: Vec<ExportedRecordField>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExportedUnion {
+    pub name: String,
+    pub base: Option<String>,
+    pub cases: Vec<ExportedUnionCase>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ExportedPolymorphicDescendant {
+    Record {
+        name: String,
+    },
+    UnionCase {
+        union_name: String,
+        case_name: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExportedExternalState {
     pub component_name: String,
     pub name: String,
@@ -55,6 +79,7 @@ pub struct ImportedType {
 pub enum ExportedType {
     Alias(ExportedAlias),
     Enum(ExportedEnum),
+    Union(ExportedUnion),
     Record(ExportedRecord),
     ExternalState(ExportedExternalState),
 }
@@ -64,6 +89,7 @@ impl ExportedType {
         match self {
             Self::Alias(alias) => &alias.name,
             Self::Enum(enum_def) => &enum_def.name,
+            Self::Union(union_def) => &union_def.name,
             Self::Record(record) => &record.name,
             Self::ExternalState(state) => &state.name,
         }
@@ -257,6 +283,37 @@ impl ExportedTypeGraph {
             .collect()
     }
 
+    pub fn polymorphic_descendants(&self, type_name: &str) -> Vec<ExportedPolymorphicDescendant> {
+        let Some(record) = self.record(type_name) else {
+            return Vec::new();
+        };
+        if !record.is_abstract {
+            return Vec::new();
+        }
+
+        let mut descendants = BTreeSet::new();
+        for record in self.concrete_descendants(type_name) {
+            descendants.insert(ExportedPolymorphicDescendant::Record {
+                name: record.name.clone(),
+            });
+        }
+
+        for union_def in self.unions() {
+            if !self.union_extends_record(union_def, type_name) {
+                continue;
+            }
+
+            for case in &union_def.cases {
+                descendants.insert(ExportedPolymorphicDescendant::UnionCase {
+                    union_name: union_def.name.clone(),
+                    case_name: case.name.clone(),
+                });
+            }
+        }
+
+        descendants.into_iter().collect()
+    }
+
     fn build_from_exported_modules(
         modules: Vec<ExportedModule>,
     ) -> Result<ExportedTypeGraphBuild, String> {
@@ -417,12 +474,42 @@ impl ExportedTypeGraph {
         }
     }
 
+    fn union_extends_record(&self, union_def: &ExportedUnion, type_name: &str) -> bool {
+        let Some(base_name) = union_def.base.as_deref() else {
+            return false;
+        };
+        let Some(mut current) = self.resolve_record(base_name) else {
+            return false;
+        };
+
+        loop {
+            if current.name == type_name {
+                return true;
+            }
+
+            let Some(base_record) = self.resolved_record_base(current) else {
+                return false;
+            };
+            current = base_record;
+        }
+    }
+
     fn records(&self) -> impl Iterator<Item = &ExportedRecord> {
         self.modules
             .iter()
             .flat_map(|module| module.declarations.iter())
             .filter_map(|declaration| match &declaration.item {
                 ExportedType::Record(record) => Some(record),
+                _ => None,
+            })
+    }
+
+    fn unions(&self) -> impl Iterator<Item = &ExportedUnion> {
+        self.modules
+            .iter()
+            .flat_map(|module| module.declarations.iter())
+            .filter_map(|declaration| match &declaration.item {
+                ExportedType::Union(union_def) => Some(union_def),
                 _ => None,
             })
     }
@@ -444,6 +531,10 @@ fn collect_exported_declarations(module: &LoweredModule) -> Vec<ExportedTypeDecl
             Item::Enum(enum_def) => declarations.push(ExportedTypeDecl {
                 visibility: enum_def.visibility,
                 item: ExportedType::Enum(export_enum(enum_def)),
+            }),
+            Item::Union(union_def) => declarations.push(ExportedTypeDecl {
+                visibility: union_def.visibility,
+                item: ExportedType::Union(export_union(union_def)),
             }),
             Item::Record(record) => declarations.push(ExportedTypeDecl {
                 visibility: record.visibility,
@@ -636,7 +727,9 @@ impl CachedImportedLibrary {
     fn imported_type(&self, visible_name: &str, exported_name: &str) -> Option<ImportedType> {
         let is_reference = match self.export_kinds.get(exported_name)? {
             PreparedItemKind::Enum => false,
-            PreparedItemKind::Record | PreparedItemKind::Component => true,
+            PreparedItemKind::Union | PreparedItemKind::Record | PreparedItemKind::Component => {
+                true
+            }
             _ => return None,
         };
 
@@ -707,7 +800,10 @@ fn build_cached_imported_library(dependency_root: &Path) -> Result<CachedImporte
         // avoid noise from unrelated value/function exports.
         if matches!(
             kind,
-            PreparedItemKind::Enum | PreparedItemKind::Record | PreparedItemKind::Component
+            PreparedItemKind::Enum
+                | PreparedItemKind::Union
+                | PreparedItemKind::Record
+                | PreparedItemKind::Component
         ) {
             wildcard_importable_export_names.push(exported_name.clone());
         }
@@ -749,6 +845,29 @@ fn export_record(def: &RecordDef) -> ExportedRecord {
         base: def.base.as_ref().map(|name| name.as_str().to_string()),
         fields: def
             .properties
+            .iter()
+            .map(|field| ExportedRecordField {
+                name: field.name.as_str().to_string(),
+                ty: field.ty.clone(),
+                has_default: field.default.is_some(),
+            })
+            .collect(),
+    }
+}
+
+fn export_union(def: &UnionDef) -> ExportedUnion {
+    ExportedUnion {
+        name: def.name.as_str().to_string(),
+        base: def.base.as_ref().map(|name| name.as_str().to_string()),
+        cases: def.cases.iter().map(export_union_case).collect(),
+    }
+}
+
+fn export_union_case(case: &UnionCaseDef) -> ExportedUnionCase {
+    ExportedUnionCase {
+        name: case.name.as_str().to_string(),
+        fields: case
+            .fields
             .iter()
             .map(|field| ExportedRecordField {
                 name: field.name.as_str().to_string(),

@@ -1,0 +1,14 @@
+---
+source: crates/nx-syntax/tests/parser_tests.rs
+expression: case_summaries
+---
+[
+    (
+        "idle",
+        0,
+    ),
+    (
+        "failed",
+        2,
+    ),
+]

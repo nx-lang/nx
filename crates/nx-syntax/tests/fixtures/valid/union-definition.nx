@@ -1,0 +1,33 @@
+enum CardSortMode = closed | open
+
+abstract type EventBase = {
+  source: string = "ui"
+}
+
+type LoadState =
+  | idle
+  | loading
+  | failed {
+      message: string
+      retryable: bool = true
+    }
+  | loaded {
+      items: string[]
+    }
+
+export type UiEvent extends EventBase =
+  | clicked {
+      x: int
+      y: int
+    }
+  | closed
+
+let idle: LoadState = { LoadState.idle }
+let failed: LoadState = <LoadState.failed message={"Offline"} />
+let view(state: LoadState) = {
+  if state is {
+    LoadState.idle => ""
+    LoadState.failed => state.message
+    else => "loaded"
+  }
+}

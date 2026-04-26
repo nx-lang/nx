@@ -27,7 +27,26 @@ let badge = if stage is {
 }
 ```
 
-The first matching arm wins. Omit `else` only when you are sure all cases are covered.
+The first matching arm wins. Enums are useful for scalar choices; discriminated unions add
+case-specific payloads and narrow the matched identifier inside each arm.
+
+```nx
+type LoadState =
+  | idle
+  | failed { message:string }
+  | loaded { count:int }
+
+let state: LoadState = LoadState.idle
+
+let label = if state is {
+  LoadState.idle => "Idle"
+  LoadState.failed => state.message
+  LoadState.loaded => "Loaded"
+}
+```
+
+For union-typed scrutinees, omit `else` only when every union case is covered. Add `else` when you
+intentionally want a fallback for the remaining cases.
 
 ### Condition-list form
 

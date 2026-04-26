@@ -49,6 +49,42 @@ let stage = DealStage.pending_review
 - Enum members conventionally use `snake_case`.
 - NX serializes enum values exactly as they appear in source, so `pending_review` stays
   `"pending_review"` over the wire or in storage.
+- Use enums for simple scalar choices. Use discriminated unions when cases need per-state payloads.
+
+## Discriminated Union Types
+Discriminated unions declare a closed set of scoped cases. A union uses `type Name =` followed by a
+required leading-pipe case list.
+
+```nx
+type LoadState =
+  | idle
+  | loading
+  | failed { message:string retryable:bool = true }
+  | loaded { items:string[] }
+```
+
+- Every case is referenced through the owning union name, such as `LoadState.idle`.
+- Fieldless cases can be used directly with member syntax.
+- Payload cases are constructed with element-style syntax:
+  `<LoadState.failed message={"Network unavailable"} />`.
+- Case payload fields use the same `name: Type`, nullable, default, and `content` field rules as
+  record fields.
+- A union may extend an abstract record to share inherited fields across every case:
+
+```nx
+abstract type EventBase = {
+  source:string
+}
+
+type UiEvent extends EventBase =
+  | clicked { x:int y:int }
+  | closed
+```
+
+Unions are closed: cases can only be declared in the union's own case list, and other declarations
+cannot extend a union to add cases. `type Result = Success | Failure` is intentionally not a
+discriminated union declaration in this feature; that spelling remains reserved for a possible
+future union-alias proposal.
 
 ## Nested records
 

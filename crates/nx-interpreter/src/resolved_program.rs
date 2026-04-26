@@ -28,6 +28,7 @@ pub enum ResolvedItemKind {
     Component,
     TypeAlias,
     Enum,
+    Union,
     Record,
 }
 
@@ -303,6 +304,7 @@ fn resolved_item_kind(item: &nx_hir::Item) -> ResolvedItemKind {
         nx_hir::Item::Component(_) => ResolvedItemKind::Component,
         nx_hir::Item::TypeAlias(_) => ResolvedItemKind::TypeAlias,
         nx_hir::Item::Enum(_) => ResolvedItemKind::Enum,
+        nx_hir::Item::Union(_) => ResolvedItemKind::Union,
         nx_hir::Item::Record(_) => ResolvedItemKind::Record,
     }
 }

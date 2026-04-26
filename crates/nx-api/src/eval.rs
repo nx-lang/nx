@@ -586,5 +586,71 @@ let root() = { answer() }"#;
         };
 
         assert_eq!(value, NxValue::String("active".to_string()));
+        assert_eq!(value.to_json_string().unwrap(), "\"active\"");
+    }
+
+    #[test]
+    fn eval_source_returns_payload_union_case_as_type_map() {
+        let source = r#"
+            type LoadState =
+              | idle
+              | failed {
+                  message: string
+                  retryable: bool = true
+                }
+            let root(): LoadState = { <LoadState.failed message={"Offline"} /> }
+        "#;
+
+        let EvalResult::Ok(value) =
+            eval_source(source, "union-root.nx", &ProgramBuildContext::empty())
+        else {
+            panic!("Expected union source evaluation to succeed");
+        };
+
+        let expected = NxValue::Record {
+            type_name: Some("LoadState.failed".to_string()),
+            properties: BTreeMap::from([
+                (
+                    "message".to_string(),
+                    NxValue::String("Offline".to_string()),
+                ),
+                ("retryable".to_string(), NxValue::Bool(true)),
+            ]),
+        };
+        assert_eq!(value, expected);
+        assert_eq!(
+            value.to_json_string().unwrap(),
+            r#"{"$type":"LoadState.failed","message":"Offline","retryable":true}"#
+        );
+        let bytes = value.to_msgpack_vec().unwrap();
+        assert_eq!(NxValue::from_msgpack_slice(&bytes).unwrap(), expected);
+    }
+
+    #[test]
+    fn eval_source_returns_fieldless_union_case_as_type_map() {
+        let source = r#"
+            type LoadState = | idle | loading
+            let root(): LoadState = { LoadState.idle }
+        "#;
+
+        let EvalResult::Ok(value) = eval_source(
+            source,
+            "fieldless-union-root.nx",
+            &ProgramBuildContext::empty(),
+        ) else {
+            panic!("Expected fieldless union source evaluation to succeed");
+        };
+
+        let expected = NxValue::Record {
+            type_name: Some("LoadState.idle".to_string()),
+            properties: BTreeMap::new(),
+        };
+        assert_eq!(value, expected);
+        assert_eq!(
+            value.to_json_string().unwrap(),
+            r#"{"$type":"LoadState.idle"}"#
+        );
+        let bytes = value.to_msgpack_vec().unwrap();
+        assert_eq!(NxValue::from_msgpack_slice(&bytes).unwrap(), expected);
     }
 }

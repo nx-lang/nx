@@ -42,7 +42,32 @@ let statusBadge = if status is {
 ```
 
 - Multiple patterns can share a body: `"saturday", "sunday" => <WeekendIcon/>`.
-- Omitting `else` is allowed. If no case matches, evaluation fails to surface incorrect assumptions.
+- Enum and literal matches may omit `else`, but a missed match fails at runtime. Use `else` when a
+  fallback is meaningful.
+- Union matches without `else` must cover every case in the union.
+
+### Discriminated Union Narrowing
+
+When the scrutinee is a local identifier with a union type, each union case arm narrows that
+identifier to the matched case for the arm body. NX does not introduce a separate `as` binding in
+this version.
+
+```nx
+type LoadState =
+  | idle
+  | failed { message:string }
+  | loaded { count:int }
+
+let label(state: LoadState) = if state is {
+  LoadState.idle => "Idle"
+  LoadState.failed => state.message
+  LoadState.loaded => "Loaded"
+}
+```
+
+`state.message` is valid only in the `LoadState.failed` arm. Outside that arm, an unnarrowed
+`LoadState` value exposes only fields shared through an abstract base record, if the union extends
+one.
 
 ## Condition-list form
 

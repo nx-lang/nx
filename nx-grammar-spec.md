@@ -192,6 +192,7 @@ VisibilityModifier
 
 TypeDefinition (AST: TypeDefinitionSyntax is a sum type)
 - TypeDefinition → RecordDefinition (RecordDefinitionSyntax)
+- TypeDefinition → UnionDefinition (UnionDefinitionSyntax)
 - TypeDefinition → EnumDefinition (EnumDefinitionSyntax)
 - TypeDefinition → TypeAliasDefinition (TypeAliasDefinitionSyntax)
 
@@ -206,6 +207,27 @@ ActionDefinition (AST: ActionDefinitionSyntax)
 RecordExtendsClauseOpt
 - RecordExtendsClauseOpt → EXTENDS QualifiedName
 - RecordExtendsClauseOpt → ε
+
+UnionDefinition (AST: UnionDefinitionSyntax)
+- UnionDefinition → VisibilityModifier? TYPE IDENTIFIER UnionExtendsClauseOpt EQ UnionCaseList
+  - fields: visibility?: "private"|"export", name: string, base?: QualifiedNameSyntax, cases: UnionCaseSyntax[]
+
+UnionExtendsClauseOpt
+- UnionExtendsClauseOpt → EXTENDS QualifiedName
+- UnionExtendsClauseOpt → ε
+  - note: semantic validation accepts only abstract record bases here; unions remain closed and cannot extend unions.
+
+UnionCaseList
+- UnionCaseList → UnionCase+
+  - note: the leading PIPE on the first case is required. `type Result = Success | Failure` is not a union declaration.
+
+UnionCase (AST: UnionCaseSyntax)
+- UnionCase → PIPE IDENTIFIER UnionCasePayloadOpt
+  - fields: name: string, properties: PropertyDefinitionSyntax[]
+
+UnionCasePayloadOpt
+- UnionCasePayloadOpt → LBRACE PropertyDefinition* RBRACE
+- UnionCasePayloadOpt → ε
 
 RecordPropertyDefinition (AST: RecordPropertyDefinitionSyntax)
 - RecordPropertyDefinition → CONTENT? MARKUP_IDENTIFIER COLON Type RecordPropertyDefaultOpt
@@ -655,10 +677,12 @@ This section lists the AST node types with fields for implementers.
 - SelectiveImportListSyntax: entries: SelectiveImportSyntax[]
 - SelectiveImportSyntax: name: string, alias?: QualifiedNameSyntax
 - LibraryPathSyntax: value: string
-- TypeDefinitionSyntax: TypeAliasDefinitionSyntax | EnumDefinitionSyntax | RecordDefinitionSyntax
+- TypeDefinitionSyntax: TypeAliasDefinitionSyntax | EnumDefinitionSyntax | RecordDefinitionSyntax | UnionDefinitionSyntax
 - TypeAliasDefinitionSyntax: visibility?: "private"|"export", name: string, type: TypeSyntax
 - EnumDefinitionSyntax: visibility?: "private"|"export", name: string, members: EnumMemberSyntax[]
 - RecordDefinitionSyntax: visibility?: "private"|"export", isAbstract: bool, name: string, base?: QualifiedNameSyntax, properties: RecordPropertyDefinitionSyntax[]
+- UnionDefinitionSyntax: visibility?: "private"|"export", name: string, base?: QualifiedNameSyntax, cases: UnionCaseSyntax[]
+- UnionCaseSyntax: name: string, properties: PropertyDefinitionSyntax[]
 - ActionDefinitionSyntax: visibility?: "private"|"export", isAbstract: bool, name: string, base?: QualifiedNameSyntax, properties: RecordPropertyDefinitionSyntax[]
 - RecordPropertyDefinitionSyntax: modifier?: "content", name: string, type: TypeSyntax, default?: ExpressionSyntax
 - ValueDefinitionSyntax: visibility?: "private"|"export", name: string, type?: TypeSyntax, value: ExpressionSyntax
@@ -740,12 +764,16 @@ This section lists the AST node types with fields for implementers.
   - After IF, parse a required ValueExpression before IS as the scrutinee
   - Condition-list form begins directly with LBRACE and never has a scrutinee
 - Element is left-factored: after LT ElementName, COLON selects the text branch; otherwise parse PropertyList and choose SLASH GT (self-closing) or GT … LT SLASH ElementName GT using lookahead at SLASH vs GT.
-- MemberAccess handles both property/field access and enum member access:
+- MemberAccess handles property/field access, enum member access, and fieldless union case shorthand:
   - All `target.name` expressions parse uniformly as MemberAccessExpressionSyntax
   - Semantic analysis resolves the target expression to determine interpretation:
     - If target resolves to an enum type → enum member access (verify name is valid enum member)
+    - If target resolves to a union type and name is a fieldless case → union case value shorthand
     - If target resolves to a value → property/field access (verify name is valid property/field on target's type)
-  - Examples: `Status.pending_review` (if Status is enum type), `obj.field` (if obj is value), `foo.bar` (ambiguous at parse time, resolved during type checking)
+  - Examples: `Status.pending_review` (if Status is enum type), `LoadState.idle` (if LoadState is a union), `obj.field` (if obj is value), `foo.bar` (ambiguous at parse time, resolved during type checking)
+- Element names may also resolve to payload union case constructors during semantic analysis:
+  - Example: `<LoadState.failed message={"Offline"} />`
+- Match-style `if value is { ... }` patterns may name union cases with QualifiedName. When the scrutinee is a local identifier, semantic analysis narrows that identifier to the matched case for the arm body and requires union matches without `else` to cover all cases.
 
 ## Validation Rules (post-parse)
 
@@ -756,6 +784,8 @@ This section lists the AST node types with fields for implementers.
 - Omitted visibility on top-level declarations defaults to internal; `private` is file-scoped,
   omitted visibility is library-scoped or program-scoped, and `export` is visible to consumers.
 - Type suffixes: zero or more of QMARK or LBRACK RBRACK, applied in source order.
+- Union declarations require at least one leading-pipe case, case names must be unique within the union, and a union `extends` target must resolve to an abstract record.
+- `type Result = Success | Failure` is intentionally not accepted as a discriminated union declaration.
 - Switch expressions (property variants): at least one case; patterns per case must be non-empty.
 - ValueIfMatchExpression / ElementsIfMatchExpression / PropertyListIfMatchExpression: at least one pattern arm; each arm requires ≥1 pattern.
 - ValueIfConditionListExpression / ElementsIfConditionListExpression / PropertyListIfConditionListExpression: at least one condition arm.

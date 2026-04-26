@@ -99,6 +99,7 @@ Generated output includes only exported type declarations:
 - `export type` aliases
 - `export enum` declarations
 - `export type` / `export action` record-like declarations
+- `export type` discriminated unions, generated as `$type`-discriminated TypeScript unions or C# polymorphic DTOs
 
 Directory input must point at a valid NX library root and always requires `--output`.
 

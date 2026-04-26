@@ -1,6 +1,7 @@
 use crate::codegen::model::{
-    ExportedAlias, ExportedEnum, ExportedExternalState, ExportedModule, ExportedRecord,
-    ExportedRecordField, ExportedType, ExportedTypeGraph, ImportedType,
+    ExportedAlias, ExportedEnum, ExportedExternalState, ExportedModule,
+    ExportedPolymorphicDescendant, ExportedRecord, ExportedRecordField, ExportedType,
+    ExportedTypeGraph, ExportedUnion, ExportedUnionCase, ImportedType,
 };
 use crate::codegen::writer::CodeWriter;
 use crate::codegen::{GenerateTypesOptions, GeneratedFile};
@@ -66,7 +67,7 @@ pub(crate) fn collect_warnings(graph: &ExportedTypeGraph, namespace: &str) -> Ve
                 continue;
             }
 
-            if !graph.concrete_descendants(&record.name).is_empty() {
+            if !graph.polymorphic_descendants(&record.name).is_empty() {
                 continue;
             }
 
@@ -139,11 +140,13 @@ fn render_module(
         .iter()
         .any(|declaration| matches!(declaration.item, ExportedType::Enum(_)));
     let needs_polymorphic_serialization_helpers = module.declarations.iter().any(|declaration| {
-        let ExportedType::Record(record) = &declaration.item else {
-            return false;
-        };
-
-        polymorphic_message_pack_root_name(record, &namespace_context).is_some()
+        matches!(declaration.item, ExportedType::Union(_))
+            || match &declaration.item {
+                ExportedType::Record(record) => {
+                    polymorphic_message_pack_root_name(record, &namespace_context).is_some()
+                }
+                _ => false,
+            }
     });
 
     writer.line("using System;");
@@ -212,6 +215,7 @@ fn emit_declaration(
     match declaration {
         ExportedType::Alias(_) => {}
         ExportedType::Enum(enum_def) => emit_enum(writer, enum_def),
+        ExportedType::Union(union_def) => emit_union(writer, union_def, context),
         ExportedType::Record(record) => emit_record(writer, record, context),
         ExportedType::ExternalState(state) => emit_external_state(writer, state, context),
     }
@@ -297,6 +301,63 @@ fn emit_record(
     });
 }
 
+fn emit_union(
+    writer: &mut CodeWriter,
+    union_def: &ExportedUnion,
+    context: &CSharpRenderContext<'_>,
+) {
+    let union_name = sanitize_csharp_identifier(&union_def.name);
+
+    writer.line("[JsonPolymorphic(TypeDiscriminatorPropertyName = \"$type\")]");
+    for case in &union_def.cases {
+        writer.line(&format!(
+            "[JsonDerivedType(typeof({}), \"{}.{}\")]",
+            csharp_union_case_type_name(&union_def.name, &case.name),
+            escape_csharp_string_literal(&union_def.name),
+            escape_csharp_string_literal(&case.name)
+        ));
+    }
+    writer.line(&format!(
+        "[MessagePackFormatter(typeof(NxPolymorphicMessagePackFormatter<{union_name}>))]"
+    ));
+
+    let header = if let Some(base) = &union_def.base {
+        format!(
+            "public abstract class {union_name} : {}",
+            csharp_type_name(base, context).text
+        )
+    } else {
+        format!("public abstract class {union_name}")
+    };
+
+    writer.block(&header, |_| {});
+
+    for case in &union_def.cases {
+        writer.blank_line();
+        emit_union_case(writer, union_def, case, context);
+    }
+}
+
+fn emit_union_case(
+    writer: &mut CodeWriter,
+    union_def: &ExportedUnion,
+    case: &ExportedUnionCase,
+    context: &CSharpRenderContext<'_>,
+) {
+    let union_name = sanitize_csharp_identifier(&union_def.name);
+    let case_type_name = csharp_union_case_type_name(&union_def.name, &case.name);
+
+    writer.line(&format!(
+        "[MessagePackFormatter(typeof(NxPolymorphicConcreteMessagePackFormatter<{union_name}, {case_type_name}>))]"
+    ));
+    writer.block(
+        &format!("public sealed class {case_type_name} : {union_name}"),
+        |writer| {
+            emit_record_fields(writer, &case.fields, context);
+        },
+    );
+}
+
 fn emit_external_state(
     writer: &mut CodeWriter,
     state: &ExportedExternalState,
@@ -324,11 +385,12 @@ fn emit_record_json_polymorphism_attributes(
     }
 
     writer.line("[JsonPolymorphic(TypeDiscriminatorPropertyName = \"$type\")]");
-    for descendant in context.graph.concrete_descendants(&record.name) {
+    for descendant in context.graph.polymorphic_descendants(&record.name) {
+        let (type_name, discriminator) = csharp_polymorphic_descendant_metadata(&descendant);
         writer.line(&format!(
             "[JsonDerivedType(typeof({}), \"{}\")]",
-            sanitize_csharp_identifier(&descendant.name),
-            escape_csharp_string_literal(&descendant.name)
+            type_name,
+            escape_csharp_string_literal(&discriminator)
         ));
     }
 }
@@ -339,7 +401,10 @@ fn should_emit_json_polymorphism_attributes(
 ) -> bool {
     record.is_abstract
         && !graph_resolves_record_base(context, record)
-        && !context.graph.concrete_descendants(&record.name).is_empty()
+        && !context
+            .graph
+            .polymorphic_descendants(&record.name)
+            .is_empty()
 }
 
 /// Polymorphic MessagePack uses a root formatter plus per-declared-type wrappers so MessagePack can resolve
@@ -363,7 +428,10 @@ fn should_emit_missing_polymorphism_hint(
 ) -> bool {
     record.is_abstract
         && !graph_resolves_record_base(context, record)
-        && context.graph.concrete_descendants(&record.name).is_empty()
+        && context
+            .graph
+            .polymorphic_descendants(&record.name)
+            .is_empty()
 }
 
 fn emit_dual_wire_name_attributes(writer: &mut CodeWriter, name: &str) {
@@ -592,6 +660,15 @@ fn csharp_type_name_inner(
                         is_reference: false,
                         is_nullable: false,
                     },
+                    ExportedType::Union(_) => CSharpType {
+                        text: generated_type_name(
+                            other,
+                            context.namespace,
+                            context.qualify_generated_types,
+                        ),
+                        is_reference: true,
+                        is_nullable: false,
+                    },
                     ExportedType::Record(_) => CSharpType {
                         text: generated_type_name(
                             other,
@@ -647,6 +724,31 @@ fn generated_type_name(name: &str, namespace: &str, qualify: bool) -> String {
     } else {
         identifier
     }
+}
+
+fn csharp_polymorphic_descendant_metadata(
+    descendant: &ExportedPolymorphicDescendant,
+) -> (String, String) {
+    match descendant {
+        ExportedPolymorphicDescendant::Record { name } => {
+            (sanitize_csharp_identifier(name), name.clone())
+        }
+        ExportedPolymorphicDescendant::UnionCase {
+            union_name,
+            case_name,
+        } => (
+            csharp_union_case_type_name(union_name, case_name),
+            format!("{union_name}.{case_name}"),
+        ),
+    }
+}
+
+fn csharp_union_case_type_name(union_name: &str, case_name: &str) -> String {
+    sanitize_csharp_identifier(&format!(
+        "{}{}",
+        union_name,
+        sanitize_csharp_member_name(case_name)
+    ))
 }
 
 fn collect_dependency_namespaces(

@@ -1137,6 +1137,7 @@
   {
     "type": "module_definition",
     "named": true,
+    "root": true,
     "fields": {},
     "children": {
       "multiple": true,
@@ -1172,6 +1173,10 @@
         },
         {
           "type": "type_definition",
+          "named": true
+        },
+        {
+          "type": "union_definition",
           "named": true
         },
         {
@@ -1844,6 +1849,93 @@
     }
   },
   {
+    "type": "union_case",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "properties": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "property_definition",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "union_case_list",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "union_case",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "union_definition",
+    "named": true,
+    "fields": {
+      "base": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "qualified_name",
+            "named": true
+          }
+        ]
+      },
+      "cases": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "union_case_list",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "visibility": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "visibility_modifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "unit_literal",
     "named": true,
     "fields": {}
@@ -2378,7 +2470,8 @@
   },
   {
     "type": "block_comment",
-    "named": true
+    "named": true,
+    "extra": true
   },
   {
     "type": "bool",
@@ -2462,7 +2555,8 @@
   },
   {
     "type": "html_block_comment",
-    "named": true
+    "named": true,
+    "extra": true
   },
   {
     "type": "i32",
@@ -2506,7 +2600,8 @@
   },
   {
     "type": "line_comment",
-    "named": true
+    "named": true,
+    "extra": true
   },
   {
     "type": "null_literal",
