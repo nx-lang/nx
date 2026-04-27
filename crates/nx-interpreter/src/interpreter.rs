@@ -9,8 +9,8 @@ use nx_hir::{
     ast, effective_component_contract, effective_component_contract_for_name,
     effective_record_shape_for_name, resolve_record_definition as resolve_hir_record_definition,
     EffectiveField, ElementId, ExprId, Function, Item, LoweredModule, Name, PreparedBinding,
-    PreparedBindingOrigin, PreparedBindingTarget, PreparedItemKind, PreparedModule, RecordKind,
-    UnionCaseDef, UnionCaseField, UnionDef,
+    PreparedBindingOrigin, PreparedBindingTarget, PreparedItemKind, PreparedModule, PropertyEntry,
+    RecordKind, UnionCaseDef, UnionCaseField, UnionDef,
 };
 use nx_types::{
     common_supertype, is_object_type, resolve_type_ref_with, resolve_type_ref_with_seen,
@@ -1980,10 +1980,23 @@ impl Interpreter {
         let element = module.element(element_id);
         let tag_name = element.tag.as_str();
 
+        let mut active_properties = Vec::new();
+        self.eval_property_entries(
+            module,
+            ctx,
+            element.property_entries(),
+            &mut active_properties,
+        )?;
+
         let mut fields = FxHashMap::default();
-        for prop in &element.properties {
-            let value = self.eval_expr(module, ctx, prop.value)?;
-            fields.insert(SmolStr::new(prop.key.as_str()), value);
+        for (key, value) in active_properties {
+            if fields.insert(SmolStr::new(key.as_str()), value).is_some() {
+                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                    expected: "unique active property names".to_string(),
+                    actual: format!("duplicate property '{}'", key.as_str()),
+                    operation: "element property evaluation".to_string(),
+                }));
+            }
         }
 
         let content_values = self.eval_content_expressions(module, ctx, &element.content)?;
@@ -2122,6 +2135,102 @@ impl Interpreter {
             type_name: element.tag.clone(),
             fields,
         })
+    }
+
+    fn eval_property_entries(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        entries: &[PropertyEntry],
+        output: &mut Vec<(Name, Value)>,
+    ) -> Result<(), RuntimeError> {
+        for entry in entries {
+            match entry {
+                PropertyEntry::Value(property) => {
+                    let value = self.eval_expr(module, ctx, property.value)?;
+                    output.push((property.key.clone(), value));
+                }
+                PropertyEntry::If {
+                    condition,
+                    then_entries,
+                    else_entries,
+                    ..
+                } => {
+                    let condition_value = self.eval_expr(module, ctx, *condition)?;
+                    match condition_value {
+                        Value::Boolean(true) => {
+                            self.eval_property_entries(module, ctx, then_entries, output)?;
+                        }
+                        Value::Boolean(false) => {
+                            self.eval_property_entries(module, ctx, else_entries, output)?;
+                        }
+                        other => {
+                            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                                expected: "bool".to_string(),
+                                actual: other.type_name().to_string(),
+                                operation: "property-list if condition".to_string(),
+                            }))
+                        }
+                    }
+                }
+                PropertyEntry::ConditionList {
+                    arms, else_entries, ..
+                } => {
+                    let mut matched = false;
+                    for arm in arms {
+                        let condition_value = self.eval_expr(module, ctx, arm.condition)?;
+                        match condition_value {
+                            Value::Boolean(true) => {
+                                self.eval_property_entries(module, ctx, &arm.entries, output)?;
+                                matched = true;
+                                break;
+                            }
+                            Value::Boolean(false) => {}
+                            other => {
+                                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                                    expected: "bool".to_string(),
+                                    actual: other.type_name().to_string(),
+                                    operation: "property-list condition arm".to_string(),
+                                }))
+                            }
+                        }
+                    }
+
+                    if !matched {
+                        self.eval_property_entries(module, ctx, else_entries, output)?;
+                    }
+                }
+                PropertyEntry::Match {
+                    scrutinee,
+                    arms,
+                    else_entries,
+                    ..
+                } => {
+                    let scrutinee_value = self.eval_expr(module, ctx, *scrutinee)?;
+                    let mut matched = false;
+                    for arm in arms {
+                        for pattern in &arm.patterns {
+                            let pattern_value = self.eval_match_pattern(module, ctx, *pattern)?;
+                            if self.values_match(&scrutinee_value, &pattern_value)? {
+                                self.eval_property_entries(module, ctx, &arm.entries, output)?;
+                                matched = true;
+                                break;
+                            }
+                        }
+
+                        if matched {
+                            break;
+                        }
+                    }
+
+                    if !matched {
+                        self.eval_property_entries(module, ctx, else_entries, output)?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn inject_element_content_field(
@@ -3357,6 +3466,66 @@ mod tests {
 
     fn span(start: u32, end: u32) -> TextSpan {
         TextSpan::new(TextSize::from(start), TextSize::from(end))
+    }
+
+    #[test]
+    fn test_property_fragment_evaluation_preserves_active_property_order() {
+        let mut module = LoweredModule::new(SourceId::new(0));
+        let first = module.alloc_expr(ast::Expr::Literal(ast::Literal::String(SmolStr::new(
+            "first",
+        ))));
+        let second = module.alloc_expr(ast::Expr::Literal(ast::Literal::String(SmolStr::new(
+            "second",
+        ))));
+        let third = module.alloc_expr(ast::Expr::Literal(ast::Literal::String(SmolStr::new(
+            "third",
+        ))));
+        let fallback = module.alloc_expr(ast::Expr::Literal(ast::Literal::String(SmolStr::new(
+            "fallback",
+        ))));
+        let condition = module.alloc_expr(ast::Expr::Literal(ast::Literal::Boolean(true)));
+
+        let entries = vec![
+            PropertyEntry::Value(nx_hir::Property {
+                key: Name::new("first"),
+                value: first,
+                span: span(0, 5),
+            }),
+            PropertyEntry::If {
+                condition,
+                then_entries: vec![PropertyEntry::Value(nx_hir::Property {
+                    key: Name::new("second"),
+                    value: second,
+                    span: span(6, 12),
+                })],
+                else_entries: vec![PropertyEntry::Value(nx_hir::Property {
+                    key: Name::new("fallback"),
+                    value: fallback,
+                    span: span(13, 21),
+                })],
+                span: span(6, 21),
+            },
+            PropertyEntry::Value(nx_hir::Property {
+                key: Name::new("third"),
+                value: third,
+                span: span(22, 27),
+            }),
+        ];
+
+        let interpreter = Interpreter::new();
+        let mut ctx = ExecutionContext::new();
+        let mut output = Vec::new();
+        interpreter
+            .eval_property_entries(&module, &mut ctx, &entries, &mut output)
+            .expect("Expected property entries to evaluate");
+
+        assert_eq!(
+            output
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["first", "second", "third"]
+        );
     }
 
     #[test]

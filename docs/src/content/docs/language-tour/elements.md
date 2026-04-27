@@ -37,6 +37,30 @@ let isLoading = true
 - Use `{}` to embed any expression (including `if`).
 - Use inline markup for attribute values when richer structure is needed.
 
+## Attributes can be conditional groups
+
+Conditional property fragments choose a set of attributes without repeating the element call.
+
+```nx
+type LoadState = | idle | failed { message:string }
+
+let <Notice message:string tone:string density:string /> =
+  <aside tone={tone}>{message}</aside>
+
+let view(state:LoadState, compact:bool) =
+  <Notice
+    if state is {
+      LoadState.failed => message={state.message} tone="danger"
+      else => message="Ready" tone="neutral"
+    }
+    if compact { density="tight" } else { density="normal" }
+  />
+```
+
+Every required attribute must be present on every branch. Mutually exclusive branches can provide
+the same attribute name, but a direct attribute and an active branch attribute cannot both provide
+the same name.
+
 ### Content-marked body parameters
 
 ```nx

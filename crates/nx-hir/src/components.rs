@@ -1,7 +1,7 @@
 use crate::{
-    ast, interface_component, Component, ComponentEmit, EffectiveField, ElementId, ExprId,
+    ast, interface_component, Component, ComponentEmit, EffectiveField, Element, ElementId, ExprId,
     InterfaceField, InterfaceItem, InterfaceItemKind, Item, Name, PreparedModule,
-    PreparedNamespace, ResolvedPreparedItem,
+    PreparedNamespace, PropertyEntry, ResolvedPreparedItem,
 };
 use nx_diagnostics::TextSpan;
 use rustc_hash::FxHashMap;
@@ -23,7 +23,7 @@ impl EffectiveComponentContract {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PendingHandlerRewrite {
     element: ElementId,
-    property_index: usize,
+    property_span: TextSpan,
     component: Name,
     emit: Name,
     action_name: Name,
@@ -391,7 +391,11 @@ pub fn promote_component_handler_bindings(module: &mut PreparedModule) {
             body: rewrite.body,
             span: rewrite.span,
         });
-        raw_module.element_mut(rewrite.element).properties[rewrite.property_index].value = handler;
+        rewrite_property_handler(
+            raw_module.element_mut(rewrite.element),
+            rewrite.property_span,
+            handler,
+        );
     }
     raw_module.diagnostics_mut().retain(|diagnostic| {
         !rewrites.iter().any(|rewrite| {
@@ -561,53 +565,196 @@ fn collect_handler_rewrites_in_element(
     let element = module.raw_module().element(element_id);
 
     if let Ok(Some(contract)) = effective_component_contract_for_name(module, &element.tag) {
-        for (property_index, property) in element.properties.iter().enumerate() {
-            if contract
-                .props
-                .iter()
-                .any(|field| field.name == property.key)
-            {
-                continue;
-            }
-
-            let prop_name = property.key.as_str();
-            if !is_handler_binding_candidate(prop_name) {
-                continue;
-            }
-
-            let Some(emit) = contract
-                .emits
-                .iter()
-                .find(|emit| handler_prop_name(emit.name.as_str()) == prop_name)
-            else {
-                continue;
-            };
-
-            if matches!(
-                module.raw_module().expr(property.value),
-                ast::Expr::ActionHandler { .. }
-            ) {
-                continue;
-            }
-
-            rewrites.push(PendingHandlerRewrite {
-                element: element_id,
-                property_index,
-                component: contract.component.name.clone(),
-                emit: emit.name.clone(),
-                action_name: emit.action_name.clone(),
-                span: property.span,
-                body: property.value,
-            });
-        }
+        collect_handler_rewrites_in_property_entries(
+            module,
+            element_id,
+            element.property_entries(),
+            &contract,
+            rewrites,
+        );
     }
 
-    for property in &element.properties {
-        collect_handler_rewrites_in_expr(module, property.value, rewrites);
-    }
     for content in &element.content {
         collect_handler_rewrites_in_expr(module, *content, rewrites);
     }
+}
+
+fn collect_handler_rewrites_in_property_entries(
+    module: &PreparedModule,
+    element_id: ElementId,
+    entries: &[PropertyEntry],
+    contract: &EffectiveComponentContract,
+    rewrites: &mut Vec<PendingHandlerRewrite>,
+) {
+    for entry in entries {
+        match entry {
+            PropertyEntry::Value(property) => {
+                if !contract
+                    .props
+                    .iter()
+                    .any(|field| field.name == property.key)
+                {
+                    let prop_name = property.key.as_str();
+                    if is_handler_binding_candidate(prop_name) {
+                        if let Some(emit) = contract
+                            .emits
+                            .iter()
+                            .find(|emit| handler_prop_name(emit.name.as_str()) == prop_name)
+                        {
+                            if !matches!(
+                                module.raw_module().expr(property.value),
+                                ast::Expr::ActionHandler { .. }
+                            ) {
+                                rewrites.push(PendingHandlerRewrite {
+                                    element: element_id,
+                                    property_span: property.span,
+                                    component: contract.component.name.clone(),
+                                    emit: emit.name.clone(),
+                                    action_name: emit.action_name.clone(),
+                                    span: property.span,
+                                    body: property.value,
+                                });
+                            }
+                        }
+                    }
+                }
+
+                collect_handler_rewrites_in_expr(module, property.value, rewrites);
+            }
+            PropertyEntry::If {
+                condition,
+                then_entries,
+                else_entries,
+                ..
+            } => {
+                collect_handler_rewrites_in_expr(module, *condition, rewrites);
+                collect_handler_rewrites_in_property_entries(
+                    module,
+                    element_id,
+                    then_entries,
+                    contract,
+                    rewrites,
+                );
+                collect_handler_rewrites_in_property_entries(
+                    module,
+                    element_id,
+                    else_entries,
+                    contract,
+                    rewrites,
+                );
+            }
+            PropertyEntry::ConditionList {
+                arms, else_entries, ..
+            } => {
+                for arm in arms {
+                    collect_handler_rewrites_in_expr(module, arm.condition, rewrites);
+                    collect_handler_rewrites_in_property_entries(
+                        module,
+                        element_id,
+                        &arm.entries,
+                        contract,
+                        rewrites,
+                    );
+                }
+                collect_handler_rewrites_in_property_entries(
+                    module,
+                    element_id,
+                    else_entries,
+                    contract,
+                    rewrites,
+                );
+            }
+            PropertyEntry::Match {
+                scrutinee,
+                arms,
+                else_entries,
+                ..
+            } => {
+                collect_handler_rewrites_in_expr(module, *scrutinee, rewrites);
+                for arm in arms {
+                    for pattern in &arm.patterns {
+                        collect_handler_rewrites_in_expr(module, *pattern, rewrites);
+                    }
+                    collect_handler_rewrites_in_property_entries(
+                        module,
+                        element_id,
+                        &arm.entries,
+                        contract,
+                        rewrites,
+                    );
+                }
+                collect_handler_rewrites_in_property_entries(
+                    module,
+                    element_id,
+                    else_entries,
+                    contract,
+                    rewrites,
+                );
+            }
+        }
+    }
+}
+
+fn rewrite_property_handler(element: &mut Element, property_span: TextSpan, handler: ExprId) {
+    for property in &mut element.properties {
+        if property.span == property_span {
+            property.value = handler;
+        }
+    }
+    rewrite_property_entry_handler(&mut element.property_entries, property_span, handler);
+}
+
+fn rewrite_property_entry_handler(
+    entries: &mut [PropertyEntry],
+    property_span: TextSpan,
+    handler: ExprId,
+) -> bool {
+    for entry in entries {
+        match entry {
+            PropertyEntry::Value(property) if property.span == property_span => {
+                property.value = handler;
+                return true;
+            }
+            PropertyEntry::Value(_) => {}
+            PropertyEntry::If {
+                then_entries,
+                else_entries,
+                ..
+            } => {
+                if rewrite_property_entry_handler(then_entries, property_span, handler)
+                    || rewrite_property_entry_handler(else_entries, property_span, handler)
+                {
+                    return true;
+                }
+            }
+            PropertyEntry::ConditionList {
+                arms, else_entries, ..
+            } => {
+                for arm in arms {
+                    if rewrite_property_entry_handler(&mut arm.entries, property_span, handler) {
+                        return true;
+                    }
+                }
+                if rewrite_property_entry_handler(else_entries, property_span, handler) {
+                    return true;
+                }
+            }
+            PropertyEntry::Match {
+                arms, else_entries, ..
+            } => {
+                for arm in arms {
+                    if rewrite_property_entry_handler(&mut arm.entries, property_span, handler) {
+                        return true;
+                    }
+                }
+                if rewrite_property_entry_handler(else_entries, property_span, handler) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
 }
 
 fn validate_component_definition(

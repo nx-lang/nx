@@ -82,6 +82,29 @@ let banner = if {
 - Arms are evaluated in order; the first true condition wins.
 - `else` is optional but recommended for clarity.
 
+## Property-list form
+
+Inside an element opening tag, `if` can select property groups instead of a single value.
+
+```nx
+<Button if primary { label="Save" } else { label="Cancel" } />
+
+<Badge if {
+  isError => tone="danger"
+  isWarning => tone="warning"
+  else => tone="neutral"
+} />
+
+<Notice if state is {
+  LoadState.failed => message={state.message}
+  else => message=""
+} />
+```
+
+Property-list matches share the same union narrowing and exhaustiveness checks as value matches.
+Required properties must be present on every reachable branch, and duplicate properties are
+rejected only when the duplicates can occur on the same execution path.
+
 ## Best Practices
 - Keep cases small and consider extracting functions or components for large branches.
 - Use explicit return types when inference becomes ambiguous, especially when mixing markup and scalar values.

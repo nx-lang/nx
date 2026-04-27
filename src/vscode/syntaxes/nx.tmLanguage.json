@@ -618,12 +618,12 @@
         },
         { "include": "#keywords-core" },
         {
-          "begin": "(?=[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*\\s*=)",
+          "begin": "(?=[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*\\s*=(?!>))",
           "end": "(?=\n|[/>])",
           "patterns": [
             { "include": "#keywords-control" },
             { "include": "#attr-name" },
-            { "name": "keyword.operator.assignment.nx", "match": "=" },
+            { "name": "keyword.operator.assignment.nx", "match": "=(?!>)" },
             { "include": "#attr-value" }
           ]
         }
@@ -889,15 +889,15 @@
             { "include": "#values-braced-expression" },
             { "include": "#keywords-control" },
             { "include": "#types" },
-            { "include": "#operators" },
-            { "include": "#qualifiers" }
+            { "include": "#qualifiers" },
+            { "include": "#operators" }
           ]
         },
         { "include": "#values-braced-expression" },
         { "include": "#keywords-control" },
         { "include": "#types" },
-        { "include": "#operators" },
-        { "include": "#qualifiers" }
+        { "include": "#qualifiers" },
+        { "include": "#operators" }
       ]
     }
   }

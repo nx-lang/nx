@@ -92,6 +92,16 @@ describe('NX control blocks', () => {
     expect(elseScopes).to.include('meta.control.if.properties.nx');
   });
 
+  it('highlights property-list match fragments with union patterns and braced values', () => {
+    const line = '<View if state is { LoadState.failed => message={state.message} else => message="" } />';
+    expect(scopesForSubstring(line, 'if', grammar)).to.include('meta.control.if.properties.nx');
+    expect(scopesForSubstring(line, 'is', grammar)).to.include('keyword.control.match.nx');
+    expect(scopesForSubstring(line, 'LoadState', grammar)).to.include('entity.name.type.union.nx');
+    expect(scopesForSubstring(line, 'failed', grammar)).to.include('entity.name.type.union.case.nx');
+    expect(scopesForSubstring(line, 'message', grammar)).to.include('entity.other.attribute-name.nx');
+    expect(scopesForSubstring(line, 'state.message', grammar)).to.include('meta.values-braced-expression.nx');
+  });
+
   it('highlights property-list condition list arms', () => {
     const line = '<UserCard if layout { "compact" => gap=4 "full" => gap=8 else => gap=2 }>';
     const ifScopes = scopesForSubstring(line, 'if', grammar);

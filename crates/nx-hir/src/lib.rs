@@ -589,19 +589,103 @@ pub struct Property {
     pub span: TextSpan,
 }
 
+/// One arm in a condition-list property fragment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PropertyConditionArm {
+    /// Boolean condition that activates this arm.
+    pub condition: ExprId,
+    /// Property entries produced by this arm.
+    pub entries: Vec<PropertyEntry>,
+    /// Source location.
+    pub span: TextSpan,
+}
+
+/// One arm in a match-style property fragment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PropertyMatchArm {
+    /// Patterns accepted by this arm.
+    pub patterns: Vec<ExprId>,
+    /// Property entries produced by this arm.
+    pub entries: Vec<PropertyEntry>,
+    /// Source location.
+    pub span: TextSpan,
+}
+
+/// Ordered entry in an element property list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PropertyEntry {
+    /// Direct key/value property.
+    Value(Property),
+    /// Simple conditional property fragment.
+    If {
+        /// Boolean condition that selects the then branch.
+        condition: ExprId,
+        /// Entries active when the condition is true.
+        then_entries: Vec<PropertyEntry>,
+        /// Entries active when the condition is false.
+        else_entries: Vec<PropertyEntry>,
+        /// Source location.
+        span: TextSpan,
+    },
+    /// Condition-list property fragment.
+    ConditionList {
+        /// Ordered condition arms.
+        arms: Vec<PropertyConditionArm>,
+        /// Entries active when no condition arm matches.
+        else_entries: Vec<PropertyEntry>,
+        /// Source location.
+        span: TextSpan,
+    },
+    /// Match-style property fragment.
+    Match {
+        /// Scrutinee matched against each arm.
+        scrutinee: ExprId,
+        /// Ordered match arms.
+        arms: Vec<PropertyMatchArm>,
+        /// Entries active when no match arm matches.
+        else_entries: Vec<PropertyEntry>,
+        /// Source location.
+        span: TextSpan,
+    },
+}
+
+impl PropertyEntry {
+    /// Returns the source span for this entry.
+    pub fn span(&self) -> TextSpan {
+        match self {
+            PropertyEntry::Value(property) => property.span,
+            PropertyEntry::If { span, .. }
+            | PropertyEntry::ConditionList { span, .. }
+            | PropertyEntry::Match { span, .. } => *span,
+        }
+    }
+}
+
 /// NX element (XML-like syntax).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Element {
     /// Element tag name
     pub tag: Name,
-    /// Element properties
+    /// Direct top-level element properties.
+    ///
+    /// This preserves the historical flat property API for direct-property consumers. Use
+    /// `property_entries` when conditional or match-style property fragments must be observed.
     pub properties: Vec<Property>,
+    /// Ordered property-list entries, including conditional and match fragments.
+    pub property_entries: Vec<PropertyEntry>,
     /// Nested body-content expressions in source order
     pub content: Vec<ExprId>,
     /// Closing tag name (must match opening tag)
     pub close_name: Option<Name>,
     /// Source location
     pub span: TextSpan,
+}
+
+impl Element {
+    /// Returns the ordered property entries that should be used for analysis and runtime binding.
+    pub fn property_entries(&self) -> &[PropertyEntry] {
+        &self.property_entries
+    }
 }
 
 /// Top-level item in a module.

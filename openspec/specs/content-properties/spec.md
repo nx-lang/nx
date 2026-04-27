@@ -61,9 +61,10 @@ resolved.
   one content property
 
 ### Requirement: Markup body content binds to the declared content property
-When a markup-style invocation resolves to an NX-defined plain record, function, or component with
-a declared content property, the invocation body SHALL bind to that property using the same
-scalar-or-sequence normalization applied to other element body content.
+The system SHALL bind markup invocation body content to the declared content property when a
+markup-style invocation resolves to an NX-defined plain record, function, or component with a
+declared content property. The binding SHALL use the same scalar-or-sequence normalization applied
+to other element body content.
 
 #### Scenario: Text body binds to a scalar content property
 - **WHEN** a file contains `type Foo = { prop1:int content label:string }` and
@@ -92,9 +93,9 @@ scalar-or-sequence normalization applied to other element body content.
   body content
 
 ### Requirement: Body content requires an explicit content property on NX-defined targets
-When a markup-style invocation resolves to an NX-defined plain record, function, or component that
-has no declared content property, markup body content SHALL be rejected rather than being routed by
-an implicit implementation convention.
+The system SHALL reject markup body content when a markup-style invocation resolves to an
+NX-defined plain record, function, or component that has no declared content property. Body content
+MUST NOT be routed by an implicit implementation convention.
 
 #### Scenario: Unmarked property does not receive body content implicitly
 - **WHEN** a file contains `let <Collect items:object[] />: object[] = { items }`
@@ -107,14 +108,37 @@ an implicit implementation convention.
 - **THEN** analysis SHALL reject the invocation because `Panel` has no declared content property
 
 ### Requirement: Named and body content sources are mutually exclusive
-If an invocation supplies a declaration's content property both as explicit named property input and
-as element body content, the invocation SHALL be rejected.
+The system SHALL reject an invocation that supplies a declaration's content property both as
+explicit named property input and as element body content.
 
 #### Scenario: Content property passed twice is rejected
 - **WHEN** a file contains `type Foo = { prop1:int content label:string }`
 - **AND** a call site contains `<Foo prop1=32 label="named">body text</Foo>`
 - **THEN** analysis SHALL reject the invocation because `label` is supplied both by named property
   and by body content
+
+### Requirement: Property-list fragments participate in content-property binding rules
+Conditional property-list fragments SHALL participate in the same content-property validation rules
+as direct explicit properties. A content property supplied by a property-list fragment MUST be
+treated as an explicit named property on every reachable path where that fragment is active.
+
+#### Scenario: Content property supplied by every branch satisfies required content
+- **WHEN** a component declares `content body:Element`
+- **AND** a call site contains `<Panel if compact { body=<span /> } else { body=<section /> } />`
+- **THEN** type checking SHALL accept the invocation because every reachable branch supplies
+  `body`
+
+#### Scenario: Conditional content property conflicts with body content
+- **WHEN** a component declares `content body:Element`
+- **AND** a call site contains `<Panel if compact { body=<span /> }><Badge /></Panel>`
+- **THEN** type checking SHALL reject the invocation because `body` can be supplied by both a named
+  property fragment and element body content on the `compact` path
+
+#### Scenario: Mutually exclusive content property branches are accepted
+- **WHEN** a component declares `content body:Element`
+- **AND** a call site contains `<Panel if compact { body=<span /> } else { body=<section /> } />`
+- **THEN** type checking SHALL NOT report a duplicate content-property diagnostic for the mutually
+  exclusive `body` branches
 
 ### Requirement: `content` remains a contextual keyword
 The token `content` SHALL act as a modifier only when it appears immediately before a property name

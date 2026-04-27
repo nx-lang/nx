@@ -29,6 +29,54 @@ This page describes element syntax and attribute rules. For full grammar, see [n
 
 Attributes may contain markup as values when the parameter type accepts elements.
 
+## Conditional Property Fragments
+
+Property lists can include conditional fragments. A fragment contributes zero or more properties
+to the invocation before the target component, function, record, or union case is bound.
+
+```nx
+<Button
+  if primary {
+    label="Save"
+    tone="strong"
+  } else {
+    label="Cancel"
+    tone="neutral"
+  }
+/>
+```
+
+Condition-list fragments choose the first true arm:
+
+```nx
+<Badge
+  if {
+    isError => tone="danger"
+    isWarning => tone="warning"
+    else => tone="neutral"
+  }
+/>
+```
+
+Match-style fragments use the same union case validation and local identifier narrowing as value
+matches:
+
+```nx
+<Notice
+  if state is {
+    LoadState.failed => message={state.message}
+    else => message=""
+  }
+/>
+```
+
+Required properties must be supplied on every reachable branch. Duplicate property names are
+rejected when they can occur on the same path, including a direct property plus a conditional
+branch property. The same property name is allowed in mutually exclusive branches.
+
+Content properties follow the same rules. Body content conflicts with a named content property on
+any reachable branch, while mutually exclusive named content-property branches are accepted.
+
 ## Namespaces
 
 ```nx

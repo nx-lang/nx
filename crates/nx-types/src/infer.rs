@@ -11,8 +11,8 @@ use nx_hir::{
     ast, effective_component_contract_for_name, effective_record_shape_for_name,
     interface_component, interface_enum, interface_function_signature, interface_type_alias,
     interface_union, is_record_subtype, ExprId, InterfaceItemKind, Item, Name,
-    PreparedBindingOrigin, PreparedModule, PreparedNamespace, ResolvedPreparedItem, UnionCaseDef,
-    UnionDef,
+    PreparedBindingOrigin, PreparedModule, PreparedNamespace, PropertyEntry, ResolvedPreparedItem,
+    UnionCaseDef, UnionDef,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -22,8 +22,30 @@ struct TypeAliasInfo {
 }
 
 struct ElementBindingSpec {
-    content_property: Option<(Name, Type)>,
-    properties: FxHashMap<Name, Type>,
+    content_property: Option<Name>,
+    properties: FxHashMap<Name, ElementPropertySpec>,
+    handler_properties: FxHashSet<Name>,
+}
+
+struct ElementPropertySpec {
+    ty: Type,
+    is_required: bool,
+}
+
+#[derive(Clone)]
+struct PropertyPath {
+    properties: Vec<PropertyPathBinding>,
+}
+
+#[derive(Clone)]
+struct PropertyPathBinding {
+    key: Name,
+    ty: Type,
+    span: TextSpan,
+}
+
+fn handler_prop_name(emit_name: &str) -> String {
+    format!("on{}", emit_name)
 }
 
 /// Type inference context.
@@ -961,7 +983,7 @@ impl<'a> InferenceContext<'a> {
                         let spec = self.build_element_binding_spec(
                             params
                                 .iter()
-                                .map(|param| (&param.name, &param.ty, param.is_content)),
+                                .map(|param| (&param.name, &param.ty, param.is_content, true)),
                         );
                         self.check_element_bindings(element, span, &spec);
                         return self.type_from_type_ref(&return_type);
@@ -1039,7 +1061,7 @@ impl<'a> InferenceContext<'a> {
             function
                 .params
                 .iter()
-                .map(|param| (&param.name, &param.ty, param.is_content)),
+                .map(|param| (&param.name, &param.ty, param.is_content, true)),
         );
         self.check_element_bindings(element, span, &spec);
     }
@@ -1054,21 +1076,32 @@ impl<'a> InferenceContext<'a> {
             .effective_component_contract(&component.name)
             .ok()
             .flatten();
-        let spec = if let Some(contract) = effective_contract.as_ref() {
+        let mut spec = if let Some(contract) = effective_contract.as_ref() {
             self.build_element_binding_spec(
                 contract
                     .props
                     .iter()
-                    .map(|field| (&field.name, &field.ty, field.is_content)),
+                    .map(|field| (&field.name, &field.ty, field.is_content, field.is_required)),
             )
         } else {
-            self.build_element_binding_spec(
-                component
-                    .props
-                    .iter()
-                    .map(|field| (&field.name, &field.ty, field.is_content)),
-            )
+            self.build_element_binding_spec(component.props.iter().map(|field| {
+                (
+                    &field.name,
+                    &field.ty,
+                    field.is_content,
+                    field.default.is_none() && !matches!(field.ty, ast::TypeRef::Nullable(_)),
+                )
+            }))
         };
+        let emits = effective_contract
+            .as_ref()
+            .map(|contract| contract.emits.as_slice())
+            .unwrap_or(component.emits.as_slice());
+        spec.handler_properties.extend(
+            emits
+                .iter()
+                .map(|emit| Name::new(&handler_prop_name(emit.name.as_str()))),
+        );
         self.check_element_bindings(element, span, &spec);
     }
 
@@ -1084,15 +1117,17 @@ impl<'a> InferenceContext<'a> {
                 shape
                     .fields
                     .iter()
-                    .map(|field| (&field.name, &field.ty, field.is_content)),
+                    .map(|field| (&field.name, &field.ty, field.is_content, field.is_required)),
             )
         } else {
-            self.build_element_binding_spec(
-                record_def
-                    .properties
-                    .iter()
-                    .map(|field| (&field.name, &field.ty, field.is_content)),
-            )
+            self.build_element_binding_spec(record_def.properties.iter().map(|field| {
+                (
+                    &field.name,
+                    &field.ty,
+                    field.is_content,
+                    field.default.is_none() && !matches!(field.ty, ast::TypeRef::Nullable(_)),
+                )
+            }))
         };
         self.check_element_bindings(element, span, &spec);
     }
@@ -1105,7 +1140,7 @@ impl<'a> InferenceContext<'a> {
         span: TextSpan,
     ) {
         let mut content_property: Option<Name> = None;
-        let mut properties = FxHashMap::<Name, (Type, bool)>::default();
+        let mut properties = FxHashMap::<Name, ElementPropertySpec>::default();
 
         if let Some(base_name) = union_def.base.as_ref() {
             if let Ok(Some(shape)) = effective_record_shape_for_name(self.module, base_name) {
@@ -1114,7 +1149,13 @@ impl<'a> InferenceContext<'a> {
                     if field.is_content {
                         content_property = Some(field.name.clone());
                     }
-                    properties.insert(field.name, (ty, field.is_required));
+                    properties.insert(
+                        field.name,
+                        ElementPropertySpec {
+                            ty,
+                            is_required: field.is_required,
+                        },
+                    );
                 }
             }
         }
@@ -1126,16 +1167,22 @@ impl<'a> InferenceContext<'a> {
             if field.is_content {
                 content_property = Some(field.name.clone());
             }
-            properties.insert(field.name.clone(), (ty, is_required));
+            properties.insert(field.name.clone(), ElementPropertySpec { ty, is_required });
         }
 
-        let mut provided = FxHashSet::<Name>::default();
-        if !element.content.is_empty() {
-            if let Some(content_name) = content_property.as_ref() {
-                if element
-                    .properties
+        let spec = ElementBindingSpec {
+            content_property,
+            properties,
+            handler_properties: FxHashSet::default(),
+        };
+        let property_paths = self.property_paths_for_entries(element.property_entries());
+        self.report_duplicate_property_paths(&property_paths, &element.tag);
+
+        let content_from_body = if !element.content.is_empty() {
+            if let Some(content_name) = spec.content_property.as_ref() {
+                if property_paths
                     .iter()
-                    .any(|prop| prop.key == *content_name)
+                    .any(|path| path.properties.iter().any(|prop| prop.key == *content_name))
                 {
                     self.error(
                         "content-binding-conflict",
@@ -1145,11 +1192,12 @@ impl<'a> InferenceContext<'a> {
                         ),
                         span,
                     );
-                } else if let Some((expected, _)) = properties.get(content_name).cloned() {
+                    false
+                } else if let Some(expected) = spec.properties.get(content_name) {
                     let actual = self.normalized_sequence_type(&element.content, span);
                     self.check_typed_binding(
                         &actual,
-                        &expected,
+                        &expected.ty,
                         span,
                         "content-type-mismatch",
                         format!(
@@ -1157,7 +1205,9 @@ impl<'a> InferenceContext<'a> {
                             union_def.name, case.name, content_name
                         ),
                     );
-                    provided.insert(content_name.clone());
+                    true
+                } else {
+                    false
                 }
             } else {
                 self.error(
@@ -1168,67 +1218,43 @@ impl<'a> InferenceContext<'a> {
                     ),
                     span,
                 );
+                false
             }
-        }
+        } else {
+            false
+        };
 
-        for property in &element.properties {
-            if let Some((expected, _)) = properties.get(&property.key).cloned() {
-                let actual = self.infer_expr(property.value);
-                self.check_typed_binding(
-                    &actual,
-                    &expected,
-                    property.span,
-                    "union-case-field-type-mismatch",
-                    format!(
-                        "Field '{}' on union case '{}.{}'",
-                        property.key, union_def.name, case.name
-                    ),
-                );
-                provided.insert(property.key.clone());
-            } else {
-                self.error(
-                    "unknown-union-case-field",
-                    format!(
-                        "Union case '{}.{}' has no field '{}'",
-                        union_def.name, case.name, property.key
-                    ),
-                    property.span,
-                );
-            }
-        }
-
-        for (name, (_, is_required)) in properties {
-            if is_required && !provided.contains(&name) {
-                self.error(
-                    "missing-union-case-field",
-                    format!(
-                        "Union case '{}.{}' requires field '{}'",
-                        union_def.name, case.name, name
-                    ),
-                    span,
-                );
-            }
-        }
+        self.check_property_path_bindings(
+            &property_paths,
+            &spec,
+            &element.tag,
+            content_from_body,
+            span,
+            "union-case-field-type-mismatch",
+            "unknown-union-case-field",
+            "missing-union-case-field",
+        );
     }
 
     fn build_element_binding_spec<'b, I>(&mut self, bindings: I) -> ElementBindingSpec
     where
-        I: IntoIterator<Item = (&'b Name, &'b ast::TypeRef, bool)>,
+        I: IntoIterator<Item = (&'b Name, &'b ast::TypeRef, bool, bool)>,
     {
         let mut content_property = None;
         let mut properties = FxHashMap::default();
 
-        for (name, ty_ref, is_content) in bindings {
+        for (name, ty_ref, is_content, is_required) in bindings {
             let ty = self.type_from_type_ref(ty_ref);
             if is_content {
-                content_property = Some((name.clone(), ty.clone()));
+                content_property = Some(name.clone());
             }
-            properties.insert(name.clone(), ty);
+            properties.insert(name.clone(), ElementPropertySpec { ty, is_required });
         }
 
         ElementBindingSpec {
             content_property,
             properties,
+            handler_properties: FxHashSet::default(),
         }
     }
 
@@ -1238,13 +1264,16 @@ impl<'a> InferenceContext<'a> {
         span: TextSpan,
         spec: &ElementBindingSpec,
     ) {
-        if !element.content.is_empty() {
-            if let Some((content_name, expected)) = spec.content_property.as_ref() {
-                if element
-                    .properties
-                    .iter()
-                    .any(|prop| prop.key == *content_name)
-                {
+        let property_paths = self.property_paths_for_entries(element.property_entries());
+        self.report_duplicate_property_paths(&property_paths, &element.tag);
+
+        let content_from_body = if !element.content.is_empty() {
+            if let Some(content_name) = spec.content_property.as_ref() {
+                if property_paths.iter().any(|path| {
+                    path.properties
+                        .iter()
+                        .any(|property| property.key == *content_name)
+                }) {
                     self.error(
                         "content-binding-conflict",
                         format!(
@@ -1253,15 +1282,19 @@ impl<'a> InferenceContext<'a> {
                         ),
                         span,
                     );
-                } else {
+                    false
+                } else if let Some(expected) = spec.properties.get(content_name) {
                     let actual = self.normalized_sequence_type(&element.content, span);
                     self.check_typed_binding(
                         &actual,
-                        expected,
+                        &expected.ty,
                         span,
                         "content-type-mismatch",
                         format!("Content for '{}' binds to '{}'", element.tag, content_name),
                     );
+                    true
+                } else {
+                    false
                 }
             } else {
                 self.error(
@@ -1272,18 +1305,274 @@ impl<'a> InferenceContext<'a> {
                     ),
                     span,
                 );
+                false
+            }
+        } else {
+            false
+        };
+
+        self.check_property_path_bindings(
+            &property_paths,
+            spec,
+            &element.tag,
+            content_from_body,
+            span,
+            "property-type-mismatch",
+            "unknown-property",
+            "missing-property",
+        );
+    }
+
+    fn property_paths_for_entries(&mut self, entries: &[PropertyEntry]) -> Vec<PropertyPath> {
+        let mut paths = vec![PropertyPath {
+            properties: Vec::new(),
+        }];
+
+        for entry in entries {
+            let alternatives = self.property_paths_for_entry(entry);
+            let mut next_paths = Vec::new();
+            for path in &paths {
+                for alternative in &alternatives {
+                    let mut properties = path.properties.clone();
+                    properties.extend(alternative.properties.clone());
+                    next_paths.push(PropertyPath { properties });
+                }
+            }
+            paths = next_paths;
+        }
+
+        paths
+    }
+
+    fn property_paths_for_entry(&mut self, entry: &PropertyEntry) -> Vec<PropertyPath> {
+        match entry {
+            PropertyEntry::Value(property) => vec![PropertyPath {
+                properties: vec![PropertyPathBinding {
+                    key: property.key.clone(),
+                    ty: self.infer_expr(property.value),
+                    span: property.span,
+                }],
+            }],
+            PropertyEntry::If {
+                condition,
+                then_entries,
+                else_entries,
+                span,
+            } => {
+                self.check_boolean_condition(*condition, *span, "property-list if condition");
+                let mut paths = self.property_paths_for_entries(then_entries);
+                paths.extend(self.property_paths_for_entries(else_entries));
+                paths
+            }
+            PropertyEntry::ConditionList {
+                arms, else_entries, ..
+            } => {
+                let mut paths = Vec::new();
+                for arm in arms {
+                    self.check_boolean_condition(
+                        arm.condition,
+                        arm.span,
+                        "property-list condition arm",
+                    );
+                    paths.extend(self.property_paths_for_entries(&arm.entries));
+                }
+                paths.extend(self.property_paths_for_entries(else_entries));
+                paths
+            }
+            PropertyEntry::Match {
+                scrutinee,
+                arms,
+                else_entries,
+                span,
+            } => self.property_paths_for_match(*scrutinee, arms, else_entries, *span),
+        }
+    }
+
+    fn property_paths_for_match(
+        &mut self,
+        scrutinee: ExprId,
+        arms: &[nx_hir::PropertyMatchArm],
+        else_entries: &[PropertyEntry],
+        span: TextSpan,
+    ) -> Vec<PropertyPath> {
+        let scrutinee_ty = self.infer_expr(scrutinee);
+        let scrutinee_name = match self.module.raw_module().expr(scrutinee) {
+            ast::Expr::Ident(name) => Some(name.clone()),
+            _ => None,
+        };
+        let union_ty = match &scrutinee_ty {
+            Type::Union(union_ty) => Some(union_ty.clone()),
+            _ => None,
+        };
+
+        let mut covered_cases = FxHashSet::default();
+        let mut paths = Vec::new();
+
+        for arm in arms {
+            let pattern_tys = arm
+                .patterns
+                .iter()
+                .map(|pattern| {
+                    let pattern_ty = self.infer_match_pattern(*pattern);
+                    self.check_match_pattern(
+                        &scrutinee_ty,
+                        union_ty.as_ref(),
+                        &pattern_ty,
+                        &mut covered_cases,
+                        self.module.raw_module().expr(*pattern).span(),
+                    );
+                    pattern_ty
+                })
+                .collect::<Vec<_>>();
+
+            let narrowed_case = self.match_arm_narrowed_case(union_ty.as_ref(), &pattern_tys);
+            if let (Some(name), Some(case_ty)) = (scrutinee_name.as_ref(), narrowed_case) {
+                self.env.push_scope();
+                self.env.bind(name.clone(), Type::UnionCase(case_ty));
+                paths.extend(self.property_paths_for_entries(&arm.entries));
+                self.env.pop_scope();
+            } else {
+                paths.extend(self.property_paths_for_entries(&arm.entries));
             }
         }
 
-        for property in &element.properties {
-            if let Some(expected) = spec.properties.get(&property.key) {
-                let actual = self.infer_expr(property.value);
-                self.check_typed_binding(
-                    &actual,
-                    expected,
-                    property.span,
-                    "property-type-mismatch",
-                    format!("Property '{}' on '{}'", property.key, element.tag),
+        let is_exhaustive = union_ty.as_ref().is_some_and(|union_ty| {
+            union_ty
+                .cases
+                .iter()
+                .all(|case| covered_cases.contains(case))
+        });
+
+        if !else_entries.is_empty() {
+            paths.extend(self.property_paths_for_entries(else_entries));
+        } else if let Some(union_ty) = union_ty.as_ref() {
+            if !is_exhaustive {
+                let missing = union_ty
+                    .cases
+                    .iter()
+                    .filter(|case| !covered_cases.contains(*case))
+                    .map(|case| case.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                self.error(
+                    "non-exhaustive-union-match",
+                    format!(
+                        "Union match on '{}' is missing cases: {}",
+                        union_ty.name, missing
+                    ),
+                    span,
+                );
+                paths.push(PropertyPath {
+                    properties: Vec::new(),
+                });
+            }
+        } else {
+            paths.push(PropertyPath {
+                properties: Vec::new(),
+            });
+        }
+
+        paths
+    }
+
+    fn check_boolean_condition(&mut self, condition: ExprId, span: TextSpan, context: &str) {
+        let condition_ty = self.infer_expr(condition);
+        if !condition_ty.is_error() && !self.type_satisfies_expected(&condition_ty, &Type::bool()) {
+            self.error(
+                "type-mismatch",
+                format!("{} expects bool, found {}", context, condition_ty),
+                span,
+            );
+        }
+    }
+
+    fn report_duplicate_property_paths(&mut self, paths: &[PropertyPath], element_name: &Name) {
+        let mut reported = FxHashSet::<(Name, usize, usize)>::default();
+        for path in paths {
+            let mut seen = FxHashSet::<Name>::default();
+            for property in &path.properties {
+                if !seen.insert(property.key.clone()) {
+                    let start: usize = property.span.start().into();
+                    let end: usize = property.span.end().into();
+                    if reported.insert((property.key.clone(), start, end)) {
+                        self.error(
+                            "duplicate-property",
+                            format!(
+                                "Property '{}' on '{}' can be supplied more than once on the same path",
+                                property.key, element_name
+                            ),
+                            property.span,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn check_property_path_bindings(
+        &mut self,
+        paths: &[PropertyPath],
+        spec: &ElementBindingSpec,
+        element_name: &Name,
+        content_from_body: bool,
+        span: TextSpan,
+        type_mismatch_code: &str,
+        unknown_property_code: &str,
+        missing_property_code: &str,
+    ) {
+        let mut reported_unknown = FxHashSet::<(Name, usize, usize)>::default();
+
+        for path in paths {
+            for property in &path.properties {
+                if let Some(expected) = spec.properties.get(&property.key) {
+                    self.check_typed_binding(
+                        &property.ty,
+                        &expected.ty,
+                        property.span,
+                        type_mismatch_code,
+                        format!("Property '{}' on '{}'", property.key, element_name),
+                    );
+                } else if spec.handler_properties.contains(&property.key) {
+                    continue;
+                } else {
+                    let start: usize = property.span.start().into();
+                    let end: usize = property.span.end().into();
+                    if reported_unknown.insert((property.key.clone(), start, end)) {
+                        self.error(
+                            unknown_property_code,
+                            format!(
+                                "Element '{}' has no property '{}'",
+                                element_name, property.key
+                            ),
+                            property.span,
+                        );
+                    }
+                }
+            }
+        }
+
+        for (name, expected) in &spec.properties {
+            if !expected.is_required {
+                continue;
+            }
+
+            let supplied_by_body = content_from_body
+                && spec
+                    .content_property
+                    .as_ref()
+                    .is_some_and(|prop| prop == name);
+            if supplied_by_body {
+                continue;
+            }
+
+            if paths
+                .iter()
+                .any(|path| !path.properties.iter().any(|property| property.key == *name))
+            {
+                self.error(
+                    missing_property_code,
+                    format!("Element '{}' requires property '{}'", element_name, name),
+                    span,
                 );
             }
         }

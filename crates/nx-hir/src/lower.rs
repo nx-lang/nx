@@ -6,9 +6,10 @@
 use crate::ast::{BinOp, Expr, Literal, MatchArm, OrderedFloat, Stmt, TypeRef, UnOp};
 use crate::{
     Component, ComponentEmit, ComponentEmitKind, Element, EnumDef, EnumMember, ExprId, Function,
-    Import, ImportKind, Item, LoweredModule, LoweringDiagnostic, Name, Param, Property, RecordDef,
-    RecordField, RecordKind, SelectiveImport, SourceId, TypeAlias, UnionCaseDef, UnionCaseField,
-    UnionDef, ValueDef, Visibility,
+    Import, ImportKind, Item, LoweredModule, LoweringDiagnostic, Name, Param, Property,
+    PropertyConditionArm, PropertyEntry, PropertyMatchArm, RecordDef, RecordField, RecordKind,
+    SelectiveImport, SourceId, TypeAlias, UnionCaseDef, UnionCaseField, UnionDef, ValueDef,
+    Visibility,
 };
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_syntax::{SyntaxKind, SyntaxNode};
@@ -1656,6 +1657,209 @@ impl LoweringContext {
         }
     }
 
+    fn lower_property_value(
+        &mut self,
+        child: SyntaxNode,
+        component: Option<&PredeclaredComponent>,
+    ) -> Property {
+        let key = child
+            .child_by_field("name")
+            .map(|n| Name::new(n.text()))
+            .unwrap_or_else(|| Name::new("_"));
+
+        let value_node = Self::property_value_node(child);
+        let value = if let Some(component) = component {
+            let prop_name = key.as_str();
+            let is_declared_prop = component
+                .effective_props
+                .iter()
+                .any(|prop| prop.name == key);
+
+            if !is_declared_prop && Self::is_handler_binding_candidate(prop_name) {
+                if let Some(HandlerPropResolution::Emit(emit)) = component.handler_props.get(&key) {
+                    let body = if let Some(value_node) = value_node {
+                        self.push_scope();
+                        let action_name = Name::new("action");
+                        self.define_name(&action_name, TypeTag::Unknown);
+                        let body = self.lower_expr(value_node);
+                        self.pop_scope();
+                        body
+                    } else {
+                        self.error_expr(child.span())
+                    };
+
+                    self.alloc_expr(Expr::ActionHandler {
+                        component: component.name.clone(),
+                        emit: emit.name.clone(),
+                        action_name: emit.action_name.clone(),
+                        body,
+                        span: child.span(),
+                    })
+                } else if matches!(
+                    component.handler_props.get(&key),
+                    Some(HandlerPropResolution::Collision)
+                ) {
+                    self.add_diagnostic(
+                        format!(
+                            "Component '{}' cannot use '{}' because it collides with a declared prop or duplicate emitted action",
+                            component.name.as_str(),
+                            prop_name
+                        ),
+                        child.span(),
+                    );
+                    self.lower_value_or_error(value_node, child.span())
+                } else {
+                    self.add_diagnostic(
+                        format!(
+                            "Component '{}' does not emit '{}' required by handler '{}'",
+                            component.name.as_str(),
+                            &prop_name[2..],
+                            prop_name
+                        ),
+                        child.span(),
+                    );
+                    self.lower_value_or_error(value_node, child.span())
+                }
+            } else {
+                self.lower_value_or_error(value_node, child.span())
+            }
+        } else {
+            self.lower_value_or_error(value_node, child.span())
+        };
+
+        Property {
+            key,
+            value,
+            span: child.span(),
+        }
+    }
+
+    fn lower_property_entries(
+        &mut self,
+        node: SyntaxNode,
+        component: Option<&PredeclaredComponent>,
+    ) -> Vec<PropertyEntry> {
+        node.children()
+            .filter_map(|child| self.lower_property_entry(child, component))
+            .collect()
+    }
+
+    fn lower_property_entry(
+        &mut self,
+        child: SyntaxNode,
+        component: Option<&PredeclaredComponent>,
+    ) -> Option<PropertyEntry> {
+        match child.kind() {
+            SyntaxKind::PROPERTY_VALUE => Some(PropertyEntry::Value(
+                self.lower_property_value(child, component),
+            )),
+            SyntaxKind::PROPERTY_LIST_IF_EXPRESSION => child
+                .children()
+                .find_map(|nested| self.lower_property_entry(nested, component)),
+            SyntaxKind::PROPERTY_LIST_IF_SIMPLE_EXPRESSION => {
+                let condition = child
+                    .child_by_field("condition")
+                    .map(|n| self.lower_expr(n))
+                    .unwrap_or_else(|| self.error_expr(child.span()));
+                let then_entries = child
+                    .child_by_field("then")
+                    .map(|n| self.lower_property_entries(n, component))
+                    .unwrap_or_default();
+                let else_entries = child
+                    .child_by_field("else")
+                    .map(|n| self.lower_property_entries(n, component))
+                    .unwrap_or_default();
+
+                Some(PropertyEntry::If {
+                    condition,
+                    then_entries,
+                    else_entries,
+                    span: child.span(),
+                })
+            }
+            SyntaxKind::PROPERTY_LIST_IF_CONDITION_LIST_EXPRESSION => {
+                let mut arms = Vec::new();
+                for arm_node in child.children() {
+                    if arm_node.kind() != SyntaxKind::PROPERTY_LIST_IF_CONDITION_ARM {
+                        continue;
+                    }
+
+                    let condition = arm_node
+                        .child_by_field("condition")
+                        .map(|n| self.lower_expr(n))
+                        .unwrap_or_else(|| self.error_expr(arm_node.span()));
+                    let entries = arm_node
+                        .child_by_field("body")
+                        .map(|n| self.lower_property_entries(n, component))
+                        .unwrap_or_default();
+                    arms.push(PropertyConditionArm {
+                        condition,
+                        entries,
+                        span: arm_node.span(),
+                    });
+                }
+
+                let else_entries = child
+                    .child_by_field("else")
+                    .map(|n| self.lower_property_entries(n, component))
+                    .unwrap_or_default();
+
+                Some(PropertyEntry::ConditionList {
+                    arms,
+                    else_entries,
+                    span: child.span(),
+                })
+            }
+            SyntaxKind::PROPERTY_LIST_IF_MATCH_EXPRESSION => {
+                let scrutinee = child
+                    .child_by_field("scrutinee")
+                    .map(|n| self.lower_expr(n))
+                    .unwrap_or_else(|| self.error_expr(child.span()));
+                let mut arms = Vec::new();
+
+                for arm_node in child.children() {
+                    if arm_node.kind() != SyntaxKind::PROPERTY_LIST_IF_MATCH_ARM {
+                        continue;
+                    }
+
+                    let mut patterns = Vec::new();
+                    for pattern_node in arm_node.children() {
+                        if pattern_node.kind() == SyntaxKind::PATTERN {
+                            patterns.push(self.lower_pattern_expr(pattern_node));
+                        }
+                    }
+
+                    let entries = arm_node
+                        .children()
+                        .find(|n| n.kind() == SyntaxKind::PROPERTY_LIST)
+                        .map(|n| self.lower_property_entries(n, component))
+                        .unwrap_or_default();
+
+                    if !patterns.is_empty() {
+                        arms.push(PropertyMatchArm {
+                            patterns,
+                            entries,
+                            span: arm_node.span(),
+                        });
+                    }
+                }
+
+                let else_entries = child
+                    .child_by_field("else")
+                    .map(|n| self.lower_property_entries(n, component))
+                    .unwrap_or_default();
+
+                Some(PropertyEntry::Match {
+                    scrutinee,
+                    arms,
+                    else_entries,
+                    span: child.span(),
+                })
+            }
+            _ => None,
+        }
+    }
+
     /// Lowers an element.
     ///
     /// Parses: `<tag prop1=val1 prop2={expr}>...body content...</tag>`
@@ -1670,88 +1874,18 @@ impl LoweringContext {
             .unwrap_or_else(|| Name::new("unknown"));
         let component = self.find_predeclared_component(tag.as_str()).cloned();
 
-        // Parse properties from property_list
-        let mut properties = Vec::new();
+        // Parse properties from property_list.
+        let mut property_entries = Vec::new();
         if let Some(prop_list) = node.child_by_field("properties") {
-            for child in prop_list.children() {
-                if child.kind() == SyntaxKind::PROPERTY_VALUE {
-                    // property_value: name '=' expression
-                    let key = child
-                        .child_by_field("name")
-                        .map(|n| Name::new(n.text()))
-                        .unwrap_or_else(|| Name::new("_"));
-
-                    let value_node = Self::property_value_node(child);
-                    let value = if let Some(component) = component.as_ref() {
-                        let prop_name = key.as_str();
-                        let is_declared_prop = component
-                            .effective_props
-                            .iter()
-                            .any(|prop| prop.name == key);
-
-                        if !is_declared_prop && Self::is_handler_binding_candidate(prop_name) {
-                            if let Some(HandlerPropResolution::Emit(emit)) =
-                                component.handler_props.get(&key)
-                            {
-                                let body = if let Some(value_node) = value_node {
-                                    self.push_scope();
-                                    let action_name = Name::new("action");
-                                    self.define_name(&action_name, TypeTag::Unknown);
-                                    let body = self.lower_expr(value_node);
-                                    self.pop_scope();
-                                    body
-                                } else {
-                                    self.error_expr(child.span())
-                                };
-
-                                self.alloc_expr(Expr::ActionHandler {
-                                    component: component.name.clone(),
-                                    emit: emit.name.clone(),
-                                    action_name: emit.action_name.clone(),
-                                    body,
-                                    span: child.span(),
-                                })
-                            } else if matches!(
-                                component.handler_props.get(&key),
-                                Some(HandlerPropResolution::Collision)
-                            ) {
-                                self.add_diagnostic(
-                                    format!(
-                                        "Component '{}' cannot use '{}' because it collides with a declared prop or duplicate emitted action",
-                                        component.name.as_str(),
-                                        prop_name
-                                    ),
-                                    child.span(),
-                                );
-                                self.lower_value_or_error(value_node, child.span())
-                            } else {
-                                self.add_diagnostic(
-                                    format!(
-                                        "Component '{}' does not emit '{}' required by handler '{}'",
-                                        component.name.as_str(),
-                                        &prop_name[2..],
-                                        prop_name
-                                    ),
-                                    child.span(),
-                                );
-                                self.lower_value_or_error(value_node, child.span())
-                            }
-                        } else {
-                            self.lower_value_or_error(value_node, child.span())
-                        }
-                    } else {
-                        self.lower_value_or_error(value_node, child.span())
-                    };
-
-                    let prop_span = child.span();
-                    properties.push(Property {
-                        key,
-                        value,
-                        span: prop_span,
-                    });
-                }
-            }
+            property_entries = self.lower_property_entries(prop_list, component.as_ref());
         }
+        let properties = property_entries
+            .iter()
+            .filter_map(|entry| match entry {
+                PropertyEntry::Value(property) => Some(property.clone()),
+                _ => None,
+            })
+            .collect();
 
         // Parse body content expressions.
         let mut content = Vec::new();
@@ -1767,6 +1901,7 @@ impl LoweringContext {
         Element {
             tag,
             properties,
+            property_entries,
             content,
             close_name,
             span,
@@ -3472,6 +3607,101 @@ enum Mode = light | dark"#;
             }
             _ => panic!("Expected Function item for implicit root"),
         }
+    }
+
+    #[test]
+    fn test_lower_element_with_simple_property_fragment() {
+        let source = r#"<Button if showLabel { label="Save" } />"#;
+        let parse_result = parse_str(source, "property-fragment-simple.nx");
+
+        let tree = parse_result.tree.unwrap();
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+        let Item::Function(func) = &module.items()[0] else {
+            panic!("Expected Function item for implicit root");
+        };
+        let Expr::Element { element, .. } = module.expr(func.body) else {
+            panic!("Expected Element expression as body");
+        };
+        let elem = module.element(*element);
+
+        assert_eq!(elem.properties.len(), 0);
+        assert_eq!(elem.property_entries.len(), 1);
+        let PropertyEntry::If {
+            then_entries,
+            else_entries,
+            ..
+        } = &elem.property_entries[0]
+        else {
+            panic!("Expected simple property-list if fragment");
+        };
+
+        assert_eq!(then_entries.len(), 1);
+        assert_eq!(else_entries.len(), 0);
+        let PropertyEntry::Value(property) = &then_entries[0] else {
+            panic!("Expected direct property in then branch");
+        };
+        assert_eq!(property.key.as_str(), "label");
+    }
+
+    #[test]
+    fn test_lower_element_with_condition_list_property_fragment() {
+        let source = r#"<Badge if { isError => tone="danger" isWarning => tone="warning" else => tone="neutral" } />"#;
+        let parse_result = parse_str(source, "property-fragment-condition-list.nx");
+
+        let tree = parse_result.tree.unwrap();
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+        let Item::Function(func) = &module.items()[0] else {
+            panic!("Expected Function item for implicit root");
+        };
+        let Expr::Element { element, .. } = module.expr(func.body) else {
+            panic!("Expected Element expression as body");
+        };
+        let elem = module.element(*element);
+
+        assert_eq!(elem.property_entries.len(), 1);
+        let PropertyEntry::ConditionList {
+            arms, else_entries, ..
+        } = &elem.property_entries[0]
+        else {
+            panic!("Expected condition-list property fragment");
+        };
+
+        assert_eq!(arms.len(), 2);
+        assert_eq!(arms[0].entries.len(), 1);
+        assert_eq!(arms[1].entries.len(), 1);
+        assert_eq!(else_entries.len(), 1);
+    }
+
+    #[test]
+    fn test_lower_element_with_match_property_fragment() {
+        let source = r#"<View if state is { LoadState.failed => message={state.message} else => message="" } />"#;
+        let parse_result = parse_str(source, "property-fragment-match.nx");
+
+        let tree = parse_result.tree.unwrap();
+        let root = tree.root();
+        let module = lower(root, SourceId::new(0));
+        let Item::Function(func) = &module.items()[0] else {
+            panic!("Expected Function item for implicit root");
+        };
+        let Expr::Element { element, .. } = module.expr(func.body) else {
+            panic!("Expected Element expression as body");
+        };
+        let elem = module.element(*element);
+
+        assert_eq!(elem.property_entries.len(), 1);
+        let PropertyEntry::Match {
+            arms, else_entries, ..
+        } = &elem.property_entries[0]
+        else {
+            panic!("Expected match property fragment");
+        };
+
+        assert_eq!(arms.len(), 1);
+        assert_eq!(arms[0].patterns.len(), 1);
+        assert_eq!(arms[0].entries.len(), 1);
+        assert_eq!(else_entries.len(), 1);
     }
 
     #[test]

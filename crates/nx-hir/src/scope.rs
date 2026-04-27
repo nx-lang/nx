@@ -3,7 +3,9 @@
 //! This module provides the infrastructure for resolving identifiers to their
 //! definitions, tracking scopes, and detecting undefined references.
 
-use crate::{ast, ExprId, Item, Name, PreparedItemKind, PreparedModule, PreparedNamespace};
+use crate::{
+    ast, ExprId, Item, Name, PreparedItemKind, PreparedModule, PreparedNamespace, PropertyEntry,
+};
 use la_arena::{Arena, Idx};
 use nx_diagnostics::{Diagnostic, Label, TextSpan};
 use rustc_hash::FxHashMap;
@@ -486,9 +488,7 @@ impl<'a> UndefinedIdentifierChecker<'a> {
             }
             ast::Expr::Element { element, .. } => {
                 let element = self.module.raw_module().element(*element);
-                for property in &element.properties {
-                    self.check_expr(property.value, scope);
-                }
+                self.check_property_entries(element.property_entries(), scope);
                 for content in &element.content {
                     self.check_expr(*content, scope);
                 }
@@ -564,6 +564,50 @@ impl<'a> UndefinedIdentifierChecker<'a> {
                     self.module.raw_module().expr(*body).span(),
                 );
                 self.check_expr(*body, let_scope);
+            }
+        }
+    }
+
+    fn check_property_entries(&mut self, entries: &[PropertyEntry], scope: ScopeId) {
+        for entry in entries {
+            match entry {
+                PropertyEntry::Value(property) => {
+                    self.check_expr(property.value, scope);
+                }
+                PropertyEntry::If {
+                    condition,
+                    then_entries,
+                    else_entries,
+                    ..
+                } => {
+                    self.check_expr(*condition, scope);
+                    self.check_property_entries(then_entries, scope);
+                    self.check_property_entries(else_entries, scope);
+                }
+                PropertyEntry::ConditionList {
+                    arms, else_entries, ..
+                } => {
+                    for arm in arms {
+                        self.check_expr(arm.condition, scope);
+                        self.check_property_entries(&arm.entries, scope);
+                    }
+                    self.check_property_entries(else_entries, scope);
+                }
+                PropertyEntry::Match {
+                    scrutinee,
+                    arms,
+                    else_entries,
+                    ..
+                } => {
+                    self.check_expr(*scrutinee, scope);
+                    for arm in arms {
+                        for pattern in &arm.patterns {
+                            self.check_expr(*pattern, scope);
+                        }
+                        self.check_property_entries(&arm.entries, scope);
+                    }
+                    self.check_property_entries(else_entries, scope);
+                }
             }
         }
     }
@@ -864,6 +908,60 @@ mod tests {
         assert!(
             diagnostics.is_empty(),
             "Expected qualified prepared bindings to suppress undefined-base diagnostics, got {:?}",
+            diagnostics
+        );
+    }
+
+    #[test]
+    fn property_fragment_condition_branch_identifiers_are_checked() {
+        let source = r#"
+            let render(showLabel:bool, label:string) = {
+                <Button if showLabel { text={label} } />
+            }
+        "#;
+        let parse = nx_syntax::parse_str(source, "property-fragment-scope.nx");
+        let tree = parse.tree.expect("Expected syntax tree");
+        let prepared = PreparedModule::standalone(
+            "property-fragment-scope.nx",
+            crate::lower(tree.root(), crate::SourceId::new(parse.source_id.as_u32())),
+        );
+
+        let (scopes, _) = build_scopes(&prepared);
+        let diagnostics = check_undefined_identifiers(&prepared, &scopes);
+
+        assert!(
+            diagnostics.is_empty(),
+            "Expected property fragment identifiers to resolve, got {:?}",
+            diagnostics
+        );
+    }
+
+    #[test]
+    fn property_fragment_match_branch_reports_undefined_identifier() {
+        let source = r#"
+            type LoadState = | idle | failed { message:string }
+            let render(state:LoadState) = {
+                <Notice if state is {
+                    LoadState.failed => message={missing}
+                    else => message=""
+                } />
+            }
+        "#;
+        let parse = nx_syntax::parse_str(source, "property-fragment-match-scope.nx");
+        let tree = parse.tree.expect("Expected syntax tree");
+        let prepared = PreparedModule::standalone(
+            "property-fragment-match-scope.nx",
+            crate::lower(tree.root(), crate::SourceId::new(parse.source_id.as_u32())),
+        );
+
+        let (scopes, _) = build_scopes(&prepared);
+        let diagnostics = check_undefined_identifiers(&prepared, &scopes);
+
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message().contains("missing")),
+            "Expected undefined identifier inside property match branch, got {:?}",
             diagnostics
         );
     }

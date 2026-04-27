@@ -440,6 +440,211 @@ fn test_union_match_rejects_pattern_from_other_union() {
 }
 
 #[test]
+fn test_property_fragment_required_property_must_be_on_every_path() {
+    let accepted = check_str(
+        r#"
+            let <Button label:string /> = <button>{label}</button>
+            let <Main primary:bool /> = <Button if primary { label="Save" } else { label="Cancel" } />
+        "#,
+        "property-fragment-required-accepted.nx",
+    );
+    assert!(
+        accepted.is_ok(),
+        "Expected every-branch required property to type check, got {:?}",
+        accepted.errors()
+    );
+
+    let rejected = check_str(
+        r#"
+            let <Button label:string /> = <button>{label}</button>
+            let <Main primary:bool /> = <Button if primary { label="Save" } />
+        "#,
+        "property-fragment-required-rejected.nx",
+    );
+    assert!(
+        rejected
+            .errors()
+            .iter()
+            .any(|diag| diag.code() == Some("missing-property")),
+        "Expected missing-property diagnostic, got {:?}",
+        rejected.errors()
+    );
+}
+
+#[test]
+fn test_property_fragment_condition_list_without_else_has_empty_required_path() {
+    let rejected = check_str(
+        r#"
+            let <Badge tone:string /> = <span>{tone}</span>
+            let <Main isError:bool /> = <Badge if { isError => tone="danger" } />
+        "#,
+        "property-fragment-condition-list-required-rejected.nx",
+    );
+    assert!(
+        rejected
+            .errors()
+            .iter()
+            .any(|diag| diag.code() == Some("missing-property")),
+        "Expected missing-property diagnostic, got {:?}",
+        rejected.errors()
+    );
+
+    let accepted = check_str(
+        r#"
+            let <Badge tone:string /> = <span>{tone}</span>
+            let <Main isError:bool /> = <Badge if { isError => tone="danger" else => tone="neutral" } />
+        "#,
+        "property-fragment-condition-list-required-accepted.nx",
+    );
+    assert!(
+        accepted.is_ok(),
+        "Expected else arm to satisfy required property, got {:?}",
+        accepted.errors()
+    );
+}
+
+#[test]
+fn test_property_fragment_duplicates_are_path_sensitive() {
+    let accepted = check_str(
+        r#"
+            let <Badge tone:string /> = <span>{tone}</span>
+            let <Main isError:bool /> = <Badge if isError { tone="danger" } else { tone="neutral" } />
+        "#,
+        "property-fragment-mutually-exclusive-duplicates.nx",
+    );
+    assert!(
+        accepted.is_ok(),
+        "Expected mutually exclusive same-key branches to type check, got {:?}",
+        accepted.errors()
+    );
+
+    let rejected = check_str(
+        r#"
+            let <Badge tone:string /> = <span>{tone}</span>
+            let <Main isError:bool /> = <Badge tone="neutral" if isError { tone="danger" } />
+        "#,
+        "property-fragment-static-duplicate.nx",
+    );
+    assert!(
+        rejected
+            .errors()
+            .iter()
+            .any(|diag| diag.code() == Some("duplicate-property")),
+        "Expected duplicate-property diagnostic, got {:?}",
+        rejected.errors()
+    );
+}
+
+#[test]
+fn test_property_fragment_content_property_rules_are_path_sensitive() {
+    let accepted = check_str(
+        r#"
+            component <Panel content body:Element /> = {
+                <section>{body}</section>
+            }
+            let <Main compact:bool /> = {
+                <Panel if compact { body=<span /> } else { body=<section /> } />
+            }
+        "#,
+        "property-fragment-content-accepted.nx",
+    );
+    assert!(
+        accepted.is_ok(),
+        "Expected mutually exclusive content branches to type check, got {:?}",
+        accepted.errors()
+    );
+
+    let rejected = check_str(
+        r#"
+            component <Panel content body:Element /> = {
+                <section>{body}</section>
+            }
+            let <Main compact:bool /> = {
+                <Panel if compact { body=<span /> }><Badge /></Panel>
+            }
+        "#,
+        "property-fragment-content-conflict.nx",
+    );
+    assert!(
+        rejected
+            .errors()
+            .iter()
+            .any(|diag| diag.code() == Some("content-binding-conflict")),
+        "Expected content-binding-conflict diagnostic, got {:?}",
+        rejected.errors()
+    );
+}
+
+#[test]
+fn test_property_fragment_match_uses_union_narrowing() {
+    let source = r#"
+        type LoadState = | idle | failed { message:string }
+        let <Notice message:string /> = <div>{message}</div>
+        let view(state: LoadState) = {
+            <Notice if state is {
+                LoadState.failed => message={state.message}
+                else => message=""
+            } />
+        }
+    "#;
+
+    let result = check_str(source, "property-fragment-match-narrowing.nx");
+    assert!(
+        result.is_ok(),
+        "Expected property-list match arm to narrow the identifier, got {:?}",
+        result.errors()
+    );
+}
+
+#[test]
+fn test_property_fragment_match_rejects_non_exhaustive_union() {
+    let source = r#"
+        type LoadState = | idle | failed { message:string }
+        let <Notice message:string /> = <div>{message}</div>
+        let view(state: LoadState) = {
+            <Notice if state is {
+                LoadState.failed => message={state.message}
+            } />
+        }
+    "#;
+
+    let result = check_str(source, "property-fragment-match-non-exhaustive.nx");
+    let errors = result.errors();
+    assert!(
+        errors
+            .iter()
+            .any(|diag| diag.code() == Some("non-exhaustive-union-match")),
+        "Expected non-exhaustive-union-match diagnostic, got {:?}",
+        errors
+    );
+}
+
+#[test]
+fn test_property_fragment_match_rejects_wrong_union_pattern() {
+    let source = r#"
+        type LoadState = | idle | failed { message:string }
+        type SaveState = | failed
+        let <Notice message:string /> = <div>{message}</div>
+        let view(state: LoadState) = {
+            <Notice if state is {
+                SaveState.failed => message=""
+                else => message=""
+            } />
+        }
+    "#;
+
+    let result = check_str(source, "property-fragment-match-wrong-union.nx");
+    let errors = result.errors();
+    assert!(
+        errors
+            .iter()
+            .any(|diag| diag.code() == Some("wrong-union-pattern")),
+        "Expected wrong-union-pattern diagnostic, got {:?}",
+        errors
+    );
+}
+
+#[test]
 #[ignore = "Array literals are not yet accepted as RHS expressions (parser limitation)"]
 fn test_record_in_collections_type_checks() {
     let source = r#"

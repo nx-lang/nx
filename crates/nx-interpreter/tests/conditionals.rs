@@ -12,6 +12,7 @@
 use nx_hir::{lower, SourceId};
 use nx_interpreter::{Interpreter, Value};
 use nx_syntax::parse_str;
+use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
 
 /// Helper function to execute a function from NX source code and return the result
@@ -78,6 +79,118 @@ fn test_if_without_else() {
     let result = execute_nx_function(source, "maybe_double", vec![Value::Int(-5)])
         .unwrap_or_else(|e| panic!("{}", e));
     assert_eq!(result, Value::Null);
+}
+
+#[test]
+fn test_property_fragment_simple_conditional_selects_then_and_else() {
+    let source = r#"
+        let view(enabled:bool) = {
+            <button if enabled { label="Save" } else { label="Disabled" } />
+        }
+    "#;
+
+    let then_result = execute_nx_function(source, "view", vec![Value::Boolean(true)])
+        .unwrap_or_else(|e| panic!("{}", e));
+    let Value::Record { fields, .. } = then_result else {
+        panic!("Expected record result");
+    };
+    assert_eq!(
+        fields.get("label"),
+        Some(&Value::String(SmolStr::new("Save")))
+    );
+
+    let else_result = execute_nx_function(source, "view", vec![Value::Boolean(false)])
+        .unwrap_or_else(|e| panic!("{}", e));
+    let Value::Record { fields, .. } = else_result else {
+        panic!("Expected record result");
+    };
+    assert_eq!(
+        fields.get("label"),
+        Some(&Value::String(SmolStr::new("Disabled")))
+    );
+}
+
+#[test]
+fn test_property_fragment_condition_list_selects_first_matching_arm_and_else() {
+    let source = r#"
+        let view(isError:bool, isWarning:bool) = {
+            <badge if {
+                isError => tone="danger"
+                isWarning => tone="warning"
+                else => tone="neutral"
+            } />
+        }
+    "#;
+
+    let assert_tone = |args: Vec<Value>, expected: &str| {
+        let result = execute_nx_function(source, "view", args).unwrap_or_else(|e| panic!("{}", e));
+        let Value::Record { fields, .. } = result else {
+            panic!("Expected record result");
+        };
+        assert_eq!(
+            fields.get("tone"),
+            Some(&Value::String(SmolStr::new(expected)))
+        );
+    };
+
+    assert_tone(vec![Value::Boolean(true), Value::Boolean(true)], "danger");
+    assert_tone(vec![Value::Boolean(false), Value::Boolean(true)], "warning");
+    assert_tone(
+        vec![Value::Boolean(false), Value::Boolean(false)],
+        "neutral",
+    );
+}
+
+#[test]
+fn test_property_fragment_match_selects_matching_arm() {
+    let source = r#"
+        type LoadState = | idle | failed { message:string }
+        let view(state:LoadState) = {
+            <notice if state is {
+                LoadState.failed => message={state.message}
+                else => message=""
+            } />
+        }
+    "#;
+
+    let mut fields = FxHashMap::default();
+    fields.insert(
+        SmolStr::new("message"),
+        Value::String(SmolStr::new("Offline")),
+    );
+    let result = execute_nx_function(
+        source,
+        "view",
+        vec![Value::Record {
+            type_name: nx_hir::Name::new("LoadState.failed"),
+            fields,
+        }],
+    )
+    .unwrap_or_else(|e| panic!("{}", e));
+
+    let Value::Record { fields, .. } = result else {
+        panic!("Expected record result");
+    };
+    assert_eq!(
+        fields.get("message"),
+        Some(&Value::String(SmolStr::new("Offline")))
+    );
+}
+
+#[test]
+fn test_property_fragment_runtime_rejects_duplicate_active_property() {
+    let source = r#"
+        let view(enabled:bool) = {
+            <button tone="neutral" if enabled { tone="danger" } />
+        }
+    "#;
+
+    let error = execute_nx_function(source, "view", vec![Value::Boolean(true)])
+        .expect_err("Expected duplicate active property to fail");
+    assert!(
+        error.contains("duplicate property 'tone'"),
+        "Expected duplicate property runtime error, got {error}"
+    );
 }
 
 // ============================================================================

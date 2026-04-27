@@ -1,0 +1,35 @@
+# Review: add-property-list-fragments
+
+## Scope
+**Reviewed artifacts:** `proposal.md`, `design.md`, `tasks.md`, `specs/content-properties/spec.md`, `specs/discriminated-unions/spec.md`, `specs/property-list-fragments/spec.md`  
+**Reviewed code:** `crates/nx-hir/src/lib.rs`, `crates/nx-hir/src/lower.rs`, `crates/nx-hir/src/components.rs`, `crates/nx-hir/src/scope.rs`, `crates/nx-types/src/infer.rs`, `crates/nx-types/tests/type_checker_tests.rs`, `crates/nx-interpreter/src/interpreter.rs`, `crates/nx-interpreter/tests/conditionals.rs`, `docs/src/content/docs/language-tour/elements.md`, `docs/src/content/docs/reference/syntax/elements.md`, `docs/src/content/docs/reference/syntax/if.md`, `examples/nx/component.nx`, `src/vscode/syntaxes/nx.tmLanguage.json`, `src/vscode/test/grammar/control-blocks.test.ts`, `specs/future.md`
+
+## Findings
+
+### ✅ Resolved - RF1 Condition-list fragments without `else` are analyzed as always-producing a branch
+- **Severity:** High
+- **Evidence:** `property_paths_for_entry` for `PropertyEntry::ConditionList` only unions arm paths plus `else_entries`, but does not add an empty path when `else_entries` is omitted. This makes static analysis believe one of the listed arms must always contribute properties, while runtime explicitly allows "no arm matched" and contributes nothing (it evaluates `else_entries`, which may be empty). See `crates/nx-types/src/infer.rs` in the `ConditionList` branch of `property_paths_for_entry`.
+- **Recommendation:** In the `ConditionList` branch, add an explicit empty-property path when `else_entries` is empty to model the runtime "no condition matched" path. Add a regression test where a required prop is provided only in condition-list arms with no `else` and verify `missing-property` is reported.
+- **Resolution (verified during 2026-04-27 05:30 UTC review):** The original analysis was incorrect. `property_paths_for_entries(&[])` returns `vec![PropertyPath { properties: Vec::new() }]` (a single empty path) — see `crates/nx-types/src/infer.rs:1326-1345`. So `paths.extend(self.property_paths_for_entries(else_entries))` in the `ConditionList` branch already contributes an empty "no arm matched" path when `else_entries` is empty. A regression test (added temporarily during this verification) confirmed `missing-property` is reported for `<Badge if { isError => tone="danger" } />` when `Badge` requires `tone`. The `If` branch behaves identically by symmetry. No code change needed; recommend adding the regression test below (RF3) so future refactors do not regress this.
+
+## New Findings Discovered During 2026-04-27 05:30 UTC Review
+
+### ✅ Verified - RF2 No interpreter test for condition-list runtime evaluation
+- **Severity:** Low
+- **Evidence:** Task 5.5 mandated "interpreter/runtime tests for then/else selection, match-arm selection, and active property ordering." `crates/nx-interpreter/tests/conditionals.rs` covers simple if/else (`test_property_fragment_simple_conditional_selects_then_and_else`), match-arm selection (`test_property_fragment_match_selects_matching_arm`), and runtime duplicate rejection (`test_property_fragment_runtime_rejects_duplicate_active_property`), but there is no test exercising `PropertyEntry::ConditionList` runtime evaluation (`crates/nx-interpreter/src/interpreter.rs:2176-2202`) — neither first-match-wins arm selection nor fall-through to `else_entries`. There is also no explicit test for source-order "active property ordering" interleaving a direct property with a conditional fragment that contributes additional properties.
+- **Recommendation:** Add two interpreter tests: (a) a condition-list with multiple arms verifying the first-true arm wins and later arms are not evaluated, plus a fall-through-to-`else` case; (b) a test that asserts active-property source order when a direct property is interleaved with a conditional fragment.
+- **Fix:** Added `test_property_fragment_condition_list_selects_first_matching_arm_and_else` to cover first-match-wins and else fall-through at runtime, and strengthened `test_property_fragment_evaluation_preserves_active_property_order` to assert direct/conditional/direct source order.
+- **Verification:** Both tests located and run during 2026-04-27 19:30 UTC verification — `test_property_fragment_condition_list_selects_first_matching_arm_and_else` (`crates/nx-interpreter/tests/conditionals.rs:114`) exercises (true,true)→"danger", (false,true)→"warning", (false,false)→"neutral" so it covers first-match-wins and else fall-through; `test_property_fragment_evaluation_preserves_active_property_order` (`crates/nx-interpreter/src/interpreter.rs:3472`) directly invokes `eval_property_entries` with `[Value("first"), If{then:[Value("second")], else:[Value("fallback")]}, Value("third")]` and asserts output order `["first","second","third"]` — a direct/conditional/direct interleave as recommended. Both pass; broader `cargo test -p nx-types -p nx-interpreter -p nx-hir` sweep shows zero failures. Minor nit (non-blocking): the first-match-wins assertion is observed only via the resulting `tone` value rather than via a side-effecting probe that would prove later arms were not entered, but the runtime duplicate-property error would fire if both arms ran, so this is sufficient.
+
+### ✅ Verified - RF3 No type-checker regression test for condition-list-without-else missing required prop
+- **Severity:** Low
+- **Evidence:** `test_property_fragment_required_property_must_be_on_every_path` (`crates/nx-types/tests/type_checker_tests.rs:443-472`) covers the simple-`if` case but not the condition-list-without-`else` case. The behavior is correct today (verified during this review pass — see RF1 resolution) but is unprotected against regressions, and the absence of this test is what allowed the original RF1 mis-diagnosis.
+- **Recommendation:** Add a test asserting that `<Badge if { isError => tone="danger" } />` against `<Badge tone:string />` reports `missing-property`, and an accompanying accepted case where `else => tone="neutral"` makes the prop satisfied on every path.
+- **Fix:** Added `test_property_fragment_condition_list_without_else_has_empty_required_path` covering the missing-property rejection without `else` and the accepted case with an `else` arm.
+- **Verification:** Test located at `crates/nx-types/tests/type_checker_tests.rs:475` matches the recommendation exactly: rejected case (`<Badge if { isError => tone="danger" } />`) asserts `missing-property` is reported; accepted case (`<Badge if { isError => tone="danger" else => tone="neutral" } />`) asserts `result.is_ok()`. Test passes during 2026-04-27 19:30 UTC verification.
+
+## Questions
+- None
+
+## Summary
+- Second-pass review confirms the implementation is sound. RF1 was a false positive: the empty path is added because `property_paths_for_entries(&[])` returns a single empty path. RF2 and RF3 (low-severity test-coverage gaps) have been fixed and independently verified during the 2026-04-27 19:30 UTC verification pass. All findings are now resolved or verified; the change is ready to archive.
