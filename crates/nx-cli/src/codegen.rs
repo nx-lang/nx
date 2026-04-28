@@ -19,6 +19,7 @@ pub enum TargetLanguage {
 pub struct GenerateTypesOptions {
     pub language: TargetLanguage,
     pub csharp_namespace: Option<String>,
+    pub typescript_package_prefix: Option<String>,
     pub format: FormatOptions,
 }
 
@@ -94,7 +95,7 @@ pub fn generate_types_with_warnings(
     }?;
 
     let mut warnings = build.warnings;
-    warnings.extend(collect_language_warnings(graph, opts));
+    warnings.extend(collect_language_warnings(graph, opts, false));
 
     Ok(GeneratedOutput { value, warnings })
 }
@@ -122,7 +123,7 @@ pub fn generate_library_types_with_warnings(
     }?;
 
     let mut warnings = build.warnings;
-    warnings.extend(collect_language_warnings(graph, opts));
+    warnings.extend(collect_language_warnings(graph, opts, true));
 
     Ok(GeneratedOutput { value, warnings })
 }
@@ -130,12 +131,17 @@ pub fn generate_library_types_with_warnings(
 fn collect_language_warnings(
     graph: &model::ExportedTypeGraph,
     opts: &GenerateTypesOptions,
+    include_imports: bool,
 ) -> Vec<String> {
     match opts.language {
         TargetLanguage::CSharp => {
             languages::csharp::collect_warnings(graph, opts.csharp_namespace_or_default())
         }
-        TargetLanguage::TypeScript => Vec::new(),
+        TargetLanguage::TypeScript => languages::typescript::collect_warnings(
+            graph,
+            opts.typescript_package_prefix.as_deref(),
+            include_imports,
+        ),
     }
 }
 
@@ -166,6 +172,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
         };
 
@@ -190,6 +197,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
         };
 
@@ -216,6 +224,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
         };
 
@@ -238,6 +247,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
         };
 
@@ -263,6 +273,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
         };
 
@@ -286,6 +297,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
         };
 
@@ -310,6 +322,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
         };
 
@@ -338,6 +351,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
         };
 
@@ -364,7 +378,7 @@ mod tests {
     }
 
     #[test]
-    fn generates_csharp_global_aliases() {
+    fn generates_csharp_alias_only_output_without_global_usings() {
         let source = r#"
             export type Count = int
             export type Name = string
@@ -373,17 +387,18 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
         };
 
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
 
-        assert!(output.contains("global using Count = long;"));
-        assert!(output.contains("global using Name = string;"));
+        assert!(!output.contains("global using"));
+        assert!(!output.contains("namespace Test.Models"));
     }
 
     #[test]
-    fn generates_csharp_global_aliases_before_non_global_usings() {
+    fn generates_csharp_alias_references_transparently() {
         let source = r#"
             export type Count = int
             export type Payload = { count: Count }
@@ -392,14 +407,14 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
         };
 
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
-        let global_using_index = output.find("global using Count = long;").unwrap();
-        let using_system_index = output.find("using System;").unwrap();
 
-        assert!(global_using_index < using_system_index);
+        assert!(!output.contains("global using Count"));
+        assert!(output.contains("public long Count { get; set; }"));
     }
 
     #[test]
@@ -413,6 +428,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
         };
 
@@ -430,6 +446,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
         };
 
@@ -458,6 +475,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
         };
 
@@ -502,6 +520,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
         };
 
@@ -542,6 +561,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
         };
 
@@ -582,6 +602,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
         };
 
@@ -622,6 +643,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
         };
 
@@ -645,6 +667,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
         };
 
@@ -680,6 +703,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
         };
 
@@ -709,6 +733,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
         };
 
@@ -759,6 +784,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
         };
 
@@ -802,6 +828,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
         };
 
@@ -862,6 +889,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
         };
 
@@ -917,6 +945,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
         };
 
@@ -972,6 +1001,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
         };
 
@@ -1030,6 +1060,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
         };
 
@@ -1072,6 +1103,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
         };
 
@@ -1092,6 +1124,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
         };
 
@@ -1124,6 +1157,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
         };
 
@@ -1165,6 +1199,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
         };
 
@@ -1188,6 +1223,7 @@ mod tests {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
         };
 
@@ -1230,6 +1266,7 @@ export type QuestionFlowInitialExperience = {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models.ChatLink".to_string()),
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
         };
 
@@ -1253,6 +1290,7 @@ export type QuestionFlowInitialExperience = {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
         };
 
@@ -1284,6 +1322,7 @@ export type QuestionFlowInitialExperience = {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
         };
 
@@ -1318,6 +1357,7 @@ export type QuestionFlowInitialExperience = {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
         };
 
@@ -1339,6 +1379,7 @@ export type QuestionFlowInitialExperience = {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
         };
 
@@ -1400,6 +1441,7 @@ export type QuestionFlowInitialExperience = {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
         };
 
@@ -1415,7 +1457,7 @@ export type QuestionFlowInitialExperience = {
     }
 
     #[test]
-    fn generates_csharp_library_aliases_with_global_qualified_cross_module_types() {
+    fn generates_csharp_library_aliases_transparently_across_modules() {
         let temp_dir = TempDir::new().expect("temp dir");
         let library_dir = temp_dir.path().join("ui");
         fs::create_dir_all(&library_dir).expect("library dir");
@@ -1429,11 +1471,17 @@ export type QuestionFlowInitialExperience = {
             "export type ThemeAlias = ThemeMode",
         )
         .expect("alias file");
+        fs::write(
+            library_dir.join("button.nx"),
+            "export type Button = { theme: ThemeAlias }",
+        )
+        .expect("button file");
 
         let artifact = build_library_artifact_from_directory(&library_dir).expect("library build");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
         };
 
@@ -1442,9 +1490,15 @@ export type QuestionFlowInitialExperience = {
             .iter()
             .find(|file| file.relative_path == PathBuf::from("aliases.g.cs"))
             .expect("aliases.g.cs");
-        assert!(aliases
+        let button = files
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("button.g.cs"))
+            .expect("button.g.cs");
+
+        assert!(!aliases.content.contains("global using ThemeAlias"));
+        assert!(button
             .content
-            .contains("global using ThemeAlias = global::Test.Models.ThemeMode;"));
+            .contains("public ThemeMode Theme { get; set; }"));
     }
 
     #[test]
@@ -1476,6 +1530,7 @@ export type QuestionFlowInitialExperience = {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models.ChatLink".to_string()),
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
         };
 
@@ -1497,6 +1552,355 @@ export type QuestionFlowInitialExperience = {
             .contains(
                 "public global::Test.Models.QuestionFlow.QuestionFlow QuestionFlow { get; set; } = default!;"
             ));
+    }
+
+    #[test]
+    fn generates_csharp_dependency_primitive_aliases_transparently() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let question_flow_dir = temp_dir.path().join("question-flow");
+        let chat_link_dir = temp_dir.path().join("chat-link");
+        fs::create_dir_all(&question_flow_dir).expect("question-flow dir");
+        fs::create_dir_all(&chat_link_dir).expect("chat-link dir");
+
+        fs::write(
+            question_flow_dir.join("QuestionFlowId.nx"),
+            "export type QuestionFlowId = string",
+        )
+        .expect("question-flow file");
+        fs::write(
+            chat_link_dir.join("QuestionFlowInitialExperience.nx"),
+            r#"import "../question-flow"
+
+export type QuestionFlowInitialExperience = {
+  questionFlowId: QuestionFlowId
+}
+"#,
+        )
+        .expect("chat-link file");
+
+        let artifact =
+            build_library_artifact_from_directory(&chat_link_dir).expect("library build");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.Models.ChatLink".to_string()),
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let output = generate_library_types_with_warnings(&artifact, &opts).unwrap();
+        let chat_link = output
+            .value
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("QuestionFlowInitialExperience.g.cs"))
+            .expect("QuestionFlowInitialExperience.g.cs");
+
+        assert!(output.warnings.is_empty());
+        assert!(!chat_link.content.contains("global using"));
+        assert!(!chat_link.content.contains("public QuestionFlowId"));
+        assert!(!chat_link.content.contains("Test.Models.QuestionFlow"));
+        assert!(chat_link
+            .content
+            .contains("public string QuestionFlowId { get; set; } = default!;"));
+    }
+
+    #[test]
+    fn generates_csharp_dependency_nominal_aliases_as_target_types() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let question_flow_dir = temp_dir.path().join("question-flow");
+        let chat_link_dir = temp_dir.path().join("chat-link");
+        fs::create_dir_all(&question_flow_dir).expect("question-flow dir");
+        fs::create_dir_all(&chat_link_dir).expect("chat-link dir");
+
+        fs::write(
+            question_flow_dir.join("Question.nx"),
+            r#"export type Question = { id:string }
+export type PrimaryQuestion = Question
+"#,
+        )
+        .expect("question-flow file");
+        fs::write(
+            chat_link_dir.join("QuestionFlowInitialExperience.nx"),
+            r#"import "../question-flow"
+
+export type QuestionFlowInitialExperience = {
+  question: PrimaryQuestion
+}
+"#,
+        )
+        .expect("chat-link file");
+
+        let artifact =
+            build_library_artifact_from_directory(&chat_link_dir).expect("library build");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.Models.ChatLink".to_string()),
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let output = generate_library_types_with_warnings(&artifact, &opts).unwrap();
+        let chat_link = output
+            .value
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("QuestionFlowInitialExperience.g.cs"))
+            .expect("QuestionFlowInitialExperience.g.cs");
+
+        assert_eq!(output.warnings.len(), 1);
+        assert!(output.warnings[0].contains("question-flow"));
+        assert!(!chat_link.content.contains("PrimaryQuestion"));
+        assert!(chat_link
+            .content
+            .contains("using Test.Models.QuestionFlow;"));
+        assert!(chat_link.content.contains(
+            "public global::Test.Models.QuestionFlow.Question Question { get; set; } = default!;"
+        ));
+    }
+
+    #[test]
+    fn generates_typescript_library_files_with_dependency_package_imports() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let question_flow_dir = temp_dir.path().join("question-flow");
+        let chat_link_dir = temp_dir.path().join("chat-link");
+        fs::create_dir_all(&question_flow_dir).expect("question-flow dir");
+        fs::create_dir_all(&chat_link_dir).expect("chat-link dir");
+
+        fs::write(
+            question_flow_dir.join("QuestionFlow.nx"),
+            "export type QuestionFlow = { id:string }",
+        )
+        .expect("question-flow file");
+        fs::write(
+            chat_link_dir.join("QuestionFlowInitialExperience.nx"),
+            r#"import "../question-flow"
+
+export type QuestionFlowInitialExperience = {
+  questionFlow: QuestionFlow
+}
+"#,
+        )
+        .expect("chat-link file");
+
+        let artifact =
+            build_library_artifact_from_directory(&chat_link_dir).expect("library build");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            typescript_package_prefix: Some("@org/nx-".to_string()),
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let output = generate_library_types_with_warnings(&artifact, &opts).unwrap();
+        let chat_link = output
+            .value
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("QuestionFlowInitialExperience.ts"))
+            .expect("QuestionFlowInitialExperience.ts");
+
+        assert_eq!(output.warnings.len(), 1);
+        assert!(output.warnings[0].contains("question-flow"));
+        assert!(output.warnings[0].contains("@org/nx-question-flow"));
+        assert!(chat_link
+            .content
+            .contains("import type { QuestionFlow } from \"@org/nx-question-flow\";"));
+        assert!(chat_link.content.contains("questionFlow: QuestionFlow;"));
+    }
+
+    #[test]
+    fn generates_typescript_library_files_with_dependency_alias_imports() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let question_flow_dir = temp_dir.path().join("question-flow");
+        let chat_link_dir = temp_dir.path().join("chat-link");
+        fs::create_dir_all(&question_flow_dir).expect("question-flow dir");
+        fs::create_dir_all(&chat_link_dir).expect("chat-link dir");
+
+        fs::write(
+            question_flow_dir.join("QuestionFlowId.nx"),
+            "export type QuestionFlowId = string",
+        )
+        .expect("question-flow file");
+        fs::write(
+            chat_link_dir.join("QuestionFlowInitialExperience.nx"),
+            r#"import { QuestionFlowId as Flow.QuestionFlowId } from "../question-flow"
+
+export type QuestionFlowInitialExperience = {
+  questionFlowId: Flow.QuestionFlowId
+}
+"#,
+        )
+        .expect("chat-link file");
+
+        let artifact =
+            build_library_artifact_from_directory(&chat_link_dir).expect("library build");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            typescript_package_prefix: Some("@org/nx-".to_string()),
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let output = generate_library_types_with_warnings(&artifact, &opts).unwrap();
+        let chat_link = output
+            .value
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("QuestionFlowInitialExperience.ts"))
+            .expect("QuestionFlowInitialExperience.ts");
+
+        assert_eq!(output.warnings.len(), 1);
+        assert!(output.warnings[0].contains("@org/nx-question-flow"));
+        assert!(chat_link.content.contains(
+            "import type { QuestionFlowId as Flow_QuestionFlowId } from \"@org/nx-question-flow\";"
+        ));
+        assert!(chat_link
+            .content
+            .contains("questionFlowId: Flow_QuestionFlowId;"));
+    }
+
+    #[test]
+    fn generates_typescript_dependency_import_alias_for_qualified_selective_import() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let question_flow_dir = temp_dir.path().join("question-flow");
+        let chat_link_dir = temp_dir.path().join("chat-link");
+        fs::create_dir_all(&question_flow_dir).expect("question-flow dir");
+        fs::create_dir_all(&chat_link_dir).expect("chat-link dir");
+
+        fs::write(
+            question_flow_dir.join("QuestionFlow.nx"),
+            "export type QuestionFlow = { id:string }",
+        )
+        .expect("question-flow file");
+        fs::write(
+            chat_link_dir.join("QuestionFlowInitialExperience.nx"),
+            r#"import { QuestionFlow as Flow.QuestionFlow } from "../question-flow"
+
+export type QuestionFlowInitialExperience = {
+  questionFlow: Flow.QuestionFlow
+}
+"#,
+        )
+        .expect("chat-link file");
+
+        let artifact =
+            build_library_artifact_from_directory(&chat_link_dir).expect("library build");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            typescript_package_prefix: Some("@org/nx-".to_string()),
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let output = generate_library_types_with_warnings(&artifact, &opts).unwrap();
+        let chat_link = output
+            .value
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("QuestionFlowInitialExperience.ts"))
+            .expect("QuestionFlowInitialExperience.ts");
+
+        assert!(chat_link.content.contains(
+            "import type { QuestionFlow as Flow_QuestionFlow } from \"@org/nx-question-flow\";"
+        ));
+        assert!(chat_link
+            .content
+            .contains("questionFlow: Flow_QuestionFlow;"));
+    }
+
+    #[test]
+    fn generates_typescript_dependency_import_warning_without_package_prefix() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let question_flow_dir = temp_dir.path().join("question-flow");
+        let chat_link_dir = temp_dir.path().join("chat-link");
+        fs::create_dir_all(&question_flow_dir).expect("question-flow dir");
+        fs::create_dir_all(&chat_link_dir).expect("chat-link dir");
+
+        fs::write(
+            question_flow_dir.join("QuestionFlow.nx"),
+            "export type QuestionFlow = { id:string }",
+        )
+        .expect("question-flow file");
+        fs::write(
+            chat_link_dir.join("QuestionFlowInitialExperience.nx"),
+            r#"import "../question-flow"
+
+export type QuestionFlowInitialExperience = {
+  questionFlow: QuestionFlow
+}
+"#,
+        )
+        .expect("chat-link file");
+
+        let artifact =
+            build_library_artifact_from_directory(&chat_link_dir).expect("library build");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let output = generate_library_types_with_warnings(&artifact, &opts).unwrap();
+        let chat_link = output
+            .value
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("QuestionFlowInitialExperience.ts"))
+            .expect("QuestionFlowInitialExperience.ts");
+
+        assert_eq!(output.warnings.len(), 1);
+        assert!(output.warnings[0].contains("question-flow"));
+        assert!(output.warnings[0].contains("package 'question-flow'"));
+        assert!(chat_link
+            .content
+            .contains("import type { QuestionFlow } from \"question-flow\";"));
+    }
+
+    #[test]
+    fn generates_no_typescript_dependency_warning_when_no_import_is_emitted() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let question_flow_dir = temp_dir.path().join("question-flow");
+        let chat_link_dir = temp_dir.path().join("chat-link");
+        fs::create_dir_all(&question_flow_dir).expect("question-flow dir");
+        fs::create_dir_all(&chat_link_dir).expect("chat-link dir");
+
+        fs::write(
+            question_flow_dir.join("QuestionFlow.nx"),
+            "export type QuestionFlow = { id:string }",
+        )
+        .expect("question-flow file");
+        fs::write(
+            chat_link_dir.join("ChatLink.nx"),
+            r#"import "../question-flow"
+
+export type ChatLink = {
+  id: string
+}
+"#,
+        )
+        .expect("chat-link file");
+
+        let artifact =
+            build_library_artifact_from_directory(&chat_link_dir).expect("library build");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            typescript_package_prefix: Some("@org/nx-".to_string()),
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let output = generate_library_types_with_warnings(&artifact, &opts).unwrap();
+        let chat_link = output
+            .value
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("ChatLink.ts"))
+            .expect("ChatLink.ts");
+
+        assert!(
+            output.warnings.is_empty(),
+            "Expected no assumed package warning without an emitted dependency import, got {:?}",
+            output.warnings
+        );
+        assert!(
+            !chat_link.content.contains("@org/nx-question-flow"),
+            "Generated source should not import an unused dependency package: {}",
+            chat_link.content
+        );
     }
 
     #[test]
@@ -1528,6 +1932,7 @@ export type QuestionFlowInitialExperience = {
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models.ChatLink".to_string()),
+            typescript_package_prefix: None,
             format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
         };
 

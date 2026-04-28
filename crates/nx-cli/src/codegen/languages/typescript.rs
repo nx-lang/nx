@@ -1,7 +1,7 @@
 use crate::codegen::model::{
     ExportedAlias, ExportedEnum, ExportedExternalState, ExportedModule,
     ExportedPolymorphicDescendant, ExportedRecord, ExportedType, ExportedTypeGraph, ExportedUnion,
-    ExportedUnionCase,
+    ExportedUnionCase, ImportedType,
 };
 use crate::codegen::writer::CodeWriter;
 use crate::codegen::{GenerateTypesOptions, GeneratedFile};
@@ -15,6 +15,28 @@ const NX_RECORD_HELPER_MODULE_BASENAME: &str = "_nx";
 enum NxRecordMode {
     Inline,
     Import,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct TypeScriptImportSpecifier {
+    exported_name: String,
+    local_name: String,
+}
+
+impl TypeScriptImportSpecifier {
+    fn rendered(&self) -> String {
+        if self.exported_name == self.local_name {
+            self.exported_name.clone()
+        } else {
+            format!("{} as {}", self.exported_name, self.local_name)
+        }
+    }
+}
+
+struct TypeScriptImportContext<'a> {
+    graph: &'a ExportedTypeGraph,
+    imported_types_by_visible_name: BTreeMap<String, ImportedType>,
+    package_prefix: Option<&'a str>,
 }
 
 pub fn emit_single_file(
@@ -74,6 +96,47 @@ pub fn emit_library(
     Ok(files)
 }
 
+pub(crate) fn collect_warnings(
+    graph: &ExportedTypeGraph,
+    package_prefix: Option<&str>,
+    include_imports: bool,
+) -> Vec<String> {
+    if !include_imports {
+        return Vec::new();
+    }
+
+    let mut warnings = Vec::new();
+    let mut warned_dependency_packages = BTreeSet::new();
+
+    for module in &graph.modules {
+        let import_context = TypeScriptImportContext {
+            graph,
+            imported_types_by_visible_name: imported_types_by_visible_name(module),
+            package_prefix,
+        };
+        let emitted_imports = collect_module_imports(module, &import_context);
+
+        for imported_type in &module.imported_types {
+            let package_target =
+                assumed_dependency_package_for_library(package_prefix, &imported_type.library_name);
+            if !emitted_imports.contains_key(&package_target) {
+                continue;
+            }
+
+            if warned_dependency_packages
+                .insert((imported_type.library_name.clone(), package_target.clone()))
+            {
+                warnings.push(format!(
+                    "Generated TypeScript cross-library imports for dependency '{}' assume package '{}' derived from the dependency directory name. If that library is published under a different package name, regenerate with --typescript-package-prefix or update the generated import manually.",
+                    imported_type.library_name, package_target
+                ));
+            }
+        }
+    }
+
+    warnings
+}
+
 fn render_module(
     graph: &ExportedTypeGraph,
     module: &ExportedModule,
@@ -84,6 +147,11 @@ fn render_module(
 ) -> String {
     let mut writer = CodeWriter::new(opts.format.clone());
     write_header(&mut writer);
+    let import_context = TypeScriptImportContext {
+        graph,
+        imported_types_by_visible_name: imported_types_by_visible_name(module),
+        package_prefix: opts.typescript_package_prefix.as_deref(),
+    };
 
     let mut wrote_import = false;
     if include_imports {
@@ -95,10 +163,13 @@ fn render_module(
             wrote_import = true;
         }
 
-        let dependencies = collect_module_imports(graph, module);
-        for (module_path, type_names) in &dependencies {
-            let names = type_names.iter().cloned().collect::<Vec<_>>().join(", ");
-            let specifier = relative_module_specifier(&module.module_path, module_path);
+        let dependencies = collect_module_imports(module, &import_context);
+        for (specifier, type_names) in &dependencies {
+            let names = type_names
+                .iter()
+                .map(TypeScriptImportSpecifier::rendered)
+                .collect::<Vec<_>>()
+                .join(", ");
             writer.line(&format!("import type {{ {names} }} from \"{specifier}\";"));
             wrote_import = true;
         }
@@ -397,31 +468,31 @@ fn module_needs_nx_record(module: &ExportedModule) -> bool {
 }
 
 fn collect_module_imports(
-    graph: &ExportedTypeGraph,
     module: &ExportedModule,
-) -> BTreeMap<PathBuf, BTreeSet<String>> {
-    let mut imports = BTreeMap::<PathBuf, BTreeSet<String>>::new();
+    context: &TypeScriptImportContext<'_>,
+) -> BTreeMap<String, BTreeSet<TypeScriptImportSpecifier>> {
+    let mut imports = BTreeMap::<String, BTreeSet<TypeScriptImportSpecifier>>::new();
 
     for declaration in &module.declarations {
         match &declaration.item {
             ExportedType::Alias(alias) => {
-                add_type_ref_imports(graph, module, &alias.target, &mut imports);
+                add_type_ref_imports(module, context, &alias.target, &mut imports);
             }
             ExportedType::Enum(_) => {}
             ExportedType::Union(union_def) => {
                 if let Some(base_name) = union_def.base.as_deref() {
-                    if let Some(base_record) = graph.resolve_record(base_name) {
+                    if let Some(base_record) = context.graph.resolve_record(base_name) {
                         add_imported_symbol(
-                            graph,
                             module,
+                            context,
                             &base_record.name,
                             ts_base_contract_name(&base_record.name),
                             &mut imports,
                         );
                     } else {
                         add_imported_symbol(
-                            graph,
                             module,
+                            context,
                             base_name,
                             ts_type_name(base_name),
                             &mut imports,
@@ -431,15 +502,15 @@ fn collect_module_imports(
 
                 for case in &union_def.cases {
                     for field in &case.fields {
-                        add_type_ref_imports(graph, module, &field.ty, &mut imports);
+                        add_type_ref_imports(module, context, &field.ty, &mut imports);
                     }
                 }
             }
             ExportedType::Record(record) => {
-                if let Some(base_record) = graph.resolved_record_base(record) {
+                if let Some(base_record) = context.graph.resolved_record_base(record) {
                     add_imported_symbol(
-                        graph,
                         module,
+                        context,
                         &base_record.name,
                         ts_base_contract_name(&base_record.name),
                         &mut imports,
@@ -447,18 +518,23 @@ fn collect_module_imports(
                 }
 
                 for field in &record.fields {
-                    add_type_ref_imports(graph, module, &field.ty, &mut imports);
+                    add_type_ref_imports(module, context, &field.ty, &mut imports);
                 }
 
                 if record.is_abstract {
-                    for descendant in graph.polymorphic_descendants(&record.name) {
-                        add_polymorphic_descendant_import(graph, module, &descendant, &mut imports);
+                    for descendant in context.graph.polymorphic_descendants(&record.name) {
+                        add_polymorphic_descendant_import(
+                            module,
+                            context,
+                            &descendant,
+                            &mut imports,
+                        );
                     }
                 }
             }
             ExportedType::ExternalState(state) => {
                 for field in &state.fields {
-                    add_type_ref_imports(graph, module, &field.ty, &mut imports);
+                    add_type_ref_imports(module, context, &field.ty, &mut imports);
                 }
             }
         }
@@ -468,22 +544,22 @@ fn collect_module_imports(
 }
 
 fn add_polymorphic_descendant_import(
-    graph: &ExportedTypeGraph,
     module: &ExportedModule,
+    context: &TypeScriptImportContext<'_>,
     descendant: &ExportedPolymorphicDescendant,
-    imports: &mut BTreeMap<PathBuf, BTreeSet<String>>,
+    imports: &mut BTreeMap<String, BTreeSet<TypeScriptImportSpecifier>>,
 ) {
     match descendant {
         ExportedPolymorphicDescendant::Record { name } => {
-            add_imported_symbol(graph, module, name, sanitize_ts_type_name(name), imports);
+            add_imported_symbol(module, context, name, sanitize_ts_type_name(name), imports);
         }
         ExportedPolymorphicDescendant::UnionCase {
             union_name,
             case_name,
         } => {
             add_imported_symbol(
-                graph,
                 module,
+                context,
                 union_name,
                 ts_union_case_type_name(union_name, case_name),
                 imports,
@@ -493,26 +569,47 @@ fn add_polymorphic_descendant_import(
 }
 
 fn add_type_ref_imports(
-    graph: &ExportedTypeGraph,
     module: &ExportedModule,
+    context: &TypeScriptImportContext<'_>,
     ty: &TypeRef,
-    imports: &mut BTreeMap<PathBuf, BTreeSet<String>>,
+    imports: &mut BTreeMap<String, BTreeSet<TypeScriptImportSpecifier>>,
 ) {
     let mut names = BTreeSet::new();
     collect_type_ref_names(ty, &mut names);
     for name in names {
-        add_imported_symbol(graph, module, &name, sanitize_ts_type_name(&name), imports);
+        add_imported_symbol(
+            module,
+            context,
+            &name,
+            sanitize_ts_type_name(&name),
+            imports,
+        );
     }
 }
 
 fn add_imported_symbol(
-    graph: &ExportedTypeGraph,
     module: &ExportedModule,
+    context: &TypeScriptImportContext<'_>,
     type_name: &str,
     imported_name: String,
-    imports: &mut BTreeMap<PathBuf, BTreeSet<String>>,
+    imports: &mut BTreeMap<String, BTreeSet<TypeScriptImportSpecifier>>,
 ) {
-    let Some(owner_module) = graph.owner_module(type_name) else {
+    if let Some(imported_type) = context.imported_types_by_visible_name.get(type_name) {
+        let package_target = assumed_dependency_package_for_library(
+            context.package_prefix,
+            &imported_type.library_name,
+        );
+        imports
+            .entry(package_target)
+            .or_default()
+            .insert(TypeScriptImportSpecifier {
+                exported_name: sanitize_ts_type_name(&imported_type.exported_name),
+                local_name: imported_name,
+            });
+        return;
+    }
+
+    let Some(owner_module) = context.graph.owner_module(type_name) else {
         return;
     };
 
@@ -520,10 +617,14 @@ fn add_imported_symbol(
         return;
     }
 
+    let specifier = relative_module_specifier(&module.module_path, owner_module);
     imports
-        .entry(owner_module.to_path_buf())
+        .entry(specifier)
         .or_default()
-        .insert(imported_name);
+        .insert(TypeScriptImportSpecifier {
+            exported_name: imported_name.clone(),
+            local_name: imported_name,
+        });
 }
 
 fn collect_type_ref_names(ty: &TypeRef, out: &mut BTreeSet<String>) {
@@ -669,6 +770,60 @@ fn sanitize_ts_member_name(name: &str) -> String {
 
 fn escape_ts_string(value: &str) -> String {
     value.replace('\\', "\\\\").replace('\"', "\\\"")
+}
+
+fn imported_types_by_visible_name(module: &ExportedModule) -> BTreeMap<String, ImportedType> {
+    module
+        .imported_types
+        .iter()
+        .map(|imported_type| (imported_type.visible_name.clone(), imported_type.clone()))
+        .collect()
+}
+
+fn assumed_dependency_package_for_library(
+    package_prefix: Option<&str>,
+    library_name: &str,
+) -> String {
+    format!(
+        "{}{}",
+        package_prefix.unwrap_or_default(),
+        sanitize_ts_package_segment(library_name)
+    )
+}
+
+fn sanitize_ts_package_segment(name: &str) -> String {
+    let mut out = String::new();
+    let mut previous_was_separator = false;
+
+    for ch in name.chars() {
+        let next = if ch.is_ascii_alphanumeric() {
+            Some(ch.to_ascii_lowercase())
+        } else if ch == '-' || ch == '_' || ch == '.' {
+            Some(ch)
+        } else if !previous_was_separator {
+            Some('-')
+        } else {
+            None
+        };
+
+        if let Some(next) = next {
+            previous_was_separator = next == '-' || next == '_' || next == '.';
+            out.push(next);
+        }
+    }
+
+    while out.starts_with(['-', '_', '.']) {
+        out.remove(0);
+    }
+    while out.ends_with(['-', '_', '.']) {
+        out.pop();
+    }
+
+    if out.is_empty() {
+        "nx-library".to_string()
+    } else {
+        out
+    }
 }
 
 fn module_output_path(module_path: &Path) -> PathBuf {

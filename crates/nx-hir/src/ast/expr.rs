@@ -63,6 +63,17 @@ impl std::hash::Hash for OrderedFloat {
     }
 }
 
+/// Property assignment inside a record literal.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RecordLiteralProperty {
+    /// Property key.
+    pub name: Name,
+    /// Property value expression.
+    pub value: ExprId,
+    /// Source span for the property assignment.
+    pub span: TextSpan,
+}
+
 /// Binary operator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BinOp {
@@ -226,7 +237,7 @@ pub enum Expr {
         /// Record type name
         record: Name,
         /// Property assignments
-        properties: Vec<(Name, ExprId)>,
+        properties: Vec<RecordLiteralProperty>,
         /// Source span
         span: TextSpan,
     },

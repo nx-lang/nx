@@ -898,7 +898,7 @@ impl<'a> InferenceContext<'a> {
     fn infer_record_literal(
         &mut self,
         record: &Name,
-        properties: &[(Name, ExprId)],
+        properties: &[ast::RecordLiteralProperty],
         span: TextSpan,
     ) -> Type {
         if let Some(record_def) = self.resolve_record_definition(record) {
@@ -911,43 +911,30 @@ impl<'a> InferenceContext<'a> {
             }
 
             let effective_shape = self.effective_record_shape(record).ok().flatten();
-            for (name, expr_id) in properties {
-                let actual = self.infer_expr(*expr_id);
-                if let Some(field) = if let Some(shape) = effective_shape.as_ref() {
-                    shape
-                        .fields
-                        .iter()
-                        .find(|field| field.name == *name)
-                        .map(|field| {
-                            (
-                                field.name.clone(),
-                                field.ty.clone(),
-                                field.is_content,
-                                field.span,
-                            )
-                        })
-                } else {
-                    record_def
-                        .properties
-                        .iter()
-                        .find(|field| field.name == *name)
-                        .map(|field| {
-                            (
-                                field.name.clone(),
-                                field.ty.clone(),
-                                field.is_content,
-                                field.span,
-                            )
-                        })
-                } {
-                    let expected = self.type_from_type_ref(&field.1);
-                    self.check_typed_binding(
-                        &actual,
-                        &expected,
-                        span,
-                        "record-field-type-mismatch",
-                        format!("Record field '{}' on '{}'", name, record),
-                    );
+            for property in properties {
+                match self.record_field_type_ref(
+                    &record_def,
+                    effective_shape.as_ref(),
+                    &property.name,
+                ) {
+                    Some(field_ty) => {
+                        let actual = self.infer_expr(property.value);
+                        let expected = self.type_from_type_ref(&field_ty);
+                        self.check_typed_binding(
+                            &actual,
+                            &expected,
+                            property.span,
+                            "record-field-type-mismatch",
+                            format!("Record field '{}' on '{}'", property.name, record),
+                        );
+                    }
+                    None => {
+                        self.error(
+                            "unknown-record-field",
+                            format!("Record '{}' has no field '{}'", record, property.name),
+                            property.span,
+                        );
+                    }
                 }
             }
 
@@ -955,6 +942,27 @@ impl<'a> InferenceContext<'a> {
         } else {
             Type::named(record.clone())
         }
+    }
+
+    fn record_field_type_ref(
+        &self,
+        record_def: &nx_hir::RecordDef,
+        effective_shape: Option<&nx_hir::EffectiveRecordShape>,
+        name: &Name,
+    ) -> Option<ast::TypeRef> {
+        if let Some(shape) = effective_shape {
+            return shape
+                .fields
+                .iter()
+                .find(|field| field.name == *name)
+                .map(|field| field.ty.clone());
+        }
+
+        record_def
+            .properties
+            .iter()
+            .find(|field| field.name == *name)
+            .map(|field| field.ty.clone())
     }
 
     fn infer_element_expression(&mut self, element: &nx_hir::Element, span: TextSpan) -> Type {
@@ -1129,7 +1137,72 @@ impl<'a> InferenceContext<'a> {
                 )
             }))
         };
-        self.check_element_bindings(element, span, &spec);
+        self.check_record_element_bindings(element, span, &spec);
+    }
+
+    fn check_record_element_bindings(
+        &mut self,
+        element: &nx_hir::Element,
+        span: TextSpan,
+        spec: &ElementBindingSpec,
+    ) {
+        let property_paths = self.property_paths_for_entries(element.property_entries());
+        self.report_duplicate_property_paths(&property_paths, &element.tag);
+
+        let content_from_body = if !element.content.is_empty() {
+            if let Some(content_name) = spec.content_property.as_ref() {
+                if property_paths.iter().any(|path| {
+                    path.properties
+                        .iter()
+                        .any(|property| property.key == *content_name)
+                }) {
+                    self.error(
+                        "content-binding-conflict",
+                        format!(
+                            "Record '{}' passes content for '{}' both as a property and as body content",
+                            element.tag, content_name
+                        ),
+                        span,
+                    );
+                    false
+                } else if let Some(expected) = spec.properties.get(content_name) {
+                    let actual = self.normalized_sequence_type(&element.content, span);
+                    self.check_typed_binding(
+                        &actual,
+                        &expected.ty,
+                        span,
+                        "content-type-mismatch",
+                        format!("Content for '{}' binds to '{}'", element.tag, content_name),
+                    );
+                    true
+                } else {
+                    false
+                }
+            } else {
+                self.error(
+                    "missing-content-property",
+                    format!(
+                        "Record '{}' passes body content, but '{}' does not declare a content field",
+                        element.tag, element.tag
+                    ),
+                    span,
+                );
+                false
+            }
+        } else {
+            false
+        };
+
+        self.check_property_path_bindings(
+            &property_paths,
+            spec,
+            &element.tag,
+            content_from_body,
+            span,
+            "record-field-type-mismatch",
+            "unknown-record-field",
+            "missing-property",
+        );
     }
 
     fn check_element_bindings_against_union_case(
@@ -2148,11 +2221,8 @@ impl<'a> InferenceContext<'a> {
             (Type::Union(union), Type::Named(expected_name)) => {
                 self.union_type_satisfies_record(&union.name, expected_name)
             }
-            (Type::Named(_), Type::Nullable(expected_inner)) => {
+            (_, Type::Nullable(expected_inner)) => {
                 self.type_satisfies_expected(actual, expected_inner)
-            }
-            (Type::Nullable(actual_inner), Type::Nullable(expected_inner)) => {
-                self.type_satisfies_expected(actual_inner, expected_inner)
             }
             (Type::Array(actual_inner), Type::Array(expected_inner)) => {
                 self.type_satisfies_expected(actual_inner, expected_inner)
@@ -2162,16 +2232,22 @@ impl<'a> InferenceContext<'a> {
     }
 
     fn type_satisfies_expected_with_coercion(&self, actual: &Type, expected: &Type) -> bool {
-        match (actual, expected) {
+        if self.type_satisfies_expected(actual, expected) {
+            return true;
+        }
+
+        let coercion_target = expected.strip_nullable();
+
+        match (actual, coercion_target) {
             (Type::Array(actual_inner), Type::Array(expected_inner)) => {
                 self.type_satisfies_expected(actual_inner, expected_inner)
             }
-            (Type::Array(_), _) if is_object_type(expected) => true,
+            (Type::Array(_), _) if is_object_type(coercion_target) => true,
             (Type::Array(_), _) => false,
             (_, Type::Array(expected_inner)) => {
                 self.type_satisfies_expected(actual, expected_inner)
             }
-            _ => self.type_satisfies_expected(actual, expected),
+            _ => false,
         }
     }
 

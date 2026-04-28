@@ -540,8 +540,8 @@ fn collect_handler_rewrites_in_expr(
             collect_handler_rewrites_in_expr(module, *base, rewrites);
         }
         ast::Expr::RecordLiteral { properties, .. } => {
-            for (_, value) in properties {
-                collect_handler_rewrites_in_expr(module, *value, rewrites);
+            for property in properties {
+                collect_handler_rewrites_in_expr(module, property.value, rewrites);
             }
         }
         ast::Expr::Element { element, .. } => {

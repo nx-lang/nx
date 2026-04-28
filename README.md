@@ -92,6 +92,7 @@ nxlang generate ./models/person.nx --language typescript
 
 # Library generation writes one generated file per contributing NX module.
 nxlang generate ./ui --language csharp --csharp-namespace MyApp.Models --output ./generated
+nxlang generate ./chat-link --language typescript --typescript-package-prefix @org/nx- --output ./generated
 ```
 
 Generated output includes only exported type declarations:
@@ -102,6 +103,9 @@ Generated output includes only exported type declarations:
 - `export type` discriminated unions, generated as `$type`-discriminated TypeScript unions or C# polymorphic DTOs
 
 Directory input must point at a valid NX library root and always requires `--output`.
+TypeScript generation emits package imports for dependency-library references; until NX has
+manifest-declared package names, those package targets are derived from the dependency directory
+name plus the optional `--typescript-package-prefix` value and surfaced as warnings.
 
 ## Features
 

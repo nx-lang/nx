@@ -1,7 +1,8 @@
 use nx_api::{build_library_artifact_from_directory, LibraryArtifact};
 use nx_hir::{
-    ast::TypeRef, Component, EnumDef, ImportKind, Item, LoweredModule, PreparedItemKind, RecordDef,
-    RecordKind, SelectiveImport, TypeAlias, UnionCaseDef, UnionDef, Visibility,
+    ast::TypeRef, Component, EnumDef, ImportKind, InterfaceItemKind, Item, LoweredModule,
+    PreparedItemKind, RecordDef, RecordKind, SelectiveImport, TypeAlias, UnionCaseDef, UnionDef,
+    Visibility,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeSet;
@@ -68,11 +69,36 @@ pub struct ExportedExternalState {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ImportedTypeKind {
+    Alias {
+        target: TypeRef,
+        target_is_reference: bool,
+    },
+    Enum,
+    Union,
+    Record,
+    Component,
+}
+
+impl ImportedTypeKind {
+    pub fn is_reference(&self) -> bool {
+        match self {
+            Self::Alias {
+                target_is_reference,
+                ..
+            } => *target_is_reference,
+            Self::Enum => false,
+            Self::Union | Self::Record | Self::Component => true,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ImportedType {
     pub visible_name: String,
     pub exported_name: String,
     pub library_name: String,
-    pub is_reference: bool,
+    pub kind: ImportedTypeKind,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -141,6 +167,7 @@ struct ImportedTypesBuild {
 struct CachedImportedLibrary {
     library_name: String,
     export_kinds: FxHashMap<String, PreparedItemKind>,
+    alias_targets: FxHashMap<String, TypeRef>,
     wildcard_importable_export_names: Vec<String>,
 }
 
@@ -725,11 +752,19 @@ fn imported_visible_name_collision_warning(
 
 impl CachedImportedLibrary {
     fn imported_type(&self, visible_name: &str, exported_name: &str) -> Option<ImportedType> {
-        let is_reference = match self.export_kinds.get(exported_name)? {
-            PreparedItemKind::Enum => false,
-            PreparedItemKind::Union | PreparedItemKind::Record | PreparedItemKind::Component => {
-                true
+        let kind = match self.export_kinds.get(exported_name)? {
+            PreparedItemKind::TypeAlias => {
+                let target = self.resolve_alias_target(exported_name, &mut BTreeSet::new())?;
+                let target_is_reference = self.type_ref_is_reference(&target, &mut BTreeSet::new());
+                ImportedTypeKind::Alias {
+                    target,
+                    target_is_reference,
+                }
             }
+            PreparedItemKind::Enum => ImportedTypeKind::Enum,
+            PreparedItemKind::Union => ImportedTypeKind::Union,
+            PreparedItemKind::Record => ImportedTypeKind::Record,
+            PreparedItemKind::Component => ImportedTypeKind::Component,
             _ => return None,
         };
 
@@ -737,8 +772,69 @@ impl CachedImportedLibrary {
             visible_name: visible_name.to_string(),
             exported_name: exported_name.to_string(),
             library_name: self.library_name.clone(),
-            is_reference,
+            kind,
         })
+    }
+
+    fn resolve_alias_target(
+        &self,
+        exported_name: &str,
+        seen_aliases: &mut BTreeSet<String>,
+    ) -> Option<TypeRef> {
+        let target = self.alias_targets.get(exported_name)?.clone();
+        let TypeRef::Name(target_name) = &target else {
+            return Some(target);
+        };
+        if !matches!(
+            self.export_kinds.get(target_name.as_str()),
+            Some(PreparedItemKind::TypeAlias)
+        ) {
+            return Some(target);
+        }
+
+        if !seen_aliases.insert(exported_name.to_string()) {
+            return None;
+        }
+
+        let resolved = self.resolve_alias_target(target_name.as_str(), seen_aliases);
+        seen_aliases.remove(exported_name);
+        resolved
+    }
+
+    fn type_ref_is_reference(&self, ty: &TypeRef, seen_aliases: &mut BTreeSet<String>) -> bool {
+        match ty {
+            TypeRef::Nullable(inner) => self.type_ref_is_reference(inner, seen_aliases),
+            TypeRef::Array(_) | TypeRef::Function { .. } => true,
+            TypeRef::Name(name) => self.type_name_is_reference(name.as_str(), seen_aliases),
+        }
+    }
+
+    fn type_name_is_reference(&self, name: &str, seen_aliases: &mut BTreeSet<String>) -> bool {
+        match name {
+            "string" | "object" | "unknown" | "error" => true,
+            "i32" | "i64" | "int" | "f32" | "f64" | "float" | "bool" | "void" => false,
+            other => match self.export_kinds.get(other) {
+                Some(PreparedItemKind::Enum) => false,
+                Some(
+                    PreparedItemKind::Union
+                    | PreparedItemKind::Record
+                    | PreparedItemKind::Component,
+                ) => true,
+                Some(PreparedItemKind::TypeAlias) => {
+                    if !seen_aliases.insert(other.to_string()) {
+                        return true;
+                    }
+
+                    let is_reference = self
+                        .resolve_alias_target(other, &mut BTreeSet::new())
+                        .map(|target| self.type_ref_is_reference(&target, seen_aliases))
+                        .unwrap_or(true);
+                    seen_aliases.remove(other);
+                    is_reference
+                }
+                _ => true,
+            },
+        }
     }
 
     fn unsupported_import_warning(
@@ -784,6 +880,7 @@ fn build_cached_imported_library(dependency_root: &Path) -> Result<CachedImporte
         })?
         .to_string();
     let mut export_kinds = FxHashMap::default();
+    let mut alias_targets = FxHashMap::default();
     let mut wildcard_importable_export_names = Vec::new();
 
     for (exported_name, item_indices) in &dependency.exported_items {
@@ -800,12 +897,16 @@ fn build_cached_imported_library(dependency_root: &Path) -> Result<CachedImporte
         // avoid noise from unrelated value/function exports.
         if matches!(
             kind,
-            PreparedItemKind::Enum
+            PreparedItemKind::TypeAlias
+                | PreparedItemKind::Enum
                 | PreparedItemKind::Union
                 | PreparedItemKind::Record
                 | PreparedItemKind::Component
         ) {
             wildcard_importable_export_names.push(exported_name.clone());
+        }
+        if let InterfaceItemKind::TypeAlias { ty, .. } = &interface_item.item {
+            alias_targets.insert(exported_name.clone(), ty.clone());
         }
         export_kinds.insert(exported_name.clone(), kind);
     }
@@ -815,6 +916,7 @@ fn build_cached_imported_library(dependency_root: &Path) -> Result<CachedImporte
     Ok(CachedImportedLibrary {
         library_name,
         export_kinds,
+        alias_targets,
         wildcard_importable_export_names,
     })
 }

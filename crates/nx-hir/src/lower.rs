@@ -3,7 +3,9 @@
 //! This module converts the tree-sitter Concrete Syntax Tree (CST) into
 //! our typed High-level Intermediate Representation (HIR).
 
-use crate::ast::{BinOp, Expr, Literal, MatchArm, OrderedFloat, Stmt, TypeRef, UnOp};
+use crate::ast::{
+    BinOp, Expr, Literal, MatchArm, OrderedFloat, RecordLiteralProperty, Stmt, TypeRef, UnOp,
+};
 use crate::{
     Component, ComponentEmit, ComponentEmitKind, Element, EnumDef, EnumMember, ExprId, Function,
     Import, ImportKind, Item, LoweredModule, LoweringDiagnostic, Name, Param, Property,
@@ -1080,7 +1082,11 @@ impl LoweringContext {
                         let props = element
                             .properties
                             .iter()
-                            .map(|p| (p.key.clone(), p.value))
+                            .map(|p| RecordLiteralProperty {
+                                name: p.key.clone(),
+                                value: p.value,
+                                span: p.span,
+                            })
                             .collect();
                         return self.alloc_expr(Expr::RecordLiteral {
                             record: record_def.name.clone(),
@@ -3377,7 +3383,7 @@ enum Mode = light | dark"#;
             } => {
                 assert_eq!(record.as_str(), "User");
                 assert_eq!(properties.len(), 1);
-                assert_eq!(properties[0].0.as_str(), "name");
+                assert_eq!(properties[0].name.as_str(), "name");
             }
             other => panic!("expected record literal expr, got {:?}", other),
         }

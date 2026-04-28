@@ -85,6 +85,13 @@ pub enum RuntimeErrorKind {
         operation: String,
     },
 
+    /// Unknown field supplied while constructing a record value
+    UnknownRecordField {
+        record: SmolStr,
+        field: SmolStr,
+        operation: String,
+    },
+
     /// Attempted to instantiate an abstract record
     AbstractRecordInstantiation { record: SmolStr, operation: String },
 
@@ -176,6 +183,15 @@ impl fmt::Display for RuntimeErrorKind {
             } => write!(
                 f,
                 "Missing required field '{}' on record '{}' in {}",
+                field, record, operation
+            ),
+            RuntimeErrorKind::UnknownRecordField {
+                record,
+                field,
+                operation,
+            } => write!(
+                f,
+                "Unknown field '{}' on record '{}' in {}",
                 field, record, operation
             ),
             RuntimeErrorKind::AbstractRecordInstantiation { record, operation } => write!(

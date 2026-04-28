@@ -985,6 +985,19 @@ impl Interpreter {
         })
     }
 
+    fn unknown_record_field_error(
+        &self,
+        record_name: &Name,
+        field_name: &str,
+        operation: &str,
+    ) -> RuntimeError {
+        RuntimeError::new(RuntimeErrorKind::UnknownRecordField {
+            record: SmolStr::new(record_name.as_str()),
+            field: SmolStr::new(field_name),
+            operation: operation.to_string(),
+        })
+    }
+
     fn materialize_component_fields(
         &self,
         module: &LoweredModule,
@@ -3138,12 +3151,12 @@ impl Interpreter {
         module: &LoweredModule,
         ctx: &mut ExecutionContext,
         record: &Name,
-        properties: &[(Name, ExprId)],
+        properties: &[ast::RecordLiteralProperty],
     ) -> Result<Value, RuntimeError> {
         let mut overrides = FxHashMap::default();
-        for (name, expr_id) in properties {
-            let value = self.eval_expr(module, ctx, *expr_id)?;
-            overrides.insert(SmolStr::new(name.as_str()), value);
+        for property in properties {
+            let value = self.eval_expr(module, ctx, property.value)?;
+            overrides.insert(SmolStr::new(property.name.as_str()), value);
         }
 
         self.build_record_value(module, ctx, record.as_str(), overrides)
@@ -3320,6 +3333,20 @@ impl Interpreter {
                 &record_def.name,
                 missing_operation.unwrap_or("record construction"),
             ));
+        }
+
+        for field_name in overrides.keys() {
+            if !record_shape
+                .fields
+                .iter()
+                .any(|field| field.name.as_str() == field_name.as_str())
+            {
+                return Err(self.unknown_record_field_error(
+                    &record_def.name,
+                    field_name.as_str(),
+                    missing_operation.unwrap_or("record construction"),
+                ));
+            }
         }
 
         let mut materialized = FxHashMap::default();
@@ -3747,8 +3774,16 @@ mod tests {
         let body = lowered_module.alloc_expr(ast::Expr::RecordLiteral {
             record: Name::new("DoSearch"),
             properties: vec![
-                (Name::new("userId"), user_id_expr),
-                (Name::new("search"), search_expr),
+                ast::RecordLiteralProperty {
+                    name: Name::new("userId"),
+                    value: user_id_expr,
+                    span: span(0, 0),
+                },
+                ast::RecordLiteralProperty {
+                    name: Name::new("search"),
+                    value: search_expr,
+                    span: span(0, 0),
+                },
             ],
             span: span(0, 0),
         });

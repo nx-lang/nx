@@ -482,8 +482,8 @@ impl<'a> UndefinedIdentifierChecker<'a> {
                 }
             }
             ast::Expr::RecordLiteral { properties, .. } => {
-                for (_, expr) in properties {
-                    self.check_expr(*expr, scope);
+                for property in properties {
+                    self.check_expr(property.value, scope);
                 }
             }
             ast::Expr::Element { element, .. } => {

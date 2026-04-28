@@ -41,14 +41,20 @@ pub fn type_satisfies_expected(actual: &Type, expected: &Type) -> bool {
 }
 
 pub fn type_satisfies_expected_with_coercion(actual: &Type, expected: &Type) -> bool {
-    match (actual, expected) {
+    if type_satisfies_expected(actual, expected) {
+        return true;
+    }
+
+    let coercion_target = expected.strip_nullable();
+
+    match (actual, coercion_target) {
         (Type::Array(actual_inner), Type::Array(expected_inner)) => {
             type_satisfies_expected(actual_inner, expected_inner)
         }
-        (Type::Array(_), _) if is_object_type(expected) => true,
+        (Type::Array(_), _) if is_object_type(coercion_target) => true,
         (Type::Array(_), _) => false,
         (_, Type::Array(expected_inner)) => type_satisfies_expected(actual, expected_inner),
-        _ => type_satisfies_expected(actual, expected),
+        _ => false,
     }
 }
 
@@ -135,6 +141,38 @@ mod tests {
         assert!(type_satisfies_expected_with_coercion(
             &Type::int(),
             &Type::array(Type::int())
+        ));
+    }
+
+    #[test]
+    fn test_type_satisfies_expected_with_coercion_allows_array_to_nullable_array() {
+        assert!(type_satisfies_expected_with_coercion(
+            &Type::array(Type::int()),
+            &Type::nullable(Type::array(Type::int()))
+        ));
+    }
+
+    #[test]
+    fn test_type_satisfies_expected_with_coercion_allows_scalar_to_nullable_array() {
+        assert!(type_satisfies_expected_with_coercion(
+            &Type::int(),
+            &Type::nullable(Type::array(Type::int()))
+        ));
+    }
+
+    #[test]
+    fn test_type_satisfies_expected_with_coercion_rejects_nullable_array_to_array() {
+        assert!(!type_satisfies_expected_with_coercion(
+            &Type::nullable(Type::array(Type::int())),
+            &Type::array(Type::int())
+        ));
+    }
+
+    #[test]
+    fn test_type_satisfies_expected_with_coercion_rejects_nullable_items_for_nullable_array() {
+        assert!(!type_satisfies_expected_with_coercion(
+            &Type::array(Type::nullable(Type::int())),
+            &Type::nullable(Type::array(Type::int()))
         ));
     }
 

@@ -22,12 +22,15 @@ let evens = for n in numbers { if (n % 2 == 0) { n } }
 - Nested sequences are straightforward: `int[][]` represents a matrix, and `(string, User[])[]` models grouped buckets.
 - Nullable lists and lists of nullable elements remain distinct: `string[]?` is a nullable list of
   strings, while `string?[]` is a list whose items may be null.
+- Non-null list values can bind to nullable list targets, so a braced list such as
+  `{ <Link /> <Link /> }` can populate a `Link[]?` field or annotated `let`.
 - Nullability does not stack on the same layer: `string?[]?` is valid, but `string?[]??` is
   rejected because the outer list is already nullable.
 
 ```nx
 let matrix: int[][] = [[1, 2], [3, 4], [5, 6]]
 let maybeNames: string[]? = getCachedNames()
+let inlineLinks: ChatBrandLink[]? = { <ChatBrandLink /> <ChatBrandLink /> }
 let aliases: string?[] = ["ali", null, "alice"]
 let grouped: (string, User[])[] = [
   ("admins", [admin1, admin2]),

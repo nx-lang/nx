@@ -667,6 +667,50 @@ fn test_record_literal_defaults_and_overrides() {
 }
 
 #[test]
+fn test_record_construction_rejects_unknown_fields_runtime() {
+    let source = r##"
+        type ChatLinkConfig = { standaloneAppearance: string }
+        let root(): ChatLinkConfig = {
+          <ChatLinkConfig standaloneAppearance={"split"} accentColor={"#3b82f6"} />
+        }
+    "##;
+
+    let result = execute_function(source, "root", vec![]);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("Unknown field 'accentColor' on record 'ChatLinkConfig'"),
+        "Error should mention the unknown record field:\n{}",
+        err
+    );
+}
+
+#[test]
+fn test_strict_record_construction_still_applies_defaults_runtime() {
+    let source = r#"
+        type User = { name: string role: string = "member" }
+        let root(): User = { <User name={"Ava"} /> }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("record defaults failed: {}", err));
+    match result {
+        Value::Record { type_name, fields } => {
+            assert_eq!(type_name.as_str(), "User");
+            assert_eq!(
+                fields.get("name"),
+                Some(&Value::String(SmolStr::new("Ava")))
+            );
+            assert_eq!(
+                fields.get("role"),
+                Some(&Value::String(SmolStr::new("member")))
+            );
+        }
+        other => panic!("expected Record, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_action_record_literal_uses_defaults() {
     let source = r#"
         action SaveRequested = { value: string = "Anon" source: string? }
@@ -1207,6 +1251,48 @@ fn test_multi_value_brace_return_is_rejected_for_scalar_annotation_runtime() {
         "Error should mention the return value mismatch:\n{}",
         err
     );
+}
+
+#[test]
+fn test_nullable_list_let_binding_preserves_supplied_list_runtime() {
+    let source = r#"
+        type ChatBrandLink = { label: string = "docs" }
+        let links: ChatBrandLink[]? = { <ChatBrandLink label={"docs"} /> <ChatBrandLink label={"api"} /> }
+        let root(): object[] = { links }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("Nullable-list let binding failed:\n{}", err));
+
+    let Value::Array(items) = result else {
+        panic!("Expected supplied links to remain a list");
+    };
+    assert_eq!(items.len(), 2);
+    assert!(items.iter().all(|item| matches!(
+        item,
+        Value::Record { type_name, .. } if type_name.as_str() == "ChatBrandLink"
+    )));
+}
+
+#[test]
+fn test_nullable_list_record_field_preserves_supplied_list_runtime() {
+    let source = r#"
+        type ChatBrandLink = { label: string = "docs" }
+        type Brand = { links: ChatBrandLink[]? }
+        let root(): object[] = { <Brand links={ <ChatBrandLink label={"docs"} /> <ChatBrandLink label={"api"} /> } />.links }
+    "#;
+
+    let result = execute_function(source, "root", vec![])
+        .unwrap_or_else(|err| panic!("Nullable-list record field failed:\n{}", err));
+
+    let Value::Array(items) = result else {
+        panic!("Expected supplied links to remain a list");
+    };
+    assert_eq!(items.len(), 2);
+    assert!(items.iter().all(|item| matches!(
+        item,
+        Value::Record { type_name, .. } if type_name.as_str() == "ChatBrandLink"
+    )));
 }
 
 #[test]

@@ -764,6 +764,191 @@ fn test_record_inheritance_accepts_concrete_leaf_for_abstract_return_type() {
 }
 
 #[test]
+fn test_record_literal_rejects_unknown_record_field() {
+    let source = r##"
+        type ChatLinkConfig = { standaloneAppearance:string }
+        let config: ChatLinkConfig = {
+          <ChatLinkConfig accentColor={"#3b82f6"} standaloneAppearance={"split"} />
+        }
+    "##;
+
+    let result = check_str(source, "record-unknown-field.nx");
+    assert!(
+        result
+            .errors()
+            .iter()
+            .any(|diag| diag.code() == Some("unknown-record-field")),
+        "Expected unknown-record-field diagnostic, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_record_literal_unknown_record_fields_use_value_spans() {
+    let source = r##"
+        type ChatLinkConfig = { standaloneAppearance:string }
+        let config: ChatLinkConfig = {
+          <ChatLinkConfig accentColor={"#3b82f6"} label={"Preview"} standaloneAppearance={"split"} />
+        }
+    "##;
+
+    let result = check_str(source, "record-unknown-field-spans.nx");
+    let unknown_field_spans = result
+        .errors()
+        .iter()
+        .filter(|diag| diag.code() == Some("unknown-record-field"))
+        .map(|diag| {
+            diag.labels()
+                .first()
+                .expect("unknown-record-field diagnostic should have a primary label")
+                .range
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        unknown_field_spans.len(),
+        2,
+        "Expected two unknown-record-field diagnostics, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+    assert_ne!(
+        unknown_field_spans[0], unknown_field_spans[1],
+        "Unknown record field diagnostics should point at each supplied value span"
+    );
+}
+
+#[test]
+fn test_record_literal_field_type_mismatches_use_value_spans() {
+    let source = r##"
+        type ChatLinkConfig = { count:int enabled:bool }
+        let config: ChatLinkConfig = {
+          <ChatLinkConfig count={"many"} enabled={"yes"} />
+        }
+    "##;
+
+    let result = check_str(source, "record-field-mismatch-spans.nx");
+    let mismatch_spans = result
+        .errors()
+        .iter()
+        .filter(|diag| diag.code() == Some("record-field-type-mismatch"))
+        .map(|diag| {
+            diag.labels()
+                .first()
+                .expect("record-field-type-mismatch diagnostic should have a primary label")
+                .range
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        mismatch_spans.len(),
+        2,
+        "Expected two record-field-type-mismatch diagnostics, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+    assert_ne!(
+        mismatch_spans[0], mismatch_spans[1],
+        "Record field type mismatch diagnostics should point at each supplied value span"
+    );
+}
+
+#[test]
+fn test_element_style_record_rejects_unknown_record_field() {
+    let source = r##"
+        type ChatLinkConfig = { content standaloneAppearance:string }
+        let config: ChatLinkConfig = {
+          <ChatLinkConfig accentColor={"#3b82f6"}>split</ChatLinkConfig>
+        }
+    "##;
+
+    let result = check_str(source, "element-record-unknown-field.nx");
+    assert!(
+        result
+            .errors()
+            .iter()
+            .any(|diag| diag.code() == Some("unknown-record-field")),
+        "Expected unknown-record-field diagnostic, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_action_record_rejects_unknown_record_field() {
+    let source = r#"
+        action SearchSubmitted = { query:string }
+        let action: SearchSubmitted = {
+          <SearchSubmitted query={"docs"} source={"toolbar"} />
+        }
+    "#;
+
+    let result = check_str(source, "action-record-unknown-field.nx");
+    assert!(
+        result
+            .errors()
+            .iter()
+            .any(|diag| diag.code() == Some("unknown-record-field")),
+        "Expected unknown-record-field diagnostic, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_derived_record_accepts_inherited_fields_and_rejects_unknown_record_field() {
+    let source = r##"
+        abstract type AppearanceBase = { variant:string }
+        type SplitAppearance extends AppearanceBase = { links:string[]? }
+        let appearance: SplitAppearance = {
+          <SplitAppearance variant={"split"} links={ "docs" } accentColor={"#3b82f6"} />
+        }
+    "##;
+
+    let result = check_str(source, "derived-record-unknown-field.nx");
+    let errors = result.errors();
+    assert!(
+        errors
+            .iter()
+            .any(|diag| diag.code() == Some("unknown-record-field")),
+        "Expected unknown-record-field diagnostic, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        !errors
+            .iter()
+            .any(|diag| diag.code() == Some("unknown-record-field")
+                && diag.message().contains("variant")),
+        "Inherited field 'variant' should be accepted, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn test_record_inheritance_uses_shared_abstract_supertype_for_branches() {
     let source = r#"
         abstract type Entity = {
@@ -1597,6 +1782,114 @@ fn test_array_type_compatibility() {
 
     assert!(arr_int.is_compatible_with(&arr_int2));
     assert!(!arr_int.is_compatible_with(&arr_str));
+}
+
+#[test]
+fn test_annotated_nullable_list_let_accepts_braced_list_literal() {
+    let source = r#"
+        type ChatBrandLink = { label:string = "docs" }
+        let links: ChatBrandLink[]? = { <ChatBrandLink /> <ChatBrandLink /> }
+    "#;
+
+    let result = check_str(source, "nullable-list-let.nx");
+    assert!(
+        result.errors().is_empty(),
+        "Expected nullable-list let binding to type check, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_record_nullable_list_field_accepts_braced_list_literal() {
+    let source = r#"
+        type ChatBrandLink = { label:string = "docs" }
+        type Brand = { links: ChatBrandLink[]? }
+        let brand: Brand = { <Brand links={ <ChatBrandLink /> <ChatBrandLink /> } /> }
+    "#;
+
+    let result = check_str(source, "nullable-list-record-field.nx");
+    assert!(
+        result.errors().is_empty(),
+        "Expected nullable-list record field binding to type check, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_component_nullable_list_prop_accepts_braced_list_literal() {
+    let source = r#"
+        type ChatBrandLink = { label:string = "docs" }
+        component <Brand links: ChatBrandLink[]? /> = { <div /> }
+        let brand: Brand = { <Brand links={ <ChatBrandLink /> <ChatBrandLink /> } /> }
+    "#;
+
+    let result = check_str(source, "nullable-list-component-prop.nx");
+    assert!(
+        result.errors().is_empty(),
+        "Expected nullable-list component prop binding to type check, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_nullable_list_binding_rejects_incompatible_element_types_with_full_shape() {
+    let source = r#"
+        type ChatBrandLink = { label:string = "docs" }
+        type OtherLink = { href:string = "/docs" }
+        let links: ChatBrandLink[]? = { <OtherLink /> <OtherLink /> }
+    "#;
+
+    let result = check_str(source, "nullable-list-value-mismatch.nx");
+    let errors = result.errors();
+    assert!(
+        errors
+            .iter()
+            .any(|diag| diag.code() == Some("value-type-mismatch")
+                && diag.message().contains("ChatBrandLink[]?")
+                && diag.message().contains("OtherLink[]")),
+        "Expected value-type-mismatch with full nullable-list shapes, got {:?}",
+        errors
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_nullable_list_property_rejects_incompatible_element_types_with_full_shape() {
+    let source = r#"
+        type ChatBrandLink = { label:string = "docs" }
+        type OtherLink = { href:string = "/docs" }
+        component <Brand links: ChatBrandLink[]? /> = { <div /> }
+        let brand: Brand = { <Brand links={ <OtherLink /> <OtherLink /> } /> }
+    "#;
+
+    let result = check_str(source, "nullable-list-property-mismatch.nx");
+    let errors = result.errors();
+    assert!(
+        errors
+            .iter()
+            .any(|diag| diag.code() == Some("property-type-mismatch")
+                && diag.message().contains("ChatBrandLink[]?")
+                && diag.message().contains("OtherLink[]")),
+        "Expected property-type-mismatch with full nullable-list shapes, got {:?}",
+        errors
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]

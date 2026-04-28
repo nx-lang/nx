@@ -79,6 +79,10 @@ enum Commands {
         /// C# namespace for generated types (only used for --language csharp)
         #[arg(long, default_value = "Nx.Generated")]
         csharp_namespace: String,
+
+        /// Package prefix for TypeScript dependency-library imports (only used for --language typescript)
+        #[arg(long = "typescript-package-prefix")]
+        typescript_package_prefix: Option<String>,
     },
 }
 
@@ -118,12 +122,14 @@ fn main() -> ExitCode {
             output,
             editorconfig,
             csharp_namespace,
+            typescript_package_prefix,
         } => generate_types(
             &file,
             language,
             output.as_ref(),
             editorconfig.as_ref(),
             &csharp_namespace,
+            typescript_package_prefix.as_deref(),
         ),
     }
 }
@@ -213,6 +219,7 @@ fn generate_types(
     output: Option<&PathBuf>,
     editorconfig: Option<&PathBuf>,
     csharp_namespace: &str,
+    typescript_package_prefix: Option<&str>,
 ) -> ExitCode {
     let input_kind = match classify_generate_input(path) {
         Ok(kind) => kind,
@@ -229,6 +236,10 @@ fn generate_types(
     let csharp_namespace = match language {
         GenLanguage::Typescript => None,
         GenLanguage::Csharp => Some(csharp_namespace.to_string()),
+    };
+    let typescript_package_prefix = match language {
+        GenLanguage::Typescript => typescript_package_prefix.map(str::to_string),
+        GenLanguage::Csharp => None,
     };
 
     let format_target_name = match input_kind {
@@ -249,6 +260,7 @@ fn generate_types(
     let opts = codegen::GenerateTypesOptions {
         language: target_language,
         csharp_namespace,
+        typescript_package_prefix,
         format,
     };
 
@@ -1303,6 +1315,55 @@ let root() = { Ui.title() }"#,
         assert!(theme.contains("export type ThemeMode = \"light\" | \"dark\";"));
         assert!(index.contains("export * from \"./forms\";"));
         assert!(index.contains("export * from \"./theme\";"));
+    }
+
+    #[test]
+    fn test_cli_generate_library_writes_typescript_dependency_package_import() {
+        let dir = TempDir::new().unwrap();
+        let question_flow_path = dir.path().join("question-flow");
+        let chat_link_path = dir.path().join("chat-link");
+        fs::create_dir_all(&question_flow_path).unwrap();
+        fs::create_dir_all(&chat_link_path).unwrap();
+        fs::write(
+            question_flow_path.join("QuestionFlow.nx"),
+            "export type QuestionFlow = { id:string }",
+        )
+        .unwrap();
+        fs::write(
+            chat_link_path.join("QuestionFlowInitialExperience.nx"),
+            r#"import "../question-flow"
+
+export type QuestionFlowInitialExperience = {
+  questionFlow: QuestionFlow
+}
+"#,
+        )
+        .unwrap();
+        let output_path = dir.path().join("generated-ts");
+
+        let output = run_cli(&[
+            "generate",
+            chat_link_path.to_str().unwrap(),
+            "--language",
+            "typescript",
+            "--typescript-package-prefix",
+            "@org/nx-",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        assert!(
+            output.status.success(),
+            "CLI should write TypeScript library output with dependency imports"
+        );
+        let generated =
+            fs::read_to_string(output_path.join("QuestionFlowInitialExperience.ts")).unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        assert!(generated.contains("import type { QuestionFlow } from \"@org/nx-question-flow\";"));
+        assert!(generated.contains("questionFlow: QuestionFlow;"));
+        assert!(stderr.contains("Warning:"));
+        assert!(stderr.contains("@org/nx-question-flow"));
     }
 
     #[test]

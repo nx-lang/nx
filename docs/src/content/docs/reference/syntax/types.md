@@ -36,6 +36,8 @@ type User extends UserBase = {
 - Prefix one field with `content` when element body content should bind to that field during markup-style construction.
 - `abstract type` records can appear in annotations but cannot be instantiated directly.
 - `extends Base` is valid only when `Base` resolves to an abstract record declaration.
+- Record construction is closed: supplied fields must be declared on the effective record shape,
+  including inherited fields. Unknown fields are rejected instead of being ignored.
 
 ## Enum Types
 Enums declare a fixed set of named values.
@@ -130,6 +132,17 @@ let user =
 
 let entityName(user: UserBase) = user.name
 let result = entityName(user)
+```
+
+If a record has a stale field name, type checking reports it before defaults are applied.
+
+```nx
+type ChatLinkConfig = { standaloneAppearance:string }
+
+let config = <ChatLinkConfig
+  accentColor={"#3b82f6"}        // rejected: not declared on ChatLinkConfig
+  standaloneAppearance={"split"}
+/>
 ```
 
 ## Function Types

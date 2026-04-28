@@ -1,7 +1,7 @@
 use crate::codegen::model::{
-    ExportedAlias, ExportedEnum, ExportedExternalState, ExportedModule,
-    ExportedPolymorphicDescendant, ExportedRecord, ExportedRecordField, ExportedType,
-    ExportedTypeGraph, ExportedUnion, ExportedUnionCase, ImportedType,
+    ExportedEnum, ExportedExternalState, ExportedModule, ExportedPolymorphicDescendant,
+    ExportedRecord, ExportedRecordField, ExportedType, ExportedTypeGraph, ExportedUnion,
+    ExportedUnionCase, ImportedType, ImportedTypeKind,
 };
 use crate::codegen::writer::CodeWriter;
 use crate::codegen::{GenerateTypesOptions, GeneratedFile};
@@ -45,6 +45,10 @@ pub(crate) fn collect_warnings(graph: &ExportedTypeGraph, namespace: &str) -> Ve
 
     for module in &graph.modules {
         for imported_type in &module.imported_types {
+            if !imported_type_uses_dependency_namespace(imported_type) {
+                continue;
+            }
+
             let assumed_namespace =
                 assumed_dependency_namespace_for_library(namespace, &imported_type.library_name);
             if warned_dependency_namespaces.insert((
@@ -94,14 +98,16 @@ fn render_module(
         return writer.finish();
     }
 
-    let aliases = module
+    let body_items = module
         .declarations
         .iter()
-        .filter_map(|declaration| match &declaration.item {
-            ExportedType::Alias(alias) => Some(alias),
-            _ => None,
-        })
+        .filter(|declaration| !matches!(declaration.item, ExportedType::Alias(_)))
         .collect::<Vec<_>>();
+
+    if body_items.is_empty() {
+        return writer.finish();
+    }
+
     let imported_type_lookup = module
         .imported_types
         .iter()
@@ -110,12 +116,6 @@ fn render_module(
         .collect::<FxHashMap<_, _>>();
     let dependency_usings = collect_dependency_namespaces(&module.imported_types, namespace);
 
-    let global_context = CSharpRenderContext {
-        namespace,
-        graph,
-        imported_types_by_visible_name: &imported_type_lookup,
-        qualify_generated_types: true,
-    };
     let namespace_context = CSharpRenderContext {
         namespace,
         graph,
@@ -123,18 +123,6 @@ fn render_module(
         qualify_generated_types: false,
     };
 
-    for alias in &aliases {
-        emit_alias(&mut writer, alias, &global_context);
-    }
-
-    if !aliases.is_empty() {
-        writer.blank_line();
-    }
-
-    let needs_json_serialization = module
-        .declarations
-        .iter()
-        .any(|declaration| !matches!(declaration.item, ExportedType::Alias(_)));
     let needs_enum_serialization_helpers = module
         .declarations
         .iter()
@@ -150,9 +138,7 @@ fn render_module(
     });
 
     writer.line("using System;");
-    if needs_json_serialization {
-        writer.line("using System.Text.Json.Serialization;");
-    }
+    writer.line("using System.Text.Json.Serialization;");
     writer.line("using MessagePack;");
     if needs_enum_serialization_helpers || needs_polymorphic_serialization_helpers {
         writer.line("using NxLang.Nx.Serialization;");
@@ -167,25 +153,17 @@ fn render_module(
 
     writer.blank_line();
 
-    let body_items = module
-        .declarations
-        .iter()
-        .filter(|declaration| !matches!(declaration.item, ExportedType::Alias(_)))
-        .collect::<Vec<_>>();
-
-    if !body_items.is_empty() {
-        writer.block(
-            &format!("namespace {}", sanitize_csharp_qualified_name(namespace)),
-            |writer| {
-                for (index, declaration) in body_items.iter().enumerate() {
-                    emit_declaration(writer, &declaration.item, &namespace_context);
-                    if index + 1 != body_items.len() {
-                        writer.blank_line();
-                    }
+    writer.block(
+        &format!("namespace {}", sanitize_csharp_qualified_name(namespace)),
+        |writer| {
+            for (index, declaration) in body_items.iter().enumerate() {
+                emit_declaration(writer, &declaration.item, &namespace_context);
+                if index + 1 != body_items.len() {
+                    writer.blank_line();
                 }
-            },
-        );
-    }
+            }
+        },
+    );
 
     writer.finish()
 }
@@ -196,15 +174,6 @@ fn write_header(writer: &mut CodeWriter) {
     writer.line("#nullable enable");
     writer.line("#pragma warning disable MsgPack005");
     writer.blank_line();
-}
-
-fn emit_alias(writer: &mut CodeWriter, alias: &ExportedAlias, context: &CSharpRenderContext<'_>) {
-    let alias_name = sanitize_csharp_identifier(&alias.name);
-    let target_type = csharp_type(&alias.target, context);
-    writer.line(&format!(
-        "global using {alias_name} = {};",
-        target_type.text
-    ));
 }
 
 fn emit_declaration(
@@ -639,16 +608,14 @@ fn csharp_type_name_inner(
                     ExportedType::Alias(alias) => {
                         if !seen_aliases.insert(other.to_string()) {
                             return CSharpType {
-                                text: sanitize_csharp_identifier(other),
+                                text: "object".to_string(),
                                 is_reference: true,
                                 is_nullable: false,
                             };
                         }
 
-                        let mut alias_type =
-                            csharp_type_inner(&alias.target, context, seen_aliases);
+                        let alias_type = csharp_type_inner(&alias.target, context, seen_aliases);
                         seen_aliases.remove(other);
-                        alias_type.text = sanitize_csharp_identifier(other);
                         alias_type
                     }
                     ExportedType::Enum(_) => CSharpType {
@@ -689,19 +656,7 @@ fn csharp_type_name_inner(
                     },
                 }
             } else if let Some(imported_type) = context.imported_types_by_visible_name.get(other) {
-                let dependency_namespace = assumed_dependency_namespace_for_library(
-                    context.namespace,
-                    &imported_type.library_name,
-                );
-                CSharpType {
-                    text: generated_type_name(
-                        &imported_type.exported_name,
-                        &dependency_namespace,
-                        true,
-                    ),
-                    is_reference: imported_type.is_reference,
-                    is_nullable: false,
-                }
+                csharp_imported_type(imported_type, context)
             } else {
                 CSharpType {
                     text: sanitize_csharp_qualified_name(other),
@@ -710,6 +665,115 @@ fn csharp_type_name_inner(
                 }
             }
         }
+    }
+}
+
+fn csharp_imported_type(
+    imported_type: &ImportedType,
+    context: &CSharpRenderContext<'_>,
+) -> CSharpType {
+    let dependency_namespace =
+        assumed_dependency_namespace_for_library(context.namespace, &imported_type.library_name);
+
+    match &imported_type.kind {
+        ImportedTypeKind::Alias {
+            target,
+            target_is_reference,
+        } => csharp_imported_alias_target_type(target, &dependency_namespace, *target_is_reference),
+        _ => CSharpType {
+            text: generated_type_name(&imported_type.exported_name, &dependency_namespace, true),
+            is_reference: imported_type.kind.is_reference(),
+            is_nullable: false,
+        },
+    }
+}
+
+fn csharp_imported_alias_target_type(
+    ty: &TypeRef,
+    dependency_namespace: &str,
+    target_is_reference: bool,
+) -> CSharpType {
+    match ty {
+        TypeRef::Nullable(inner) => {
+            let mut inner =
+                csharp_imported_alias_target_type(inner, dependency_namespace, target_is_reference);
+            inner.text = format!("{}?", inner.text);
+            inner.is_nullable = true;
+            inner
+        }
+        TypeRef::Array(inner) => {
+            let inner =
+                csharp_imported_alias_target_type(inner, dependency_namespace, target_is_reference);
+            CSharpType {
+                text: format!("{}[]", inner.text),
+                is_reference: true,
+                is_nullable: false,
+            }
+        }
+        TypeRef::Function { .. } => CSharpType {
+            text: "global::System.Delegate".to_string(),
+            is_reference: true,
+            is_nullable: false,
+        },
+        TypeRef::Name(name) => csharp_imported_alias_target_name(
+            name.as_str(),
+            dependency_namespace,
+            target_is_reference,
+        ),
+    }
+}
+
+fn csharp_imported_alias_target_name(
+    name: &str,
+    dependency_namespace: &str,
+    target_is_reference: bool,
+) -> CSharpType {
+    match name {
+        "string" => CSharpType {
+            text: "string".to_string(),
+            is_reference: true,
+            is_nullable: false,
+        },
+        "i32" => CSharpType {
+            text: "int".to_string(),
+            is_reference: false,
+            is_nullable: false,
+        },
+        "i64" | "int" => CSharpType {
+            text: "long".to_string(),
+            is_reference: false,
+            is_nullable: false,
+        },
+        "f32" => CSharpType {
+            text: "float".to_string(),
+            is_reference: false,
+            is_nullable: false,
+        },
+        "f64" | "float" => CSharpType {
+            text: "double".to_string(),
+            is_reference: false,
+            is_nullable: false,
+        },
+        "bool" => CSharpType {
+            text: "bool".to_string(),
+            is_reference: false,
+            is_nullable: false,
+        },
+        "void" => CSharpType {
+            text: "void".to_string(),
+            is_reference: false,
+            is_nullable: false,
+        },
+        "object" | "unknown" | "error" => CSharpType {
+            text: "object".to_string(),
+            is_reference: true,
+            is_nullable: false,
+        },
+        other => CSharpType {
+            text: generated_type_name(other, dependency_namespace, true),
+            is_reference: target_is_reference,
+            is_nullable: false,
+        },
     }
 }
 
@@ -757,11 +821,45 @@ fn collect_dependency_namespaces(
 ) -> BTreeSet<String> {
     imported_types
         .iter()
+        .filter(|imported_type| imported_type_uses_dependency_namespace(imported_type))
         .map(|imported_type| {
             assumed_dependency_namespace_for_library(current_namespace, &imported_type.library_name)
         })
         .filter(|dependency_namespace| dependency_namespace != current_namespace)
         .collect()
+}
+
+fn imported_type_uses_dependency_namespace(imported_type: &ImportedType) -> bool {
+    match &imported_type.kind {
+        ImportedTypeKind::Alias { target, .. } => {
+            imported_alias_target_uses_dependency_namespace(target)
+        }
+        _ => true,
+    }
+}
+
+fn imported_alias_target_uses_dependency_namespace(ty: &TypeRef) -> bool {
+    match ty {
+        TypeRef::Nullable(inner) | TypeRef::Array(inner) => {
+            imported_alias_target_uses_dependency_namespace(inner)
+        }
+        TypeRef::Function { .. } => false,
+        TypeRef::Name(name) => !matches!(
+            name.as_str(),
+            "string"
+                | "i32"
+                | "i64"
+                | "int"
+                | "f32"
+                | "f64"
+                | "float"
+                | "bool"
+                | "void"
+                | "object"
+                | "unknown"
+                | "error"
+        ),
+    }
 }
 
 // Cross-library C# references currently assume sibling namespaces derived from dependency
