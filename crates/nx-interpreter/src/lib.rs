@@ -15,7 +15,9 @@ pub mod eval;
 
 pub use context::{ExecutionContext, ResourceLimits};
 pub use error::{RuntimeError, RuntimeErrorKind};
-pub use interpreter::{ComponentDispatchResult, ComponentInitResult, Interpreter};
+pub use interpreter::{
+    ComponentDispatchResult, ComponentEvaluateResult, ComponentInitResult, Interpreter,
+};
 pub use resolved_program::{
     ModuleQualifiedExprRef, ModuleQualifiedItemRef, ResolvedItemKind, ResolvedModule,
     ResolvedModuleSource, ResolvedProgram, RuntimeModuleId,

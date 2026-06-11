@@ -86,6 +86,14 @@ public sealed class SearchBoxProps
 }
 
 [MessagePackObject]
+public sealed class SearchBoxState
+{
+    [Key("query")]
+    [JsonPropertyName("query")]
+    public string Query { get; set; } = string.Empty;
+}
+
+[MessagePackObject]
 public sealed class TextInputElement
 {
     [Key("value")]
@@ -177,6 +185,14 @@ public sealed class DealStageProps
 }
 
 [MessagePackObject]
+public sealed class DealStageState
+{
+    [Key("stage")]
+    [JsonPropertyName("stage")]
+    public ComponentDealStage Stage { get; set; } = ComponentDealStage.Draft;
+}
+
+[MessagePackObject]
 public sealed class DealStageElement
 {
     [Key("stage")]
@@ -190,6 +206,14 @@ public sealed class RestrictedDealStageElement
     [Key("stage")]
     [JsonPropertyName("stage")]
     public RestrictedDealStage Stage { get; set; } = RestrictedDealStage.Draft;
+}
+
+[MessagePackObject]
+public sealed class FlowState
+{
+    [Key("label")]
+    [JsonPropertyName("label")]
+    public string Label { get; set; } = string.Empty;
 }
 
 public class NxRuntimeComponentTests
@@ -215,6 +239,123 @@ public class NxRuntimeComponentTests
         Assert.Equal("Find docs", result.Rendered.Value);
         Assert.Equal("Find docs", result.Rendered.Placeholder);
         Assert.NotEmpty(result.StateSnapshot);
+    }
+
+    [Fact]
+    public void EvaluateComponent_WithTypedPropsAndState_ReturnsRenderedElement()
+    {
+        string source = """
+            component <SearchBox placeholder:string = "Find docs" /> = {
+              state { query:string }
+              <TextInput value={query} placeholder={placeholder} />
+            }
+            """;
+
+        TextInputElement result =
+            NxRuntime.EvaluateComponent<SearchBoxProps, SearchBoxState, TextInputElement>(
+                source,
+                "SearchBox",
+                new SearchBoxProps { Placeholder = "Find docs" },
+                new SearchBoxState { Query = "docs" });
+
+        Assert.Equal("docs", result.Value);
+        Assert.Equal("Find docs", result.Placeholder);
+    }
+
+    [Fact]
+    public void EvaluateComponentJson_ReturnsRenderedValueWithoutWrapperFields()
+    {
+        string source = """
+            component <SearchBox placeholder:string = "Find docs" /> = {
+              state { query:string }
+              <TextInput value={query} placeholder={placeholder} />
+            }
+            """;
+
+        JsonElement result = NxRuntime.EvaluateComponentJson(
+            source,
+            "SearchBox",
+            new SearchBoxProps { Placeholder = "Find docs" },
+            new SearchBoxState { Query = "docs" });
+
+        Assert.Equal("TextInput", result.GetProperty("$type").GetString());
+        Assert.Equal("docs", result.GetProperty("value").GetString());
+        Assert.False(result.TryGetProperty("rendered", out _));
+        Assert.False(result.TryGetProperty("state_snapshot", out _));
+        Assert.False(result.TryGetProperty("effects", out _));
+    }
+
+    [Fact]
+    public void EvaluateComponentBytes_ReturnsSelectedFormatDirectly()
+    {
+        string source = """
+            component <SearchBox placeholder:string = "Find docs" /> = {
+              state { query:string }
+              <TextInput value={query} placeholder={placeholder} />
+            }
+            """;
+        byte[] propsBytes = MessagePackSerializer.Serialize(new SearchBoxProps { Placeholder = "Find docs" });
+        byte[] stateBytes = MessagePackSerializer.Serialize(new SearchBoxState { Query = "docs" });
+
+        byte[] msgpack = NxRuntime.EvaluateComponentBytes(source, "SearchBox", propsBytes, stateBytes);
+        TextInputElement typed = MessagePackSerializer.Deserialize<TextInputElement>(msgpack);
+        Assert.Equal("docs", typed.Value);
+
+        byte[] json = NxRuntime.EvaluateComponentBytes(
+            source,
+            "SearchBox",
+            NxOutputFormat.Json,
+            propsBytes,
+            stateBytes);
+        using JsonDocument document = JsonDocument.Parse(json);
+        Assert.Equal("TextInput", document.RootElement.GetProperty("$type").GetString());
+        Assert.False(document.RootElement.TryGetProperty("rendered", out _));
+    }
+
+    [Fact]
+    public void EvaluateComponent_WithInvalidState_ThrowsEvaluationException()
+    {
+        string source = """
+            component <SearchBox placeholder:string = "Find docs" /> = {
+              state { query:string }
+              <TextInput value={query} placeholder={placeholder} />
+            }
+            """;
+
+        NxEvaluationException error = Assert.Throws<NxEvaluationException>(
+            () => NxRuntime.EvaluateComponentJson(
+                source,
+                "SearchBox",
+                new SearchBoxProps { Placeholder = "Find docs" },
+                new Dictionary<string, object?>()));
+
+        Assert.Contains(
+            error.Diagnostics,
+            diagnostic => diagnostic.Message.Contains("Missing required component field 'query'"));
+    }
+
+    [Fact]
+    public void EvaluateComponent_WithSourceDiagnostics_ThrowsBeforeRuntimeExecution()
+    {
+        string source = """
+            let broken(): int = "oops"
+
+            component <SearchBox /> = {
+              state { query:string }
+              <TextInput value={query} />
+            }
+            """;
+
+        NxEvaluationException error = Assert.Throws<NxEvaluationException>(
+            () => NxRuntime.EvaluateComponentJson(
+                source,
+                "SearchBox",
+                new Dictionary<string, object?>(),
+                new SearchBoxState { Query = "docs" }));
+
+        Assert.Contains(
+            error.Diagnostics,
+            diagnostic => string.Equals(diagnostic.Code, "return-type-mismatch", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -739,6 +880,66 @@ public class NxRuntimeComponentTests
     }
 
     [Fact]
+    public void EvaluateComponent_WithBuildContextAndProgramArtifact_ReusesImportedComponentDefinition()
+    {
+        string tempPath = Path.Combine(Path.GetTempPath(), $"nx-evaluate-component-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempPath);
+
+        try
+        {
+            string appRoot = Path.Combine(tempPath, "app");
+            string libraryRoot = Path.Combine(tempPath, "question-flow");
+            Directory.CreateDirectory(appRoot);
+            Directory.CreateDirectory(libraryRoot);
+            File.WriteAllText(
+                Path.Combine(libraryRoot, "QuestionFlow.nx"),
+                """
+                export component <SearchBox placeholder:string = "Find docs" /> = {
+                  state { query:string }
+                  <TextInput value={query} placeholder={placeholder} />
+                }
+                """);
+
+            string source = """
+                import "../question-flow"
+                let root() = { 0 }
+                """;
+            string mainPath = Path.Combine(appRoot, "main.nx");
+            File.WriteAllText(mainPath, source);
+            using NxLibraryRegistry registry = new();
+            registry.LoadFromDirectory(libraryRoot);
+            using NxProgramBuildContext buildContext = registry.CreateBuildContext();
+
+            TextInputElement fromSource =
+                NxRuntime.EvaluateComponent<SearchBoxProps, SearchBoxState, TextInputElement>(
+                    source,
+                    "SearchBox",
+                    buildContext,
+                    new SearchBoxProps { Placeholder = "From library" },
+                    new SearchBoxState { Query = "docs" },
+                    mainPath);
+
+            Assert.Equal("docs", fromSource.Value);
+            Assert.Equal("From library", fromSource.Placeholder);
+
+            using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, buildContext, mainPath);
+            TextInputElement fromArtifact =
+                NxRuntime.EvaluateComponent<SearchBoxProps, SearchBoxState, TextInputElement>(
+                    programArtifact,
+                    "SearchBox",
+                    new SearchBoxProps { Placeholder = "Artifact" },
+                    new SearchBoxState { Query = "state" });
+
+            Assert.Equal("state", fromArtifact.Value);
+            Assert.Equal("Artifact", fromArtifact.Placeholder);
+        }
+        finally
+        {
+            Directory.Delete(tempPath, recursive: true);
+        }
+    }
+
+    [Fact]
     public void InitializeComponent_WithBareStringEnumProp_ReturnsBareStringInRenderedOutput()
     {
         string source = """
@@ -792,6 +993,57 @@ public class NxRuntimeComponentTests
                 new DealStageProps { Stage = ComponentDealStage.PendingReview });
 
         Assert.Equal(ComponentDealStage.PendingReview, result.Rendered.Stage);
+    }
+
+    [Fact]
+    public void EvaluateComponent_WithEnumTypedDto_MapsEnumStateAndOutput()
+    {
+        string source = """
+            enum DealStage = | draft | pending_review | closed_won
+
+            component <Pipeline /> = {
+              state { stage:DealStage }
+              <StageBadge stage={stage} />
+            }
+            """;
+
+        DealStageElement result =
+            NxRuntime.EvaluateComponent<Dictionary<string, object?>, DealStageState, DealStageElement>(
+                source,
+                "Pipeline",
+                new Dictionary<string, object?>(),
+                new DealStageState { Stage = ComponentDealStage.ClosedWon });
+
+        Assert.Equal(ComponentDealStage.ClosedWon, result.Stage);
+    }
+
+    [Fact]
+    public void EvaluateComponent_WithPolymorphicDto_MapsConcreteRecordOutput()
+    {
+        string source = """
+            abstract type Question = {
+              label:string
+            }
+
+            type ShortTextQuestion extends Question = {
+              placeholder:string?
+            }
+
+            component <QuestionFlow /> = {
+              state { label:string }
+              <ShortTextQuestion label={label} />
+            }
+            """;
+
+        Question result =
+            NxRuntime.EvaluateComponent<Dictionary<string, object?>, FlowState, Question>(
+                source,
+                "QuestionFlow",
+                new Dictionary<string, object?>(),
+                new FlowState { Label = "Name" });
+
+        ShortTextQuestion question = Assert.IsType<ShortTextQuestion>(result);
+        Assert.Equal("Name", question.Label);
     }
 
     [Fact]

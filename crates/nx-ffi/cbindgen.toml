@@ -42,6 +42,7 @@ include = [
     "nx_free_program_artifact",
     "nx_free_program_build_context",
     "nx_component_init_program_artifact",
+    "nx_component_evaluate_program_artifact",
     "nx_component_dispatch_actions_program_artifact",
     "nx_load_library_into_registry",
     "nx_free_buffer",

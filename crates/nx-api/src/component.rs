@@ -26,6 +26,16 @@ pub struct ComponentInitResult {
     pub state_snapshot: Vec<u8>,
 }
 
+/// The result of evaluating a component from explicit props and host-owned explicit state.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ComponentEvaluateResult {
+    /// Rendered component body converted to the public value model.
+    ///
+    /// Evaluation returns this value directly through raw FFI formats; it does not include
+    /// lifecycle state snapshots, effects, or wrapper fields.
+    pub rendered: NxValue,
+}
+
 /// The result of dispatching actions against a component state snapshot.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ComponentDispatchResult {
@@ -43,6 +53,14 @@ pub enum ComponentInitEvalResult {
     /// Initialization succeeded.
     Ok(ComponentInitResult),
     /// Initialization failed with diagnostics.
+    Err(Vec<NxDiagnostic>),
+}
+
+/// Result of evaluating a component from explicit props and explicit state.
+pub enum ComponentEvaluateEvalResult {
+    /// Evaluation succeeded.
+    Ok(ComponentEvaluateResult),
+    /// Evaluation failed with diagnostics.
     Err(Vec<NxDiagnostic>),
 }
 
@@ -110,6 +128,77 @@ fn initialize_component_program_artifact_with_source(
             state_snapshot: result.state_snapshot,
         }),
         Err(error) => ComponentInitEvalResult::Err(runtime_error_diagnostics(source, error)),
+    }
+}
+
+/// Runs shared static analysis and then evaluates a named component from source text using a
+/// caller-supplied build context.
+///
+/// The caller owns the supplied current state. Evaluation is pure: it does not create snapshots,
+/// dispatch actions, invoke handlers, or return effects.
+pub fn evaluate_component_source(
+    source: &str,
+    file_name: &str,
+    build_context: &ProgramBuildContext,
+    component_name: &str,
+    props: &NxValue,
+    state: &NxValue,
+) -> ComponentEvaluateEvalResult {
+    let program = match build_source_program_artifact(source, file_name, build_context) {
+        Ok(program) => program,
+        Err(diagnostics) => return ComponentEvaluateEvalResult::Err(diagnostics),
+    };
+
+    evaluate_component_program_artifact_with_source(&program, source, component_name, props, state)
+}
+
+/// Evaluates a named component from a resolved [`ProgramArtifact`] using explicit props and
+/// host-owned current state.
+///
+/// Successful evaluation returns the rendered component body only.
+pub fn evaluate_component_program_artifact(
+    program: &ProgramArtifact,
+    component_name: &str,
+    props: &NxValue,
+    state: &NxValue,
+) -> ComponentEvaluateEvalResult {
+    let source = program_root_source(program);
+    evaluate_component_program_artifact_with_source(program, &source, component_name, props, state)
+}
+
+fn evaluate_component_program_artifact_with_source(
+    program: &ProgramArtifact,
+    source: &str,
+    component_name: &str,
+    props: &NxValue,
+    state: &NxValue,
+) -> ComponentEvaluateEvalResult {
+    if let Some(diagnostics) = program_artifact_error_diagnostics(program, source) {
+        return ComponentEvaluateEvalResult::Err(diagnostics);
+    }
+
+    if let Err(message) = validate_host_input_value(ComponentLookup::Program(program), props) {
+        return ComponentEvaluateEvalResult::Err(invalid_input_diagnostics(message));
+    }
+    if let Err(message) = validate_host_input_value(ComponentLookup::Program(program), state) {
+        return ComponentEvaluateEvalResult::Err(invalid_input_diagnostics(message));
+    }
+
+    let props = match from_nx_value(props) {
+        Ok(props) => props,
+        Err(error) => return ComponentEvaluateEvalResult::Err(invalid_input_diagnostics(error)),
+    };
+    let state = match from_nx_value(state) {
+        Ok(state) => state,
+        Err(error) => return ComponentEvaluateEvalResult::Err(invalid_input_diagnostics(error)),
+    };
+
+    let interpreter = Interpreter::from_resolved_program(program.resolved_program.clone());
+    match interpreter.evaluate_resolved_component(component_name, props, state) {
+        Ok(result) => ComponentEvaluateEvalResult::Ok(ComponentEvaluateResult {
+            rendered: to_nx_value(&result.rendered),
+        }),
+        Err(error) => ComponentEvaluateEvalResult::Err(runtime_error_diagnostics(source, error)),
     }
 }
 
@@ -356,6 +445,237 @@ mod tests {
             Some(&NxValue::String("Find docs".to_string()))
         );
         assert!(!result.state_snapshot.is_empty());
+    }
+
+    #[test]
+    fn evaluate_component_program_artifact_returns_rendered_output() {
+        let source = r#"
+            component <SearchBox placeholder:string = "Find docs" /> = {
+              state { query:string }
+              <TextInput value={query} placeholder={placeholder} />
+            }
+        "#;
+        let program = build_program_artifact_from_source(
+            source,
+            "component-evaluate-artifact.nx",
+            &ProgramBuildContext::empty(),
+        )
+        .expect("Expected program artifact");
+        let state = NxValue::Record {
+            type_name: None,
+            properties: BTreeMap::from([(
+                "query".to_string(),
+                NxValue::String("docs".to_string()),
+            )]),
+        };
+
+        let result =
+            evaluate_component_program_artifact(&program, "SearchBox", &empty_record(), &state);
+        let ComponentEvaluateEvalResult::Ok(result) = result else {
+            panic!("Expected artifact component evaluation to succeed");
+        };
+
+        let NxValue::Record {
+            type_name,
+            properties,
+        } = result.rendered
+        else {
+            panic!("Expected rendered element record");
+        };
+        assert_eq!(type_name.as_deref(), Some("TextInput"));
+        assert_eq!(
+            properties.get("value"),
+            Some(&NxValue::String("docs".to_string()))
+        );
+        assert_eq!(
+            properties.get("placeholder"),
+            Some(&NxValue::String("Find docs".to_string()))
+        );
+    }
+
+    #[test]
+    fn evaluate_component_source_returns_static_diagnostics_before_runtime_work() {
+        let result = evaluate_component_source(
+            static_analysis_failure_source(),
+            "component-evaluate-static-errors.nx",
+            &ProgramBuildContext::empty(),
+            "SearchBox",
+            &empty_record(),
+            &empty_record(),
+        );
+        let ComponentEvaluateEvalResult::Err(diagnostics) = result else {
+            panic!("Expected evaluation to stop on static analysis diagnostics");
+        };
+
+        assert_static_analysis_diagnostics(&diagnostics);
+        assert!(!diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code.as_deref() == Some("runtime-error")));
+    }
+
+    #[test]
+    fn evaluate_component_program_artifact_resolves_imported_library_component() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("search-box.nx"),
+            r#"
+                export component <SearchBox placeholder:string = "Find docs" /> = {
+                  state { query:string }
+                  <TextInput value={query} placeholder={placeholder} />
+                }
+            "#,
+        )
+        .expect("ui file");
+        let main_path = app_dir.join("main.nx");
+        let source = r#"import "../ui"
+let root() = { 0 }"#;
+        fs::write(&main_path, source).expect("main file");
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("Expected registry preload");
+        let build_context = registry.build_context();
+        let program = build_program_artifact_from_source(
+            source,
+            &main_path.display().to_string(),
+            &build_context,
+        )
+        .expect("Expected program artifact");
+        let state = NxValue::Record {
+            type_name: None,
+            properties: BTreeMap::from([(
+                "query".to_string(),
+                NxValue::String("docs".to_string()),
+            )]),
+        };
+
+        let result =
+            evaluate_component_program_artifact(&program, "SearchBox", &empty_record(), &state);
+        let ComponentEvaluateEvalResult::Ok(result) = result else {
+            panic!("Expected imported component evaluation to succeed");
+        };
+
+        let NxValue::Record {
+            type_name,
+            properties,
+        } = result.rendered
+        else {
+            panic!("Expected rendered element record");
+        };
+        assert_eq!(type_name.as_deref(), Some("TextInput"));
+        assert_eq!(
+            properties.get("value"),
+            Some(&NxValue::String("docs".to_string()))
+        );
+    }
+
+    #[test]
+    fn evaluate_component_source_returns_json_compatible_enum_output() {
+        let source = r#"
+            enum ThemeMode = | light | dark
+
+            component <ThemeView /> = {
+              state { theme:ThemeMode }
+              <ThemePanel mode={theme} />
+            }
+        "#;
+        let state = NxValue::Record {
+            type_name: None,
+            properties: BTreeMap::from([(
+                "theme".to_string(),
+                NxValue::String("dark".to_string()),
+            )]),
+        };
+
+        let result = evaluate_component_source(
+            source,
+            "component-evaluate-enum.nx",
+            &ProgramBuildContext::empty(),
+            "ThemeView",
+            &empty_record(),
+            &state,
+        );
+        let ComponentEvaluateEvalResult::Ok(result) = result else {
+            panic!("Expected source component evaluation to succeed");
+        };
+        assert_eq!(
+            result.rendered,
+            NxValue::Record {
+                type_name: Some("ThemePanel".to_string()),
+                properties: BTreeMap::from([(
+                    "mode".to_string(),
+                    NxValue::String("dark".to_string()),
+                )]),
+            }
+        );
+
+        let json = result
+            .rendered
+            .to_json_string()
+            .expect("Expected rendered value to serialize as JSON");
+        assert!(json.contains(r#""$type":"ThemePanel""#));
+        assert!(json.contains(r#""mode":"dark""#));
+        assert!(
+            !json.contains(r#""rendered""#),
+            "Evaluation JSON must be the rendered value directly"
+        );
+    }
+
+    #[test]
+    fn evaluate_component_source_preserves_polymorphic_record_output() {
+        let source = r#"
+            abstract type Question = {
+              label:string
+            }
+
+            type ShortTextQuestion extends Question = {
+              placeholder:string
+            }
+
+            component <Flow /> = {
+              state { label:string }
+              <ShortTextQuestion label={label} placeholder="Enter your name" />
+            }
+        "#;
+        let state = NxValue::Record {
+            type_name: None,
+            properties: BTreeMap::from([(
+                "label".to_string(),
+                NxValue::String("Name".to_string()),
+            )]),
+        };
+
+        let result = evaluate_component_source(
+            source,
+            "component-evaluate-polymorphic.nx",
+            &ProgramBuildContext::empty(),
+            "Flow",
+            &empty_record(),
+            &state,
+        );
+        let ComponentEvaluateEvalResult::Ok(result) = result else {
+            panic!("Expected polymorphic component evaluation to succeed");
+        };
+
+        assert_eq!(
+            result.rendered,
+            NxValue::Record {
+                type_name: Some("ShortTextQuestion".to_string()),
+                properties: BTreeMap::from([
+                    ("label".to_string(), NxValue::String("Name".to_string()),),
+                    (
+                        "placeholder".to_string(),
+                        NxValue::String("Enter your name".to_string()),
+                    ),
+                ]),
+            }
+        );
     }
 
     #[test]

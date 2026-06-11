@@ -42,6 +42,13 @@ pub struct ComponentInitResult {
     pub state_snapshot: Vec<u8>,
 }
 
+/// Result of pure component evaluation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ComponentEvaluateResult {
+    /// Rendered component body value
+    pub rendered: Value,
+}
+
 /// Result of component action dispatch.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComponentDispatchResult {
@@ -176,6 +183,26 @@ impl Interpreter {
             module,
             component_name,
             props,
+            ResourceLimits::default(),
+        )
+    }
+
+    /// Evaluate a named component from explicit props and host-owned explicit current state.
+    ///
+    /// This is a pure render operation. It does not create or consume a component state snapshot,
+    /// dispatch actions, invoke action handlers, or return effects.
+    pub fn evaluate_component(
+        &self,
+        module: &LoweredModule,
+        component_name: &str,
+        props: Value,
+        state: Value,
+    ) -> Result<ComponentEvaluateResult, RuntimeError> {
+        self.evaluate_component_with_limits(
+            module,
+            component_name,
+            props,
+            state,
             ResourceLimits::default(),
         )
     }
@@ -355,6 +382,66 @@ impl Interpreter {
             module.lowered_module.as_ref(),
             target_name,
             props,
+            limits,
+        )
+    }
+
+    /// Evaluate a resolved-program component entrypoint from explicit props and state.
+    pub fn evaluate_resolved_component(
+        &self,
+        component_name: &str,
+        props: Value,
+        state: Value,
+    ) -> Result<ComponentEvaluateResult, RuntimeError> {
+        self.evaluate_resolved_component_with_limits(
+            component_name,
+            props,
+            state,
+            ResourceLimits::default(),
+        )
+    }
+
+    /// Evaluate a resolved-program component entrypoint with custom limits.
+    pub fn evaluate_resolved_component_with_limits(
+        &self,
+        component_name: &str,
+        props: Value,
+        state: Value,
+        limits: ResourceLimits,
+    ) -> Result<ComponentEvaluateResult, RuntimeError> {
+        let program = self.program.as_ref().ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorKind::ComponentNotFound {
+                name: SmolStr::new(component_name),
+            })
+        })?;
+        let entry = program.entry_component(component_name).ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorKind::ComponentNotFound {
+                name: SmolStr::new(component_name),
+            })
+        })?;
+        let module = program.module(entry.module_id).ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorKind::ComponentNotFound {
+                name: SmolStr::new(component_name),
+            })
+        })?;
+        let item = module
+            .lowered_module
+            .item_by_definition(entry.definition_id)
+            .ok_or_else(|| {
+                RuntimeError::new(RuntimeErrorKind::ComponentNotFound {
+                    name: SmolStr::new(component_name),
+                })
+            })?;
+        let target_name = match item {
+            Item::Component(component) => component.name.as_str(),
+            _ => component_name,
+        };
+
+        self.evaluate_component_with_limits(
+            module.lowered_module.as_ref(),
+            target_name,
+            props,
+            state,
             limits,
         )
     }
@@ -706,14 +793,7 @@ impl Interpreter {
     ) -> Result<ComponentInitResult, RuntimeError> {
         let component = self.find_component(module, component_name)?;
         let contract = self.effective_component_contract(module, component);
-        if contract.component.is_abstract {
-            return Err(RuntimeError::new(
-                RuntimeErrorKind::AbstractComponentInstantiation {
-                    component: SmolStr::new(component.name.as_str()),
-                    operation: "component initialization".to_string(),
-                },
-            ));
-        }
+        self.ensure_concrete_component(&contract, "component initialization")?;
         let mut ctx = ExecutionContext::with_limits(limits);
         self.bind_top_level_values(module, &mut ctx)?;
         let normalized_props =
@@ -759,6 +839,48 @@ impl Interpreter {
             rendered,
             state_snapshot,
         })
+    }
+
+    /// Evaluate a named component from explicit props and explicit current state with custom
+    /// resource limits.
+    pub fn evaluate_component_with_limits(
+        &self,
+        module: &LoweredModule,
+        component_name: &str,
+        props: Value,
+        state: Value,
+        limits: ResourceLimits,
+    ) -> Result<ComponentEvaluateResult, RuntimeError> {
+        let component = self.find_component(module, component_name)?;
+        let contract = self.effective_component_contract(module, component);
+        self.ensure_concrete_component(&contract, "component evaluation")?;
+
+        let mut ctx = ExecutionContext::with_limits(limits);
+        self.bind_top_level_values(module, &mut ctx)?;
+        let normalized_props =
+            self.normalize_component_props(module, &mut ctx, component, &contract, props)?;
+        self.normalize_explicit_component_state(module, &mut ctx, component, state)?;
+
+        if component.is_external {
+            return Ok(ComponentEvaluateResult {
+                rendered: Value::Record {
+                    type_name: component.name.clone(),
+                    fields: normalized_props,
+                },
+            });
+        }
+
+        let rendered = if let Some(body) = component.body {
+            self.eval_expr(module, &mut ctx, body)?
+        } else {
+            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: "component body".to_string(),
+                actual: "missing".to_string(),
+                operation: format!("component evaluation for '{}'", component.name),
+            }));
+        };
+
+        Ok(ComponentEvaluateResult { rendered })
     }
 
     /// Dispatch a batch of actions against an opaque component state snapshot with custom limits.
@@ -866,6 +988,23 @@ impl Interpreter {
                 ancestors: Vec::new(),
             }
         })
+    }
+
+    fn ensure_concrete_component(
+        &self,
+        contract: &nx_hir::EffectiveComponentContract,
+        operation: &str,
+    ) -> Result<(), RuntimeError> {
+        if contract.component.is_abstract {
+            return Err(RuntimeError::new(
+                RuntimeErrorKind::AbstractComponentInstantiation {
+                    component: SmolStr::new(contract.component.name.as_str()),
+                    operation: operation.to_string(),
+                },
+            ));
+        }
+
+        Ok(())
     }
 
     fn bind_top_level_values(
@@ -1157,16 +1296,7 @@ impl Interpreter {
         mut overrides: FxHashMap<SmolStr, Value>,
         visible_fields: &mut FxHashMap<SmolStr, Value>,
     ) -> Result<FxHashMap<SmolStr, Value>, RuntimeError> {
-        let module_identity = self
-            .runtime_prepared_module(module)
-            .module_identity()
-            .to_string();
-        let state_fields = component
-            .state
-            .iter()
-            .cloned()
-            .map(|field| nx_hir::EffectiveField::from_record_field(field, module_identity.clone()))
-            .collect::<Vec<_>>();
+        let state_fields = self.component_state_fields(module, component);
         self.materialize_component_fields(
             module,
             ctx,
@@ -1176,6 +1306,84 @@ impl Interpreter {
             visible_fields,
             "state initialization",
         )
+    }
+
+    fn component_state_fields(
+        &self,
+        module: &LoweredModule,
+        component: &nx_hir::Component,
+    ) -> Vec<nx_hir::EffectiveField> {
+        let module_identity = self
+            .runtime_prepared_module(module)
+            .module_identity()
+            .to_string();
+        component
+            .state
+            .iter()
+            .cloned()
+            .map(|field| nx_hir::EffectiveField::from_record_field(field, module_identity.clone()))
+            .collect()
+    }
+
+    fn normalize_explicit_component_state(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        component: &nx_hir::Component,
+        state: Value,
+    ) -> Result<(), RuntimeError> {
+        let mut overrides = self.input_fields_from_value(
+            state,
+            &format!("component state for '{}'", component.name.as_str()),
+        )?;
+        let state_fields = self.component_state_fields(module, component);
+
+        for field in &state_fields {
+            let value = if let Some(value) = overrides.remove(field.name.as_str()) {
+                value
+            } else if matches!(&field.ty, ast::TypeRef::Nullable(_)) {
+                Value::Null
+            } else {
+                return Err(self.missing_required_component_field_error(
+                    &component.name,
+                    &field.name,
+                    "state evaluation",
+                ));
+            };
+            let owner_module = self.owner_module_for_effective_field(
+                module,
+                field,
+                &format!(
+                    "component state evaluation '{}.{}' type coercion",
+                    component.name.as_str(),
+                    field.name.as_str()
+                ),
+            )?;
+            let value = self.coerce_value_to_type(
+                owner_module,
+                value,
+                &field.ty,
+                &format!(
+                    "component state evaluation '{}.{}'",
+                    component.name.as_str(),
+                    field.name.as_str()
+                ),
+            )?;
+            ctx.define_variable(SmolStr::new(field.name.as_str()), value.clone());
+        }
+
+        if let Some(name) = overrides.keys().next() {
+            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: "declared component state field".to_string(),
+                actual: format!("unknown state field '{}'", name),
+                operation: format!(
+                    "component state evaluation for '{}'",
+                    component.name.as_str()
+                ),
+            }));
+        }
+
+        Ok(())
     }
 
     fn validate_component_action<'a>(
@@ -4365,6 +4573,255 @@ mod tests {
     }
 
     #[test]
+    fn test_evaluate_component_uses_explicit_state_for_rendering() {
+        let source = r#"
+            component <SearchBox placeholder:string = "Find docs" /> = {
+              state { query:string }
+              <TextInput value={query} placeholder={placeholder} />
+            }
+        "#;
+
+        let (module, interpreter) = lower_module_runtime(source);
+        let state = Value::Record {
+            type_name: Name::new("object"),
+            fields: FxHashMap::from_iter([(
+                SmolStr::new("query"),
+                Value::String(SmolStr::new("docs")),
+            )]),
+        };
+        let evaluated = interpreter
+            .evaluate_component(
+                module.as_ref(),
+                "SearchBox",
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::default(),
+                },
+                state,
+            )
+            .expect("Expected component evaluation to succeed");
+
+        assert_eq!(
+            extract_record_field(&evaluated.rendered, "value"),
+            &Value::String(SmolStr::new("docs"))
+        );
+        assert_eq!(
+            extract_record_field(&evaluated.rendered, "placeholder"),
+            &Value::String(SmolStr::new("Find docs"))
+        );
+    }
+
+    #[test]
+    fn test_evaluate_component_accepts_empty_state_for_stateless_component() {
+        let source = r#"
+            component <Button text:string /> = {
+              <button>{text}</button>
+            }
+        "#;
+
+        let (module, interpreter) = lower_module_runtime(source);
+        let evaluated = interpreter
+            .evaluate_component(
+                module.as_ref(),
+                "Button",
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::from_iter([(
+                        SmolStr::new("text"),
+                        Value::String(SmolStr::new("Save")),
+                    )]),
+                },
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::default(),
+                },
+            )
+            .expect("Expected stateless component evaluation to succeed");
+
+        assert_eq!(
+            extract_record_field(&evaluated.rendered, "content"),
+            &Value::String(SmolStr::new("Save"))
+        );
+    }
+
+    #[test]
+    fn test_evaluate_component_validates_explicit_state_fields() {
+        let source = r#"
+            enum ThemeMode = | light | dark
+
+            component <SearchBox /> = {
+              state {
+                query:string
+                theme:ThemeMode
+                note:string?
+              }
+              <TextInput value={query} theme={theme} note={note} />
+            }
+        "#;
+
+        let (module, interpreter) = lower_module_runtime(source);
+        let props = Value::Record {
+            type_name: Name::new("object"),
+            fields: FxHashMap::default(),
+        };
+        let state = Value::Record {
+            type_name: Name::new("object"),
+            fields: FxHashMap::from_iter([
+                (SmolStr::new("query"), Value::String(SmolStr::new("docs"))),
+                (SmolStr::new("theme"), Value::String(SmolStr::new("dark"))),
+            ]),
+        };
+
+        let evaluated = interpreter
+            .evaluate_component(module.as_ref(), "SearchBox", props.clone(), state)
+            .expect("Expected enum and nullable state evaluation to succeed");
+        assert_eq!(
+            extract_record_field(&evaluated.rendered, "theme"),
+            &Value::EnumValue {
+                type_name: Name::new("ThemeMode"),
+                member: SmolStr::new("dark"),
+            }
+        );
+        assert_eq!(
+            extract_record_field(&evaluated.rendered, "note"),
+            &Value::Null
+        );
+
+        let missing_state = interpreter
+            .evaluate_component(
+                module.as_ref(),
+                "SearchBox",
+                props.clone(),
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::from_iter([(
+                        SmolStr::new("theme"),
+                        Value::String(SmolStr::new("dark")),
+                    )]),
+                },
+            )
+            .expect_err("Expected missing required state field to fail");
+        assert!(matches!(
+            missing_state.kind(),
+            RuntimeErrorKind::MissingRequiredComponentField {
+                component,
+                field,
+                phase,
+            } if component == "SearchBox" && field == "query" && phase == "state evaluation"
+        ));
+
+        let unknown_state = interpreter
+            .evaluate_component(
+                module.as_ref(),
+                "SearchBox",
+                props.clone(),
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::from_iter([
+                        (SmolStr::new("query"), Value::String(SmolStr::new("docs"))),
+                        (SmolStr::new("theme"), Value::String(SmolStr::new("dark"))),
+                        (
+                            SmolStr::new("extra"),
+                            Value::String(SmolStr::new("ignored")),
+                        ),
+                    ]),
+                },
+            )
+            .expect_err("Expected unknown state field to fail");
+        assert!(matches!(
+            unknown_state.kind(),
+            RuntimeErrorKind::TypeMismatch { actual, .. } if actual == "unknown state field 'extra'"
+        ));
+
+        let bad_enum = interpreter
+            .evaluate_component(
+                module.as_ref(),
+                "SearchBox",
+                props,
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::from_iter([
+                        (SmolStr::new("query"), Value::String(SmolStr::new("docs"))),
+                        (
+                            SmolStr::new("theme"),
+                            Value::String(SmolStr::new("sparkly")),
+                        ),
+                    ]),
+                },
+            )
+            .expect_err("Expected unknown enum state value to fail");
+        assert!(matches!(
+            bad_enum.kind(),
+            RuntimeErrorKind::TypeMismatch { actual, .. }
+                if actual == "unknown enum member 'sparkly'"
+        ));
+    }
+
+    #[test]
+    fn test_evaluate_component_rejects_abstract_component() {
+        let source = r#"
+            abstract component <SearchBase placeholder:string />
+        "#;
+
+        let (module, interpreter) = lower_module_runtime(source);
+        let error = interpreter
+            .evaluate_component(
+                module.as_ref(),
+                "SearchBase",
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::default(),
+                },
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::default(),
+                },
+            )
+            .expect_err("Expected abstract component evaluation to fail");
+
+        assert!(matches!(
+            error.kind(),
+            RuntimeErrorKind::AbstractComponentInstantiation { component, operation }
+                if component == "SearchBase" && operation == "component evaluation"
+        ));
+    }
+
+    #[test]
+    fn test_evaluate_component_does_not_invoke_action_handlers() {
+        let source = r#"
+            action SearchSubmitted = { searchString:string }
+            action DoSearch = { search:string }
+
+            component <SearchBox emits { SearchSubmitted } /> = {
+              <TextInput />
+            }
+
+            let withHandler() = <SearchBox onSearchSubmitted=<DoSearch search={action.searchString} /> />
+        "#;
+
+        let (module, interpreter) = lower_module_runtime(source);
+        let props = interpreter
+            .execute_function(module.as_ref(), "withHandler", vec![])
+            .expect("Expected handler props function to succeed");
+        let evaluated = interpreter
+            .evaluate_component(
+                module.as_ref(),
+                "SearchBox",
+                props,
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::default(),
+                },
+            )
+            .expect("Expected component evaluation with handler prop to succeed");
+
+        assert!(matches!(
+            evaluated.rendered,
+            Value::Record { ref type_name, .. } if type_name.as_str() == "TextInput"
+        ));
+    }
+
+    #[test]
     fn test_initialize_component_rejects_abstract_component() {
         let source = r#"
             abstract component <SearchBase placeholder:string />
@@ -4489,6 +4946,140 @@ mod tests {
             .decode_component_snapshot(module.as_ref(), &init.state_snapshot)
             .expect("Expected snapshot to decode");
         assert!(snapshot.state.is_empty(), "Expected empty external state");
+    }
+
+    #[test]
+    fn test_evaluate_external_component_preserves_prop_only_rendering() {
+        let source = r#"
+            enum ThemeMode = | light | dark
+
+            external component <SearchBox placeholder:string = "Find docs" /> = {
+              state {
+                query:string
+                theme:ThemeMode
+                note:string?
+              }
+            }
+        "#;
+
+        let (module, interpreter) = lower_module_runtime(source);
+        let props = Value::Record {
+            type_name: Name::new("object"),
+            fields: FxHashMap::default(),
+        };
+        let evaluated = interpreter
+            .evaluate_component(
+                module.as_ref(),
+                "SearchBox",
+                props.clone(),
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::from_iter([
+                        (SmolStr::new("query"), Value::String(SmolStr::new("docs"))),
+                        (SmolStr::new("theme"), Value::String(SmolStr::new("dark"))),
+                    ]),
+                },
+            )
+            .expect("Expected external component evaluation to succeed");
+
+        let Value::Record { type_name, fields } = &evaluated.rendered else {
+            panic!("Expected external component render value");
+        };
+        assert_eq!(type_name.as_str(), "SearchBox");
+        assert_eq!(
+            fields.get("placeholder"),
+            Some(&Value::String(SmolStr::new("Find docs")))
+        );
+        assert!(
+            !fields.contains_key("query"),
+            "Declared external state must not appear in rendered props"
+        );
+        assert!(
+            !fields.contains_key("theme"),
+            "Declared external state must not appear in rendered props"
+        );
+        assert!(
+            !fields.contains_key("note"),
+            "Declared external state must not appear in rendered props"
+        );
+
+        let missing_state = interpreter
+            .evaluate_component(
+                module.as_ref(),
+                "SearchBox",
+                props.clone(),
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::from_iter([(
+                        SmolStr::new("theme"),
+                        Value::String(SmolStr::new("dark")),
+                    )]),
+                },
+            )
+            .expect_err("Expected external component evaluation to validate required state");
+        assert!(matches!(
+            missing_state.kind(),
+            RuntimeErrorKind::MissingRequiredComponentField {
+                component,
+                field,
+                phase,
+            } if component == "SearchBox" && field == "query" && phase == "state evaluation"
+        ));
+
+        let unknown_state = interpreter
+            .evaluate_component(
+                module.as_ref(),
+                "SearchBox",
+                props.clone(),
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::from_iter([
+                        (SmolStr::new("query"), Value::String(SmolStr::new("docs"))),
+                        (SmolStr::new("theme"), Value::String(SmolStr::new("dark"))),
+                        (
+                            SmolStr::new("extra"),
+                            Value::String(SmolStr::new("ignored")),
+                        ),
+                    ]),
+                },
+            )
+            .expect_err("Expected external component evaluation to reject unknown state");
+        assert!(matches!(
+            unknown_state.kind(),
+            RuntimeErrorKind::TypeMismatch { actual, .. } if actual == "unknown state field 'extra'"
+        ));
+
+        let non_record_state = interpreter
+            .evaluate_component(module.as_ref(), "SearchBox", props.clone(), Value::Int(1))
+            .expect_err("Expected external component evaluation to reject non-record state");
+        assert!(matches!(
+            non_record_state.kind(),
+            RuntimeErrorKind::TypeMismatch { expected, actual, .. }
+                if expected == "record" && actual == "i64"
+        ));
+
+        let bad_enum = interpreter
+            .evaluate_component(
+                module.as_ref(),
+                "SearchBox",
+                props,
+                Value::Record {
+                    type_name: Name::new("object"),
+                    fields: FxHashMap::from_iter([
+                        (SmolStr::new("query"), Value::String(SmolStr::new("docs"))),
+                        (
+                            SmolStr::new("theme"),
+                            Value::String(SmolStr::new("sparkly")),
+                        ),
+                    ]),
+                },
+            )
+            .expect_err("Expected external component evaluation to reject invalid enum state");
+        assert!(matches!(
+            bad_enum.kind(),
+            RuntimeErrorKind::TypeMismatch { actual, .. }
+                if actual == "unknown enum member 'sparkly'"
+        ));
     }
 
     #[test]

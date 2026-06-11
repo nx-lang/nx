@@ -229,7 +229,7 @@ layers, for JSON and MessagePack alike:
 "dark"
 ```
 
-Raw APIs (`EvaluateBytes`, `EvaluateJson`, `InitializeComponentJson`,
+Raw APIs (`EvaluateBytes`, `EvaluateJson`, `EvaluateComponentJson`, `InitializeComponentJson`,
 `DispatchComponentActionsJson`) emit the member string directly. When the host feeds a raw value
 back into the runtime for a slot whose declared NX type is an enum, the runtime resolves the string
 against that enum's member list. Unknown members surface through the standard argument
@@ -283,6 +283,72 @@ LoadState fromMessagePack = MessagePackSerializer.Deserialize<LoadState>(bytes);
 
 Enums and discriminated unions intentionally remain separate wire contracts: enums are bare authored
 member strings, while union cases are `$type` maps.
+
+### Component Evaluation
+
+Use `EvaluateComponent` when the host owns current component state and only needs the rendered body.
+Evaluation is pure: it does not create or consume `StateSnapshot`, dispatch actions, invoke action
+handlers, or return effects.
+
+```csharp
+using NxLang.Nx;
+
+string source = """
+    component <SearchBox placeholder:string = "Find docs" /> = {
+      state { query:string }
+      <TextInput value={query} placeholder={placeholder} />
+    }
+    """;
+
+TextInputElement rendered =
+    NxRuntime.EvaluateComponent<SearchBoxProps, SearchBoxState, TextInputElement>(
+        source,
+        "SearchBox",
+        new SearchBoxProps { Placeholder = "Find docs" },
+        new SearchBoxState { Query = "docs" });
+```
+
+For JSON workflows, the result is the rendered value directly rather than a lifecycle wrapper:
+
+```csharp
+JsonElement renderedJson =
+    NxRuntime.EvaluateComponentJson(
+        source,
+        "SearchBox",
+        new SearchBoxProps { Placeholder = "Find docs" },
+        new SearchBoxState { Query = "docs" });
+
+string value = renderedJson.GetProperty("value").GetString()!;
+```
+
+Raw-byte overloads let the caller choose MessagePack or JSON output. Props and state inputs are
+always supplied as MessagePack bytes:
+
+```csharp
+byte[] propsBytes = MessagePackSerializer.Serialize(new SearchBoxProps { Placeholder = "Find docs" });
+byte[] stateBytes = MessagePackSerializer.Serialize(new SearchBoxState { Query = "docs" });
+
+byte[] jsonBytes = NxRuntime.EvaluateComponentBytes(
+    source,
+    "SearchBox",
+    NxOutputFormat.Json,
+    propsBytes,
+    stateBytes);
+```
+
+When evaluating repeatedly or resolving imports from preloaded libraries, build a
+`NxProgramArtifact` once and call the artifact overload:
+
+```csharp
+using NxProgramArtifact program = NxProgramArtifact.Build(source);
+
+TextInputElement renderedAgain =
+    NxRuntime.EvaluateComponent<SearchBoxProps, SearchBoxState, TextInputElement>(
+        program,
+        "SearchBox",
+        new SearchBoxProps { Placeholder = "Find docs" },
+        new SearchBoxState { Query = "docs" });
+```
 
 ### Component Lifecycle
 
@@ -354,12 +420,15 @@ string key instead of MessagePack `Union` envelopes.
 
 - Initialization returns the rendered element plus an opaque `StateSnapshot` byte array that the host owns.
 - Dispatch consumes that saved snapshot and an ordered action list, then returns effect actions plus the next snapshot.
+- Evaluation accepts explicit props and explicit current state, then returns only the rendered value.
 - Reuse a saved `StateSnapshot` only with the exact same `NxProgramArtifact` revision that produced it.
   Mixing snapshots across program revisions is rejected.
+- Use evaluation for host-owned transparent state. Use initialization and dispatch for NX-owned
+  component lifecycles that need opaque snapshot round-tripping and handler effects.
 - The managed source-based component helpers build transient `NxProgramArtifact`s internally and then
   call the native program-artifact component APIs. The public native C ABI itself is artifact-first.
 - State defaults run only during initialization in this change. Declarative state-update actions are still a follow-up, so dispatch currently preserves state values while still producing effect actions from bound handlers.
-- Component lifecycle inputs remain MessagePack-only in this phase. Typed prop/action overloads still
+- Component runtime inputs remain MessagePack-only in this phase. Typed prop/state/action overloads still
   serialize those inputs as MessagePack before calling the runtime.
 - JSON component results encode `state_snapshot` as base64 on the wire, and the managed binding
   decodes that back to `StateSnapshot` bytes for later dispatch calls.
@@ -387,7 +456,8 @@ catch (NxEvaluationException ex)
 
 All source-driven APIs run the shared NX static-analysis pipeline before any runtime execution.
 If parsing, lowering, scope building, or type checking reports errors, the call returns the full
-diagnostic set and does not execute `root`, component initialization, or component dispatch.
+diagnostic set and does not execute `root`, component evaluation, component initialization, or
+component dispatch.
 
 ### Generated Types
 

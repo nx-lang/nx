@@ -6,12 +6,13 @@ use nx_api::{
 };
 use nx_ffi::{
     nx_build_program_artifact, nx_build_workspace_program_artifact,
-    nx_component_dispatch_actions_program_artifact, nx_component_init_program_artifact,
-    nx_create_library_registry, nx_create_program_build_context, nx_eval_program_artifact,
-    nx_eval_source, nx_ffi_abi_version, nx_free_buffer, nx_free_library_registry,
-    nx_free_program_artifact, nx_free_program_build_context, nx_load_library_into_registry,
-    nx_validate_workspace, NxBuffer, NxEvalStatus, NxLibraryRegistryHandle, NxOutputFormat,
-    NxProgramArtifactHandle, NxProgramBuildContextHandle, NxWorkspaceModule, NX_FFI_ABI_VERSION,
+    nx_component_dispatch_actions_program_artifact, nx_component_evaluate_program_artifact,
+    nx_component_init_program_artifact, nx_create_library_registry,
+    nx_create_program_build_context, nx_eval_program_artifact, nx_eval_source, nx_ffi_abi_version,
+    nx_free_buffer, nx_free_library_registry, nx_free_program_artifact,
+    nx_free_program_build_context, nx_load_library_into_registry, nx_validate_workspace, NxBuffer,
+    NxEvalStatus, NxLibraryRegistryHandle, NxOutputFormat, NxProgramArtifactHandle,
+    NxProgramBuildContextHandle, NxWorkspaceModule, NX_FFI_ABI_VERSION,
 };
 use nx_interpreter::Interpreter;
 use nx_value::NxValue;
@@ -279,6 +280,71 @@ fn component_init_json_with_program_artifact(
         component_name_bytes.len(),
         props_ptr,
         props_len,
+        output_format_value(NxOutputFormat::Json),
+        &mut out as *mut NxBuffer,
+    );
+
+    (
+        status,
+        String::from_utf8(copy_and_free_buffer(out)).unwrap(),
+    )
+}
+
+fn component_evaluate_msgpack_with_program_artifact(
+    program_artifact: *mut NxProgramArtifactHandle,
+    component_name: &str,
+    props: Option<&[u8]>,
+    state: Option<&[u8]>,
+) -> (NxEvalStatus, Vec<u8>) {
+    let component_name_bytes = component_name.as_bytes();
+    let mut out = empty_buffer();
+
+    let (props_ptr, props_len) = props
+        .map(|bytes| (bytes.as_ptr(), bytes.len()))
+        .unwrap_or((std::ptr::null(), 0));
+    let (state_ptr, state_len) = state
+        .map(|bytes| (bytes.as_ptr(), bytes.len()))
+        .unwrap_or((std::ptr::null(), 0));
+
+    let status = nx_component_evaluate_program_artifact(
+        program_artifact as *const NxProgramArtifactHandle,
+        component_name_bytes.as_ptr(),
+        component_name_bytes.len(),
+        props_ptr,
+        props_len,
+        state_ptr,
+        state_len,
+        output_format_value(NxOutputFormat::MessagePack),
+        &mut out as *mut NxBuffer,
+    );
+
+    (status, copy_and_free_buffer(out))
+}
+
+fn component_evaluate_json_with_program_artifact(
+    program_artifact: *mut NxProgramArtifactHandle,
+    component_name: &str,
+    props: Option<&[u8]>,
+    state: Option<&[u8]>,
+) -> (NxEvalStatus, String) {
+    let component_name_bytes = component_name.as_bytes();
+    let mut out = empty_buffer();
+
+    let (props_ptr, props_len) = props
+        .map(|bytes| (bytes.as_ptr(), bytes.len()))
+        .unwrap_or((std::ptr::null(), 0));
+    let (state_ptr, state_len) = state
+        .map(|bytes| (bytes.as_ptr(), bytes.len()))
+        .unwrap_or((std::ptr::null(), 0));
+
+    let status = nx_component_evaluate_program_artifact(
+        program_artifact as *const NxProgramArtifactHandle,
+        component_name_bytes.as_ptr(),
+        component_name_bytes.len(),
+        props_ptr,
+        props_len,
+        state_ptr,
+        state_len,
         output_format_value(NxOutputFormat::Json),
         &mut out as *mut NxBuffer,
     );
@@ -762,6 +828,21 @@ fn ffi_program_artifact_entry_points_reject_null_handles() {
     let _ = copy_and_free_buffer(out);
 
     let mut out = empty_buffer();
+    let status = nx_component_evaluate_program_artifact(
+        std::ptr::null(),
+        b"SearchBox".as_ptr(),
+        "SearchBox".len(),
+        std::ptr::null(),
+        0,
+        std::ptr::null(),
+        0,
+        output_format_value(NxOutputFormat::MessagePack),
+        &mut out as *mut NxBuffer,
+    );
+    assert!(matches!(status, NxEvalStatus::InvalidArgument));
+    let _ = copy_and_free_buffer(out);
+
+    let mut out = empty_buffer();
     let status = nx_component_dispatch_actions_program_artifact(
         std::ptr::null(),
         std::ptr::null(),
@@ -847,6 +928,172 @@ let root() = { 0 }"#;
 }
 
 #[test]
+fn ffi_component_evaluate_returns_rendered_value_in_msgpack_and_json() {
+    let source = r#"
+        component <SearchBox placeholder:string = "Find docs" /> = {
+          state { query:string }
+          <TextInput value={query} placeholder={placeholder} />
+        }
+    "#;
+    let props = NxValue::Record {
+        type_name: None,
+        properties: Default::default(),
+    };
+    let state = NxValue::Record {
+        type_name: None,
+        properties: std::collections::BTreeMap::from([(
+            "query".to_string(),
+            NxValue::String("docs".to_string()),
+        )]),
+    };
+    let props_msgpack = props.to_msgpack_vec().unwrap();
+    let state_msgpack = state.to_msgpack_vec().unwrap();
+
+    let build_context = create_empty_build_context();
+    let (program, build_status, build_bytes) =
+        build_program_artifact_handle(build_context, source, "ffi-component-evaluate.nx");
+    nx_free_program_build_context(build_context);
+    assert!(matches!(build_status, NxEvalStatus::Ok));
+    assert!(build_bytes.is_empty());
+    assert!(!program.is_null());
+
+    let (msgpack_status, msgpack_bytes) = component_evaluate_msgpack_with_program_artifact(
+        program,
+        "SearchBox",
+        Some(&props_msgpack),
+        Some(&state_msgpack),
+    );
+    assert!(matches!(msgpack_status, NxEvalStatus::Ok));
+    let rendered = NxValue::from_msgpack_slice(&msgpack_bytes).unwrap();
+    assert_eq!(
+        rendered,
+        NxValue::Record {
+            type_name: Some("TextInput".to_string()),
+            properties: std::collections::BTreeMap::from([
+                (
+                    "placeholder".to_string(),
+                    NxValue::String("Find docs".to_string()),
+                ),
+                ("value".to_string(), NxValue::String("docs".to_string())),
+            ]),
+        }
+    );
+
+    let (json_status, json_payload) = component_evaluate_json_with_program_artifact(
+        program,
+        "SearchBox",
+        Some(&props_msgpack),
+        Some(&state_msgpack),
+    );
+    nx_free_program_artifact(program);
+    assert!(matches!(json_status, NxEvalStatus::Ok));
+    assert!(!json_payload.contains(r#""state_snapshot""#));
+    assert!(!json_payload.contains(r#""effects""#));
+    assert!(!json_payload.contains(r#""rendered""#));
+    assert_eq!(NxValue::from_json_str(&json_payload).unwrap(), rendered);
+}
+
+#[test]
+fn ffi_component_evaluate_returns_invalid_state_diagnostics() {
+    let source = r#"
+        component <SearchBox /> = {
+          state { query:string }
+          <TextInput value={query} />
+        }
+    "#;
+
+    let build_context = create_empty_build_context();
+    let (program, build_status, build_bytes) =
+        build_program_artifact_handle(build_context, source, "ffi-component-evaluate-state.nx");
+    nx_free_program_build_context(build_context);
+    assert!(matches!(build_status, NxEvalStatus::Ok));
+    assert!(build_bytes.is_empty());
+    assert!(!program.is_null());
+
+    let (status, diagnostics_bytes) =
+        component_evaluate_msgpack_with_program_artifact(program, "SearchBox", None, None);
+    nx_free_program_artifact(program);
+    assert!(matches!(status, NxEvalStatus::Error));
+    let diagnostics: Vec<NxDiagnostic> = rmp_serde::from_slice(&diagnostics_bytes).unwrap();
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic
+        .message
+        .contains("Missing required component field 'query'")));
+}
+
+#[test]
+fn ffi_component_evaluate_with_program_artifact_reuses_preloaded_library_component() {
+    let temp = TempDir::new().expect("temp dir");
+    let app_root = temp.path().join("app");
+    let library_root = temp.path().join("question-flow");
+    std::fs::create_dir_all(&app_root).expect("app root");
+    std::fs::create_dir_all(&library_root).expect("library root");
+    std::fs::write(
+        library_root.join("QuestionFlow.nx"),
+        r#"
+            export component <SearchBox placeholder:string = "Find docs" /> = {
+              state { query:string }
+              <TextInput value={query} placeholder={placeholder} />
+            }
+        "#,
+    )
+    .expect("library file");
+
+    let registry = create_library_registry();
+    let (load_status, load_bytes) =
+        load_library_into_registry(registry, &library_root.display().to_string());
+    assert!(matches!(load_status, NxEvalStatus::Ok));
+    assert!(load_bytes.is_empty());
+    let build_context = create_program_build_context(registry);
+
+    let main_path = app_root.join("main.nx");
+    let source = r#"import "../question-flow"
+let root() = { 0 }"#;
+    std::fs::write(&main_path, source).expect("main file");
+
+    let (program, build_status, build_bytes) = build_program_artifact_handle(
+        build_context as *const NxProgramBuildContextHandle,
+        source,
+        &main_path.display().to_string(),
+    );
+    assert!(matches!(build_status, NxEvalStatus::Ok));
+    assert!(build_bytes.is_empty());
+
+    nx_free_program_build_context(build_context);
+    nx_free_library_registry(registry);
+
+    let state = NxValue::Record {
+        type_name: None,
+        properties: std::collections::BTreeMap::from([(
+            "query".to_string(),
+            NxValue::String("docs".to_string()),
+        )]),
+    };
+    let state_msgpack = state.to_msgpack_vec().unwrap();
+    let (status, payload) = component_evaluate_msgpack_with_program_artifact(
+        program,
+        "SearchBox",
+        None,
+        Some(&state_msgpack),
+    );
+    nx_free_program_artifact(program);
+
+    assert!(matches!(status, NxEvalStatus::Ok));
+    let rendered = NxValue::from_msgpack_slice(&payload).unwrap();
+    let NxValue::Record {
+        type_name,
+        properties,
+    } = rendered
+    else {
+        panic!("Expected rendered element record");
+    };
+    assert_eq!(type_name.as_deref(), Some("TextInput"));
+    assert_eq!(
+        properties.get("value"),
+        Some(&NxValue::String("docs".to_string()))
+    );
+}
+
+#[test]
 fn ffi_eval_program_artifact_returns_json_diagnostics_directly() {
     let build_context = create_empty_build_context();
     let (program, build_status, build_bytes) =
@@ -908,6 +1155,21 @@ fn ffi_value_entry_points_reject_unknown_output_format() {
         program as *const NxProgramArtifactHandle,
         b"SearchBox".as_ptr(),
         "SearchBox".len(),
+        std::ptr::null(),
+        0,
+        42,
+        &mut out,
+    );
+    assert!(matches!(status, NxEvalStatus::InvalidArgument));
+    assert!(copy_and_free_buffer(out).is_empty());
+
+    let mut out = empty_buffer();
+    let status = nx_component_evaluate_program_artifact(
+        program as *const NxProgramArtifactHandle,
+        b"SearchBox".as_ptr(),
+        "SearchBox".len(),
+        std::ptr::null(),
+        0,
         std::ptr::null(),
         0,
         42,

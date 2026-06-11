@@ -13,7 +13,7 @@
 #endif
 
 
-#define NX_FFI_ABI_VERSION 9
+#define NX_FFI_ABI_VERSION 10
 
 enum NxEvalStatus
 #ifdef __cplusplus
@@ -131,6 +131,23 @@ NxEvalStatus nx_component_init_program_artifact(const struct NxProgramArtifactHa
                                                 size_t props_len,
                                                 uint32_t output_format,
                                                 struct NxBuffer *out_buffer);
+
+/**
+ * Evaluates a component from a program artifact using MessagePack props/state inputs.
+ *
+ * Successful output is the rendered value directly in the selected format, without lifecycle
+ * state snapshot, effects, or wrapper fields.
+ */
+NX_FFI_EXPORT
+NxEvalStatus nx_component_evaluate_program_artifact(const struct NxProgramArtifactHandle *program_artifact_ptr,
+                                                    const uint8_t *component_name_ptr,
+                                                    size_t component_name_len,
+                                                    const uint8_t *props_ptr,
+                                                    size_t props_len,
+                                                    const uint8_t *state_ptr,
+                                                    size_t state_len,
+                                                    uint32_t output_format,
+                                                    struct NxBuffer *out_buffer);
 
 NX_FFI_EXPORT
 NxEvalStatus nx_component_dispatch_actions_program_artifact(const struct NxProgramArtifactHandle *program_artifact_ptr,

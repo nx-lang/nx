@@ -6,10 +6,11 @@ use nx_api::{
     build_workspace_program_artifact,
     dispatch_component_actions_program_artifact as api_dispatch_component_actions_program_artifact,
     eval_program_artifact as api_eval_program_artifact, eval_source,
+    evaluate_component_program_artifact as api_evaluate_component_program_artifact,
     initialize_component_program_artifact as api_initialize_component_program_artifact,
     load_program_artifact_from_source, validate_workspace, ComponentDispatchEvalResult,
-    ComponentDispatchResult, ComponentInitEvalResult, ComponentInitResult, EvalResult,
-    LibraryRegistry, NxDiagnostic, NxSeverity, NxWorkspace,
+    ComponentDispatchResult, ComponentEvaluateEvalResult, ComponentInitEvalResult,
+    ComponentInitResult, EvalResult, LibraryRegistry, NxDiagnostic, NxSeverity, NxWorkspace,
     NxWorkspaceModule as ApiNxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
 };
 use nx_value::NxValue;
@@ -17,7 +18,7 @@ use serde::Serialize;
 use std::any::Any;
 use std::panic;
 
-pub const NX_FFI_ABI_VERSION: u32 = 9;
+pub const NX_FFI_ABI_VERSION: u32 = 10;
 
 #[repr(C)]
 pub struct NxBuffer {
@@ -784,6 +785,74 @@ pub extern "C" fn nx_component_init_program_artifact(
                     serialize_component_init_payload(output_format, &result)?,
                 )),
                 ComponentInitEvalResult::Err(diagnostics) => Ok((
+                    NxEvalStatus::Error,
+                    serialize_diagnostics_payload(output_format, &diagnostics)?,
+                )),
+            }
+        })?;
+
+        Ok(payload)
+    });
+
+    finish_output_entry(out_buffer, output_format, result)
+}
+
+/// Evaluates a component from a program artifact using MessagePack props/state inputs.
+///
+/// Successful output is the rendered value directly in the selected format, without lifecycle
+/// state snapshot, effects, or wrapper fields.
+#[no_mangle]
+pub extern "C" fn nx_component_evaluate_program_artifact(
+    program_artifact_ptr: *const NxProgramArtifactHandle,
+    component_name_ptr: *const u8,
+    component_name_len: usize,
+    props_ptr: *const u8,
+    props_len: usize,
+    state_ptr: *const u8,
+    state_len: usize,
+    output_format: u32,
+    out_buffer: *mut NxBuffer,
+) -> NxEvalStatus {
+    if let Err(status) = prepare_out_buffer(out_buffer) {
+        return status;
+    }
+
+    let output_format = match parse_output_format(output_format) {
+        Ok(output_format) => output_format,
+        Err(status) => return status,
+    };
+
+    if program_artifact_ptr.is_null() {
+        return NxEvalStatus::InvalidArgument;
+    }
+
+    let result = panic::catch_unwind(|| {
+        let component_name = unsafe { slice_to_str(component_name_ptr, component_name_len) }?;
+        let props = if props_len == 0 {
+            empty_record()
+        } else {
+            let bytes = unsafe { slice_to_bytes(props_ptr, props_len) }?;
+            parse_msgpack_value(bytes)?
+        };
+        let state = if state_len == 0 {
+            empty_record()
+        } else {
+            let bytes = unsafe { slice_to_bytes(state_ptr, state_len) }?;
+            parse_msgpack_value(bytes)?
+        };
+
+        let payload = with_program_artifact(program_artifact_ptr, |program_artifact| {
+            match api_evaluate_component_program_artifact(
+                program_artifact,
+                component_name,
+                &props,
+                &state,
+            ) {
+                ComponentEvaluateEvalResult::Ok(result) => Ok((
+                    NxEvalStatus::Ok,
+                    serialize_eval_payload(output_format, &result.rendered)?,
+                )),
+                ComponentEvaluateEvalResult::Err(diagnostics) => Ok((
                     NxEvalStatus::Error,
                     serialize_diagnostics_payload(output_format, &diagnostics)?,
                 )),

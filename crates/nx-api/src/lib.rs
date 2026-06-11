@@ -4,6 +4,9 @@
 //! - [`eval_source`]: evaluate NX source text to a stable [`NxValue`](nx_value::NxValue)
 //! - [`eval_program_artifact`]: evaluate the `root()` entrypoint of a previously built
 //!   [`ProgramArtifact`]
+//! - [`evaluate_component_source`] / [`evaluate_component_program_artifact`]: pure component
+//!   rendering from explicit props and host-owned current state, returning the rendered value
+//!   directly without lifecycle wrapper fields
 //! - [`NxWorkspace`] / [`NxWorkspaceModule`]: validate and build programs from logical in-memory
 //!   source modules without temporary files
 //! - [`initialize_component_source`] / [`dispatch_component_actions_source`]: component lifecycle
@@ -37,9 +40,10 @@ pub use artifacts::{
 };
 pub use component::{
     dispatch_component_actions_program_artifact, dispatch_component_actions_source,
+    evaluate_component_program_artifact, evaluate_component_source,
     initialize_component_program_artifact, initialize_component_source,
-    ComponentDispatchEvalResult, ComponentDispatchResult, ComponentInitEvalResult,
-    ComponentInitResult,
+    ComponentDispatchEvalResult, ComponentDispatchResult, ComponentEvaluateEvalResult,
+    ComponentEvaluateResult, ComponentInitEvalResult, ComponentInitResult,
 };
 pub use diagnostics::{NxDiagnostic, NxDiagnosticLabel, NxSeverity, NxTextSpan};
 pub use eval::{

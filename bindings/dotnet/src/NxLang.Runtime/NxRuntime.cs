@@ -298,6 +298,308 @@ public static class NxRuntime
     }
 
     /// <summary>
+    /// Evaluates a named component from explicit props and state and returns the raw result bytes in the canonical
+    /// MessagePack wire format.
+    /// </summary>
+    public static byte[] EvaluateComponentBytes(
+        string source,
+        string componentName,
+        byte[]? propsBytes = null,
+        byte[]? stateBytes = null,
+        string? fileName = null)
+    {
+        return EvaluateComponentBytes(
+            source,
+            componentName,
+            NxOutputFormat.MessagePack,
+            propsBytes,
+            stateBytes,
+            fileName);
+    }
+
+    /// <summary>
+    /// Evaluates a named component from explicit props and state and returns the raw result bytes in the requested
+    /// output format.
+    /// </summary>
+    public static byte[] EvaluateComponentBytes(
+        string source,
+        string componentName,
+        NxOutputFormat outputFormat,
+        byte[]? propsBytes = null,
+        byte[]? stateBytes = null,
+        string? fileName = null)
+    {
+        using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, fileName);
+        return EvaluateComponentBytes(programArtifact, componentName, outputFormat, propsBytes, stateBytes);
+    }
+
+    /// <summary>
+    /// Evaluates a named component from source text against a caller-supplied build context.
+    /// </summary>
+    public static byte[] EvaluateComponentBytes(
+        string source,
+        string componentName,
+        NxProgramBuildContext buildContext,
+        byte[]? propsBytes = null,
+        byte[]? stateBytes = null,
+        string? fileName = null)
+    {
+        return EvaluateComponentBytes(
+            source,
+            componentName,
+            buildContext,
+            NxOutputFormat.MessagePack,
+            propsBytes,
+            stateBytes,
+            fileName);
+    }
+
+    /// <summary>
+    /// Evaluates a named component from source text against a caller-supplied build context in the requested output
+    /// format.
+    /// </summary>
+    public static byte[] EvaluateComponentBytes(
+        string source,
+        string componentName,
+        NxProgramBuildContext buildContext,
+        NxOutputFormat outputFormat,
+        byte[]? propsBytes = null,
+        byte[]? stateBytes = null,
+        string? fileName = null)
+    {
+        ArgumentNullException.ThrowIfNull(buildContext);
+
+        using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, buildContext, fileName);
+        return EvaluateComponentBytes(programArtifact, componentName, outputFormat, propsBytes, stateBytes);
+    }
+
+    /// <summary>
+    /// Evaluates a named component from a previously built program artifact and returns the raw result bytes.
+    /// </summary>
+    public static byte[] EvaluateComponentBytes(
+        NxProgramArtifact programArtifact,
+        string componentName,
+        byte[]? propsBytes = null,
+        byte[]? stateBytes = null)
+    {
+        return EvaluateComponentBytes(
+            programArtifact,
+            componentName,
+            NxOutputFormat.MessagePack,
+            propsBytes,
+            stateBytes);
+    }
+
+    /// <summary>
+    /// Evaluates a named component from a previously built program artifact and returns the raw result bytes in the
+    /// requested output format.
+    /// </summary>
+    public static byte[] EvaluateComponentBytes(
+        NxProgramArtifact programArtifact,
+        string componentName,
+        NxOutputFormat outputFormat,
+        byte[]? propsBytes = null,
+        byte[]? stateBytes = null)
+    {
+        byte[] payload = InvokeComponentEvaluateProgramArtifactNativeCall(
+            programArtifact,
+            componentName,
+            outputFormat,
+            propsBytes,
+            stateBytes,
+            NxNativeMethods.nx_component_evaluate_program_artifact,
+            out NxEvalStatus status);
+        return status switch
+        {
+            NxEvalStatus.Ok => payload,
+            NxEvalStatus.Error => throw CreateEvaluationException(payload, outputFormat),
+            _ => throw CreateInteropStatusException(status),
+        };
+    }
+
+    /// <summary>
+    /// Evaluates a named component using no explicit props or state and returns the JSON result.
+    /// </summary>
+    public static JsonElement EvaluateComponentJson(
+        string source,
+        string componentName,
+        string? fileName = null)
+    {
+        byte[] payload = EvaluateComponentBytes(source, componentName, NxOutputFormat.Json, null, null, fileName);
+        return DeserializeJsonElement(
+            payload,
+            "NX native runtime returned an invalid component evaluation JSON payload.");
+    }
+
+    /// <summary>
+    /// Evaluates a named component from source text using a caller-supplied build context and returns the JSON result.
+    /// </summary>
+    public static JsonElement EvaluateComponentJson(
+        string source,
+        string componentName,
+        NxProgramBuildContext buildContext,
+        string? fileName = null)
+    {
+        byte[] payload = EvaluateComponentBytes(
+            source,
+            componentName,
+            buildContext,
+            NxOutputFormat.Json,
+            null,
+            null,
+            fileName);
+        return DeserializeJsonElement(
+            payload,
+            "NX native runtime returned an invalid component evaluation JSON payload.");
+    }
+
+    /// <summary>
+    /// Evaluates a named component from a program artifact using no explicit props or state and returns the JSON result.
+    /// </summary>
+    public static JsonElement EvaluateComponentJson(
+        NxProgramArtifact programArtifact,
+        string componentName)
+    {
+        byte[] payload = EvaluateComponentBytes(programArtifact, componentName, NxOutputFormat.Json, null, null);
+        return DeserializeJsonElement(
+            payload,
+            "NX native runtime returned an invalid component evaluation JSON payload.");
+    }
+
+    /// <summary>
+    /// Evaluates a named component with MessagePack-serializable props and state and returns the JSON result.
+    /// </summary>
+    public static JsonElement EvaluateComponentJson<TProps, TState>(
+        string source,
+        string componentName,
+        TProps props,
+        TState state,
+        string? fileName = null)
+    {
+        byte[] payload = EvaluateComponentBytes(
+            source,
+            componentName,
+            NxOutputFormat.Json,
+            SerializeMessagePackInput(props),
+            SerializeMessagePackInput(state),
+            fileName);
+        return DeserializeJsonElement(
+            payload,
+            "NX native runtime returned an invalid component evaluation JSON payload.");
+    }
+
+    /// <summary>
+    /// Evaluates a named component with MessagePack-serializable props and state against a caller-supplied build
+    /// context and returns the JSON result.
+    /// </summary>
+    public static JsonElement EvaluateComponentJson<TProps, TState>(
+        string source,
+        string componentName,
+        NxProgramBuildContext buildContext,
+        TProps props,
+        TState state,
+        string? fileName = null)
+    {
+        byte[] payload = EvaluateComponentBytes(
+            source,
+            componentName,
+            buildContext,
+            NxOutputFormat.Json,
+            SerializeMessagePackInput(props),
+            SerializeMessagePackInput(state),
+            fileName);
+        return DeserializeJsonElement(
+            payload,
+            "NX native runtime returned an invalid component evaluation JSON payload.");
+    }
+
+    /// <summary>
+    /// Evaluates a named component from a program artifact with MessagePack-serializable props and state and returns
+    /// the JSON result.
+    /// </summary>
+    public static JsonElement EvaluateComponentJson<TProps, TState>(
+        NxProgramArtifact programArtifact,
+        string componentName,
+        TProps props,
+        TState state)
+    {
+        byte[] payload = EvaluateComponentBytes(
+            programArtifact,
+            componentName,
+            NxOutputFormat.Json,
+            SerializeMessagePackInput(props),
+            SerializeMessagePackInput(state));
+        return DeserializeJsonElement(
+            payload,
+            "NX native runtime returned an invalid component evaluation JSON payload.");
+    }
+
+    /// <summary>
+    /// Evaluates a named component with MessagePack-serializable props and state and deserializes the rendered result.
+    /// </summary>
+    public static TElement EvaluateComponent<TProps, TState, TElement>(
+        string source,
+        string componentName,
+        TProps props,
+        TState state,
+        string? fileName = null)
+    {
+        byte[] payload = EvaluateComponentBytes(
+            source,
+            componentName,
+            SerializeMessagePackInput(props),
+            SerializeMessagePackInput(state),
+            fileName);
+        return DeserializeMessagePackResult<TElement>(
+            payload,
+            "NX native runtime returned an invalid component evaluation MessagePack payload.");
+    }
+
+    /// <summary>
+    /// Evaluates a named component with MessagePack-serializable props and state against a caller-supplied build
+    /// context.
+    /// </summary>
+    public static TElement EvaluateComponent<TProps, TState, TElement>(
+        string source,
+        string componentName,
+        NxProgramBuildContext buildContext,
+        TProps props,
+        TState state,
+        string? fileName = null)
+    {
+        byte[] payload = EvaluateComponentBytes(
+            source,
+            componentName,
+            buildContext,
+            SerializeMessagePackInput(props),
+            SerializeMessagePackInput(state),
+            fileName);
+        return DeserializeMessagePackResult<TElement>(
+            payload,
+            "NX native runtime returned an invalid component evaluation MessagePack payload.");
+    }
+
+    /// <summary>
+    /// Evaluates a named component from a program artifact with MessagePack-serializable props and state and
+    /// deserializes the rendered result.
+    /// </summary>
+    public static TElement EvaluateComponent<TProps, TState, TElement>(
+        NxProgramArtifact programArtifact,
+        string componentName,
+        TProps props,
+        TState state)
+    {
+        byte[] payload = EvaluateComponentBytes(
+            programArtifact,
+            componentName,
+            SerializeMessagePackInput(props),
+            SerializeMessagePackInput(state));
+        return DeserializeMessagePackResult<TElement>(
+            payload,
+            "NX native runtime returned an invalid component evaluation MessagePack payload.");
+    }
+
+    /// <summary>
     /// Initializes a named component using no explicit props and returns the JSON result.
     /// </summary>
     public static NxComponentInitResult<JsonElement> InitializeComponentJson(
@@ -827,6 +1129,17 @@ public static class NxRuntime
         NxOutputFormat outputFormat,
         out NxBuffer buffer);
 
+    private delegate NxEvalStatus ComponentEvaluateProgramArtifactCallback(
+        NxProgramArtifactSafeHandle programArtifactHandle,
+        byte[] componentNameBytes,
+        nuint componentNameLength,
+        byte[] propsBytes,
+        nuint propsLength,
+        byte[] stateBytes,
+        nuint stateLength,
+        NxOutputFormat outputFormat,
+        out NxBuffer buffer);
+
     private delegate NxEvalStatus ComponentDispatchProgramArtifactCallback(
         NxProgramArtifactSafeHandle programArtifactHandle,
         byte[] stateSnapshotBytes,
@@ -898,6 +1211,37 @@ public static class NxRuntime
             (nuint)componentNameBytes.Length,
             payloadBytes,
             (nuint)payloadBytes.Length,
+            outputFormat,
+            out NxBuffer buffer);
+        return CopyAndFreeBuffer(buffer);
+    }
+
+    private static byte[] InvokeComponentEvaluateProgramArtifactNativeCall(
+        NxProgramArtifact programArtifact,
+        string componentName,
+        NxOutputFormat outputFormat,
+        byte[]? propsBytes,
+        byte[]? stateBytes,
+        ComponentEvaluateProgramArtifactCallback callback,
+        out NxEvalStatus status)
+    {
+        ArgumentNullException.ThrowIfNull(programArtifact);
+        ArgumentNullException.ThrowIfNull(componentName);
+
+        NxNativeLibrary.EnsureLoaded();
+
+        byte[] componentNameBytes = Encoding.UTF8.GetBytes(componentName);
+        byte[] propsPayloadBytes = propsBytes ?? Array.Empty<byte>();
+        byte[] statePayloadBytes = stateBytes ?? Array.Empty<byte>();
+
+        status = callback(
+            programArtifact.SafeHandle,
+            componentNameBytes,
+            (nuint)componentNameBytes.Length,
+            propsPayloadBytes,
+            (nuint)propsPayloadBytes.Length,
+            statePayloadBytes,
+            (nuint)statePayloadBytes.Length,
             outputFormat,
             out NxBuffer buffer);
         return CopyAndFreeBuffer(buffer);
