@@ -1,28 +1,22 @@
 [package]
-name = "nx-cli"
+name = "nx-codegen"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-
-[[bin]]
-name = "nxlang"
-path = "src/main.rs"
+homepage.workspace = true
 
 [dependencies]
 nx-api = { path = "../nx-api" }
-nx-codegen = { path = "../nx-codegen" }
-nx-syntax = { path = "../nx-syntax" }
-nx-hir = { path = "../nx-hir" }
-nx-types = { path = "../nx-types" }
 nx-diagnostics = { path = "../nx-diagnostics" }
+nx-hir = { path = "../nx-hir" }
 nx-interpreter = { path = "../nx-interpreter" }
-nx-value = { path = "../nx-value" }
-clap = { version = "4", features = ["derive"] }
-smol_str = { workspace = true }
+nx-types = { path = "../nx-types" }
 rustc-hash = { workspace = true }
+smol_str = { workspace = true }
 
 [dev-dependencies]
+serde_json = { workspace = true }
 tempfile = "3"

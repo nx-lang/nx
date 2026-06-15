@@ -2,21 +2,23 @@
 //!
 //! Provides commands like:
 //! - `nxlang run <file>` - Run an NX file and output the result
-//! - `nxlang generate <path> --language <csharp|typescript>` - Generate language-specific type definitions
+//! - `nxlang typegen <path> --language <csharp|typescript>` - Generate language-specific type definitions
+//! - `nxlang codegen <path> --target <javascript|typescript>` - Generate executable source
 //! - `nxlang parse <file>` - Parse and display AST (future)
 //! - `nxlang check <file>` - Type check and report errors (future)
 //! - `nxlang format <file>` - Format NX source code (future)
 
-mod codegen;
 mod format;
 mod json;
+mod typegen;
 
 use clap::{Parser, Subcommand};
 use nx_api::{
-    build_program_artifact_from_source, LibraryRegistry, NxDiagnostic, ProgramArtifact,
-    ProgramBuildContext,
+    build_program_artifact_from_source, build_workspace_program_artifact, LibraryRegistry,
+    NxDiagnostic, NxWorkspace, NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
 };
-use nx_diagnostics::{render_diagnostics_cli, Severity};
+use nx_codegen::{emit_program, CodegenOptions};
+use nx_diagnostics::{render_diagnostics_cli, Diagnostic, Severity};
 use nx_hir::{lower_source_module, Item, LoweredModule};
 use nx_interpreter::{Interpreter, Value};
 use std::collections::HashMap;
@@ -60,7 +62,7 @@ enum Commands {
     ///
     /// Outputs exported NX type declarations. File input generates one file. Directory input
     /// analyzes the full library and writes one generated file per contributing module.
-    Generate {
+    Typegen {
         /// Path to an NX source file or NX library directory
         file: PathBuf,
 
@@ -84,6 +86,24 @@ enum Commands {
         #[arg(long = "typescript-package-prefix")]
         typescript_package_prefix: Option<String>,
     },
+
+    /// Generate executable TypeScript or JavaScript from an NX file or workspace directory
+    Codegen {
+        /// Path to an NX source file or workspace directory
+        file: PathBuf,
+
+        /// Executable output target
+        #[arg(long, value_enum)]
+        target: ExecutableTarget,
+
+        /// Output directory for generated program and runtime files
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Entry module identity when generating from a workspace directory
+        #[arg(long)]
+        entry: Option<String>,
+    },
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,6 +115,12 @@ enum OutputFormat {
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 enum GenLanguage {
     Csharp,
+    Typescript,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum ExecutableTarget {
+    Javascript,
     Typescript,
 }
 
@@ -116,7 +142,7 @@ fn main() -> ExitCode {
             format,
             output,
         } => run_file(&file, format, output.as_ref()),
-        Commands::Generate {
+        Commands::Typegen {
             file,
             language,
             output,
@@ -131,6 +157,12 @@ fn main() -> ExitCode {
             &csharp_namespace,
             typescript_package_prefix.as_deref(),
         ),
+        Commands::Codegen {
+            file,
+            target,
+            output,
+            entry,
+        } => generate_executable_source(&file, target, &output, entry.as_deref()),
     }
 }
 
@@ -230,8 +262,8 @@ fn generate_types(
     };
 
     let target_language = match language {
-        GenLanguage::Typescript => codegen::TargetLanguage::TypeScript,
-        GenLanguage::Csharp => codegen::TargetLanguage::CSharp,
+        GenLanguage::Typescript => typegen::TargetLanguage::TypeScript,
+        GenLanguage::Csharp => typegen::TargetLanguage::CSharp,
     };
     let csharp_namespace = match language {
         GenLanguage::Typescript => None,
@@ -245,9 +277,9 @@ fn generate_types(
     let format_target_name = match input_kind {
         GenerateInputKind::SourceFile => output
             .and_then(|output_path| output_path.file_name().and_then(|name| name.to_str()))
-            .unwrap_or(codegen::default_single_file_name(target_language)),
+            .unwrap_or(typegen::default_single_file_name(target_language)),
         GenerateInputKind::LibraryDirectory => {
-            codegen::default_library_target_name(target_language)
+            typegen::default_library_target_name(target_language)
         }
     };
     let format = match resolve_format_options(target_language, editorconfig, format_target_name) {
@@ -257,7 +289,7 @@ fn generate_types(
             return ExitCode::from(1);
         }
     };
-    let opts = codegen::GenerateTypesOptions {
+    let opts = typegen::GenerateTypesOptions {
         language: target_language,
         csharp_namespace,
         typescript_package_prefix,
@@ -268,6 +300,88 @@ fn generate_types(
         GenerateInputKind::SourceFile => generate_types_from_file(path, output, &opts),
         GenerateInputKind::LibraryDirectory => generate_types_from_library(path, output, &opts),
     }
+}
+
+fn generate_executable_source(
+    path: &PathBuf,
+    target: ExecutableTarget,
+    output_root: &Path,
+    entry: Option<&str>,
+) -> ExitCode {
+    let input_kind = match classify_generate_input(path) {
+        Ok(kind) => kind,
+        Err(message) => {
+            eprintln!("Error: {}", message);
+            return ExitCode::from(1);
+        }
+    };
+
+    if output_root.exists() && !output_root.is_dir() {
+        eprintln!("Error: Executable codegen requires --output to be a directory root");
+        return ExitCode::from(1);
+    }
+
+    let artifact = match input_kind {
+        GenerateInputKind::SourceFile => load_source_program_for_codegen(path),
+        GenerateInputKind::LibraryDirectory => load_workspace_program_for_codegen(path, entry),
+    };
+    let artifact = match artifact {
+        Ok(artifact) => artifact,
+        Err(exit_code) => return exit_code,
+    };
+
+    let options = match target {
+        ExecutableTarget::Typescript => CodegenOptions::typescript(),
+        ExecutableTarget::Javascript => CodegenOptions::javascript(),
+    };
+    let generated = match emit_program(&artifact, &options) {
+        Ok(output) => output,
+        Err(error) => return render_codegen_diagnostics(&artifact, &error.diagnostics),
+    };
+
+    for warning in &generated.warnings {
+        eprintln!("Warning: {}", warning.message);
+    }
+
+    if let Err(error) = std::fs::create_dir_all(output_root) {
+        eprintln!(
+            "Error creating output directory '{}': {}",
+            output_root.display(),
+            error
+        );
+        return ExitCode::from(1);
+    }
+
+    for file in generated.files {
+        let target_path = match resolve_generated_output_path(output_root, &file.relative_path) {
+            Ok(path) => path,
+            Err(message) => {
+                eprintln!("Error: {}", message);
+                return ExitCode::from(1);
+            }
+        };
+        if let Some(parent) = target_path.parent() {
+            if let Err(error) = std::fs::create_dir_all(parent) {
+                eprintln!(
+                    "Error creating output directory '{}': {}",
+                    parent.display(),
+                    error
+                );
+                return ExitCode::from(1);
+            }
+        }
+
+        if let Err(error) = std::fs::write(&target_path, file.content) {
+            eprintln!(
+                "Error writing output to '{}': {}",
+                target_path.display(),
+                error
+            );
+            return ExitCode::from(1);
+        }
+    }
+
+    ExitCode::SUCCESS
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -302,20 +416,20 @@ fn classify_generate_input(path: &Path) -> Result<GenerateInputKind, String> {
 }
 
 fn resolve_format_options(
-    language: codegen::TargetLanguage,
+    language: typegen::TargetLanguage,
     editorconfig: Option<&PathBuf>,
     target_file_name: &str,
-) -> Result<codegen::options::FormatOptions, String> {
+) -> Result<typegen::options::FormatOptions, String> {
     match editorconfig {
-        Some(path) => codegen::format_options_from_editorconfig(language, path, target_file_name),
-        None => Ok(codegen::options::FormatOptions::defaults_for(language)),
+        Some(path) => typegen::format_options_from_editorconfig(language, path, target_file_name),
+        None => Ok(typegen::options::FormatOptions::defaults_for(language)),
     }
 }
 
 fn generate_types_from_file(
     path: &Path,
     output: Option<&PathBuf>,
-    opts: &codegen::GenerateTypesOptions,
+    opts: &typegen::GenerateTypesOptions,
 ) -> ExitCode {
     if output.is_some_and(|output_path| output_path.is_dir()) {
         eprintln!(
@@ -341,7 +455,7 @@ fn generate_types_from_file(
         Err(exit_code) => return exit_code,
     };
 
-    let generated = match codegen::generate_types_with_warnings(&module, path, opts) {
+    let generated = match typegen::generate_types_with_warnings(&module, path, opts) {
         Ok(output) => output,
         Err(message) => {
             eprintln!("Error: {}", message);
@@ -369,7 +483,7 @@ fn generate_types_from_file(
 fn generate_types_from_library(
     path: &Path,
     output: Option<&PathBuf>,
-    opts: &codegen::GenerateTypesOptions,
+    opts: &typegen::GenerateTypesOptions,
 ) -> ExitCode {
     let Some(output_root) = output else {
         eprintln!("Error: Library generation requires an output directory");
@@ -395,7 +509,7 @@ fn generate_types_from_library(
         return ExitCode::from(1);
     }
 
-    let generated = match codegen::generate_library_types_with_warnings(library.as_ref(), opts) {
+    let generated = match typegen::generate_library_types_with_warnings(library.as_ref(), opts) {
         Ok(output) => output,
         Err(message) => {
             eprintln!("Error: {}", message);
@@ -443,6 +557,128 @@ fn generate_types_from_library(
     }
 
     ExitCode::SUCCESS
+}
+
+fn load_source_program_for_codegen(path: &Path) -> Result<ProgramArtifact, ExitCode> {
+    let source = match std::fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(error) => {
+            eprintln!("Error reading file: {}", error);
+            return Err(ExitCode::from(1));
+        }
+    };
+
+    load_source_program_for_run(&source, path)
+}
+
+fn load_workspace_program_for_codegen(
+    root_path: &Path,
+    entry: Option<&str>,
+) -> Result<ProgramArtifact, ExitCode> {
+    let modules = match collect_workspace_modules(root_path) {
+        Ok(modules) => modules,
+        Err(message) => {
+            eprintln!("Error: {}", message);
+            return Err(ExitCode::from(1));
+        }
+    };
+
+    if modules.is_empty() {
+        eprintln!(
+            "Error: '{}' is not a valid NX workspace because it contains no .nx source files",
+            root_path.display()
+        );
+        return Err(ExitCode::from(1));
+    }
+
+    let entry_identity = match entry {
+        Some(entry) => entry.to_string(),
+        None => match default_workspace_entry(&modules) {
+            Ok(identity) => identity,
+            Err(message) => {
+                eprintln!("Error: {}", message);
+                return Err(ExitCode::from(1));
+            }
+        },
+    };
+    let workspace = match NxWorkspace::new(modules) {
+        Ok(workspace) => workspace,
+        Err(error) => {
+            eprintln!("Error: {}", error);
+            return Err(ExitCode::from(1));
+        }
+    };
+
+    build_workspace_program_artifact(&workspace, &entry_identity, &ProgramBuildContext::empty())
+        .map_err(|diagnostics| render_api_diagnostics(&diagnostics))
+}
+
+fn collect_workspace_modules(root_path: &Path) -> Result<Vec<NxWorkspaceModule>, String> {
+    let mut source_paths = Vec::new();
+    collect_nx_file_paths(root_path, &mut source_paths)?;
+    source_paths.sort();
+
+    let mut modules = Vec::with_capacity(source_paths.len());
+    for source_path in source_paths {
+        let identity = workspace_identity_for_path(root_path, &source_path)?;
+        let source = std::fs::read_to_string(&source_path)
+            .map_err(|error| format!("Failed to read '{}': {}", source_path.display(), error))?;
+        modules.push(
+            NxWorkspaceModule::from_source(identity, source)
+                .map_err(|error| format!("Invalid workspace input: {}", error))?,
+        );
+    }
+
+    Ok(modules)
+}
+
+fn collect_nx_file_paths(dir: &Path, output: &mut Vec<PathBuf>) -> Result<(), String> {
+    let entries = std::fs::read_dir(dir)
+        .map_err(|error| format!("Failed to read directory '{}': {}", dir.display(), error))?;
+    for entry in entries {
+        let entry = entry
+            .map_err(|error| format!("Failed to read directory '{}': {}", dir.display(), error))?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("Failed to inspect '{}': {}", path.display(), error))?;
+        if file_type.is_dir() {
+            collect_nx_file_paths(&path, output)?;
+        } else if file_type.is_file()
+            && path.extension().and_then(|extension| extension.to_str()) == Some("nx")
+        {
+            output.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn workspace_identity_for_path(root_path: &Path, source_path: &Path) -> Result<String, String> {
+    let relative_path = source_path.strip_prefix(root_path).unwrap_or(source_path);
+    let mut parts = Vec::new();
+    for component in relative_path.components() {
+        match component {
+            Component::Normal(value) => parts.push(value.to_string_lossy().to_string()),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(format!(
+                    "Workspace source path '{}' cannot be converted to a logical identity",
+                    source_path.display()
+                ));
+            }
+        }
+    }
+    Ok(parts.join("/"))
+}
+
+fn default_workspace_entry(modules: &[NxWorkspaceModule]) -> Result<String, String> {
+    if modules.len() == 1 {
+        return Ok(modules[0].identity().to_string());
+    }
+    if modules.iter().any(|module| module.identity() == "main.nx") {
+        return Ok("main.nx".to_string());
+    }
+    Err("Workspace executable codegen requires --entry when the directory contains multiple .nx files".to_string())
 }
 
 fn render_generate_warnings(warnings: &[String]) {
@@ -501,6 +737,16 @@ fn render_api_diagnostics(diagnostics: &[NxDiagnostic]) -> ExitCode {
         }
     }
 
+    ExitCode::from(1)
+}
+
+fn render_codegen_diagnostics(program: &ProgramArtifact, diagnostics: &[Diagnostic]) -> ExitCode {
+    let mut sources = HashMap::new();
+    for entry in program.source_entries() {
+        sources.insert(entry.identity.to_string(), entry.source.to_string());
+    }
+    let rendered = render_diagnostics_cli(diagnostics, &sources);
+    eprint!("{}", rendered);
     ExitCode::from(1)
 }
 
@@ -1010,7 +1256,7 @@ let root() = { Ui.title() }"#,
     }
 
     #[test]
-    fn test_cli_generate_file_infers_single_file_generation() {
+    fn test_cli_typegen_file_infers_single_file_generation() {
         let source = r#"
             type Hidden = string
             export type Theme = string
@@ -1019,7 +1265,7 @@ let root() = { Ui.title() }"#,
         let (_dir, path) = create_temp_nx_file(source);
 
         let output = run_cli(&[
-            "generate",
+            "typegen",
             path.to_str().unwrap(),
             "--language",
             "typescript",
@@ -1037,7 +1283,104 @@ let root() = { Ui.title() }"#,
     }
 
     #[test]
-    fn test_cli_generate_file_emits_external_component_state_contract() {
+    fn test_cli_generate_command_is_removed() {
+        let (_dir, path) = create_temp_nx_file("export type Theme = string");
+
+        let output = run_cli(&[
+            "generate",
+            path.to_str().unwrap(),
+            "--language",
+            "typescript",
+        ]);
+
+        assert!(
+            !output.status.success(),
+            "old generate command should not be accepted"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("unrecognized subcommand"));
+    }
+
+    #[test]
+    fn test_cli_types_command_is_removed() {
+        let (_dir, path) = create_temp_nx_file("export type Theme = string");
+
+        let output = run_cli(&["types", path.to_str().unwrap(), "--language", "typescript"]);
+
+        assert!(
+            !output.status.success(),
+            "old types command should not be accepted"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("unrecognized subcommand"));
+    }
+
+    #[test]
+    fn test_cli_codegen_file_writes_executable_javascript_output() {
+        let (dir, path) = create_temp_nx_file("let root() = { 1 + 2 }");
+        let output_path = dir.path().join("codegen-js");
+
+        let output = run_cli(&[
+            "codegen",
+            path.to_str().unwrap(),
+            "--target",
+            "javascript",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        assert!(
+            output.status.success(),
+            "CLI should write executable JavaScript output: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let module = fs::read_to_string(output_path.join("m0_test.js")).unwrap();
+        let runtime = fs::read_to_string(output_path.join("nx-runtime.js")).unwrap();
+        let index = fs::read_to_string(output_path.join("index.js")).unwrap();
+
+        assert!(module.contains("export function root()"));
+        assert!(module.contains("return (1 + 2);"));
+        assert!(runtime.contains("export function nxElement"));
+        assert!(!runtime.contains("export function nxRecord"));
+        assert!(index.contains("export { root } from \"./m0_test.js\";"));
+    }
+
+    #[test]
+    fn test_cli_codegen_workspace_uses_entry_and_resolved_imports() {
+        let (dir, workspace_path) = create_temp_library(&[
+            (
+                "main.nx",
+                r#"import { answer } from "./value.nx"
+let root(): int = { answer }"#,
+            ),
+            ("value.nx", "export let answer: int = 42"),
+        ]);
+        let output_path = dir.path().join("codegen-workspace-js");
+
+        let output = run_cli(&[
+            "codegen",
+            workspace_path.to_str().unwrap(),
+            "--target",
+            "javascript",
+            "--entry",
+            "main.nx",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        assert!(
+            output.status.success(),
+            "CLI should write workspace executable output: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let module = fs::read_to_string(output_path.join("m0_main.js")).unwrap();
+
+        assert!(module.contains("import { answer as m1_answer } from \"./m1_value.js\";"));
+        assert!(module.contains("return m1_answer;"));
+    }
+
+    #[test]
+    fn test_cli_typegen_file_emits_external_component_state_contract() {
         let source = r#"
             export external component <SearchBox /> = {
               state { query:string }
@@ -1046,7 +1389,7 @@ let root() = { Ui.title() }"#,
         let (_dir, path) = create_temp_nx_file(source);
 
         let output = run_cli(&[
-            "generate",
+            "typegen",
             path.to_str().unwrap(),
             "--language",
             "typescript",
@@ -1068,7 +1411,7 @@ let root() = { Ui.title() }"#,
     }
 
     #[test]
-    fn test_cli_generate_file_warns_and_skips_conflicting_external_component_state_contract() {
+    fn test_cli_typegen_file_warns_and_skips_conflicting_external_component_state_contract() {
         let source = r#"
             export type SearchBox_state = string
             export external component <SearchBox /> = {
@@ -1078,7 +1421,7 @@ let root() = { Ui.title() }"#,
         let (_dir, path) = create_temp_nx_file(source);
 
         let output = run_cli(&[
-            "generate",
+            "typegen",
             path.to_str().unwrap(),
             "--language",
             "typescript",
@@ -1098,7 +1441,7 @@ let root() = { Ui.title() }"#,
     }
 
     #[test]
-    fn test_cli_generate_file_preserves_composed_typescript_list_suffixes() {
+    fn test_cli_typegen_file_preserves_composed_typescript_list_suffixes() {
         let source = r#"
             export type Matrix = string[][]
             export type MaybeNames = string[]?
@@ -1111,7 +1454,7 @@ let root() = { Ui.title() }"#,
         let (_dir, path) = create_temp_nx_file(source);
 
         let output = run_cli(&[
-            "generate",
+            "typegen",
             path.to_str().unwrap(),
             "--language",
             "typescript",
@@ -1130,7 +1473,7 @@ let root() = { Ui.title() }"#,
     }
 
     #[test]
-    fn test_cli_generate_file_preserves_composed_csharp_list_suffixes() {
+    fn test_cli_typegen_file_preserves_composed_csharp_list_suffixes() {
         let source = r#"
             export type Payload = {
               matrix:string[][]
@@ -1141,7 +1484,7 @@ let root() = { Ui.title() }"#,
         let (_dir, path) = create_temp_nx_file(source);
 
         let output = run_cli(&[
-            "generate",
+            "typegen",
             path.to_str().unwrap(),
             "--language",
             "csharp",
@@ -1160,14 +1503,14 @@ let root() = { Ui.title() }"#,
     }
 
     #[test]
-    fn test_cli_generate_file_warns_for_csharp_abstract_root_without_concrete_descendants() {
+    fn test_cli_typegen_file_warns_for_csharp_abstract_root_without_concrete_descendants() {
         let source = r#"
             export abstract type Question = { label:string }
         "#;
         let (_dir, path) = create_temp_nx_file(source);
 
         let output = run_cli(&[
-            "generate",
+            "typegen",
             path.to_str().unwrap(),
             "--language",
             "csharp",
@@ -1195,13 +1538,13 @@ let root() = { Ui.title() }"#,
     }
 
     #[test]
-    fn test_cli_generate_rejects_non_nx_files() {
+    fn test_cli_typegen_rejects_non_nx_files() {
         let dir = TempDir::new().unwrap();
         let file_path = dir.path().join("README.md");
         fs::write(&file_path, "# Not NX").unwrap();
 
         let output = run_cli(&[
-            "generate",
+            "typegen",
             file_path.to_str().unwrap(),
             "--language",
             "typescript",
@@ -1214,12 +1557,12 @@ let root() = { Ui.title() }"#,
     }
 
     #[test]
-    fn test_cli_generate_library_requires_output_directory() {
+    fn test_cli_typegen_library_requires_output_directory() {
         let (_dir, library_path) =
             create_temp_library(&[("theme.nx", "export enum ThemeMode = | light | dark")]);
 
         let output = run_cli(&[
-            "generate",
+            "typegen",
             library_path.to_str().unwrap(),
             "--language",
             "typescript",
@@ -1234,14 +1577,14 @@ let root() = { Ui.title() }"#,
     }
 
     #[test]
-    fn test_cli_generate_rejects_empty_library_directory() {
+    fn test_cli_typegen_rejects_empty_library_directory() {
         let dir = TempDir::new().unwrap();
         let library_path = dir.path().join("empty-library");
         let output_path = dir.path().join("generated");
         fs::create_dir_all(&library_path).unwrap();
 
         let output = run_cli(&[
-            "generate",
+            "typegen",
             library_path.to_str().unwrap(),
             "--language",
             "typescript",
@@ -1258,13 +1601,13 @@ let root() = { Ui.title() }"#,
     }
 
     #[test]
-    fn test_cli_generate_surfaces_library_diagnostics() {
+    fn test_cli_typegen_surfaces_library_diagnostics() {
         let (_dir, library_path) =
             create_temp_library(&[("broken.nx", r#"export let answer(): int = { "oops" }"#)]);
         let output_path = library_path.parent().unwrap().join("generated");
 
         let output = run_cli(&[
-            "generate",
+            "typegen",
             library_path.to_str().unwrap(),
             "--language",
             "typescript",
@@ -1282,7 +1625,7 @@ let root() = { Ui.title() }"#,
     }
 
     #[test]
-    fn test_cli_generate_library_writes_typescript_output() {
+    fn test_cli_typegen_library_writes_typescript_output() {
         let (dir, library_path) = create_temp_library(&[
             ("theme.nx", "export enum ThemeMode = | light | dark"),
             (
@@ -1293,7 +1636,7 @@ let root() = { Ui.title() }"#,
         let output_path = dir.path().join("generated-ts");
 
         let output = run_cli(&[
-            "generate",
+            "typegen",
             library_path.to_str().unwrap(),
             "--language",
             "typescript",
@@ -1318,7 +1661,7 @@ let root() = { Ui.title() }"#,
     }
 
     #[test]
-    fn test_cli_generate_library_writes_typescript_dependency_package_import() {
+    fn test_cli_typegen_library_writes_typescript_dependency_package_import() {
         let dir = TempDir::new().unwrap();
         let question_flow_path = dir.path().join("question-flow");
         let chat_link_path = dir.path().join("chat-link");
@@ -1342,7 +1685,7 @@ export type QuestionFlowInitialExperience = {
         let output_path = dir.path().join("generated-ts");
 
         let output = run_cli(&[
-            "generate",
+            "typegen",
             chat_link_path.to_str().unwrap(),
             "--language",
             "typescript",
@@ -1367,7 +1710,7 @@ export type QuestionFlowInitialExperience = {
     }
 
     #[test]
-    fn test_cli_generate_library_writes_external_component_state_output() {
+    fn test_cli_typegen_library_writes_external_component_state_output() {
         let (dir, library_path) = create_temp_library(&[
             ("theme.nx", "export enum ThemeMode = | light | dark"),
             (
@@ -1380,7 +1723,7 @@ export type QuestionFlowInitialExperience = {
         let output_path = dir.path().join("generated-ts");
 
         let output = run_cli(&[
-            "generate",
+            "typegen",
             library_path.to_str().unwrap(),
             "--language",
             "typescript",
@@ -1403,7 +1746,7 @@ export type QuestionFlowInitialExperience = {
     }
 
     #[test]
-    fn test_cli_generate_library_writes_csharp_external_component_state_output() {
+    fn test_cli_typegen_library_writes_csharp_external_component_state_output() {
         let (dir, library_path) = create_temp_library(&[
             ("theme.nx", "export enum ThemeMode = | light | dark"),
             (
@@ -1416,7 +1759,7 @@ export type QuestionFlowInitialExperience = {
         let output_path = dir.path().join("generated-cs");
 
         let output = run_cli(&[
-            "generate",
+            "typegen",
             library_path.to_str().unwrap(),
             "--language",
             "csharp",
@@ -1447,7 +1790,7 @@ export type QuestionFlowInitialExperience = {
     }
 
     #[test]
-    fn test_cli_generate_library_writes_csharp_output() {
+    fn test_cli_typegen_library_writes_csharp_output() {
         let (dir, library_path) = create_temp_library(&[
             ("theme.nx", "export enum ThemeMode = | light | dark"),
             ("forms.nx", "export type FormState = { theme: ThemeMode }"),
@@ -1455,7 +1798,7 @@ export type QuestionFlowInitialExperience = {
         let output_path = dir.path().join("generated-cs");
 
         let output = run_cli(&[
-            "generate",
+            "typegen",
             library_path.to_str().unwrap(),
             "--language",
             "csharp",
@@ -1547,6 +1890,9 @@ export type QuestionFlowInitialExperience = {
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("NX Language CLI"));
         assert!(stdout.contains("run"));
+        assert!(stdout.contains("typegen"));
+        assert!(stdout.contains("codegen"));
+        assert!(!stdout.contains("  types"));
     }
 
     #[test]

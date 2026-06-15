@@ -78,6 +78,34 @@ pub struct ProgramArtifact {
     pub(crate) source_map: FxHashMap<String, Arc<str>>,
 }
 
+/// Borrowed source text entry preserved in a [`ProgramArtifact`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProgramSourceEntry<'a> {
+    pub identity: &'a str,
+    pub source: &'a str,
+}
+
+impl ProgramArtifact {
+    /// Looks up preserved source text by normalized source-provider identity.
+    pub fn source_text(&self, identity: &str) -> Option<&str> {
+        self.source_map.get(identity).map(|source| source.as_ref())
+    }
+
+    /// Returns preserved source entries sorted by identity for deterministic consumers.
+    pub fn source_entries(&self) -> Vec<ProgramSourceEntry<'_>> {
+        let mut entries = self
+            .source_map
+            .iter()
+            .map(|(identity, source)| ProgramSourceEntry {
+                identity: identity.as_str(),
+                source: source.as_ref(),
+            })
+            .collect::<Vec<_>>();
+        entries.sort_by(|lhs, rhs| lhs.identity.cmp(rhs.identity));
+        entries
+    }
+}
+
 #[derive(Debug, Default)]
 struct LibraryRegistryState {
     libraries: FxHashMap<PathBuf, Arc<LibraryArtifact>>,

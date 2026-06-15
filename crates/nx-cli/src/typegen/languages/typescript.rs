@@ -1,10 +1,10 @@
-use crate::codegen::model::{
+use crate::typegen::model::{
     ExportedAlias, ExportedEnum, ExportedExternalState, ExportedModule,
     ExportedPolymorphicDescendant, ExportedRecord, ExportedType, ExportedTypeGraph, ExportedUnion,
     ExportedUnionCase, ImportedType,
 };
-use crate::codegen::writer::CodeWriter;
-use crate::codegen::{GenerateTypesOptions, GeneratedFile};
+use crate::typegen::writer::CodeWriter;
+use crate::typegen::{GenerateTypesOptions, GeneratedFile};
 use nx_hir::ast::TypeRef;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};

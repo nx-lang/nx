@@ -1,10 +1,10 @@
-use crate::codegen::model::{
+use crate::typegen::model::{
     ExportedEnum, ExportedExternalState, ExportedModule, ExportedPolymorphicDescendant,
     ExportedRecord, ExportedRecordField, ExportedType, ExportedTypeGraph, ExportedUnion,
     ExportedUnionCase, ImportedType, ImportedTypeKind,
 };
-use crate::codegen::writer::CodeWriter;
-use crate::codegen::{GenerateTypesOptions, GeneratedFile};
+use crate::typegen::writer::CodeWriter;
+use crate::typegen::{GenerateTypesOptions, GeneratedFile};
 use nx_hir::ast::TypeRef;
 use rustc_hash::FxHashMap;
 use std::collections::BTreeSet;

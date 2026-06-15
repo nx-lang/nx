@@ -4,7 +4,7 @@ mod model;
 pub mod options;
 mod writer;
 
-use crate::codegen::options::FormatOptions;
+use crate::typegen::options::FormatOptions;
 use nx_api::LibraryArtifact;
 use nx_hir::LoweredModule;
 use std::path::{Path, PathBuf};

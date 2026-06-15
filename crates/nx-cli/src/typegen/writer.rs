@@ -1,4 +1,4 @@
-use crate::codegen::options::{BraceStyle, FormatOptions};
+use crate::typegen::options::{BraceStyle, FormatOptions};
 
 #[derive(Clone, Debug)]
 pub struct CodeWriter {

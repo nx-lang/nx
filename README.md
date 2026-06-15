@@ -84,15 +84,15 @@ for (name, result) in session.check_all() {
 
 ### Generated Types
 
-Use `nxlang generate` with either a single `.nx` file or a full library directory:
+Use `nxlang typegen` with either a single `.nx` file or a full library directory:
 
 ```bash
 # Single-file generation writes one output unit to stdout by default.
-nxlang generate ./models/person.nx --language typescript
+nxlang typegen ./models/person.nx --language typescript
 
 # Library generation writes one generated file per contributing NX module.
-nxlang generate ./ui --language csharp --csharp-namespace MyApp.Models --output ./generated
-nxlang generate ./chat-link --language typescript --typescript-package-prefix @org/nx- --output ./generated
+nxlang typegen ./ui --language csharp --csharp-namespace MyApp.Models --output ./generated
+nxlang typegen ./chat-link --language typescript --typescript-package-prefix @org/nx- --output ./generated
 ```
 
 Generated output includes only exported type declarations:
@@ -106,6 +106,19 @@ Directory input must point at a valid NX library root and always requires `--out
 TypeScript generation emits package imports for dependency-library references; until NX has
 manifest-declared package names, those package targets are derived from the dependency directory
 name plus the optional `--typescript-package-prefix` value and surfaced as warnings.
+
+### Executable Code Generation
+
+Use `nxlang codegen` when you want executable TypeScript or JavaScript for supported non-reactive
+NX programs:
+
+```bash
+nxlang codegen ./app/main.nx --target javascript --output ./generated-runtime
+nxlang codegen ./app --entry main.nx --target typescript --output ./generated-runtime
+```
+
+Generated output includes ESM program modules plus a small local NX runtime helper file for
+canonical NX values. DTO/type-only output remains separate under `nxlang typegen`.
 
 ## Features
 

@@ -1,4 +1,4 @@
-use crate::codegen::TargetLanguage;
+use crate::typegen::TargetLanguage;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BraceStyle {

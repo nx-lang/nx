@@ -1,28 +1,28 @@
 # cli-code-generation Specification
 
 ## Purpose
-Define the `nxlang generate` CLI behavior for single-file and library code generation while
+Define the `nxlang typegen` CLI behavior for single-file and library code generation while
 honoring NX export visibility.
 ## Requirements
-### Requirement: `generate` infers file versus library generation from the input path
-The `nxlang generate` command SHALL inspect the input path and select generation behavior from the
+### Requirement: `typegen` infers file versus library generation from the input path
+The `nxlang typegen` command SHALL inspect the input path and select generation behavior from the
 filesystem entry kind. A `.nx` file SHALL trigger single-file generation. A directory SHALL trigger
 library generation. Any other input kind or unsupported file extension MUST be rejected.
 
 #### Scenario: NX file input triggers single-file generation
-- **WHEN** a user runs `nxlang generate ./models/user.nx --language typescript`
+- **WHEN** a user runs `nxlang typegen ./models/user.nx --language typescript`
 - **THEN** the CLI SHALL treat `user.nx` as a single source module input
 
 #### Scenario: Directory input triggers library generation
-- **WHEN** a user runs `nxlang generate ./question-flow --language csharp --output ./generated`
+- **WHEN** a user runs `nxlang typegen ./question-flow --language csharp --output ./generated`
 - **THEN** the CLI SHALL treat `question-flow` as a library input rather than as a source file
 
 #### Scenario: Non-NX file input is rejected
-- **WHEN** a user runs `nxlang generate ./README.md --language typescript`
+- **WHEN** a user runs `nxlang typegen ./README.md --language typescript`
 - **THEN** the CLI SHALL report an error instead of attempting code generation
 
 ### Requirement: Single-file generation emits only exported type declarations
-When `nxlang generate` targets a single `.nx` file, the generated output SHALL include source
+When `nxlang typegen` targets a single `.nx` file, the generated output SHALL include source
 declarations marked `export` in that file plus companion state contracts synthesized from any
 exported external components in that file that declare state. The generated type surface SHALL
 cover exported type aliases, exported enums, exported record-like declarations, exported action
@@ -47,7 +47,7 @@ records, and generated external-component state contracts.
 - **AND** SHALL include field `query`
 
 ### Requirement: Library generation emits the exported type surface of the full library
-When `nxlang generate` targets a directory, the CLI SHALL analyze that directory as an NX library
+When `nxlang typegen` targets a directory, the CLI SHALL analyze that directory as an NX library
 and SHALL generate code from every library module that contributes exported type declarations or
 exported external-component state contracts. The command MUST reject a directory that cannot be
 analyzed as a valid NX library.
@@ -67,16 +67,16 @@ analyzed as a valid NX library.
 - **THEN** library generation SHALL omit `Hidden` and `InternalThing` from the generated output
 
 #### Scenario: Invalid library directory is rejected
-- **WHEN** a user runs `nxlang generate ./empty-dir --language csharp --output ./generated`
+- **WHEN** a user runs `nxlang typegen ./empty-dir --language csharp --output ./generated`
 - **THEN** the CLI SHALL report a library-analysis error if `empty-dir` is not a valid NX library
 
 ### Requirement: Library generation uses per-module multi-file output
-When `nxlang generate` targets a directory, generated output SHALL be written as multiple files
+When `nxlang typegen` targets a directory, generated output SHALL be written as multiple files
 using one generated file per contributing NX module. Library generation SHALL require `--output`,
 and that output path SHALL be treated as a directory root.
 
 #### Scenario: Library generation requires an output directory
-- **WHEN** a user runs `nxlang generate ./ui --language typescript` without `--output`
+- **WHEN** a user runs `nxlang typegen ./ui --language typescript` without `--output`
 - **THEN** the CLI SHALL report that library generation requires an output directory
 
 #### Scenario: TypeScript library generation writes per-module files and a barrel
@@ -116,7 +116,7 @@ import targets SHALL be derived from the dependency library name and the optiona
 - **WHEN** library `chat-link` imports `../question-flow`
 - **AND** `chat-link` exports `type QuestionFlowInitialExperience = { questionFlow:QuestionFlow }`
 - **AND** `../question-flow` exports `type QuestionFlow = { id:string }`
-- **AND** the user runs `nxlang generate ./chat-link --language typescript --typescript-package-prefix @org/nx- --output ./generated`
+- **AND** the user runs `nxlang typegen ./chat-link --language typescript --typescript-package-prefix @org/nx- --output ./generated`
 - **THEN** generated file `QuestionFlowInitialExperience.ts` SHALL include
   `import type { QuestionFlow } from "@org/nx-question-flow";`
 - **AND** the generated `questionFlow` field SHALL reference `QuestionFlow` without requiring a
@@ -388,4 +388,3 @@ authored NX wire names.
 - **WHEN** source contains `export enum CardSortMode = closed | open` and `export type LoadState = | idle | loading`
 - **THEN** generated C# SHALL use enum serialization helpers for `CardSortMode`
 - **AND** generated C# SHALL use `$type` polymorphic DTO support for `LoadState`
-

@@ -465,10 +465,10 @@ NX type generation remains C#-first:
 
 ```bash
 # Single NX file to stdout or a chosen file
-nxlang generate Person.nx --language csharp --csharp-namespace MyApp.Models > Person.g.cs
+nxlang typegen Person.nx --language csharp --csharp-namespace MyApp.Models > Person.g.cs
 
 # Full NX library to a generated output directory
-nxlang generate ./models --language csharp --csharp-namespace MyApp.Models --output ./generated
+nxlang typegen ./models --language csharp --csharp-namespace MyApp.Models --output ./generated
 ```
 
 Generation now honors NX export visibility, so only declarations marked `export` are emitted.

@@ -23,8 +23,8 @@
 //!   expansion (`*.{cs,csx}` style). It is intentionally minimal.
 //! - For TypeScript brace style is intentionally not configurable; generation uses K&R by default.
 
-use crate::codegen::options::{BraceStyle, FormatOptions, IndentStyle, NewlineStyle};
-use crate::codegen::TargetLanguage;
+use crate::typegen::options::{BraceStyle, FormatOptions, IndentStyle, NewlineStyle};
+use crate::typegen::TargetLanguage;
 use std::collections::HashMap;
 use std::path::Path;
 
