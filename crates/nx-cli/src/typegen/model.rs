@@ -1,8 +1,9 @@
 use nx_api::{build_library_artifact_from_directory, LibraryArtifact};
 use nx_hir::{
-    ast::TypeRef, Component, EnumDef, ImportKind, InterfaceItemKind, Item, LoweredModule,
-    PreparedItemKind, RecordDef, RecordKind, SelectiveImport, TypeAlias, UnionCaseDef, UnionDef,
-    Visibility,
+    ast::{Expr, Literal, OrderedFloat, TypeRef},
+    Component, EnumDef, ImportKind, InterfaceItemKind, Item, LoweredModule, PreparedItemKind,
+    RecordDef, RecordField, RecordKind, SelectiveImport, TypeAlias, UnionCaseDef, UnionCaseField,
+    UnionDef, Visibility,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeSet;
@@ -25,7 +26,22 @@ pub struct ExportedEnum {
 pub struct ExportedRecordField {
     pub name: String,
     pub ty: TypeRef,
-    pub has_default: bool,
+    pub default_value: Option<ExportedFieldDefault>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExportedFieldDefault {
+    Literal(ExportedLiteralDefault),
+    Unsupported,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExportedLiteralDefault {
+    String(String),
+    Int(i64),
+    Float(OrderedFloat),
+    Boolean(bool),
+    Null,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -561,14 +577,14 @@ fn collect_exported_declarations(module: &LoweredModule) -> Vec<ExportedTypeDecl
             }),
             Item::Union(union_def) => declarations.push(ExportedTypeDecl {
                 visibility: union_def.visibility,
-                item: ExportedType::Union(export_union(union_def)),
+                item: ExportedType::Union(export_union(module, union_def)),
             }),
             Item::Record(record) => declarations.push(ExportedTypeDecl {
                 visibility: record.visibility,
-                item: ExportedType::Record(export_record(record)),
+                item: ExportedType::Record(export_record(module, record)),
             }),
             Item::Component(component) => {
-                if let Some(record) = export_external_component_contract(component) {
+                if let Some(record) = export_external_component_contract(module, component) {
                     declarations.push(ExportedTypeDecl {
                         visibility: component.visibility,
                         item: ExportedType::Record(record),
@@ -939,7 +955,7 @@ fn export_enum(def: &EnumDef) -> ExportedEnum {
     }
 }
 
-fn export_record(def: &RecordDef) -> ExportedRecord {
+fn export_record(module: &LoweredModule, def: &RecordDef) -> ExportedRecord {
     ExportedRecord {
         name: def.name.as_str().to_string(),
         kind: def.kind,
@@ -948,39 +964,38 @@ fn export_record(def: &RecordDef) -> ExportedRecord {
         fields: def
             .properties
             .iter()
-            .map(|field| ExportedRecordField {
-                name: field.name.as_str().to_string(),
-                ty: field.ty.clone(),
-                has_default: field.default.is_some(),
-            })
+            .map(|field| export_record_field(module, field))
             .collect(),
     }
 }
 
-fn export_union(def: &UnionDef) -> ExportedUnion {
+fn export_union(module: &LoweredModule, def: &UnionDef) -> ExportedUnion {
     ExportedUnion {
         name: def.name.as_str().to_string(),
         base: def.base.as_ref().map(|name| name.as_str().to_string()),
-        cases: def.cases.iter().map(export_union_case).collect(),
+        cases: def
+            .cases
+            .iter()
+            .map(|case| export_union_case(module, case))
+            .collect(),
     }
 }
 
-fn export_union_case(case: &UnionCaseDef) -> ExportedUnionCase {
+fn export_union_case(module: &LoweredModule, case: &UnionCaseDef) -> ExportedUnionCase {
     ExportedUnionCase {
         name: case.name.as_str().to_string(),
         fields: case
             .fields
             .iter()
-            .map(|field| ExportedRecordField {
-                name: field.name.as_str().to_string(),
-                ty: field.ty.clone(),
-                has_default: field.default.is_some(),
-            })
+            .map(|field| export_union_case_field(module, field))
             .collect(),
     }
 }
 
-fn export_external_component_contract(component: &Component) -> Option<ExportedRecord> {
+fn export_external_component_contract(
+    module: &LoweredModule,
+    component: &Component,
+) -> Option<ExportedRecord> {
     if !component.is_external {
         return None;
     }
@@ -996,11 +1011,7 @@ fn export_external_component_contract(component: &Component) -> Option<ExportedR
         fields: component
             .props
             .iter()
-            .map(|field| ExportedRecordField {
-                name: field.name.as_str().to_string(),
-                ty: field.ty.clone(),
-                has_default: field.default.is_some(),
-            })
+            .map(|field| export_record_field(module, field))
             .collect(),
     })
 }
@@ -1019,10 +1030,49 @@ fn export_external_state(component: &Component) -> Option<ExportedExternalState>
             .map(|field| ExportedRecordField {
                 name: field.name.as_str().to_string(),
                 ty: field.ty.clone(),
-                has_default: false,
+                default_value: None,
             })
             .collect(),
     })
+}
+
+fn export_record_field(module: &LoweredModule, field: &RecordField) -> ExportedRecordField {
+    ExportedRecordField {
+        name: field.name.as_str().to_string(),
+        ty: field.ty.clone(),
+        default_value: export_field_default(module, field.default),
+    }
+}
+
+fn export_union_case_field(module: &LoweredModule, field: &UnionCaseField) -> ExportedRecordField {
+    ExportedRecordField {
+        name: field.name.as_str().to_string(),
+        ty: field.ty.clone(),
+        default_value: export_field_default(module, field.default),
+    }
+}
+
+fn export_field_default(
+    module: &LoweredModule,
+    default_expr: Option<nx_hir::ExprId>,
+) -> Option<ExportedFieldDefault> {
+    let default_expr = default_expr?;
+    match module.expr(default_expr) {
+        Expr::Literal(literal) => Some(ExportedFieldDefault::Literal(export_literal_default(
+            literal,
+        ))),
+        _ => Some(ExportedFieldDefault::Unsupported),
+    }
+}
+
+fn export_literal_default(literal: &Literal) -> ExportedLiteralDefault {
+    match literal {
+        Literal::String(value) => ExportedLiteralDefault::String(value.as_str().to_string()),
+        Literal::Int(value) => ExportedLiteralDefault::Int(*value),
+        Literal::Float(value) => ExportedLiteralDefault::Float(*value),
+        Literal::Boolean(value) => ExportedLiteralDefault::Boolean(*value),
+        Literal::Null => ExportedLiteralDefault::Null,
+    }
 }
 
 fn module_output_stem(path: &Path) -> Result<PathBuf, String> {
@@ -1128,7 +1178,7 @@ mod tests {
                 assert_eq!(state.component_name, "SearchBox");
                 assert_eq!(state.fields.len(), 1);
                 assert_eq!(state.fields[0].name, "query");
-                assert!(!state.fields[0].has_default);
+                assert!(state.fields[0].default_value.is_none());
             }
             other => panic!("Expected generated external state contract, got {other:?}"),
         }

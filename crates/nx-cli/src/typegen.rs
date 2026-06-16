@@ -659,6 +659,94 @@ mod tests {
     }
 
     #[test]
+    fn generates_csharp_record_field_literal_default_initializers() {
+        let source = r#"
+            export type Settings = {
+              enabled:bool = true
+              count:int = 42
+              title:string = "hello"
+              maybe:string? = null
+              ratio:float = 0.25
+              small:f32 = 0.5
+              maybeSmall:f32? = 0.5
+            }
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.Models".to_string()),
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(output.contains("public bool Enabled { get; set; } = true;"));
+        assert!(output.contains("public long Count { get; set; } = 42;"));
+        assert!(output.contains("public string Title { get; set; } = \"hello\";"));
+        assert!(output.contains("public string? Maybe { get; set; } = null;"));
+        assert!(output.contains("public double Ratio { get; set; } = 0.25;"));
+        assert!(output.contains("public float Small { get; set; } = 0.5f;"));
+        assert!(output.contains("public float? MaybeSmall { get; set; } = 0.5f;"));
+        assert!(!output.contains("public string Title { get; set; } = default!;"));
+    }
+
+    #[test]
+    fn generates_csharp_union_and_external_component_literal_default_initializers() {
+        let source = r#"
+            export type LoadState =
+              | failed { retryable:bool = true }
+            export external component <Toggle selected:bool = true label:string = "On" />
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.Models".to_string()),
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(output.contains("public sealed class LoadStateFailed : LoadState"));
+        assert!(output.contains("public bool Retryable { get; set; } = true;"));
+        assert!(output.contains("public sealed class Toggle"));
+        assert!(output.contains("public bool Selected { get; set; } = true;"));
+        assert!(output.contains("public string Label { get; set; } = \"On\";"));
+        assert!(!output.contains("public string Label { get; set; } = default!;"));
+    }
+
+    #[test]
+    fn warns_when_csharp_literal_default_initializer_cannot_be_preserved() {
+        let source = r#"
+            export type Settings = {
+              enabled:bool = { !false }
+              title:string = { "hello" + "world" }
+            }
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.Models".to_string()),
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let output = generate_types_with_warnings(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert_eq!(output.warnings.len(), 2);
+        assert!(output.warnings[0].contains("Settings.enabled"));
+        assert!(output.warnings[0].contains("omitted default"));
+        assert!(output.warnings[1].contains("Settings.title"));
+        assert!(output.warnings[1].contains("omitted default"));
+        assert!(output.value.contains("public bool Enabled { get; set; }"));
+        assert!(!output.value.contains("public bool Enabled { get; set; } ="));
+        assert!(output
+            .value
+            .contains("public string Title { get; set; } = default!;"));
+    }
+
+    #[test]
     fn generates_csharp_enums_with_shared_runtime_enum_serialization_helpers() {
         let source = r#"
             export enum DealStage = | draft | pending_review | closed_won

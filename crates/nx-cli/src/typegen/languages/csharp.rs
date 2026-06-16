@@ -1,7 +1,8 @@
 use crate::typegen::model::{
-    ExportedEnum, ExportedExternalState, ExportedModule, ExportedPolymorphicDescendant,
-    ExportedRecord, ExportedRecordField, ExportedType, ExportedTypeGraph, ExportedUnion,
-    ExportedUnionCase, ImportedType, ImportedTypeKind,
+    ExportedEnum, ExportedExternalState, ExportedFieldDefault, ExportedLiteralDefault,
+    ExportedModule, ExportedPolymorphicDescendant, ExportedRecord, ExportedRecordField,
+    ExportedType, ExportedTypeGraph, ExportedUnion, ExportedUnionCase, ImportedType,
+    ImportedTypeKind,
 };
 use crate::typegen::writer::CodeWriter;
 use crate::typegen::{GenerateTypesOptions, GeneratedFile};
@@ -80,9 +81,44 @@ pub(crate) fn collect_warnings(graph: &ExportedTypeGraph, namespace: &str) -> Ve
                 record.name
             ));
         }
+
+        for declaration in &module.declarations {
+            match &declaration.item {
+                ExportedType::Record(record) => collect_unsupported_default_warnings(
+                    &mut warnings,
+                    &record.name,
+                    &record.fields,
+                ),
+                ExportedType::Union(union_def) => {
+                    for case in &union_def.cases {
+                        collect_unsupported_default_warnings(
+                            &mut warnings,
+                            &format!("{}.{}", union_def.name, case.name),
+                            &case.fields,
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     warnings
+}
+
+fn collect_unsupported_default_warnings(
+    warnings: &mut Vec<String>,
+    owner_name: &str,
+    fields: &[ExportedRecordField],
+) {
+    for field in fields {
+        if matches!(field.default_value, Some(ExportedFieldDefault::Unsupported)) {
+            warnings.push(format!(
+                "Generated C# omitted default for '{}.{}' because only literal defaults can be emitted as property initializers.",
+                owner_name, field.name
+            ));
+        }
+    }
 }
 
 fn render_module(
@@ -420,7 +456,14 @@ fn emit_record_fields(
         let field_type = csharp_type(&field.ty, context);
         let field_name = sanitize_csharp_member_name(&field.name);
 
-        let property_declaration = if field_type.is_reference && !field_type.is_nullable {
+        let property_declaration = if let Some(initializer) =
+            csharp_default_initializer(field.default_value.as_ref(), &field_type)
+        {
+            format!(
+                "public {} {} {{ get; set; }} = {};",
+                field_type.text, field_name, initializer
+            )
+        } else if field_type.is_reference && !field_type.is_nullable {
             format!(
                 "public {} {} {{ get; set; }} = default!;",
                 field_type.text, field_name
@@ -437,6 +480,66 @@ fn emit_record_fields(
         );
         needs_leading_blank_line = true;
     }
+}
+
+fn csharp_default_initializer(
+    default_value: Option<&ExportedFieldDefault>,
+    field_type: &CSharpType,
+) -> Option<String> {
+    let Some(ExportedFieldDefault::Literal(literal)) = default_value else {
+        return None;
+    };
+
+    Some(match literal {
+        ExportedLiteralDefault::String(value) => {
+            format!("\"{}\"", escape_csharp_string_literal(value))
+        }
+        ExportedLiteralDefault::Int(value) => value.to_string(),
+        ExportedLiteralDefault::Float(value) => csharp_float_literal(*value, field_type),
+        ExportedLiteralDefault::Boolean(value) => value.to_string(),
+        ExportedLiteralDefault::Null => "null".to_string(),
+    })
+}
+
+fn csharp_float_literal(value: nx_hir::ast::OrderedFloat, field_type: &CSharpType) -> String {
+    let type_name = field_type.text.trim_end_matches('?');
+    let is_float = type_name == "float";
+    let value = value.0;
+    let mut literal = if value.is_nan() {
+        if is_float {
+            "float.NaN".to_string()
+        } else {
+            "double.NaN".to_string()
+        }
+    } else if value == f64::INFINITY {
+        if is_float {
+            "float.PositiveInfinity".to_string()
+        } else {
+            "double.PositiveInfinity".to_string()
+        }
+    } else if value == f64::NEG_INFINITY {
+        if is_float {
+            "float.NegativeInfinity".to_string()
+        } else {
+            "double.NegativeInfinity".to_string()
+        }
+    } else {
+        let mut text = value.to_string();
+        if !text.contains('.') && !text.contains('e') && !text.contains('E') {
+            text.push_str(".0");
+        }
+        text
+    };
+
+    if is_float
+        && !literal.starts_with("float.")
+        && !literal.ends_with('f')
+        && !literal.ends_with('F')
+    {
+        literal.push('f');
+    }
+
+    literal
 }
 
 fn emit_dual_annotated_auto_property(
@@ -934,5 +1037,18 @@ fn sanitize_csharp_member_name(name: &str) -> String {
 }
 
 fn escape_csharp_string_literal(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('\"', "\\\"")
+    let mut escaped = String::new();
+    for ch in value.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            '\0' => escaped.push_str("\\0"),
+            ch if ch.is_control() => escaped.push_str(&format!("\\u{:04x}", ch as u32)),
+            ch => escaped.push(ch),
+        }
+    }
+    escaped
 }
