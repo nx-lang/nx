@@ -13,9 +13,10 @@ mod runtime;
 pub use builder::build_codegen_program;
 pub use emit::{emit_codegen_program, emit_program};
 pub use model::{
-    CodegenDeclaration, CodegenDeclarationKind, CodegenElement, CodegenEntrypoint,
-    CodegenExpression, CodegenExpressionKind, CodegenModule, CodegenModuleProvenance,
-    CodegenProgram, CodegenReference, CodegenSourceEntry, CodegenUnsupportedConstruct,
+    CodegenComponent, CodegenComponentDescriptor, CodegenComponentField, CodegenDeclaration,
+    CodegenDeclarationKind, CodegenElement, CodegenEntrypoint, CodegenExpression,
+    CodegenExpressionKind, CodegenModule, CodegenModuleProvenance, CodegenProgram,
+    CodegenReference, CodegenSourceEntry, CodegenUnsupportedConstruct,
 };
 pub use options::{
     CodegenError, CodegenOptions, CodegenOutput, CodegenOutputFormat, CodegenTarget,

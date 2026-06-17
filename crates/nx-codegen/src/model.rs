@@ -10,6 +10,7 @@ pub struct CodegenProgram {
     pub fingerprint: u64,
     pub modules: Vec<CodegenModule>,
     pub entrypoints: Vec<CodegenEntrypoint>,
+    pub component_entrypoints: Vec<CodegenEntrypoint>,
     pub source_entries: Vec<CodegenSourceEntry>,
 }
 
@@ -106,6 +107,7 @@ pub enum CodegenDeclarationKind {
     Record {
         fields: Vec<CodegenRecordField>,
     },
+    Component(CodegenComponent),
     Union {
         cases: Vec<CodegenUnionCase>,
     },
@@ -118,6 +120,7 @@ pub enum CodegenDeclarationKind {
 pub struct CodegenParam {
     pub name: String,
     pub ty: ast::TypeRef,
+    pub is_content: bool,
     pub span: TextSpan,
 }
 
@@ -129,6 +132,28 @@ pub struct CodegenRecordField {
     pub is_content: bool,
     pub is_required: bool,
     pub default: Option<CodegenExpression>,
+    pub span: TextSpan,
+}
+
+/// Component declaration metadata preserved for executable entrypoint emission.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CodegenComponent {
+    pub is_abstract: bool,
+    pub is_external: bool,
+    pub props: Vec<CodegenComponentField>,
+    pub state: Vec<CodegenComponentField>,
+    pub body: Option<CodegenExpression>,
+}
+
+/// Prop or state field metadata for component normalization.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CodegenComponentField {
+    pub name: String,
+    pub ty: ast::TypeRef,
+    pub is_content: bool,
+    pub is_required: bool,
+    pub default: Option<CodegenExpression>,
+    pub owner_module_id: RuntimeModuleId,
     pub span: TextSpan,
 }
 
@@ -217,6 +242,7 @@ pub enum CodegenExpressionKind {
         fields: Vec<CodegenRecordField>,
         properties: Vec<CodegenProperty>,
     },
+    ComponentDescriptor(CodegenComponentDescriptor),
     Element(CodegenElement),
     Unsupported(CodegenUnsupportedConstruct),
 }
@@ -238,6 +264,23 @@ pub struct CodegenProperty {
     pub name: String,
     pub value: CodegenExpression,
     pub span: TextSpan,
+}
+
+/// Element expression that resolves to a concrete component descriptor.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CodegenComponentDescriptor {
+    pub component: CodegenReference,
+    pub target_kind: CodegenComponentTargetKind,
+    pub properties: Vec<CodegenProperty>,
+    pub content_field: Option<String>,
+    pub content: Vec<CodegenExpression>,
+}
+
+/// Component element target behavior preserved for executable emission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodegenComponentTargetKind {
+    Normal,
+    External,
 }
 
 /// Element expression that serializes to a record-like NxValue payload.

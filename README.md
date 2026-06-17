@@ -118,7 +118,29 @@ nxlang codegen ./app --entry main.nx --target typescript --output ./generated-ru
 ```
 
 Generated output includes ESM program modules plus a small local NX runtime helper file for
-canonical NX values. DTO/type-only output remains separate under `nxlang typegen`.
+canonical NX values and schema-backed JSON boundaries. The executable target supports eager,
+non-reactive expressions and emits typed component functions for concrete NX components. A
+component named `SearchBox` emits `SearchBoxProps`, `SearchBoxElement`, a `SearchBox(props)`
+function that constructs an atomic component descriptor, and `SearchBoxSchema` for JSON props/state
+validation, diagnostics, and result-returning boundary operations such as `tryEvaluateJson`.
+
+External components emit typed external element factories instead of render functions. An external
+component named `TextInput` emits `TextInputProps`, `TextInputElement`, `TextInput(props)`, and
+`TextInputSchema`; calling `TextInput({ value: "Docs" })` constructs the serializable external
+element `{ "$type": "TextInput", "value": "Docs" }` for a host/client renderer. Public generated
+TypeScript uses `Element` for those values and does not expose a `Descriptor` or `Output` suffix.
+
+Generated element expressions follow the resolved declaration kind. `<Function ... />` remains an
+eager function call. `<NormalComponent ... />` and `<ExternalComponent ... />` both construct
+atomic component descriptors; normal component bodies are evaluated only through
+`SearchBoxSchema.initializeJson(props)` / `SearchBoxSchema.evaluateJson(props, state)` or through
+`tryInitializeJson` / `tryEvaluateJson` when callers need diagnostics as values. Typed callers can
+call `SearchBox(props)` directly to construct a descriptor and use generated state helpers such as
+`initialSearchBoxState` / `renderSearchBox` when they manage state explicitly.
+
+Action-handler bindings, dispatch/effect behavior, and reactive state-update APIs are not emitted
+by executable TypeScript/JavaScript codegen yet; unsupported handler bindings fail codegen with
+diagnostics instead of being dropped. DTO/type-only output remains separate under `nxlang typegen`.
 
 ## Features
 

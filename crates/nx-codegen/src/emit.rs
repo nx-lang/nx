@@ -1,8 +1,10 @@
 use crate::builder::build_codegen_program;
 use crate::model::{
-    CodegenDeclaration, CodegenDeclarationKind, CodegenElement, CodegenExpression,
-    CodegenExpressionKind, CodegenModule, CodegenModuleProvenance, CodegenProgram, CodegenProperty,
-    CodegenRecordField, CodegenReference, CodegenStatement, CodegenUnionCase,
+    CodegenComponent, CodegenComponentDescriptor, CodegenComponentField,
+    CodegenComponentTargetKind, CodegenDeclaration, CodegenDeclarationKind, CodegenElement,
+    CodegenExpression, CodegenExpressionKind, CodegenModule, CodegenModuleProvenance,
+    CodegenProgram, CodegenProperty, CodegenRecordField, CodegenReference, CodegenStatement,
+    CodegenUnionCase,
 };
 use crate::options::{CodegenError, CodegenOptions, CodegenOutput, CodegenTarget, GeneratedFile};
 use crate::runtime::runtime_helper_source;
@@ -56,7 +58,10 @@ pub fn emit_codegen_program(
 
 struct EmitContext {
     module_files: FxHashMap<RuntimeModuleId, String>,
+    modules: FxHashMap<RuntimeModuleId, CodegenModule>,
     declaration_names: FxHashMap<ReferenceKey, String>,
+    component_names: FxHashMap<ReferenceKey, ComponentGeneratedNames>,
+    schema_declarations: FxHashMap<ReferenceKey, SchemaDeclaration>,
     import_aliases: FxHashMap<ReferenceKey, String>,
 }
 
@@ -75,7 +80,15 @@ impl EmitContext {
             module_files.insert(module.id, file_name);
         }
 
+        let modules = program
+            .modules
+            .iter()
+            .map(|module| (module.id, module.clone()))
+            .collect::<FxHashMap<_, _>>();
+
         let mut declaration_names = FxHashMap::default();
+        let mut component_names = FxHashMap::default();
+        let mut schema_declarations = FxHashMap::default();
         for module in &program.modules {
             let mut used_names = FxHashSet::default();
             for declaration in &module.declarations {
@@ -84,6 +97,20 @@ impl EmitContext {
                     &mut used_names,
                 );
                 declaration_names.insert(ReferenceKey::new(&declaration.reference), name);
+                if let CodegenDeclarationKind::Component(component) = &declaration.kind {
+                    let generated_names = ComponentGeneratedNames::new(
+                        declaration_names
+                            .get(&ReferenceKey::new(&declaration.reference))
+                            .expect("component declaration name should be planned"),
+                        component,
+                        &mut used_names,
+                    );
+                    component_names
+                        .insert(ReferenceKey::new(&declaration.reference), generated_names);
+                }
+                if let Some(schema) = SchemaDeclaration::from_declaration(declaration) {
+                    schema_declarations.insert(ReferenceKey::new(&declaration.reference), schema);
+                }
             }
         }
 
@@ -105,9 +132,16 @@ impl EmitContext {
 
         Self {
             module_files,
+            modules,
             declaration_names,
+            component_names,
+            schema_declarations,
             import_aliases,
         }
+    }
+
+    fn module(&self, module_id: RuntimeModuleId) -> Option<&CodegenModule> {
+        self.modules.get(&module_id)
     }
 
     fn module_file(&self, module_id: RuntimeModuleId) -> &str {
@@ -144,6 +178,185 @@ impl EmitContext {
             .cloned()
             .unwrap_or_else(|| safe_identifier(&reference.name))
     }
+
+    fn component_names(&self, reference: &CodegenReference) -> &ComponentGeneratedNames {
+        self.component_names
+            .get(&ReferenceKey::new(reference))
+            .expect("component should have generated names")
+    }
+
+    fn component(&self, reference: &CodegenReference) -> Option<&CodegenComponent> {
+        self.module(reference.module_id)?
+            .declarations
+            .iter()
+            .find(|declaration| {
+                ReferenceKey::new(&declaration.reference) == ReferenceKey::new(reference)
+            })
+            .and_then(|declaration| match &declaration.kind {
+                CodegenDeclarationKind::Component(component) => Some(component),
+                _ => None,
+            })
+    }
+
+    fn type_reference(
+        &self,
+        current_module_id: RuntimeModuleId,
+        name: &str,
+    ) -> Option<CodegenReference> {
+        let module = self.module(current_module_id)?;
+        module
+            .imports
+            .iter()
+            .find(|reference| reference.name == name && is_type_reference_kind(reference.kind))
+            .cloned()
+            .or_else(|| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|declaration| {
+                        declaration.reference.name == name
+                            && is_type_reference_kind(declaration.reference.kind)
+                    })
+                    .map(|declaration| declaration.reference.clone())
+            })
+    }
+
+    fn generated_component_name(
+        &self,
+        current_module_id: RuntimeModuleId,
+        reference: &CodegenReference,
+        role: ComponentNameRole,
+    ) -> String {
+        let exported_name = self.component_names(reference).name(role);
+        if reference.module_id == current_module_id {
+            exported_name.to_string()
+        } else {
+            format!("{}_{}", module_prefix(reference.module_id), exported_name)
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ComponentGeneratedNames {
+    props_type: String,
+    resolved_props_type: String,
+    element_type: Option<String>,
+    state_type: Option<String>,
+    schema_value: String,
+    resolve_props_function: String,
+    initial_state_function: Option<String>,
+    render_function: Option<String>,
+}
+
+impl ComponentGeneratedNames {
+    fn new(
+        component_name: &str,
+        component: &CodegenComponent,
+        used_names: &mut FxHashSet<String>,
+    ) -> Self {
+        let props_type = unique_identifier(format!("{}Props", component_name), used_names);
+        let resolved_props_type =
+            unique_identifier(format!("{}ResolvedProps", component_name), used_names);
+        let element_type = (!component.is_abstract)
+            .then(|| unique_identifier(format!("{}Element", component_name), used_names));
+        let state_type = (!component.state.is_empty())
+            .then(|| unique_identifier(format!("{}State", component_name), used_names));
+        let schema_value = unique_identifier(format!("{}Schema", component_name), used_names);
+        let resolve_props_function =
+            unique_identifier(format!("resolve{}Props", component_name), used_names);
+        let initial_state_function = (!component.state.is_empty())
+            .then(|| unique_identifier(format!("initial{}State", component_name), used_names));
+        let render_function = (!component.is_external && !component.is_abstract)
+            .then(|| unique_identifier(format!("render{}", component_name), used_names));
+
+        Self {
+            props_type,
+            resolved_props_type,
+            element_type,
+            state_type,
+            schema_value,
+            resolve_props_function,
+            initial_state_function,
+            render_function,
+        }
+    }
+
+    fn name(&self, role: ComponentNameRole) -> &str {
+        match role {
+            ComponentNameRole::Props => &self.props_type,
+            ComponentNameRole::ResolvedProps => &self.resolved_props_type,
+            ComponentNameRole::Element => self
+                .element_type
+                .as_deref()
+                .expect("external component should have an element type"),
+            ComponentNameRole::State => self
+                .state_type
+                .as_deref()
+                .expect("stateful component should have a state type"),
+            ComponentNameRole::Schema => &self.schema_value,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum ComponentNameRole {
+    Props,
+    ResolvedProps,
+    Element,
+    State,
+    Schema,
+}
+
+#[derive(Debug, Clone)]
+struct SchemaDeclaration {
+    reference: CodegenReference,
+    kind: SchemaDeclarationKind,
+}
+
+impl SchemaDeclaration {
+    fn from_declaration(declaration: &CodegenDeclaration) -> Option<Self> {
+        let kind = match &declaration.kind {
+            CodegenDeclarationKind::Enum { members } => SchemaDeclarationKind::Enum {
+                members: members.clone(),
+            },
+            CodegenDeclarationKind::Record { fields } => SchemaDeclarationKind::Record {
+                fields: fields.clone(),
+            },
+            CodegenDeclarationKind::Union { cases } => SchemaDeclarationKind::Union {
+                cases: cases.clone(),
+            },
+            CodegenDeclarationKind::Component(component) => SchemaDeclarationKind::Component {
+                fields: component.props.clone(),
+                is_abstract: component.is_abstract,
+            },
+            CodegenDeclarationKind::Function { .. }
+            | CodegenDeclarationKind::Value { .. }
+            | CodegenDeclarationKind::TypeAlias
+            | CodegenDeclarationKind::Unsupported(_) => return None,
+        };
+
+        Some(Self {
+            reference: declaration.reference.clone(),
+            kind,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+enum SchemaDeclarationKind {
+    Enum {
+        members: Vec<String>,
+    },
+    Record {
+        fields: Vec<CodegenRecordField>,
+    },
+    Union {
+        cases: Vec<CodegenUnionCase>,
+    },
+    Component {
+        fields: Vec<CodegenComponentField>,
+        is_abstract: bool,
+    },
 }
 
 fn emit_module(
@@ -164,7 +377,7 @@ fn emit_module(
         }
     }
     out.push('\n');
-    let runtime_helpers = collect_module_runtime_helpers(module);
+    let runtime_helpers = collect_module_runtime_helpers(module, target);
     if !runtime_helpers.is_empty() {
         out.push_str(&format!(
             "import {{ {} }} from \"./{}\";\n",
@@ -175,24 +388,71 @@ fn emit_module(
 
     let value_imports = collect_module_value_references(module);
     for reference in &value_imports {
+        if reference.kind == ResolvedItemKind::Component
+            && context
+                .component(reference)
+                .is_some_and(|component| component.is_abstract)
+        {
+            continue;
+        }
         let alias = context.reference_name(module.id, reference);
         let source_file = context.module_file(reference.module_id);
-        out.push_str(&format!(
-            "import {{ {} as {} }} from \"./{}\";\n",
-            context.declaration_name(reference),
-            alias,
-            import_file(source_file, target)
-        ));
+        if reference.kind == ResolvedItemKind::Component
+            && context
+                .component(reference)
+                .is_some_and(|component| !component.is_abstract)
+        {
+            out.push_str(&format!(
+                "import {{ {} as {}, {} as {} }} from \"./{}\";\n",
+                context.declaration_name(reference),
+                alias,
+                context
+                    .component_names(reference)
+                    .name(ComponentNameRole::Schema),
+                context.generated_component_name(module.id, reference, ComponentNameRole::Schema),
+                import_file(source_file, target)
+            ));
+        } else {
+            out.push_str(&format!(
+                "import {{ {} as {} }} from \"./{}\";\n",
+                context.declaration_name(reference),
+                alias,
+                import_file(source_file, target)
+            ));
+        }
     }
     if target.is_typescript() {
         let value_keys = value_imports
             .iter()
             .map(ReferenceKey::new)
             .collect::<FxHashSet<_>>();
-        for reference in collect_module_type_references(module)
-            .into_iter()
-            .filter(|reference| !value_keys.contains(&ReferenceKey::new(reference)))
-        {
+        for reference in collect_module_type_references(module) {
+            if reference.kind == ResolvedItemKind::Component {
+                let Some(component) = context.component(&reference) else {
+                    continue;
+                };
+                if component.is_abstract || reference.module_id == module.id {
+                    continue;
+                }
+                let alias = context.generated_component_name(
+                    module.id,
+                    &reference,
+                    ComponentNameRole::Element,
+                );
+                let source_file = context.module_file(reference.module_id);
+                out.push_str(&format!(
+                    "import type {{ {} as {} }} from \"./{}\";\n",
+                    context
+                        .component_names(&reference)
+                        .name(ComponentNameRole::Element),
+                    alias,
+                    import_file(source_file, target)
+                ));
+                continue;
+            }
+            if value_keys.contains(&ReferenceKey::new(&reference)) {
+                continue;
+            }
             let alias = context.reference_name(module.id, &reference);
             let source_file = context.module_file(reference.module_id);
             out.push_str(&format!(
@@ -319,6 +579,18 @@ fn emit_declaration(
                 out.push('\n');
             }
         }
+        CodegenDeclarationKind::Component(component) => {
+            emit_component_declaration(
+                module,
+                &declaration.reference,
+                &name,
+                &declaration.reference.name,
+                component,
+                context,
+                target,
+                out,
+            );
+        }
         CodegenDeclarationKind::Union { cases } => {
             if target.is_typescript() {
                 emit_union_type(
@@ -394,6 +666,1147 @@ fn emit_union_type(
         case_type_names.join(" | ")
     };
     out.push_str(&format!("export type {} = {};\n", name, union));
+}
+
+fn emit_component_declaration(
+    module: &CodegenModule,
+    reference: &CodegenReference,
+    name: &str,
+    runtime_name: &str,
+    component: &CodegenComponent,
+    context: &EmitContext,
+    target: CodegenTarget,
+    out: &mut String,
+) {
+    if target.is_typescript() {
+        emit_component_props_type(module, reference, component, context, out);
+        out.push('\n');
+        emit_component_resolved_props_type(module, reference, component, context, out);
+        out.push('\n');
+        if !component.is_abstract {
+            emit_component_element_type(module, reference, runtime_name, component, context, out);
+            out.push('\n');
+        }
+        if !component.state.is_empty() {
+            emit_component_state_type(module, reference, component, context, out);
+            out.push('\n');
+        }
+    }
+
+    if component.is_abstract {
+        return;
+    }
+
+    emit_component_props_resolver(module, reference, component, context, target, out);
+    out.push('\n');
+
+    if component.is_external {
+        emit_component_descriptor_factory(
+            module,
+            reference,
+            name,
+            runtime_name,
+            component,
+            context,
+            target,
+            out,
+        );
+        out.push('\n');
+        emit_external_component_schema(
+            module,
+            reference,
+            runtime_name,
+            component,
+            context,
+            target,
+            out,
+        );
+        return;
+    }
+
+    if !component.state.is_empty() {
+        emit_component_initial_state(
+            module,
+            reference,
+            runtime_name,
+            component,
+            context,
+            target,
+            out,
+        );
+        out.push('\n');
+    }
+    emit_component_descriptor_factory(
+        module,
+        reference,
+        name,
+        runtime_name,
+        component,
+        context,
+        target,
+        out,
+    );
+    out.push('\n');
+    emit_normal_component_render_function(module, reference, component, context, target, out);
+    out.push('\n');
+    emit_normal_component_schema(
+        module,
+        reference,
+        runtime_name,
+        component,
+        context,
+        target,
+        out,
+    );
+}
+
+fn emit_component_props_type(
+    module: &CodegenModule,
+    reference: &CodegenReference,
+    component: &CodegenComponent,
+    context: &EmitContext,
+    out: &mut String,
+) {
+    let props_type = context
+        .component_names(reference)
+        .name(ComponentNameRole::Props);
+    if component.props.is_empty() {
+        out.push_str(&format!(
+            "export type {} = Record<string, never>;\n",
+            props_type
+        ));
+        return;
+    }
+
+    out.push_str(&format!("export type {} = {{\n", props_type));
+    for field in &component.props {
+        let optional = if field.is_required { "" } else { "?" };
+        out.push_str(&format!(
+            "  {}{}: {};\n",
+            safe_object_key(&field.name),
+            optional,
+            emit_type_ref(module.id, &field.ty, module, context)
+        ));
+    }
+    out.push_str("};\n");
+}
+
+fn emit_component_resolved_props_type(
+    module: &CodegenModule,
+    reference: &CodegenReference,
+    component: &CodegenComponent,
+    context: &EmitContext,
+    out: &mut String,
+) {
+    let resolved_props_type = context
+        .component_names(reference)
+        .name(ComponentNameRole::ResolvedProps);
+    if component.props.is_empty() {
+        out.push_str(&format!(
+            "type {} = Record<string, never>;\n",
+            resolved_props_type
+        ));
+        return;
+    }
+
+    out.push_str(&format!("type {} = {{\n", resolved_props_type));
+    for field in &component.props {
+        out.push_str(&format!(
+            "  readonly {}: {};\n",
+            safe_object_key(&field.name),
+            emit_type_ref(module.id, &field.ty, module, context)
+        ));
+    }
+    out.push_str("};\n");
+}
+
+fn emit_component_element_type(
+    module: &CodegenModule,
+    reference: &CodegenReference,
+    runtime_name: &str,
+    component: &CodegenComponent,
+    context: &EmitContext,
+    out: &mut String,
+) {
+    let element_type = context
+        .component_names(reference)
+        .name(ComponentNameRole::Element);
+    out.push_str(&format!("export type {} = {{\n", element_type));
+    out.push_str(&format!("  readonly $type: {};\n", js_string(runtime_name)));
+    for field in &component.props {
+        out.push_str(&format!(
+            "  readonly {}: {};\n",
+            safe_object_key(&field.name),
+            emit_type_ref(module.id, &field.ty, module, context)
+        ));
+    }
+    out.push_str("};\n");
+}
+
+fn emit_component_state_type(
+    module: &CodegenModule,
+    reference: &CodegenReference,
+    component: &CodegenComponent,
+    context: &EmitContext,
+    out: &mut String,
+) {
+    let state_type = context
+        .component_names(reference)
+        .name(ComponentNameRole::State);
+    out.push_str(&format!("export type {} = {{\n", state_type));
+    for field in &component.state {
+        out.push_str(&format!(
+            "  readonly {}: {};\n",
+            safe_object_key(&field.name),
+            emit_type_ref(module.id, &field.ty, module, context)
+        ));
+    }
+    out.push_str("};\n");
+}
+
+fn emit_component_props_resolver(
+    module: &CodegenModule,
+    reference: &CodegenReference,
+    component: &CodegenComponent,
+    context: &EmitContext,
+    target: CodegenTarget,
+    out: &mut String,
+) {
+    let names = context.component_names(reference);
+    let default_value = component_props_can_default(component)
+        .then_some(" = {}")
+        .unwrap_or("");
+    if target.is_typescript() {
+        out.push_str(&format!(
+            "function {}(props: {}{}): {} {{\n",
+            names.resolve_props_function,
+            names.name(ComponentNameRole::Props),
+            default_value,
+            names.name(ComponentNameRole::ResolvedProps)
+        ));
+    } else {
+        out.push_str(&format!(
+            "function {}(props{}) {{\n",
+            names.resolve_props_function, default_value
+        ));
+    }
+
+    emit_typed_field_initializers(
+        module.id,
+        &component.props,
+        "props",
+        &FxHashSet::default(),
+        context,
+        out,
+    );
+    emit_field_object_return(&component.props, "  ", out);
+    out.push_str("}\n");
+}
+
+fn emit_component_descriptor_factory(
+    _module: &CodegenModule,
+    reference: &CodegenReference,
+    name: &str,
+    runtime_name: &str,
+    component: &CodegenComponent,
+    context: &EmitContext,
+    target: CodegenTarget,
+    out: &mut String,
+) {
+    let names = context.component_names(reference);
+    let default_value = component_props_can_default(component)
+        .then_some(" = {}")
+        .unwrap_or("");
+    if target.is_typescript() {
+        out.push_str(&format!(
+            "export function {}(props: {}{}): {} {{\n",
+            name,
+            names.name(ComponentNameRole::Props),
+            default_value,
+            names.name(ComponentNameRole::Element)
+        ));
+    } else {
+        out.push_str(&format!(
+            "export function {}(props{}) {{\n",
+            name, default_value
+        ));
+    }
+    out.push_str(&format!(
+        "  const resolvedProps = {}(props);\n",
+        names.resolve_props_function
+    ));
+    out.push_str(&format!("  return {{ $type: {}", js_string(runtime_name)));
+    for field in &component.props {
+        out.push_str(&format!(
+            ", {}: resolvedProps{}",
+            safe_object_key(&field.name),
+            member_access(&field.name)
+        ));
+    }
+    out.push_str(" };\n");
+    out.push_str("}\n");
+}
+
+fn emit_component_initial_state(
+    module: &CodegenModule,
+    reference: &CodegenReference,
+    runtime_name: &str,
+    component: &CodegenComponent,
+    context: &EmitContext,
+    target: CodegenTarget,
+    out: &mut String,
+) {
+    let names = context.component_names(reference);
+    let function_name = names
+        .initial_state_function
+        .as_deref()
+        .expect("stateful component should have an initial state helper");
+    let default_value = component_props_can_default(component)
+        .then_some(" = {}")
+        .unwrap_or("");
+    if target.is_typescript() {
+        out.push_str(&format!(
+            "export function {}(props: {}{}): {} {{\n",
+            function_name,
+            names.name(ComponentNameRole::Props),
+            default_value,
+            names.name(ComponentNameRole::State)
+        ));
+    } else {
+        out.push_str(&format!(
+            "export function {}(props{}) {{\n",
+            function_name, default_value
+        ));
+    }
+    let mut predeclared = FxHashSet::default();
+    for prop in &component.props {
+        predeclared.insert(safe_identifier(&prop.name));
+    }
+
+    let mut generated_locals = predeclared.clone();
+    let resolved_props_name = unique_identifier("resolvedProps".to_string(), &mut generated_locals);
+    out.push_str(&format!(
+        "  const {} = {}(props);\n",
+        resolved_props_name, names.resolve_props_function
+    ));
+
+    for prop in &component.props {
+        out.push_str(&format!(
+            "  let {} = {}{};\n",
+            safe_identifier(&prop.name),
+            resolved_props_name,
+            member_access(&prop.name)
+        ));
+    }
+    emit_initial_state_field_initializers(
+        module.id,
+        runtime_name,
+        component,
+        &predeclared,
+        context,
+        out,
+    );
+    emit_field_object_return(&component.state, "  ", out);
+    out.push_str("}\n");
+}
+
+fn emit_normal_component_render_function(
+    module: &CodegenModule,
+    reference: &CodegenReference,
+    component: &CodegenComponent,
+    context: &EmitContext,
+    target: CodegenTarget,
+    out: &mut String,
+) {
+    let names = context.component_names(reference);
+    let render_function = names
+        .render_function
+        .as_deref()
+        .expect("normal component should have a render helper");
+    let export_prefix = if component.state.is_empty() {
+        ""
+    } else {
+        "export "
+    };
+    let return_type = component_render_return_type(module, component, context);
+    if target.is_typescript() {
+        if component.state.is_empty() {
+            out.push_str(&format!(
+                "{}function {}(props: {}): {} {{\n",
+                export_prefix,
+                render_function,
+                names.name(ComponentNameRole::ResolvedProps),
+                return_type
+            ));
+        } else {
+            out.push_str(&format!(
+                "{}function {}(props: {}, state: {}): {} {{\n",
+                export_prefix,
+                render_function,
+                names.name(ComponentNameRole::ResolvedProps),
+                names.name(ComponentNameRole::State),
+                return_type
+            ));
+        }
+    } else if component.state.is_empty() {
+        out.push_str(&format!(
+            "{}function {}(props) {{\n",
+            export_prefix, render_function
+        ));
+    } else {
+        out.push_str(&format!(
+            "{}function {}(props, state) {{\n",
+            export_prefix, render_function
+        ));
+    }
+
+    let mut predeclared = FxHashSet::default();
+    for prop in &component.props {
+        predeclared.insert(safe_identifier(&prop.name));
+        out.push_str(&format!(
+            "  let {} = props{};\n",
+            safe_identifier(&prop.name),
+            member_access(&prop.name)
+        ));
+    }
+    for field in &component.state {
+        let local_name = safe_identifier(&field.name);
+        if predeclared.contains(&local_name) {
+            out.push_str(&format!(
+                "  {} = state{};\n",
+                local_name,
+                member_access(&field.name)
+            ));
+        } else {
+            out.push_str(&format!(
+                "  const {} = state{};\n",
+                local_name,
+                member_access(&field.name)
+            ));
+        }
+    }
+    match component.body.as_ref() {
+        Some(body) => {
+            out.push_str(&format!(
+                "  return {};\n",
+                emit_expression(module.id, body, context)
+            ));
+        }
+        None => {
+            out.push_str("  return null;\n");
+        }
+    }
+    out.push_str("}\n");
+}
+
+fn emit_external_component_schema(
+    module: &CodegenModule,
+    reference: &CodegenReference,
+    runtime_name: &str,
+    component: &CodegenComponent,
+    context: &EmitContext,
+    target: CodegenTarget,
+    out: &mut String,
+) {
+    let names = context.component_names(reference);
+    if target.is_typescript() {
+        out.push_str(&format!(
+            "export const {} = nxExternalComponentSchema<{}, {}>({{\n",
+            names.name(ComponentNameRole::Schema),
+            names.name(ComponentNameRole::Props),
+            names.name(ComponentNameRole::Element)
+        ));
+    } else {
+        out.push_str(&format!(
+            "export const {} = nxExternalComponentSchema({{\n",
+            names.name(ComponentNameRole::Schema)
+        ));
+    }
+    out.push_str(&format!("  name: {},\n", js_string(runtime_name)));
+    out.push_str(&format!(
+        "  props: {},\n",
+        emit_component_boundary_schema(module.id, &component.props, false, context)
+    ));
+    out.push_str(&format!(
+        "  create: {},\n",
+        context.declaration_name(reference)
+    ));
+    out.push_str("});\n");
+}
+
+fn emit_normal_component_schema(
+    module: &CodegenModule,
+    reference: &CodegenReference,
+    runtime_name: &str,
+    component: &CodegenComponent,
+    context: &EmitContext,
+    target: CodegenTarget,
+    out: &mut String,
+) {
+    let names = context.component_names(reference);
+    let state_type = names
+        .state_type
+        .as_deref()
+        .unwrap_or("Record<string, never>");
+    let return_type = component_render_return_type(module, component, context);
+    if target.is_typescript() {
+        out.push_str(&format!(
+            "export const {} = nxComponentSchema<{}, {}, {}>({{\n",
+            names.name(ComponentNameRole::Schema),
+            names.name(ComponentNameRole::Props),
+            state_type,
+            return_type
+        ));
+    } else {
+        out.push_str(&format!(
+            "export const {} = nxComponentSchema({{\n",
+            names.name(ComponentNameRole::Schema)
+        ));
+    }
+    out.push_str(&format!("  name: {},\n", js_string(runtime_name)));
+    out.push_str(&format!(
+        "  props: {},\n",
+        emit_component_boundary_schema(module.id, &component.props, false, context)
+    ));
+    if !component.state.is_empty() {
+        out.push_str(&format!(
+            "  state: {},\n",
+            emit_component_boundary_schema(module.id, &component.state, true, context)
+        ));
+    }
+    if component.state.is_empty() {
+        let render_function = names
+            .render_function
+            .as_deref()
+            .expect("normal component should have a render helper");
+        out.push_str(&format!(
+            "  initialize: (props) => {{\n    const resolvedProps = {}(props);\n    return {{ rendered: {}(resolvedProps), state: {{}} }};\n  }},\n",
+            names.resolve_props_function, render_function
+        ));
+        out.push_str(&format!(
+            "  evaluate: (props) => {{\n    const resolvedProps = {}(props);\n    return {}(resolvedProps);\n  }},\n",
+            names.resolve_props_function, render_function
+        ));
+    } else {
+        let initial_state_function = names
+            .initial_state_function
+            .as_deref()
+            .expect("stateful component should have an initial state helper");
+        let render_function = names
+            .render_function
+            .as_deref()
+            .expect("normal component should have a render helper");
+        out.push_str("  initialize: (props) => {\n");
+        out.push_str(&format!(
+            "    const resolvedProps = {}(props);\n",
+            names.resolve_props_function
+        ));
+        out.push_str(&format!(
+            "    const initialState = {}(resolvedProps);\n",
+            initial_state_function
+        ));
+        out.push_str(&format!(
+            "    return {{ rendered: {}(resolvedProps, initialState), state: initialState }};\n",
+            render_function
+        ));
+        out.push_str("  },\n");
+        out.push_str("  evaluate: (props, state) => {\n");
+        out.push_str(&format!(
+            "    const resolvedProps = {}(props);\n",
+            names.resolve_props_function
+        ));
+        out.push_str(&format!(
+            "    const resolvedState = state ?? {}(resolvedProps);\n",
+            initial_state_function
+        ));
+        out.push_str(&format!(
+            "    return {}(resolvedProps, resolvedState);\n",
+            render_function
+        ));
+        out.push_str("  },\n");
+    }
+    out.push_str("});\n");
+}
+
+fn component_props_can_default(component: &CodegenComponent) -> bool {
+    component.props.iter().all(|field| !field.is_required)
+}
+
+fn component_render_return_type(
+    module: &CodegenModule,
+    component: &CodegenComponent,
+    context: &EmitContext,
+) -> String {
+    let mut visiting = FxHashSet::default();
+    component
+        .body
+        .as_ref()
+        .and_then(|body| {
+            expression_render_return_type(module.id, body, module, context, &mut visiting)
+        })
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn expression_render_return_type(
+    current_module_id: RuntimeModuleId,
+    expression: &CodegenExpression,
+    module: &CodegenModule,
+    context: &EmitContext,
+    visiting: &mut FxHashSet<ReferenceKey>,
+) -> Option<String> {
+    if let Some(ty) = expression
+        .ty
+        .as_ref()
+        .filter(|ty| !matches!(ty, Type::Unknown | Type::Error))
+        .and_then(|ty| emit_known_type(current_module_id, ty, module, context))
+    {
+        return Some(ty);
+    }
+
+    match &expression.kind {
+        CodegenExpressionKind::ComponentDescriptor(descriptor) => {
+            component_descriptor_render_return_type(
+                current_module_id,
+                descriptor,
+                context,
+                visiting,
+            )
+        }
+        CodegenExpressionKind::Call { .. } => referenced_function_return_type(expression, context)
+            .as_ref()
+            .and_then(|ty| emit_known_type(current_module_id, ty, module, context)),
+        CodegenExpressionKind::If {
+            then_branch,
+            else_branch: Some(else_branch),
+            ..
+        } => {
+            let then_type = expression_render_return_type(
+                current_module_id,
+                then_branch,
+                module,
+                context,
+                visiting,
+            )?;
+            let else_type = expression_render_return_type(
+                current_module_id,
+                else_branch,
+                module,
+                context,
+                visiting,
+            )?;
+            if then_type == else_type {
+                Some(then_type)
+            } else {
+                None
+            }
+        }
+        CodegenExpressionKind::Let { body, .. } => {
+            expression_render_return_type(current_module_id, body, module, context, visiting)
+        }
+        CodegenExpressionKind::Block {
+            expression: Some(expression),
+            ..
+        } => {
+            expression_render_return_type(current_module_id, expression, module, context, visiting)
+        }
+        _ => None,
+    }
+}
+
+fn emit_known_type(
+    current_module_id: RuntimeModuleId,
+    ty: &Type,
+    module: &CodegenModule,
+    context: &EmitContext,
+) -> Option<String> {
+    let emitted = emit_type(current_module_id, ty, module, context);
+    (emitted != "unknown").then_some(emitted)
+}
+
+fn component_descriptor_render_return_type(
+    current_module_id: RuntimeModuleId,
+    descriptor: &CodegenComponentDescriptor,
+    context: &EmitContext,
+    _visiting: &mut FxHashSet<ReferenceKey>,
+) -> Option<String> {
+    match descriptor.target_kind {
+        CodegenComponentTargetKind::External | CodegenComponentTargetKind::Normal => {
+            Some(context.generated_component_name(
+                current_module_id,
+                &descriptor.component,
+                ComponentNameRole::Element,
+            ))
+        }
+    }
+}
+
+fn referenced_function_return_type(
+    expression: &CodegenExpression,
+    context: &EmitContext,
+) -> Option<Type> {
+    let CodegenExpressionKind::Call { callee, .. } = &expression.kind else {
+        return None;
+    };
+    let CodegenExpressionKind::Identifier {
+        reference: Some(reference),
+        ..
+    } = &callee.kind
+    else {
+        return None;
+    };
+    let module = context.module(reference.module_id)?;
+    module
+        .declarations
+        .iter()
+        .find(|declaration| {
+            ReferenceKey::new(&declaration.reference) == ReferenceKey::new(reference)
+        })
+        .and_then(|declaration| match &declaration.kind {
+            CodegenDeclarationKind::Function {
+                return_type: Some(return_type),
+                ..
+            } => Some(return_type.clone()),
+            _ => None,
+        })
+}
+
+fn emit_typed_field_initializers(
+    current_module_id: RuntimeModuleId,
+    fields: &[CodegenComponentField],
+    input_name: &str,
+    predeclared_locals: &FxHashSet<String>,
+    context: &EmitContext,
+    out: &mut String,
+) {
+    for (index, field) in fields.iter().enumerate() {
+        let has_name = format!("__nx_has_{}", index);
+        let field_name = format!("__nx_field_{}", index);
+        out.push_str(&format!(
+            "  const {} = Object.prototype.hasOwnProperty.call({}, {});\n",
+            has_name,
+            input_name,
+            js_string(&field.name)
+        ));
+        let fallback = typed_field_fallback(current_module_id, field, context);
+        out.push_str(&format!(
+            "  const {} = {} ? {}{} : {};\n",
+            field_name,
+            has_name,
+            input_name,
+            member_access(&field.name),
+            fallback
+        ));
+        let local_name = safe_identifier(&field.name);
+        if predeclared_locals.contains(&local_name) {
+            out.push_str(&format!("  {} = {};\n", local_name, field_name));
+        } else {
+            out.push_str(&format!("  const {} = {};\n", local_name, field_name));
+        }
+    }
+}
+
+fn emit_initial_state_field_initializers(
+    current_module_id: RuntimeModuleId,
+    runtime_name: &str,
+    component: &CodegenComponent,
+    predeclared_locals: &FxHashSet<String>,
+    context: &EmitContext,
+    out: &mut String,
+) {
+    for (index, field) in component.state.iter().enumerate() {
+        let field_name = format!("__nx_field_{}", index);
+        let fallback = field
+            .default
+            .as_ref()
+            .map(|default| emit_expression(current_module_id, default, context))
+            .or_else(|| is_nullable_type(&field.ty).then(|| "null".to_string()))
+            .unwrap_or_else(|| {
+                format!(
+                    "nxMissingField({}, {})",
+                    js_string(&format!("{} state.{}", runtime_name, field.name)),
+                    js_string(&format!("{} state", runtime_name))
+                )
+            });
+        out.push_str(&format!("  const {} = {};\n", field_name, fallback));
+        let local_name = safe_identifier(&field.name);
+        if predeclared_locals.contains(&local_name) {
+            out.push_str(&format!("  {} = {};\n", local_name, field_name));
+        } else {
+            out.push_str(&format!("  const {} = {};\n", local_name, field_name));
+        }
+    }
+}
+
+fn typed_field_fallback(
+    current_module_id: RuntimeModuleId,
+    field: &CodegenComponentField,
+    context: &EmitContext,
+) -> String {
+    field
+        .default
+        .as_ref()
+        .map(|default| emit_expression(current_module_id, default, context))
+        .or_else(|| is_nullable_type(&field.ty).then(|| "null".to_string()))
+        .unwrap_or_else(|| format!("{}{}", "props", member_access(&field.name)))
+}
+
+fn emit_field_object_return(fields: &[CodegenComponentField], indent: &str, out: &mut String) {
+    out.push_str(indent);
+    out.push_str("return {");
+    for (index, field) in fields.iter().enumerate() {
+        if index > 0 {
+            out.push_str(",");
+        }
+        out.push_str(&format!(
+            " {}: __nx_field_{}",
+            safe_object_key(&field.name),
+            index
+        ));
+    }
+    out.push_str(" };\n");
+}
+
+fn emit_component_boundary_schema(
+    current_module_id: RuntimeModuleId,
+    fields: &[CodegenComponentField],
+    require_defaulted_fields: bool,
+    context: &EmitContext,
+) -> String {
+    let fields = fields
+        .iter()
+        .map(|field| {
+            let is_required = field.is_required
+                || (require_defaulted_fields
+                    && field.default.is_some()
+                    && !is_nullable_type(&field.ty));
+            let options = if is_required {
+                String::new()
+            } else {
+                ", { required: false }".to_string()
+            };
+            format!(
+                "{}: nxField({}{})",
+                safe_object_key(&field.name),
+                emit_type_schema(current_module_id, field.owner_module_id, &field.ty, context),
+                options
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("nxRecordSchema({{ {} }})", fields)
+}
+
+fn emit_type_schema(
+    current_module_id: RuntimeModuleId,
+    schema_module_id: RuntimeModuleId,
+    ty: &TypeRef,
+    context: &EmitContext,
+) -> String {
+    let mut seen = FxHashSet::default();
+    emit_type_schema_inner(current_module_id, schema_module_id, ty, context, &mut seen)
+}
+
+fn emit_type_schema_inner(
+    current_module_id: RuntimeModuleId,
+    schema_module_id: RuntimeModuleId,
+    ty: &TypeRef,
+    context: &EmitContext,
+    seen: &mut FxHashSet<ReferenceKey>,
+) -> String {
+    match ty {
+        TypeRef::Name(name) => emit_named_type_schema(
+            current_module_id,
+            schema_module_id,
+            name.as_str(),
+            context,
+            seen,
+        ),
+        TypeRef::Array(inner) => format!(
+            "nxArraySchema({})",
+            emit_type_schema_inner(current_module_id, schema_module_id, inner, context, seen)
+        ),
+        TypeRef::Nullable(inner) => format!(
+            "nxNullableSchema({})",
+            emit_type_schema_inner(current_module_id, schema_module_id, inner, context, seen)
+        ),
+        TypeRef::Function { .. } => "nxAnySchema".to_string(),
+    }
+}
+
+fn emit_named_type_schema(
+    current_module_id: RuntimeModuleId,
+    schema_module_id: RuntimeModuleId,
+    name: &str,
+    context: &EmitContext,
+    seen: &mut FxHashSet<ReferenceKey>,
+) -> String {
+    match name {
+        "i32" | "i64" | "int" | "f32" | "f64" | "float" => {
+            return "nxNumberSchema".to_string();
+        }
+        "string" => return "nxStringSchema".to_string(),
+        "bool" => return "nxBooleanSchema".to_string(),
+        _ => {}
+    }
+
+    let Some(reference) = resolve_schema_reference(schema_module_id, name, context) else {
+        return js_string("any");
+    };
+    let key = ReferenceKey::new(&reference);
+    if !seen.insert(key) {
+        return js_string("any");
+    }
+
+    let schema = context
+        .schema_declarations
+        .get(&key)
+        .map(|declaration| match &declaration.kind {
+            SchemaDeclarationKind::Enum { members } => emit_enum_schema(members),
+            SchemaDeclarationKind::Record { fields } => emit_record_schema(
+                current_module_id,
+                declaration.reference.module_id,
+                &declaration.reference.name,
+                fields,
+                context,
+                seen,
+            ),
+            SchemaDeclarationKind::Union { cases } => emit_union_schema(
+                current_module_id,
+                declaration.reference.module_id,
+                &declaration.reference.name,
+                cases,
+                context,
+                seen,
+            ),
+            SchemaDeclarationKind::Component {
+                fields,
+                is_abstract,
+                ..
+            } => {
+                if !*is_abstract && declaration.reference.module_id != current_module_id {
+                    format!(
+                        "{}.element",
+                        context.generated_component_name(
+                            current_module_id,
+                            &declaration.reference,
+                            ComponentNameRole::Schema,
+                        )
+                    )
+                } else {
+                    emit_component_schema(
+                        current_module_id,
+                        &declaration.reference.name,
+                        fields,
+                        !*is_abstract,
+                        context,
+                        seen,
+                    )
+                }
+            }
+        })
+        .unwrap_or_else(|| js_string("any"));
+
+    seen.remove(&key);
+    schema
+}
+
+fn resolve_schema_reference(
+    schema_module_id: RuntimeModuleId,
+    name: &str,
+    context: &EmitContext,
+) -> Option<CodegenReference> {
+    let module = context.module(schema_module_id)?;
+    module
+        .imports
+        .iter()
+        .find(|reference| reference.name == name && is_type_reference_kind(reference.kind))
+        .cloned()
+        .or_else(|| {
+            module
+                .declarations
+                .iter()
+                .find(|declaration| declaration.reference.name == name)
+                .map(|declaration| declaration.reference.clone())
+        })
+}
+
+fn emit_enum_schema(members: &[String]) -> String {
+    let members = members
+        .iter()
+        .map(|member| js_string(member))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("nxEnumSchema([{}])", members)
+}
+
+fn emit_record_schema(
+    current_module_id: RuntimeModuleId,
+    schema_module_id: RuntimeModuleId,
+    runtime_name: &str,
+    fields: &[CodegenRecordField],
+    context: &EmitContext,
+    seen: &mut FxHashSet<ReferenceKey>,
+) -> String {
+    let fields = fields
+        .iter()
+        .enumerate()
+        .map(|(index, field)| {
+            let default_metadata = field.default.as_ref().map(|default| {
+                emit_schema_field_default(current_module_id, &fields[..index], default, context)
+            });
+            emit_schema_field(
+                current_module_id,
+                schema_module_id,
+                &field.name,
+                &field.ty,
+                field.is_required,
+                default_metadata,
+                context,
+                seen,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "nxNamedRecordSchema({}, [{}])",
+        js_string(runtime_name),
+        fields
+    )
+}
+
+fn emit_union_schema(
+    current_module_id: RuntimeModuleId,
+    schema_module_id: RuntimeModuleId,
+    runtime_name: &str,
+    cases: &[CodegenUnionCase],
+    context: &EmitContext,
+    seen: &mut FxHashSet<ReferenceKey>,
+) -> String {
+    let cases = cases
+        .iter()
+        .map(|case| {
+            emit_record_schema(
+                current_module_id,
+                schema_module_id,
+                &format!("{}.{}", runtime_name, case.name),
+                &case.fields,
+                context,
+                seen,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("nxUnionSchema([{}])", cases)
+}
+
+fn emit_component_schema(
+    current_module_id: RuntimeModuleId,
+    runtime_name: &str,
+    fields: &[CodegenComponentField],
+    require_all_fields: bool,
+    context: &EmitContext,
+    seen: &mut FxHashSet<ReferenceKey>,
+) -> String {
+    let fields = fields
+        .iter()
+        .map(|field| {
+            emit_schema_field(
+                current_module_id,
+                field.owner_module_id,
+                &field.name,
+                &field.ty,
+                field.is_required || require_all_fields,
+                None,
+                context,
+                seen,
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "nxNamedRecordSchema({}, [{}])",
+        js_string(runtime_name),
+        fields
+    )
+}
+
+fn emit_schema_field(
+    current_module_id: RuntimeModuleId,
+    schema_module_id: RuntimeModuleId,
+    name: &str,
+    ty: &TypeRef,
+    is_required: bool,
+    default_metadata: Option<String>,
+    context: &EmitContext,
+    seen: &mut FxHashSet<ReferenceKey>,
+) -> String {
+    let default = default_metadata
+        .map(|metadata| format!(", {}", metadata))
+        .unwrap_or_default();
+    format!(
+        "{{ name: {}, schema: {}, required: {}{} }}",
+        js_string(name),
+        emit_type_schema_inner(current_module_id, schema_module_id, ty, context, seen),
+        is_required,
+        default
+    )
+}
+
+fn emit_schema_field_default(
+    current_module_id: RuntimeModuleId,
+    available_fields: &[CodegenRecordField],
+    default: &CodegenExpression,
+    context: &EmitContext,
+) -> String {
+    if let Some(value) = emit_schema_literal_default(default) {
+        return format!("hasDefault: true, defaultValue: {}", value);
+    }
+
+    format!(
+        "hasDefault: true, defaultFactory: {}",
+        emit_schema_default_factory(current_module_id, available_fields, default, context)
+    )
+}
+
+fn emit_schema_literal_default(default: &CodegenExpression) -> Option<String> {
+    match &default.kind {
+        CodegenExpressionKind::Literal(literal) => Some(emit_literal(literal)),
+        CodegenExpressionKind::EnumMember { member, .. } => Some(js_string(member)),
+        CodegenExpressionKind::Array(elements) => elements
+            .iter()
+            .map(emit_schema_literal_default)
+            .collect::<Option<Vec<_>>>()
+            .map(|values| format!("[{}]", values.join(", "))),
+        _ => None,
+    }
+}
+
+fn emit_schema_default_factory(
+    current_module_id: RuntimeModuleId,
+    available_fields: &[CodegenRecordField],
+    default: &CodegenExpression,
+    context: &EmitContext,
+) -> String {
+    let bindings = available_fields
+        .iter()
+        .map(|field| {
+            format!(
+                "const {} = __nx_record{};",
+                safe_identifier(&field.name),
+                member_access(&field.name)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "(__nx_record) => {{ {} return {}; }}",
+        bindings,
+        emit_expression(current_module_id, default, context)
+    )
+}
+
+fn is_nullable_type(ty: &TypeRef) -> bool {
+    matches!(ty, TypeRef::Nullable(_))
 }
 
 fn emit_type_ref(
@@ -501,7 +1914,7 @@ fn should_parenthesize_array_element_type(element: &str) -> bool {
 fn emit_named_type(
     current_module_id: RuntimeModuleId,
     name: &str,
-    module: &CodegenModule,
+    _module: &CodegenModule,
     context: &EmitContext,
 ) -> String {
     match name {
@@ -509,11 +1922,24 @@ fn emit_named_type(
         "string" => "string".to_string(),
         "bool" => "boolean".to_string(),
         "void" => "void".to_string(),
-        _ => module
-            .imports
-            .iter()
-            .find(|reference| reference.name == name && is_type_reference_kind(reference.kind))
-            .map(|reference| context.reference_name(current_module_id, reference))
+        _ => context
+            .type_reference(current_module_id, name)
+            .map(|reference| {
+                if reference.kind == ResolvedItemKind::Component {
+                    match context.component(&reference) {
+                        Some(component) if !component.is_abstract => context
+                            .generated_component_name(
+                                current_module_id,
+                                &reference,
+                                ComponentNameRole::Element,
+                            ),
+                        Some(_) => "unknown".to_string(),
+                        None => context.reference_name(current_module_id, &reference),
+                    }
+                } else {
+                    context.reference_name(current_module_id, &reference)
+                }
+            })
             .unwrap_or_else(|| safe_identifier(name)),
     }
 }
@@ -661,6 +2087,9 @@ fn emit_expression(
             fields,
             properties,
         } => emit_record_object(current_module_id, name, fields, properties, context),
+        CodegenExpressionKind::ComponentDescriptor(descriptor) => {
+            emit_component_descriptor(current_module_id, descriptor, context)
+        }
         CodegenExpressionKind::Element(element) => {
             emit_element(current_module_id, element, context)
         }
@@ -685,6 +2114,44 @@ fn emit_record_object(
         Vec::new(),
         context,
     )
+}
+
+fn emit_component_descriptor(
+    current_module_id: RuntimeModuleId,
+    descriptor: &CodegenComponentDescriptor,
+    context: &EmitContext,
+) -> String {
+    let mut extra_properties = Vec::new();
+    if let Some(content_field) = descriptor.content_field.as_deref() {
+        if !descriptor.content.is_empty()
+            && !descriptor
+                .properties
+                .iter()
+                .any(|property| property.name == content_field)
+        {
+            extra_properties.push((
+                content_field.to_string(),
+                emit_content_value(current_module_id, &descriptor.content, context),
+            ));
+        }
+    }
+    let mut explicit_properties = explicit_property_values(
+        current_module_id,
+        &descriptor.properties,
+        extra_properties,
+        context,
+    );
+    explicit_properties.sort_by(|lhs, rhs| lhs.0.cmp(&rhs.0));
+
+    let properties = explicit_properties
+        .iter()
+        .map(|(name, value)| format!("{}: {}", safe_object_key(name), value))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let component_name = context.reference_name(current_module_id, &descriptor.component);
+    // Concrete component functions construct atomic descriptors; schemas/render helpers are the
+    // explicit component-entry path that evaluates normal component bodies.
+    format!("{}({{ {} }})", component_name, properties)
 }
 
 fn emit_union_case_object(
@@ -967,6 +2434,56 @@ fn emit_index(program: &CodegenProgram, context: &EmitContext, target: CodegenTa
             import_file(context.module_file(entrypoint.reference.module_id), target)
         ));
     }
+    for entrypoint in &program.component_entrypoints {
+        if context
+            .component(&entrypoint.reference)
+            .is_some_and(|component| component.is_abstract)
+        {
+            continue;
+        }
+        let component_name = context.declaration_name(&entrypoint.reference);
+        let schema_name = context
+            .component_names(&entrypoint.reference)
+            .name(ComponentNameRole::Schema);
+        let names = context.component_names(&entrypoint.reference);
+        let component = context.component(&entrypoint.reference);
+        let mut value_exports = vec![component_name.to_string(), schema_name.to_string()];
+        if component.is_some_and(|component| !component.state.is_empty()) {
+            value_exports.push(
+                names
+                    .initial_state_function
+                    .as_deref()
+                    .expect("stateful component should have an initial-state helper")
+                    .to_string(),
+            );
+            value_exports.push(
+                names
+                    .render_function
+                    .as_deref()
+                    .expect("stateful component should have a render helper")
+                    .to_string(),
+            );
+        }
+        out.push_str(&format!(
+            "export {{ {} }} from \"./{}\";\n",
+            value_exports.join(", "),
+            import_file(context.module_file(entrypoint.reference.module_id), target)
+        ));
+        if target.is_typescript() {
+            let mut type_exports = vec![names.name(ComponentNameRole::Props).to_string()];
+            if component.is_some_and(|component| !component.is_abstract) {
+                type_exports.push(names.name(ComponentNameRole::Element).to_string());
+            }
+            if component.is_some_and(|component| !component.state.is_empty()) {
+                type_exports.push(names.name(ComponentNameRole::State).to_string());
+            }
+            out.push_str(&format!(
+                "export type {{ {} }} from \"./{}\";\n",
+                type_exports.join(", "),
+                import_file(context.module_file(entrypoint.reference.module_id), target)
+            ));
+        }
+    }
     out
 }
 
@@ -1024,6 +2541,9 @@ fn collect_declaration_value_references(
         CodegenDeclarationKind::Value { value, .. } => {
             collect_expression_value_references(module.id, value, output);
         }
+        CodegenDeclarationKind::Component(component) => {
+            collect_component_value_references(module, component, output);
+        }
         CodegenDeclarationKind::Unsupported(_) => {}
         CodegenDeclarationKind::Enum { .. }
         | CodegenDeclarationKind::Record { .. }
@@ -1067,9 +2587,73 @@ fn collect_declaration_type_references(
                 }
             }
         }
+        CodegenDeclarationKind::Component(component) => {
+            for field in &component.props {
+                collect_type_ref_references(module, &field.ty, output);
+            }
+            for field in &component.state {
+                collect_type_ref_references(module, &field.ty, output);
+            }
+            if let Some(body) = component.body.as_ref() {
+                if let Some(ty) = body.ty.as_ref() {
+                    collect_type_references(module, ty, output);
+                }
+                collect_expression_render_type_references(module.id, body, output);
+            }
+        }
         CodegenDeclarationKind::Enum { .. }
         | CodegenDeclarationKind::TypeAlias
         | CodegenDeclarationKind::Unsupported(_) => {}
+    }
+}
+
+fn collect_component_value_references(
+    module: &CodegenModule,
+    component: &CodegenComponent,
+    output: &mut Vec<CodegenReference>,
+) {
+    for field in &component.props {
+        collect_type_ref_schema_value_references(module, &field.ty, output);
+        if let Some(default) = field.default.as_ref() {
+            collect_expression_value_references(module.id, default, output);
+        }
+    }
+    for field in &component.state {
+        collect_type_ref_schema_value_references(module, &field.ty, output);
+        if let Some(default) = field.default.as_ref() {
+            collect_expression_value_references(module.id, default, output);
+        }
+    }
+    if let Some(body) = component.body.as_ref() {
+        collect_expression_value_references(module.id, body, output);
+    }
+}
+
+fn collect_type_ref_schema_value_references(
+    module: &CodegenModule,
+    ty: &TypeRef,
+    output: &mut Vec<CodegenReference>,
+) {
+    match ty {
+        TypeRef::Name(name) => {
+            if let Some(reference) = module.imports.iter().find(|reference| {
+                reference.name == name.as_str() && reference.kind == ResolvedItemKind::Component
+            }) {
+                output.push(reference.clone());
+            }
+        }
+        TypeRef::Array(inner) | TypeRef::Nullable(inner) => {
+            collect_type_ref_schema_value_references(module, inner, output);
+        }
+        TypeRef::Function {
+            params,
+            return_type,
+        } => {
+            for param in params {
+                collect_type_ref_schema_value_references(module, param, output);
+            }
+            collect_type_ref_schema_value_references(module, return_type, output);
+        }
     }
 }
 
@@ -1115,6 +2699,38 @@ fn collect_type_references(module: &CodegenModule, ty: &Type, output: &mut Vec<C
             collect_named_type_reference(module, case_ty.union.as_str(), output);
         }
         Type::Primitive(_) | Type::Variable(_) | Type::Unknown | Type::Error => {}
+    }
+}
+
+fn collect_expression_render_type_references(
+    current_module_id: RuntimeModuleId,
+    expression: &CodegenExpression,
+    output: &mut Vec<CodegenReference>,
+) {
+    match &expression.kind {
+        CodegenExpressionKind::ComponentDescriptor(descriptor) => {
+            if descriptor.component.module_id != current_module_id {
+                output.push(descriptor.component.clone());
+            }
+        }
+        CodegenExpressionKind::If {
+            then_branch,
+            else_branch: Some(else_branch),
+            ..
+        } => {
+            collect_expression_render_type_references(current_module_id, then_branch, output);
+            collect_expression_render_type_references(current_module_id, else_branch, output);
+        }
+        CodegenExpressionKind::Let { body, .. } => {
+            collect_expression_render_type_references(current_module_id, body, output);
+        }
+        CodegenExpressionKind::Block {
+            expression: Some(expression),
+            ..
+        } => {
+            collect_expression_render_type_references(current_module_id, expression, output);
+        }
+        _ => {}
     }
 }
 
@@ -1231,6 +2847,17 @@ fn collect_expression_value_references(
                 collect_expression_value_references(current_module_id, &property.value, output);
             }
         }
+        CodegenExpressionKind::ComponentDescriptor(descriptor) => {
+            if descriptor.component.module_id != current_module_id {
+                output.push(descriptor.component.clone());
+            }
+            for property in &descriptor.properties {
+                collect_expression_value_references(current_module_id, &property.value, output);
+            }
+            for content in &descriptor.content {
+                collect_expression_value_references(current_module_id, content, output);
+            }
+        }
         CodegenExpressionKind::UnionCase {
             fields,
             properties,
@@ -1265,13 +2892,41 @@ fn collect_expression_value_references(
     }
 }
 
-fn collect_module_runtime_helpers(module: &CodegenModule) -> Vec<&'static str> {
+fn collect_module_runtime_helpers(
+    module: &CodegenModule,
+    target: CodegenTarget,
+) -> Vec<&'static str> {
     let mut helpers = FxHashSet::default();
     for declaration in &module.declarations {
-        collect_declaration_runtime_helpers(declaration, &mut helpers);
+        collect_declaration_runtime_helpers(declaration, target, &mut helpers);
     }
-    let mut output = ["nxElement", "nxRuntimeError"]
+    let candidates = [
+        "NxResult",
+        "NxValue",
+        "nxAssertRecord",
+        "nxAnySchema",
+        "nxArraySchema",
+        "nxBooleanSchema",
+        "nxComponentSchema",
+        "nxDiagnosticsFromError",
+        "nxElement",
+        "nxEnumSchema",
+        "nxExternalComponentSchema",
+        "nxField",
+        "nxMissingField",
+        "nxNamedRecordSchema",
+        "nxNormalizeValue",
+        "nxNullableSchema",
+        "nxNumberSchema",
+        "nxRejectUnknownFields",
+        "nxRecordSchema",
+        "nxRuntimeError",
+        "nxStringSchema",
+        "nxUnionSchema",
+    ];
+    let mut output = candidates
         .into_iter()
+        .filter(|helper| target.is_typescript() || !matches!(*helper, "NxResult" | "NxValue"))
         .filter(|helper| helpers.contains(helper))
         .collect::<Vec<_>>();
     output.sort();
@@ -1280,6 +2935,7 @@ fn collect_module_runtime_helpers(module: &CodegenModule) -> Vec<&'static str> {
 
 fn collect_declaration_runtime_helpers(
     declaration: &CodegenDeclaration,
+    _target: CodegenTarget,
     output: &mut FxHashSet<&'static str>,
 ) {
     match &declaration.kind {
@@ -1292,10 +2948,83 @@ fn collect_declaration_runtime_helpers(
         CodegenDeclarationKind::Unsupported(_) => {
             output.insert("nxRuntimeError");
         }
+        CodegenDeclarationKind::Component(component) => {
+            if !component.is_abstract {
+                if component.is_external {
+                    output.insert("nxExternalComponentSchema");
+                } else {
+                    output.insert("nxComponentSchema");
+                }
+                output.insert("nxField");
+                output.insert("nxRecordSchema");
+                collect_component_schema_runtime_helpers(component, output);
+            }
+            if component.state.iter().any(|field| {
+                field.default.is_none()
+                    && !is_nullable_type(&field.ty)
+                    && !component.is_external
+                    && !component.is_abstract
+            }) {
+                output.insert("nxMissingField");
+            }
+            if let Some(body) = component.body.as_ref() {
+                collect_expression_runtime_helpers(body, output);
+            }
+        }
         CodegenDeclarationKind::Enum { .. }
         | CodegenDeclarationKind::Record { .. }
         | CodegenDeclarationKind::Union { .. }
         | CodegenDeclarationKind::TypeAlias => {}
+    }
+}
+
+fn collect_component_schema_runtime_helpers(
+    component: &CodegenComponent,
+    output: &mut FxHashSet<&'static str>,
+) {
+    for field in &component.props {
+        collect_type_ref_schema_runtime_helpers(&field.ty, output);
+    }
+    for field in &component.state {
+        collect_type_ref_schema_runtime_helpers(&field.ty, output);
+    }
+}
+
+fn collect_type_ref_schema_runtime_helpers(ty: &TypeRef, output: &mut FxHashSet<&'static str>) {
+    match ty {
+        TypeRef::Name(name) => match name.as_str() {
+            "i32" | "i64" | "int" | "f32" | "f64" | "float" => {
+                output.insert("nxNumberSchema");
+            }
+            "string" => {
+                output.insert("nxStringSchema");
+            }
+            "bool" => {
+                output.insert("nxBooleanSchema");
+            }
+            _ => {
+                output.insert("nxNamedRecordSchema");
+                output.insert("nxEnumSchema");
+                output.insert("nxUnionSchema");
+                output.insert("nxAnySchema");
+                output.insert("nxArraySchema");
+                output.insert("nxBooleanSchema");
+                output.insert("nxNullableSchema");
+                output.insert("nxNumberSchema");
+                output.insert("nxStringSchema");
+            }
+        },
+        TypeRef::Array(inner) => {
+            output.insert("nxArraySchema");
+            collect_type_ref_schema_runtime_helpers(inner, output);
+        }
+        TypeRef::Nullable(inner) => {
+            output.insert("nxNullableSchema");
+            collect_type_ref_schema_runtime_helpers(inner, output);
+        }
+        TypeRef::Function { .. } => {
+            output.insert("nxAnySchema");
+        }
     }
 }
 
@@ -1405,13 +3134,24 @@ fn collect_expression_runtime_helpers(
                 collect_expression_runtime_helpers(expr, output);
             }
         }
+        CodegenExpressionKind::ComponentDescriptor(descriptor) => {
+            for property in &descriptor.properties {
+                collect_expression_runtime_helpers(&property.value, output);
+            }
+            for content in &descriptor.content {
+                collect_expression_runtime_helpers(content, output);
+            }
+        }
     }
 }
 
 fn should_import_value_reference(kind: ResolvedItemKind) -> bool {
     matches!(
         kind,
-        ResolvedItemKind::Function | ResolvedItemKind::Value | ResolvedItemKind::Enum
+        ResolvedItemKind::Function
+            | ResolvedItemKind::Value
+            | ResolvedItemKind::Enum
+            | ResolvedItemKind::Component
     )
 }
 
@@ -1422,6 +3162,7 @@ fn is_type_reference_kind(kind: ResolvedItemKind) -> bool {
             | ResolvedItemKind::Record
             | ResolvedItemKind::Union
             | ResolvedItemKind::TypeAlias
+            | ResolvedItemKind::Component
     )
 }
 

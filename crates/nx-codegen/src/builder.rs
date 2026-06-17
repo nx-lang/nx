@@ -1,14 +1,19 @@
 use crate::model::{
-    expr_id_u32, CodegenDeclaration, CodegenDeclarationKind, CodegenElement, CodegenEntrypoint,
-    CodegenExpression, CodegenExpressionKind, CodegenModule, CodegenModuleProvenance, CodegenParam,
-    CodegenProgram, CodegenProperty, CodegenRecordField, CodegenReference, CodegenSourceEntry,
-    CodegenStatement, CodegenUnionCase, CodegenUnsupportedConstruct,
+    expr_id_u32, CodegenComponent, CodegenComponentDescriptor, CodegenComponentField,
+    CodegenComponentTargetKind, CodegenDeclaration, CodegenDeclarationKind, CodegenElement,
+    CodegenEntrypoint, CodegenExpression, CodegenExpressionKind, CodegenModule,
+    CodegenModuleProvenance, CodegenParam, CodegenProgram, CodegenProperty, CodegenRecordField,
+    CodegenReference, CodegenSourceEntry, CodegenStatement, CodegenUnionCase,
 };
 use crate::options::CodegenError;
 use nx_api::{LibraryArtifact, ProgramArtifact};
 use nx_diagnostics::{Diagnostic, Label, Severity, TextSpan};
-use nx_hir::{ast, ExprId, Item, LocalDefinitionId, LoweredModule, PropertyEntry};
-use nx_interpreter::{ResolvedModule, ResolvedModuleSource, RuntimeModuleId};
+use nx_hir::{
+    ast, EffectiveField, ExprId, Item, LocalDefinitionId, LoweredModule, Name, PreparedBinding,
+    PreparedBindingOrigin, PreparedBindingTarget, PreparedItemKind, PreparedModule, PropertyEntry,
+    RecordField,
+};
+use nx_interpreter::{ResolvedItemKind, ResolvedModule, ResolvedModuleSource, RuntimeModuleId};
 use nx_types::{ModuleArtifact, TypeEnvironment};
 use rustc_hash::FxHashSet;
 
@@ -50,6 +55,23 @@ pub fn build_codegen_program(artifact: &ProgramArtifact) -> Result<CodegenProgra
         .collect::<Vec<_>>();
     entrypoints.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
 
+    let mut component_entrypoints = artifact
+        .resolved_program
+        .entry_components
+        .iter()
+        .map(|(name, reference)| CodegenEntrypoint {
+            name: name.clone(),
+            reference: reference_from_resolved_module(
+                artifact,
+                reference.module_id,
+                reference.definition_id,
+                name,
+                reference.kind,
+            ),
+        })
+        .collect::<Vec<_>>();
+    component_entrypoints.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
+
     if !diagnostics.is_empty() {
         return Err(CodegenError::new(diagnostics));
     }
@@ -67,6 +89,7 @@ pub fn build_codegen_program(artifact: &ProgramArtifact) -> Result<CodegenProgra
         fingerprint: artifact.fingerprint,
         modules,
         entrypoints,
+        component_entrypoints,
         source_entries,
     })
 }
@@ -211,6 +234,7 @@ fn build_declaration(
                     .map(|param| CodegenParam {
                         name: param.name.as_str().to_string(),
                         ty: param.ty.clone(),
+                        is_content: param.is_content,
                         span: param.span,
                     })
                     .collect(),
@@ -274,18 +298,14 @@ fn build_declaration(
                 .collect::<Option<Vec<_>>>()?,
         },
         Item::TypeAlias(_) => CodegenDeclarationKind::TypeAlias,
-        Item::Component(component) => {
-            diagnostics.push(unsupported_diagnostic(
-                resolved_module,
-                component.span,
-                "component lifecycle/codegen is not supported by executable codegen yet",
-            ));
-            CodegenDeclarationKind::Unsupported(CodegenUnsupportedConstruct {
-                message: "component lifecycle/codegen is not supported by executable codegen yet"
-                    .to_string(),
-                span: component.span,
-            })
-        }
+        Item::Component(component) => CodegenDeclarationKind::Component(build_component(
+            artifact,
+            resolved_module,
+            lowered_module,
+            type_env,
+            component,
+            diagnostics,
+        )?),
     };
 
     Some(CodegenDeclaration {
@@ -293,6 +313,205 @@ fn build_declaration(
         span,
         kind,
     })
+}
+
+fn build_component(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    lowered_module: &LoweredModule,
+    type_env: &TypeEnvironment,
+    component: &nx_hir::Component,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<CodegenComponent> {
+    let prepared = prepared_module_for(artifact, resolved_module);
+    let contract = match nx_hir::effective_component_contract(&prepared, component) {
+        Ok(contract) => contract,
+        Err(error) => {
+            diagnostics.push(component_resolution_diagnostic(resolved_module, &error));
+            return None;
+        }
+    };
+
+    let mut prop_scope = LexicalScope::new();
+    let props = build_effective_component_fields(
+        artifact,
+        resolved_module,
+        &contract.props,
+        &mut prop_scope,
+        diagnostics,
+    )?;
+
+    let mut state_scope = LexicalScope::new();
+    for prop in &props {
+        state_scope.insert(prop.name.as_str());
+    }
+    let state = build_declared_component_fields(
+        artifact,
+        resolved_module,
+        lowered_module,
+        type_env,
+        &component.state,
+        &mut state_scope,
+        diagnostics,
+    )?;
+
+    let body = match component.body {
+        Some(body) => {
+            let mut body_scope = LexicalScope::new();
+            for prop in &props {
+                body_scope.insert(prop.name.as_str());
+            }
+            for field in &state {
+                body_scope.insert(field.name.as_str());
+            }
+            Some(build_expression(
+                artifact,
+                resolved_module,
+                lowered_module,
+                type_env,
+                body,
+                &mut body_scope,
+                diagnostics,
+            )?)
+        }
+        None => None,
+    };
+
+    Some(CodegenComponent {
+        is_abstract: component.is_abstract,
+        is_external: component.is_external,
+        props,
+        state,
+        body,
+    })
+}
+
+fn build_effective_component_fields(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    fields: &[EffectiveField],
+    scope: &mut LexicalScope,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<Vec<CodegenComponentField>> {
+    let mut mapped = Vec::with_capacity(fields.len());
+    for field in fields {
+        let Some(owner_module) = artifact
+            .resolved_program
+            .module_by_prepared_identity(&field.module_identity)
+        else {
+            diagnostics.push(missing_semantic_data_diagnostic(
+                resolved_module,
+                &format!("component field owner module '{}'", field.module_identity),
+                field.span,
+            ));
+            return None;
+        };
+        let default = match field.default.as_ref() {
+            Some(default) => Some(build_expression_for_module_identity(
+                artifact,
+                resolved_module,
+                &default.module_identity,
+                default.expr_id,
+                scope,
+                diagnostics,
+            )?),
+            None => None,
+        };
+        mapped.push(CodegenComponentField {
+            name: field.name.as_str().to_string(),
+            ty: field.ty.clone(),
+            is_content: field.is_content,
+            is_required: field.is_required,
+            default,
+            owner_module_id: owner_module.id,
+            span: field.span,
+        });
+        scope.insert(field.name.as_str());
+    }
+    Some(mapped)
+}
+
+fn build_declared_component_fields(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    lowered_module: &LoweredModule,
+    type_env: &TypeEnvironment,
+    fields: &[RecordField],
+    scope: &mut LexicalScope,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<Vec<CodegenComponentField>> {
+    let mut mapped = Vec::with_capacity(fields.len());
+    for field in fields {
+        let default = match field.default {
+            Some(default) => Some(build_expression(
+                artifact,
+                resolved_module,
+                lowered_module,
+                type_env,
+                default,
+                scope,
+                diagnostics,
+            )?),
+            None => None,
+        };
+        mapped.push(CodegenComponentField {
+            name: field.name.as_str().to_string(),
+            ty: field.ty.clone(),
+            is_content: field.is_content,
+            is_required: field.default.is_none() && !matches!(field.ty, ast::TypeRef::Nullable(_)),
+            default,
+            owner_module_id: resolved_module.id,
+            span: field.span,
+        });
+        scope.insert(field.name.as_str());
+    }
+    Some(mapped)
+}
+
+fn build_expression_for_module_identity(
+    artifact: &ProgramArtifact,
+    diagnostic_module: &ResolvedModule,
+    module_identity: &str,
+    expr_id: ExprId,
+    scope: &mut LexicalScope,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<CodegenExpression> {
+    let Some(owner_module) = artifact
+        .resolved_program
+        .module_by_prepared_identity(module_identity)
+    else {
+        diagnostics.push(missing_semantic_data_diagnostic(
+            diagnostic_module,
+            &format!("expression owner module '{}'", module_identity),
+            empty_span(),
+        ));
+        return None;
+    };
+    let Some(module_artifact) = module_artifact_for(artifact, owner_module) else {
+        diagnostics.push(missing_semantic_data_diagnostic(
+            owner_module,
+            "module artifact",
+            empty_span(),
+        ));
+        return None;
+    };
+    let Some(lowered_module) = module_artifact.lowered_module.as_ref() else {
+        diagnostics.push(missing_semantic_data_diagnostic(
+            owner_module,
+            "lowered module",
+            empty_span(),
+        ));
+        return None;
+    };
+    build_expression(
+        artifact,
+        owner_module,
+        lowered_module.as_ref(),
+        &module_artifact.type_env,
+        expr_id,
+        scope,
+        diagnostics,
+    )
 }
 
 fn build_record_fields(
@@ -878,27 +1097,239 @@ fn build_element_expression(
         }
         UnionCaseLookup::Failed => None,
         UnionCaseLookup::Missing => {
-            if mapped.content.is_empty()
-                && resolve_visible_reference(artifact, resolved_module.id, element.tag.as_str())
-                    .is_some_and(|reference| {
-                        reference.kind == nx_interpreter::ResolvedItemKind::Record
-                    })
-            {
-                let (record_name, fields) = record_literal_shape(
+            let Some(reference) =
+                resolve_visible_reference(artifact, resolved_module.id, element.tag.as_str())
+            else {
+                return Some(CodegenExpressionKind::Element(mapped));
+            };
+
+            match reference.kind {
+                ResolvedItemKind::Function => build_function_element_call(
                     artifact,
-                    resolved_module.id,
-                    element.tag.as_str(),
+                    resolved_module,
+                    element.span,
+                    reference,
+                    mapped.properties,
+                    mapped.content,
                     diagnostics,
-                )?;
-                Some(CodegenExpressionKind::Record {
-                    name: record_name,
-                    fields,
-                    properties: mapped.properties,
-                })
-            } else {
-                Some(CodegenExpressionKind::Element(mapped))
+                ),
+                ResolvedItemKind::Component => build_component_descriptor_expression(
+                    artifact,
+                    resolved_module,
+                    reference,
+                    mapped.properties,
+                    mapped.content,
+                    diagnostics,
+                ),
+                ResolvedItemKind::Record if mapped.content.is_empty() => {
+                    let (record_name, fields) = record_literal_shape(
+                        artifact,
+                        resolved_module.id,
+                        element.tag.as_str(),
+                        diagnostics,
+                    )?;
+                    Some(CodegenExpressionKind::Record {
+                        name: record_name,
+                        fields,
+                        properties: mapped.properties,
+                    })
+                }
+                _ => Some(CodegenExpressionKind::Element(mapped)),
             }
         }
+    }
+}
+
+fn build_function_element_call(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    element_span: TextSpan,
+    function_reference: CodegenReference,
+    properties: Vec<CodegenProperty>,
+    content: Vec<CodegenExpression>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<CodegenExpressionKind> {
+    let Some(params) =
+        function_params_from_reference(artifact, resolved_module, &function_reference, diagnostics)
+    else {
+        return None;
+    };
+
+    let mut consumed = FxHashSet::default();
+    let mut args = Vec::with_capacity(params.len());
+    for param in &params {
+        if let Some(property) = properties
+            .iter()
+            .find(|property| property.name == param.name)
+        {
+            consumed.insert(property.name.clone());
+            args.push(property.value.clone());
+        } else if param.is_content && !content.is_empty() {
+            args.push(content_expression(content.clone(), element_span));
+        } else {
+            diagnostics.push(unsupported_diagnostic(
+                resolved_module,
+                element_span,
+                format!(
+                    "function element call '{}' is missing argument '{}'",
+                    function_reference.name, param.name
+                ),
+            ));
+            return None;
+        }
+    }
+
+    if let Some(property) = properties
+        .iter()
+        .find(|property| !consumed.contains(&property.name))
+    {
+        diagnostics.push(unsupported_diagnostic(
+            resolved_module,
+            property.span,
+            format!(
+                "function element call '{}' has no parameter '{}'",
+                function_reference.name, property.name
+            ),
+        ));
+        return None;
+    }
+
+    Some(CodegenExpressionKind::Call {
+        callee: Box::new(CodegenExpression {
+            expr_id: 0,
+            span: element_span,
+            ty: None,
+            kind: CodegenExpressionKind::Identifier {
+                name: function_reference.name.clone(),
+                reference: Some(function_reference),
+            },
+        }),
+        args,
+    })
+}
+
+fn build_component_descriptor_expression(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    component_reference: CodegenReference,
+    properties: Vec<CodegenProperty>,
+    content: Vec<CodegenExpression>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<CodegenExpressionKind> {
+    let Some(target_module) = artifact
+        .resolved_program
+        .module(component_reference.module_id)
+    else {
+        diagnostics.push(missing_semantic_data_diagnostic(
+            resolved_module,
+            "component target module",
+            empty_span(),
+        ));
+        return None;
+    };
+    let Some(Item::Component(component)) = target_module
+        .lowered_module
+        .item_by_definition(component_reference.definition_id)
+    else {
+        diagnostics.push(missing_semantic_data_diagnostic(
+            target_module,
+            "component declaration",
+            empty_span(),
+        ));
+        return None;
+    };
+    if component.is_abstract {
+        diagnostics.push(unsupported_diagnostic(
+            target_module,
+            component.span,
+            format!(
+                "abstract component '{}' cannot be constructed by executable codegen",
+                component_reference.name
+            ),
+        ));
+        return None;
+    }
+
+    let prepared = prepared_module_for(artifact, target_module);
+    let contract = match nx_hir::effective_component_contract(&prepared, component) {
+        Ok(contract) => contract,
+        Err(error) => {
+            diagnostics.push(component_resolution_diagnostic(target_module, &error));
+            return None;
+        }
+    };
+    let content_field = contract
+        .content_prop()
+        .map(|field| field.name.as_str().to_string());
+
+    Some(CodegenExpressionKind::ComponentDescriptor(
+        CodegenComponentDescriptor {
+            component: component_reference,
+            target_kind: if component.is_external {
+                CodegenComponentTargetKind::External
+            } else {
+                CodegenComponentTargetKind::Normal
+            },
+            properties,
+            content_field,
+            content,
+        },
+    ))
+}
+
+fn function_params_from_reference(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    reference: &CodegenReference,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<Vec<CodegenParam>> {
+    let Some(target_module) = artifact.resolved_program.module(reference.module_id) else {
+        diagnostics.push(missing_semantic_data_diagnostic(
+            resolved_module,
+            "function target module",
+            empty_span(),
+        ));
+        return None;
+    };
+    let Some(Item::Function(function)) = target_module
+        .lowered_module
+        .item_by_definition(reference.definition_id)
+    else {
+        diagnostics.push(missing_semantic_data_diagnostic(
+            target_module,
+            "function declaration",
+            empty_span(),
+        ));
+        return None;
+    };
+
+    Some(
+        function
+            .params
+            .iter()
+            .map(|param| CodegenParam {
+                name: param.name.as_str().to_string(),
+                ty: param.ty.clone(),
+                is_content: param.is_content,
+                span: param.span,
+            })
+            .collect(),
+    )
+}
+
+fn content_expression(content: Vec<CodegenExpression>, span: TextSpan) -> CodegenExpression {
+    if content.len() == 1 {
+        return content
+            .into_iter()
+            .next()
+            .expect("content has one expression");
+    }
+
+    CodegenExpression {
+        expr_id: 0,
+        span,
+        ty: None,
+        kind: CodegenExpressionKind::Array(content),
     }
 }
 
@@ -1083,6 +1514,58 @@ fn library_module_artifact<'a>(
     })
 }
 
+fn prepared_module_for(artifact: &ProgramArtifact, module: &ResolvedModule) -> PreparedModule {
+    let mut prepared = PreparedModule::standalone(
+        module.prepared_module_identity(),
+        module.lowered_module.as_ref().clone(),
+    );
+
+    let Some(visible_items) = artifact.resolved_program.imported_items(module.id) else {
+        return prepared;
+    };
+
+    for (visible_name, item_ref) in visible_items {
+        let Some(target_module) = artifact.resolved_program.module(item_ref.module_id) else {
+            continue;
+        };
+        let kind = prepared_item_kind(item_ref.kind);
+        let target_module_identity = target_module.prepared_module_identity();
+        prepared.add_peer_module(
+            target_module_identity.clone(),
+            target_module.lowered_module.clone(),
+        );
+
+        for namespace in kind.namespaces() {
+            prepared.insert_binding(PreparedBinding {
+                visible_name: Name::new(visible_name),
+                namespace: *namespace,
+                kind,
+                origin: PreparedBindingOrigin::Peer {
+                    module_identity: target_module_identity.clone(),
+                },
+                target: PreparedBindingTarget::Peer {
+                    module_identity: target_module_identity.clone(),
+                    definition_id: item_ref.definition_id,
+                },
+            });
+        }
+    }
+
+    prepared
+}
+
+fn prepared_item_kind(kind: ResolvedItemKind) -> PreparedItemKind {
+    match kind {
+        ResolvedItemKind::Function => PreparedItemKind::Function,
+        ResolvedItemKind::Value => PreparedItemKind::Value,
+        ResolvedItemKind::Component => PreparedItemKind::Component,
+        ResolvedItemKind::TypeAlias => PreparedItemKind::TypeAlias,
+        ResolvedItemKind::Enum => PreparedItemKind::Enum,
+        ResolvedItemKind::Union => PreparedItemKind::Union,
+        ResolvedItemKind::Record => PreparedItemKind::Record,
+    }
+}
+
 fn provenance(source: &ResolvedModuleSource) -> CodegenModuleProvenance {
     match source {
         ResolvedModuleSource::SourceProvider { identity } => {
@@ -1232,6 +1715,22 @@ fn missing_semantic_data_diagnostic(
             missing
         ))
         .with_label(Label::primary(module.prepared_module_identity(), span))
+        .build()
+}
+
+fn component_resolution_diagnostic(
+    module: &ResolvedModule,
+    error: &nx_hir::ComponentResolutionError,
+) -> Diagnostic {
+    Diagnostic::error("codegen-missing-semantic-data")
+        .with_message(format!(
+            "Cannot build component codegen metadata: {}",
+            error.message()
+        ))
+        .with_label(Label::primary(
+            module.prepared_module_identity(),
+            error.span(),
+        ))
         .build()
 }
 

@@ -1341,7 +1341,7 @@ let root() = { Ui.title() }"#,
         assert!(module.contains("export function root()"));
         assert!(module.contains("return (1 + 2);"));
         assert!(runtime.contains("export function nxElement"));
-        assert!(!runtime.contains("export function nxRecord"));
+        assert!(runtime.contains("export function nxRecordSchema"));
         assert!(index.contains("export { root } from \"./m0_test.js\";"));
     }
 
@@ -1377,6 +1377,96 @@ let root(): int = { answer }"#,
 
         assert!(module.contains("import { answer as m1_answer } from \"./m1_value.js\";"));
         assert!(module.contains("return m1_answer;"));
+    }
+
+    #[test]
+    fn test_cli_codegen_file_writes_component_capable_javascript_output() {
+        let (dir, path) = create_temp_nx_file(
+            r#"
+external component <TextInput value:string />
+component <SearchBox placeholder:string = "Find docs" /> = {
+  state { query:string = { placeholder } }
+  <TextInput value={query} />
+}
+let root() = { <SearchBox /> }
+"#,
+        );
+        let output_path = dir.path().join("codegen-component-js");
+
+        let output = run_cli(&[
+            "codegen",
+            path.to_str().unwrap(),
+            "--target",
+            "javascript",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        assert!(
+            output.status.success(),
+            "CLI should write component-capable JavaScript output: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let module = fs::read_to_string(output_path.join("m0_test.js")).unwrap();
+        let index = fs::read_to_string(output_path.join("index.js")).unwrap();
+
+        assert!(module.contains("export function SearchBox("));
+        assert!(module
+            .contains("return { $type: \"SearchBox\", placeholder: resolvedProps.placeholder };"));
+        assert!(module.contains("export function initialSearchBoxState("));
+        assert!(module.contains("export function renderSearchBox("));
+        assert!(module.contains("export const SearchBoxSchema"));
+        assert!(!module.contains("export class SearchBox"));
+        assert!(!module.contains("static initialize("));
+        assert!(index.contains(
+            "export { SearchBox, SearchBoxSchema, initialSearchBoxState, renderSearchBox } from \"./m0_test.js\";"
+        ));
+    }
+
+    #[test]
+    fn test_cli_codegen_workspace_writes_component_capable_typescript_output() {
+        let (dir, workspace_path) = create_temp_library(&[
+            (
+                "main.nx",
+                r#"import { Question } from "./ui.nx"
+external component <ShortTextQuestion extends Question placeholder:string? />
+let root() = { <ShortTextQuestion /> }"#,
+            ),
+            (
+                "ui.nx",
+                r#"export abstract external component <Question label:string = "Untitled" />"#,
+            ),
+        ]);
+        let output_path = dir.path().join("codegen-component-ts");
+
+        let output = run_cli(&[
+            "codegen",
+            workspace_path.to_str().unwrap(),
+            "--target",
+            "typescript",
+            "--entry",
+            "main.nx",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        assert!(
+            output.status.success(),
+            "CLI should write component-capable TypeScript output: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let module = fs::read_to_string(output_path.join("m0_main.ts")).unwrap();
+        let index = fs::read_to_string(output_path.join("index.ts")).unwrap();
+
+        assert!(!module.contains("Question as m1_Question"));
+        assert!(module.contains("export type ShortTextQuestionProps"));
+        assert!(module.contains("export type ShortTextQuestionElement"));
+        assert!(module.contains("export function ShortTextQuestion("));
+        assert!(module.contains("export const ShortTextQuestionSchema"));
+        assert!(!module.contains("export class ShortTextQuestion"));
+        assert!(index.contains(
+            "export { ShortTextQuestion, ShortTextQuestionSchema } from \"./m0_main.js\";"
+        ));
     }
 
     #[test]
