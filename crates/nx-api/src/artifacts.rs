@@ -2235,13 +2235,30 @@ fn normalize_local_library_path(base_file: &Path, library_path: &str) -> io::Res
 }
 
 fn logical_source_identity(file_name: &str) -> String {
-    normalize_workspace_identity(file_name)
-        .map_err(|_| ())
-        .or_else(|_| {
-            let path = Path::new(file_name);
-            logical_identity_for_path(path).ok_or(())
-        })
-        .unwrap_or_else(|_| "input.nx".to_string())
+    logical_identity_for_path_text(file_name)
+        .or_else(|| normalize_workspace_identity(file_name).ok())
+        .unwrap_or_else(|| "input.nx".to_string())
+}
+
+fn logical_identity_for_path_text(path: &str) -> Option<String> {
+    let path = path.trim();
+    if path.is_empty() {
+        return None;
+    }
+
+    let normalized = path.replace('\\', "/");
+    let without_drive = strip_windows_drive_prefix(&normalized);
+    let identity = without_drive.trim_start_matches('/');
+    normalize_workspace_identity(identity).ok()
+}
+
+fn strip_windows_drive_prefix(path: &str) -> &str {
+    let bytes = path.as_bytes();
+    if bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic() {
+        &path[2..]
+    } else {
+        path
+    }
 }
 
 fn logical_identity_for_path(path: &Path) -> Option<String> {
@@ -2400,6 +2417,22 @@ mod tests {
 
     fn workspace(modules: Vec<NxWorkspaceModule>) -> NxWorkspace {
         NxWorkspace::new(modules).expect("workspace")
+    }
+
+    #[test]
+    fn logical_source_identity_normalizes_windows_paths_before_import_resolution() {
+        let identity = logical_source_identity(
+            r"C:\Users\runneradmin\AppData\Local\Temp\nx-prepared\app\main.nx",
+        );
+
+        assert_eq!(
+            identity,
+            "Users/runneradmin/AppData/Local/Temp/nx-prepared/app/main.nx"
+        );
+        assert_eq!(
+            normalize_workspace_import_identity(&identity, "../question-flow"),
+            Ok("Users/runneradmin/AppData/Local/Temp/nx-prepared/question-flow".to_string())
+        );
     }
 
     #[test]
