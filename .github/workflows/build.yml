@@ -45,6 +45,8 @@ jobs:
     - name: ⚙️ Set pipeline variables based on source
       run: tools/variables/_define.ps1
       shell: pwsh
+    - name: 🦀 build native runtime
+      run: cargo build --release -p nx-ffi
     - name: 🛠 build
       run: dotnet build bindings/dotnet/NxLang.sln -t:build,pack --no-restore -c ${{ env.BUILDCONFIGURATION }} -warnAsError -warnNotAsError:NU1901,NU1902,NU1903,NU1904 /bl:"${{ runner.temp }}/_artifacts/build_logs/build.binlog"
     - name: 🧪 test
