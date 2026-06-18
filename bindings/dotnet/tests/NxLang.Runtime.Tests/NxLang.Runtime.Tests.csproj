@@ -4,6 +4,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace />
     <NxRuntimeFailIfNativeLibraryMissing>true</NxRuntimeFailIfNativeLibraryMissing>
+    <!-- MessagePack generates the same resolver type name in this assembly and the runtime assembly. -->
+    <NoWarn>$(NoWarn);CS0436</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

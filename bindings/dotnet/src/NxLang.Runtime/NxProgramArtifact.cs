@@ -3,6 +3,7 @@
 
 using System;
 using System.Text;
+using System.Text.Json;
 using NxLang.Nx.Interop;
 
 namespace NxLang.Nx;
@@ -161,6 +162,61 @@ public sealed class NxProgramArtifact : IDisposable
             }
 
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Generates a host-neutral JavaScript program module from this reusable program artifact.
+    /// </summary>
+    /// <param name="options">Optional program-module codegen options.</param>
+    /// <returns>Generated JavaScript source text and structured metadata.</returns>
+    public NxGeneratedJSProgramModule GenerateJSProgramModule(NxJSProgramModuleOptions? options = null)
+    {
+        NxNativeLibrary.EnsureLoaded();
+
+        string? logicalModuleName = options?.LogicalModuleName;
+        string? runtimeImportSpecifier = options?.RuntimeImportSpecifier;
+        byte[] logicalModuleNameBytes = string.IsNullOrEmpty(logicalModuleName)
+            ? Array.Empty<byte>()
+            : Encoding.UTF8.GetBytes(logicalModuleName);
+        byte[] runtimeImportSpecifierBytes = string.IsNullOrEmpty(runtimeImportSpecifier)
+            ? Array.Empty<byte>()
+            : Encoding.UTF8.GetBytes(runtimeImportSpecifier);
+
+        NxEvalStatus status = NxNativeMethods.nx_codegen_js_program_module(
+            SafeHandle,
+            logicalModuleNameBytes,
+            (nuint)logicalModuleNameBytes.Length,
+            runtimeImportSpecifierBytes,
+            (nuint)runtimeImportSpecifierBytes.Length,
+            out NxBuffer buffer);
+        byte[] payload = NxRuntime.CopyAndFreeBuffer(buffer);
+
+        return status switch
+        {
+            NxEvalStatus.Ok => DeserializeGeneratedJSProgramModule(payload),
+            NxEvalStatus.Error => throw NxRuntime.CreateEvaluationExceptionFromJson(payload),
+            _ => throw NxRuntime.CreateInteropStatusException(status),
+        };
+    }
+
+    private static NxGeneratedJSProgramModule DeserializeGeneratedJSProgramModule(byte[] payload)
+    {
+        try
+        {
+            NxGeneratedJSProgramModule? module = JsonSerializer.Deserialize<NxGeneratedJSProgramModule>(payload);
+            if (module is null)
+            {
+                throw new JsonException("Expected generated program-module payload.");
+            }
+
+            return module;
+        }
+        catch (JsonException e)
+        {
+            throw new InvalidOperationException(
+                "NX native runtime returned an invalid generated program-module JSON payload.",
+                e);
         }
     }
 

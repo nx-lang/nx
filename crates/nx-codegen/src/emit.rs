@@ -6,7 +6,11 @@ use crate::model::{
     CodegenProgram, CodegenProperty, CodegenRecordField, CodegenReference, CodegenStatement,
     CodegenUnionCase,
 };
-use crate::options::{CodegenError, CodegenOptions, CodegenOutput, CodegenTarget, GeneratedFile};
+use crate::options::{
+    CodegenError, CodegenOptions, CodegenOutput, CodegenTarget, GeneratedFile,
+    GeneratedJsProgramModule, GeneratedJsProgramModuleComponentExport,
+    GeneratedJsProgramModuleFunctionExport, JsProgramModuleOptions, NX_JS_RUNTIME_ABI,
+};
 use crate::runtime::runtime_helper_source;
 use nx_api::ProgramArtifact;
 use nx_hir::ast::{BinOp, Literal, TypeRef, UnOp};
@@ -14,6 +18,32 @@ use nx_interpreter::{ResolvedItemKind, RuntimeModuleId};
 use nx_types::{Primitive, Type};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
+
+const JS_PROGRAM_MODULE_MANIFEST_EXPORT_NAME: &str = "nxProgramModuleManifest";
+const JS_PROGRAM_MODULE_RESERVED_RUNTIME_NAMES: &[&str] = &[
+    "NxResult",
+    "NxValue",
+    "nxAssertRecord",
+    "nxAnySchema",
+    "nxArraySchema",
+    "nxBooleanSchema",
+    "nxComponentSchema",
+    "nxDiagnosticsFromError",
+    "nxElement",
+    "nxEnumSchema",
+    "nxExternalComponentSchema",
+    "nxField",
+    "nxMissingField",
+    "nxNamedRecordSchema",
+    "nxNormalizeValue",
+    "nxNullableSchema",
+    "nxNumberSchema",
+    "nxRejectUnknownFields",
+    "nxRecordSchema",
+    "nxRuntimeError",
+    "nxStringSchema",
+    "nxUnionSchema",
+];
 
 /// Builds and emits executable files directly from a program artifact.
 pub fn emit_program(
@@ -56,7 +86,65 @@ pub fn emit_codegen_program(
     })
 }
 
+/// Builds and emits a host-neutral JavaScript program module directly from a program artifact.
+pub fn emit_js_program_module(
+    artifact: &ProgramArtifact,
+    options: &JsProgramModuleOptions,
+) -> Result<GeneratedJsProgramModule, CodegenError> {
+    let program = build_codegen_program(artifact)?;
+    emit_codegen_js_program_module(&program, options)
+}
+
+/// Emits a host-neutral JavaScript program module from an already-built codegen program.
+pub fn emit_codegen_js_program_module(
+    program: &CodegenProgram,
+    options: &JsProgramModuleOptions,
+) -> Result<GeneratedJsProgramModule, CodegenError> {
+    let context = EmitContext::new_js_program_module(program);
+    let source_text = emit_js_program_module_source(program, &context, options);
+
+    Ok(GeneratedJsProgramModule {
+        source_text,
+        logical_module_name: options.logical_module_name.clone(),
+        runtime_import_specifier: options.runtime_import_specifier.clone(),
+        runtime_abi: NX_JS_RUNTIME_ABI.to_string(),
+        program_fingerprint: program.fingerprint,
+        function_exports: collect_js_program_module_function_exports(program, &context),
+        component_exports: collect_js_program_module_component_exports(program, &context),
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmitMode {
+    Files,
+    JsProgramModule,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ExportPolicy<'a> {
+    All,
+    Names(&'a FxHashSet<String>),
+}
+
+impl ExportPolicy<'_> {
+    fn should_export(self, name: &str) -> bool {
+        match self {
+            Self::All => true,
+            Self::Names(names) => names.contains(name),
+        }
+    }
+
+    fn prefix(self, name: &str) -> &'static str {
+        if self.should_export(name) {
+            "export "
+        } else {
+            ""
+        }
+    }
+}
+
 struct EmitContext {
+    mode: EmitMode,
     module_files: FxHashMap<RuntimeModuleId, String>,
     modules: FxHashMap<RuntimeModuleId, CodegenModule>,
     declaration_names: FxHashMap<ReferenceKey, String>,
@@ -67,6 +155,18 @@ struct EmitContext {
 
 impl EmitContext {
     fn new(program: &CodegenProgram, target: CodegenTarget) -> Self {
+        Self::with_mode(program, target, EmitMode::Files)
+    }
+
+    fn new_js_program_module(program: &CodegenProgram) -> Self {
+        Self::with_mode(
+            program,
+            CodegenTarget::JavaScript,
+            EmitMode::JsProgramModule,
+        )
+    }
+
+    fn with_mode(program: &CodegenProgram, target: CodegenTarget, mode: EmitMode) -> Self {
         let mut module_files = FxHashMap::default();
         let mut used_files = FxHashSet::default();
         for module in &program.modules {
@@ -89,13 +189,19 @@ impl EmitContext {
         let mut declaration_names = FxHashMap::default();
         let mut component_names = FxHashMap::default();
         let mut schema_declarations = FxHashMap::default();
+        let mut global_used_names = FxHashSet::default();
+        if mode == EmitMode::JsProgramModule {
+            reserve_js_program_module_names(&mut global_used_names);
+        }
         for module in &program.modules {
-            let mut used_names = FxHashSet::default();
+            let mut module_used_names = FxHashSet::default();
+            let used_names = match mode {
+                EmitMode::Files => &mut module_used_names,
+                EmitMode::JsProgramModule => &mut global_used_names,
+            };
             for declaration in &module.declarations {
-                let name = unique_identifier(
-                    safe_identifier(&declaration.reference.name),
-                    &mut used_names,
-                );
+                let name =
+                    unique_identifier(safe_identifier(&declaration.reference.name), used_names);
                 declaration_names.insert(ReferenceKey::new(&declaration.reference), name);
                 if let CodegenDeclarationKind::Component(component) = &declaration.kind {
                     let generated_names = ComponentGeneratedNames::new(
@@ -103,7 +209,7 @@ impl EmitContext {
                             .get(&ReferenceKey::new(&declaration.reference))
                             .expect("component declaration name should be planned"),
                         component,
-                        &mut used_names,
+                        used_names,
                     );
                     component_names
                         .insert(ReferenceKey::new(&declaration.reference), generated_names);
@@ -115,22 +221,25 @@ impl EmitContext {
         }
 
         let mut import_aliases = FxHashMap::default();
-        for module in &program.modules {
-            let references = collect_module_import_references(module, target);
-            for reference in references {
-                import_aliases
-                    .entry(ReferenceKey::new(&reference))
-                    .or_insert_with(|| {
-                        format!(
-                            "{}_{}",
-                            module_prefix(reference.module_id),
-                            safe_identifier(&reference.name)
-                        )
-                    });
+        if mode == EmitMode::Files {
+            for module in &program.modules {
+                let references = collect_module_import_references(module, target);
+                for reference in references {
+                    import_aliases
+                        .entry(ReferenceKey::new(&reference))
+                        .or_insert_with(|| {
+                            format!(
+                                "{}_{}",
+                                module_prefix(reference.module_id),
+                                safe_identifier(&reference.name)
+                            )
+                        });
+                }
             }
         }
 
         Self {
+            mode,
             module_files,
             modules,
             declaration_names,
@@ -156,7 +265,7 @@ impl EmitContext {
         current_module_id: RuntimeModuleId,
         reference: &CodegenReference,
     ) -> String {
-        if reference.module_id == current_module_id {
+        if reference.module_id == current_module_id || self.mode == EmitMode::JsProgramModule {
             self.declaration_name(reference)
         } else {
             self.import_aliases
@@ -228,11 +337,18 @@ impl EmitContext {
         role: ComponentNameRole,
     ) -> String {
         let exported_name = self.component_names(reference).name(role);
-        if reference.module_id == current_module_id {
+        if reference.module_id == current_module_id || self.mode == EmitMode::JsProgramModule {
             exported_name.to_string()
         } else {
             format!("{}_{}", module_prefix(reference.module_id), exported_name)
         }
+    }
+}
+
+fn reserve_js_program_module_names(used_names: &mut FxHashSet<String>) {
+    used_names.insert(JS_PROGRAM_MODULE_MANIFEST_EXPORT_NAME.to_string());
+    for name in JS_PROGRAM_MODULE_RESERVED_RUNTIME_NAMES {
+        used_names.insert((*name).to_string());
     }
 }
 
@@ -466,11 +582,257 @@ fn emit_module(
     out.push('\n');
 
     for declaration in &module.declarations {
-        emit_declaration(module, declaration, context, target, &mut out);
+        emit_declaration(
+            module,
+            declaration,
+            context,
+            target,
+            ExportPolicy::All,
+            &mut out,
+        );
         out.push('\n');
     }
 
     out
+}
+
+fn emit_js_program_module_source(
+    program: &CodegenProgram,
+    context: &EmitContext,
+    options: &JsProgramModuleOptions,
+) -> String {
+    let mut out = String::new();
+    out.push_str("// <auto-generated/>\n");
+    out.push_str(&format!(
+        "// nx-program-module: {}\n",
+        options.logical_module_name
+    ));
+    out.push_str(&format!("// nx-fingerprint: {}\n", program.fingerprint));
+    out.push_str(&format!("// nx-runtime-abi: {}\n\n", NX_JS_RUNTIME_ABI));
+
+    let runtime_helpers = collect_js_program_module_runtime_helpers(program);
+    if !runtime_helpers.is_empty() {
+        out.push_str(&format!(
+            "import {{ {} }} from {};\n\n",
+            runtime_helpers.join(", "),
+            js_string(&options.runtime_import_specifier)
+        ));
+    }
+
+    let exported_names = collect_js_program_module_public_names(program, context);
+    let export_policy = ExportPolicy::Names(&exported_names);
+
+    for module in js_program_module_ordered_modules(program) {
+        out.push_str(&format!("// nx-source: {}\n", module_source_label(module)));
+        for declaration in &module.declarations {
+            emit_declaration(
+                module,
+                declaration,
+                context,
+                CodegenTarget::JavaScript,
+                export_policy,
+                &mut out,
+            );
+            out.push('\n');
+        }
+    }
+
+    emit_js_program_module_manifest(program, context, options, &mut out);
+    out
+}
+
+fn js_program_module_ordered_modules(program: &CodegenProgram) -> Vec<&CodegenModule> {
+    let mut ordered_ids = Vec::new();
+    let mut visited = FxHashSet::default();
+    let mut visiting = FxHashSet::default();
+    for module in &program.modules {
+        push_module_after_dependencies(
+            program,
+            module.id,
+            &mut ordered_ids,
+            &mut visited,
+            &mut visiting,
+        );
+    }
+
+    ordered_ids
+        .into_iter()
+        .filter_map(|module_id| program.module(module_id))
+        .collect()
+}
+
+fn push_module_after_dependencies(
+    program: &CodegenProgram,
+    module_id: RuntimeModuleId,
+    ordered_ids: &mut Vec<RuntimeModuleId>,
+    visited: &mut FxHashSet<RuntimeModuleId>,
+    visiting: &mut FxHashSet<RuntimeModuleId>,
+) {
+    if visited.contains(&module_id) || !visiting.insert(module_id) {
+        return;
+    }
+
+    if let Some(module) = program.module(module_id) {
+        let mut dependency_ids = module
+            .imports
+            .iter()
+            .map(|reference| reference.module_id)
+            .filter(|dependency_id| *dependency_id != module_id)
+            .collect::<Vec<_>>();
+        dependency_ids.sort_by_key(RuntimeModuleId::as_u32);
+        dependency_ids.dedup();
+        for dependency_id in dependency_ids {
+            push_module_after_dependencies(program, dependency_id, ordered_ids, visited, visiting);
+        }
+    }
+
+    visiting.remove(&module_id);
+    visited.insert(module_id);
+    ordered_ids.push(module_id);
+}
+
+fn emit_js_program_module_manifest(
+    program: &CodegenProgram,
+    context: &EmitContext,
+    options: &JsProgramModuleOptions,
+    out: &mut String,
+) {
+    out.push_str(&format!(
+        "export const {} = Object.freeze({{\n",
+        JS_PROGRAM_MODULE_MANIFEST_EXPORT_NAME
+    ));
+    out.push_str(&format!(
+        "  logicalModuleName: {},\n",
+        js_string(&options.logical_module_name)
+    ));
+    out.push_str(&format!(
+        "  runtimeImportSpecifier: {},\n",
+        js_string(&options.runtime_import_specifier)
+    ));
+    out.push_str(&format!(
+        "  runtimeAbi: {},\n",
+        js_string(NX_JS_RUNTIME_ABI)
+    ));
+    out.push_str(&format!(
+        "  programFingerprint: {},\n",
+        js_string(&program.fingerprint.to_string())
+    ));
+    out.push_str("  functionExports: Object.freeze([\n");
+    for export in collect_js_program_module_function_exports(program, context) {
+        out.push_str(&format!(
+            "    Object.freeze({{ entrypointName: {}, exportName: {} }}),\n",
+            js_string(&export.entrypoint_name),
+            js_string(&export.export_name)
+        ));
+    }
+    out.push_str("  ]),\n");
+    out.push_str("  componentExports: Object.freeze([\n");
+    for export in collect_js_program_module_component_exports(program, context) {
+        out.push_str(&format!(
+            "    Object.freeze({{ componentName: {}, componentExportName: {}, schemaExportName: {}",
+            js_string(&export.component_name),
+            js_string(&export.component_export_name),
+            js_string(&export.schema_export_name)
+        ));
+        if let Some(initial_state_export_name) = export.initial_state_export_name.as_deref() {
+            out.push_str(&format!(
+                ", initialStateExportName: {}",
+                js_string(initial_state_export_name)
+            ));
+        }
+        if let Some(render_export_name) = export.render_export_name.as_deref() {
+            out.push_str(&format!(
+                ", renderExportName: {}",
+                js_string(render_export_name)
+            ));
+        }
+        out.push_str(" }),\n");
+    }
+    out.push_str("  ]),\n");
+    out.push_str("});\n");
+}
+
+fn collect_js_program_module_public_names(
+    program: &CodegenProgram,
+    context: &EmitContext,
+) -> FxHashSet<String> {
+    let mut names = FxHashSet::default();
+    names.insert(JS_PROGRAM_MODULE_MANIFEST_EXPORT_NAME.to_string());
+    for export in collect_js_program_module_function_exports(program, context) {
+        names.insert(export.export_name);
+    }
+    for export in collect_js_program_module_component_exports(program, context) {
+        names.insert(export.component_export_name);
+        names.insert(export.schema_export_name);
+        if let Some(initial_state_export_name) = export.initial_state_export_name {
+            names.insert(initial_state_export_name);
+        }
+        if let Some(render_export_name) = export.render_export_name {
+            names.insert(render_export_name);
+        }
+    }
+    names
+}
+
+fn module_source_label(module: &CodegenModule) -> String {
+    match &module.provenance {
+        CodegenModuleProvenance::SourceProvider { identity } => identity.clone(),
+        CodegenModuleProvenance::Library { module_path, .. } => module_path.display().to_string(),
+    }
+}
+
+fn collect_js_program_module_function_exports(
+    program: &CodegenProgram,
+    context: &EmitContext,
+) -> Vec<GeneratedJsProgramModuleFunctionExport> {
+    program
+        .entrypoints
+        .iter()
+        .map(|entrypoint| GeneratedJsProgramModuleFunctionExport {
+            entrypoint_name: entrypoint.name.clone(),
+            export_name: context.declaration_name(&entrypoint.reference),
+        })
+        .collect()
+}
+
+fn collect_js_program_module_component_exports(
+    program: &CodegenProgram,
+    context: &EmitContext,
+) -> Vec<GeneratedJsProgramModuleComponentExport> {
+    let mut exports = Vec::new();
+    for module in &program.modules {
+        for declaration in &module.declarations {
+            let CodegenDeclarationKind::Component(component) = &declaration.kind else {
+                continue;
+            };
+            if component.is_abstract {
+                continue;
+            }
+
+            let names = context.component_names(&declaration.reference);
+            let has_state_exports = !component.is_external && !component.state.is_empty();
+            exports.push(GeneratedJsProgramModuleComponentExport {
+                component_name: declaration.reference.name.clone(),
+                component_export_name: context.declaration_name(&declaration.reference),
+                schema_export_name: names.name(ComponentNameRole::Schema).to_string(),
+                initial_state_export_name: has_state_exports.then(|| {
+                    names
+                        .initial_state_function
+                        .as_deref()
+                        .expect("stateful component should have an initial-state helper")
+                        .to_string()
+                }),
+                render_export_name: has_state_exports.then(|| {
+                    names
+                        .render_function
+                        .as_deref()
+                        .expect("stateful component should have a render helper")
+                        .to_string()
+                }),
+            });
+        }
+    }
+    exports
 }
 
 fn emit_declaration(
@@ -478,9 +840,11 @@ fn emit_declaration(
     declaration: &CodegenDeclaration,
     context: &EmitContext,
     target: CodegenTarget,
+    export_policy: ExportPolicy<'_>,
     out: &mut String,
 ) {
     let name = context.declaration_name(&declaration.reference);
+    let export_prefix = export_policy.prefix(&name);
     match &declaration.kind {
         CodegenDeclarationKind::Function {
             params,
@@ -504,7 +868,8 @@ fn emit_declaration(
                 .join(", ");
             if target.is_typescript() {
                 out.push_str(&format!(
-                    "export function {}({}): {} {{\n",
+                    "{}function {}({}): {} {{\n",
+                    export_prefix,
                     name,
                     params,
                     return_type
@@ -513,7 +878,10 @@ fn emit_declaration(
                         .unwrap_or_else(|| "unknown".to_string())
                 ));
             } else {
-                out.push_str(&format!("export function {}({}) {{\n", name, params));
+                out.push_str(&format!(
+                    "{}function {}({}) {{\n",
+                    export_prefix, name, params
+                ));
             }
             out.push_str(&format!(
                 "  return {};\n",
@@ -524,7 +892,8 @@ fn emit_declaration(
         CodegenDeclarationKind::Value { value, ty } => {
             if target.is_typescript() {
                 out.push_str(&format!(
-                    "export const {}: {} = {};\n",
+                    "{}const {}: {} = {};\n",
+                    export_prefix,
                     name,
                     ty.as_ref()
                         .map(|ty| emit_type(module.id, ty, module, context))
@@ -533,7 +902,8 @@ fn emit_declaration(
                 ));
             } else {
                 out.push_str(&format!(
-                    "export const {} = {};\n",
+                    "{}const {} = {};\n",
+                    export_prefix,
                     name,
                     emit_expression(module.id, value, context)
                 ));
@@ -541,7 +911,7 @@ fn emit_declaration(
         }
         CodegenDeclarationKind::Enum { members } => {
             if target.is_typescript() {
-                out.push_str(&format!("export const {} = {{\n", name));
+                out.push_str(&format!("{}const {} = {{\n", export_prefix, name));
                 for member in members {
                     out.push_str(&format!(
                         "  {}: {},\n",
@@ -551,11 +921,14 @@ fn emit_declaration(
                 }
                 out.push_str("} as const;\n\n");
                 out.push_str(&format!(
-                    "export type {} = typeof {}[keyof typeof {}];\n",
-                    name, name, name
+                    "{}type {} = typeof {}[keyof typeof {}];\n",
+                    export_prefix, name, name, name
                 ));
             } else {
-                out.push_str(&format!("export const {} = Object.freeze({{\n", name));
+                out.push_str(&format!(
+                    "{}const {} = Object.freeze({{\n",
+                    export_prefix, name
+                ));
                 for member in members {
                     out.push_str(&format!(
                         "  {}: {},\n",
@@ -574,6 +947,7 @@ fn emit_declaration(
                     fields,
                     module,
                     context,
+                    export_policy,
                     out,
                 );
                 out.push('\n');
@@ -588,6 +962,7 @@ fn emit_declaration(
                 component,
                 context,
                 target,
+                export_policy,
                 out,
             );
         }
@@ -599,6 +974,7 @@ fn emit_declaration(
                     cases,
                     module,
                     context,
+                    export_policy,
                     out,
                 );
                 out.push('\n');
@@ -607,7 +983,8 @@ fn emit_declaration(
         CodegenDeclarationKind::TypeAlias => {}
         CodegenDeclarationKind::Unsupported(unsupported) => {
             out.push_str(&format!(
-                "export const {} = nxRuntimeError({});\n",
+                "{}const {} = nxRuntimeError({});\n",
+                export_prefix,
                 name,
                 js_string(&unsupported.message)
             ));
@@ -621,9 +998,14 @@ fn emit_record_type(
     fields: &[CodegenRecordField],
     module: &CodegenModule,
     context: &EmitContext,
+    export_policy: ExportPolicy<'_>,
     out: &mut String,
 ) {
-    out.push_str(&format!("export type {} = {{\n", name));
+    out.push_str(&format!(
+        "{}type {} = {{\n",
+        export_policy.prefix(name),
+        name
+    ));
     out.push_str(&format!("  readonly $type: {};\n", js_string(runtime_name)));
     for field in fields {
         let optional = if field.is_required { "" } else { "?" };
@@ -643,6 +1025,7 @@ fn emit_union_type(
     cases: &[CodegenUnionCase],
     module: &CodegenModule,
     context: &EmitContext,
+    export_policy: ExportPolicy<'_>,
     out: &mut String,
 ) {
     let case_type_names = cases
@@ -656,6 +1039,7 @@ fn emit_union_type(
             &case.fields,
             module,
             context,
+            export_policy,
             out,
         );
         out.push('\n');
@@ -665,7 +1049,12 @@ fn emit_union_type(
     } else {
         case_type_names.join(" | ")
     };
-    out.push_str(&format!("export type {} = {};\n", name, union));
+    out.push_str(&format!(
+        "{}type {} = {};\n",
+        export_policy.prefix(name),
+        name,
+        union
+    ));
 }
 
 fn emit_component_declaration(
@@ -676,19 +1065,28 @@ fn emit_component_declaration(
     component: &CodegenComponent,
     context: &EmitContext,
     target: CodegenTarget,
+    export_policy: ExportPolicy<'_>,
     out: &mut String,
 ) {
     if target.is_typescript() {
-        emit_component_props_type(module, reference, component, context, out);
+        emit_component_props_type(module, reference, component, context, export_policy, out);
         out.push('\n');
         emit_component_resolved_props_type(module, reference, component, context, out);
         out.push('\n');
         if !component.is_abstract {
-            emit_component_element_type(module, reference, runtime_name, component, context, out);
+            emit_component_element_type(
+                module,
+                reference,
+                runtime_name,
+                component,
+                context,
+                export_policy,
+                out,
+            );
             out.push('\n');
         }
         if !component.state.is_empty() {
-            emit_component_state_type(module, reference, component, context, out);
+            emit_component_state_type(module, reference, component, context, export_policy, out);
             out.push('\n');
         }
     }
@@ -709,6 +1107,7 @@ fn emit_component_declaration(
             component,
             context,
             target,
+            export_policy,
             out,
         );
         out.push('\n');
@@ -719,6 +1118,7 @@ fn emit_component_declaration(
             component,
             context,
             target,
+            export_policy,
             out,
         );
         return;
@@ -732,6 +1132,7 @@ fn emit_component_declaration(
             component,
             context,
             target,
+            export_policy,
             out,
         );
         out.push('\n');
@@ -744,10 +1145,19 @@ fn emit_component_declaration(
         component,
         context,
         target,
+        export_policy,
         out,
     );
     out.push('\n');
-    emit_normal_component_render_function(module, reference, component, context, target, out);
+    emit_normal_component_render_function(
+        module,
+        reference,
+        component,
+        context,
+        target,
+        export_policy,
+        out,
+    );
     out.push('\n');
     emit_normal_component_schema(
         module,
@@ -756,6 +1166,7 @@ fn emit_component_declaration(
         component,
         context,
         target,
+        export_policy,
         out,
     );
 }
@@ -765,20 +1176,22 @@ fn emit_component_props_type(
     reference: &CodegenReference,
     component: &CodegenComponent,
     context: &EmitContext,
+    export_policy: ExportPolicy<'_>,
     out: &mut String,
 ) {
     let props_type = context
         .component_names(reference)
         .name(ComponentNameRole::Props);
+    let export_prefix = export_policy.prefix(props_type);
     if component.props.is_empty() {
         out.push_str(&format!(
-            "export type {} = Record<string, never>;\n",
-            props_type
+            "{}type {} = Record<string, never>;\n",
+            export_prefix, props_type
         ));
         return;
     }
 
-    out.push_str(&format!("export type {} = {{\n", props_type));
+    out.push_str(&format!("{}type {} = {{\n", export_prefix, props_type));
     for field in &component.props {
         let optional = if field.is_required { "" } else { "?" };
         out.push_str(&format!(
@@ -826,12 +1239,17 @@ fn emit_component_element_type(
     runtime_name: &str,
     component: &CodegenComponent,
     context: &EmitContext,
+    export_policy: ExportPolicy<'_>,
     out: &mut String,
 ) {
     let element_type = context
         .component_names(reference)
         .name(ComponentNameRole::Element);
-    out.push_str(&format!("export type {} = {{\n", element_type));
+    out.push_str(&format!(
+        "{}type {} = {{\n",
+        export_policy.prefix(element_type),
+        element_type
+    ));
     out.push_str(&format!("  readonly $type: {};\n", js_string(runtime_name)));
     for field in &component.props {
         out.push_str(&format!(
@@ -848,12 +1266,17 @@ fn emit_component_state_type(
     reference: &CodegenReference,
     component: &CodegenComponent,
     context: &EmitContext,
+    export_policy: ExportPolicy<'_>,
     out: &mut String,
 ) {
     let state_type = context
         .component_names(reference)
         .name(ComponentNameRole::State);
-    out.push_str(&format!("export type {} = {{\n", state_type));
+    out.push_str(&format!(
+        "{}type {} = {{\n",
+        export_policy.prefix(state_type),
+        state_type
+    ));
     for field in &component.state {
         out.push_str(&format!(
             "  readonly {}: {};\n",
@@ -911,15 +1334,18 @@ fn emit_component_descriptor_factory(
     component: &CodegenComponent,
     context: &EmitContext,
     target: CodegenTarget,
+    export_policy: ExportPolicy<'_>,
     out: &mut String,
 ) {
     let names = context.component_names(reference);
     let default_value = component_props_can_default(component)
         .then_some(" = {}")
         .unwrap_or("");
+    let export_prefix = export_policy.prefix(name);
     if target.is_typescript() {
         out.push_str(&format!(
-            "export function {}(props: {}{}): {} {{\n",
+            "{}function {}(props: {}{}): {} {{\n",
+            export_prefix,
             name,
             names.name(ComponentNameRole::Props),
             default_value,
@@ -927,8 +1353,8 @@ fn emit_component_descriptor_factory(
         ));
     } else {
         out.push_str(&format!(
-            "export function {}(props{}) {{\n",
-            name, default_value
+            "{}function {}(props{}) {{\n",
+            export_prefix, name, default_value
         ));
     }
     out.push_str(&format!(
@@ -954,6 +1380,7 @@ fn emit_component_initial_state(
     component: &CodegenComponent,
     context: &EmitContext,
     target: CodegenTarget,
+    export_policy: ExportPolicy<'_>,
     out: &mut String,
 ) {
     let names = context.component_names(reference);
@@ -964,9 +1391,11 @@ fn emit_component_initial_state(
     let default_value = component_props_can_default(component)
         .then_some(" = {}")
         .unwrap_or("");
+    let export_prefix = export_policy.prefix(function_name);
     if target.is_typescript() {
         out.push_str(&format!(
-            "export function {}(props: {}{}): {} {{\n",
+            "{}function {}(props: {}{}): {} {{\n",
+            export_prefix,
             function_name,
             names.name(ComponentNameRole::Props),
             default_value,
@@ -974,8 +1403,8 @@ fn emit_component_initial_state(
         ));
     } else {
         out.push_str(&format!(
-            "export function {}(props{}) {{\n",
-            function_name, default_value
+            "{}function {}(props{}) {{\n",
+            export_prefix, function_name, default_value
         ));
     }
     let mut predeclared = FxHashSet::default();
@@ -1016,6 +1445,7 @@ fn emit_normal_component_render_function(
     component: &CodegenComponent,
     context: &EmitContext,
     target: CodegenTarget,
+    export_policy: ExportPolicy<'_>,
     out: &mut String,
 ) {
     let names = context.component_names(reference);
@@ -1023,11 +1453,12 @@ fn emit_normal_component_render_function(
         .render_function
         .as_deref()
         .expect("normal component should have a render helper");
-    let export_prefix = if component.state.is_empty() {
-        ""
-    } else {
-        "export "
-    };
+    let export_prefix =
+        if component.state.is_empty() || !export_policy.should_export(render_function) {
+            ""
+        } else {
+            "export "
+        };
     let return_type = component_render_return_type(module, component, context);
     if target.is_typescript() {
         if component.state.is_empty() {
@@ -1106,20 +1537,24 @@ fn emit_external_component_schema(
     component: &CodegenComponent,
     context: &EmitContext,
     target: CodegenTarget,
+    export_policy: ExportPolicy<'_>,
     out: &mut String,
 ) {
     let names = context.component_names(reference);
+    let schema_name = names.name(ComponentNameRole::Schema);
+    let export_prefix = export_policy.prefix(schema_name);
     if target.is_typescript() {
         out.push_str(&format!(
-            "export const {} = nxExternalComponentSchema<{}, {}>({{\n",
-            names.name(ComponentNameRole::Schema),
+            "{}const {} = nxExternalComponentSchema<{}, {}>({{\n",
+            export_prefix,
+            schema_name,
             names.name(ComponentNameRole::Props),
             names.name(ComponentNameRole::Element)
         ));
     } else {
         out.push_str(&format!(
-            "export const {} = nxExternalComponentSchema({{\n",
-            names.name(ComponentNameRole::Schema)
+            "{}const {} = nxExternalComponentSchema({{\n",
+            export_prefix, schema_name
         ));
     }
     out.push_str(&format!("  name: {},\n", js_string(runtime_name)));
@@ -1141,9 +1576,12 @@ fn emit_normal_component_schema(
     component: &CodegenComponent,
     context: &EmitContext,
     target: CodegenTarget,
+    export_policy: ExportPolicy<'_>,
     out: &mut String,
 ) {
     let names = context.component_names(reference);
+    let schema_name = names.name(ComponentNameRole::Schema);
+    let export_prefix = export_policy.prefix(schema_name);
     let state_type = names
         .state_type
         .as_deref()
@@ -1151,16 +1589,17 @@ fn emit_normal_component_schema(
     let return_type = component_render_return_type(module, component, context);
     if target.is_typescript() {
         out.push_str(&format!(
-            "export const {} = nxComponentSchema<{}, {}, {}>({{\n",
-            names.name(ComponentNameRole::Schema),
+            "{}const {} = nxComponentSchema<{}, {}, {}>({{\n",
+            export_prefix,
+            schema_name,
             names.name(ComponentNameRole::Props),
             state_type,
             return_type
         ));
     } else {
         out.push_str(&format!(
-            "export const {} = nxComponentSchema({{\n",
-            names.name(ComponentNameRole::Schema)
+            "{}const {} = nxComponentSchema({{\n",
+            export_prefix, schema_name
         ));
     }
     out.push_str(&format!("  name: {},\n", js_string(runtime_name)));
@@ -2900,35 +3339,28 @@ fn collect_module_runtime_helpers(
     for declaration in &module.declarations {
         collect_declaration_runtime_helpers(declaration, target, &mut helpers);
     }
-    let candidates = [
-        "NxResult",
-        "NxValue",
-        "nxAssertRecord",
-        "nxAnySchema",
-        "nxArraySchema",
-        "nxBooleanSchema",
-        "nxComponentSchema",
-        "nxDiagnosticsFromError",
-        "nxElement",
-        "nxEnumSchema",
-        "nxExternalComponentSchema",
-        "nxField",
-        "nxMissingField",
-        "nxNamedRecordSchema",
-        "nxNormalizeValue",
-        "nxNullableSchema",
-        "nxNumberSchema",
-        "nxRejectUnknownFields",
-        "nxRecordSchema",
-        "nxRuntimeError",
-        "nxStringSchema",
-        "nxUnionSchema",
-    ];
-    let mut output = candidates
+    let mut output = JS_PROGRAM_MODULE_RESERVED_RUNTIME_NAMES
         .into_iter()
+        .copied()
         .filter(|helper| target.is_typescript() || !matches!(*helper, "NxResult" | "NxValue"))
-        .filter(|helper| helpers.contains(helper))
+        .filter(|helper| helpers.contains(*helper))
         .collect::<Vec<_>>();
+    output.sort();
+    output
+}
+
+fn collect_js_program_module_runtime_helpers(program: &CodegenProgram) -> Vec<&'static str> {
+    let mut helpers = FxHashSet::default();
+    for module in &program.modules {
+        for declaration in &module.declarations {
+            collect_declaration_runtime_helpers(
+                declaration,
+                CodegenTarget::JavaScript,
+                &mut helpers,
+            );
+        }
+    }
+    let mut output = helpers.into_iter().collect::<Vec<_>>();
     output.sort();
     output
 }

@@ -170,6 +170,54 @@ public class NxEndToEndTests
     }
 
     [Fact]
+    public void GenerateJSProgramModule_WithProgramArtifact_ReturnsSourceAndMetadata()
+    {
+        using NxProgramArtifact artifact = NxProgramArtifact.Build(
+            """let root() = { <div class="test" /> }""");
+
+        NxGeneratedJSProgramModule module = artifact.GenerateJSProgramModule(
+            new NxJSProgramModuleOptions
+            {
+                LogicalModuleName = "managed/main",
+                RuntimeImportSpecifier = "./nx-runtime.js",
+            });
+
+        Assert.Equal("managed/main", module.LogicalModuleName);
+        Assert.Equal("./nx-runtime.js", module.RuntimeImportSpecifier);
+        Assert.Equal("nx-js-runtime-v1", module.RuntimeAbi);
+        Assert.True(module.ProgramFingerprint > 0);
+        NxGeneratedJSProgramModuleFunctionExport entrypoint = Assert.Single(module.FunctionExports);
+        Assert.Equal("root", entrypoint.EntrypointName);
+        Assert.Equal("root", entrypoint.ExportName);
+        Assert.Empty(module.ComponentExports);
+        Assert.Contains("import { nxElement } from \"./nx-runtime.js\";", module.SourceText);
+        Assert.Contains("export function root()", module.SourceText);
+        Assert.Contains("export const nxProgramModuleManifest", module.SourceText);
+        Assert.DoesNotContain("export function nxElement", module.SourceText);
+    }
+
+    [Fact]
+    public void GenerateJSProgramModule_WithCodegenDiagnostics_ThrowsEvaluationException()
+    {
+        using NxProgramArtifact artifact = NxProgramArtifact.Build(
+            """
+            external component <TextInput />
+            component <SearchBox emits { SearchSubmitted { query:string } } /> = { <TextInput /> }
+            let DoSearch(query:string) = { query }
+            let root() = { <SearchBox onSearchSubmitted=<DoSearch query={action.query} /> /> }
+            """);
+
+        NxEvaluationException exception = Assert.Throws<NxEvaluationException>(
+            () => artifact.GenerateJSProgramModule());
+
+        Assert.Contains(
+            exception.Diagnostics,
+            diagnostic => diagnostic.Message.Contains(
+                "action-handler codegen is not supported",
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void BuildProgramArtifact_WithMissingLibraryFromContext_ThrowsEvaluationException()
     {
         string tempPath = Path.Combine(Path.GetTempPath(), $"nx-prepared-invalid-{Guid.NewGuid():N}");

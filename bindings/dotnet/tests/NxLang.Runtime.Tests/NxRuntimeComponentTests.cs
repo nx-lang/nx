@@ -294,11 +294,17 @@ public class NxRuntimeComponentTests
               <TextInput value={query} placeholder={placeholder} />
             }
             """;
-        byte[] propsBytes = MessagePackSerializer.Serialize(new SearchBoxProps { Placeholder = "Find docs" });
-        byte[] stateBytes = MessagePackSerializer.Serialize(new SearchBoxState { Query = "docs" });
+        byte[] propsBytes = MessagePackSerializer.Serialize(
+            new SearchBoxProps { Placeholder = "Find docs" },
+            cancellationToken: TestContext.Current.CancellationToken);
+        byte[] stateBytes = MessagePackSerializer.Serialize(
+            new SearchBoxState { Query = "docs" },
+            cancellationToken: TestContext.Current.CancellationToken);
 
         byte[] msgpack = NxRuntime.EvaluateComponentBytes(source, "SearchBox", propsBytes, stateBytes);
-        TextInputElement typed = MessagePackSerializer.Deserialize<TextInputElement>(msgpack);
+        TextInputElement typed = MessagePackSerializer.Deserialize<TextInputElement>(
+            msgpack,
+            cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("docs", typed.Value);
 
         byte[] json = NxRuntime.EvaluateComponentBytes(

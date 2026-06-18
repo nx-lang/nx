@@ -11,7 +11,9 @@ mod options;
 mod runtime;
 
 pub use builder::build_codegen_program;
-pub use emit::{emit_codegen_program, emit_program};
+pub use emit::{
+    emit_codegen_js_program_module, emit_codegen_program, emit_js_program_module, emit_program,
+};
 pub use model::{
     CodegenComponent, CodegenComponentDescriptor, CodegenComponentField, CodegenDeclaration,
     CodegenDeclarationKind, CodegenElement, CodegenEntrypoint, CodegenExpression,
@@ -20,8 +22,12 @@ pub use model::{
 };
 pub use options::{
     CodegenError, CodegenOptions, CodegenOutput, CodegenOutputFormat, CodegenTarget,
-    CodegenWarning, GeneratedFile,
+    CodegenWarning, GeneratedFile, GeneratedJsProgramModule,
+    GeneratedJsProgramModuleComponentExport, GeneratedJsProgramModuleFunctionExport,
+    JsProgramModuleOptions, DEFAULT_JS_PROGRAM_MODULE_NAME,
+    DEFAULT_JS_PROGRAM_MODULE_RUNTIME_IMPORT_SPECIFIER, NX_JS_RUNTIME_ABI,
 };
+pub use runtime::{javascript_runtime_abi, javascript_runtime_helper_source};
 
 #[cfg(test)]
 mod tests;

@@ -1,9 +1,11 @@
 use crate::model::{CodegenProperty, CodegenRecordField};
 use crate::{
-    build_codegen_program, emit_codegen_program, emit_program, CodegenDeclaration,
-    CodegenDeclarationKind, CodegenEntrypoint, CodegenExpression, CodegenExpressionKind,
-    CodegenModule, CodegenModuleProvenance, CodegenOptions, CodegenProgram, CodegenReference,
-    CodegenTarget,
+    build_codegen_program, emit_codegen_program, emit_js_program_module, emit_program,
+    javascript_runtime_helper_source, CodegenDeclaration, CodegenDeclarationKind,
+    CodegenEntrypoint, CodegenExpression, CodegenExpressionKind, CodegenModule,
+    CodegenModuleProvenance, CodegenOptions, CodegenProgram, CodegenReference, CodegenTarget,
+    JsProgramModuleOptions, DEFAULT_JS_PROGRAM_MODULE_NAME,
+    DEFAULT_JS_PROGRAM_MODULE_RUNTIME_IMPORT_SPECIFIER, NX_JS_RUNTIME_ABI,
 };
 use nx_api::{
     build_program_artifact_from_source, build_workspace_program_artifact, eval_program_artifact,
@@ -106,6 +108,48 @@ fn execute_generated_javascript_artifact_script(
     Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+fn execute_generated_js_program_module_script(
+    artifact: &ProgramArtifact,
+    script_body: &str,
+) -> Option<String> {
+    if Command::new("node").arg("--version").output().is_err() {
+        return None;
+    }
+
+    let options = JsProgramModuleOptions {
+        runtime_import_specifier: "./nx-runtime.js".to_string(),
+        ..JsProgramModuleOptions::default()
+    };
+    let module = emit_js_program_module(artifact, &options).expect("program module output");
+    let dir = TempDir::new().expect("temp dir");
+    fs::write(dir.path().join("package.json"), r#"{ "type": "module" }"#).expect("package file");
+    fs::write(
+        dir.path().join("nx-runtime.js"),
+        javascript_runtime_helper_source(),
+    )
+    .expect("runtime helper");
+    fs::write(dir.path().join("program.js"), module.source_text).expect("program module");
+
+    let program_url = format!("file://{}", dir.path().join("program.js").display());
+    let script = format!(
+        "import({:?}).then((m) => {{ {} }});",
+        program_url, script_body
+    );
+    let output = Command::new("node")
+        .arg("--input-type=module")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .expect("node execution");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 fn assert_generated_typescript_artifact_type_checks(artifact: &ProgramArtifact) {
     let output = emit_program(artifact, &CodegenOptions::typescript()).expect("ts output");
     if Command::new("tsc").arg("--version").output().is_err() {
@@ -144,6 +188,10 @@ fn assert_generated_typescript_artifact_type_checks(artifact: &ProgramArtifact) 
 
 fn interpreter_json_root(source: &str) -> String {
     let artifact = artifact_from_source(source);
+    interpreter_json_artifact_root(&artifact)
+}
+
+fn interpreter_json_artifact_root(artifact: &ProgramArtifact) -> String {
     match eval_program_artifact(&artifact) {
         EvalResult::Ok(value) => value.to_json_string().expect("interpreter json"),
         EvalResult::Err(diagnostics) => panic!("interpreter diagnostics: {:?}", diagnostics),
@@ -699,6 +747,382 @@ let root() = { <User name="Ada" age=42 /> }
     let second = emit_program(&artifact, &CodegenOptions::javascript()).expect("second output");
 
     assert_eq!(first.files, second.files);
+}
+
+#[test]
+fn js_program_module_defaults_and_metadata_are_host_neutral() {
+    let artifact = artifact_from_source("let root() = { 1 + 2 }");
+    let module = emit_js_program_module(&artifact, &JsProgramModuleOptions::default())
+        .expect("program module");
+
+    assert_eq!(module.logical_module_name, DEFAULT_JS_PROGRAM_MODULE_NAME);
+    assert_eq!(
+        module.runtime_import_specifier,
+        DEFAULT_JS_PROGRAM_MODULE_RUNTIME_IMPORT_SPECIFIER
+    );
+    assert_eq!(module.runtime_abi, NX_JS_RUNTIME_ABI);
+    assert_eq!(module.program_fingerprint, artifact.fingerprint);
+    assert_eq!(module.function_exports.len(), 1);
+    assert_eq!(module.function_exports[0].entrypoint_name, "root");
+    assert_eq!(module.function_exports[0].export_name, "root");
+    assert!(module.component_exports.is_empty());
+    assert!(module.source_text.contains("export function root()"));
+    assert!(module
+        .source_text
+        .contains("export const nxProgramModuleManifest"));
+    assert!(module
+        .source_text
+        .contains("runtimeAbi: \"nx-js-runtime-v1\""));
+    assert!(!module.source_text.contains("nx-runtime.js"));
+    assert!(!module.source_text.contains("from \"./m"));
+}
+
+#[test]
+fn js_program_module_uses_configured_runtime_import_specifier() {
+    let artifact = artifact_from_source(r#"let root() = { <div class="test" /> }"#);
+    let options = JsProgramModuleOptions {
+        logical_module_name: "reachme/cache/main".to_string(),
+        runtime_import_specifier: "./nx-runtime.js".to_string(),
+    };
+    let module = emit_js_program_module(&artifact, &options).expect("program module");
+
+    assert_eq!(module.logical_module_name, "reachme/cache/main");
+    assert_eq!(module.runtime_import_specifier, "./nx-runtime.js");
+    assert!(module
+        .source_text
+        .contains("import { nxElement } from \"./nx-runtime.js\";"));
+    assert!(!module.source_text.contains("export function nxElement"));
+}
+
+#[test]
+fn js_program_module_rejects_invalid_artifact_diagnostics() {
+    let artifact = artifact_from_source(r#"let root(): int = { "not an int" }"#);
+    let error = emit_js_program_module(&artifact, &JsProgramModuleOptions::default())
+        .expect_err("invalid artifact should fail program-module codegen");
+
+    assert!(error
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity() == Severity::Error));
+}
+
+#[test]
+fn js_program_module_flattens_cross_module_values_types_unions_and_components() {
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "app/main.nx",
+                r#"import { answer, add, User, Theme, LoadState, SharedBox } from "../shared/model.nx"
+let root() = {
+  <SharedBox
+    user=<User name="Ada" />
+    theme={Theme.dark}
+    load=<LoadState.ready count={add(answer(), 1)} />
+  />
+}"#,
+            ),
+            (
+                "shared/model.nx",
+                r#"export let answer(): int = { 42 }
+export let bonus: int = 1
+export let add(a:int, b:int): int = { a + b }
+export enum Theme = light | dark
+export type User = { name:string score:int = 42 }
+export type LoadState = | ready { count:int }
+export external component <TextInput value:string />
+export component <SharedBox user:User theme:Theme load:LoadState /> = {
+  <TextInput value={user.name} />
+}"#,
+            ),
+        ],
+        "app/main.nx",
+    );
+    let options = JsProgramModuleOptions {
+        runtime_import_specifier: "./nx-runtime.js".to_string(),
+        ..JsProgramModuleOptions::default()
+    };
+    let module = emit_js_program_module(&artifact, &options).expect("program module");
+
+    assert!(module.source_text.contains("function answer()"));
+    assert!(module.source_text.contains("const bonus = 1;"));
+    assert!(module.source_text.contains("function add(a, b)"));
+    assert!(module.source_text.contains("const Theme = Object.freeze"));
+    assert!(module.source_text.contains("export function answer()"));
+    assert!(module.source_text.contains("export function add(a, b)"));
+    assert!(!module.source_text.contains("export const bonus = 1;"));
+    assert!(!module
+        .source_text
+        .contains("export const Theme = Object.freeze"));
+    assert!(module.source_text.contains("export function root()"));
+    assert!(module
+        .source_text
+        .contains("export function SharedBox(props)"));
+    assert!(module
+        .source_text
+        .contains("export const SharedBoxSchema = nxComponentSchema"));
+    assert!(!module.source_text.contains("from \"./m"));
+    assert!(!module.source_text.contains("from \"../"));
+
+    let Some(output) = execute_generated_js_program_module_script(
+        &artifact,
+        "console.log(JSON.stringify(m.root()));",
+    ) else {
+        return;
+    };
+    assert_json_values_eq(&output, &interpreter_json_artifact_root(&artifact));
+}
+
+#[test]
+fn js_program_module_plans_collision_free_names_across_modules() {
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "app/main.nx",
+                r#"import { value as One.value } from "../one/value.nx"
+import { value as Two.value } from "../two/value.nx"
+let root(): int = { One.value + Two.value }"#,
+            ),
+            ("one/value.nx", "export let value: int = 1"),
+            ("two/value.nx", "export let value: int = 2"),
+        ],
+        "app/main.nx",
+    );
+    let module = emit_js_program_module(
+        &artifact,
+        &JsProgramModuleOptions {
+            runtime_import_specifier: "./nx-runtime.js".to_string(),
+            ..JsProgramModuleOptions::default()
+        },
+    )
+    .expect("program module");
+
+    assert!(module.source_text.contains("const value = 1;"));
+    assert!(module.source_text.contains("const value_2 = 2;"));
+    assert!(!module.source_text.contains("export const value = 1;"));
+    assert!(!module.source_text.contains("export const value_2 = 2;"));
+    assert!(module.source_text.contains("return (value + value_2);"));
+    assert!(!module.source_text.contains(" as m"));
+
+    let Some(output) = execute_generated_js_program_module_script(
+        &artifact,
+        "console.log(JSON.stringify(m.root()));",
+    ) else {
+        return;
+    };
+    assert_eq!(output, "3");
+}
+
+#[test]
+fn js_program_module_component_schema_execution_uses_separate_runtime() {
+    let artifact = artifact_from_source(
+        r#"
+external component <TextInput value:string />
+component <SearchBox placeholder:string = "Find docs" /> = {
+  state { query:string = { placeholder } }
+  <TextInput value={query} />
+}
+let root() = { 1 }
+"#,
+    );
+    let module = emit_js_program_module(
+        &artifact,
+        &JsProgramModuleOptions {
+            runtime_import_specifier: "./nx-runtime.js".to_string(),
+            ..JsProgramModuleOptions::default()
+        },
+    )
+    .expect("program module");
+
+    let search_box = module
+        .component_exports
+        .iter()
+        .find(|export| export.component_name == "SearchBox")
+        .expect("SearchBox component export");
+    assert_eq!(search_box.component_export_name, "SearchBox");
+    assert_eq!(search_box.schema_export_name, "SearchBoxSchema");
+    assert_eq!(
+        search_box.initial_state_export_name.as_deref(),
+        Some("initialSearchBoxState")
+    );
+    assert_eq!(
+        search_box.render_export_name.as_deref(),
+        Some("renderSearchBox")
+    );
+
+    let Some(output) = execute_generated_js_program_module_script(
+        &artifact,
+        r#"console.log(JSON.stringify({
+  init: m.SearchBoxSchema.initializeJson({}),
+  evaluated: m.SearchBoxSchema.evaluateJson({}, { query: "docs" })
+}));"#,
+    ) else {
+        return;
+    };
+    assert_json_values_eq(
+        &output,
+        r#"{
+  "init": {
+    "rendered": { "$type": "TextInput", "value": "Find docs" },
+    "state": { "query": "Find docs" }
+  },
+  "evaluated": { "$type": "TextInput", "value": "docs" }
+}"#,
+    );
+}
+
+#[test]
+fn js_program_module_cross_module_component_schema_executes_after_flattening() {
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "app/main.nx",
+                r#"import { TextInput } from "../shared/ui.nx"
+component <Host child:TextInput /> = { child }
+let root() = { 1 }"#,
+            ),
+            (
+                "shared/ui.nx",
+                r#"export external component <TextInput value:string />"#,
+            ),
+        ],
+        "app/main.nx",
+    );
+    let module = emit_js_program_module(
+        &artifact,
+        &JsProgramModuleOptions {
+            runtime_import_specifier: "./nx-runtime.js".to_string(),
+            ..JsProgramModuleOptions::default()
+        },
+    )
+    .expect("program module");
+
+    assert!(
+        module
+            .source_text
+            .find("export const TextInputSchema")
+            .expect("TextInput schema")
+            < module
+                .source_text
+                .find("export const HostSchema")
+                .expect("Host schema")
+    );
+    assert!(!module.source_text.contains("from \"./m"));
+
+    let Some(output) = execute_generated_js_program_module_script(
+        &artifact,
+        r#"console.log(JSON.stringify(
+  m.HostSchema.evaluateJson({ child: { $type: "TextInput", value: "docs" } })
+));"#,
+    ) else {
+        return;
+    };
+    assert_json_values_eq(&output, r#"{ "$type": "TextInput", "value": "docs" }"#);
+}
+
+#[test]
+fn js_program_module_output_is_deterministic() {
+    let files = [
+        (
+            "app/main.nx",
+            r#"import { SearchBox } from "../shared/ui.nx"
+let root() = { <SearchBox /> }"#,
+        ),
+        (
+            "shared/ui.nx",
+            r#"export external component <TextInput value:string />
+export component <SearchBox placeholder:string = "Find docs" /> = {
+  <TextInput value={placeholder} />
+}"#,
+        ),
+    ];
+    let first_artifact = artifact_from_workspace(&files, "app/main.nx");
+    let second_artifact = artifact_from_workspace(&files, "app/main.nx");
+    let options = JsProgramModuleOptions {
+        runtime_import_specifier: "./nx-runtime.js".to_string(),
+        ..JsProgramModuleOptions::default()
+    };
+    let first =
+        emit_js_program_module(&first_artifact, &options).expect("first JavaScript program module");
+    let second = emit_js_program_module(&second_artifact, &options)
+        .expect("second JavaScript program module");
+
+    assert_eq!(first, second);
+}
+
+#[test]
+fn js_program_module_reserves_runtime_helper_and_manifest_names() {
+    let runtime_helper_collision = artifact_from_source(
+        r#"
+let nxElement() = { 1 }
+let root() = { <div /> }
+"#,
+    );
+    let options = JsProgramModuleOptions {
+        runtime_import_specifier: "./nx-runtime.js".to_string(),
+        ..JsProgramModuleOptions::default()
+    };
+    let runtime_helper_module =
+        emit_js_program_module(&runtime_helper_collision, &options).expect("program module");
+    assert!(runtime_helper_module
+        .source_text
+        .contains("import { nxElement } from \"./nx-runtime.js\";"));
+    assert!(runtime_helper_module
+        .source_text
+        .contains("function nxElement_2()"));
+    assert!(!runtime_helper_module
+        .source_text
+        .contains("function nxElement()"));
+
+    let manifest_collision = artifact_from_source(
+        r#"
+let nxProgramModuleManifest() = { 1 }
+let root() = { nxProgramModuleManifest() }
+"#,
+    );
+    let manifest_module =
+        emit_js_program_module(&manifest_collision, &options).expect("program module");
+    assert!(manifest_module
+        .source_text
+        .contains("function nxProgramModuleManifest_2()"));
+    assert!(manifest_module
+        .source_text
+        .contains("return nxProgramModuleManifest_2();"));
+    assert!(manifest_module
+        .source_text
+        .contains("export const nxProgramModuleManifest = Object.freeze"));
+}
+
+#[test]
+fn js_program_module_source_is_host_neutral() {
+    let artifact = artifact_from_source(r#"let root() = { <div class="test" /> }"#);
+    let module = emit_js_program_module(
+        &artifact,
+        &JsProgramModuleOptions {
+            runtime_import_specifier: "./nx-runtime.js".to_string(),
+            ..JsProgramModuleOptions::default()
+        },
+    )
+    .expect("program module");
+    let imports = module
+        .source_text
+        .lines()
+        .filter(|line| line.starts_with("import "))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        imports,
+        vec!["import { nxElement } from \"./nx-runtime.js\";"]
+    );
+    assert!(!module.source_text.contains("export default"));
+    assert!(!module.source_text.contains("fetch("));
+    assert!(!module.source_text.contains("WorkerCode"));
+    assert!(!module.source_text.contains("actor("));
+    assert!(!module.source_text.contains("setup("));
+    assert!(!module.source_text.contains("require("));
+    assert!(!module.source_text.contains("from \"node:"));
+    assert!(!module.source_text.contains("from \"fs\""));
+    assert!(!module.source_text.contains("from \"path\""));
+    assert!(!module.source_text.contains("export function nxElement"));
 }
 
 #[test]

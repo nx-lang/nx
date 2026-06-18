@@ -17,7 +17,7 @@ use nx_api::{
     build_program_artifact_from_source, build_workspace_program_artifact, LibraryRegistry,
     NxDiagnostic, NxWorkspace, NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
 };
-use nx_codegen::{emit_program, CodegenOptions};
+use nx_codegen::{emit_js_program_module, emit_program, CodegenOptions, JsProgramModuleOptions};
 use nx_diagnostics::{render_diagnostics_cli, Diagnostic, Severity};
 use nx_hir::{lower_source_module, Item, LoweredModule};
 use nx_interpreter::{Interpreter, Value};
@@ -100,6 +100,10 @@ enum Commands {
         #[arg(short, long)]
         output: PathBuf,
 
+        /// Executable output format
+        #[arg(long, default_value_t = ExecutableOutputFormat::Files)]
+        format: ExecutableOutputFormat,
+
         /// Entry module identity when generating from a workspace directory
         #[arg(long)]
         entry: Option<String>,
@@ -124,11 +128,27 @@ enum ExecutableTarget {
     Typescript,
 }
 
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum ExecutableOutputFormat {
+    Files,
+    #[value(name = "program-module")]
+    JsProgramModule,
+}
+
 impl std::fmt::Display for OutputFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             OutputFormat::Nx => write!(f, "nx"),
             OutputFormat::Json => write!(f, "json"),
+        }
+    }
+}
+
+impl std::fmt::Display for ExecutableOutputFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExecutableOutputFormat::Files => write!(f, "files"),
+            ExecutableOutputFormat::JsProgramModule => write!(f, "program-module"),
         }
     }
 }
@@ -161,8 +181,9 @@ fn main() -> ExitCode {
             file,
             target,
             output,
+            format,
             entry,
-        } => generate_executable_source(&file, target, &output, entry.as_deref()),
+        } => generate_executable_source(&file, target, format, &output, entry.as_deref()),
     }
 }
 
@@ -305,6 +326,7 @@ fn generate_types(
 fn generate_executable_source(
     path: &PathBuf,
     target: ExecutableTarget,
+    format: ExecutableOutputFormat,
     output_root: &Path,
     entry: Option<&str>,
 ) -> ExitCode {
@@ -329,6 +351,10 @@ fn generate_executable_source(
         Ok(artifact) => artifact,
         Err(exit_code) => return exit_code,
     };
+
+    if format == ExecutableOutputFormat::JsProgramModule {
+        return generate_executable_js_program_module(&artifact, target, output_root);
+    }
 
     let options = match target {
         ExecutableTarget::Typescript => CodegenOptions::typescript(),
@@ -379,6 +405,49 @@ fn generate_executable_source(
             );
             return ExitCode::from(1);
         }
+    }
+
+    ExitCode::SUCCESS
+}
+
+fn generate_executable_js_program_module(
+    artifact: &ProgramArtifact,
+    target: ExecutableTarget,
+    output_root: &Path,
+) -> ExitCode {
+    if target != ExecutableTarget::Javascript {
+        eprintln!("Error: Program-module codegen is only supported with --target javascript");
+        return ExitCode::from(1);
+    }
+
+    let generated = match emit_js_program_module(artifact, &JsProgramModuleOptions::javascript()) {
+        Ok(output) => output,
+        Err(error) => return render_codegen_diagnostics(artifact, &error.diagnostics),
+    };
+
+    if let Err(error) = std::fs::create_dir_all(output_root) {
+        eprintln!(
+            "Error creating output directory '{}': {}",
+            output_root.display(),
+            error
+        );
+        return ExitCode::from(1);
+    }
+
+    let target_path = match resolve_generated_output_path(output_root, Path::new("program.js")) {
+        Ok(path) => path,
+        Err(message) => {
+            eprintln!("Error: {}", message);
+            return ExitCode::from(1);
+        }
+    };
+    if let Err(error) = std::fs::write(&target_path, generated.source_text) {
+        eprintln!(
+            "Error writing output to '{}': {}",
+            target_path.display(),
+            error
+        );
+        return ExitCode::from(1);
     }
 
     ExitCode::SUCCESS
@@ -1343,6 +1412,60 @@ let root() = { Ui.title() }"#,
         assert!(runtime.contains("export function nxElement"));
         assert!(runtime.contains("export function nxRecordSchema"));
         assert!(index.contains("export { root } from \"./m0_test.js\";"));
+    }
+
+    #[test]
+    fn test_cli_codegen_js_program_module_writes_single_host_neutral_javascript_module() {
+        let (dir, path) = create_temp_nx_file(r#"let root() = { <div class="test" /> }"#);
+        let output_path = dir.path().join("codegen-program-module-js");
+
+        let output = run_cli(&[
+            "codegen",
+            path.to_str().unwrap(),
+            "--target",
+            "javascript",
+            "--format",
+            "program-module",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        assert!(
+            output.status.success(),
+            "CLI should write program-module JavaScript output: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let module = fs::read_to_string(output_path.join("program.js")).unwrap();
+
+        assert!(module.contains("import { nxElement } from \"nx:runtime\";"));
+        assert!(module.contains("export function root()"));
+        assert!(module.contains("export const nxProgramModuleManifest"));
+        assert!(!output_path.join("nx-runtime.js").exists());
+        assert!(!output_path.join("index.js").exists());
+        assert!(!output_path.join("m0_test.js").exists());
+    }
+
+    #[test]
+    fn test_cli_codegen_js_program_module_rejects_typescript_target() {
+        let (dir, path) = create_temp_nx_file("let root() = { 1 + 2 }");
+        let output_path = dir.path().join("codegen-program-module-ts");
+
+        let output = run_cli(&[
+            "codegen",
+            path.to_str().unwrap(),
+            "--target",
+            "typescript",
+            "--format",
+            "program-module",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Program-module codegen is only supported with --target javascript")
+        );
     }
 
     #[test]

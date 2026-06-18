@@ -311,7 +311,7 @@ nx/                                 # Repository root
 ├── Cargo.lock                      # Shared Rust lockfile
 ├── rust-toolchain.toml             # Rust version pinning
 │
-├── NX.sln                          # (Existing) .NET solution (for C# code)
+├── bindings/dotnet/NxLang.sln      # .NET solution for C# bindings
 ├── Directory.Build.props           # (Existing) .NET build config
 ├── Directory.Packages.props        # (Existing) .NET packages
 ├── global.json                     # (Existing) .NET SDK version
@@ -948,8 +948,8 @@ cargo insta review
 ### .NET Development
 
 ```bash
-# Build C# projects (existing)
-dotnet build NX.sln
+# Build C# bindings
+dotnet build bindings/dotnet/NxLang.sln
 
 # Run C# tests
 dotnet test
@@ -987,9 +987,9 @@ cd docs && pnpm dev
 ```
 ✅ docs/                   # Already good location
 ✅ .github/                # GitHub workflows
-✅ src/NX/                 # Existing C# code
-✅ test/NX.Tests/          # Existing C# tests
-✅ NX.sln                  # .NET solution
+✅ bindings/dotnet/src/    # C# binding code
+✅ bindings/dotnet/tests/  # C# binding tests
+✅ bindings/dotnet/NxLang.sln # .NET solution
 ✅ nx-grammar*.md          # Language specs at root
 ✅ README.md, LICENSE, etc.
 ```

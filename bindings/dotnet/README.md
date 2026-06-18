@@ -169,6 +169,32 @@ selected loaded snapshots instead of reading libraries from disk on demand. The 
 `NxProgramArtifact.Build(source, fileName)` convenience still exists, but it now creates a
 transient empty registry/build-context pair internally before calling the native build API.
 
+### Program Module Codegen
+
+Use `NxProgramArtifact.GenerateJSProgramModule` when a managed host needs cacheable JavaScript source
+for a resolved NX program rather than immediate interpreter evaluation:
+
+```csharp
+using NxLang.Nx;
+
+using NxProgramArtifact program = NxProgramArtifact.Build(source, "/app/main.nx");
+NxGeneratedJSProgramModule generated = program.GenerateJSProgramModule(
+    new NxJSProgramModuleOptions
+    {
+        LogicalModuleName = "app/main",
+        RuntimeImportSpecifier = "nx:runtime",
+    });
+
+string sourceText = generated.SourceText;
+string runtimeAbi = generated.RuntimeAbi;
+```
+
+The generated source is one host-neutral JavaScript ESM module. It imports NX runtime helpers from
+the configured runtime specifier and does not include host wrappers, `nx-runtime.js`, or
+Cloudflare/Rivet packaging. The returned metadata includes the program fingerprint, runtime ABI,
+function entrypoint exports, and component/schema exports so managed hosts can cache and validate
+the module without parsing generated source.
+
 ### In-Memory Workspaces
 
 Use `NxWorkspace` when source modules come from editor buffers, database rows, or other logical

@@ -1,4 +1,12 @@
-use crate::options::CodegenTarget;
+use crate::options::{CodegenTarget, NX_JS_RUNTIME_ABI};
+
+pub fn javascript_runtime_abi() -> &'static str {
+    NX_JS_RUNTIME_ABI
+}
+
+pub fn javascript_runtime_helper_source() -> String {
+    javascript_runtime()
+}
 
 pub fn runtime_helper_source(target: CodegenTarget) -> String {
     match target {

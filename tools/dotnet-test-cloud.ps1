@@ -24,6 +24,8 @@ Param(
 )
 
 $RepoRoot = (Resolve-Path "$PSScriptRoot/..").Path
+$DotNetSolution = Join-Path $RepoRoot 'bindings/dotnet/NxLang.sln'
+$DotNetTestRoot = Join-Path $RepoRoot 'bindings/dotnet/tests'
 $ArtifactStagingFolder = & "$PSScriptRoot/Get-ArtifactsStagingDirectory.ps1"
 
 $dotnet = 'dotnet'
@@ -48,7 +50,7 @@ $testBinLog = Join-Path $ArtifactStagingFolder (Join-Path build_logs test.binlog
 $testDiagLog = Join-Path $ArtifactStagingFolder (Join-Path test_logs diag.log)
 $nativeLibraryConfiguration = if ($Configuration -eq 'Debug') { 'Debug' } else { 'Release' }
 
-& $dotnet test $RepoRoot `
+& $dotnet test $DotNetSolution `
     --no-build `
     -c $Configuration `
     -p:NxRuntimeNativeLibraryConfiguration=$nativeLibraryConfiguration `
@@ -62,7 +64,7 @@ $nativeLibraryConfiguration = if ($Configuration -eq 'Debug') { 'Debug' } else {
     --logger trx `
 
 $unknownCounter = 0
-Get-ChildItem -Recurse -Path $RepoRoot\test\*.trx |% {
+Get-ChildItem -Recurse -Path $DotNetTestRoot -Filter *.trx |% {
   Copy-Item $_ -Destination $ArtifactStagingFolder/test_logs/
 
   if ($PublishResults) {

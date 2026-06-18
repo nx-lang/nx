@@ -13,12 +13,16 @@ use nx_api::{
     ComponentInitResult, EvalResult, LibraryRegistry, NxDiagnostic, NxSeverity, NxWorkspace,
     NxWorkspaceModule as ApiNxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
 };
+use nx_codegen::{
+    emit_js_program_module, GeneratedJsProgramModule, GeneratedJsProgramModuleComponentExport,
+    GeneratedJsProgramModuleFunctionExport, JsProgramModuleOptions,
+};
 use nx_value::NxValue;
 use serde::Serialize;
 use std::any::Any;
 use std::panic;
 
-pub const NX_FFI_ABI_VERSION: u32 = 10;
+pub const NX_FFI_ABI_VERSION: u32 = 11;
 
 #[repr(C)]
 pub struct NxBuffer {
@@ -100,6 +104,35 @@ struct JsonComponentInitResult<'a> {
 struct JsonComponentDispatchResult<'a> {
     effects: &'a [NxValue],
     state_snapshot: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonGeneratedJsProgramModule {
+    source_text: String,
+    logical_module_name: String,
+    runtime_import_specifier: String,
+    runtime_abi: String,
+    program_fingerprint: u64,
+    function_exports: Vec<JsonGeneratedJsProgramModuleFunctionExport>,
+    component_exports: Vec<JsonGeneratedJsProgramModuleComponentExport>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonGeneratedJsProgramModuleFunctionExport {
+    entrypoint_name: String,
+    export_name: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonGeneratedJsProgramModuleComponentExport {
+    component_name: String,
+    component_export_name: String,
+    schema_export_name: String,
+    initial_state_export_name: Option<String>,
+    render_export_name: Option<String>,
 }
 
 enum FfiPayload {
@@ -412,6 +445,56 @@ fn serialize_component_dispatch_payload(
                 .map_err(|e| format!("messagepack serialize failed: {e}"))?,
         )),
         NxOutputFormat::Json => Ok(FfiPayload::Json(json_component_dispatch_payload(result)?)),
+    }
+}
+
+fn json_generated_js_program_module_payload(
+    module: GeneratedJsProgramModule,
+) -> Result<String, String> {
+    serde_json::to_string(&JsonGeneratedJsProgramModule::from(module))
+        .map_err(|e| format!("json serialize failed: {e}"))
+}
+
+impl From<GeneratedJsProgramModule> for JsonGeneratedJsProgramModule {
+    fn from(module: GeneratedJsProgramModule) -> Self {
+        Self {
+            source_text: module.source_text,
+            logical_module_name: module.logical_module_name,
+            runtime_import_specifier: module.runtime_import_specifier,
+            runtime_abi: module.runtime_abi,
+            program_fingerprint: module.program_fingerprint,
+            function_exports: module
+                .function_exports
+                .into_iter()
+                .map(JsonGeneratedJsProgramModuleFunctionExport::from)
+                .collect(),
+            component_exports: module
+                .component_exports
+                .into_iter()
+                .map(JsonGeneratedJsProgramModuleComponentExport::from)
+                .collect(),
+        }
+    }
+}
+
+impl From<GeneratedJsProgramModuleFunctionExport> for JsonGeneratedJsProgramModuleFunctionExport {
+    fn from(export: GeneratedJsProgramModuleFunctionExport) -> Self {
+        Self {
+            entrypoint_name: export.entrypoint_name,
+            export_name: export.export_name,
+        }
+    }
+}
+
+impl From<GeneratedJsProgramModuleComponentExport> for JsonGeneratedJsProgramModuleComponentExport {
+    fn from(export: GeneratedJsProgramModuleComponentExport) -> Self {
+        Self {
+            component_name: export.component_name,
+            component_export_name: export.component_export_name,
+            schema_export_name: export.schema_export_name,
+            initial_state_export_name: export.initial_state_export_name,
+            render_export_name: export.render_export_name,
+        }
     }
 }
 
@@ -733,6 +816,70 @@ pub extern "C" fn nx_eval_program_artifact(
                     NxEvalStatus::Error,
                     serialize_diagnostics_payload(output_format, &diagnostics)?,
                 )),
+            }
+        })?;
+
+        Ok(payload)
+    });
+
+    finish_output_entry(out_buffer, output_format, result)
+}
+
+#[no_mangle]
+pub extern "C" fn nx_codegen_js_program_module(
+    program_artifact_ptr: *const NxProgramArtifactHandle,
+    logical_module_name_ptr: *const u8,
+    logical_module_name_len: usize,
+    runtime_import_specifier_ptr: *const u8,
+    runtime_import_specifier_len: usize,
+    out_buffer: *mut NxBuffer,
+) -> NxEvalStatus {
+    if let Err(status) = prepare_out_buffer(out_buffer) {
+        return status;
+    }
+
+    if program_artifact_ptr.is_null() {
+        return NxEvalStatus::InvalidArgument;
+    }
+
+    let output_format = NxOutputFormat::Json;
+    let result = panic::catch_unwind(|| {
+        let logical_module_name =
+            unsafe { slice_to_str(logical_module_name_ptr, logical_module_name_len) }?;
+        let runtime_import_specifier =
+            unsafe { slice_to_str(runtime_import_specifier_ptr, runtime_import_specifier_len) }?;
+        let mut options = JsProgramModuleOptions::javascript();
+        if !logical_module_name.is_empty() {
+            options.logical_module_name = logical_module_name.to_string();
+        }
+        if !runtime_import_specifier.is_empty() {
+            options.runtime_import_specifier = runtime_import_specifier.to_string();
+        }
+
+        let payload = with_program_artifact(program_artifact_ptr, |program_artifact| {
+            match emit_js_program_module(program_artifact, &options) {
+                Ok(module) => Ok((
+                    NxEvalStatus::Ok,
+                    FfiPayload::Json(json_generated_js_program_module_payload(module)?),
+                )),
+                Err(error) => {
+                    let diagnostics = error
+                        .diagnostics
+                        .iter()
+                        .map(|diagnostic| NxDiagnostic {
+                            severity: diagnostic.severity().into(),
+                            code: diagnostic.code().map(str::to_string),
+                            message: diagnostic.message().to_string(),
+                            labels: Vec::new(),
+                            help: None,
+                            note: None,
+                        })
+                        .collect::<Vec<_>>();
+                    Ok((
+                        NxEvalStatus::Error,
+                        serialize_diagnostics_payload(output_format, &diagnostics)?,
+                    ))
+                }
             }
         })?;
 

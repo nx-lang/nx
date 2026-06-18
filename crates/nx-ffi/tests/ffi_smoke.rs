@@ -5,7 +5,7 @@ use nx_api::{
     ProgramBuildContext,
 };
 use nx_ffi::{
-    nx_build_program_artifact, nx_build_workspace_program_artifact,
+    nx_build_program_artifact, nx_build_workspace_program_artifact, nx_codegen_js_program_module,
     nx_component_dispatch_actions_program_artifact, nx_component_evaluate_program_artifact,
     nx_component_init_program_artifact, nx_create_library_registry,
     nx_create_program_build_context, nx_eval_program_artifact, nx_eval_source, nx_ffi_abi_version,
@@ -18,6 +18,35 @@ use nx_interpreter::Interpreter;
 use nx_value::NxValue;
 use serde::Deserialize;
 use tempfile::TempDir;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JsProgramModulePayload {
+    source_text: String,
+    logical_module_name: String,
+    runtime_import_specifier: String,
+    runtime_abi: String,
+    program_fingerprint: u64,
+    function_exports: Vec<JsProgramModuleFunctionExport>,
+    component_exports: Vec<JsProgramModuleComponentExport>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JsProgramModuleFunctionExport {
+    entrypoint_name: String,
+    export_name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JsProgramModuleComponentExport {
+    component_name: String,
+    component_export_name: String,
+    schema_export_name: String,
+    initial_state_export_name: Option<String>,
+    render_export_name: Option<String>,
+}
 
 fn empty_buffer() -> NxBuffer {
     NxBuffer {
@@ -228,6 +257,30 @@ fn eval_json_with_program_artifact(
     let status = nx_eval_program_artifact(
         program_artifact as *const NxProgramArtifactHandle,
         output_format_value(NxOutputFormat::Json),
+        &mut out as *mut NxBuffer,
+    );
+
+    (
+        status,
+        String::from_utf8(copy_and_free_buffer(out)).unwrap(),
+    )
+}
+
+fn codegen_js_program_module(
+    program_artifact: *mut NxProgramArtifactHandle,
+    logical_module_name: &str,
+    runtime_import_specifier: &str,
+) -> (NxEvalStatus, String) {
+    let logical_module_name_bytes = logical_module_name.as_bytes();
+    let runtime_import_specifier_bytes = runtime_import_specifier.as_bytes();
+    let mut out = empty_buffer();
+
+    let status = nx_codegen_js_program_module(
+        program_artifact as *const NxProgramArtifactHandle,
+        logical_module_name_bytes.as_ptr(),
+        logical_module_name_bytes.len(),
+        runtime_import_specifier_bytes.as_ptr(),
+        runtime_import_specifier_bytes.len(),
         &mut out as *mut NxBuffer,
     );
 
@@ -521,6 +574,82 @@ fn ffi_eval_program_artifact_returns_json_success_directly() {
 
     assert!(matches!(status, NxEvalStatus::Ok));
     assert_eq!(json, "42");
+}
+
+#[test]
+fn ffi_codegen_js_program_module_returns_source_and_metadata() {
+    let build_context = create_empty_build_context();
+    let (program, build_status, build_bytes) = build_program_artifact_handle(
+        build_context,
+        r#"
+external component <TextInput value:string />
+component <SearchBox /> = { <TextInput value="docs" /> }
+let root() = { <SearchBox /> }
+"#,
+        "root.nx",
+    );
+    nx_free_program_build_context(build_context);
+
+    assert!(matches!(build_status, NxEvalStatus::Ok));
+    assert!(build_bytes.is_empty());
+    assert!(!program.is_null());
+
+    let (status, json) = codegen_js_program_module(program, "managed/main", "./nx-runtime.js");
+    nx_free_program_artifact(program);
+
+    assert!(matches!(status, NxEvalStatus::Ok));
+    let payload: JsProgramModulePayload = serde_json::from_str(&json).unwrap();
+    assert_eq!(payload.logical_module_name, "managed/main");
+    assert_eq!(payload.runtime_import_specifier, "./nx-runtime.js");
+    assert_eq!(payload.runtime_abi, "nx-js-runtime-v1");
+    assert!(payload.program_fingerprint > 0);
+    assert_eq!(payload.function_exports.len(), 1);
+    assert_eq!(payload.function_exports[0].entrypoint_name, "root");
+    assert_eq!(payload.function_exports[0].export_name, "root");
+    assert_eq!(payload.component_exports.len(), 2);
+    let search_box = payload
+        .component_exports
+        .iter()
+        .find(|export| export.component_name == "SearchBox")
+        .expect("SearchBox export metadata");
+    assert_eq!(search_box.component_export_name, "SearchBox");
+    assert_eq!(search_box.schema_export_name, "SearchBoxSchema");
+    assert!(search_box.initial_state_export_name.is_none());
+    assert!(search_box.render_export_name.is_none());
+    assert!(payload.source_text.contains("from \"./nx-runtime.js\";"));
+    assert!(payload.source_text.contains("export function root()"));
+    assert!(!payload
+        .source_text
+        .contains("nx-runtime.js\";\nexport function nxElement"));
+}
+
+#[test]
+fn ffi_codegen_js_program_module_returns_json_diagnostics_for_codegen_errors() {
+    let build_context = create_empty_build_context();
+    let (program, build_status, build_bytes) = build_program_artifact_handle(
+        build_context,
+        r#"
+external component <TextInput />
+component <SearchBox emits { SearchSubmitted { query:string } } /> = { <TextInput /> }
+let DoSearch(query:string) = { query }
+let root() = { <SearchBox onSearchSubmitted=<DoSearch query={action.query} /> /> }
+"#,
+        "root.nx",
+    );
+    nx_free_program_build_context(build_context);
+
+    assert!(matches!(build_status, NxEvalStatus::Ok));
+    assert!(build_bytes.is_empty());
+    assert!(!program.is_null());
+
+    let (status, json) = codegen_js_program_module(program, "", "");
+    nx_free_program_artifact(program);
+
+    assert!(matches!(status, NxEvalStatus::Error));
+    let diagnostics: Vec<NxDiagnostic> = serde_json::from_str(&json).unwrap();
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic
+        .message
+        .contains("action-handler codegen is not supported")));
 }
 
 #[test]

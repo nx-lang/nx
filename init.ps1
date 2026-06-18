@@ -57,6 +57,7 @@ Param (
 
 $EnvVars = @{}
 $PrependPath = @()
+$DotNetSolution = Join-Path $PSScriptRoot 'bindings/dotnet/NxLang.sln'
 
 if (!$NoPrerequisites) {
     if (!$NoNuGetCredProvider) {
@@ -92,7 +93,7 @@ try {
 
     if (!$NoRestore -and $PSCmdlet.ShouldProcess("NuGet packages", "Restore")) {
         Write-Host "Restoring NuGet packages" -ForegroundColor $HeaderColor
-        dotnet restore @RestoreArguments
+        dotnet restore $DotNetSolution @RestoreArguments
         if ($lastexitcode -ne 0) {
             throw "Failure while restoring packages."
         }

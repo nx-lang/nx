@@ -115,6 +115,7 @@ NX programs:
 ```bash
 nxlang codegen ./app/main.nx --target javascript --output ./generated-runtime
 nxlang codegen ./app --entry main.nx --target typescript --output ./generated-runtime
+nxlang codegen ./app/main.nx --target javascript --format program-module --output ./generated-module
 ```
 
 Generated output includes ESM program modules plus a small local NX runtime helper file for
@@ -137,6 +138,49 @@ atomic component descriptors; normal component bodies are evaluated only through
 `tryInitializeJson` / `tryEvaluateJson` when callers need diagnostics as values. Typed callers can
 call `SearchBox(props)` directly to construct a descriptor and use generated state helpers such as
 `initialSearchBoxState` / `renderSearchBox` when they manage state explicitly.
+
+The default `nxlang codegen` format is `files`, which writes the existing readable file graph. Use
+`--format program-module` with `--target javascript` to write a single host-neutral `program.js`
+that imports NX helpers from `nx:runtime` and omits the local `nx-runtime.js` copy and index
+barrel.
+
+Rust hosts that cache executable programs can use `nx_codegen::emit_js_program_module` instead of the
+CLI file layout. That API returns a single host-neutral JavaScript ESM source string plus
+structured metadata, including the logical module name, runtime import specifier, expected
+`NX_JS_RUNTIME_ABI`, program fingerprint, exported function entrypoints, and component/schema
+exports:
+
+```rust
+let options = nx_codegen::JsProgramModuleOptions {
+    logical_module_name: "app/main".to_string(),
+    runtime_import_specifier: "nx:runtime".to_string(),
+};
+let generated = nx_codegen::emit_js_program_module(&artifact, &options)?;
+database.put_program_module(
+    generated.program_fingerprint,
+    &generated.runtime_abi,
+    &generated.source_text,
+);
+```
+
+The cached program module imports shared NX helpers from the configured runtime specifier and does
+not include a generated `nx-runtime.js` file. Hosts can obtain the standalone JavaScript runtime
+source with `nx_codegen::javascript_runtime_helper_source()` and compare
+`nx_codegen::javascript_runtime_abi()` with the generated module metadata before loading it.
+Cloudflare Worker exports, Dynamic Worker manifests, Rivet actors, database cache records,
+auth/logging policy, resource limits, and isolate host wrappers are intentionally supplied outside
+`nx-codegen`.
+
+.NET hosts can build an `NxProgramArtifact` and call `GenerateJSProgramModule(...)` to invoke the same
+codegen path through `NxLang.Runtime`:
+
+```csharp
+using NxLang.Nx;
+
+using NxProgramArtifact program = NxProgramArtifact.Build(source, fileName: "/app/main.nx");
+NxGeneratedJSProgramModule generated = program.GenerateJSProgramModule(
+    new NxJSProgramModuleOptions { RuntimeImportSpecifier = "nx:runtime" });
+```
 
 Action-handler bindings, dispatch/effect behavior, and reactive state-update APIs are not emitted
 by executable TypeScript/JavaScript codegen yet; unsupported handler bindings fail codegen with
