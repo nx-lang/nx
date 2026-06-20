@@ -4,9 +4,9 @@
 //! interpreter functionality.
 
 use nx_diagnostics::{TextSize, TextSpan};
-use nx_hir::ast::{BinOp, Expr, Stmt};
+use nx_hir::ast::{BinOp, Expr, Literal, Stmt};
 use nx_hir::{Function, Item, LoweredModule, Name, Param, SourceId};
-use nx_interpreter::{Interpreter, Value};
+use nx_interpreter::{Interpreter, RuntimeErrorKind, Value};
 use smol_str::SmolStr;
 
 /// Helper to create a text span
@@ -425,4 +425,68 @@ fn test_complex_arithmetic_direct_hir() {
 
     // 2 + (3 * 4) = 2 + 12 = 14
     assert_eq!(result, Value::Int(14));
+}
+
+fn array_index_module(index: i64) -> LoweredModule {
+    let mut module = LoweredModule::new(SourceId::new(0));
+
+    let first = module.alloc_expr(Expr::Literal(Literal::Int(10)));
+    let second = module.alloc_expr(Expr::Literal(Literal::Int(20)));
+    let array = module.alloc_expr(Expr::Array {
+        elements: vec![first, second],
+        span: span(0, 8),
+    });
+    let index = module.alloc_expr(Expr::Literal(Literal::Int(index)));
+    let body = module.alloc_expr(Expr::Index {
+        base: array,
+        index,
+        span: span(0, 11),
+    });
+
+    module.add_item(Item::Function(Function {
+        name: Name::new("root"),
+        visibility: nx_hir::Visibility::Export,
+        params: Vec::new(),
+        return_type: None,
+        body,
+        span: span(0, 20),
+    }));
+
+    module
+}
+
+#[test]
+fn test_array_index_direct_hir() {
+    let module = array_index_module(1);
+    let interpreter = Interpreter::new();
+    let result = interpreter
+        .execute_function(&module, "root", vec![])
+        .unwrap();
+
+    assert_eq!(result, Value::Int(20));
+}
+
+#[test]
+fn test_array_index_out_of_bounds_direct_hir() {
+    for index in [-1, 2] {
+        let module = array_index_module(index);
+        let interpreter = Interpreter::new();
+        let error = interpreter
+            .execute_function(&module, "root", vec![])
+            .expect_err("Expected out-of-bounds index to fail");
+
+        assert_eq!(
+            error.to_string(),
+            format!("Array index {index} is out of bounds for length 2")
+        );
+        match error.kind() {
+            RuntimeErrorKind::ArrayIndexOutOfBounds {
+                index: actual_index,
+                length,
+            } => {
+                assert_eq!((*actual_index, *length), (index, 2));
+            }
+            other => panic!("Expected ArrayIndexOutOfBounds, got {other:?}"),
+        }
+    }
 }

@@ -15,8 +15,9 @@ nx-hir = { path = "../nx-hir" }
 nx-interpreter = { path = "../nx-interpreter" }
 nx-types = { path = "../nx-types" }
 rustc-hash = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 smol_str = { workspace = true }
 
 [dev-dependencies]
-serde_json = { workspace = true }
 tempfile = "3"

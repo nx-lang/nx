@@ -6,6 +6,7 @@
 
 mod builder;
 mod emit;
+mod ir;
 mod model;
 mod options;
 mod runtime;
@@ -14,11 +15,20 @@ pub use builder::build_codegen_program;
 pub use emit::{
     emit_codegen_js_program_module, emit_codegen_program, emit_js_program_module, emit_program,
 };
+pub use ir::{
+    emit_codegen_nx_ir, emit_nx_ir, GeneratedNxIr, NxIrComponent, NxIrComponentField,
+    NxIrDeclaration, NxIrDeclarationKind, NxIrEntrypoint, NxIrEntrypointMetadata, NxIrExpression,
+    NxIrExpressionOp, NxIrLiteral, NxIrMatchArm, NxIrMetadata, NxIrModule, NxIrModuleProvenance,
+    NxIrParam, NxIrProgram, NxIrProperty, NxIrRecordField, NxIrReference, NxIrSemanticType,
+    NxIrSemanticTypeShape, NxIrSourceEntry, NxIrSourceSpan, NxIrStatement, NxIrTypeRef,
+    NxIrUnionCase, NX_IR_FORMAT_ID, NX_IR_REQUIRED_FEATURE_EAGER_V1, NX_IR_RUNTIME_ABI,
+    NX_IR_SCHEMA_VERSION,
+};
 pub use model::{
     CodegenComponent, CodegenComponentDescriptor, CodegenComponentField, CodegenDeclaration,
     CodegenDeclarationKind, CodegenElement, CodegenEntrypoint, CodegenExpression,
-    CodegenExpressionKind, CodegenModule, CodegenModuleProvenance, CodegenProgram,
-    CodegenReference, CodegenSourceEntry, CodegenUnsupportedConstruct,
+    CodegenExpressionKind, CodegenMatchArm, CodegenModule, CodegenModuleProvenance, CodegenProgram,
+    CodegenReference, CodegenSourceEntry, CodegenTypeRef, CodegenUnsupportedConstruct,
 };
 pub use options::{
     CodegenError, CodegenOptions, CodegenOutput, CodegenOutputFormat, CodegenTarget,

@@ -3,7 +3,7 @@
 //! Provides commands like:
 //! - `nxlang run <file>` - Run an NX file and output the result
 //! - `nxlang typegen <path> --language <csharp|typescript>` - Generate language-specific type definitions
-//! - `nxlang codegen <path> --target <javascript|typescript>` - Generate executable source
+//! - `nxlang codegen <path> --target <javascript|typescript|nx-ir>` - Generate executable output
 //! - `nxlang parse <file>` - Parse and display AST (future)
 //! - `nxlang check <file>` - Type check and report errors (future)
 //! - `nxlang format <file>` - Format NX source code (future)
@@ -17,7 +17,9 @@ use nx_api::{
     build_program_artifact_from_source, build_workspace_program_artifact, LibraryRegistry,
     NxDiagnostic, NxWorkspace, NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
 };
-use nx_codegen::{emit_js_program_module, emit_program, CodegenOptions, JsProgramModuleOptions};
+use nx_codegen::{
+    emit_js_program_module, emit_nx_ir, emit_program, CodegenOptions, JsProgramModuleOptions,
+};
 use nx_diagnostics::{render_diagnostics_cli, Diagnostic, Severity};
 use nx_hir::{lower_source_module, Item, LoweredModule};
 use nx_interpreter::{Interpreter, Value};
@@ -87,7 +89,7 @@ enum Commands {
         typescript_package_prefix: Option<String>,
     },
 
-    /// Generate executable TypeScript or JavaScript from an NX file or workspace directory
+    /// Generate executable TypeScript, JavaScript, or NX IR from an NX file or workspace directory
     Codegen {
         /// Path to an NX source file or workspace directory
         file: PathBuf,
@@ -126,6 +128,8 @@ enum GenLanguage {
 enum ExecutableTarget {
     Javascript,
     Typescript,
+    #[value(name = "nx-ir")]
+    NxIr,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
@@ -352,6 +356,14 @@ fn generate_executable_source(
         Err(exit_code) => return exit_code,
     };
 
+    if target == ExecutableTarget::NxIr {
+        if format != ExecutableOutputFormat::Files {
+            eprintln!("Error: NX IR codegen does not use --format; use --target nx-ir");
+            return ExitCode::from(1);
+        }
+        return generate_executable_nx_ir(&artifact, output_root);
+    }
+
     if format == ExecutableOutputFormat::JsProgramModule {
         return generate_executable_js_program_module(&artifact, target, output_root);
     }
@@ -359,6 +371,7 @@ fn generate_executable_source(
     let options = match target {
         ExecutableTarget::Typescript => CodegenOptions::typescript(),
         ExecutableTarget::Javascript => CodegenOptions::javascript(),
+        ExecutableTarget::NxIr => unreachable!("NX IR target is handled before source codegen"),
     };
     let generated = match emit_program(&artifact, &options) {
         Ok(output) => output,
@@ -408,6 +421,50 @@ fn generate_executable_source(
     }
 
     ExitCode::SUCCESS
+}
+
+fn generate_executable_nx_ir(artifact: &ProgramArtifact, output_root: &Path) -> ExitCode {
+    let generated = match emit_nx_ir(artifact) {
+        Ok(output) => output,
+        Err(error) => return render_codegen_diagnostics(artifact, &error.diagnostics),
+    };
+
+    if let Err(error) = std::fs::create_dir_all(output_root) {
+        eprintln!(
+            "Error creating output directory '{}': {}",
+            output_root.display(),
+            error
+        );
+        return ExitCode::from(1);
+    }
+
+    let target_path =
+        match resolve_generated_output_path(output_root, &nx_ir_relative_path(artifact)) {
+            Ok(path) => path,
+            Err(message) => {
+                eprintln!("Error: {}", message);
+                return ExitCode::from(1);
+            }
+        };
+    if let Err(error) = std::fs::write(&target_path, generated.json) {
+        eprintln!(
+            "Error writing output to '{}': {}",
+            target_path.display(),
+            error
+        );
+        return ExitCode::from(1);
+    }
+
+    ExitCode::SUCCESS
+}
+
+fn nx_ir_relative_path(artifact: &ProgramArtifact) -> PathBuf {
+    let stem = Path::new(&artifact.entry_identity)
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("program");
+    PathBuf::from(format!("{stem}.nxir.json"))
 }
 
 fn generate_executable_js_program_module(
@@ -1466,6 +1523,134 @@ let root() = { Ui.title() }"#,
         assert!(
             stderr.contains("Program-module codegen is only supported with --target javascript")
         );
+    }
+
+    #[test]
+    fn test_cli_codegen_source_file_writes_single_nx_ir_artifact() {
+        let (dir, path) = create_temp_nx_file("let root() = { 1 + 2 }");
+        let output_path = dir.path().join("codegen-nx-ir");
+
+        let output = run_cli(&[
+            "codegen",
+            path.to_str().unwrap(),
+            "--target",
+            "nx-ir",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        assert!(
+            output.status.success(),
+            "CLI should write NX IR output: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let ir_path = output_path.join("test.nxir.json");
+        let document: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(ir_path).unwrap()).unwrap();
+
+        assert_eq!(document["format"], "nx-ir-json");
+        assert_eq!(document["functionEntrypoints"][0]["name"], "root");
+        assert!(!output_path.join("nx-runtime.js").exists());
+        assert!(!output_path.join("index.js").exists());
+        assert!(!output_path.join("m0_test.js").exists());
+    }
+
+    #[test]
+    fn test_cli_codegen_workspace_nx_ir_uses_selected_entry() {
+        let (dir, workspace_path) = create_temp_library(&[
+            ("main.nx", "let root() = { 1 }"),
+            ("other.nx", "let root() = { 2 }"),
+        ]);
+        let output_path = dir.path().join("codegen-workspace-nx-ir");
+
+        let output = run_cli(&[
+            "codegen",
+            workspace_path.to_str().unwrap(),
+            "--target",
+            "nx-ir",
+            "--entry",
+            "other.nx",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        assert!(
+            output.status.success(),
+            "CLI should write workspace NX IR output: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let document: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(output_path.join("other.nxir.json")).unwrap())
+                .unwrap();
+
+        assert_eq!(document["functionEntrypoints"][0]["name"], "root");
+        assert!(document["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|source| source["identity"] == "other.nx"));
+    }
+
+    #[test]
+    fn test_cli_codegen_nx_ir_static_diagnostics_prevent_output() {
+        let (dir, path) = create_temp_nx_file("let root(): int = { \"oops\" }");
+        let output_path = dir.path().join("codegen-invalid-nx-ir");
+
+        let output = run_cli(&[
+            "codegen",
+            path.to_str().unwrap(),
+            "--target",
+            "nx-ir",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        assert!(!output.status.success());
+        assert!(!output_path.join("test.nxir.json").exists());
+    }
+
+    #[test]
+    fn test_cli_codegen_nx_ir_rejects_output_format_override() {
+        let (dir, path) = create_temp_nx_file("let root() = { 1 + 2 }");
+        let output_path = dir.path().join("codegen-nx-ir-format");
+
+        let output = run_cli(&[
+            "codegen",
+            path.to_str().unwrap(),
+            "--target",
+            "nx-ir",
+            "--format",
+            "program-module",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("NX IR codegen does not use --format"));
+        assert!(!output_path.join("test.nxir.json").exists());
+    }
+
+    #[test]
+    fn test_cli_codegen_nx_ir_is_not_source_output_format() {
+        let (dir, path) = create_temp_nx_file("let root() = { 1 + 2 }");
+        let output_path = dir.path().join("codegen-old-nx-ir-format");
+
+        let output = run_cli(&[
+            "codegen",
+            path.to_str().unwrap(),
+            "--target",
+            "javascript",
+            "--format",
+            "nx-ir",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("invalid value 'nx-ir'"));
+        assert!(!output_path.join("test.nxir.json").exists());
     }
 
     #[test]

@@ -190,6 +190,29 @@ public static class NxRuntime
     }
 
     /// <summary>
+    /// Generates deterministic NX IR JSON from NX source code.
+    /// </summary>
+    public static NxGeneratedNxIr GenerateNxIr(string source, string? fileName = null)
+    {
+        using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, fileName);
+        return programArtifact.GenerateNxIr();
+    }
+
+    /// <summary>
+    /// Generates deterministic NX IR JSON from NX source code against a caller-supplied build context.
+    /// </summary>
+    public static NxGeneratedNxIr GenerateNxIr(
+        string source,
+        NxProgramBuildContext buildContext,
+        string? fileName = null)
+    {
+        ArgumentNullException.ThrowIfNull(buildContext);
+
+        using NxProgramArtifact programArtifact = NxProgramArtifact.Build(source, buildContext, fileName);
+        return programArtifact.GenerateNxIr();
+    }
+
+    /// <summary>
     /// Initializes a named component and returns the raw result bytes in the canonical MessagePack wire format.
     /// </summary>
     public static byte[] InitializeComponentBytes(

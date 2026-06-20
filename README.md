@@ -116,6 +116,7 @@ NX programs:
 nxlang codegen ./app/main.nx --target javascript --output ./generated-runtime
 nxlang codegen ./app --entry main.nx --target typescript --output ./generated-runtime
 nxlang codegen ./app/main.nx --target javascript --format program-module --output ./generated-module
+nxlang codegen ./app/main.nx --target nx-ir --output ./generated-ir
 ```
 
 Generated output includes ESM program modules plus a small local NX runtime helper file for
@@ -142,7 +143,8 @@ call `SearchBox(props)` directly to construct a descriptor and use generated sta
 The default `nxlang codegen` format is `files`, which writes the existing readable file graph. Use
 `--format program-module` with `--target javascript` to write a single host-neutral `program.js`
 that imports NX helpers from `nx:runtime` and omits the local `nx-runtime.js` copy and index
-barrel.
+barrel. Use `--target nx-ir` to write a host-neutral `.nxir.json` artifact instead of generated
+source files.
 
 Rust hosts that cache executable programs can use `nx_codegen::emit_js_program_module` instead of the
 CLI file layout. That API returns a single host-neutral JavaScript ESM source string plus

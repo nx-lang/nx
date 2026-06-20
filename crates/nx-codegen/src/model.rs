@@ -120,8 +120,31 @@ pub enum CodegenDeclarationKind {
 pub struct CodegenParam {
     pub name: String,
     pub ty: ast::TypeRef,
+    pub resolved_ty: CodegenTypeRef,
     pub is_content: bool,
     pub span: TextSpan,
+}
+
+/// Resolved type reference metadata preserved for NX IR boundary normalization.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CodegenTypeRef {
+    Primitive {
+        name: String,
+    },
+    Nominal {
+        reference: CodegenReference,
+        display: String,
+    },
+    Array {
+        element: Box<CodegenTypeRef>,
+    },
+    Nullable {
+        inner: Box<CodegenTypeRef>,
+    },
+    Function {
+        params: Vec<CodegenTypeRef>,
+        return_type: Box<CodegenTypeRef>,
+    },
 }
 
 /// Record field metadata preserved for strongly typed target emission.
@@ -129,6 +152,7 @@ pub struct CodegenParam {
 pub struct CodegenRecordField {
     pub name: String,
     pub ty: ast::TypeRef,
+    pub resolved_ty: CodegenTypeRef,
     pub is_content: bool,
     pub is_required: bool,
     pub default: Option<CodegenExpression>,
@@ -150,6 +174,7 @@ pub struct CodegenComponent {
 pub struct CodegenComponentField {
     pub name: String,
     pub ty: ast::TypeRef,
+    pub resolved_ty: CodegenTypeRef,
     pub is_content: bool,
     pub is_required: bool,
     pub default: Option<CodegenExpression>,
@@ -200,6 +225,11 @@ pub enum CodegenExpressionKind {
         then_branch: Box<CodegenExpression>,
         else_branch: Option<Box<CodegenExpression>>,
     },
+    Match {
+        scrutinee: Box<CodegenExpression>,
+        arms: Vec<CodegenMatchArm>,
+        else_branch: Option<Box<CodegenExpression>>,
+    },
     Let {
         name: String,
         value: Box<CodegenExpression>,
@@ -245,6 +275,13 @@ pub enum CodegenExpressionKind {
     ComponentDescriptor(CodegenComponentDescriptor),
     Element(CodegenElement),
     Unsupported(CodegenUnsupportedConstruct),
+}
+
+/// One authored-order arm in a match-style `if is` expression.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CodegenMatchArm {
+    pub patterns: Vec<CodegenExpression>,
+    pub body: CodegenExpression,
 }
 
 /// Statement forms supported inside codegen blocks.

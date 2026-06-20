@@ -1707,6 +1707,7 @@ impl Interpreter {
             ast::Expr::RecordLiteral {
                 record, properties, ..
             } => self.eval_record_literal(module, ctx, record, properties),
+            ast::Expr::Index { base, index, .. } => self.eval_index(module, ctx, *base, *index),
             ast::Expr::Member { base, member, .. } => self.eval_member(module, ctx, *base, member),
             _ => {
                 // Other expression types not yet implemented
@@ -2846,6 +2847,60 @@ impl Interpreter {
                 operation: format!("member access .{}", member.as_str()),
             })),
         }
+    }
+
+    fn eval_index(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        base_expr: ExprId,
+        index_expr: ExprId,
+    ) -> Result<Value, RuntimeError> {
+        let base_value = self.eval_expr(module, ctx, base_expr)?;
+        let index_value = self.eval_expr(module, ctx, index_expr)?;
+
+        let values = match base_value {
+            Value::Array(values) => values,
+            other => {
+                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                    expected: "array".to_string(),
+                    actual: other.type_name().to_string(),
+                    operation: "index access".to_string(),
+                }));
+            }
+        };
+
+        let index = match index_value {
+            Value::Int(index) => index,
+            Value::Int32(index) => i64::from(index),
+            other => {
+                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                    expected: "integer index".to_string(),
+                    actual: other.type_name().to_string(),
+                    operation: "index access".to_string(),
+                }));
+            }
+        };
+
+        if index < 0 {
+            return Err(RuntimeError::new(RuntimeErrorKind::ArrayIndexOutOfBounds {
+                index,
+                length: values.len(),
+            }));
+        }
+
+        let index_usize = usize::try_from(index).map_err(|_| {
+            RuntimeError::new(RuntimeErrorKind::ArrayIndexOutOfBounds {
+                index,
+                length: values.len(),
+            })
+        })?;
+        values.get(index_usize).cloned().ok_or_else(|| {
+            RuntimeError::new(RuntimeErrorKind::ArrayIndexOutOfBounds {
+                index,
+                length: values.len(),
+            })
+        })
     }
 
     /// Instantiate a record value from its definition, applying default values.

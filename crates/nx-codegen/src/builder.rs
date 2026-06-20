@@ -1,17 +1,17 @@
 use crate::model::{
     expr_id_u32, CodegenComponent, CodegenComponentDescriptor, CodegenComponentField,
     CodegenComponentTargetKind, CodegenDeclaration, CodegenDeclarationKind, CodegenElement,
-    CodegenEntrypoint, CodegenExpression, CodegenExpressionKind, CodegenModule,
+    CodegenEntrypoint, CodegenExpression, CodegenExpressionKind, CodegenMatchArm, CodegenModule,
     CodegenModuleProvenance, CodegenParam, CodegenProgram, CodegenProperty, CodegenRecordField,
-    CodegenReference, CodegenSourceEntry, CodegenStatement, CodegenUnionCase,
+    CodegenReference, CodegenSourceEntry, CodegenStatement, CodegenTypeRef, CodegenUnionCase,
 };
 use crate::options::CodegenError;
 use nx_api::{LibraryArtifact, ProgramArtifact};
 use nx_diagnostics::{Diagnostic, Label, Severity, TextSpan};
 use nx_hir::{
-    ast, EffectiveField, ExprId, Item, LocalDefinitionId, LoweredModule, Name, PreparedBinding,
-    PreparedBindingOrigin, PreparedBindingTarget, PreparedItemKind, PreparedModule, PropertyEntry,
-    RecordField,
+    ast, EffectiveField, ExprId, Item, LocalDefinitionId, LoweredModule, Name, Param,
+    PreparedBinding, PreparedBindingOrigin, PreparedBindingTarget, PreparedItemKind,
+    PreparedModule, PreparedNamespace, PropertyEntry, RecordField,
 };
 use nx_interpreter::{ResolvedItemKind, ResolvedModule, ResolvedModuleSource, RuntimeModuleId};
 use nx_types::{ModuleArtifact, TypeEnvironment};
@@ -228,16 +228,7 @@ fn build_declaration(
                 return None;
             };
             CodegenDeclarationKind::Function {
-                params: function
-                    .params
-                    .iter()
-                    .map(|param| CodegenParam {
-                        name: param.name.as_str().to_string(),
-                        ty: param.ty.clone(),
-                        is_content: param.is_content,
-                        span: param.span,
-                    })
-                    .collect(),
+                params: build_params(artifact, resolved_module, &function.params, diagnostics)?,
                 body,
                 return_type: type_env.get_expr_type(function.body).cloned(),
             }
@@ -386,6 +377,26 @@ fn build_component(
     })
 }
 
+fn build_params(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    params: &[Param],
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<Vec<CodegenParam>> {
+    params
+        .iter()
+        .map(|param| {
+            Some(CodegenParam {
+                name: param.name.as_str().to_string(),
+                ty: param.ty.clone(),
+                resolved_ty: build_type_ref(artifact, resolved_module, &param.ty, diagnostics)?,
+                is_content: param.is_content,
+                span: param.span,
+            })
+        })
+        .collect()
+}
+
 fn build_effective_component_fields(
     artifact: &ProgramArtifact,
     resolved_module: &ResolvedModule,
@@ -420,6 +431,7 @@ fn build_effective_component_fields(
         mapped.push(CodegenComponentField {
             name: field.name.as_str().to_string(),
             ty: field.ty.clone(),
+            resolved_ty: build_type_ref(artifact, owner_module, &field.ty, diagnostics)?,
             is_content: field.is_content,
             is_required: field.is_required,
             default,
@@ -457,6 +469,7 @@ fn build_declared_component_fields(
         mapped.push(CodegenComponentField {
             name: field.name.as_str().to_string(),
             ty: field.ty.clone(),
+            resolved_ty: build_type_ref(artifact, resolved_module, &field.ty, diagnostics)?,
             is_content: field.is_content,
             is_required: field.default.is_none() && !matches!(field.ty, ast::TypeRef::Nullable(_)),
             default,
@@ -540,6 +553,7 @@ fn build_record_fields(
         mapped.push(CodegenRecordField {
             name: field.name.as_str().to_string(),
             ty: field.ty.clone(),
+            resolved_ty: build_type_ref(artifact, resolved_module, &field.ty, diagnostics)?,
             is_content: field.is_content,
             is_required: field.default.is_none() && !matches!(field.ty, ast::TypeRef::Nullable(_)),
             default,
@@ -576,6 +590,7 @@ fn build_union_case_fields(
         mapped.push(CodegenRecordField {
             name: field.name.as_str().to_string(),
             ty: field.ty.clone(),
+            resolved_ty: build_type_ref(artifact, resolved_module, &field.ty, diagnostics)?,
             is_content: field.is_content,
             is_required: field.default.is_none() && !matches!(field.ty, ast::TypeRef::Nullable(_)),
             default,
@@ -714,6 +729,64 @@ fn build_expression(
             CodegenExpressionKind::If {
                 condition: Box::new(condition),
                 then_branch: Box::new(then_branch),
+                else_branch,
+            }
+        }
+        ast::Expr::Match {
+            scrutinee,
+            arms,
+            else_branch,
+            ..
+        } => {
+            let scrutinee = build_expression(
+                artifact,
+                resolved_module,
+                lowered_module,
+                type_env,
+                *scrutinee,
+                scope,
+                diagnostics,
+            )?;
+            let mut mapped_arms = Vec::with_capacity(arms.len());
+            for arm in arms {
+                let mut patterns = Vec::with_capacity(arm.patterns.len());
+                for pattern in &arm.patterns {
+                    patterns.push(build_expression(
+                        artifact,
+                        resolved_module,
+                        lowered_module,
+                        type_env,
+                        *pattern,
+                        scope,
+                        diagnostics,
+                    )?);
+                }
+                let body = build_expression(
+                    artifact,
+                    resolved_module,
+                    lowered_module,
+                    type_env,
+                    arm.body,
+                    scope,
+                    diagnostics,
+                )?;
+                mapped_arms.push(CodegenMatchArm { patterns, body });
+            }
+            let else_branch = match else_branch {
+                Some(expr) => Some(Box::new(build_expression(
+                    artifact,
+                    resolved_module,
+                    lowered_module,
+                    type_env,
+                    *expr,
+                    scope,
+                    diagnostics,
+                )?)),
+                None => None,
+            };
+            CodegenExpressionKind::Match {
+                scrutinee: Box::new(scrutinee),
+                arms: mapped_arms,
                 else_branch,
             }
         }
@@ -990,14 +1063,6 @@ fn build_expression(
                 resolved_module,
                 *span,
                 "action-handler codegen is not supported by this non-reactive executable target",
-            ));
-            return None;
-        }
-        ast::Expr::Match { span, .. } => {
-            diagnostics.push(unsupported_diagnostic(
-                resolved_module,
-                *span,
-                "match expressions are not supported by executable codegen yet",
             ));
             return None;
         }
@@ -1307,13 +1372,16 @@ fn function_params_from_reference(
         function
             .params
             .iter()
-            .map(|param| CodegenParam {
-                name: param.name.as_str().to_string(),
-                ty: param.ty.clone(),
-                is_content: param.is_content,
-                span: param.span,
+            .map(|param| {
+                Some(CodegenParam {
+                    name: param.name.as_str().to_string(),
+                    ty: param.ty.clone(),
+                    resolved_ty: build_type_ref(artifact, target_module, &param.ty, diagnostics)?,
+                    is_content: param.is_content,
+                    span: param.span,
+                })
             })
-            .collect(),
+            .collect::<Option<Vec<_>>>()?,
     )
 }
 
@@ -1486,6 +1554,129 @@ fn record_literal_shape(
         diagnostics,
     )?;
     Some((record_def.name.as_str().to_string(), fields))
+}
+
+fn build_type_ref(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    ty: &ast::TypeRef,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<CodegenTypeRef> {
+    let prepared = prepared_module_for(artifact, resolved_module);
+    build_type_ref_with_prepared(artifact, resolved_module, &prepared, ty, diagnostics)
+}
+
+fn build_type_ref_with_prepared(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    prepared: &PreparedModule,
+    ty: &ast::TypeRef,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<CodegenTypeRef> {
+    match ty {
+        ast::TypeRef::Name(name) => {
+            if is_builtin_type_name(name.as_str()) {
+                return Some(CodegenTypeRef::Primitive {
+                    name: name.as_str().to_string(),
+                });
+            }
+
+            let Some(binding) = prepared.resolve_binding(PreparedNamespace::Type, name) else {
+                diagnostics.push(missing_semantic_data_diagnostic(
+                    resolved_module,
+                    &format!("type binding '{}'", name.as_str()),
+                    empty_span(),
+                ));
+                return None;
+            };
+            let current_module_identity = resolved_module.prepared_module_identity();
+            let target_module_identity = binding.module_identity(&current_module_identity);
+            let Some(target_module) = artifact
+                .resolved_program
+                .module_by_prepared_identity(target_module_identity)
+            else {
+                diagnostics.push(missing_semantic_data_diagnostic(
+                    resolved_module,
+                    &format!("type module '{}'", target_module_identity),
+                    empty_span(),
+                ));
+                return None;
+            };
+            let reference = reference_from_resolved_module(
+                artifact,
+                target_module.id,
+                binding.definition_id(),
+                name.as_str(),
+                resolved_item_kind_from_prepared(binding.kind),
+            );
+
+            Some(CodegenTypeRef::Nominal {
+                reference,
+                display: name.as_str().to_string(),
+            })
+        }
+        ast::TypeRef::Array(element) => Some(CodegenTypeRef::Array {
+            element: Box::new(build_type_ref_with_prepared(
+                artifact,
+                resolved_module,
+                prepared,
+                element,
+                diagnostics,
+            )?),
+        }),
+        ast::TypeRef::Nullable(inner) => Some(CodegenTypeRef::Nullable {
+            inner: Box::new(build_type_ref_with_prepared(
+                artifact,
+                resolved_module,
+                prepared,
+                inner,
+                diagnostics,
+            )?),
+        }),
+        ast::TypeRef::Function {
+            params,
+            return_type,
+        } => Some(CodegenTypeRef::Function {
+            params: params
+                .iter()
+                .map(|param| {
+                    build_type_ref_with_prepared(
+                        artifact,
+                        resolved_module,
+                        prepared,
+                        param,
+                        diagnostics,
+                    )
+                })
+                .collect::<Option<Vec<_>>>()?,
+            return_type: Box::new(build_type_ref_with_prepared(
+                artifact,
+                resolved_module,
+                prepared,
+                return_type,
+                diagnostics,
+            )?),
+        }),
+    }
+}
+
+fn is_builtin_type_name(name: &str) -> bool {
+    matches!(
+        name,
+        "i32" | "i64" | "int" | "f32" | "f64" | "float" | "string" | "bool" | "void" | "object"
+    )
+}
+
+fn resolved_item_kind_from_prepared(kind: PreparedItemKind) -> ResolvedItemKind {
+    match kind {
+        PreparedItemKind::Function => ResolvedItemKind::Function,
+        PreparedItemKind::Value => ResolvedItemKind::Value,
+        PreparedItemKind::Component => ResolvedItemKind::Component,
+        PreparedItemKind::TypeAlias => ResolvedItemKind::TypeAlias,
+        PreparedItemKind::Enum => ResolvedItemKind::Enum,
+        PreparedItemKind::Union => ResolvedItemKind::Union,
+        PreparedItemKind::Record => ResolvedItemKind::Record,
+    }
 }
 
 fn module_artifact_for<'a>(

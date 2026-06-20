@@ -218,6 +218,56 @@ public class NxEndToEndTests
     }
 
     [Fact]
+    public void GenerateNxIr_WithProgramArtifact_ReturnsJsonAndMetadata()
+    {
+        using NxProgramArtifact artifact = NxProgramArtifact.Build("let root() = { 1 + 2 }");
+
+        NxGeneratedNxIr ir = artifact.GenerateNxIr();
+
+        Assert.Contains("\"format\": \"nx-ir-json\"", ir.Json, StringComparison.Ordinal);
+        Assert.Equal(1, ir.Metadata.SchemaVersion);
+        Assert.Equal("nx-ir-runtime-v1", ir.Metadata.RuntimeAbi);
+        Assert.True(ir.Metadata.ProgramFingerprint > 0);
+        NxIrEntrypointMetadata entrypoint = Assert.Single(ir.Metadata.FunctionEntrypoints);
+        Assert.Equal("root", entrypoint.Name);
+        Assert.Equal("function", entrypoint.Reference.Kind);
+        Assert.Empty(ir.Metadata.ComponentEntrypoints);
+    }
+
+    [Fact]
+    public void GenerateNxIr_SourceConvenienceUsesBuildContext()
+    {
+        using NxLibraryRegistry registry = new();
+        using NxProgramBuildContext buildContext = registry.CreateBuildContext();
+
+        NxGeneratedNxIr ir = NxRuntime.GenerateNxIr("let root() = { 42 }", buildContext);
+
+        Assert.Contains("\"programFingerprint\"", ir.Json, StringComparison.Ordinal);
+        Assert.Equal("root", Assert.Single(ir.Metadata.FunctionEntrypoints).Name);
+    }
+
+    [Fact]
+    public void GenerateNxIr_WithIrDiagnostics_ThrowsEvaluationException()
+    {
+        using NxProgramArtifact artifact = NxProgramArtifact.Build(
+            """
+            external component <TextInput />
+            component <SearchBox emits { SearchSubmitted { query:string } } /> = { <TextInput /> }
+            let DoSearch(query:string) = { query }
+            let root() = { <SearchBox onSearchSubmitted=<DoSearch query={action.query} /> /> }
+            """);
+
+        NxEvaluationException exception = Assert.Throws<NxEvaluationException>(
+            () => artifact.GenerateNxIr());
+
+        Assert.Contains(
+            exception.Diagnostics,
+            diagnostic => diagnostic.Message.Contains(
+                "action-handler codegen is not supported",
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void BuildProgramArtifact_WithMissingLibraryFromContext_ThrowsEvaluationException()
     {
         string tempPath = Path.Combine(Path.GetTempPath(), $"nx-prepared-invalid-{Guid.NewGuid():N}");

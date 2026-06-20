@@ -75,6 +75,9 @@ pub enum RuntimeErrorKind {
     /// Record field not found on the given record value
     RecordFieldNotFound { record: SmolStr, field: SmolStr },
 
+    /// Array index was outside the available element range
+    ArrayIndexOutOfBounds { index: i64, length: usize },
+
     /// Record type referenced at runtime could not be found
     RecordTypeNotFound { name: SmolStr },
 
@@ -173,6 +176,11 @@ impl fmt::Display for RuntimeErrorKind {
             RuntimeErrorKind::RecordFieldNotFound { record, field } => {
                 write!(f, "Record '{}' has no field named '{}'", record, field)
             }
+            RuntimeErrorKind::ArrayIndexOutOfBounds { index, length } => write!(
+                f,
+                "Array index {} is out of bounds for length {}",
+                index, length
+            ),
             RuntimeErrorKind::RecordTypeNotFound { name } => {
                 write!(f, "Record type not found: {}", name)
             }

@@ -6,13 +6,13 @@ use nx_api::{
 };
 use nx_ffi::{
     nx_build_program_artifact, nx_build_workspace_program_artifact, nx_codegen_js_program_module,
-    nx_component_dispatch_actions_program_artifact, nx_component_evaluate_program_artifact,
-    nx_component_init_program_artifact, nx_create_library_registry,
-    nx_create_program_build_context, nx_eval_program_artifact, nx_eval_source, nx_ffi_abi_version,
-    nx_free_buffer, nx_free_library_registry, nx_free_program_artifact,
-    nx_free_program_build_context, nx_load_library_into_registry, nx_validate_workspace, NxBuffer,
-    NxEvalStatus, NxLibraryRegistryHandle, NxOutputFormat, NxProgramArtifactHandle,
-    NxProgramBuildContextHandle, NxWorkspaceModule, NX_FFI_ABI_VERSION,
+    nx_codegen_nx_ir, nx_component_dispatch_actions_program_artifact,
+    nx_component_evaluate_program_artifact, nx_component_init_program_artifact,
+    nx_create_library_registry, nx_create_program_build_context, nx_eval_program_artifact,
+    nx_eval_source, nx_ffi_abi_version, nx_free_buffer, nx_free_library_registry,
+    nx_free_program_artifact, nx_free_program_build_context, nx_load_library_into_registry,
+    nx_validate_workspace, NxBuffer, NxEvalStatus, NxLibraryRegistryHandle, NxOutputFormat,
+    NxProgramArtifactHandle, NxProgramBuildContextHandle, NxWorkspaceModule, NX_FFI_ABI_VERSION,
 };
 use nx_interpreter::Interpreter;
 use nx_value::NxValue;
@@ -46,6 +46,29 @@ struct JsProgramModuleComponentExport {
     schema_export_name: String,
     initial_state_export_name: Option<String>,
     render_export_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NxIrPayload {
+    json: String,
+    metadata: NxIrMetadataPayload,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NxIrMetadataPayload {
+    program_fingerprint: u64,
+    schema_version: u32,
+    runtime_abi: String,
+    function_entrypoints: Vec<NxIrEntrypointPayload>,
+    component_entrypoints: Vec<NxIrEntrypointPayload>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NxIrEntrypointPayload {
+    name: String,
 }
 
 fn empty_buffer() -> NxBuffer {
@@ -281,6 +304,20 @@ fn codegen_js_program_module(
         logical_module_name_bytes.len(),
         runtime_import_specifier_bytes.as_ptr(),
         runtime_import_specifier_bytes.len(),
+        &mut out as *mut NxBuffer,
+    );
+
+    (
+        status,
+        String::from_utf8(copy_and_free_buffer(out)).unwrap(),
+    )
+}
+
+fn codegen_nx_ir(program_artifact: *mut NxProgramArtifactHandle) -> (NxEvalStatus, String) {
+    let mut out = empty_buffer();
+
+    let status = nx_codegen_nx_ir(
+        program_artifact as *const NxProgramArtifactHandle,
         &mut out as *mut NxBuffer,
     );
 
@@ -621,6 +658,61 @@ let root() = { <SearchBox /> }
     assert!(!payload
         .source_text
         .contains("nx-runtime.js\";\nexport function nxElement"));
+}
+
+#[test]
+fn ffi_codegen_nx_ir_returns_json_and_metadata() {
+    let build_context = create_empty_build_context();
+    let (program, build_status, build_bytes) =
+        build_program_artifact_handle(build_context, "let root() = { 1 + 2 }", "root.nx");
+    nx_free_program_build_context(build_context);
+
+    assert!(matches!(build_status, NxEvalStatus::Ok));
+    assert!(build_bytes.is_empty());
+    assert!(!program.is_null());
+
+    let (status, json) = codegen_nx_ir(program);
+    nx_free_program_artifact(program);
+
+    assert!(matches!(status, NxEvalStatus::Ok));
+    let payload: NxIrPayload = serde_json::from_str(&json).unwrap();
+    let document: serde_json::Value = serde_json::from_str(&payload.json).unwrap();
+
+    assert_eq!(document["format"], "nx-ir-json");
+    assert_eq!(payload.metadata.schema_version, 1);
+    assert_eq!(payload.metadata.runtime_abi, "nx-ir-runtime-v1");
+    assert!(payload.metadata.program_fingerprint > 0);
+    assert_eq!(payload.metadata.function_entrypoints[0].name, "root");
+    assert!(payload.metadata.component_entrypoints.is_empty());
+}
+
+#[test]
+fn ffi_codegen_nx_ir_returns_json_diagnostics_for_ir_errors() {
+    let build_context = create_empty_build_context();
+    let (program, build_status, build_bytes) = build_program_artifact_handle(
+        build_context,
+        r#"
+external component <TextInput />
+component <SearchBox emits { SearchSubmitted { query:string } } /> = { <TextInput /> }
+let DoSearch(query:string) = { query }
+let root() = { <SearchBox onSearchSubmitted=<DoSearch query={action.query} /> /> }
+"#,
+        "root.nx",
+    );
+    nx_free_program_build_context(build_context);
+
+    assert!(matches!(build_status, NxEvalStatus::Ok));
+    assert!(build_bytes.is_empty());
+    assert!(!program.is_null());
+
+    let (status, json) = codegen_nx_ir(program);
+    nx_free_program_artifact(program);
+
+    assert!(matches!(status, NxEvalStatus::Error));
+    let diagnostics: Vec<NxDiagnostic> = serde_json::from_str(&json).unwrap();
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic
+        .message
+        .contains("action-handler codegen is not supported")));
 }
 
 #[test]

@@ -200,6 +200,25 @@ public sealed class NxProgramArtifact : IDisposable
         };
     }
 
+    /// <summary>
+    /// Generates deterministic NX IR JSON from this reusable program artifact.
+    /// </summary>
+    /// <returns>NX IR JSON and structured metadata.</returns>
+    public NxGeneratedNxIr GenerateNxIr()
+    {
+        NxNativeLibrary.EnsureLoaded();
+
+        NxEvalStatus status = NxNativeMethods.nx_codegen_nx_ir(SafeHandle, out NxBuffer buffer);
+        byte[] payload = NxRuntime.CopyAndFreeBuffer(buffer);
+
+        return status switch
+        {
+            NxEvalStatus.Ok => DeserializeGeneratedNxIr(payload),
+            NxEvalStatus.Error => throw NxRuntime.CreateEvaluationExceptionFromJson(payload),
+            _ => throw NxRuntime.CreateInteropStatusException(status),
+        };
+    }
+
     private static NxGeneratedJSProgramModule DeserializeGeneratedJSProgramModule(byte[] payload)
     {
         try
@@ -216,6 +235,26 @@ public sealed class NxProgramArtifact : IDisposable
         {
             throw new InvalidOperationException(
                 "NX native runtime returned an invalid generated program-module JSON payload.",
+                e);
+        }
+    }
+
+    private static NxGeneratedNxIr DeserializeGeneratedNxIr(byte[] payload)
+    {
+        try
+        {
+            NxGeneratedNxIr? ir = JsonSerializer.Deserialize<NxGeneratedNxIr>(payload);
+            if (ir is null)
+            {
+                throw new JsonException("Expected generated NX IR payload.");
+            }
+
+            return ir;
+        }
+        catch (JsonException e)
+        {
+            throw new InvalidOperationException(
+                "NX native runtime returned an invalid generated NX IR JSON payload.",
                 e);
         }
     }

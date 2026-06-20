@@ -1,11 +1,12 @@
 use crate::model::{CodegenProperty, CodegenRecordField};
 use crate::{
-    build_codegen_program, emit_codegen_program, emit_js_program_module, emit_program,
+    build_codegen_program, emit_codegen_program, emit_js_program_module, emit_nx_ir, emit_program,
     javascript_runtime_helper_source, CodegenDeclaration, CodegenDeclarationKind,
     CodegenEntrypoint, CodegenExpression, CodegenExpressionKind, CodegenModule,
     CodegenModuleProvenance, CodegenOptions, CodegenProgram, CodegenReference, CodegenTarget,
-    JsProgramModuleOptions, DEFAULT_JS_PROGRAM_MODULE_NAME,
-    DEFAULT_JS_PROGRAM_MODULE_RUNTIME_IMPORT_SPECIFIER, NX_JS_RUNTIME_ABI,
+    CodegenTypeRef, JsProgramModuleOptions, DEFAULT_JS_PROGRAM_MODULE_NAME,
+    DEFAULT_JS_PROGRAM_MODULE_RUNTIME_IMPORT_SPECIFIER, NX_IR_FORMAT_ID, NX_IR_RUNTIME_ABI,
+    NX_IR_SCHEMA_VERSION, NX_JS_RUNTIME_ABI,
 };
 use nx_api::{
     build_program_artifact_from_source, build_workspace_program_artifact, eval_program_artifact,
@@ -220,6 +221,230 @@ fn builds_codegen_program_from_inline_artifact() {
     assert_eq!(
         artifact.source_entries()[0].source,
         "let root() = { 1 + 2 }"
+    );
+}
+
+#[test]
+fn nx_ir_emits_metadata_entrypoints_and_source_provenance() {
+    let artifact = artifact_from_source("let root() = { 1 + 2 }");
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+
+    assert_eq!(document["format"], NX_IR_FORMAT_ID);
+    assert_eq!(document["schemaVersion"], NX_IR_SCHEMA_VERSION);
+    assert_eq!(document["runtimeAbi"], NX_IR_RUNTIME_ABI);
+    assert_eq!(
+        document["programFingerprint"],
+        artifact.fingerprint.to_string()
+    );
+    assert_eq!(document["functionEntrypoints"][0]["name"], "root");
+    assert_eq!(
+        document["functionEntrypoints"][0]["reference"]["module"],
+        "m0"
+    );
+    assert_eq!(document["sources"][0]["identity"], "main.nx");
+    assert_eq!(document["sources"][0]["source"], "let root() = { 1 + 2 }");
+
+    assert_eq!(generated.metadata.program_fingerprint, artifact.fingerprint);
+    assert_eq!(generated.metadata.schema_version, NX_IR_SCHEMA_VERSION);
+    assert_eq!(generated.metadata.runtime_abi, NX_IR_RUNTIME_ABI);
+    assert_eq!(generated.metadata.function_entrypoints[0].name, "root");
+}
+
+#[test]
+fn nx_ir_output_is_deterministic() {
+    let source = r#"
+enum Theme = light | dark
+type User = { name:string score:int = 42 }
+let root() = { <User name="Ada" /> }
+"#;
+    let first = emit_nx_ir(&artifact_from_source(source)).expect("first nx ir");
+    let second = emit_nx_ir(&artifact_from_source(source)).expect("second nx ir");
+
+    assert_eq!(first.json, second.json);
+}
+
+#[test]
+fn nx_ir_preserves_module_qualified_references() {
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "app/main.nx",
+                r#"import { answer } from "../shared/value.nx"
+let root(): int = { answer() }"#,
+            ),
+            ("shared/value.nx", r#"export let answer(): int = { 42 }"#),
+        ],
+        "app/main.nx",
+    );
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+
+    let modules = document["modules"].as_array().expect("modules");
+    assert_eq!(modules.len(), 2);
+    let root_body = &modules[0]["declarations"][0]["kind"]["body"];
+    let callee_reference = &root_body["op"]["callee"]["op"]["reference"];
+    assert_eq!(callee_reference["kind"], "function");
+    assert_eq!(callee_reference["name"], "answer");
+    assert_ne!(callee_reference["module"], "m0");
+}
+
+#[test]
+fn nx_ir_nominal_type_refs_are_module_qualified() {
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "app/main.nx",
+                r#"import { User } from "../shared/model.nx"
+let root(user: User): User = { user }"#,
+            ),
+            ("shared/model.nx", r#"export type User = { name:string }"#),
+        ],
+        "app/main.nx",
+    );
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+    let modules = document["modules"].as_array().expect("modules");
+    let root = modules
+        .iter()
+        .flat_map(|module| module["declarations"].as_array().expect("declarations"))
+        .find(|declaration| declaration["reference"]["name"] == "root")
+        .expect("root declaration");
+    let param_type = &root["kind"]["params"][0]["ty"];
+
+    assert_eq!(param_type["kind"], "nominal");
+    assert_eq!(param_type["display"], "User");
+    assert_eq!(param_type["reference"]["name"], "User");
+    assert_eq!(param_type["reference"]["kind"], "record");
+    assert_ne!(
+        param_type["reference"]["module"],
+        root["reference"]["module"]
+    );
+}
+
+#[test]
+fn nx_ir_component_inherited_field_spans_use_owner_source() {
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "app/main.nx",
+                r#"import { Question } from "../shared/ui.nx"
+external component <ShortTextQuestion extends Question placeholder:string? />
+let root() = { <ShortTextQuestion /> }"#,
+            ),
+            (
+                "shared/ui.nx",
+                r#"export abstract external component <Question label:string = "Untitled" />"#,
+            ),
+        ],
+        "app/main.nx",
+    );
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+    let modules = document["modules"].as_array().expect("modules");
+    let short_text_question = modules
+        .iter()
+        .flat_map(|module| module["declarations"].as_array().expect("declarations"))
+        .find(|declaration| declaration["reference"]["name"] == "ShortTextQuestion")
+        .expect("ShortTextQuestion declaration");
+    let props = short_text_question["kind"]["props"]
+        .as_array()
+        .expect("props");
+    let label = props
+        .iter()
+        .find(|field| field["name"] == "label")
+        .expect("label prop");
+    let placeholder = props
+        .iter()
+        .find(|field| field["name"] == "placeholder")
+        .expect("placeholder prop");
+
+    assert_eq!(label["span"]["source"], "shared/ui.nx");
+    assert_eq!(placeholder["span"]["source"], "app/main.nx");
+}
+
+#[test]
+fn nx_ir_encodes_eager_expressions_and_canonical_value_metadata() {
+    let loop_ir = emit_nx_ir(&artifact_from_source(
+        "let <Labels items:int[] /> = {for item, index in items { item + index }}",
+    ))
+    .expect("loop nx ir");
+    let loop_document: Value = serde_json::from_str(&loop_ir.json).expect("loop nx ir json");
+    assert_eq!(
+        loop_document["modules"][0]["declarations"][0]["kind"]["body"]["op"]["tag"],
+        "for"
+    );
+
+    let match_ir = emit_nx_ir(&artifact_from_source(
+        r#"let root(x:int): string = {
+    if x is {
+        0 => "zero"
+        1, 2 => "small"
+        else => "many"
+    }
+}"#,
+    ))
+    .expect("match nx ir");
+    let match_document: Value = serde_json::from_str(&match_ir.json).expect("match nx ir json");
+    let root_body = &match_document["modules"][0]["declarations"][0]["kind"]["body"];
+    assert_eq!(root_body["op"]["tag"], "ifIs");
+    assert_eq!(
+        root_body["op"]["arms"][0]["patterns"][0]["op"]["tag"],
+        "literal"
+    );
+
+    let union_ir = emit_nx_ir(&artifact_from_source(
+        r#"type LoadState = | idle | failed { message:string }
+let root(): LoadState = { <LoadState.failed message={"Offline"} /> }"#,
+    ))
+    .expect("union nx ir");
+    let union_document: Value = serde_json::from_str(&union_ir.json).expect("union nx ir json");
+    let union_body = &union_document["modules"][0]["declarations"][1]["kind"]["body"];
+    assert_eq!(union_body["op"]["tag"], "unionCase");
+
+    let big_ir = emit_nx_ir(&artifact_from_source("let root() = { 9007199254740993 }"))
+        .expect("big int nx ir");
+    let big_document: Value = serde_json::from_str(&big_ir.json).expect("big int nx ir json");
+    let big_body = &big_document["modules"][0]["declarations"][0]["kind"]["body"];
+    assert_eq!(big_body["op"]["value"]["kind"], "int");
+    assert_eq!(big_body["op"]["value"]["value"], "9007199254740993");
+    assert!(big_body["op"]["value"]["number"].is_null());
+}
+
+#[test]
+fn nx_ir_encodes_component_state_metadata() {
+    let source = r#"
+external component <TextInput value:string />
+component <SearchBox placeholder:string = "Find docs" /> = {
+  state { query:string = { placeholder } }
+  <TextInput value={query} />
+}
+let root() = { <SearchBox /> }
+"#;
+    let generated = emit_nx_ir(&artifact_from_source(source)).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+    let declarations = document["modules"][0]["declarations"]
+        .as_array()
+        .expect("declarations");
+    let search_box = declarations
+        .iter()
+        .find(|declaration| declaration["reference"]["name"] == "SearchBox")
+        .expect("SearchBox declaration");
+
+    assert_eq!(search_box["kind"]["tag"], "component");
+    assert_eq!(search_box["kind"]["props"][0]["name"], "placeholder");
+    assert_eq!(
+        search_box["kind"]["props"][0]["default"]["op"]["tag"],
+        "literal"
+    );
+    assert_eq!(search_box["kind"]["state"][0]["name"], "query");
+    assert_eq!(
+        search_box["kind"]["state"][0]["default"]["op"]["tag"],
+        "slot"
+    );
+    assert_eq!(
+        search_box["kind"]["body"]["op"]["tag"],
+        "componentDescriptor"
     );
 }
 
@@ -573,6 +798,9 @@ fn int_field_with_default(name: &str, value: i64) -> CodegenRecordField {
     CodegenRecordField {
         name: name.to_string(),
         ty: ast::TypeRef::name("int"),
+        resolved_ty: CodegenTypeRef::Primitive {
+            name: "int".to_string(),
+        },
         is_content: false,
         is_required: false,
         default: Some(int_expression(value as u32, value)),

@@ -89,6 +89,11 @@ internal static class NxNativeMethods
         out NxBuffer outBuffer);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+    internal static extern NxEvalStatus nx_codegen_nx_ir(
+        NxProgramArtifactSafeHandle programArtifactPtr,
+        out NxBuffer outBuffer);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
     internal static extern NxEvalStatus nx_component_init_program_artifact(
         NxProgramArtifactSafeHandle programArtifactPtr,
         byte[] componentNamePtr,

@@ -14,15 +14,16 @@ use nx_api::{
     NxWorkspaceModule as ApiNxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
 };
 use nx_codegen::{
-    emit_js_program_module, GeneratedJsProgramModule, GeneratedJsProgramModuleComponentExport,
-    GeneratedJsProgramModuleFunctionExport, JsProgramModuleOptions,
+    emit_js_program_module, emit_nx_ir, GeneratedJsProgramModule,
+    GeneratedJsProgramModuleComponentExport, GeneratedJsProgramModuleFunctionExport, GeneratedNxIr,
+    JsProgramModuleOptions, NxIrMetadata,
 };
 use nx_value::NxValue;
 use serde::Serialize;
 use std::any::Any;
 use std::panic;
 
-pub const NX_FFI_ABI_VERSION: u32 = 11;
+pub const NX_FFI_ABI_VERSION: u32 = 12;
 
 #[repr(C)]
 pub struct NxBuffer {
@@ -133,6 +134,13 @@ struct JsonGeneratedJsProgramModuleComponentExport {
     schema_export_name: String,
     initial_state_export_name: Option<String>,
     render_export_name: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonGeneratedNxIr {
+    json: String,
+    metadata: NxIrMetadata,
 }
 
 enum FfiPayload {
@@ -453,6 +461,14 @@ fn json_generated_js_program_module_payload(
 ) -> Result<String, String> {
     serde_json::to_string(&JsonGeneratedJsProgramModule::from(module))
         .map_err(|e| format!("json serialize failed: {e}"))
+}
+
+fn json_generated_nx_ir_payload(ir: GeneratedNxIr) -> Result<String, String> {
+    serde_json::to_string(&JsonGeneratedNxIr {
+        json: ir.json,
+        metadata: ir.metadata,
+    })
+    .map_err(|e| format!("json serialize failed: {e}"))
 }
 
 impl From<GeneratedJsProgramModule> for JsonGeneratedJsProgramModule {
@@ -861,6 +877,54 @@ pub extern "C" fn nx_codegen_js_program_module(
                 Ok(module) => Ok((
                     NxEvalStatus::Ok,
                     FfiPayload::Json(json_generated_js_program_module_payload(module)?),
+                )),
+                Err(error) => {
+                    let diagnostics = error
+                        .diagnostics
+                        .iter()
+                        .map(|diagnostic| NxDiagnostic {
+                            severity: diagnostic.severity().into(),
+                            code: diagnostic.code().map(str::to_string),
+                            message: diagnostic.message().to_string(),
+                            labels: Vec::new(),
+                            help: None,
+                            note: None,
+                        })
+                        .collect::<Vec<_>>();
+                    Ok((
+                        NxEvalStatus::Error,
+                        serialize_diagnostics_payload(output_format, &diagnostics)?,
+                    ))
+                }
+            }
+        })?;
+
+        Ok(payload)
+    });
+
+    finish_output_entry(out_buffer, output_format, result)
+}
+
+#[no_mangle]
+pub extern "C" fn nx_codegen_nx_ir(
+    program_artifact_ptr: *const NxProgramArtifactHandle,
+    out_buffer: *mut NxBuffer,
+) -> NxEvalStatus {
+    if let Err(status) = prepare_out_buffer(out_buffer) {
+        return status;
+    }
+
+    if program_artifact_ptr.is_null() {
+        return NxEvalStatus::InvalidArgument;
+    }
+
+    let output_format = NxOutputFormat::Json;
+    let result = panic::catch_unwind(|| {
+        let payload = with_program_artifact(program_artifact_ptr, |program_artifact| {
+            match emit_nx_ir(program_artifact) {
+                Ok(ir) => Ok((
+                    NxEvalStatus::Ok,
+                    FfiPayload::Json(json_generated_nx_ir_payload(ir)?),
                 )),
                 Err(error) => {
                     let diagnostics = error

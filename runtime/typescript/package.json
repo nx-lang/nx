@@ -1,0 +1,17 @@
+{
+  "name": "@nx-lang/ir-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && node dist/test/runtime.test.js && node test/emitted-ir.test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  },
+  "exports": {
+    ".": "./dist/src/index.js"
+  },
+  "types": "./dist/src/index.d.ts"
+}

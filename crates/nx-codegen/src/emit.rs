@@ -13,6 +13,7 @@ use crate::options::{
 };
 use crate::runtime::runtime_helper_source;
 use nx_api::ProgramArtifact;
+use nx_diagnostics::{Diagnostic, Label};
 use nx_hir::ast::{BinOp, Literal, TypeRef, UnOp};
 use nx_interpreter::{ResolvedItemKind, RuntimeModuleId};
 use nx_types::{Primitive, Type};
@@ -59,6 +60,8 @@ pub fn emit_codegen_program(
     program: &CodegenProgram,
     options: &CodegenOptions,
 ) -> Result<CodegenOutput, CodegenError> {
+    validate_source_codegen_program(program)?;
+
     let context = EmitContext::new(program, options.target);
     let mut files = Vec::new();
     files.push(GeneratedFile {
@@ -100,6 +103,8 @@ pub fn emit_codegen_js_program_module(
     program: &CodegenProgram,
     options: &JsProgramModuleOptions,
 ) -> Result<GeneratedJsProgramModule, CodegenError> {
+    validate_source_codegen_program(program)?;
+
     let context = EmitContext::new_js_program_module(program);
     let source_text = emit_js_program_module_source(program, &context, options);
 
@@ -112,6 +117,224 @@ pub fn emit_codegen_js_program_module(
         function_exports: collect_js_program_module_function_exports(program, &context),
         component_exports: collect_js_program_module_component_exports(program, &context),
     })
+}
+
+fn validate_source_codegen_program(program: &CodegenProgram) -> Result<(), CodegenError> {
+    let mut diagnostics = Vec::new();
+    for module in &program.modules {
+        for declaration in &module.declarations {
+            collect_source_codegen_diagnostics(module, declaration, &mut diagnostics);
+        }
+    }
+
+    if diagnostics.is_empty() {
+        Ok(())
+    } else {
+        Err(CodegenError::new(diagnostics))
+    }
+}
+
+fn collect_source_codegen_diagnostics(
+    module: &CodegenModule,
+    declaration: &CodegenDeclaration,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match &declaration.kind {
+        CodegenDeclarationKind::Function { body, .. } => {
+            collect_expression_source_codegen_diagnostics(module, body, diagnostics);
+        }
+        CodegenDeclarationKind::Value { value, .. } => {
+            collect_expression_source_codegen_diagnostics(module, value, diagnostics);
+        }
+        CodegenDeclarationKind::Record { fields } => {
+            collect_record_field_source_codegen_diagnostics(module, fields, diagnostics);
+        }
+        CodegenDeclarationKind::Component(component) => {
+            collect_component_field_source_codegen_diagnostics(
+                module,
+                &component.props,
+                diagnostics,
+            );
+            collect_component_field_source_codegen_diagnostics(
+                module,
+                &component.state,
+                diagnostics,
+            );
+            if let Some(body) = component.body.as_ref() {
+                collect_expression_source_codegen_diagnostics(module, body, diagnostics);
+            }
+        }
+        CodegenDeclarationKind::Union { cases } => {
+            for case in cases {
+                collect_record_field_source_codegen_diagnostics(module, &case.fields, diagnostics);
+            }
+        }
+        CodegenDeclarationKind::Enum { .. }
+        | CodegenDeclarationKind::TypeAlias
+        | CodegenDeclarationKind::Unsupported(_) => {}
+    }
+}
+
+fn collect_component_field_source_codegen_diagnostics(
+    module: &CodegenModule,
+    fields: &[CodegenComponentField],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for field in fields {
+        if let Some(default) = field.default.as_ref() {
+            collect_expression_source_codegen_diagnostics(module, default, diagnostics);
+        }
+    }
+}
+
+fn collect_record_field_source_codegen_diagnostics(
+    module: &CodegenModule,
+    fields: &[CodegenRecordField],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for field in fields {
+        if let Some(default) = field.default.as_ref() {
+            collect_expression_source_codegen_diagnostics(module, default, diagnostics);
+        }
+    }
+}
+
+fn collect_expression_source_codegen_diagnostics(
+    module: &CodegenModule,
+    expression: &CodegenExpression,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match &expression.kind {
+        CodegenExpressionKind::Match { .. } => {
+            diagnostics.push(source_codegen_unsupported_diagnostic(
+                module,
+                expression.span,
+                "match expressions are not supported by executable source codegen yet",
+            ));
+        }
+        CodegenExpressionKind::Binary { lhs, rhs, .. } => {
+            collect_expression_source_codegen_diagnostics(module, lhs, diagnostics);
+            collect_expression_source_codegen_diagnostics(module, rhs, diagnostics);
+        }
+        CodegenExpressionKind::Unary { expr, .. } => {
+            collect_expression_source_codegen_diagnostics(module, expr, diagnostics);
+        }
+        CodegenExpressionKind::Call { callee, args } => {
+            collect_expression_source_codegen_diagnostics(module, callee, diagnostics);
+            for arg in args {
+                collect_expression_source_codegen_diagnostics(module, arg, diagnostics);
+            }
+        }
+        CodegenExpressionKind::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            collect_expression_source_codegen_diagnostics(module, condition, diagnostics);
+            collect_expression_source_codegen_diagnostics(module, then_branch, diagnostics);
+            if let Some(else_branch) = else_branch {
+                collect_expression_source_codegen_diagnostics(module, else_branch, diagnostics);
+            }
+        }
+        CodegenExpressionKind::Let { value, body, .. } => {
+            collect_expression_source_codegen_diagnostics(module, value, diagnostics);
+            collect_expression_source_codegen_diagnostics(module, body, diagnostics);
+        }
+        CodegenExpressionKind::Block {
+            statements,
+            expression,
+        } => {
+            for statement in statements {
+                match statement {
+                    CodegenStatement::Let { init, .. } => {
+                        collect_expression_source_codegen_diagnostics(module, init, diagnostics);
+                    }
+                    CodegenStatement::Expr(expr) => {
+                        collect_expression_source_codegen_diagnostics(module, expr, diagnostics);
+                    }
+                }
+            }
+            if let Some(expression) = expression {
+                collect_expression_source_codegen_diagnostics(module, expression, diagnostics);
+            }
+        }
+        CodegenExpressionKind::Array(elements) => {
+            for element in elements {
+                collect_expression_source_codegen_diagnostics(module, element, diagnostics);
+            }
+        }
+        CodegenExpressionKind::For { iterable, body, .. } => {
+            collect_expression_source_codegen_diagnostics(module, iterable, diagnostics);
+            collect_expression_source_codegen_diagnostics(module, body, diagnostics);
+        }
+        CodegenExpressionKind::Index { base, index } => {
+            collect_expression_source_codegen_diagnostics(module, base, diagnostics);
+            collect_expression_source_codegen_diagnostics(module, index, diagnostics);
+        }
+        CodegenExpressionKind::Member { base, .. } => {
+            collect_expression_source_codegen_diagnostics(module, base, diagnostics);
+        }
+        CodegenExpressionKind::UnionCase {
+            fields,
+            properties,
+            content,
+            ..
+        } => {
+            collect_record_field_source_codegen_diagnostics(module, fields, diagnostics);
+            for property in properties {
+                collect_expression_source_codegen_diagnostics(module, &property.value, diagnostics);
+            }
+            for item in content {
+                collect_expression_source_codegen_diagnostics(module, item, diagnostics);
+            }
+        }
+        CodegenExpressionKind::Record {
+            fields, properties, ..
+        } => {
+            collect_record_field_source_codegen_diagnostics(module, fields, diagnostics);
+            for property in properties {
+                collect_expression_source_codegen_diagnostics(module, &property.value, diagnostics);
+            }
+        }
+        CodegenExpressionKind::ComponentDescriptor(descriptor) => {
+            for property in &descriptor.properties {
+                collect_expression_source_codegen_diagnostics(module, &property.value, diagnostics);
+            }
+            for item in &descriptor.content {
+                collect_expression_source_codegen_diagnostics(module, item, diagnostics);
+            }
+        }
+        CodegenExpressionKind::Element(element) => {
+            for property in &element.properties {
+                collect_expression_source_codegen_diagnostics(module, &property.value, diagnostics);
+            }
+            for item in &element.content {
+                collect_expression_source_codegen_diagnostics(module, item, diagnostics);
+            }
+        }
+        CodegenExpressionKind::Literal(_)
+        | CodegenExpressionKind::Identifier { .. }
+        | CodegenExpressionKind::EnumMember { .. }
+        | CodegenExpressionKind::Unsupported(_) => {}
+    }
+}
+
+fn source_codegen_unsupported_diagnostic(
+    module: &CodegenModule,
+    span: nx_diagnostics::TextSpan,
+    message: impl Into<String>,
+) -> Diagnostic {
+    Diagnostic::error("codegen-unsupported-construct")
+        .with_message(message)
+        .with_label(Label::primary(module_diagnostic_identity(module), span))
+        .build()
+}
+
+fn module_diagnostic_identity(module: &CodegenModule) -> String {
+    match &module.provenance {
+        CodegenModuleProvenance::SourceProvider { identity } => identity.clone(),
+        CodegenModuleProvenance::Library { module_path, .. } => module_path.display().to_string(),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1739,6 +1962,39 @@ fn expression_render_return_type(
                 None
             }
         }
+        CodegenExpressionKind::Match {
+            arms,
+            else_branch: Some(else_branch),
+            ..
+        } => {
+            let mut expected = None;
+            for arm in arms {
+                let branch_type = expression_render_return_type(
+                    current_module_id,
+                    &arm.body,
+                    module,
+                    context,
+                    visiting,
+                )?;
+                match &expected {
+                    Some(expected) if expected != &branch_type => return None,
+                    None => expected = Some(branch_type),
+                    _ => {}
+                }
+            }
+            let else_type = expression_render_return_type(
+                current_module_id,
+                else_branch,
+                module,
+                context,
+                visiting,
+            )?;
+            match expected {
+                Some(expected) if expected == else_type => Some(expected),
+                None => Some(else_type),
+                _ => None,
+            }
+        }
         CodegenExpressionKind::Let { body, .. } => {
             expression_render_return_type(current_module_id, body, module, context, visiting)
         }
@@ -2440,6 +2696,10 @@ fn emit_expression(
                 .map(|expr| emit_expression(current_module_id, expr, context))
                 .unwrap_or_else(|| "null".to_string())
         ),
+        CodegenExpressionKind::Match { .. } => {
+            "nxRuntimeError(\"match expressions are not supported by executable source codegen yet\")"
+                .to_string()
+        }
         CodegenExpressionKind::Let { name, value, body } => format!(
             "(() => {{ const {} = {}; return {}; }})()",
             safe_identifier(name),
@@ -3160,6 +3420,16 @@ fn collect_expression_render_type_references(
             collect_expression_render_type_references(current_module_id, then_branch, output);
             collect_expression_render_type_references(current_module_id, else_branch, output);
         }
+        CodegenExpressionKind::Match {
+            arms, else_branch, ..
+        } => {
+            for arm in arms {
+                collect_expression_render_type_references(current_module_id, &arm.body, output);
+            }
+            if let Some(else_branch) = else_branch {
+                collect_expression_render_type_references(current_module_id, else_branch, output);
+            }
+        }
         CodegenExpressionKind::Let { body, .. } => {
             collect_expression_render_type_references(current_module_id, body, output);
         }
@@ -3232,6 +3502,22 @@ fn collect_expression_value_references(
         } => {
             collect_expression_value_references(current_module_id, condition, output);
             collect_expression_value_references(current_module_id, then_branch, output);
+            if let Some(else_branch) = else_branch {
+                collect_expression_value_references(current_module_id, else_branch, output);
+            }
+        }
+        CodegenExpressionKind::Match {
+            scrutinee,
+            arms,
+            else_branch,
+        } => {
+            collect_expression_value_references(current_module_id, scrutinee, output);
+            for arm in arms {
+                for pattern in &arm.patterns {
+                    collect_expression_value_references(current_module_id, pattern, output);
+                }
+                collect_expression_value_references(current_module_id, &arm.body, output);
+            }
             if let Some(else_branch) = else_branch {
                 collect_expression_value_references(current_module_id, else_branch, output);
             }
@@ -3503,6 +3789,22 @@ fn collect_expression_runtime_helpers(
         } => {
             collect_expression_runtime_helpers(condition, output);
             collect_expression_runtime_helpers(then_branch, output);
+            if let Some(else_branch) = else_branch {
+                collect_expression_runtime_helpers(else_branch, output);
+            }
+        }
+        CodegenExpressionKind::Match {
+            scrutinee,
+            arms,
+            else_branch,
+        } => {
+            collect_expression_runtime_helpers(scrutinee, output);
+            for arm in arms {
+                for pattern in &arm.patterns {
+                    collect_expression_runtime_helpers(pattern, output);
+                }
+                collect_expression_runtime_helpers(&arm.body, output);
+            }
             if let Some(else_branch) = else_branch {
                 collect_expression_runtime_helpers(else_branch, output);
             }

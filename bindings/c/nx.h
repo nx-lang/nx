@@ -13,7 +13,7 @@
 #endif
 
 
-#define NX_FFI_ABI_VERSION 10
+#define NX_FFI_ABI_VERSION 12
 
 enum NxEvalStatus
 #ifdef __cplusplus
@@ -122,6 +122,18 @@ NX_FFI_EXPORT
 NxEvalStatus nx_eval_program_artifact(const struct NxProgramArtifactHandle *program_artifact_ptr,
                                       uint32_t output_format,
                                       struct NxBuffer *out_buffer);
+
+NX_FFI_EXPORT
+NxEvalStatus nx_codegen_js_program_module(const struct NxProgramArtifactHandle *program_artifact_ptr,
+                                          const uint8_t *logical_module_name_ptr,
+                                          size_t logical_module_name_len,
+                                          const uint8_t *runtime_import_specifier_ptr,
+                                          size_t runtime_import_specifier_len,
+                                          struct NxBuffer *out_buffer);
+
+NX_FFI_EXPORT
+NxEvalStatus nx_codegen_nx_ir(const struct NxProgramArtifactHandle *program_artifact_ptr,
+                              struct NxBuffer *out_buffer);
 
 NX_FFI_EXPORT
 NxEvalStatus nx_component_init_program_artifact(const struct NxProgramArtifactHandle *program_artifact_ptr,
