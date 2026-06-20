@@ -25,10 +25,13 @@ Basic syntax highlighting and language configuration for the NX language using a
    ```bash
    nvm install 24 && nvm use 24
    ```
-3. From `src/vscode`, install dependencies and build the VSIX package when needed:
+3. From `src/vscode`, enable the package manager version declared by `package.json`, install
+   dependencies, and verify the VSIX package when needed:
    ```bash
-   pnpm install
-   pnpm run package
+   corepack enable
+   corepack prepare pnpm@10.28.1 --activate
+   pnpm install --frozen-lockfile
+   pnpm run package:verify
    ```
 4. Launch VS Code with the extension loaded and pointing at the repo root (from `src/vscode`):
    ```bash
@@ -62,16 +65,75 @@ This allows web editors and docs tooling to reuse the same highlighting assets w
 
 ## Packaging and Publishing
 
-You can package with `vsce` or publish to Open VSX with `ovsx`.
+Use the local package scripts from `src/vscode` so the same checks run locally and in CI.
 
-Example commands (install tools globally or as dev dependencies):
-
+```bash
+pnpm run test
+pnpm run package:ls
+pnpm run package
 ```
-pnpm exec vsce package
-pnpm exec ovsx publish
+
+`package:ls` prints the files that will be included in the extension package. The release VSIX is
+limited to `package.json`, `README.md`, `CHANGELOG.md`, `LICENSE`, `language-configuration.json`,
+`syntaxes/**`, and `snippets/**` by the `files` allowlist in `package.json`; do not add a
+`.vscodeignore` alongside that allowlist because `vsce` switches to ignore-based collection when
+one is present, bypassing the `files` allowlist and requiring every development-only path to be
+excluded separately.
+
+### Release Preparation
+
+1. Update `src/vscode/package.json` to the release version.
+2. Add the release notes to `src/vscode/CHANGELOG.md`.
+3. Run the package verification:
+   ```bash
+   pnpm install --frozen-lockfile
+   pnpm run package:verify
+   ```
+4. Create and push a tag that matches the package version:
+   ```bash
+   git tag vscode-v$(node -p "require('./package.json').version")
+   git push origin vscode-v$(node -p "require('./package.json').version")
+   ```
+
+The GitHub Actions workflow publishes only from `vscode-v<version>` tags where `<version>` matches
+`src/vscode/package.json`.
+
+### Credentials
+
+Configure these GitHub Actions secrets before pushing a release tag:
+
+- `VSCE_PAT` — Visual Studio Marketplace personal access token for publisher `nx-lang`
+- `OVSX_PAT` — Open VSX personal access token for namespace `nx-lang`
+
+For local publishing, provide the same values as environment variables:
+
+```bash
+export VSCE_PAT=...
+export OVSX_PAT=...
 ```
 
-Set the publisher to `nx-lang` and the extension ID to `nx-language` (already configured).
+Do not commit tokens or write them into tracked configuration files.
+
+### Local Publish and Repair
+
+Publish an already-built VSIX to both registries:
+
+```bash
+VSIX=nx-language-$(node -p "require('./package.json').version").vsix
+pnpm run publish:all -- "$VSIX"
+```
+
+If a CI release partially succeeds and only one registry needs a repair, publish the same VSIX to
+one registry:
+
+```bash
+VSIX=nx-language-$(node -p "require('./package.json').version").vsix
+pnpm run publish:vsce -- "$VSIX"
+pnpm run publish:ovsx -- "$VSIX"
+```
+
+Both commands publish the provided VSIX artifact instead of rebuilding a new package. The publisher
+is `nx-lang` and the extension ID is `nx-language`.
 
 ## Notes
 

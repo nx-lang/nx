@@ -36,9 +36,12 @@
   "scripts": {
     "test": "node --loader ./node_modules/ts-node/esm.mjs ./node_modules/mocha/bin/mocha.js \"test/**/*.ts\"",
     "test:grammar": "node --loader ./node_modules/ts-node/esm.mjs ./node_modules/mocha/bin/mocha.js \"test/**/*.ts\"",
-    "package": "vsce package",
-    "publish:vsce": "vsce publish",
-    "publish:ovsx": "ovsx publish"
+    "package": "vsce package --no-dependencies",
+    "package:ls": "vsce ls --tree --no-dependencies",
+    "package:verify": "pnpm run test && pnpm run package:ls && pnpm run package",
+    "publish:vsce": "node ./scripts/publish-vsix.mjs vsce",
+    "publish:ovsx": "node ./scripts/publish-vsix.mjs ovsx",
+    "publish:all": "node ./scripts/publish-all.mjs"
   },
   "files": [
     "package.json",
