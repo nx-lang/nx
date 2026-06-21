@@ -40,7 +40,7 @@ let <TodoList
   filter:string
 /> =
   <ul class="todo-list">
-    {for item, index in items {
+    for item, index in items {
       <TodoItem
         item={item}
         index={index}
@@ -50,7 +50,7 @@ let <TodoList
           visible={item.status == filter}
         }
       />
-    }}
+    }
   </ul>
 
 let <TodoItem

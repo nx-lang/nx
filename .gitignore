@@ -363,6 +363,10 @@ MigrationBackup/
 # VS Code extension packages
 *.vsix
 
+# VS Code extension build outputs
+src/vscode/out/
+src/vscode/server/
+
 # Rust
 target/
 Cargo.lock

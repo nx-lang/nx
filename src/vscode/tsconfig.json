@@ -3,6 +3,8 @@
     "target": "ES2022",
     "module": "nodenext",
     "moduleResolution": "nodenext",
+    "rootDir": "src",
+    "outDir": "out",
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "strict": true,
@@ -10,6 +12,6 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["test/**/*.ts"],
+  "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "out"]
 }

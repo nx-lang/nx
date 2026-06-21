@@ -15,7 +15,7 @@ pub use syntax_kind::{syntax_kind_from_str, SyntaxKind};
 pub use syntax_node::SyntaxNode;
 pub use validation::validate;
 
-use nx_diagnostics::{Diagnostic, Severity};
+use nx_diagnostics::{Diagnostic, Label, Severity};
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -184,6 +184,7 @@ pub fn parse_str(source: &str, file_name: &str) -> ParseResult {
             tree: None,
             errors: vec![Diagnostic::error("invalid-utf8")
                 .with_message("Source file contains invalid UTF-8")
+                .with_label(document_start_label(file_name))
                 .build()],
             source_id: SourceId::new(0),
         };
@@ -221,6 +222,7 @@ pub fn parse_str(source: &str, file_name: &str) -> ParseResult {
             tree: None,
             errors: vec![Diagnostic::error("parse-failed")
                 .with_message("Failed to parse source")
+                .with_label(document_start_label(file_name))
                 .build()],
             source_id,
         },
@@ -250,6 +252,7 @@ pub fn parse_file(path: impl AsRef<Path>) -> io::Result<ParseResult> {
             tree: None,
             errors: vec![Diagnostic::error("file-not-found")
                 .with_message(format!("File not found: {}", path.display()))
+                .with_label(document_start_label(path.display().to_string()))
                 .build()],
             source_id: SourceId::new(0),
         });
@@ -264,6 +267,7 @@ pub fn parse_file(path: impl AsRef<Path>) -> io::Result<ParseResult> {
             tree: None,
             errors: vec![Diagnostic::error("invalid-utf8")
                 .with_message(format!("File contains invalid UTF-8: {}", path.display()))
+                .with_label(document_start_label(path.display().to_string()))
                 .build()],
             source_id: SourceId::new(0),
         });
@@ -287,9 +291,14 @@ fn validate_source_size(source_len: usize, file_name: &str) -> Option<Diagnostic
             .with_message(format!(
                 "NX source file '{file_name}' is too large ({source_len} bytes). NX source files must be <= {MAX_SOURCE_BYTES} bytes."
             ))
+            .with_label(document_start_label(file_name))
             .with_help("Split the source into smaller files before parsing or evaluation.")
             .build(),
     )
+}
+
+fn document_start_label(file_name: impl Into<String>) -> Label {
+    Label::primary(file_name, TextRange::default())
 }
 
 /// Extension trait for `&str` to check UTF-8 validity.
@@ -404,6 +413,8 @@ mod tests {
         assert_eq!(diagnostic.severity(), Severity::Error);
         assert!(diagnostic.message().contains(&MAX_SOURCE_BYTES.to_string()));
         assert!(diagnostic.message().contains("too-large.nx"));
+        assert_eq!(diagnostic.labels().len(), 1);
+        assert_eq!(diagnostic.labels()[0].file, "too-large.nx");
     }
 
     #[test]

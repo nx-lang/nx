@@ -3,7 +3,7 @@
   "displayName": "NX Language",
   "publisher": "nx-lang",
   "version": "0.1.0",
-  "description": "Syntax highlighting and language basics for the NX language (TextMate grammar only).",
+  "description": "Syntax highlighting and language server integration for the NX language.",
   "packageManager": "pnpm@10.28.1",
   "license": "MIT",
   "keywords": [
@@ -33,12 +33,21 @@
     "vscode": "^1.90.0"
   },
   "type": "module",
+  "main": "./out/extension.cjs",
+  "activationEvents": [
+    "onLanguage:nx"
+  ],
   "scripts": {
+    "compile": "tsc -p . && node ./scripts/bundle-extension.mjs",
+    "build:lsp": "node ./scripts/build-lsp.mjs",
+    "build:lsp:debug": "NX_LSP_PROFILE=debug pnpm run build:lsp",
+    "vscode:launch": "pnpm run build:lsp:debug && pnpm run compile && code --extensionDevelopmentPath=. ../..",
     "test": "node --loader ./node_modules/ts-node/esm.mjs ./node_modules/mocha/bin/mocha.js \"test/**/*.ts\"",
     "test:grammar": "node --loader ./node_modules/ts-node/esm.mjs ./node_modules/mocha/bin/mocha.js \"test/**/*.ts\"",
-    "package": "vsce package --no-dependencies",
+    "package": "node ./scripts/package-vsix.mjs",
+    "package:check-assets": "node ./scripts/check-package-assets.mjs",
     "package:ls": "vsce ls --tree --no-dependencies",
-    "package:verify": "pnpm run test && pnpm run package:ls && pnpm run package",
+    "package:verify": "pnpm run compile && pnpm run test && pnpm run package:check-assets && pnpm run package:ls && pnpm run package",
     "publish:vsce": "node ./scripts/publish-vsix.mjs vsce",
     "publish:ovsx": "node ./scripts/publish-vsix.mjs ovsx",
     "publish:all": "node ./scripts/publish-all.mjs"
@@ -49,14 +58,22 @@
     "CHANGELOG.md",
     "LICENSE",
     "language-configuration.json",
+    "out/**",
+    "server/**",
     "syntaxes/**",
     "snippets/**"
   ],
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
   "devDependencies": {
     "@types/chai": "^4.3.11",
     "@types/mocha": "^10.0.6",
+    "@types/node": "^24.0.0",
+    "@types/vscode": "1.90.0",
     "@vscode/vsce": "^3.7.0",
     "chai": "^4.4.1",
+    "esbuild": "^0.27.0",
     "mocha": "^10.5.0",
     "ovsx": "^0.8.3",
     "ts-node": "^10.9.2",
@@ -100,6 +117,16 @@
         "language": "nx",
         "path": "./snippets/nx.json"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "NX Language",
+      "properties": {
+        "nx.server.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to an nx-lsp executable. When empty, the packaged server binary is used."
+        }
+      }
+    }
   }
 }

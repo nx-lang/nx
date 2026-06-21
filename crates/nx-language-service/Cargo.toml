@@ -1,0 +1,21 @@
+[package]
+name = "nx-language-service"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+nx-api = { path = "../nx-api" }
+nx-hir = { path = "../nx-hir" }
+nx-syntax = { path = "../nx-syntax" }
+nx-types = { path = "../nx-types" }
+rustc-hash.workspace = true
+serde.workspace = true
+text-size.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

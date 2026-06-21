@@ -1,3 +1,6 @@
+let foo=3
+let bar={foox + 3}
+
 component <Button text:string /> = {
   <button>{text}</button>
 }

@@ -1,6 +1,7 @@
 # NX VS Code Extension – TODO
 
-This tracks near-term enhancements and future work. The LSP server will be implemented in C#.
+This tracks near-term enhancements and future work. The LSP server is implemented in Rust and
+started by the VS Code extension client.
 
 ## Grammar Coverage
 - [x] Parse attribute values that can embed inline elements, e.g., `prop=<Start/>` and `content=<:uitext>…</>`.
@@ -48,14 +49,14 @@ This tracks near-term enhancements and future work. The LSP server will be imple
 - [ ] Verify debug launch works across Windows, WSL, and macOS. Consider a separate non-WSL config.
 - [ ] Add `.vscode/tasks.json` helpers (package, test) and recommended extensions for contributors.
 
-## LSP (C#) Roadmap – later milestone
-- [ ] Choose server framework (e.g., OmniSharp.Extensions.LanguageServer) and set up a C# project.
-- [ ] Define protocol surface: diagnostics, hovers, completion, document symbols, formatting.
-- [ ] Implement a minimal server (no features) and a Node client stub in the extension to spawn the C# server.
-- [ ] Follow repo C# guidelines (nullable enabled, Allman braces, explicit access modifiers).
-- [ ] Ensure any JSON-RPC handlers adhere to internal conventions (e.g., method attributes as required by repo guidance).
-- [ ] Add launch configurations for server + client debugging (attach to dotnet, run Extension Host).
-- [ ] Wire WSL support for server process (spawn via `dotnet` within WSL).
+## LSP Roadmap
+- [x] Add Rust `nx-lsp` stdio server and VS Code language client activation.
+- [x] Surface diagnostics, document symbols, hovers, and completions through LSP.
+- [x] Add a configurable `nx.server.path` development override.
+- [ ] Improve hover and completion quality with richer semantic metadata.
+- [ ] Add formatting, rename, references, and go-to-definition in later milestones.
+- [ ] Add launch configurations for server + client debugging.
+- [ ] Expand native VSIX release targets beyond the initial package target.
 
 ## Performance & Quality
 - [ ] Profile grammar on large `.nx` files; tune regexes to avoid catastrophic backtracking.
