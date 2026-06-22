@@ -27,6 +27,11 @@ jobs:
           echo "NUGET_API_KEY_DEFINED=true" >> $env:GITHUB_ENV
         }
 
+        if ('${{ secrets.NPM_TOKEN }}') {
+          Write-Host "NPM_TOKEN secret detected. Editor assets package will be published."
+          echo "NPM_TOKEN_DEFINED=true" >> $env:GITHUB_ENV
+        }
+
     - name: 🔎 Search for build of ${{ github.ref }}
       shell: pwsh
       id: findrunid
@@ -67,8 +72,16 @@ jobs:
     - name: 🔻 Download deployables artifacts
       uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
       with:
-        name: deployables-Linux
+        name: deployables-Complete
         path: ${{ runner.temp }}/deployables
+        run-id: ${{ steps.findrunid.outputs.runid }}
+        github-token: ${{ github.token }}
+
+    - name: 🔻 Download editor-assets package
+      uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      with:
+        name: editor-assets-package
+        path: ${{ runner.temp }}/editor-assets
         run-id: ${{ steps.findrunid.outputs.runid }}
         github-token: ${{ github.token }}
 
@@ -86,3 +99,11 @@ jobs:
     - name: 🚀 Push NuGet packages
       run: dotnet nuget push ${{ runner.temp }}/deployables/*.nupkg --source https://api.nuget.org/v3/index.json -k '${{ secrets.NUGET_API_KEY }}'
       if: ${{ env.NUGET_API_KEY_DEFINED == 'true' }}
+
+    - name: 🚀 Publish editor-assets package
+      run: |
+        echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
+        npm publish ${{ runner.temp }}/editor-assets/*.tgz --access public
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      if: ${{ env.NPM_TOKEN_DEFINED == 'true' }}

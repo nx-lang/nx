@@ -126,7 +126,7 @@ internal static class NxNativeLibrary
     private static InvalidOperationException CreateMissingLibraryException(DllNotFoundException innerException)
     {
         return new InvalidOperationException(
-            "NX native runtime could not be found. Build `crates/nx-ffi` and stage the native library next to the application output, or import `bindings/dotnet/build/NxLang.Runtime.targets` when consuming NX from a vendored source checkout.",
+            "NX native runtime could not be found. Package consumers should restore and publish for a supported runtime identifier so the `NxLang.Runtime` package stages its `nx_ffi` native asset. Source consumers should build `crates/nx-ffi` and import `bindings/dotnet/build/NxLang.Runtime.targets` from the same NX checkout.",
             innerException);
     }
 

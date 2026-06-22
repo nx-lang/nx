@@ -28,12 +28,13 @@
 └─────────────────┘
 ```
 
-The managed binding validates the native ABI version at startup and expects the native library to be staged alongside the application output.
+The managed binding validates the native ABI version at startup. Published package consumers get
+the native runtime through normal .NET runtime asset restore, build, test, and publish behavior.
 
 ## Prerequisites
 
 - **.NET SDK**: `.NET 10.0`
-- **Rust**: the workspace toolchain declared in `rust-toolchain.toml`
+- **Rust**: the workspace toolchain declared in `rust-toolchain.toml` when building NX from source
 - **OS**: Linux, macOS, or Windows
 
 ## Build
@@ -68,9 +69,37 @@ dotnet test bindings/dotnet/NxLang.sln -p:NxRuntimeNativeLibraryConfiguration=De
 
 ## Supported Integration Workflows
 
-NX is not published as a NuGet package yet. The supported consumption model for now is vendoring the NX repository as a git submodule or subtree and building it locally.
+### Primary: `PackageReference`
 
-### Primary: `ProjectReference`
+Applications should reference the published runtime package:
+
+```xml
+<ItemGroup>
+  <PackageReference Include="NxLang.Runtime" Version="0.1.0" />
+</ItemGroup>
+```
+
+The package contains `NxLang.Runtime.dll` and the native `nx_ffi` runtime assets for supported
+runtime identifiers under `runtimes/<rid>/native/`. Package consumers do not need to vendor the NX
+repository, import `bindings/dotnet/build/NxLang.Runtime.targets`, or install Rust just to build,
+test, run, or publish an application that uses `NxLang.Runtime`.
+
+Publish for a supported runtime identifier when creating a deployable application:
+
+```bash
+dotnet publish MyApp.csproj -c Release -r linux-x64 --self-contained false
+```
+
+Initial supported RIDs are:
+
+- `linux-x64`
+- `osx-arm64`
+- `win-x64`
+
+Application-owned `.nx` source files and domain libraries are not packaged by NX. Embed them, copy
+them as content, or otherwise stage them from the consuming application.
+
+### Advanced: Source `ProjectReference`
 
 Use a direct project reference to the managed binding and import the staging targets file:
 
@@ -82,7 +111,7 @@ Use a direct project reference to the managed binding and import the staging tar
 <Import Project="external/nx/bindings/dotnet/build/NxLang.Runtime.targets" />
 ```
 
-Recommended flow:
+Use this flow when contributing to NX or intentionally testing unreleased runtime changes:
 
 1. Vendor NX source into your repository.
 2. Run `cargo build --release -p nx-ffi` in the vendored NX checkout.
@@ -96,7 +125,7 @@ Optional properties:
 - `NxRuntimeStageNativeLibrary`: set to `false` if you want to stage the library yourself.
 - `NxRuntimeFailIfNativeLibraryMissing`: set to `true` to fail the build when the native library is missing.
 
-### Secondary: Built Assembly Reference
+### Advanced: Built Assembly Reference
 
 If you cannot use `ProjectReference`, reference the built managed assembly directly and copy the native library alongside your application's output:
 
@@ -105,6 +134,17 @@ If you cannot use `ProjectReference`, reference the built managed assembly direc
 - **Windows**: `target/release/nx_ffi.dll`
 
 The managed runtime looks for the native library in the application base directory and the managed assembly directory.
+
+### Migration From Source Consumption
+
+To migrate an application from a vendored NX checkout to the package:
+
+1. Remove the `ProjectReference` to `bindings/dotnet/src/NxLang.Runtime/NxLang.Runtime.csproj`.
+2. Remove the manual import of `bindings/dotnet/build/NxLang.Runtime.targets`.
+3. Add `PackageReference Include="NxLang.Runtime"`.
+4. Remove consumer-side `cargo build -p nx-ffi` steps that only existed to stage the runtime.
+5. Keep application-specific `.nx` files in the application and stage them with application-owned
+   content rules.
 
 ## Usage
 
@@ -512,7 +552,10 @@ formatter implementation comes from the shared runtime assembly.
 
 ### Native runtime could not be found
 
-Build `crates/nx-ffi` and stage the native library next to the application output. If you are consuming NX as a vendored source dependency, import `bindings/dotnet/build/NxLang.Runtime.targets` to automate that copy step.
+Package consumers should restore, build, and publish for one of the supported runtime identifiers
+so the `NxLang.Runtime` package can stage the matching native runtime asset. Source consumers should
+build `crates/nx-ffi` and import `bindings/dotnet/build/NxLang.Runtime.targets` to automate that
+copy step.
 
 ### Native runtime ABI mismatch
 

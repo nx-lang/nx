@@ -1,6 +1,7 @@
-# NX Language (VS Code)
+# NX Language
 
-Syntax highlighting, language configuration, snippets, and Rust language-server features for the NX language.
+Syntax highlighting, reusable editor assets, snippets, and Rust language-server features for the NX
+language.
 
 ## Features
 
@@ -16,7 +17,32 @@ Syntax highlighting, language configuration, snippets, and Rust language-server 
 - Rust `nx-lsp` integration for diagnostics, document symbols, hover, and completions
 - `nx.server.path` setting for using a development or custom `nx-lsp` executable
 
-## Getting Started
+## Package Consumption
+
+Install the reusable editor-assets package from your application:
+
+```bash
+pnpm add @nx-lang/language
+```
+
+Import the public JSON assets through stable package paths:
+
+```ts
+import grammar from '@nx-lang/language/grammar';
+import markdownCodeBlockGrammar from '@nx-lang/language/markdown-codeblock-grammar';
+import languageConfiguration from '@nx-lang/language/language-configuration';
+import snippets from '@nx-lang/language/snippets';
+```
+
+Browser editor integrations such as Monaco or Shiki can use these JSON assets as data inputs. The
+package does not require a VS Code extension install and consumers should not reference
+`external/nx/src/vscode` or another NX checkout path.
+
+To migrate from a file-based dependency, replace references such as
+`file:../../external/nx/src/vscode` with the published `@nx-lang/language` package and update
+imports to the public paths above.
+
+## Local Development
 
 1. Install and load `nvm` (recommended on WSL):
    ```bash
@@ -45,23 +71,28 @@ Syntax highlighting, language configuration, snippets, and Rust language-server 
 
 ## File Structure
 
-- `package.json` — Extension manifest (publisher: `nx-lang`, id: `nx-language`).
-- `syntaxes/nx.tmLanguage.json` — TextMate grammar for NX.
-- `language-configuration.json` — Comments, brackets, pairs.
-- `snippets/nx.json` — Handy snippets for elements, control-flow, and braced value expressions.
-- `src/` — VS Code activation code and LSP client helpers.
-- `server/<platform>-<arch>/nx-lsp` — Packaged Rust language server asset.
-- `out/` — Compiled extension runtime.
-- `samples/` — Example NX files.
+- `package.json` - VS Code extension manifest (publisher: `nx-lang`, id: `nx-language`).
+- `syntaxes/nx.tmLanguage.json` - TextMate grammar for NX.
+- `syntaxes/nx.markdown.codeblock.tmLanguage.json` - Markdown fenced-code-block grammar injection.
+- `language-configuration.json` - Comments, brackets, pairs.
+- `snippets/nx.json` - Handy snippets for elements, control-flow, and braced value expressions.
+- `src/` - VS Code activation code and LSP client helpers.
+- `server/<platform>-<arch>/nx-lsp` - Packaged Rust language server asset.
+- `out/` - Compiled extension runtime.
+- `samples/` - Example NX files.
 
 ## Package Exports
 
-The published package also exposes the language assets for browser consumers:
+The generated `@nx-lang/language` package exposes the reusable language assets for browser
+consumers:
 
-- `nx-language/grammar` — NX TextMate grammar JSON
-- `nx-language/language-configuration` — NX language configuration JSON
+- `@nx-lang/language/grammar` - NX TextMate grammar JSON
+- `@nx-lang/language/markdown-codeblock-grammar` - NX markdown code-block grammar JSON
+- `@nx-lang/language/language-configuration` - NX language configuration JSON
+- `@nx-lang/language/snippets` - NX snippets JSON
 
-This allows web editors and docs tooling to reuse the same highlighting assets without copying them into another repository.
+This allows web editors and docs tooling to reuse the same highlighting assets without copying them
+into another repository.
 
 ## Roadmap
 
@@ -80,22 +111,36 @@ pnpm run package:ls
 pnpm run package
 ```
 
-`package:ls` prints the files that will be included in the extension package. The release VSIX is
-limited to `package.json`, `README.md`, `CHANGELOG.md`, `LICENSE`, `language-configuration.json`,
-`out/**`, `server/**`, `syntaxes/**`, and `snippets/**` by the `files` allowlist in `package.json`; do not add a
-`.vscodeignore` alongside that allowlist because `vsce` switches to ignore-based collection when
-one is present, bypassing the `files` allowlist and requiring every development-only path to be
-excluded separately.
+`package:ls` prints the files that will be included in the VS Code extension package. The release
+VSIX is limited to `package.json`, `README.md`, `CHANGELOG.md`, `LICENSE`,
+`language-configuration.json`, `out/**`, `server/**`, `syntaxes/**`, and `snippets/**` by the
+`files` allowlist in `package.json`; do not add a `.vscodeignore` alongside that allowlist because
+`vsce` switches to ignore-based collection when one is present, bypassing the `files` allowlist and
+requiring every development-only path to be excluded separately.
 
 `pnpm run build:lsp` builds the Rust `nx-lsp` binary in release mode and copies it into
 `server/<platform>-<arch>/`. Set `NX_LSP_PROFILE=debug` for a debug server during local
-development. `pnpm run package:verify` fails if `out/extension.cjs`,
-`out/serverPath.js`, or the expected server asset for the current package target is missing.
+development. `pnpm run package:verify` fails if `out/extension.cjs`, `out/serverPath.js`, or the
+expected server asset for the current package target is missing.
 
 To build a native VSIX target, build or copy the matching server binary into the platform directory
 that matches the VS Code target, then run `NX_VSCODE_TARGET=<target> pnpm run package`. For cross
 builds, set `CARGO_BUILD_TARGET`, `NX_LSP_PLATFORM`, and `NX_VSCODE_TARGET`; for example,
 `NX_LSP_PLATFORM=linux-x64 NX_VSCODE_TARGET=linux-x64 CARGO_BUILD_TARGET=x86_64-unknown-linux-gnu pnpm run build:lsp`.
+
+### Editor Assets Package
+
+Package and verify the npm editor-assets tarball:
+
+```bash
+pnpm run package:language
+pnpm run verify:package dist/*.tgz
+pnpm run smoke:package dist/*.tgz
+```
+
+`package:language` builds a clean `@nx-lang/language` tarball from a staging manifest, so VS Code
+extension runtime files such as `out/**`, `server/**`, and `vscode-languageclient` stay out of the
+reusable editor-assets package.
 
 ### Release Preparation
 
@@ -106,6 +151,7 @@ builds, set `CARGO_BUILD_TARGET`, `NX_LSP_PLATFORM`, and `NX_VSCODE_TARGET`; for
    pnpm install --frozen-lockfile
    pnpm run build:lsp
    pnpm run package:verify
+   pnpm run package:language
    ```
 4. Create and push a tag that matches the package version:
    ```bash
@@ -113,17 +159,22 @@ builds, set `CARGO_BUILD_TARGET`, `NX_LSP_PLATFORM`, and `NX_VSCODE_TARGET`; for
    git push origin vscode-v$(node -p "require('./package.json').version")
    ```
 
-The GitHub Actions workflow publishes only from `vscode-v<version>` tags where `<version>` matches
-`src/vscode/package.json`.
+The GitHub Actions workflow publishes the VS Code extension only from `vscode-v<version>` tags where
+`<version>` matches `src/vscode/package.json`. The main build workflow publishes the reusable
+`@nx-lang/language` editor-assets package artifact for the release workflow.
 
 ### Credentials
 
 Configure these GitHub Actions secrets before pushing a release tag:
 
-- `VSCE_PAT` — Visual Studio Marketplace personal access token for publisher `nx-lang`
-- `OVSX_PAT` — Open VSX personal access token for namespace `nx-lang`
+- `VSCE_PAT` - Visual Studio Marketplace personal access token for publisher `nx-lang`
+- `OVSX_PAT` - Open VSX personal access token for namespace `nx-lang`
 
-For local publishing, provide the same values as environment variables:
+Configure this secret before publishing release deployables:
+
+- `NPM_TOKEN` - npm token allowed to publish `@nx-lang/language`
+
+For local VS Code extension publishing, provide the registry values as environment variables:
 
 ```bash
 export VSCE_PAT=...
@@ -160,4 +211,8 @@ is `nx-lang` and the extension ID is `nx-language`.
 
 ## Limitations
 
-- TextMate text blocks: `text-raw-block` scopes regions like `<tag:text raw> ... </tag>` while `text-typed-block` scopes typed text elements so their bodies stay flat text except for the `@{ … }` braced value delimiter. The grammar still can’t easily host other embedded languages inside these sections, and completely preventing nested NX markup inside raw blocks would require more invasive rule restructuring.
+- TextMate text blocks: `text-raw-block` scopes regions like `<tag:text raw> ... </tag>` while
+  `text-typed-block` scopes typed text elements so their bodies stay flat text except for the
+  `@{ ... }` braced value delimiter. The grammar still can't easily host other embedded languages
+  inside these sections, and completely preventing nested NX markup inside raw blocks would require
+  more invasive rule restructuring.
