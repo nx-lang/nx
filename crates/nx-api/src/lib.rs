@@ -8,7 +8,7 @@
 //!   rendering from explicit props and host-owned current state, returning the rendered value
 //!   directly without lifecycle wrapper fields
 //! - [`NxWorkspace`] / [`NxWorkspaceModule`]: validate and build programs from logical in-memory
-//!   source modules without temporary files
+//!   source modules or load a logical workspace from a directory
 //! - [`initialize_component_source`] / [`dispatch_component_actions_source`]: component lifecycle
 //!   entry points that analyze source against a caller-supplied [`ProgramBuildContext`],
 //!   initialize a named component, and dispatch action batches
@@ -51,4 +51,6 @@ pub use eval::{
     load_program_artifact_from_source, EvalResult,
 };
 pub use value::{from_nx_value, to_nx_value, FromNxValueError};
-pub use workspace::{NxWorkspace, NxWorkspaceInputError, NxWorkspaceModule};
+pub use workspace::{
+    NxWorkspace, NxWorkspaceDirectoryError, NxWorkspaceInputError, NxWorkspaceModule,
+};

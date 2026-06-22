@@ -493,11 +493,7 @@ pub fn build_workspace_program_artifact(
             return Err(diagnostics_to_api(&[diagnostic], ""));
         }
     };
-    if !graph
-        .modules()
-        .iter()
-        .any(|module| module.identity == entry_identity)
-    {
+    if !graph.contains_identity(&entry_identity) {
         let diagnostic = Diagnostic::error("workspace-entry-not-found")
             .with_message(format!(
                 "Workspace entry module '{}' was not found",
@@ -2319,7 +2315,6 @@ fn full_source_span(source: &str) -> TextSpan {
 fn source_provider_error_diagnostic(error: &SourceProviderError) -> Diagnostic {
     let code = match error {
         SourceProviderError::Identity(_) => "workspace-identity-error",
-        SourceProviderError::Io { .. } => "workspace-source-load-error",
     };
     Diagnostic::error(code)
         .with_message(error.to_string())
@@ -2406,7 +2401,6 @@ pub(crate) fn has_error_diagnostics(diagnostics: &[Diagnostic]) -> bool {
 mod tests {
     use super::*;
     use crate::eval::eval_program_artifact;
-    use crate::source_graph::FilesystemSourceProvider;
     use crate::EvalResult;
     use crate::NxWorkspaceModule;
     use tempfile::TempDir;
@@ -3599,8 +3593,9 @@ let root(): int = { answer }"#;
         let workspace_graph = WorkspaceSourceProvider::new(&workspace)
             .load_graph()
             .expect("workspace graph");
-        let filesystem_graph = FilesystemSourceProvider::from_root(temp.path())
-            .expect("filesystem provider")
+        let filesystem_workspace =
+            NxWorkspace::from_directory(temp.path()).expect("filesystem workspace");
+        let filesystem_graph = WorkspaceSourceProvider::new(&filesystem_workspace)
             .load_graph()
             .expect("filesystem graph");
 

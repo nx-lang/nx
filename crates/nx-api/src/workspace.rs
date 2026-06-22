@@ -1,6 +1,8 @@
 use rustc_hash::FxHashSet;
 use std::error::Error;
 use std::fmt;
+use std::fs;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 /// A logical workspace containing NX source modules submitted together for analysis.
@@ -22,6 +24,28 @@ impl NxWorkspace {
         }
 
         Ok(Self { modules })
+    }
+
+    /// Creates a workspace from every `.nx` source file under a directory.
+    pub fn from_directory(root_path: impl AsRef<Path>) -> Result<Self, NxWorkspaceDirectoryError> {
+        let root_path = root_path.as_ref();
+        let mut source_paths = Vec::new();
+        collect_nx_file_paths(root_path, &mut source_paths)?;
+        source_paths.sort();
+
+        let mut modules = Vec::with_capacity(source_paths.len());
+        for source_path in source_paths {
+            let identity = workspace_identity_for_path(root_path, &source_path)?;
+            let source = fs::read_to_string(&source_path).map_err(|error| {
+                NxWorkspaceDirectoryError::ReadFile {
+                    path: source_path.clone(),
+                    message: error.to_string(),
+                }
+            })?;
+            modules.push(NxWorkspaceModule::from_source(identity, source)?);
+        }
+
+        Ok(Self::new(modules)?)
     }
 
     /// Returns the validated modules in this workspace.
@@ -133,6 +157,63 @@ impl fmt::Display for NxWorkspaceInputError {
 
 impl Error for NxWorkspaceInputError {}
 
+/// Error encountered while loading a workspace from a filesystem directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NxWorkspaceDirectoryError {
+    ReadDirectory { path: PathBuf, message: String },
+    InspectPath { path: PathBuf, message: String },
+    ReadFile { path: PathBuf, message: String },
+    InvalidSourcePath { path: PathBuf },
+    InvalidInput(NxWorkspaceInputError),
+}
+
+impl fmt::Display for NxWorkspaceDirectoryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ReadDirectory { path, message } => {
+                write!(
+                    formatter,
+                    "Failed to read directory '{}': {}",
+                    path.display(),
+                    message
+                )
+            }
+            Self::InspectPath { path, message } => {
+                write!(
+                    formatter,
+                    "Failed to inspect '{}': {}",
+                    path.display(),
+                    message
+                )
+            }
+            Self::ReadFile { path, message } => {
+                write!(
+                    formatter,
+                    "Failed to read '{}': {}",
+                    path.display(),
+                    message
+                )
+            }
+            Self::InvalidSourcePath { path } => {
+                write!(
+                    formatter,
+                    "Workspace source path '{}' cannot be converted to a logical identity",
+                    path.display()
+                )
+            }
+            Self::InvalidInput(error) => write!(formatter, "Invalid workspace input: {}", error),
+        }
+    }
+}
+
+impl Error for NxWorkspaceDirectoryError {}
+
+impl From<NxWorkspaceInputError> for NxWorkspaceDirectoryError {
+    fn from(value: NxWorkspaceInputError) -> Self {
+        Self::InvalidInput(value)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum WorkspaceIdentityError {
     Empty,
@@ -228,9 +309,63 @@ fn normalize_workspace_identity_from_segments<'a>(
     Ok(normalized.join("/"))
 }
 
+fn collect_nx_file_paths(
+    dir: &Path,
+    output: &mut Vec<PathBuf>,
+) -> Result<(), NxWorkspaceDirectoryError> {
+    let entries = fs::read_dir(dir).map_err(|error| NxWorkspaceDirectoryError::ReadDirectory {
+        path: dir.to_path_buf(),
+        message: error.to_string(),
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|error| NxWorkspaceDirectoryError::ReadDirectory {
+            path: dir.to_path_buf(),
+            message: error.to_string(),
+        })?;
+        let path = entry.path();
+        let file_type =
+            entry
+                .file_type()
+                .map_err(|error| NxWorkspaceDirectoryError::InspectPath {
+                    path: path.clone(),
+                    message: error.to_string(),
+                })?;
+        if file_type.is_dir() {
+            collect_nx_file_paths(&path, output)?;
+        } else if file_type.is_file()
+            && path.extension().and_then(|extension| extension.to_str()) == Some("nx")
+        {
+            output.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn workspace_identity_for_path(
+    root_path: &Path,
+    source_path: &Path,
+) -> Result<String, NxWorkspaceDirectoryError> {
+    let relative_path = source_path.strip_prefix(root_path).unwrap_or(source_path);
+    let mut parts = Vec::new();
+    for component in relative_path.components() {
+        match component {
+            Component::Normal(value) => parts.push(value.to_string_lossy().to_string()),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(NxWorkspaceDirectoryError::InvalidSourcePath {
+                    path: source_path.to_path_buf(),
+                });
+            }
+        }
+    }
+    Ok(parts.join("/"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use tempfile::TempDir;
 
     #[test]
     fn normalizes_workspace_identity_dot_segments() {
@@ -282,6 +417,21 @@ mod tests {
             normalize_workspace_identity("tenant/../../outside.nx"),
             Err(WorkspaceIdentityError::EscapesRoot)
         );
+    }
+
+    #[test]
+    fn loads_workspace_from_directory() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::write(app_dir.join("main.nx"), "let root() = { 1 }").expect("main file");
+        fs::write(temp.path().join("notes.txt"), "ignored").expect("non-nx file");
+
+        let workspace = NxWorkspace::from_directory(temp.path()).expect("workspace");
+
+        assert_eq!(workspace.modules().len(), 1);
+        assert_eq!(workspace.modules()[0].identity(), "app/main.nx");
+        assert_eq!(workspace.modules()[0].source(), "let root() = { 1 }");
     }
 
     #[test]

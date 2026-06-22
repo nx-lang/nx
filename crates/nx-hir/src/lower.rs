@@ -146,6 +146,12 @@ impl LoweringContext {
         };
 
         let mut expr = self.alloc_expr(Expr::Ident(first.clone()));
+        let first_span = node
+            .children()
+            .find(|child| child.kind() == SyntaxKind::IDENTIFIER)
+            .map(|child| child.span())
+            .unwrap_or_else(|| node.span());
+        self.module.set_expr_span(expr, first_span);
         let ty = self.lookup_name(&first);
         self.set_expr_type(expr, ty);
 
@@ -882,12 +888,14 @@ impl LoweringContext {
                 {
                     let name = Name::new(id_node.text());
                     let expr = self.alloc_expr(Expr::Ident(name.clone()));
+                    self.module.set_expr_span(expr, id_node.span());
                     let ty = self.lookup_name(&name);
                     self.set_expr_type(expr, ty);
                     expr
                 } else {
                     let name = Name::new(node.text());
                     let expr = self.alloc_expr(Expr::Ident(name.clone()));
+                    self.module.set_expr_span(expr, node.span());
                     let ty = self.lookup_name(&name);
                     self.set_expr_type(expr, ty);
                     expr

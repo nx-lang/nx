@@ -1,8 +1,6 @@
-use crate::workspace::{normalize_workspace_identity, NxWorkspace, WorkspaceIdentityError};
+use crate::workspace::{NxWorkspace, WorkspaceIdentityError};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::fmt;
-use std::fs;
-use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,6 +41,7 @@ impl LogicalModuleGraph {
         &self.modules
     }
 
+    #[cfg(test)]
     pub fn get(&self, identity: &str) -> Option<&LogicalSourceModule> {
         self.identities
             .get(identity)
@@ -68,21 +67,12 @@ pub(crate) trait SourceProvider {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SourceProviderError {
     Identity(WorkspaceIdentityError),
-    Io { path: PathBuf, message: String },
 }
 
 impl fmt::Display for SourceProviderError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Identity(error) => error.fmt(formatter),
-            Self::Io { path, message } => {
-                write!(
-                    formatter,
-                    "Failed to load '{}': {}",
-                    path.display(),
-                    message
-                )
-            }
         }
     }
 }
@@ -115,99 +105,6 @@ impl SourceProvider for WorkspaceSourceProvider<'_> {
 
         LogicalModuleGraph::from_modules(modules)
     }
-}
-
-pub(crate) struct FilesystemSourceProvider {
-    root_path: PathBuf,
-    source_paths: Vec<PathBuf>,
-}
-
-impl FilesystemSourceProvider {
-    pub fn new(root_path: impl Into<PathBuf>, source_paths: Vec<PathBuf>) -> Self {
-        Self {
-            root_path: root_path.into(),
-            source_paths,
-        }
-    }
-
-    pub fn from_root(root_path: impl Into<PathBuf>) -> Result<Self, SourceProviderError> {
-        let root_path = root_path.into();
-        let mut source_paths = Vec::new();
-        collect_nx_files(&root_path, &mut source_paths)?;
-        source_paths.sort();
-        Ok(Self {
-            root_path,
-            source_paths,
-        })
-    }
-
-    fn identity_for_path(&self, source_path: &Path) -> Result<String, WorkspaceIdentityError> {
-        let logical_path = source_path
-            .strip_prefix(&self.root_path)
-            .unwrap_or(source_path);
-        let identity = logical_path
-            .components()
-            .filter_map(logical_component)
-            .collect::<Vec<_>>()
-            .join("/");
-        normalize_workspace_identity(&identity)
-    }
-}
-
-impl SourceProvider for FilesystemSourceProvider {
-    fn load_graph(&self) -> Result<LogicalModuleGraph, SourceProviderError> {
-        let mut modules = Vec::with_capacity(self.source_paths.len());
-        for source_path in &self.source_paths {
-            let identity = self.identity_for_path(source_path)?;
-            let source =
-                fs::read_to_string(source_path).map_err(|error| SourceProviderError::Io {
-                    path: source_path.clone(),
-                    message: error.to_string(),
-                })?;
-            modules.push(LogicalSourceModule {
-                identity,
-                source: Arc::<str>::from(source),
-            });
-        }
-
-        LogicalModuleGraph::from_modules(modules)
-    }
-}
-
-fn logical_component(component: Component<'_>) -> Option<String> {
-    match component {
-        Component::Normal(value) => Some(value.to_string_lossy().to_string()),
-        Component::CurDir => Some(".".to_string()),
-        Component::ParentDir => Some("..".to_string()),
-        Component::RootDir | Component::Prefix(_) => None,
-    }
-}
-
-fn collect_nx_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), SourceProviderError> {
-    let entries = fs::read_dir(dir).map_err(|error| SourceProviderError::Io {
-        path: dir.to_path_buf(),
-        message: error.to_string(),
-    })?;
-
-    for entry in entries {
-        let entry = entry.map_err(|error| SourceProviderError::Io {
-            path: dir.to_path_buf(),
-            message: error.to_string(),
-        })?;
-        let path = entry.path();
-        let file_type = entry.file_type().map_err(|error| SourceProviderError::Io {
-            path: path.clone(),
-            message: error.to_string(),
-        })?;
-        if file_type.is_dir() {
-            collect_nx_files(&path, out)?;
-        } else if file_type.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("nx")
-        {
-            out.push(path);
-        }
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -256,8 +153,9 @@ mod tests {
         let workspace_graph = WorkspaceSourceProvider::new(&workspace)
             .load_graph()
             .expect("workspace graph");
-        let filesystem_graph = FilesystemSourceProvider::from_root(temp.path())
-            .expect("filesystem provider")
+        let filesystem_workspace =
+            NxWorkspace::from_directory(temp.path()).expect("filesystem workspace");
+        let filesystem_graph = WorkspaceSourceProvider::new(&filesystem_workspace)
             .load_graph()
             .expect("filesystem graph");
 

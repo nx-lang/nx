@@ -31,6 +31,7 @@ pub mod unions;
 
 use la_arena::{Arena, Idx};
 use nx_diagnostics::{Diagnostic, Label, Severity, TextSpan};
+use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
 
 // Re-export lowering function
@@ -796,6 +797,8 @@ pub struct LoweredModule {
     diagnostics: Vec<LoweringDiagnostic>,
     /// Arena for all expressions
     exprs: Arena<ast::Expr>,
+    /// Source spans for expressions that carry token-precise locations.
+    expr_spans: FxHashMap<ExprId, TextSpan>,
     /// Arena for all elements
     elements: Arena<Element>,
 }
@@ -809,6 +812,7 @@ impl LoweredModule {
             items: Vec::new(),
             diagnostics: Vec::new(),
             exprs: Arena::new(),
+            expr_spans: FxHashMap::default(),
             elements: Arena::new(),
         }
     }
@@ -861,6 +865,25 @@ impl LoweredModule {
     /// Allocate a new expression in the arena.
     pub fn alloc_expr(&mut self, expr: ast::Expr) -> ExprId {
         self.exprs.alloc(expr)
+    }
+
+    /// Records a source span for an already allocated expression.
+    pub fn set_expr_span(&mut self, id: ExprId, span: TextSpan) {
+        self.expr_spans.insert(id, span);
+    }
+
+    /// Returns the best available source span for an expression.
+    pub fn expr_span(&self, id: ExprId) -> TextSpan {
+        if let Some(span) = self.expr_spans.get(&id) {
+            return *span;
+        }
+
+        let expr = self.expr(id);
+        debug_assert!(
+            !matches!(expr, ast::Expr::Ident(_)),
+            "identifier expression missing source span"
+        );
+        expr.span()
     }
 
     /// Get an expression by ID.

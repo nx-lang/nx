@@ -15,7 +15,7 @@ mod typegen;
 use clap::{Parser, Subcommand};
 use nx_api::{
     build_program_artifact_from_source, build_workspace_program_artifact, LibraryRegistry,
-    NxDiagnostic, NxWorkspace, NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
+    NxDiagnostic, NxWorkspace, ProgramArtifact, ProgramBuildContext,
 };
 use nx_codegen::{
     emit_js_program_module, emit_nx_ir, emit_program, CodegenOptions, JsProgramModuleOptions,
@@ -701,15 +701,15 @@ fn load_workspace_program_for_codegen(
     root_path: &Path,
     entry: Option<&str>,
 ) -> Result<ProgramArtifact, ExitCode> {
-    let modules = match collect_workspace_modules(root_path) {
-        Ok(modules) => modules,
-        Err(message) => {
-            eprintln!("Error: {}", message);
+    let workspace = match NxWorkspace::from_directory(root_path) {
+        Ok(workspace) => workspace,
+        Err(error) => {
+            eprintln!("Error: {}", error);
             return Err(ExitCode::from(1));
         }
     };
 
-    if modules.is_empty() {
+    if workspace.modules().is_empty() {
         eprintln!(
             "Error: '{}' is not a valid NX workspace because it contains no .nx source files",
             root_path.display()
@@ -719,7 +719,7 @@ fn load_workspace_program_for_codegen(
 
     let entry_identity = match entry {
         Some(entry) => entry.to_string(),
-        None => match default_workspace_entry(&modules) {
+        None => match default_workspace_entry(&workspace) {
             Ok(identity) => identity,
             Err(message) => {
                 eprintln!("Error: {}", message);
@@ -727,77 +727,13 @@ fn load_workspace_program_for_codegen(
             }
         },
     };
-    let workspace = match NxWorkspace::new(modules) {
-        Ok(workspace) => workspace,
-        Err(error) => {
-            eprintln!("Error: {}", error);
-            return Err(ExitCode::from(1));
-        }
-    };
 
     build_workspace_program_artifact(&workspace, &entry_identity, &ProgramBuildContext::empty())
         .map_err(|diagnostics| render_api_diagnostics(&diagnostics))
 }
 
-fn collect_workspace_modules(root_path: &Path) -> Result<Vec<NxWorkspaceModule>, String> {
-    let mut source_paths = Vec::new();
-    collect_nx_file_paths(root_path, &mut source_paths)?;
-    source_paths.sort();
-
-    let mut modules = Vec::with_capacity(source_paths.len());
-    for source_path in source_paths {
-        let identity = workspace_identity_for_path(root_path, &source_path)?;
-        let source = std::fs::read_to_string(&source_path)
-            .map_err(|error| format!("Failed to read '{}': {}", source_path.display(), error))?;
-        modules.push(
-            NxWorkspaceModule::from_source(identity, source)
-                .map_err(|error| format!("Invalid workspace input: {}", error))?,
-        );
-    }
-
-    Ok(modules)
-}
-
-fn collect_nx_file_paths(dir: &Path, output: &mut Vec<PathBuf>) -> Result<(), String> {
-    let entries = std::fs::read_dir(dir)
-        .map_err(|error| format!("Failed to read directory '{}': {}", dir.display(), error))?;
-    for entry in entries {
-        let entry = entry
-            .map_err(|error| format!("Failed to read directory '{}': {}", dir.display(), error))?;
-        let path = entry.path();
-        let file_type = entry
-            .file_type()
-            .map_err(|error| format!("Failed to inspect '{}': {}", path.display(), error))?;
-        if file_type.is_dir() {
-            collect_nx_file_paths(&path, output)?;
-        } else if file_type.is_file()
-            && path.extension().and_then(|extension| extension.to_str()) == Some("nx")
-        {
-            output.push(path);
-        }
-    }
-    Ok(())
-}
-
-fn workspace_identity_for_path(root_path: &Path, source_path: &Path) -> Result<String, String> {
-    let relative_path = source_path.strip_prefix(root_path).unwrap_or(source_path);
-    let mut parts = Vec::new();
-    for component in relative_path.components() {
-        match component {
-            Component::Normal(value) => parts.push(value.to_string_lossy().to_string()),
-            Component::CurDir => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(format!(
-                    "Workspace source path '{}' cannot be converted to a logical identity",
-                    source_path.display()
-                ));
-            }
-        }
-    }
-    Ok(parts.join("/"))
-}
-
-fn default_workspace_entry(modules: &[NxWorkspaceModule]) -> Result<String, String> {
+fn default_workspace_entry(workspace: &NxWorkspace) -> Result<String, String> {
+    let modules = workspace.modules();
     if modules.len() == 1 {
         return Ok(modules[0].identity().to_string());
     }

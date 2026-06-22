@@ -417,7 +417,7 @@ impl<'a> UndefinedIdentifierChecker<'a> {
             ast::Expr::Literal(_) | ast::Expr::Error(_) => {}
             ast::Expr::Ident(name) => {
                 if self.scope_manager.resolve(name, scope).is_none() {
-                    self.report_undefined(name, self.module.raw_module().expr(expr_id).span());
+                    self.report_undefined(name, self.module.raw_module().expr_span(expr_id));
                 }
             }
             ast::Expr::BinaryOp { lhs, rhs, .. } => {
@@ -964,5 +964,61 @@ mod tests {
             "Expected undefined identifier inside property match branch, got {:?}",
             diagnostics
         );
+    }
+
+    #[test]
+    fn undefined_identifier_reports_identifier_span() {
+        let source = r#"let render(label:string) = { missing }"#;
+        let parse = nx_syntax::parse_str(source, "undefined-span.nx");
+        let tree = parse.tree.expect("Expected syntax tree");
+        let prepared = PreparedModule::standalone(
+            "undefined-span.nx",
+            crate::lower(tree.root(), crate::SourceId::new(parse.source_id.as_u32())),
+        );
+
+        let (scopes, _) = build_scopes(&prepared);
+        let diagnostics = check_undefined_identifiers(&prepared, &scopes);
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.message().contains("missing"))
+            .expect("Expected undefined identifier diagnostic for missing");
+        let label = diagnostic
+            .labels()
+            .iter()
+            .find(|label| label.primary)
+            .expect("Expected primary label");
+        let start = TextSize::try_from(source.find("missing").expect("Expected missing in source"))
+            .expect("Expected identifier offset to fit in TextSize");
+        let end = start + TextSize::try_from("missing".len()).expect("Expected identifier length");
+
+        assert_eq!(label.range, TextSpan::new(start, end));
+    }
+
+    #[test]
+    fn undefined_qualified_name_reports_base_identifier_span() {
+        let source = r#"let render() = { missing.prop }"#;
+        let parse = nx_syntax::parse_str(source, "undefined-qualified-span.nx");
+        let tree = parse.tree.expect("Expected syntax tree");
+        let prepared = PreparedModule::standalone(
+            "undefined-qualified-span.nx",
+            crate::lower(tree.root(), crate::SourceId::new(parse.source_id.as_u32())),
+        );
+
+        let (scopes, _) = build_scopes(&prepared);
+        let diagnostics = check_undefined_identifiers(&prepared, &scopes);
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.message().contains("missing"))
+            .expect("Expected undefined identifier diagnostic for missing");
+        let label = diagnostic
+            .labels()
+            .iter()
+            .find(|label| label.primary)
+            .expect("Expected primary label");
+        let start = TextSize::try_from(source.find("missing").expect("Expected missing in source"))
+            .expect("Expected identifier offset to fit in TextSize");
+        let end = start + TextSize::try_from("missing".len()).expect("Expected identifier length");
+
+        assert_eq!(label.range, TextSpan::new(start, end));
     }
 }
