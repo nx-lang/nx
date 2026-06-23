@@ -31,8 +31,8 @@ jobs:
         include:
           - target: linux-x64
             os: ubuntu-latest
-          - target: darwin-x64
-            os: macos-13
+          - target: darwin-arm64
+            os: macos-14
           - target: win32-x64
             os: windows-latest
     env:
