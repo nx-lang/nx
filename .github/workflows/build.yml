@@ -13,6 +13,11 @@ on:
         description: Publish verified packages to configured preview feeds
         type: boolean
         default: false
+      preview_artifact_run_id:
+        description: Successful Build workflow run ID containing artifacts to publish as a preview
+        type: string
+        required: false
+        default: ''
 
 env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
@@ -26,6 +31,7 @@ permissions:
 jobs:
   build:
     name: 🏭 Build
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.preview_artifact_run_id == '' || (!inputs.publish_preview && vars.PUBLISH_PREVIEW_PACKAGES != 'true') }}
 
     runs-on: ${{ matrix.os }}
     strategy:
@@ -156,6 +162,7 @@ jobs:
   editor-assets:
     name: 📦 Editor assets
     runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.preview_artifact_run_id == '' || (!inputs.publish_preview && vars.PUBLISH_PREVIEW_PACKAGES != 'true') }}
     defaults:
       run:
         working-directory: src/vscode
@@ -187,7 +194,7 @@ jobs:
       run: pnpm run package:language
     - name: Verify editor-assets package
       run: |
-        package=$(ls dist/*.tgz | head -n 1)
+        package=$(find dist -maxdepth 1 -name '*.tgz' -type f -print -quit)
         pnpm run verify:package "$package"
         pnpm run smoke:package "$package"
     - name: Upload editor-assets package
@@ -203,23 +210,61 @@ jobs:
     - package
     - smoke-test-package
     - editor-assets
-    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.publish_preview || vars.PUBLISH_PREVIEW_PACKAGES == 'true') }}
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && (inputs.publish_preview || vars.PUBLISH_PREVIEW_PACKAGES == 'true') && (inputs.preview_artifact_run_id != '' || (needs.package.result == 'success' && needs.smoke-test-package.result == 'success' && needs.editor-assets.result == 'success')) }}
     environment: preview
     permissions:
       contents: read
+      actions: read
       packages: write
     steps:
     - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+    - name: 🔎 Validate source artifact run
+      if: ${{ inputs.preview_artifact_run_id != '' }}
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PREVIEW_ARTIFACT_RUN_ID: ${{ inputs.preview_artifact_run_id }}
+      run: |
+        IFS=$'\t' read -r status conclusion head_sha workflow_path head_repository < <(
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${PREVIEW_ARTIFACT_RUN_ID}" \
+            --jq '[.status, .conclusion, .head_sha, .path, .head_repository.full_name] | @tsv'
+        )
+
+        if [ "${status}" != "completed" ] || [ "${conclusion}" != "success" ]; then
+          echo "::error::Preview artifact run ${PREVIEW_ARTIFACT_RUN_ID} must be completed successfully. Status: ${status}; conclusion: ${conclusion}."
+          exit 1
+        fi
+
+        if [ "${workflow_path}" != ".github/workflows/build.yml" ]; then
+          echo "::error::Preview artifact run ${PREVIEW_ARTIFACT_RUN_ID} must come from .github/workflows/build.yml. Source workflow: ${workflow_path}."
+          exit 1
+        fi
+
+        if [ "${head_repository}" != "${GITHUB_REPOSITORY}" ]; then
+          echo "::error::Preview artifact run ${PREVIEW_ARTIFACT_RUN_ID} must come from ${GITHUB_REPOSITORY}. Source repository: ${head_repository}."
+          exit 1
+        fi
+
+        artifact_names=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${PREVIEW_ARTIFACT_RUN_ID}/artifacts" --paginate --jq '.artifacts[].name')
+        if ! grep -Fxq "deployables-Complete" <<<"${artifact_names}" || ! grep -Fxq "editor-assets-package" <<<"${artifact_names}"; then
+          echo "::error::Preview artifact run ${PREVIEW_ARTIFACT_RUN_ID} must contain deployables-Complete and editor-assets-package artifacts."
+          exit 1
+        fi
+
+        echo "Using preview artifacts from successful workflow run ${PREVIEW_ARTIFACT_RUN_ID} at ${head_sha}."
     - name: 🔻 Download complete deployables
       uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
       with:
         name: deployables-Complete
         path: ${{ runner.temp }}/deployables
+        run-id: ${{ inputs.preview_artifact_run_id || github.run_id }}
+        github-token: ${{ github.token }}
     - name: 🔻 Download editor-assets package
       uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
       with:
         name: editor-assets-package
         path: ${{ runner.temp }}/editor-assets
+        run-id: ${{ inputs.preview_artifact_run_id || github.run_id }}
+        github-token: ${{ github.token }}
     - name: 🚀 Publish preview NuGet package
       shell: pwsh
       env:
@@ -255,7 +300,8 @@ jobs:
           echo "//${registry_key}/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
         fi
 
-        npm publish "${{ runner.temp }}"/editor-assets/*.tgz --access public --registry "${PREVIEW_NPM_REGISTRY}"
+        package=$(find "${{ runner.temp }}/editor-assets" -maxdepth 1 -name '*.tgz' -type f -print -quit)
+        npm publish "$package" --access public --registry "${PREVIEW_NPM_REGISTRY}"
 
   publish-production:
     name: 🚀 Publish production packages
@@ -293,7 +339,7 @@ jobs:
     - name: 🔎 Check npm version
       id: npm-version
       run: |
-        package=$(ls "${{ runner.temp }}"/editor-assets/*.tgz | head -n 1)
+        package=$(find "${{ runner.temp }}/editor-assets" -maxdepth 1 -name '*.tgz' -type f -print -quit)
         name=$(node -e "const p=require('child_process').execFileSync('tar',['-xOf',process.argv[1],'package/package.json'],{encoding:'utf8'}); console.log(JSON.parse(p).name)" "$package")
         package_version=$(node -e "const p=require('child_process').execFileSync('tar',['-xOf',process.argv[1],'package/package.json'],{encoding:'utf8'}); console.log(JSON.parse(p).version)" "$package")
         if npm view "${name}@${package_version}" version >/dev/null 2>&1; then
@@ -350,5 +396,5 @@ jobs:
     - name: 🚀 Publish editor-assets package
       if: ${{ steps.npm-version.outputs.exists != 'true' }}
       run: |
-        package=$(ls "${{ runner.temp }}"/editor-assets/*.tgz | head -n 1)
+        package=$(find "${{ runner.temp }}/editor-assets" -maxdepth 1 -name '*.tgz' -type f -print -quit)
         npm publish "$package" --access public

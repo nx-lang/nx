@@ -49,15 +49,23 @@ Production environment secrets:
 - `VSCE_PAT`: Visual Studio Marketplace token for publisher `nx-lang`.
 - `OVSX_PAT`: Open VSX token for namespace `nx-lang`.
 
+Repository or organization preview control variables:
+
+- `PUBLISH_PREVIEW_PACKAGES`: optional variable that allows the manual Build workflow's preview
+  publish job to run. The workflow dispatch `publish_preview` input can also enable the same path.
+  Leaving both unset keeps preview behavior at artifact upload only.
+
 Preview environment secrets or variables:
 
 - `PREVIEW_NUGET_SOURCE`: optional NuGet-compatible preview feed URL.
 - `PREVIEW_NUGET_API_KEY`: optional preview feed API key.
 - `PREVIEW_NPM_REGISTRY`: optional npm-compatible preview registry URL.
 - `PREVIEW_NPM_TOKEN`: optional preview npm token.
-- `PUBLISH_PREVIEW_PACKAGES`: optional variable that allows the manual Build workflow's preview
-  publish job to run. The workflow dispatch `publish_preview` input can also enable the same path.
-  Leaving both unset keeps preview behavior at artifact upload only.
+
+The manual Build workflow also accepts `preview_artifact_run_id`. Set it to a successful Build
+workflow run ID when publishing preview packages from already-verified PR or branch artifacts. This
+lets the preview publish job download and publish the same `deployables-Complete` and
+`editor-assets-package` artifacts instead of rebuilding package contents.
 
 Never commit registry tokens or write them into tracked configuration files.
 
