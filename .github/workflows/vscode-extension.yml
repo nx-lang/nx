@@ -83,14 +83,15 @@ jobs:
           rm -f ./*.vsix
           pnpm run package:verify
 
-          mapfile -t vsix_files < <(find . -maxdepth 1 -type f -name '*.vsix' | sort)
-          if [ "${#vsix_files[@]}" -ne 1 ]; then
-            echo "::error::Expected exactly one VSIX, found ${#vsix_files[@]}."
-            printf '%s\n' "${vsix_files[@]}"
+          vsix_files="$(find . -maxdepth 1 -type f -name '*.vsix' | sort)"
+          vsix_count="$(printf '%s\n' "${vsix_files}" | sed '/^$/d' | wc -l | tr -d ' ')"
+          if [ "${vsix_count}" -ne 1 ]; then
+            echo "::error::Expected exactly one VSIX, found ${vsix_count}."
+            printf '%s\n' "${vsix_files}"
             exit 1
           fi
 
-          vsix_path="${vsix_files[0]}"
+          vsix_path="${vsix_files}"
           echo "vsix_path=${vsix_path}" >> "$GITHUB_OUTPUT"
           echo "vsix_name=${vsix_path#./}" >> "$GITHUB_OUTPUT"
 
