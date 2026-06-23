@@ -33,10 +33,10 @@ Set up ownership before enabling publication:
 Prefer trusted publishing where the registry supports it:
 
 - NuGet.org: create a trusted publishing policy for repository `nx-lang/nx`, workflow file
-  `build.yml`, and the `production` environment. Set `NUGET_USER` as a production environment
-  secret for the NuGet owner account used by `NuGet/login`.
+  `package-release.yml`, and the `production` environment. Set `NUGET_USER` as a production
+  environment secret for the NuGet owner account used by `NuGet/login`.
 - npm: create a trusted publisher for `@nx-lang/language` that matches repository `nx-lang/nx`,
-  workflow `.github/workflows/build.yml`, and environment `production`.
+  workflow `.github/workflows/package-release.yml`, and environment `production`.
 
 The production workflow requests GitHub OIDC with `id-token: write` only in publish jobs.
 
@@ -49,12 +49,6 @@ Production environment secrets:
 - `VSCE_PAT`: Visual Studio Marketplace token for publisher `nx-lang`.
 - `OVSX_PAT`: Open VSX token for namespace `nx-lang`.
 
-Repository or organization preview control variables:
-
-- `PUBLISH_PREVIEW_PACKAGES`: optional variable that allows the manual Build workflow's preview
-  publish job to run. The workflow dispatch `publish_preview` input can also enable the same path.
-  Leaving both unset keeps preview behavior at artifact upload only.
-
 Preview environment secrets or variables:
 
 - `PREVIEW_NUGET_SOURCE`: optional NuGet-compatible preview feed URL.
@@ -62,10 +56,10 @@ Preview environment secrets or variables:
 - `PREVIEW_NPM_REGISTRY`: optional npm-compatible preview registry URL.
 - `PREVIEW_NPM_TOKEN`: optional preview npm token.
 
-The manual Build workflow also accepts `preview_artifact_run_id`. Set it to a successful Build
-workflow run ID when publishing preview packages from already-verified PR or branch artifacts. This
-lets the preview publish job download and publish the same `deployables-Complete` and
-`editor-assets-package` artifacts instead of rebuilding package contents.
+The Package release workflow accepts `artifact_run_id`. Set it to a successful Build workflow run ID
+when publishing preview packages from already-verified PR or branch artifacts. This lets the preview
+publish job download and publish the same `deployables-Complete` and `editor-assets-package` artifacts
+instead of rebuilding package contents.
 
 Never commit registry tokens or write them into tracked configuration files.
 
@@ -74,7 +68,8 @@ Never commit registry tokens or write them into tracked configuration files.
 1. Confirm PR workflows upload `deployables-Complete`, `editor-assets-package`, and VSIX artifacts
    without public registry credentials.
 2. Enable `preview` only after the preview feed and variables are configured.
-3. Enable `production` after package version checks, package inspection, and smoke tests pass.
+3. Enable `production` after package version checks, package inspection, smoke tests, and Package
+   release workflow validation pass.
 4. Keep `NUGET_API_KEY` empty when NuGet trusted publishing is working. Production npm publishing
    uses trusted publishing only; do not configure an npm publish token for CI.
 5. Run the first production publish with required reviewers enabled.
