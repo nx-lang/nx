@@ -8,12 +8,20 @@ on:
     - validate/*
   pull_request:
   workflow_dispatch:
+    inputs:
+      publish_preview:
+        description: Publish verified packages to configured preview feeds
+        type: boolean
+        default: false
 
 env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
   BUILDCONFIGURATION: Release
   # codecov_token: 4dc9e7e2-6b01-4932-a180-847b52b43d35 # Get a new one from https://codecov.io/
   NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages/
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -187,3 +195,160 @@ jobs:
       with:
         name: editor-assets-package
         path: src/vscode/dist/*.tgz
+
+  publish-preview:
+    name: 🚀 Publish preview packages
+    runs-on: ubuntu-latest
+    needs:
+    - package
+    - smoke-test-package
+    - editor-assets
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.publish_preview || vars.PUBLISH_PREVIEW_PACKAGES == 'true') }}
+    environment: preview
+    permissions:
+      contents: read
+      packages: write
+    steps:
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+    - name: 🔻 Download complete deployables
+      uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      with:
+        name: deployables-Complete
+        path: ${{ runner.temp }}/deployables
+    - name: 🔻 Download editor-assets package
+      uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      with:
+        name: editor-assets-package
+        path: ${{ runner.temp }}/editor-assets
+    - name: 🚀 Publish preview NuGet package
+      shell: pwsh
+      env:
+        PREVIEW_NUGET_SOURCE: ${{ vars.PREVIEW_NUGET_SOURCE }}
+        PREVIEW_NUGET_API_KEY: ${{ secrets.PREVIEW_NUGET_API_KEY }}
+      run: |
+        if (!$env:PREVIEW_NUGET_SOURCE) {
+          Write-Host "PREVIEW_NUGET_SOURCE is not configured; skipping preview NuGet publish."
+          return
+        }
+
+        $package = Get-ChildItem '${{ runner.temp }}/deployables/NxLang.Runtime.*.nupkg' | Select-Object -First 1
+        $apiKeyArgs = @()
+        if ($env:PREVIEW_NUGET_API_KEY) {
+          $apiKeyArgs = @('--api-key', $env:PREVIEW_NUGET_API_KEY)
+        }
+
+        dotnet nuget push $package.FullName --source $env:PREVIEW_NUGET_SOURCE --skip-duplicate @apiKeyArgs
+    - name: 🚀 Publish preview editor-assets package
+      env:
+        PREVIEW_NPM_REGISTRY: ${{ vars.PREVIEW_NPM_REGISTRY }}
+        NODE_AUTH_TOKEN: ${{ secrets.PREVIEW_NPM_TOKEN }}
+      run: |
+        if [ -z "${PREVIEW_NPM_REGISTRY}" ]; then
+          echo "PREVIEW_NPM_REGISTRY is not configured; skipping preview npm publish."
+          exit 0
+        fi
+
+        if [ -n "${NODE_AUTH_TOKEN}" ]; then
+          registry="${PREVIEW_NPM_REGISTRY%/}"
+          registry_key="${registry#https://}"
+          registry_key="${registry_key#http://}"
+          echo "//${registry_key}/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
+        fi
+
+        npm publish "${{ runner.temp }}"/editor-assets/*.tgz --access public --registry "${PREVIEW_NPM_REGISTRY}"
+
+  publish-production:
+    name: 🚀 Publish production packages
+    runs-on: ubuntu-latest
+    needs:
+    - package
+    - smoke-test-package
+    - editor-assets
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    environment: production
+    env:
+      NUGET_USER: ${{ secrets.NUGET_USER }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+      with:
+        fetch-depth: 0
+    - name: 🔻 Download complete deployables
+      uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      with:
+        name: deployables-Complete
+        path: ${{ runner.temp }}/deployables
+    - name: 🔻 Download editor-assets package
+      uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      with:
+        name: editor-assets-package
+        path: ${{ runner.temp }}/editor-assets
+    - name: 🔎 Check NuGet version
+      shell: pwsh
+      run: |
+        $package = Get-ChildItem '${{ runner.temp }}/deployables/NxLang.Runtime.*.nupkg' | Select-Object -First 1
+        tools/packaging/Test-NuGetPackageVersionAvailable.ps1 -PackagePath $package.FullName
+    - name: 🔎 Check npm version
+      id: npm-version
+      run: |
+        package=$(ls "${{ runner.temp }}"/editor-assets/*.tgz | head -n 1)
+        name=$(node -e "const p=require('child_process').execFileSync('tar',['-xOf',process.argv[1],'package/package.json'],{encoding:'utf8'}); console.log(JSON.parse(p).name)" "$package")
+        package_version=$(node -e "const p=require('child_process').execFileSync('tar',['-xOf',process.argv[1],'package/package.json'],{encoding:'utf8'}); console.log(JSON.parse(p).version)" "$package")
+        if npm view "${name}@${package_version}" version >/dev/null 2>&1; then
+          echo "::warning::${name}@${package_version} already exists on npm; treating this run as an idempotent retry."
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        echo "exists=false" >> "$GITHUB_OUTPUT"
+        echo "npm package ${name}@${package_version} is available."
+    - name: Check NuGet authentication
+      id: nuget-auth
+      shell: pwsh
+      env:
+        FALLBACK_NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+      run: |
+        if ($env:NUGET_USER) {
+          "use_trusted=true" >> $env:GITHUB_OUTPUT
+        } elseif ($env:FALLBACK_NUGET_API_KEY) {
+          "use_trusted=false" >> $env:GITHUB_OUTPUT
+        } else {
+          Write-Error "NuGet publishing requires NuGet trusted publishing (NUGET_USER) or NUGET_API_KEY fallback."
+        }
+    - name: NuGet login
+      id: nuget-login
+      uses: NuGet/login@ebc737b6fc418a6ca0073cf116ec8dc156d8b81e # v1
+      if: ${{ steps.nuget-auth.outputs.use_trusted == 'true' }}
+      with:
+        user: ${{ env.NUGET_USER }}
+    - name: 🚀 Publish NuGet package
+      shell: pwsh
+      env:
+        TRUSTED_NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+        FALLBACK_NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+      run: |
+        $apiKey = if ($env:TRUSTED_NUGET_API_KEY) { $env:TRUSTED_NUGET_API_KEY } else { $env:FALLBACK_NUGET_API_KEY }
+        $package = Get-ChildItem '${{ runner.temp }}/deployables/NxLang.Runtime.*.nupkg' | Select-Object -First 1
+        dotnet nuget push $package.FullName --source https://api.nuget.org/v3/index.json --api-key $apiKey --skip-duplicate
+    - name: Setup Node.js for npm trusted publishing
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: '24'
+        registry-url: 'https://registry.npmjs.org'
+        cache: ''
+    - name: Check npm trusted publishing support
+      shell: bash
+      run: |
+        npm_version="$(npm --version)"
+        if node -e "const [a,b,c]=process.argv[1].split('.').map(Number); process.exit(a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1))) ? 0 : 1)" "${npm_version}"; then
+          echo "Using npm trusted publishing with npm ${npm_version}."
+        else
+          echo "::error::Production npm publishing requires trusted publishing with npm >= 11.5.1. Current npm: ${npm_version}."
+          exit 1
+        fi
+    - name: 🚀 Publish editor-assets package
+      if: ${{ steps.npm-version.outputs.exists != 'true' }}
+      run: |
+        package=$(ls "${{ runner.temp }}"/editor-assets/*.tgz | head -n 1)
+        npm publish "$package" --access public

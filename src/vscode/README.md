@@ -103,6 +103,9 @@ into another repository.
 ## Packaging and Publishing
 
 Use the local package scripts from `src/vscode` so the same checks run locally and in CI.
+Cross-package CI setup is documented in
+[docs/deployment-setup.md](../../docs/deployment-setup.md), and the recurring release runbook is in
+[docs/deployment.md](../../docs/deployment.md).
 
 ```bash
 pnpm run test
@@ -144,35 +147,35 @@ reusable editor-assets package.
 
 ### Release Preparation
 
-1. Update `src/vscode/package.json` to the release version.
-2. Add the release notes to `src/vscode/CHANGELOG.md`.
+1. Add the release notes to `src/vscode/CHANGELOG.md`.
+2. Let CI stage the publishable VSIX version from the repository build version, or set
+   `VSCODE_EXTENSION_VERSION` for a local repair package.
 3. Run the package verification:
    ```bash
    pnpm install --frozen-lockfile
    pnpm run build:lsp
+   pnpm run version:stage
    pnpm run package:verify
    pnpm run package:language
    ```
-4. Create and push a tag that matches the package version:
-   ```bash
-   git tag vscode-v$(node -p "require('./package.json').version")
-   git push origin vscode-v$(node -p "require('./package.json').version")
-   ```
 
-The GitHub Actions workflow publishes the VS Code extension only from `vscode-v<version>` tags where
-`<version>` matches `src/vscode/package.json`. The main build workflow publishes the reusable
-`@nx-lang/language` editor-assets package artifact for the release workflow.
+Trusted `main` builds publish verified VSIX artifacts through the `production` environment after
+version checks pass. Manual repair uses the VS Code Extension workflow's `repair_run_id` dispatch
+input to republish VSIX artifacts from an earlier workflow run.
 
 ### Credentials
 
-Configure these GitHub Actions secrets before pushing a release tag:
+Configure these GitHub Actions secrets before enabling production VS Code extension publishing:
 
 - `VSCE_PAT` - Visual Studio Marketplace personal access token for publisher `nx-lang`
 - `OVSX_PAT` - Open VSX personal access token for namespace `nx-lang`
 
-Configure this secret before publishing release deployables:
+Configure this only when NuGet trusted publishing is unavailable:
 
-- `NPM_TOKEN` - npm token allowed to publish `@nx-lang/language`
+- `NUGET_API_KEY` - NuGet.org fallback API key
+
+Production npm publishing for `@nx-lang/language` uses npm trusted publishing only. Do not configure
+an npm publish token for CI.
 
 For local VS Code extension publishing, provide the registry values as environment variables:
 

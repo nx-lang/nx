@@ -6,8 +6,8 @@
     <Title>NX Runtime</Title>
     <Description>Managed .NET bindings for the NX runtime with packaged native nx_ffi runtime assets.</Description>
     <PackageTags>nx;runtime;binding;ffi;language</PackageTags>
-    <PackageProjectUrl>https://github.com/bret/nx</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/bret/nx</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/nx-lang/nx</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/nx-lang/nx</RepositoryUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <NxRuntimeNativePackageAssetsRoot Condition="'$(NxRuntimeNativePackageAssetsRoot)' == ''">$(RepoRootPath)artifacts\nx-runtime\</NxRuntimeNativePackageAssetsRoot>
     <NxRuntimeSupportedRids Condition="'$(NxRuntimeSupportedRids)' == ''">linux-x64;osx-arm64;win-x64</NxRuntimeSupportedRids>

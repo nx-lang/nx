@@ -99,6 +99,15 @@ Initial supported RIDs are:
 Application-owned `.nx` source files and domain libraries are not packaged by NX. Embed them, copy
 them as content, or otherwise stage them from the consuming application.
 
+## Package Publishing
+
+Cross-package CI setup is documented in
+[docs/deployment-setup.md](../../docs/deployment-setup.md), and the recurring release runbook is in
+[docs/deployment.md](../../docs/deployment.md). The `NxLang.Runtime` package is published from the
+complete `deployables-Complete` artifact after package metadata verification and RID smoke tests
+pass. Production publishing prefers NuGet.org trusted publishing with `NUGET_API_KEY` as a gated
+fallback.
+
 ### Advanced: Source `ProjectReference`
 
 Use a direct project reference to the managed binding and import the staging targets file:

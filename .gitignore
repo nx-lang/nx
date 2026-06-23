@@ -46,6 +46,9 @@ Generated\ Files/
 [Tt]est[Rr]esult*/
 [Bb]uild[Ll]og.*
 
+# Repository-local package staging output
+/artifacts/
+
 # NUnit
 *.VisualState.xml
 TestResult.xml
