@@ -64,6 +64,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Restore .NET tools
+        run: dotnet tool restore
+        working-directory: .
+
       - name: Build Rust language server
         run: pnpm run build:lsp
 
