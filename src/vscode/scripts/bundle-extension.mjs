@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const packageRoot = join(scriptDir, '..');
 const executable = process.platform === 'win32' ? 'esbuild.cmd' : 'esbuild';
+const useShell = process.platform === 'win32';
 const result = spawnSync(
   join(packageRoot, 'node_modules', '.bin', executable),
   [
@@ -19,6 +20,7 @@ const result = spawnSync(
   {
     cwd: packageRoot,
     env: process.env,
+    shell: useShell,
     stdio: 'inherit'
   }
 );

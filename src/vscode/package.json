@@ -46,6 +46,8 @@
     "vscode:launch": "pnpm run build:lsp:debug && pnpm run compile && code --extensionDevelopmentPath=. ../..",
     "test": "node --loader ./node_modules/ts-node/esm.mjs ./node_modules/mocha/bin/mocha.js \"test/**/*.ts\"",
     "test:grammar": "node --loader ./node_modules/ts-node/esm.mjs ./node_modules/mocha/bin/mocha.js \"test/**/*.ts\"",
+    "version:stage": "node ./scripts/stage-vsix-version.mjs",
+    "version:check:vsix": "node ./scripts/check-vsix-version.mjs",
     "package": "node ./scripts/package-vsix.mjs",
     "package:language": "pnpm run test:grammar && node ./scripts/package-language.mjs",
     "package:check-assets": "node ./scripts/check-package-assets.mjs",
