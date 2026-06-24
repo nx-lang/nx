@@ -11,6 +11,9 @@ importers:
       '@astrojs/starlight':
         specifier: ^0.27.0
         version: 0.27.1(astro@4.16.19(@types/node@24.7.2)(rollup@4.52.4)(typescript@5.9.3))
+      '@shikijs/themes':
+        specifier: 1.29.2
+        version: 1.29.2
       astro:
         specifier: ^4.12.2
         version: 4.16.19(@types/node@24.7.2)(rollup@4.52.4)(typescript@5.9.3)

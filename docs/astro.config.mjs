@@ -1,8 +1,8 @@
 import { defineConfig } from 'astro/config';
 import { fileURLToPath } from 'node:url';
 import starlight from '@astrojs/starlight';
-import darkPlus from 'shiki/themes/dark-plus.mjs';
-import lightPlus from 'shiki/themes/light-plus.mjs';
+import darkPlus from '@shikijs/themes/dark-plus';
+import lightPlus from '@shikijs/themes/light-plus';
 import starlightConfig from './starlight.config.mjs';
 
 const nxGrammarPath = fileURLToPath(

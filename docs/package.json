@@ -11,6 +11,7 @@
     "preview": "astro preview"
   },
   "dependencies": {
+    "@shikijs/themes": "1.29.2",
     "@astrojs/starlight": "^0.27.0",
     "astro": "^4.12.2"
   },

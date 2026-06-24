@@ -1,6 +1,6 @@
 import nxGrammar from '../src/vscode/syntaxes/nx.tmLanguage.json' assert { type: 'json' };
-import darkPlus from 'shiki/themes/dark-plus.mjs';
-import lightPlus from 'shiki/themes/light-plus.mjs';
+import darkPlus from '@shikijs/themes/dark-plus';
+import lightPlus from '@shikijs/themes/light-plus';
 
 const nxLanguage = {
   ...nxGrammar,
