@@ -1,7 +1,7 @@
 # Deployment Setup
 
-This checklist covers the one-time setup for publishing NX packages from GitHub Actions. The
-ongoing release runbook lives in [deployment.md](deployment.md).
+This checklist covers the one-time setup for publishing NX packages and VS Code extension artifacts
+from GitHub Actions. The ongoing release runbook lives in [deployment.md](deployment.md).
 
 ## GitHub Environments
 
@@ -38,7 +38,10 @@ Prefer trusted publishing where the registry supports it:
 - npm: create a trusted publisher for `@nx-lang/language` that matches repository `nx-lang/nx`,
   workflow `.github/workflows/package-publish.yml`, and environment `production`.
 
-The production workflow requests GitHub OIDC with `id-token: write` only in publish jobs.
+The Publish packages production job requests GitHub OIDC with `id-token: write` only for registry
+publish steps that support trusted publishing.
+Visual Studio Marketplace and Open VSX publishing currently use production environment token
+secrets in the `vscode-extension-publish.yml` workflow.
 
 ## Secrets And Variables
 
@@ -61,6 +64,14 @@ when publishing preview packages from already-verified PR or branch artifacts. T
 publish job download and publish the same `deployables-Complete` and `editor-assets-package` artifacts
 instead of rebuilding package contents.
 
+The Publish VS Code extension workflow accepts `artifact_run_id`. Set it to a successful VS Code
+Extension workflow run ID when repairing Marketplace or Open VSX publication from already-verified
+VSIX artifacts. The workflow downloads the `vscode-vsix-*` artifacts instead of rebuilding package
+contents.
+
+Rust tool publication for `nxlang`, `nx-lsp`, and Rust crates is not part of this deployment setup
+yet; no crates.io token or Rust binary-release credential is required for this release pipeline.
+
 Never commit registry tokens or write them into tracked configuration files.
 
 ## First Enablement
@@ -68,8 +79,8 @@ Never commit registry tokens or write them into tracked configuration files.
 1. Confirm PR workflows upload `deployables-Complete`, `editor-assets-package`, and VSIX artifacts
    without public registry credentials.
 2. Enable `preview` only after the preview feed and variables are configured.
-3. Enable `production` after package version checks, package inspection, smoke tests, and Package
-   release workflow validation pass.
+3. Enable `production` after package version checks, package inspection, smoke tests, and Publish
+   packages and Publish VS Code extension workflow validation pass.
 4. Keep `NUGET_API_KEY` empty when NuGet trusted publishing is working. Production npm publishing
    uses trusted publishing only; do not configure an npm publish token for CI.
 5. Run the first production publish with required reviewers enabled.

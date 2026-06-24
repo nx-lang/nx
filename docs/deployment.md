@@ -1,30 +1,38 @@
 # Deployment Runbook
 
-This runbook covers day-to-day package publishing. One-time environment and registry setup is in
-[deployment-setup.md](deployment-setup.md).
+This runbook covers day-to-day package and VS Code extension publishing. One-time environment and
+registry setup is in [deployment-setup.md](deployment-setup.md).
 
 ## Release Model
 
 Pull requests build, verify, and upload package artifacts without public registry credentials. The
-Build workflow proves the NuGet and editor-assets package bits; the Publish packages workflow publishes
-those already-verified artifacts. VSIX publishing remains in the VS Code extension workflow. Trusted
-preview publishing is optional and uses the `preview` environment. Successful trusted `main` Build runs
-trigger production package publishing through the `production` environment.
+Build workflow proves the NuGet and editor-assets package bits; the Publish packages workflow
+publishes those already-verified artifacts. The VS Code Extension workflow proves the VSIX bits; the
+Publish VS Code extension workflow publishes those already-verified artifacts. Trusted preview
+publishing is optional for package feeds and uses the `preview` environment. Successful trusted
+`main` Build and VS Code Extension runs trigger their corresponding production publish workflows
+through the `production` environment.
 
-Public package versions are immutable. If a bad package is published, roll forward with a higher
+Public registry versions are immutable. If a bad artifact is published, roll forward with a higher
 version and unlist or deprecate the bad version where the registry supports it.
+
+Rust tooling publication for `nxlang`, `nx-lsp`, and Rust crates is not part of this release
+pipeline yet.
 
 ## Publish A New Release
 
 1. Merge the release change to `main`.
 2. Confirm the Build workflow completed package assembly, package inspection, and RID smoke tests.
-3. Inspect uploaded artifacts:
+3. Confirm the VS Code Extension workflow completed VSIX packaging and verification for every target.
+4. Inspect uploaded artifacts:
    - `deployables-Complete`: verified `NxLang.Runtime.*.nupkg`.
    - `editor-assets-package`: verified `nx-lang-language-*.tgz`.
    - VS Code extension workflow artifacts: one verified `.vsix` per platform target.
-4. Confirm the Publish packages workflow started from the successful `main` Build run.
-5. Approve the `production` environment deployment if reviewers are required.
-6. Confirm package publication in NuGet.org, npm, Visual Studio Marketplace, and Open VSX.
+5. Confirm the Publish packages workflow started from the successful `main` Build run.
+6. Confirm the Publish VS Code extension workflow started from the successful `main` VS Code
+   Extension run.
+7. Approve the `production` environment deployments if reviewers are required.
+8. Confirm package publication in NuGet.org, npm, Visual Studio Marketplace, and Open VSX.
 
 ## Artifact Inspection
 
@@ -60,7 +68,17 @@ gh workflow run package-publish.yml --ref main -f target_environment=production 
 For a local emergency repair, publish the same tarball with an interactive maintainer session rather
 than a CI `NPM_TOKEN`.
 
-VS Code registry repair from `src/vscode`:
+VS Code registry repair:
+
+```bash
+gh workflow run vscode-extension-publish.yml --ref main -f artifact_run_id=<vscode-extension-run-id>
+```
+
+The VSIX publish script checks each registry separately and skips an already-published extension
+version, so this repair path can fill in a missing Marketplace or Open VSX publication without
+failing on the registry that already succeeded.
+
+For a local emergency repair from `src/vscode`, publish the same downloaded VSIX artifacts:
 
 ```bash
 pnpm run publish:vsce -- nx-language-*.vsix
@@ -68,8 +86,9 @@ pnpm run publish:ovsx -- nx-language-*.vsix
 ```
 
 Do not rebuild package contents for a repair publish unless the fix requires a new higher version.
-If GitHub Release asset upload fails, upload the same Build workflow artifacts to the GitHub Release;
-registry repair still belongs in the Publish packages workflow.
+If GitHub Release asset upload fails, upload the same Build workflow artifacts to the GitHub Release.
+Package registry repair belongs in the Publish packages workflow; VSIX registry repair belongs in
+the Publish VS Code extension workflow.
 
 ## Higher-Version Fixes
 
@@ -78,7 +97,7 @@ When a published artifact is bad:
 1. Fix the source issue.
 2. Let versioning produce a higher package version.
 3. Publish the fixed version through `main` and the `production` environment.
-4. Unlist or deprecate the bad NuGet/npm version where useful.
+4. Unlist or deprecate the bad NuGet, npm, or extension version where useful.
 5. Update release notes or documentation to steer users to the fixed version.
 
 ## Preview Publishing
