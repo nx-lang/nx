@@ -33,10 +33,10 @@ Set up ownership before enabling publication:
 Prefer trusted publishing where the registry supports it:
 
 - NuGet.org: create a trusted publishing policy for repository `nx-lang/nx`, workflow file
-  `package-release.yml`, and the `production` environment. Set `NUGET_USER` as a production
+  `package-publish.yml`, and the `production` environment. Set `NUGET_USER` as a production
   environment secret for the NuGet owner account used by `NuGet/login`.
 - npm: create a trusted publisher for `@nx-lang/language` that matches repository `nx-lang/nx`,
-  workflow `.github/workflows/package-release.yml`, and environment `production`.
+  workflow `.github/workflows/package-publish.yml`, and environment `production`.
 
 The production workflow requests GitHub OIDC with `id-token: write` only in publish jobs.
 
@@ -56,7 +56,7 @@ Preview environment secrets or variables:
 - `PREVIEW_NPM_REGISTRY`: optional npm-compatible preview registry URL.
 - `PREVIEW_NPM_TOKEN`: optional preview npm token.
 
-The Package release workflow accepts `artifact_run_id`. Set it to a successful Build workflow run ID
+The Publish packages workflow accepts `artifact_run_id`. Set it to a successful Build workflow run ID
 when publishing preview packages from already-verified PR or branch artifacts. This lets the preview
 publish job download and publish the same `deployables-Complete` and `editor-assets-package` artifacts
 instead of rebuilding package contents.

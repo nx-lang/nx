@@ -1,4 +1,4 @@
-name: 🚀 Package release
+name: 🚀 Publish packages
 
 on:
   workflow_run:
