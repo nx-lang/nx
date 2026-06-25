@@ -3,21 +3,19 @@
 This checklist covers the one-time setup for publishing NX packages and VS Code extension artifacts
 from GitHub Actions. The ongoing release runbook lives in [deployment.md](deployment.md).
 
-## GitHub Environments
+## GitHub Environment
 
-Create two GitHub environments:
+Create one GitHub environment:
 
-- `preview`: used for trusted preview/test feed publishing. Keep public registry credentials out of
-  this environment. Optional feeds can use repository-scoped `GITHUB_TOKEN` or preview-only tokens.
-- `production`: used for NuGet.org, npm, Visual Studio Marketplace, and Open VSX publication. Start
-  with required reviewers if automatic main publishing should wait for human approval.
+- `production`: used only by workflows that publish already-reviewed GitHub Release assets to
+  NuGet.org, npm, the Visual Studio Marketplace, and Open VSX.
 
 Recommended protection:
 
-- Restrict `production` deployments to `main`.
-- Add required reviewers for `production` before enabling public registry writes.
-- Keep fork pull requests artifact-only; do not expose environment secrets to untrusted PRs.
-- Audit environment deployment history after each release.
+- Add required reviewers before enabling public registry writes.
+- Restrict deployments to protected release branches or tags as appropriate for the repository.
+- Keep pull request and `main` build workflows artifact-only; they do not need production secrets.
+- Audit environment deployment history after each published release.
 
 ## Registry Ownership
 
@@ -38,10 +36,11 @@ Prefer trusted publishing where the registry supports it:
 - npm: create a trusted publisher for `@nx-lang/language` that matches repository `nx-lang/nx`,
   workflow `.github/workflows/package-publish.yml`, and environment `production`.
 
-The Publish packages production job requests GitHub OIDC with `id-token: write` only for registry
-publish steps that support trusted publishing.
-Visual Studio Marketplace and Open VSX publishing currently use production environment token
-secrets in the `vscode-extension-publish.yml` workflow.
+The package publish job requests GitHub OIDC with `id-token: write` only after a package GitHub
+Release is published and its release assets are validated.
+
+Visual Studio Marketplace and Open VSX publishing currently use production environment token secrets
+in `.github/workflows/vscode-extension-publish.yml`.
 
 ## Secrets And Variables
 
@@ -52,35 +51,49 @@ Production environment secrets:
 - `VSCE_PAT`: Visual Studio Marketplace token for publisher `nx-lang`.
 - `OVSX_PAT`: Open VSX token for namespace `nx-lang`.
 
-Preview environment secrets or variables:
+No preview NuGet, preview npm, or pull request registry credentials are required. Pull request
+testing uses workflow artifacts and PR comments with download/install commands.
 
-- `PREVIEW_NUGET_SOURCE`: optional NuGet-compatible preview feed URL.
-- `PREVIEW_NUGET_API_KEY`: optional preview feed API key.
-- `PREVIEW_NPM_REGISTRY`: optional npm-compatible preview registry URL.
-- `PREVIEW_NPM_TOKEN`: optional preview npm token.
+The Publish packages workflow accepts `release_tag` for manual repair. Set it to a published package
+GitHub Release tag such as `v1.2.3`; the workflow downloads and republishes the attached release
+assets without rebuilding package contents.
 
-The Publish packages workflow accepts `artifact_run_id`. Set it to a successful Build workflow run ID
-when publishing preview packages from already-verified PR or branch artifacts. This lets the preview
-publish job download and publish the same `deployables-Complete` and `editor-assets-package` artifacts
-instead of rebuilding package contents.
-
-The Publish VS Code extension workflow accepts `artifact_run_id`. Set it to a successful VS Code
-Extension workflow run ID when repairing Marketplace or Open VSX publication from already-verified
-VSIX artifacts. The workflow downloads the `vscode-vsix-*` artifacts instead of rebuilding package
-contents.
+The Publish VS Code extension workflow accepts `release_tag` for manual repair. Set it to a
+published VS Code GitHub Release tag such as `vscode-v1.2.3`; the workflow validates and republishes
+the attached VSIX assets without rebuilding package contents.
 
 Rust tool publication for `nxlang`, `nx-lsp`, and Rust crates is not part of this deployment setup
 yet; no crates.io token or Rust binary-release credential is required for this release pipeline.
 
 Never commit registry tokens or write them into tracked configuration files.
 
+## Versioning Setup
+
+The repository uses the restored local .NET tool `minver-cli` through
+`tools/versions/Get-ReleaseVersion.ps1`.
+
+Supported release tag formats:
+
+- Package releases: `v<major>.<minor>.<patch>`, for example `v1.2.3`.
+- VS Code extension releases: `vscode-v<major>.<minor>.<patch>`, for example `vscode-v1.2.3`.
+
+The first implementation intentionally supports stable `major.minor.patch` release tags only. Pull
+request and `main` package artifacts receive unique prerelease versions, while VSIX artifacts use
+registry-valid `major.minor.patch` versions and are tested by direct VSIX installation.
+
 ## First Enablement
 
-1. Confirm PR workflows upload `deployables-Complete`, `editor-assets-package`, and VSIX artifacts
-   without public registry credentials.
-2. Enable `preview` only after the preview feed and variables are configured.
-3. Enable `production` after package version checks, package inspection, smoke tests, and Publish
-   packages and Publish VS Code extension workflow validation pass.
-4. Keep `NUGET_API_KEY` empty when NuGet trusted publishing is working. Production npm publishing
+1. Confirm PR workflows upload `deployables-Complete`, `editor-assets-package`, and `vscode-vsix-*`
+   artifacts without public registry credentials.
+2. Confirm the trusted PR artifact comment workflow posts download/install commands without checking
+   out or executing pull request code.
+3. Push a test package tag in a disposable repository or dry-run branch and confirm `release.yml`
+   creates a draft package GitHub Release with `.nupkg`, `.snupkg`, `.tgz`, manifest, and checksum
+   assets.
+4. Push a test VS Code tag in a disposable repository or dry-run branch and confirm
+   `vscode-release.yml` creates a draft VS Code GitHub Release with VSIX, manifest, and checksum
+   assets.
+5. Enable `production` after release asset validation, package inspection, smoke tests, and publish
+   workflow validation pass.
+6. Keep `NUGET_API_KEY` empty when NuGet trusted publishing is working. Production npm publishing
    uses trusted publishing only; do not configure an npm publish token for CI.
-5. Run the first production publish with required reviewers enabled.

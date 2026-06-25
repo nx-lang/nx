@@ -1,33 +1,20 @@
-import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const scriptDir = fileURLToPath(new URL('.', import.meta.url));
 const packageRoot = join(scriptDir, '..');
-const repoRoot = join(packageRoot, '..', '..');
 const manifestPath = join(packageRoot, 'package.json');
 
-function runNbgv(variableName) {
-  return execFileSync('dotnet', ['nbgv', 'get-version', '-v', variableName], {
-    cwd: repoRoot,
-    encoding: 'utf8'
-  }).trim();
-}
-
 function getPackageVersion() {
-  for (const key of ['VSCODE_EXTENSION_VERSION', 'NBGV_NpmPackageVersion', 'NBGV_NPMPACKAGEVERSION', 'NPM_PACKAGE_VERSION']) {
+  for (const key of ['VSCODE_EXTENSION_VERSION', 'PACKAGE_VERSION', 'NPM_PACKAGE_VERSION', 'RELEASE_VERSION']) {
     const value = process.env[key]?.trim();
     if (value) {
       return value;
     }
   }
 
-  try {
-    return runNbgv('NpmPackageVersion');
-  } catch (error) {
-    throw new Error(`Could not determine VS Code extension version. Run dotnet tool restore or set VSCODE_EXTENSION_VERSION. ${error.message}`);
-  }
+  throw new Error('Could not determine VS Code extension version. Run tools/versions/Get-ReleaseVersion.ps1 or set VSCODE_EXTENSION_VERSION.');
 }
 
 const packageVersion = getPackageVersion();

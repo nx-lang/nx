@@ -16,10 +16,10 @@
       ],
       "rollForward": false
     },
-    "nbgv": {
-      "version": "3.9.50",
+    "minver-cli": {
+      "version": "7.0.0",
       "commands": [
-        "nbgv"
+        "minver"
       ],
       "rollForward": false
     }

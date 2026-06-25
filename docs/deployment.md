@@ -5,43 +5,115 @@ registry setup is in [deployment-setup.md](deployment-setup.md).
 
 ## Release Model
 
-Pull requests build, verify, and upload package artifacts without public registry credentials. The
-Build workflow proves the NuGet and editor-assets package bits; the Publish packages workflow
-publishes those already-verified artifacts. The VS Code Extension workflow proves the VSIX bits; the
-Publish VS Code extension workflow publishes those already-verified artifacts. Trusted preview
-publishing is optional for package feeds and uses the `preview` environment. Successful trusted
-`main` Build and VS Code Extension runs trigger their corresponding production publish workflows
-through the `production` environment.
+Pull requests and `main` builds are artifact-only. They build, verify, and upload NuGet, npm
+editor-assets, and VSIX artifacts without public registry credentials.
 
-Public registry versions are immutable. If a bad artifact is published, roll forward with a higher
-version and unlist or deprecate the bad version where the registry supports it.
+Production publishing has two reviewed release tracks:
+
+- Package releases use tags like `v1.2.3`. The tag workflow creates a draft GitHub Release with
+  verified `NxLang.Runtime` `.nupkg` and `.snupkg` assets, the `@nx-lang/language` npm tarball, a
+  release manifest, and checksums.
+- VS Code extension releases use tags like `vscode-v1.2.3`. The tag workflow creates a draft GitHub
+  Release with verified VSIX assets, a release manifest, and checksums.
+
+Publishing the GitHub Release is the production gate. Published package releases trigger
+`package-publish.yml`; published VS Code releases trigger `vscode-extension-publish.yml`. Those
+workflows validate the release assets and publish the attached files without rebuilding package
+contents.
 
 Rust tooling publication for `nxlang`, `nx-lsp`, and Rust crates is not part of this release
 pipeline yet.
 
-## Publish A New Release
+## Versioning Rules
+
+Version calculation is centralized in `tools/versions/Get-ReleaseVersion.ps1` and uses the local
+MinVer CLI tool.
+
+- `v<major>.<minor>.<patch>` package tags produce stable NuGet and npm versions with no prerelease
+  suffix.
+- `vscode-v<major>.<minor>.<patch>` tags produce registry-valid VSIX versions.
+- Pull request package artifacts use unique prerelease versions such as
+  `0.1.0-pr.<pr>.<run>.<attempt>`.
+- `main` package artifacts use CI prerelease versions such as `0.1.0-ci.<run>.<attempt>`.
+- VSIX test artifacts use `major.minor.patch` because VSIX registries do not accept SemVer
+  prerelease suffixes.
+
+Only stable `major.minor.patch` release tags are supported in this implementation.
+
+## Publish A Package Release
 
 1. Merge the release change to `main`.
-2. Confirm the Build workflow completed package assembly, package inspection, and RID smoke tests.
-3. Confirm the VS Code Extension workflow completed VSIX packaging and verification for every target.
-4. Inspect uploaded artifacts:
-   - `deployables-Complete`: verified `NxLang.Runtime.*.nupkg`.
-   - `editor-assets-package`: verified `nx-lang-language-*.tgz`.
-   - VS Code extension workflow artifacts: one verified `.vsix` per platform target.
-5. Confirm the Publish packages workflow started from the successful `main` Build run.
-6. Confirm the Publish VS Code extension workflow started from the successful `main` VS Code
-   Extension run.
-7. Approve the `production` environment deployments if reviewers are required.
-8. Confirm package publication in NuGet.org, npm, Visual Studio Marketplace, and Open VSX.
+2. Create and push a package release tag:
+   ```bash
+   git tag v1.2.3
+   git push origin v1.2.3
+   ```
+3. Wait for the Package release workflow to finish.
+4. Open the draft GitHub Release for `v1.2.3`.
+5. Inspect the attached `.nupkg`, `.snupkg`, npm `.tgz`, `release-manifest.json`, and
+   `release-checksums.txt` assets.
+6. Confirm the manifest tag, version, commit, artifact names, and checksums match the intended
+   release.
+7. Publish the GitHub Release.
+8. Approve the `production` environment deployment if reviewers are required.
+9. Confirm publication on NuGet.org and npm.
+
+## Publish A VS Code Extension Release
+
+1. Merge the extension release change to `main`.
+2. Create and push a VS Code extension release tag:
+   ```bash
+   git tag vscode-v1.2.3
+   git push origin vscode-v1.2.3
+   ```
+3. Wait for the VS Code extension release workflow to finish.
+4. Open the draft GitHub Release for `vscode-v1.2.3`.
+5. Inspect the attached VSIX assets, `release-manifest.json`, and `release-checksums.txt`.
+6. Confirm every VSIX contains publisher `nx-lang`, extension `nx-language`, and version `1.2.3`.
+7. Publish the GitHub Release.
+8. Approve the `production` environment deployment if reviewers are required.
+9. Confirm publication in the Visual Studio Marketplace and Open VSX.
+
+## Pull Request Artifact Testing
+
+The trusted PR artifact comment workflow posts commands after successful PR artifact builds. Use the
+specific workflow run ID from the comment so the downloaded files match the verified build.
+
+NuGet runtime package test:
+
+```bash
+gh run download <run-id> -R nx-lang/nx -n deployables-Complete -D nx-package-artifacts
+dotnet new console -n nx-runtime-test
+dotnet add nx-runtime-test/nx-runtime-test.csproj package NxLang.Runtime --version <package-version> --source "$(pwd)/nx-package-artifacts"
+```
+
+npm editor-assets package test:
+
+```bash
+gh run download <run-id> -R nx-lang/nx -n editor-assets-package -D nx-editor-assets
+mkdir nx-editor-assets-test
+cd nx-editor-assets-test
+npm init -y
+pnpm add ../nx-editor-assets/*.tgz
+```
+
+VSIX test:
+
+```bash
+gh run download <run-id> -R nx-lang/nx -p 'vscode-vsix-*' -D nx-vsix-artifacts
+find nx-vsix-artifacts -name '*.vsix' -type f -print0 | xargs -0 -I{} code --install-extension '{}' --force
+```
 
 ## Artifact Inspection
 
-Use the workflow artifacts from the successful run rather than rebuilding locally:
+Use workflow or GitHub Release artifacts rather than rebuilding locally:
 
 ```bash
 unzip -l NxLang.Runtime.*.nupkg
+unzip -l NxLang.Runtime.*.snupkg
 tar -tf nx-lang-language-*.tgz
 unzip -l nx-language-*.vsix
+sha256sum -c release-checksums.txt
 ```
 
 For the runtime package, `tools/packaging/Test-NxRuntimePackage.ps1` verifies metadata and native
@@ -50,72 +122,40 @@ runtime assets. For editor assets, run `pnpm run verify:package` and `pnpm run s
 
 ## Repair A Partial Publish
 
-If one registry publish succeeds and another fails, download the artifacts from the successful
-workflow run and republish the same artifact.
+Repair uses the same GitHub Release assets that were already reviewed and partially published.
 
-NuGet fallback repair:
-
-```bash
-dotnet nuget push NxLang.Runtime.*.nupkg --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
-```
-
-npm trusted-publishing repair:
+Package registry repair:
 
 ```bash
-gh workflow run package-publish.yml --ref main -f target_environment=production -f artifact_run_id=<build-run-id>
+gh workflow run package-publish.yml --ref main -f release_tag=v1.2.3
 ```
-
-For a local emergency repair, publish the same tarball with an interactive maintainer session rather
-than a CI `NPM_TOKEN`.
 
 VS Code registry repair:
 
 ```bash
-gh workflow run vscode-extension-publish.yml --ref main -f artifact_run_id=<vscode-extension-run-id>
+gh workflow run vscode-extension-publish.yml --ref main -f release_tag=vscode-v1.2.3
 ```
 
-The VSIX publish script checks each registry separately and skips an already-published extension
-version, so this repair path can fill in a missing Marketplace or Open VSX publication without
-failing on the registry that already succeeded.
+The package publish workflow validates the release assets before registry writes and uses
+idempotent duplicate-version behavior where supported. The VSIX publish script checks each registry
+separately and skips an already-published extension version, so a repair can fill in a missing
+Marketplace or Open VSX publication.
 
-For a local emergency repair from `src/vscode`, publish the same downloaded VSIX artifacts:
+For a local emergency repair from already-downloaded assets:
 
 ```bash
+dotnet nuget push NxLang.Runtime.*.nupkg --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
 pnpm run publish:vsce -- nx-language-*.vsix
 pnpm run publish:ovsx -- nx-language-*.vsix
 ```
 
 Do not rebuild package contents for a repair publish unless the fix requires a new higher version.
-If GitHub Release asset upload fails, upload the same Build workflow artifacts to the GitHub Release.
-Package registry repair belongs in the Publish packages workflow; VSIX registry repair belongs in
-the Publish VS Code extension workflow.
 
 ## Higher-Version Fixes
 
-When a published artifact is bad:
+Public registry versions are immutable. When a published artifact is bad:
 
 1. Fix the source issue.
-2. Let versioning produce a higher package version.
-3. Publish the fixed version through `main` and the `production` environment.
-4. Unlist or deprecate the bad NuGet, npm, or extension version where useful.
-5. Update release notes or documentation to steer users to the fixed version.
-
-## Preview Publishing
-
-Preview publishing is off by default. Run the Publish packages workflow manually after configuring
-preview feed variables. The workflow publishes artifacts from a successful PR or branch Build workflow
-run:
-
-1. Let the PR or branch Build workflow complete successfully.
-2. Copy the source run ID from the run URL, or run `gh run list --workflow build.yml`.
-   The source run must be a successful Build workflow run from this repository with package artifacts.
-3. Run the Publish packages workflow manually on a ref that contains the publish workflow file.
-4. Set `target_environment=preview`.
-5. Set `artifact_run_id` to the successful source run ID.
-6. Approve the `preview` environment deployment if reviewers are required.
-7. Confirm the preview NuGet feed and npm-compatible registry received the expected package versions.
-
-The Publish packages workflow validates that the source run completed successfully, downloads
-`deployables-Complete` and `editor-assets-package` from that run, and publishes those exact artifacts.
-Preview packages must use credentials scoped to preview feeds and must never use production registry
-credentials.
+2. Publish a higher version through the appropriate tag-driven release track.
+3. Unlist or deprecate the bad NuGet, npm, or extension version where useful.
+4. Update release notes or documentation to steer users to the fixed version.

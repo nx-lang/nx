@@ -1,11 +1,4 @@
-# package-release-automation Specification
-
-## Purpose
-Define how NX package registry publication is coordinated from verified CI and GitHub Release
-artifacts, including tag-driven draft releases, production publication, deployment environments,
-registry authentication, artifact-based pull request testing, and maintainer runbooks.
-
-## Requirements
+## ADDED Requirements
 
 ### Requirement: Release versioning uses MinVer
 NX SHALL use MinVer CLI as the single CI version source for package release artifacts and preview
@@ -37,6 +30,8 @@ MinVer limitation and records it for maintainer review before replacing the beha
 - **THEN** they SHALL NOT call `dotnet nbgv` or depend on `version.json`
 - **AND** package-generation scripts SHALL read MinVer-derived environment variables or direct MinVer CLI
   output instead
+
+## MODIFIED Requirements
 
 ### Requirement: Package publishing uses explicit deployment environments
 NX SHALL model package registry publication through explicit GitHub Actions deployment environments so
@@ -115,27 +110,10 @@ writes when release asset validation fails or when the package version is not pu
 - **AND** the deployment documentation SHALL describe how to repair the failed registry by publishing
   the same release asset rather than rebuilding
 
-### Requirement: Registry authentication prefers trusted publishing
-NX SHALL use keyless trusted-publishing or repository-scoped credentials where the target registry
-supports them. Long-lived registry tokens SHALL be documented as fallbacks or for registries that do
-not support trusted publishing.
-
-#### Scenario: Trusted publishing policy is configured
-- **WHEN** a registry supports trusted publishing for GitHub Actions
-- **THEN** the production workflow SHALL be able to publish using GitHub OIDC and the registry's
-  trusted-publisher policy
-- **AND** the workflow SHALL request only the permissions needed for token exchange and publication
-
-#### Scenario: Token fallback is configured
-- **WHEN** trusted publishing is unavailable for a target registry
-- **THEN** CI SHALL read the required token from a GitHub environment secret
-- **AND** CI SHALL fail before publication if the token is missing
-- **AND** CI SHALL NOT store registry tokens in tracked source files
-
 ### Requirement: Deployment setup and runbook are documented
-NX SHALL include separate deployment documentation for one-time CI/registry setup and ongoing
-package publishing operations. Documentation SHALL describe tag-driven draft releases, artifact-only
-CI/PR builds, release-publication registry writes, and artifact-based pull request testing.
+NX SHALL include separate deployment documentation for one-time CI/registry setup and ongoing package
+publishing operations. Documentation SHALL describe tag-driven draft releases, artifact-only CI/PR
+builds, release-publication registry writes, and artifact-based pull request testing.
 
 #### Scenario: Maintainer configures deployment environments
 - **WHEN** a maintainer reads `docs/deployment-setup.md`
@@ -212,5 +190,5 @@ to external registries only after the corresponding GitHub Release is published.
 - **WHEN** a maintainer reads the package deployment runbook for this release pipeline
 - **THEN** the runbook SHALL describe NuGet/editor-assets package publishing and VS Code extension
   publishing
-- **AND** it SHALL NOT describe `nxlang`, `nx-lsp`, or Rust crate publication as part of this
-  release pipeline
+- **AND** it SHALL NOT describe `nxlang`, `nx-lsp`, or Rust crate publication as part of this release
+  pipeline

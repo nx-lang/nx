@@ -148,8 +148,8 @@ reusable editor-assets package.
 ### Release Preparation
 
 1. Add the release notes to `src/vscode/CHANGELOG.md`.
-2. Let CI stage the publishable VSIX version from the repository build version, or set
-   `VSCODE_EXTENSION_VERSION` for a local repair package.
+2. Let CI stage the publishable VSIX version from the `vscode-v<major>.<minor>.<patch>` release tag,
+   or set `VSCODE_EXTENSION_VERSION` for a local repair package.
 3. Run the package verification:
    ```bash
    pnpm install --frozen-lockfile
@@ -158,10 +158,21 @@ reusable editor-assets package.
    pnpm run package:verify
    pnpm run package:language
    ```
+4. Push a VS Code extension release tag such as `vscode-v1.2.3`.
+5. Review the draft GitHub Release, including the attached VSIX files, manifest, and checksums.
+6. Publish the GitHub Release to trigger the separate `Publish VS Code extension` workflow.
 
-Trusted `main` builds publish verified VSIX artifacts through the `production` environment after
-version checks pass. Manual repair uses the VS Code Extension workflow's `repair_run_id` dispatch
-input to republish VSIX artifacts from an earlier workflow run.
+Pull requests and `main` builds upload verified VSIX artifacts but do not publish to the Visual
+Studio Marketplace or Open VSX. Pull request builds are tested by downloading the VSIX artifact from
+the PR comment and installing it directly:
+
+```bash
+gh run download <run-id> -R nx-lang/nx -p 'vscode-vsix-*' -D nx-vsix-artifacts
+find nx-vsix-artifacts -name '*.vsix' -type f -print0 | xargs -0 -I{} code --install-extension '{}' --force
+```
+
+Manual CI repair uses the Publish VS Code extension workflow's `release_tag` dispatch input to
+republish VSIX artifacts from an already-published GitHub Release.
 
 ### Credentials
 
@@ -188,7 +199,7 @@ Do not commit tokens or write them into tracked configuration files.
 
 ### Local Publish and Repair
 
-Publish an already-built VSIX to both registries:
+Publish an already-built VSIX to both registries for a local repair:
 
 ```bash
 VSIX=nx-language-$(node -p "require('./package.json').version").vsix
@@ -206,6 +217,9 @@ pnpm run publish:ovsx -- "$VSIX"
 
 Both commands publish the provided VSIX artifact instead of rebuilding a new package. The publisher
 is `nx-lang` and the extension ID is `nx-language`.
+
+The normal production path is not local publishing: push a `vscode-v*` tag, inspect the draft GitHub
+Release assets, then publish that GitHub Release so CI publishes the reviewed VSIX files.
 
 ## Notes
 

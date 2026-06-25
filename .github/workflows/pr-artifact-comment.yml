@@ -1,0 +1,165 @@
+name: PR artifact comments
+
+on:
+  workflow_run:
+    workflows:
+    - 🏭 Build
+    - VS Code Extension
+    types:
+    - completed
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  comment:
+    name: Update PR artifact comment
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request' }}
+    steps:
+    - name: Update artifact comment
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        repository="$(jq -r ".repository.full_name" "${GITHUB_EVENT_PATH}")"
+        run_id="$(jq -r ".workflow_run.id" "${GITHUB_EVENT_PATH}")"
+        workflow_path="$(jq -r ".workflow_run.path" "${GITHUB_EVENT_PATH}")"
+        pr_number="$(jq -r ".workflow_run.pull_requests[0].number // empty" "${GITHUB_EVENT_PATH}")"
+
+        if [ -z "${pr_number}" ]; then
+          pr_number="$(gh api "repos/${repository}/actions/runs/${run_id}/pull_requests" --jq ".[0].number // empty")"
+        fi
+
+        case "${workflow_path}" in
+          .github/workflows/build.yml)
+            artifact_name="package-pr-test-commands"
+            expected_schema="nx.package-pr-artifacts.v1"
+            marker="<!-- nx-pr-artifacts:packages -->"
+            ;;
+          .github/workflows/vscode-extension.yml)
+            artifact_name="vscode-pr-test-commands"
+            expected_schema="nx.vscode-pr-artifacts.v1"
+            marker="<!-- nx-pr-artifacts:vscode -->"
+            ;;
+          *)
+            echo "Workflow ${workflow_path} does not produce PR artifact comments."
+            exit 0
+            ;;
+        esac
+
+        work_dir="${RUNNER_TEMP}/pr-artifact-comment"
+        mkdir -p "${work_dir}"
+        gh api "repos/${repository}/actions/runs/${run_id}/artifacts" --paginate > "${work_dir}/artifacts.json"
+        artifact_id="$(jq -r --arg name "${artifact_name}" ".artifacts[] | select(.name == \$name) | .id" "${work_dir}/artifacts.json" | head -n 1)"
+
+        if [ -z "${artifact_id}" ]; then
+          echo "Run ${run_id} did not upload ${artifact_name}; nothing to comment."
+          exit 0
+        fi
+
+        gh api "repos/${repository}/actions/artifacts/${artifact_id}/zip" > "${work_dir}/metadata.zip"
+        unzip -q "${work_dir}/metadata.zip" -d "${work_dir}/metadata"
+        metadata="${work_dir}/metadata/metadata.json"
+
+        if [ ! -f "${metadata}" ]; then
+          echo "::error::${artifact_name} is missing metadata.json."
+          exit 1
+        fi
+
+        schema="$(jq -r ".schema // empty" "${metadata}")"
+        metadata_repository="$(jq -r ".repository // empty" "${metadata}")"
+        metadata_pr="$(jq -r ".pullRequest // empty" "${metadata}")"
+        metadata_run="$(jq -r ".runId // empty" "${metadata}")"
+
+        if [ "${schema}" != "${expected_schema}" ]; then
+          echo "::error::Unexpected metadata schema '${schema}'."
+          exit 1
+        fi
+
+        if [ "${metadata_repository}" != "${repository}" ] || [ "${metadata_run}" != "${run_id}" ]; then
+          echo "::error::Metadata does not match workflow run ${run_id}."
+          exit 1
+        fi
+
+        if [ -z "${metadata_pr}" ]; then
+          echo "::error::Metadata does not identify a pull request."
+          exit 1
+        fi
+
+        if [ -z "${pr_number}" ]; then
+          pr_number="${metadata_pr}"
+        elif [ "${metadata_pr}" != "${pr_number}" ]; then
+          echo "::error::Metadata pull request ${metadata_pr} does not match workflow run pull request ${pr_number}."
+          exit 1
+        fi
+
+        body_path="${work_dir}/body.md"
+        run_url="https://github.com/${repository}/actions/runs/${run_id}"
+
+        if [ "${artifact_name}" = "package-pr-test-commands" ]; then
+          nuget_artifact="$(jq -r ".artifacts.nuget // empty" "${metadata}")"
+          npm_artifact="$(jq -r ".artifacts.npm // empty" "${metadata}")"
+          package_version="$(jq -r ".versions.nuget // empty" "${metadata}")"
+          npm_version="$(jq -r ".versions.npm // empty" "${metadata}")"
+
+          if [ "${nuget_artifact}" != "deployables-Complete" ] || [ "${npm_artifact}" != "editor-assets-package" ]; then
+            echo "::error::Unexpected package artifact names."
+            exit 1
+          fi
+
+          {
+            printf "%s\n" "${marker}"
+            printf "### NX package test artifacts\n\n"
+            printf "Build run: [%s](%s)\n\n" "${run_id}" "${run_url}"
+            printf "NuGet package version: \`%s\`\n" "${package_version}"
+            printf "Editor-assets npm version: \`%s\`\n\n" "${npm_version}"
+            printf "\`\`\`bash\n"
+            printf "gh run download %s -R %s -n deployables-Complete -D nx-package-artifacts\n" "${run_id}" "${repository}"
+            printf "dotnet new console -n nx-runtime-test\n"
+            printf "dotnet add nx-runtime-test/nx-runtime-test.csproj package NxLang.Runtime --version %s --source \"\$(pwd)/nx-package-artifacts\"\n" "${package_version}"
+            printf "\`\`\`\n\n"
+            printf "\`\`\`bash\n"
+            printf "gh run download %s -R %s -n editor-assets-package -D nx-editor-assets\n" "${run_id}" "${repository}"
+            printf "mkdir nx-editor-assets-test\n"
+            printf "cd nx-editor-assets-test\n"
+            printf "npm init -y\n"
+            printf "pnpm add ../nx-editor-assets/*.tgz\n"
+            printf "\`\`\`\n"
+          } > "${body_path}"
+        else
+          vsix_pattern="$(jq -r ".artifacts.vsixPattern // empty" "${metadata}")"
+          vscode_version="$(jq -r ".versions.vscode // empty" "${metadata}")"
+
+          if [ "${vsix_pattern}" != "vscode-vsix-*" ]; then
+            echo "::error::Unexpected VSIX artifact pattern."
+            exit 1
+          fi
+
+          {
+            printf "%s\n" "${marker}"
+            printf "### NX VS Code extension test artifacts\n\n"
+            printf "Build run: [%s](%s)\n\n" "${run_id}" "${run_url}"
+            printf "VSIX version: \`%s\`\n\n" "${vscode_version}"
+            printf "\`\`\`bash\n"
+            printf "gh run download %s -R %s -p 'vscode-vsix-*' -D nx-vsix-artifacts\n" "${run_id}" "${repository}"
+            printf "find nx-vsix-artifacts -name '*.vsix' -type f -print0 | xargs -0 -I{} code --install-extension '{}' --force\n"
+            printf "\`\`\`\n"
+          } > "${body_path}"
+        fi
+
+        gh api "repos/${repository}/issues/${pr_number}/comments" --paginate > "${work_dir}/comments.json"
+        comment_id="$(jq -r --arg marker "${marker}" ".[] | select(.user.type == \"Bot\") | select(.body | contains(\$marker)) | .id" "${work_dir}/comments.json" | head -n 1)"
+        jq -n --rawfile body "${body_path}" "{body: \$body}" > "${work_dir}/comment.json"
+
+        if [ -n "${comment_id}" ]; then
+          gh api -X PATCH "repos/${repository}/issues/comments/${comment_id}" --input "${work_dir}/comment.json" > /dev/null
+          echo "Updated PR #${pr_number} artifact comment ${comment_id}."
+        else
+          gh api -X POST "repos/${repository}/issues/${pr_number}/comments" --input "${work_dir}/comment.json" > /dev/null
+          echo "Created PR #${pr_number} artifact comment."
+        fi

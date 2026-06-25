@@ -1,45 +1,4 @@
-# editor-assets Specification
-
-## Purpose
-
-Define how NX publishes reusable editor language assets so JavaScript and TypeScript consumers can
-import NX grammars, language configuration, and snippets without depending on an NX source checkout,
-and how those assets relate to the VS Code extension packaging workflow.
-
-## Requirements
-
-### Requirement: NX editor assets are published as an npm package
-NX SHALL publish reusable editor language assets as the `@nx-lang/language` npm package generated
-from the repository's editor asset source. The package SHALL allow JavaScript and TypeScript
-consumers to import NX language assets without depending on an NX source checkout or a file-based
-package dependency.
-
-#### Scenario: Web editor consumer installs editor assets package
-- **WHEN** a JavaScript application installs the published `@nx-lang/language` npm package
-- **THEN** the application SHALL be able to import the NX TextMate grammar from
-  `@nx-lang/language/grammar`
-- **AND** the application SHALL be able to import the NX markdown code-block grammar from
-  `@nx-lang/language/markdown-codeblock-grammar`
-- **AND** the application SHALL be able to import the NX language configuration from
-  `@nx-lang/language/language-configuration`
-- **AND** the application SHALL be able to import the NX snippets from `@nx-lang/language/snippets`
-- **AND** the application SHALL NOT need to reference `external/nx/src/vscode` or any other NX
-  repository path
-
-#### Scenario: Package contains reusable language assets
-- **WHEN** the `@nx-lang/language` npm package is packed for release
-- **THEN** the package SHALL include the NX TextMate grammar
-- **AND** the package SHALL include the NX markdown code-block grammar
-- **AND** the package SHALL include the NX language configuration
-- **AND** the package SHALL include the NX snippets file
-- **AND** the package SHALL NOT include VS Code extension runtime outputs or native `nx-lsp`
-  binaries
-
-#### Scenario: Browser editor bridges grammar into Monaco
-- **WHEN** a browser editor such as Monaco/Shiki imports the `@nx-lang/language` package
-- **THEN** the imported grammar and language configuration SHALL be usable as data assets by the
-  consuming application's editor integration
-- **AND** NX SHALL NOT require the consumer to install a VS Code extension to access those assets
+## MODIFIED Requirements
 
 ### Requirement: Editor asset package generation is verified before publication
 NX SHALL verify the `@nx-lang/language` package before publication. Verification SHALL prove that the

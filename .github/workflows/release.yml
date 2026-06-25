@@ -1,67 +1,295 @@
-name: 🎁 Release
+name: Package release
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+    - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Package release tag to rebuild as a draft release
+        type: string
+        required: true
 
-run-name: ${{ github.ref_name }}
+run-name: Package release ${{ inputs.tag || github.ref_name }}
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  BUILDCONFIGURATION: Release
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages/
 
 permissions:
-  actions: read
   contents: write
 
 jobs:
-  release:
-    runs-on: ubuntu-24.04
+  validate:
+    name: Validate package release tag
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.tag.outputs.should_release }}
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
     steps:
-    - name: 🔎 Search for build of ${{ github.ref }}
-      shell: pwsh
-      id: findrunid
+    - name: Validate tag
+      id: tag
+      shell: bash
       env:
-        GH_TOKEN: ${{ github.token }}
+        DISPATCH_TAG: ${{ inputs.tag }}
       run: |
-        $restApiRoot = '/repos/${{ github.repository }}'
+        set -euo pipefail
 
-        # Resolve the tag reference to a commit sha
-        $resolvedRef = gh api `
-          -H "Accept: application/vnd.github+json" `
-          -H "X-GitHub-Api-Version: 2022-11-28" `
-          $restApiRoot/git/ref/tags/${{ github.ref_name }} `
-          | ConvertFrom-Json
-        $commitSha = $resolvedRef.object.sha
+        tag="${DISPATCH_TAG:-${GITHUB_REF_NAME}}"
+        if [[ "${tag}" =~ ^vscode-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "VS Code release tag ${tag} is handled by vscode-release.yml; skipping package release."
+          {
+            echo "should_release=false"
+            echo "tag=${tag}"
+            echo "version="
+          } >> "${GITHUB_OUTPUT}"
+          exit 0
+        fi
 
-        Write-Host "Resolved ${{ github.ref_name }} to $commitSha"
+        if [[ ! "${tag}" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+          echo "::error::Package release tags must match v<major>.<minor>.<patch>. Actual tag: ${tag}."
+          exit 1
+        fi
 
-        $releases = gh run list -R ${{ github.repository }} -c $commitSha -w .github/workflows/build.yml -s success --json databaseId,startedAt `
-          | ConvertFrom-Json | Sort-Object startedAt -Descending
+        {
+          echo "should_release=true"
+          echo "tag=${tag}"
+          echo "version=${tag#v}"
+        } >> "${GITHUB_OUTPUT}"
 
-        if ($releases.length -eq 0) {
-          Write-Error "No successful builds found for ${{ github.ref }}."
-        } elseif ($releases.length -gt 1) {
-          Write-Warning "More than one successful run found for ${{ github.ref }}. Artifacts from the most recent successful run will ship."
-        }
+  native-runtime:
+    name: Build native runtime (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: validate
+    if: ${{ needs.validate.outputs.should_release == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+        - ubuntu-latest
+        - macos-14
+        - windows-2022
+    steps:
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+      with:
+        fetch-depth: 0
+        ref: ${{ needs.validate.outputs.tag }}
+    - name: Install prerequisites
+      run: |
+        ./init.ps1 -UpgradePrerequisites
+        dotnet --info
+      shell: pwsh
+    - name: Stage NX native runtime
+      run: tools/packaging/Stage-NxRuntimeNativeArtifact.ps1 -Configuration ${{ env.BUILDCONFIGURATION }}
+      shell: pwsh
+    - name: Upload NX native runtime artifact
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: nx-runtime-native-${{ runner.os }}
+        path: artifacts/nx-runtime
+        if-no-files-found: error
 
-        $runid = $releases[0].databaseId
-
-        Write-Host "Using artifacts from run-id: $runid"
-
-        Echo "runid=$runid" >> $env:GITHUB_OUTPUT
-
-    - name: 🔻 Download deployables artifacts
+  package:
+    name: Build NuGet package
+    runs-on: ubuntu-latest
+    needs:
+    - validate
+    - native-runtime
+    if: ${{ needs.validate.outputs.should_release == 'true' }}
+    steps:
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+      with:
+        fetch-depth: 0
+        ref: ${{ needs.validate.outputs.tag }}
+    - name: Install prerequisites
+      run: |
+        ./init.ps1 -UpgradePrerequisites
+        dotnet --info
+      shell: pwsh
+    - name: Calculate package version
+      id: versions
+      shell: pwsh
+      run: >
+        tools/versions/Get-ReleaseVersion.ps1
+        -Track package
+        -Context tag
+        -RefName '${{ needs.validate.outputs.tag }}'
+        -GitHubEnvPath $env:GITHUB_ENV
+        -GitHubOutputPath $env:GITHUB_OUTPUT
+    - name: Download NX native runtime artifacts
       uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
       with:
-        name: deployables-Complete
-        path: ${{ runner.temp }}/deployables
-        run-id: ${{ steps.findrunid.outputs.runid }}
-        github-token: ${{ github.token }}
-
-    - name: 💽 Upload artifacts to release
+        pattern: nx-runtime-native-*
+        path: artifacts/nx-runtime
+        merge-multiple: true
+    - name: Pack NxLang.Runtime
+      run: >
+        dotnet pack bindings/dotnet/src/NxLang.Runtime/NxLang.Runtime.csproj
+        -c ${{ env.BUILDCONFIGURATION }}
+        -warnAsError
+        -warnNotAsError:NU1901,NU1902,NU1903,NU1904
+        -p:Version="${{ steps.versions.outputs.package_version }}"
+        -p:PackageVersion="${{ steps.versions.outputs.package_version }}"
+        -p:ContinuousIntegrationBuild=true
+    - name: Verify NxLang.Runtime package
+      run: |
+        $package = Get-ChildItem bin/Packages/${{ env.BUILDCONFIGURATION }}/NxLang.Runtime.*.nupkg | Select-Object -First 1
+        tools/packaging/Test-NxRuntimePackage.ps1 -PackagePath $package.FullName
       shell: pwsh
-      if: ${{ github.event_name == 'release' && github.event.release.assets_url != '' }}
+    - name: Upload package artifacts
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: package-release-nuget
+        path: |
+          bin/Packages/${{ env.BUILDCONFIGURATION }}/*.nupkg
+          bin/Packages/${{ env.BUILDCONFIGURATION }}/*.snupkg
+        if-no-files-found: error
+
+  editor-assets:
+    name: Build editor-assets package
+    runs-on: ubuntu-latest
+    needs: validate
+    if: ${{ needs.validate.outputs.should_release == 'true' }}
+    defaults:
+      run:
+        working-directory: src/vscode
+    steps:
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+      with:
+        fetch-depth: 0
+        ref: ${{ needs.validate.outputs.tag }}
+    - name: Restore .NET tools
+      run: dotnet tool restore
+      working-directory: .
+    - name: Set editor package version
+      shell: pwsh
+      run: >
+        tools/versions/Get-ReleaseVersion.ps1
+        -Track package
+        -Context tag
+        -RefName '${{ needs.validate.outputs.tag }}'
+        -GitHubEnvPath $env:GITHUB_ENV
+      working-directory: .
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        package_json_file: src/vscode/package.json
+        run_install: false
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '24'
+        cache: 'pnpm'
+        cache-dependency-path: src/vscode/pnpm-lock.yaml
+    - name: Install dependencies
+      run: pnpm install --frozen-lockfile
+    - name: Package editor assets
+      run: pnpm run package:language
+    - name: Verify editor-assets package
+      run: |
+        package=$(find dist -maxdepth 1 -name '*.tgz' -type f -print -quit)
+        pnpm run verify:package "$package"
+        pnpm run smoke:package "$package"
+    - name: Upload editor-assets package
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: package-release-editor-assets
+        path: src/vscode/dist/*.tgz
+        if-no-files-found: error
+
+  draft-release:
+    name: Create draft GitHub Release
+    runs-on: ubuntu-latest
+    needs:
+    - validate
+    - package
+    - editor-assets
+    if: ${{ needs.validate.outputs.should_release == 'true' }}
+    permissions:
+      actions: read
+      contents: write
+    steps:
+    - name: Download NuGet release artifacts
+      uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      with:
+        name: package-release-nuget
+        path: ${{ runner.temp }}/nuget
+    - name: Download editor-assets release artifact
+      uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      with:
+        name: package-release-editor-assets
+        path: ${{ runner.temp }}/editor-assets
+    - name: Create manifest and checksums
+      shell: pwsh
+      env:
+        RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $releaseAssets = Join-Path $env:RUNNER_TEMP 'release-assets'
+        New-Item -ItemType Directory -Force -Path $releaseAssets | Out-Null
+
+        Get-ChildItem "$env:RUNNER_TEMP/nuget" -File -Include '*.nupkg', '*.snupkg' -Recurse | Copy-Item -Destination $releaseAssets
+        Get-ChildItem "$env:RUNNER_TEMP/editor-assets" -File -Filter '*.tgz' -Recurse | Copy-Item -Destination $releaseAssets
+
+        $nupkg = @(Get-ChildItem $releaseAssets -File -Filter '*.nupkg')
+        $snupkg = @(Get-ChildItem $releaseAssets -File -Filter '*.snupkg')
+        $tgz = @(Get-ChildItem $releaseAssets -File -Filter '*.tgz')
+
+        if ($nupkg.Count -eq 0 -or $snupkg.Count -eq 0 -or $tgz.Count -eq 0) {
+            throw 'Package releases require .nupkg, .snupkg, and npm .tgz assets.'
+        }
+
+        $artifacts = @(Get-ChildItem $releaseAssets -File | Sort-Object Name | ForEach-Object {
+            [ordered] @{
+                name = $_.Name
+                size = $_.Length
+                sha256 = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+        })
+
+        $manifest = [ordered] @{
+            schema = 'nx.release-manifest.v1'
+            track = 'package'
+            tag = $env:RELEASE_TAG
+            version = $env:RELEASE_VERSION
+            commit = $env:GITHUB_SHA
+            artifacts = $artifacts
+        }
+
+        $manifestPath = Join-Path $releaseAssets 'release-manifest.json'
+        $checksumPath = Join-Path $releaseAssets 'release-checksums.txt'
+        $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath
+        $artifacts | ForEach-Object { "$($_.sha256)  $($_.name)" } | Set-Content -LiteralPath $checksumPath
+    - name: Create or update draft release
+      shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
+        RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        RELEASE_VERSION: ${{ needs.validate.outputs.version }}
       run: |
-        Get-ChildItem '${{ runner.temp }}/deployables' -File -Recurse |% {
-          Write-Host "Uploading $($_.Name) to release..."
-          gh release -R ${{ github.repository }} upload "${{ github.ref_name }}" $_.FullName
-        }
+        set -euo pipefail
+
+        notes="${RUNNER_TEMP}/release-notes.md"
+        cat > "${notes}" <<EOF
+        Draft package release for ${RELEASE_TAG}.
+
+        Review the attached NuGet, symbol, npm editor-assets, manifest, and checksum assets before publishing this GitHub Release.
+        Publishing the release triggers production package registry publication.
+        EOF
+
+        if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+          is_draft="$(gh release view "${RELEASE_TAG}" --json isDraft --jq '.isDraft')"
+          if [ "${is_draft}" != "true" ]; then
+            echo "::error::Release ${RELEASE_TAG} already exists and is not a draft."
+            exit 1
+          fi
+          gh release edit "${RELEASE_TAG}" --draft=true --title "NX packages ${RELEASE_VERSION}" --notes-file "${notes}"
+        else
+          gh release create "${RELEASE_TAG}" --draft --title "NX packages ${RELEASE_VERSION}" --notes-file "${notes}"
+        fi
+
+        gh release upload "${RELEASE_TAG}" "${RUNNER_TEMP}/release-assets/"* --clobber

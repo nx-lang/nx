@@ -6,7 +6,6 @@ import { fileURLToPath } from 'node:url';
 
 const scriptDir = fileURLToPath(new URL('.', import.meta.url));
 const packageRoot = join(scriptDir, '..');
-const repoRoot = join(packageRoot, '..', '..');
 const manifest = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
 const distRoot = join(packageRoot, 'dist');
 const stagingRoot = mkdtempSync(join(tmpdir(), 'nx-language-assets-'));
@@ -21,21 +20,14 @@ const assetPaths = [
 ];
 
 function getPackageVersion() {
-  for (const key of ['NPM_PACKAGE_VERSION', 'NBGV_NpmPackageVersion', 'NBGV_NPMPACKAGEVERSION']) {
+  for (const key of ['NPM_PACKAGE_VERSION', 'PACKAGE_VERSION', 'RELEASE_VERSION']) {
     const value = process.env[key]?.trim();
     if (value) {
       return value;
     }
   }
 
-  try {
-    return execFileSync('dotnet', ['nbgv', 'get-version', '-v', 'NpmPackageVersion'], {
-      cwd: repoRoot,
-      encoding: 'utf8'
-    }).trim();
-  } catch (error) {
-    throw new Error(`Could not determine @nx-lang/language package version. Run dotnet tool restore or set NPM_PACKAGE_VERSION. ${error.message}`);
-  }
+  throw new Error('Could not determine @nx-lang/language package version. Run tools/versions/Get-ReleaseVersion.ps1 or set NPM_PACKAGE_VERSION.');
 }
 
 try {
