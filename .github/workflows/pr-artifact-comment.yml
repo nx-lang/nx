@@ -19,6 +19,9 @@ jobs:
     name: Update PR artifact comment
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request' }}
+    concurrency:
+      group: pr-artifact-comment-${{ github.event.workflow_run.path }}-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+      cancel-in-progress: false
     steps:
     - name: Update artifact comment
       shell: bash
@@ -26,24 +29,38 @@ jobs:
         GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
+
         repository="$(jq -r ".repository.full_name" "${GITHUB_EVENT_PATH}")"
         run_id="$(jq -r ".workflow_run.id" "${GITHUB_EVENT_PATH}")"
         workflow_path="$(jq -r ".workflow_run.path" "${GITHUB_EVENT_PATH}")"
+        head_repository="$(jq -r ".workflow_run.head_repository.full_name // empty" "${GITHUB_EVENT_PATH}")"
+        head_branch="$(jq -r ".workflow_run.head_branch // empty" "${GITHUB_EVENT_PATH}")"
+        work_dir="${RUNNER_TEMP}/pr-artifact-comment"
+        mkdir -p "${work_dir}"
+
         pr_number="$(jq -r ".workflow_run.pull_requests[0].number // empty" "${GITHUB_EVENT_PATH}")"
 
         if [ -z "${pr_number}" ]; then
           pr_number="$(gh api "repos/${repository}/actions/runs/${run_id}/pull_requests" --jq ".[0].number // empty")"
         fi
 
+        if [ -z "${pr_number}" ] && [ -n "${head_repository}" ] && [ -n "${head_branch}" ]; then
+          gh api "repos/${repository}/pulls?state=all" --paginate --jq ".[]" > "${work_dir}/pulls.ndjson"
+          pr_number="$(jq -rs --arg repo "${head_repository}" --arg branch "${head_branch}" 'map(select(.head.repo.full_name == $repo and .head.ref == $branch))[0].number // empty' "${work_dir}/pulls.ndjson")"
+        fi
+
+        if [ -z "${pr_number}" ]; then
+          echo "::warning::Unable to identify pull request for workflow run ${run_id}; nothing to comment."
+          exit 0
+        fi
+
         case "${workflow_path}" in
           .github/workflows/build.yml)
-            artifact_name="package-pr-test-commands"
-            expected_schema="nx.package-pr-artifacts.v1"
+            comment_kind="packages"
             marker="<!-- nx-pr-artifacts:packages -->"
             ;;
           .github/workflows/vscode-extension.yml)
-            artifact_name="vscode-pr-test-commands"
-            expected_schema="nx.vscode-pr-artifacts.v1"
+            comment_kind="vscode"
             marker="<!-- nx-pr-artifacts:vscode -->"
             ;;
           *)
@@ -52,65 +69,129 @@ jobs:
             ;;
         esac
 
-        work_dir="${RUNNER_TEMP}/pr-artifact-comment"
-        mkdir -p "${work_dir}"
-        gh api "repos/${repository}/actions/runs/${run_id}/artifacts" --paginate > "${work_dir}/artifacts.json"
-        artifact_id="$(jq -r --arg name "${artifact_name}" ".artifacts[] | select(.name == \$name) | .id" "${work_dir}/artifacts.json" | head -n 1)"
+        gh api "repos/${repository}/actions/runs/${run_id}/artifacts" --paginate --jq ".artifacts[]" > "${work_dir}/artifacts.ndjson"
 
-        if [ -z "${artifact_id}" ]; then
-          echo "Run ${run_id} did not upload ${artifact_name}; nothing to comment."
-          exit 0
-        fi
+        artifact_id_by_name() {
+          local name="$1"
+          jq -rs --arg name "${name}" 'map(select(.name == $name))[0].id // empty' "${work_dir}/artifacts.ndjson"
+        }
 
-        gh api "repos/${repository}/actions/artifacts/${artifact_id}/zip" > "${work_dir}/metadata.zip"
-        unzip -q "${work_dir}/metadata.zip" -d "${work_dir}/metadata"
-        metadata="${work_dir}/metadata/metadata.json"
+        artifact_id_by_prefix() {
+          local prefix="$1"
+          jq -rs --arg prefix "${prefix}" 'map(select(.name | startswith($prefix)))[0].id // empty' "${work_dir}/artifacts.ndjson"
+        }
 
-        if [ ! -f "${metadata}" ]; then
-          echo "::error::${artifact_name} is missing metadata.json."
-          exit 1
-        fi
+        download_artifact() {
+          local artifact_id="$1"
+          local destination="$2"
+          local zip_path="${work_dir}/artifact-${artifact_id}.zip"
 
-        schema="$(jq -r ".schema // empty" "${metadata}")"
-        metadata_repository="$(jq -r ".repository // empty" "${metadata}")"
-        metadata_pr="$(jq -r ".pullRequest // empty" "${metadata}")"
-        metadata_run="$(jq -r ".runId // empty" "${metadata}")"
+          rm -rf "${destination}"
+          mkdir -p "${destination}"
+          gh api "repos/${repository}/actions/artifacts/${artifact_id}/zip" > "${zip_path}"
+          unzip -q "${zip_path}" -d "${destination}"
+        }
 
-        if [ "${schema}" != "${expected_schema}" ]; then
-          echo "::error::Unexpected metadata schema '${schema}'."
-          exit 1
-        fi
+        first_matching_file() {
+          local directory="$1"
+          local pattern="$2"
+          find "${directory}" -type f -name "${pattern}" | sort | sed -n '1p'
+        }
 
-        if [ "${metadata_repository}" != "${repository}" ] || [ "${metadata_run}" != "${run_id}" ]; then
-          echo "::error::Metadata does not match workflow run ${run_id}."
-          exit 1
-        fi
+        find_nuget_package_version() {
+          local directory="$1"
+          python3 - "${directory}" <<'PY'
+        import sys
+        import zipfile
+        from pathlib import Path
+        import xml.etree.ElementTree as ET
 
-        if [ -z "${metadata_pr}" ]; then
-          echo "::error::Metadata does not identify a pull request."
-          exit 1
-        fi
+        directory = Path(sys.argv[1])
+        target_id = "NxLang.Runtime"
+        matches = []
 
-        if [ -z "${pr_number}" ]; then
-          pr_number="${metadata_pr}"
-        elif [ "${metadata_pr}" != "${pr_number}" ]; then
-          echo "::error::Metadata pull request ${metadata_pr} does not match workflow run pull request ${pr_number}."
-          exit 1
-        fi
+        for package_path in sorted(directory.rglob("*.nupkg")):
+            with zipfile.ZipFile(package_path) as package:
+                nuspec_names = [name for name in package.namelist() if name.endswith(".nuspec")]
+                if len(nuspec_names) != 1:
+                    print(f"::error::{package_path} has {len(nuspec_names)} nuspec files.", file=sys.stderr)
+                    sys.exit(1)
+
+                root = ET.fromstring(package.read(nuspec_names[0]))
+
+            namespace = ""
+            if root.tag.startswith("{"):
+                namespace = root.tag.split("}", 1)[0] + "}"
+
+            metadata = root.find(f"{namespace}metadata")
+            if metadata is None:
+                print(f"::error::{package_path} is missing nuspec metadata.", file=sys.stderr)
+                sys.exit(1)
+
+            package_id = (metadata.findtext(f"{namespace}id") or "").strip()
+            version = (metadata.findtext(f"{namespace}version") or "").strip()
+
+            if package_id == target_id:
+                matches.append((package_path, version))
+
+        if len(matches) != 1:
+            print(f"::error::Expected exactly one {target_id} package, found {len(matches)}.", file=sys.stderr)
+            sys.exit(1)
+
+        package_path, version = matches[0]
+        if not version:
+            print(f"::error::{package_path} is missing a package version.", file=sys.stderr)
+            sys.exit(1)
+
+        print(version)
+        PY
+        }
+
+        validate_semver() {
+          local name="$1"
+          local version="$2"
+          local semver_regex='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z][0-9A-Za-z.-]*)?(\+[0-9A-Za-z][0-9A-Za-z.-]*)?$'
+
+          if [[ ! "${version}" =~ ${semver_regex} ]]; then
+            echo "::error::${name} version '${version}' is not valid SemVer."
+            exit 1
+          fi
+        }
 
         body_path="${work_dir}/body.md"
         run_url="https://github.com/${repository}/actions/runs/${run_id}"
 
-        if [ "${artifact_name}" = "package-pr-test-commands" ]; then
-          nuget_artifact="$(jq -r ".artifacts.nuget // empty" "${metadata}")"
-          npm_artifact="$(jq -r ".artifacts.npm // empty" "${metadata}")"
-          package_version="$(jq -r ".versions.nuget // empty" "${metadata}")"
-          npm_version="$(jq -r ".versions.npm // empty" "${metadata}")"
+        if [ "${comment_kind}" = "packages" ]; then
+          nuget_artifact_id="$(artifact_id_by_name "deployables-Complete")"
+          npm_artifact_id="$(artifact_id_by_name "editor-assets-package")"
 
-          if [ "${nuget_artifact}" != "deployables-Complete" ] || [ "${npm_artifact}" != "editor-assets-package" ]; then
-            echo "::error::Unexpected package artifact names."
+          if [ -z "${nuget_artifact_id}" ] || [ -z "${npm_artifact_id}" ]; then
+            echo "Run ${run_id} did not upload package artifacts; nothing to comment."
+            exit 0
+          fi
+
+          nuget_dir="${work_dir}/deployables-Complete"
+          npm_dir="${work_dir}/editor-assets-package"
+          download_artifact "${nuget_artifact_id}" "${nuget_dir}"
+          download_artifact "${npm_artifact_id}" "${npm_dir}"
+
+          npm_package_path="$(first_matching_file "${npm_dir}" "*.tgz")"
+
+          if [ -z "${npm_package_path}" ]; then
+            echo "::error::editor-assets-package is missing a .tgz package."
             exit 1
           fi
+
+          package_version="$(find_nuget_package_version "${nuget_dir}")"
+          npm_version="$(tar -xOf "${npm_package_path}" package/package.json | jq -r ".version // empty")"
+
+          if [ -z "${package_version}" ] || [ -z "${npm_version}" ]; then
+            echo "::error::Could not read package artifact versions."
+            exit 1
+          fi
+
+          validate_semver "NuGet package" "${package_version}"
+          validate_semver "editor-assets npm package" "${npm_version}"
 
           {
             printf "%s\n" "${marker}"
@@ -132,13 +213,30 @@ jobs:
             printf "\`\`\`\n"
           } > "${body_path}"
         else
-          vsix_pattern="$(jq -r ".artifacts.vsixPattern // empty" "${metadata}")"
-          vscode_version="$(jq -r ".versions.vscode // empty" "${metadata}")"
+          vsix_artifact_id="$(artifact_id_by_prefix "vscode-vsix-")"
 
-          if [ "${vsix_pattern}" != "vscode-vsix-*" ]; then
-            echo "::error::Unexpected VSIX artifact pattern."
+          if [ -z "${vsix_artifact_id}" ]; then
+            echo "Run ${run_id} did not upload VSIX artifacts; nothing to comment."
+            exit 0
+          fi
+
+          vsix_dir="${work_dir}/vscode-vsix"
+          download_artifact "${vsix_artifact_id}" "${vsix_dir}"
+          vsix_path="$(first_matching_file "${vsix_dir}" "*.vsix")"
+
+          if [ -z "${vsix_path}" ]; then
+            echo "::error::VSIX artifact is missing a .vsix package."
             exit 1
           fi
+
+          vscode_version="$(unzip -p "${vsix_path}" extension/package.json | jq -r ".version // empty")"
+
+          if [ -z "${vscode_version}" ]; then
+            echo "::error::Could not read VSIX package version."
+            exit 1
+          fi
+
+          validate_semver "VSIX" "${vscode_version}"
 
           {
             printf "%s\n" "${marker}"
@@ -146,14 +244,21 @@ jobs:
             printf "Build run: [%s](%s)\n\n" "${run_id}" "${run_url}"
             printf "VSIX version: \`%s\`\n\n" "${vscode_version}"
             printf "\`\`\`bash\n"
-            printf "gh run download %s -R %s -p 'vscode-vsix-*' -D nx-vsix-artifacts\n" "${run_id}" "${repository}"
-            printf "find nx-vsix-artifacts -name '*.vsix' -type f -print0 | xargs -0 -I{} code --install-extension '{}' --force\n"
+            printf "case \"\$(uname -s)-\$(uname -m)\" in\n"
+            printf "  Linux-x86_64) vsix_target=linux-x64 ;;\n"
+            printf "  Darwin-arm64) vsix_target=darwin-arm64 ;;\n"
+            printf "  MINGW*|MSYS*|CYGWIN*) vsix_target=win32-x64 ;;\n"
+            printf "  *) echo \"No VSIX target for this host.\"; exit 1 ;;\n"
+            printf "esac\n"
+            printf "gh run download %s -R %s -n \"vscode-vsix-\${vsix_target}\" -D nx-vsix-artifacts\n" "${run_id}" "${repository}"
+            printf "vsix=\"\$(find nx-vsix-artifacts -name '*.vsix' -type f -print -quit)\"\n"
+            printf "code --install-extension \"\${vsix}\" --force\n"
             printf "\`\`\`\n"
           } > "${body_path}"
         fi
 
-        gh api "repos/${repository}/issues/${pr_number}/comments" --paginate > "${work_dir}/comments.json"
-        comment_id="$(jq -r --arg marker "${marker}" ".[] | select(.user.type == \"Bot\") | select(.body | contains(\$marker)) | .id" "${work_dir}/comments.json" | head -n 1)"
+        gh api "repos/${repository}/issues/${pr_number}/comments" --paginate --jq ".[]" > "${work_dir}/comments.ndjson"
+        comment_id="$(jq -rs --arg marker "${marker}" 'map(select(.user.type == "Bot") | select(.body | contains($marker)))[0].id // empty' "${work_dir}/comments.ndjson")"
         jq -n --rawfile body "${body_path}" "{body: \$body}" > "${work_dir}/comment.json"
 
         if [ -n "${comment_id}" ]; then
