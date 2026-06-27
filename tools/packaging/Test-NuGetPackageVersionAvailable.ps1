@@ -1,7 +1,7 @@
 param(
     [Parameter(Mandatory = $true)]
     [string] $PackagePath,
-    [string] $PackageId = 'NxLang.Runtime',
+    [string] $PackageId = 'NxLang.Sdk',
     [string] $RegistryUrl = 'https://api.nuget.org/v3/index.json'
 )
 

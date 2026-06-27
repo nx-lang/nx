@@ -60,8 +60,8 @@ jobs:
           echo "version=${tag#v}"
         } >> "${GITHUB_OUTPUT}"
 
-  native-runtime:
-    name: Build native runtime (${{ matrix.os }})
+  native-sdk:
+    name: Build native SDK (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     needs: validate
     if: ${{ needs.validate.outputs.should_release == 'true' }}
@@ -82,14 +82,14 @@ jobs:
         ./init.ps1 -UpgradePrerequisites
         dotnet --info
       shell: pwsh
-    - name: Stage NX native runtime
-      run: tools/packaging/Stage-NxRuntimeNativeArtifact.ps1 -Configuration ${{ env.BUILDCONFIGURATION }}
+    - name: Stage NX native SDK
+      run: tools/packaging/Stage-NxSdkNativeArtifact.ps1 -Configuration ${{ env.BUILDCONFIGURATION }}
       shell: pwsh
-    - name: Upload NX native runtime artifact
+    - name: Upload NX native SDK artifact
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
-        name: nx-runtime-native-${{ runner.os }}
-        path: artifacts/nx-runtime
+        name: nx-sdk-native-${{ runner.os }}
+        path: artifacts/nx-sdk
         if-no-files-found: error
 
   package:
@@ -97,7 +97,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
     - validate
-    - native-runtime
+    - native-sdk
     if: ${{ needs.validate.outputs.should_release == 'true' }}
     steps:
     - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
@@ -119,25 +119,25 @@ jobs:
         -RefName '${{ needs.validate.outputs.tag }}'
         -GitHubEnvPath $env:GITHUB_ENV
         -GitHubOutputPath $env:GITHUB_OUTPUT
-    - name: Download NX native runtime artifacts
+    - name: Download NX native SDK artifacts
       uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
       with:
-        pattern: nx-runtime-native-*
-        path: artifacts/nx-runtime
+        pattern: nx-sdk-native-*
+        path: artifacts/nx-sdk
         merge-multiple: true
-    - name: Pack NxLang.Runtime
+    - name: Pack NxLang.Sdk
       run: >
-        dotnet pack bindings/dotnet/src/NxLang.Runtime/NxLang.Runtime.csproj
+        dotnet pack bindings/dotnet/src/NxLang.Sdk/NxLang.Sdk.csproj
         -c ${{ env.BUILDCONFIGURATION }}
         -warnAsError
         -warnNotAsError:NU1901,NU1902,NU1903,NU1904
         -p:Version="${{ steps.versions.outputs.package_version }}"
         -p:PackageVersion="${{ steps.versions.outputs.package_version }}"
         -p:ContinuousIntegrationBuild=true
-    - name: Verify NxLang.Runtime package
+    - name: Verify NxLang.Sdk package
       run: |
-        $package = Get-ChildItem bin/Packages/${{ env.BUILDCONFIGURATION }}/NxLang.Runtime.*.nupkg | Select-Object -First 1
-        tools/packaging/Test-NxRuntimePackage.ps1 -PackagePath $package.FullName
+        $package = Get-ChildItem bin/Packages/${{ env.BUILDCONFIGURATION }}/NxLang.Sdk.*.nupkg | Select-Object -First 1
+        tools/packaging/Test-NxSdkPackage.ps1 -PackagePath $package.FullName
       shell: pwsh
     - name: Upload package artifacts
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

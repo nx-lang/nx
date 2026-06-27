@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <PropertyGroup>
+    <NxSdkRepoRoot Condition="'$(NxSdkRepoRoot)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\..'))</NxSdkRepoRoot>
+    <NxSdkStageNativeLibrary Condition="'$(NxSdkStageNativeLibrary)' == ''">true</NxSdkStageNativeLibrary>
+    <NxSdkFailIfNativeLibraryMissing Condition="'$(NxSdkFailIfNativeLibraryMissing)' == ''">false</NxSdkFailIfNativeLibraryMissing>
+    <NxSdkNativeLibraryConfiguration Condition="'$(NxSdkNativeLibraryConfiguration)' == ''">Release</NxSdkNativeLibraryConfiguration>
+    <NxSdkNativeLibraryFile Condition="$([MSBuild]::IsOSPlatform('Windows'))">nx_ffi.dll</NxSdkNativeLibraryFile>
+    <NxSdkNativeLibraryFile Condition="'$(NxSdkNativeLibraryFile)' == '' and $([MSBuild]::IsOSPlatform('OSX'))">libnx_ffi.dylib</NxSdkNativeLibraryFile>
+    <NxSdkNativeLibraryFile Condition="'$(NxSdkNativeLibraryFile)' == ''">libnx_ffi.so</NxSdkNativeLibraryFile>
+    <_NxSdkDebugLibraryDir>$([System.IO.Path]::Combine('$(NxSdkRepoRoot)', 'target', 'debug'))</_NxSdkDebugLibraryDir>
+    <_NxSdkReleaseLibraryDir>$([System.IO.Path]::Combine('$(NxSdkRepoRoot)', 'target', 'release'))</_NxSdkReleaseLibraryDir>
+    <_NxSdkDebugLibraryPath>$([System.IO.Path]::Combine('$(_NxSdkDebugLibraryDir)', '$(NxSdkNativeLibraryFile)'))</_NxSdkDebugLibraryPath>
+    <_NxSdkReleaseLibraryPath>$([System.IO.Path]::Combine('$(_NxSdkReleaseLibraryDir)', '$(NxSdkNativeLibraryFile)'))</_NxSdkReleaseLibraryPath>
+  </PropertyGroup>
+
+  <Choose>
+    <When Condition="'$(NxSdkNativeLibraryDir)' == '' and '$(NxSdkNativeLibraryConfiguration)' == 'Release'">
+      <PropertyGroup>
+        <NxSdkNativeLibraryDir>$(_NxSdkReleaseLibraryDir)</NxSdkNativeLibraryDir>
+      </PropertyGroup>
+    </When>
+    <When Condition="'$(NxSdkNativeLibraryDir)' == '' and '$(NxSdkNativeLibraryConfiguration)' == 'Debug'">
+      <PropertyGroup>
+        <NxSdkNativeLibraryDir>$(_NxSdkDebugLibraryDir)</NxSdkNativeLibraryDir>
+      </PropertyGroup>
+    </When>
+  </Choose>
+
+  <Target Name="StageNxSdkNativeLibrary" AfterTargets="Build" Condition="'$(NxSdkStageNativeLibrary)' == 'true'">
+    <PropertyGroup>
+      <_NxSdkNativeLibraryPath>$([System.IO.Path]::Combine('$(NxSdkNativeLibraryDir)', '$(NxSdkNativeLibraryFile)'))</_NxSdkNativeLibraryPath>
+    </PropertyGroup>
+
+    <Error
+      Text="Invalid value for `NxSdkNativeLibraryConfiguration`: '$(NxSdkNativeLibraryConfiguration)'. Supported values are `Debug` and `Release`, or set `NxSdkNativeLibraryDir` explicitly."
+      Condition="'$(NxSdkNativeLibraryDir)' == '' and '$(NxSdkNativeLibraryConfiguration)' != 'Debug' and '$(NxSdkNativeLibraryConfiguration)' != 'Release'" />
+
+    <Warning
+      Text="NX native SDK library was not found at '$(_NxSdkNativeLibraryPath)'. Build `cargo build -p nx-ffi` for `NxSdkNativeLibraryConfiguration=Debug`, or `cargo build --release -p nx-ffi` for `NxSdkNativeLibraryConfiguration=Release`, or set `NxSdkNativeLibraryDir` explicitly before running the managed project."
+      Condition="!Exists('$(_NxSdkNativeLibraryPath)') and '$(NxSdkFailIfNativeLibraryMissing)' != 'true'" />
+
+    <Error
+      Text="NX native SDK library was not found at '$(_NxSdkNativeLibraryPath)'. Build `cargo build -p nx-ffi` for `NxSdkNativeLibraryConfiguration=Debug`, or `cargo build --release -p nx-ffi` for `NxSdkNativeLibraryConfiguration=Release`, or set `NxSdkNativeLibraryDir` explicitly before running the managed project."
+      Condition="!Exists('$(_NxSdkNativeLibraryPath)') and '$(NxSdkFailIfNativeLibraryMissing)' == 'true'" />
+
+    <Copy
+      SourceFiles="$(_NxSdkNativeLibraryPath)"
+      DestinationFolder="$(OutDir)"
+      SkipUnchangedFiles="true"
+      Condition="Exists('$(_NxSdkNativeLibraryPath)')" />
+  </Target>
+</Project>

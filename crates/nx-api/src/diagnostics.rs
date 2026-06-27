@@ -100,6 +100,25 @@ pub fn diagnostics_to_api(diagnostics: &[Diagnostic], source: &str) -> Vec<NxDia
     diagnostics_to_api_with_source_map(diagnostics, source, None)
 }
 
+/// Converts internal [`Diagnostic`] values into [`NxDiagnostic`] values using a caller-provided
+/// source map for logical source identities.
+///
+/// `fallback_source` is used when a diagnostic label does not match any provided source entry.
+pub fn diagnostics_to_api_with_source_entries<'a, I>(
+    diagnostics: &[Diagnostic],
+    fallback_source: &str,
+    sources: I,
+) -> Vec<NxDiagnostic>
+where
+    I: IntoIterator<Item = (&'a str, &'a str)>,
+{
+    let sources = sources
+        .into_iter()
+        .map(|(identity, source)| (identity.to_string(), Arc::<str>::from(source)))
+        .collect::<FxHashMap<_, _>>();
+    diagnostics_to_api_with_sources(diagnostics, fallback_source, &sources)
+}
+
 pub(crate) fn diagnostics_to_api_with_sources(
     diagnostics: &[Diagnostic],
     fallback_source: &str,

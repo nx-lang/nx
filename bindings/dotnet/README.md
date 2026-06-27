@@ -1,8 +1,9 @@
-# NxLang.Runtime - NX .NET Bindings
+# NxLang.Sdk - NX .NET SDK
 
-`.NET 10` bindings for the NX language runtime, implemented in C# and backed by the native Rust FFI library.
+`.NET 10` SDK for NX host, compiler, diagnostics, program artifact, IR generation, and evaluation
+workflows, implemented in C# and backed by the native Rust FFI library.
 
-- **Assembly**: `NxLang.Runtime.dll`
+- **Assembly**: `NxLang.Sdk.dll`
 - **Namespace**: `NxLang.Nx`
 - **Primary language**: C#
 - **Support posture**: C# usage is tested and documented today. Other .NET languages should work because the binding is a normal managed assembly over a native library, but they are not yet validated in this repository.
@@ -29,7 +30,7 @@
 ```
 
 The managed binding validates the native ABI version at startup. Published package consumers get
-the native runtime through normal .NET runtime asset restore, build, test, and publish behavior.
+the native SDK library through normal .NET runtime asset restore, build, test, and publish behavior.
 
 ## Prerequisites
 
@@ -39,7 +40,7 @@ the native runtime through normal .NET runtime asset restore, build, test, and p
 
 ## Build
 
-Build the native runtime first:
+Build the native SDK library first:
 
 ```bash
 cargo build --release -p nx-ffi
@@ -57,32 +58,32 @@ Run the C# test suite:
 dotnet test bindings/dotnet/NxLang.sln
 ```
 
-The test project imports `bindings/dotnet/build/NxLang.Runtime.targets`, which copies the native library from `target/release` into the test output directory.
+The test project imports `bindings/dotnet/build/NxLang.Sdk.targets`, which copies the native library from `target/release` into the test output directory.
 
 To test against a debug native build instead, build `nx_ffi` without `--release` and pass the native
 library configuration explicitly:
 
 ```bash
 cargo build -p nx-ffi
-dotnet test bindings/dotnet/NxLang.sln -p:NxRuntimeNativeLibraryConfiguration=Debug
+dotnet test bindings/dotnet/NxLang.sln -p:NxSdkNativeLibraryConfiguration=Debug
 ```
 
 ## Supported Integration Workflows
 
 ### Primary: `PackageReference`
 
-Applications should reference the published runtime package:
+Applications should reference the published SDK package:
 
 ```xml
 <ItemGroup>
-  <PackageReference Include="NxLang.Runtime" Version="0.1.0" />
+  <PackageReference Include="NxLang.Sdk" Version="0.1.0" />
 </ItemGroup>
 ```
 
-The package contains `NxLang.Runtime.dll` and the native `nx_ffi` runtime assets for supported
+The package contains `NxLang.Sdk.dll` and the native `nx_ffi` runtime assets for supported
 runtime identifiers under `runtimes/<rid>/native/`. Package consumers do not need to vendor the NX
-repository, import `bindings/dotnet/build/NxLang.Runtime.targets`, or install Rust just to build,
-test, run, or publish an application that uses `NxLang.Runtime`.
+repository, import `bindings/dotnet/build/NxLang.Sdk.targets`, or install Rust just to build,
+test, run, or publish an application that uses `NxLang.Sdk`.
 
 Publish for a supported runtime identifier when creating a deployable application:
 
@@ -103,7 +104,7 @@ them as content, or otherwise stage them from the consuming application.
 
 Cross-package CI setup is documented in
 [docs/deployment-setup.md](../../docs/deployment-setup.md), and the recurring release runbook is in
-[docs/deployment.md](../../docs/deployment.md). The `NxLang.Runtime` package is published from the
+[docs/deployment.md](../../docs/deployment.md). The `NxLang.Sdk` package is published from the
 complete `deployables-Complete` artifact after package metadata verification and RID smoke tests
 pass. Production publishing prefers NuGet.org trusted publishing with `NUGET_API_KEY` as a gated
 fallback.
@@ -114,25 +115,25 @@ Use a direct project reference to the managed binding and import the staging tar
 
 ```xml
 <ItemGroup>
-  <ProjectReference Include="external/nx/bindings/dotnet/src/NxLang.Runtime/NxLang.Runtime.csproj" />
+  <ProjectReference Include="external/nx/bindings/dotnet/src/NxLang.Sdk/NxLang.Sdk.csproj" />
 </ItemGroup>
 
-<Import Project="external/nx/bindings/dotnet/build/NxLang.Runtime.targets" />
+<Import Project="external/nx/bindings/dotnet/build/NxLang.Sdk.targets" />
 ```
 
-Use this flow when contributing to NX or intentionally testing unreleased runtime changes:
+Use this flow when contributing to NX or intentionally testing unreleased SDK changes:
 
 1. Vendor NX source into your repository.
 2. Run `cargo build --release -p nx-ffi` in the vendored NX checkout.
 3. Build your .NET solution.
-4. Let `NxLang.Runtime.targets` copy the native library from `target/release` into your application output.
+4. Let `NxLang.Sdk.targets` copy the native library from `target/release` into your application output.
 
 Optional properties:
 
-- `NxRuntimeNativeLibraryConfiguration`: choose `Debug` or `Release` when `NxRuntimeNativeLibraryDir` is not set. Defaults to `Release`.
-- `NxRuntimeNativeLibraryDir`: override the directory that contains the built native library.
-- `NxRuntimeStageNativeLibrary`: set to `false` if you want to stage the library yourself.
-- `NxRuntimeFailIfNativeLibraryMissing`: set to `true` to fail the build when the native library is missing.
+- `NxSdkNativeLibraryConfiguration`: choose `Debug` or `Release` when `NxSdkNativeLibraryDir` is not set. Defaults to `Release`.
+- `NxSdkNativeLibraryDir`: override the directory that contains the built native library.
+- `NxSdkStageNativeLibrary`: set to `false` if you want to stage the library yourself.
+- `NxSdkFailIfNativeLibraryMissing`: set to `true` to fail the build when the native library is missing.
 
 ### Advanced: Built Assembly Reference
 
@@ -142,15 +143,15 @@ If you cannot use `ProjectReference`, reference the built managed assembly direc
 - **macOS**: `target/release/libnx_ffi.dylib`
 - **Windows**: `target/release/nx_ffi.dll`
 
-The managed runtime looks for the native library in the application base directory and the managed assembly directory.
+The managed SDK looks for the native library in the application base directory and the managed assembly directory.
 
 ### Migration From Source Consumption
 
 To migrate an application from a vendored NX checkout to the package:
 
-1. Remove the `ProjectReference` to `bindings/dotnet/src/NxLang.Runtime/NxLang.Runtime.csproj`.
-2. Remove the manual import of `bindings/dotnet/build/NxLang.Runtime.targets`.
-3. Add `PackageReference Include="NxLang.Runtime"`.
+1. Remove the `ProjectReference` to `bindings/dotnet/src/NxLang.Sdk/NxLang.Sdk.csproj`.
+2. Remove the manual import of `bindings/dotnet/build/NxLang.Sdk.targets`.
+3. Add `PackageReference Include="NxLang.Sdk"`.
 4. Remove consumer-side `cargo build -p nx-ffi` steps that only existed to stage the runtime.
 5. Keep application-specific `.nx` files in the application and stage them with application-owned
    content rules.
@@ -312,7 +313,7 @@ type-mismatch error path.
 
 Typed generated DTOs use the same member-string contract. Generated enums emit an explicit
 wire-format mapping type and rely on `NxEnumJsonConverter<TEnum, TWire>` and
-`NxEnumMessagePackFormatter<TEnum, TWire>` from `NxLang.Runtime` to (de)serialize the authored
+`NxEnumMessagePackFormatter<TEnum, TWire>` from `NxLang.Sdk` to (de)serialize the authored
 member string.
 
 Use the raw APIs when you need a schema-free value tree. Use typed generated models when you want
@@ -551,24 +552,24 @@ Library generation writes one `.g.cs` file per contributing module under the req
 directory. Generated enums use the authored NX member spellings for both JSON and MessagePack, the
 same bare-string shape raw runtime payloads carry. Generated discriminated unions emit an abstract
 root plus sealed case DTOs whose JSON and MessagePack attributes use the canonical `$type` map
-shape. Generated C# enums and unions rely on shared helpers from `NxLang.Runtime` under
+shape. Generated C# enums and unions rely on shared helpers from `NxLang.Sdk` under
 `NxLang.Nx.Serialization`, so the project that compiles the generated files must reference
-`NxLang.Runtime` in addition to the serializer packages it already uses. The generated enum output
+`NxLang.Sdk` in addition to the serializer packages it already uses. The generated enum output
 emits the enum itself plus an explicit wire-format mapping type; the JSON converter and MessagePack
-formatter implementation comes from the shared runtime assembly.
+formatter implementation comes from the shared SDK assembly.
 
 ## Troubleshooting
 
-### Native runtime could not be found
+### Native SDK library could not be found
 
 Package consumers should restore, build, and publish for one of the supported runtime identifiers
-so the `NxLang.Runtime` package can stage the matching native runtime asset. Source consumers should
-build `crates/nx-ffi` and import `bindings/dotnet/build/NxLang.Runtime.targets` to automate that
+so the `NxLang.Sdk` package can stage the matching native SDK asset. Source consumers should
+build `crates/nx-ffi` and import `bindings/dotnet/build/NxLang.Sdk.targets` to automate that
 copy step.
 
-### Native runtime ABI mismatch
+### Native SDK ABI mismatch
 
-Rebuild both the managed and native pieces from the same NX source revision. `NxLang.Runtime.dll` and `nx_ffi` must come from the same checkout.
+Rebuild both the managed and native pieces from the same NX source revision. `NxLang.Sdk.dll` and `nx_ffi` must come from the same checkout.
 
 ### Entry point not found for new component lifecycle methods
 
@@ -576,7 +577,7 @@ Build or rebuild the native `nx_ffi` library for the same configuration as your 
 
 ```bash
 cargo build -p nx-ffi
-dotnet test bindings/dotnet/NxLang.sln -p:NxRuntimeNativeLibraryConfiguration=Debug
+dotnet test bindings/dotnet/NxLang.sln -p:NxSdkNativeLibraryConfiguration=Debug
 ```
 
 ## Project Structure
@@ -584,9 +585,9 @@ dotnet test bindings/dotnet/NxLang.sln -p:NxRuntimeNativeLibraryConfiguration=De
 ```text
 bindings/dotnet/
 ├── build/
-│   └── NxLang.Runtime.targets
+│   └── NxLang.Sdk.targets
 ├── src/
-│   └── NxLang.Runtime/
+│   └── NxLang.Sdk/
 │       ├── Interop/
 │       ├── Serialization/
 │       ├── NxRuntime.cs
@@ -594,7 +595,7 @@ bindings/dotnet/
 │       ├── NxSeverity.cs
 │       └── Properties/
 ├── tests/
-│   └── NxLang.Runtime.Tests/
+│   └── NxLang.Sdk.Tests/
 ├── Directory.Packages.props
 ├── NxLang.sln
 └── README.md

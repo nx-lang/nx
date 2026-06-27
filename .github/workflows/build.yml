@@ -48,8 +48,8 @@ jobs:
     - name: ⚙️ Set pipeline variables based on source
       run: tools/variables/_define.ps1
       shell: pwsh
-    - name: 🛠 Build NX native runtime
-      run: tools/packaging/Stage-NxRuntimeNativeArtifact.ps1 -Configuration ${{ env.BUILDCONFIGURATION }}
+    - name: 🛠 Build NX native SDK
+      run: tools/packaging/Stage-NxSdkNativeArtifact.ps1 -Configuration ${{ env.BUILDCONFIGURATION }}
       shell: pwsh
     - name: 🛠 build
       run: dotnet build bindings/dotnet/NxLang.sln -t:build --no-restore -c ${{ env.BUILDCONFIGURATION }} -warnAsError -warnNotAsError:NU1901,NU1902,NU1903,NU1904 /bl:"${{ runner.temp }}/_artifacts/build_logs/build.binlog"
@@ -66,11 +66,11 @@ jobs:
     - name: 📢 Publish artifacts
       uses: ./.github/actions/publish-artifacts
       if: cancelled() == false
-    - name: 📢 Upload NX native runtime artifact
+    - name: 📢 Upload NX native SDK artifact
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
-        name: nx-runtime-native-${{ runner.os }}
-        path: artifacts/nx-runtime
+        name: nx-sdk-native-${{ runner.os }}
+        path: artifacts/nx-sdk
       if: cancelled() == false
     - name: 📢 Publish code coverage results to codecov.io
       run: ./tools/publish-CodeCov.ps1 -CodeCovToken "${{ env.codecov_token }}" -PathToCodeCoverage "${{ runner.temp }}/_artifacts/coverageResults" -Name "${{ runner.os }} Coverage Results" -Flags "${{ runner.os }}"
@@ -104,25 +104,25 @@ jobs:
         -PullRequestNumber '${{ github.event.pull_request.number }}'
         -GitHubEnvPath $env:GITHUB_ENV
         -GitHubOutputPath $env:GITHUB_OUTPUT
-    - name: 🔻 Download NX native runtime artifacts
+    - name: 🔻 Download NX native SDK artifacts
       uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
       with:
-        pattern: nx-runtime-native-*
-        path: artifacts/nx-runtime
+        pattern: nx-sdk-native-*
+        path: artifacts/nx-sdk
         merge-multiple: true
-    - name: 📦 Pack NxLang.Runtime
+    - name: 📦 Pack NxLang.Sdk
       run: >
-        dotnet pack bindings/dotnet/src/NxLang.Runtime/NxLang.Runtime.csproj
+        dotnet pack bindings/dotnet/src/NxLang.Sdk/NxLang.Sdk.csproj
         -c ${{ env.BUILDCONFIGURATION }}
         -warnAsError
         -warnNotAsError:NU1901,NU1902,NU1903,NU1904
         -p:Version="${{ steps.versions.outputs.package_version }}"
         -p:PackageVersion="${{ steps.versions.outputs.package_version }}"
         -p:ContinuousIntegrationBuild=true
-    - name: 🔎 Verify NxLang.Runtime package
+    - name: 🔎 Verify NxLang.Sdk package
       run: |
-        $package = Get-ChildItem bin/Packages/${{ env.BUILDCONFIGURATION }}/NxLang.Runtime.*.nupkg | Select-Object -First 1
-        tools/packaging/Test-NxRuntimePackage.ps1 -PackagePath $package.FullName
+        $package = Get-ChildItem bin/Packages/${{ env.BUILDCONFIGURATION }}/NxLang.Sdk.*.nupkg | Select-Object -First 1
+        tools/packaging/Test-NxSdkPackage.ps1 -PackagePath $package.FullName
       shell: pwsh
     - name: 📢 Upload complete deployables
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -158,10 +158,10 @@ jobs:
       with:
         name: deployables-Complete
         path: ${{ runner.temp }}/deployables
-    - name: 🧪 Smoke-test NxLang.Runtime package
+    - name: 🧪 Smoke-test NxLang.Sdk package
       run: |
-        $package = Get-ChildItem '${{ runner.temp }}/deployables/NxLang.Runtime.*.nupkg' | Select-Object -First 1
-        tools/packaging/SmokeTest-NxRuntimePackage.ps1 -PackagePath $package.FullName -RuntimeIdentifier ${{ matrix.rid }}
+        $package = Get-ChildItem '${{ runner.temp }}/deployables/NxLang.Sdk.*.nupkg' | Select-Object -First 1
+        tools/packaging/SmokeTest-NxSdkPackage.ps1 -PackagePath $package.FullName -RuntimeIdentifier ${{ matrix.rid }}
       shell: pwsh
 
   editor-assets:

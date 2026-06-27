@@ -53,7 +53,7 @@ $nativeLibraryConfiguration = if ($Configuration -eq 'Debug') { 'Debug' } else {
 & $dotnet test $DotNetSolution `
     --no-build `
     -c $Configuration `
-    -p:NxRuntimeNativeLibraryConfiguration=$nativeLibraryConfiguration `
+    -p:NxSdkNativeLibraryConfiguration=$nativeLibraryConfiguration `
     --filter "TestCategory!=FailsInCloudTest" `
     --collect "Code Coverage;Format=cobertura" `
     --settings "$PSScriptRoot/test.runsettings" `

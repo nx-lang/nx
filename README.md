@@ -174,7 +174,7 @@ auth/logging policy, resource limits, and isolate host wrappers are intentionall
 `nx-codegen`.
 
 .NET hosts can build an `NxProgramArtifact` and call `GenerateJSProgramModule(...)` to invoke the same
-codegen path through `NxLang.Runtime`:
+codegen path through `NxLang.Sdk`:
 
 ```csharp
 using NxLang.Nx;

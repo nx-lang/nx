@@ -107,7 +107,7 @@ jobs:
         import xml.etree.ElementTree as ET
 
         directory = Path(sys.argv[1])
-        target_id = "NxLang.Runtime"
+        target_id = "NxLang.Sdk"
         matches = []
 
         for package_path in sorted(directory.rglob("*.nupkg")):
@@ -201,8 +201,8 @@ jobs:
             printf "Editor-assets npm version: \`%s\`\n\n" "${npm_version}"
             printf "\`\`\`bash\n"
             printf "gh run download %s -R %s -n deployables-Complete -D nx-package-artifacts\n" "${run_id}" "${repository}"
-            printf "dotnet new console -n nx-runtime-test\n"
-            printf "dotnet add nx-runtime-test/nx-runtime-test.csproj package NxLang.Runtime --version %s --source \"\$(pwd)/nx-package-artifacts\"\n" "${package_version}"
+            printf "dotnet new console -n nx-sdk-test\n"
+            printf "dotnet add nx-sdk-test/nx-sdk-test.csproj package NxLang.Sdk --version %s --source \"\$(pwd)/nx-package-artifacts\"\n" "${package_version}"
             printf "\`\`\`\n\n"
             printf "\`\`\`bash\n"
             printf "gh run download %s -R %s -n editor-assets-package -D nx-editor-assets\n" "${run_id}" "${repository}"

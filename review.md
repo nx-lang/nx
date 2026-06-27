@@ -32,7 +32,7 @@ This means the caller can build and dispose a library artifact, but cannot actua
 
 ### 🟡 Fixed RF3 — `DangerousGetHandle` is dead code on `NxLibraryArtifact`
 
-**File:** [NxLibraryArtifact.cs:91-96](bindings/dotnet/src/NxLang.Runtime/NxLibraryArtifact.cs#L91-L96)
+**File:** [NxLibraryArtifact.cs:91-96](bindings/dotnet/src/NxLang.Sdk/NxLibraryArtifact.cs#L91-L96)
 **Severity:** Low (code quality)
 
 `DangerousGetHandle()` is defined as `internal` on `NxLibraryArtifact` but has no callers. It was presumably copied from `NxProgramArtifact` where it's used by the eval path. Until there is a .NET method that passes the library handle back into native code, this is dead code.

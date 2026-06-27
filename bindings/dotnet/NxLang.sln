@@ -5,11 +5,11 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{B4249CED-EA95-4201-A130-2CFFAD16F6B7}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NxLang.Runtime", "src\NxLang.Runtime\NxLang.Runtime.csproj", "{95D852DE-E010-49A6-9D61-85A13F802305}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NxLang.Sdk", "src\NxLang.Sdk\NxLang.Sdk.csproj", "{95D852DE-E010-49A6-9D61-85A13F802305}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{08CB1744-6075-4C7D-AAFC-392FEA59D6E8}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NxLang.Runtime.Tests", "tests\NxLang.Runtime.Tests\NxLang.Runtime.Tests.csproj", "{E9130D05-EF03-4F6F-A169-4AED4A47FA11}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NxLang.Sdk.Tests", "tests\NxLang.Sdk.Tests\NxLang.Sdk.Tests.csproj", "{E9130D05-EF03-4F6F-A169-4AED4A47FA11}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

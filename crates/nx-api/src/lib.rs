@@ -45,7 +45,9 @@ pub use component::{
     ComponentDispatchEvalResult, ComponentDispatchResult, ComponentEvaluateEvalResult,
     ComponentEvaluateResult, ComponentInitEvalResult, ComponentInitResult,
 };
-pub use diagnostics::{NxDiagnostic, NxDiagnosticLabel, NxSeverity, NxTextSpan};
+pub use diagnostics::{
+    diagnostics_to_api_with_source_entries, NxDiagnostic, NxDiagnosticLabel, NxSeverity, NxTextSpan,
+};
 pub use eval::{
     eval_program_artifact, eval_source, load_library_artifact_from_directory,
     load_program_artifact_from_source, EvalResult,

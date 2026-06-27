@@ -1,0 +1,49 @@
+{
+  "name": "@nx-lang/sdk-node",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Node-only native SDK for NX host, compiler, diagnostics, artifacts, IR generation, and evaluation workflows.",
+  "license": "MIT",
+  "homepage": "https://nx-lang.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nx-lang/nx.git",
+    "directory": "bindings/node"
+  },
+  "files": [
+    "dist",
+    "native/*.node",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
+  },
+  "types": "./dist/src/index.d.ts",
+  "scripts": {
+    "build:native": "node scripts/build-native.mjs",
+    "build:ts": "tsc -p tsconfig.json",
+    "build": "npm run build:native && npm run build:ts",
+    "test": "npm run build && vitest run",
+    "clean": "node scripts/clean.mjs",
+    "rebuild": "npm run clean && npm run build"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.7.2",
+    "@types/node": "^22.20.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  },
+  "napi": {
+    "name": "nx_sdk_node",
+    "triples": {
+      "defaults": true
+    }
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

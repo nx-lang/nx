@@ -21,7 +21,7 @@ Recommended protection:
 
 Set up ownership before enabling publication:
 
-- NuGet.org: reserve or own `NxLang.Runtime`.
+- NuGet.org: reserve or own `NxLang.Sdk`.
 - npm: own the `@nx-lang` scope and the `@nx-lang/language` package.
 - Visual Studio Marketplace: own publisher `nx-lang` and extension `nx-language`.
 - Open VSX: own namespace `nx-lang` and extension `nx-language`.

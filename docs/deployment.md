@@ -11,7 +11,7 @@ editor-assets, and VSIX artifacts without public registry credentials.
 Production publishing has two reviewed release tracks:
 
 - Package releases use tags like `v1.2.3`. The tag workflow creates a draft GitHub Release with
-  verified `NxLang.Runtime` `.nupkg` and `.snupkg` assets, the `@nx-lang/language` npm tarball, a
+  verified `NxLang.Sdk` `.nupkg` and `.snupkg` assets, the `@nx-lang/language` npm tarball, a
   release manifest, and checksums.
 - VS Code extension releases use tags like `vscode-v1.2.3`. The tag workflow creates a draft GitHub
   Release with verified VSIX assets, a release manifest, and checksums.
@@ -79,12 +79,12 @@ Only stable `major.minor.patch` release tags are supported in this implementatio
 The trusted PR artifact comment workflow posts commands after successful PR artifact builds. Use the
 specific workflow run ID from the comment so the downloaded files match the verified build.
 
-NuGet runtime package test:
+NuGet SDK package test:
 
 ```bash
 gh run download <run-id> -R nx-lang/nx -n deployables-Complete -D nx-package-artifacts
-dotnet new console -n nx-runtime-test
-dotnet add nx-runtime-test/nx-runtime-test.csproj package NxLang.Runtime --version <package-version> --source "$(pwd)/nx-package-artifacts"
+dotnet new console -n nx-sdk-test
+dotnet add nx-sdk-test/nx-sdk-test.csproj package NxLang.Sdk --version <package-version> --source "$(pwd)/nx-package-artifacts"
 ```
 
 npm editor-assets package test:
@@ -109,15 +109,15 @@ find nx-vsix-artifacts -name '*.vsix' -type f -print0 | xargs -0 -I{} code --ins
 Use workflow or GitHub Release artifacts rather than rebuilding locally:
 
 ```bash
-unzip -l NxLang.Runtime.*.nupkg
-unzip -l NxLang.Runtime.*.snupkg
+unzip -l NxLang.Sdk.*.nupkg
+unzip -l NxLang.Sdk.*.snupkg
 tar -tf nx-lang-language-*.tgz
 unzip -l nx-language-*.vsix
 sha256sum -c release-checksums.txt
 ```
 
-For the runtime package, `tools/packaging/Test-NxRuntimePackage.ps1` verifies metadata and native
-runtime assets. For editor assets, run `pnpm run verify:package` and `pnpm run smoke:package` from
+For the SDK package, `tools/packaging/Test-NxSdkPackage.ps1` verifies metadata and native SDK
+assets. For editor assets, run `pnpm run verify:package` and `pnpm run smoke:package` from
 `src/vscode`.
 
 ## Repair A Partial Publish
@@ -144,7 +144,7 @@ Marketplace or Open VSX publication.
 For a local emergency repair from already-downloaded assets:
 
 ```bash
-dotnet nuget push NxLang.Runtime.*.nupkg --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
+dotnet nuget push NxLang.Sdk.*.nupkg --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
 pnpm run publish:vsce -- nx-language-*.vsix
 pnpm run publish:ovsx -- nx-language-*.vsix
 ```

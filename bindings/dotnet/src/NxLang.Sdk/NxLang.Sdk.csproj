@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>NxLang.Nx</RootNamespace>
+    <PackageId>NxLang.Sdk</PackageId>
+    <Title>NX .NET SDK</Title>
+    <Description>Managed .NET SDK for NX host, compiler, diagnostics, program artifacts, IR generation, and evaluation workflows with packaged native nx_ffi SDK assets.</Description>
+    <PackageTags>nx;sdk;runtime;compiler;binding;ffi;language</PackageTags>
+    <PackageProjectUrl>https://github.com/nx-lang/nx</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/nx-lang/nx</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <NxSdkNativePackageAssetsRoot Condition="'$(NxSdkNativePackageAssetsRoot)' == ''">$(RepoRootPath)artifacts\nx-sdk\</NxSdkNativePackageAssetsRoot>
+    <NxSdkSupportedRids Condition="'$(NxSdkSupportedRids)' == ''">linux-x64;osx-arm64;win-x64</NxSdkSupportedRids>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MessagePack" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="" />
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('$(NxSdkNativePackageAssetsRoot)runtimes')">
+    <None
+      Include="$(NxSdkNativePackageAssetsRoot)runtimes\**\*"
+      Pack="true"
+      PackagePath="runtimes" />
+  </ItemGroup>
+
+  <Target Name="ValidateNxSdkNativePackageAssets" BeforeTargets="GenerateNuspec" Condition="'$(IsPackable)' != 'false' and '$(NxSdkSkipNativePackageAssetValidation)' != 'true'">
+    <ItemGroup>
+      <_NxSdkSupportedRid Include="$(NxSdkSupportedRids)" />
+      <_NxSdkExpectedNativePackageAsset
+        Include="$(NxSdkNativePackageAssetsRoot)runtimes\%(_NxSdkSupportedRid.Identity)\native\libnx_ffi.so"
+        Condition="$([System.String]::Copy('%(_NxSdkSupportedRid.Identity)').StartsWith('linux-'))" />
+      <_NxSdkExpectedNativePackageAsset
+        Include="$(NxSdkNativePackageAssetsRoot)runtimes\%(_NxSdkSupportedRid.Identity)\native\libnx_ffi.dylib"
+        Condition="$([System.String]::Copy('%(_NxSdkSupportedRid.Identity)').StartsWith('osx-'))" />
+      <_NxSdkExpectedNativePackageAsset
+        Include="$(NxSdkNativePackageAssetsRoot)runtimes\%(_NxSdkSupportedRid.Identity)\native\nx_ffi.dll"
+        Condition="$([System.String]::Copy('%(_NxSdkSupportedRid.Identity)').StartsWith('win-'))" />
+      <_NxSdkMissingNativePackageAsset Include="@(_NxSdkExpectedNativePackageAsset)" Condition="!Exists('%(Identity)')" />
+    </ItemGroup>
+
+    <Error
+      Text="Missing NX native SDK asset '%(_NxSdkMissingNativePackageAsset.Identity)'. Run tools/packaging/Stage-NxSdkNativeArtifact.ps1 for every supported RID, or set NxSdkSkipNativePackageAssetValidation=true for non-release local packing."
+      Condition="'@(_NxSdkMissingNativePackageAsset)' != ''" />
+  </Target>
+</Project>

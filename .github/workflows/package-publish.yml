@@ -127,12 +127,12 @@ jobs:
         }
 
         Add-Type -AssemblyName System.IO.Compression.FileSystem
-        $nupkg = @(Get-ChildItem $assets -File -Filter 'NxLang.Runtime.*.nupkg')
-        $snupkg = @(Get-ChildItem $assets -File -Filter 'NxLang.Runtime.*.snupkg')
+        $nupkg = @(Get-ChildItem $assets -File -Filter 'NxLang.Sdk.*.nupkg')
+        $snupkg = @(Get-ChildItem $assets -File -Filter 'NxLang.Sdk.*.snupkg')
         $tgz = @(Get-ChildItem $assets -File -Filter '*.tgz')
 
         if ($nupkg.Count -ne 1 -or $snupkg.Count -ne 1 -or $tgz.Count -ne 1) {
-            throw 'Package releases must include exactly one NxLang.Runtime .nupkg, one .snupkg, and one npm .tgz asset.'
+            throw 'Package releases must include exactly one NxLang.Sdk .nupkg, one .snupkg, and one npm .tgz asset.'
         }
 
         $archive = [System.IO.Compression.ZipFile]::OpenRead($nupkg[0].FullName)
@@ -168,7 +168,7 @@ jobs:
     - name: Check NuGet version
       shell: pwsh
       run: |
-        $package = Get-ChildItem "$env:RUNNER_TEMP/release-assets/NxLang.Runtime.*.nupkg" | Select-Object -First 1
+        $package = Get-ChildItem "$env:RUNNER_TEMP/release-assets/NxLang.Sdk.*.nupkg" | Select-Object -First 1
         tools/packaging/Test-NuGetPackageVersionAvailable.ps1 -PackagePath $package.FullName
     - name: Check npm version
       id: npm-version
