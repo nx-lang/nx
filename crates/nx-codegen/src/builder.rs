@@ -15,7 +15,7 @@ use nx_hir::{
 };
 use nx_interpreter::{ResolvedItemKind, ResolvedModule, ResolvedModuleSource, RuntimeModuleId};
 use nx_types::{ModuleArtifact, TypeEnvironment};
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Builds a target-neutral code generation program from a resolved program artifact.
 pub fn build_codegen_program(artifact: &ProgramArtifact) -> Result<CodegenProgram, CodegenError> {
@@ -31,8 +31,9 @@ pub fn build_codegen_program(artifact: &ProgramArtifact) -> Result<CodegenProgra
 
     let mut diagnostics = Vec::new();
     let mut modules = Vec::new();
+    let mut prepared_cache = PreparedModuleCache::default();
     for module in artifact.resolved_program.modules() {
-        match build_module(artifact, module, &mut diagnostics) {
+        match build_module(artifact, module, &mut prepared_cache, &mut diagnostics) {
             Some(module) => modules.push(module),
             None => {}
         }
@@ -97,6 +98,7 @@ pub fn build_codegen_program(artifact: &ProgramArtifact) -> Result<CodegenProgra
 fn build_module(
     artifact: &ProgramArtifact,
     module: &ResolvedModule,
+    prepared_cache: &mut PreparedModuleCache,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<CodegenModule> {
     let Some(module_artifact) = module_artifact_for(artifact, module) else {
@@ -123,6 +125,7 @@ fn build_module(
         if let Some(declaration) = build_declaration(
             artifact,
             module,
+            prepared_cache,
             lowered_module.as_ref(),
             &module_artifact.type_env,
             reference,
@@ -200,9 +203,33 @@ impl LexicalScope {
     }
 }
 
+#[derive(Debug, Default)]
+struct PreparedModuleCache {
+    modules: FxHashMap<u32, PreparedModule>,
+}
+
+impl PreparedModuleCache {
+    fn get<'a>(
+        &'a mut self,
+        artifact: &ProgramArtifact,
+        module: &ResolvedModule,
+    ) -> &'a PreparedModule {
+        let key = module.id.as_u32();
+        if !self.modules.contains_key(&key) {
+            let prepared = build_prepared_module_for(artifact, module);
+            self.modules.insert(key, prepared);
+        }
+
+        self.modules
+            .get(&key)
+            .expect("prepared module should be cached")
+    }
+}
+
 fn build_declaration(
     artifact: &ProgramArtifact,
     resolved_module: &ResolvedModule,
+    prepared_cache: &mut PreparedModuleCache,
     lowered_module: &LoweredModule,
     type_env: &TypeEnvironment,
     reference: CodegenReference,
@@ -219,6 +246,7 @@ fn build_declaration(
             let Some(body) = build_expression(
                 artifact,
                 resolved_module,
+                prepared_cache,
                 lowered_module,
                 type_env,
                 function.body,
@@ -228,7 +256,13 @@ fn build_declaration(
                 return None;
             };
             CodegenDeclarationKind::Function {
-                params: build_params(artifact, resolved_module, &function.params, diagnostics)?,
+                params: build_params(
+                    artifact,
+                    resolved_module,
+                    prepared_cache,
+                    &function.params,
+                    diagnostics,
+                )?,
                 body,
                 return_type: type_env.get_expr_type(function.body).cloned(),
             }
@@ -238,6 +272,7 @@ fn build_declaration(
             let Some(expr) = build_expression(
                 artifact,
                 resolved_module,
+                prepared_cache,
                 lowered_module,
                 type_env,
                 value.value,
@@ -262,6 +297,7 @@ fn build_declaration(
             fields: build_record_fields(
                 artifact,
                 resolved_module,
+                prepared_cache,
                 lowered_module,
                 type_env,
                 &record.properties,
@@ -278,6 +314,7 @@ fn build_declaration(
                         fields: build_union_case_fields(
                             artifact,
                             resolved_module,
+                            prepared_cache,
                             lowered_module,
                             type_env,
                             &case.fields,
@@ -292,6 +329,7 @@ fn build_declaration(
         Item::Component(component) => CodegenDeclarationKind::Component(build_component(
             artifact,
             resolved_module,
+            prepared_cache,
             lowered_module,
             type_env,
             component,
@@ -309,12 +347,13 @@ fn build_declaration(
 fn build_component(
     artifact: &ProgramArtifact,
     resolved_module: &ResolvedModule,
+    prepared_cache: &mut PreparedModuleCache,
     lowered_module: &LoweredModule,
     type_env: &TypeEnvironment,
     component: &nx_hir::Component,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<CodegenComponent> {
-    let prepared = prepared_module_for(artifact, resolved_module);
+    let prepared = prepared_cache.get(artifact, resolved_module);
     let contract = match nx_hir::effective_component_contract(&prepared, component) {
         Ok(contract) => contract,
         Err(error) => {
@@ -327,6 +366,7 @@ fn build_component(
     let props = build_effective_component_fields(
         artifact,
         resolved_module,
+        prepared_cache,
         &contract.props,
         &mut prop_scope,
         diagnostics,
@@ -339,6 +379,7 @@ fn build_component(
     let state = build_declared_component_fields(
         artifact,
         resolved_module,
+        prepared_cache,
         lowered_module,
         type_env,
         &component.state,
@@ -358,6 +399,7 @@ fn build_component(
             Some(build_expression(
                 artifact,
                 resolved_module,
+                prepared_cache,
                 lowered_module,
                 type_env,
                 body,
@@ -380,6 +422,7 @@ fn build_component(
 fn build_params(
     artifact: &ProgramArtifact,
     resolved_module: &ResolvedModule,
+    prepared_cache: &mut PreparedModuleCache,
     params: &[Param],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Vec<CodegenParam>> {
@@ -389,7 +432,13 @@ fn build_params(
             Some(CodegenParam {
                 name: param.name.as_str().to_string(),
                 ty: param.ty.clone(),
-                resolved_ty: build_type_ref(artifact, resolved_module, &param.ty, diagnostics)?,
+                resolved_ty: build_type_ref(
+                    artifact,
+                    resolved_module,
+                    prepared_cache,
+                    &param.ty,
+                    diagnostics,
+                )?,
                 is_content: param.is_content,
                 span: param.span,
             })
@@ -400,6 +449,7 @@ fn build_params(
 fn build_effective_component_fields(
     artifact: &ProgramArtifact,
     resolved_module: &ResolvedModule,
+    prepared_cache: &mut PreparedModuleCache,
     fields: &[EffectiveField],
     scope: &mut LexicalScope,
     diagnostics: &mut Vec<Diagnostic>,
@@ -421,6 +471,7 @@ fn build_effective_component_fields(
             Some(default) => Some(build_expression_for_module_identity(
                 artifact,
                 resolved_module,
+                prepared_cache,
                 &default.module_identity,
                 default.expr_id,
                 scope,
@@ -431,7 +482,13 @@ fn build_effective_component_fields(
         mapped.push(CodegenComponentField {
             name: field.name.as_str().to_string(),
             ty: field.ty.clone(),
-            resolved_ty: build_type_ref(artifact, owner_module, &field.ty, diagnostics)?,
+            resolved_ty: build_type_ref(
+                artifact,
+                owner_module,
+                prepared_cache,
+                &field.ty,
+                diagnostics,
+            )?,
             is_content: field.is_content,
             is_required: field.is_required,
             default,
@@ -446,6 +503,7 @@ fn build_effective_component_fields(
 fn build_declared_component_fields(
     artifact: &ProgramArtifact,
     resolved_module: &ResolvedModule,
+    prepared_cache: &mut PreparedModuleCache,
     lowered_module: &LoweredModule,
     type_env: &TypeEnvironment,
     fields: &[RecordField],
@@ -458,6 +516,7 @@ fn build_declared_component_fields(
             Some(default) => Some(build_expression(
                 artifact,
                 resolved_module,
+                prepared_cache,
                 lowered_module,
                 type_env,
                 default,
@@ -469,7 +528,13 @@ fn build_declared_component_fields(
         mapped.push(CodegenComponentField {
             name: field.name.as_str().to_string(),
             ty: field.ty.clone(),
-            resolved_ty: build_type_ref(artifact, resolved_module, &field.ty, diagnostics)?,
+            resolved_ty: build_type_ref(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                &field.ty,
+                diagnostics,
+            )?,
             is_content: field.is_content,
             is_required: field.default.is_none() && !matches!(field.ty, ast::TypeRef::Nullable(_)),
             default,
@@ -484,6 +549,7 @@ fn build_declared_component_fields(
 fn build_expression_for_module_identity(
     artifact: &ProgramArtifact,
     diagnostic_module: &ResolvedModule,
+    prepared_cache: &mut PreparedModuleCache,
     module_identity: &str,
     expr_id: ExprId,
     scope: &mut LexicalScope,
@@ -519,6 +585,7 @@ fn build_expression_for_module_identity(
     build_expression(
         artifact,
         owner_module,
+        prepared_cache,
         lowered_module.as_ref(),
         &module_artifact.type_env,
         expr_id,
@@ -530,6 +597,7 @@ fn build_expression_for_module_identity(
 fn build_record_fields(
     artifact: &ProgramArtifact,
     resolved_module: &ResolvedModule,
+    prepared_cache: &mut PreparedModuleCache,
     lowered_module: &LoweredModule,
     type_env: &TypeEnvironment,
     fields: &[nx_hir::RecordField],
@@ -542,6 +610,7 @@ fn build_record_fields(
             Some(default) => Some(build_expression(
                 artifact,
                 resolved_module,
+                prepared_cache,
                 lowered_module,
                 type_env,
                 default,
@@ -553,7 +622,13 @@ fn build_record_fields(
         mapped.push(CodegenRecordField {
             name: field.name.as_str().to_string(),
             ty: field.ty.clone(),
-            resolved_ty: build_type_ref(artifact, resolved_module, &field.ty, diagnostics)?,
+            resolved_ty: build_type_ref(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                &field.ty,
+                diagnostics,
+            )?,
             is_content: field.is_content,
             is_required: field.default.is_none() && !matches!(field.ty, ast::TypeRef::Nullable(_)),
             default,
@@ -567,6 +642,7 @@ fn build_record_fields(
 fn build_union_case_fields(
     artifact: &ProgramArtifact,
     resolved_module: &ResolvedModule,
+    prepared_cache: &mut PreparedModuleCache,
     lowered_module: &LoweredModule,
     type_env: &TypeEnvironment,
     fields: &[nx_hir::UnionCaseField],
@@ -579,6 +655,7 @@ fn build_union_case_fields(
             Some(default) => Some(build_expression(
                 artifact,
                 resolved_module,
+                prepared_cache,
                 lowered_module,
                 type_env,
                 default,
@@ -590,7 +667,13 @@ fn build_union_case_fields(
         mapped.push(CodegenRecordField {
             name: field.name.as_str().to_string(),
             ty: field.ty.clone(),
-            resolved_ty: build_type_ref(artifact, resolved_module, &field.ty, diagnostics)?,
+            resolved_ty: build_type_ref(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                &field.ty,
+                diagnostics,
+            )?,
             is_content: field.is_content,
             is_required: field.default.is_none() && !matches!(field.ty, ast::TypeRef::Nullable(_)),
             default,
@@ -604,6 +687,7 @@ fn build_union_case_fields(
 fn build_expression(
     artifact: &ProgramArtifact,
     resolved_module: &ResolvedModule,
+    prepared_cache: &mut PreparedModuleCache,
     lowered_module: &LoweredModule,
     type_env: &TypeEnvironment,
     expr_id: ExprId,
@@ -627,6 +711,7 @@ fn build_expression(
             let lhs = build_expression(
                 artifact,
                 resolved_module,
+                prepared_cache,
                 lowered_module,
                 type_env,
                 *lhs,
@@ -636,6 +721,7 @@ fn build_expression(
             let rhs = build_expression(
                 artifact,
                 resolved_module,
+                prepared_cache,
                 lowered_module,
                 type_env,
                 *rhs,
@@ -652,6 +738,7 @@ fn build_expression(
             let expr = build_expression(
                 artifact,
                 resolved_module,
+                prepared_cache,
                 lowered_module,
                 type_env,
                 *expr,
@@ -667,6 +754,7 @@ fn build_expression(
             let callee = build_expression(
                 artifact,
                 resolved_module,
+                prepared_cache,
                 lowered_module,
                 type_env,
                 *func,
@@ -678,6 +766,7 @@ fn build_expression(
                 mapped_args.push(build_expression(
                     artifact,
                     resolved_module,
+                    prepared_cache,
                     lowered_module,
                     type_env,
                     *arg,
@@ -699,6 +788,7 @@ fn build_expression(
             let condition = build_expression(
                 artifact,
                 resolved_module,
+                prepared_cache,
                 lowered_module,
                 type_env,
                 *condition,
@@ -708,6 +798,7 @@ fn build_expression(
             let then_branch = build_expression(
                 artifact,
                 resolved_module,
+                prepared_cache,
                 lowered_module,
                 type_env,
                 *then_branch,
@@ -718,6 +809,7 @@ fn build_expression(
                 Some(expr) => Some(Box::new(build_expression(
                     artifact,
                     resolved_module,
+                    prepared_cache,
                     lowered_module,
                     type_env,
                     *expr,
@@ -741,6 +833,7 @@ fn build_expression(
             let scrutinee = build_expression(
                 artifact,
                 resolved_module,
+                prepared_cache,
                 lowered_module,
                 type_env,
                 *scrutinee,
@@ -754,6 +847,7 @@ fn build_expression(
                     patterns.push(build_expression(
                         artifact,
                         resolved_module,
+                        prepared_cache,
                         lowered_module,
                         type_env,
                         *pattern,
@@ -764,6 +858,7 @@ fn build_expression(
                 let body = build_expression(
                     artifact,
                     resolved_module,
+                    prepared_cache,
                     lowered_module,
                     type_env,
                     arm.body,
@@ -776,6 +871,7 @@ fn build_expression(
                 Some(expr) => Some(Box::new(build_expression(
                     artifact,
                     resolved_module,
+                    prepared_cache,
                     lowered_module,
                     type_env,
                     *expr,
@@ -796,6 +892,7 @@ fn build_expression(
             let value = build_expression(
                 artifact,
                 resolved_module,
+                prepared_cache,
                 lowered_module,
                 type_env,
                 *value,
@@ -807,6 +904,7 @@ fn build_expression(
             let body = build_expression(
                 artifact,
                 resolved_module,
+                prepared_cache,
                 lowered_module,
                 type_env,
                 *body,
@@ -832,6 +930,7 @@ fn build_expression(
                         let init = build_expression(
                             artifact,
                             resolved_module,
+                            prepared_cache,
                             lowered_module,
                             type_env,
                             *init,
@@ -848,6 +947,7 @@ fn build_expression(
                     ast::Stmt::Expr(expr, _) => CodegenStatement::Expr(build_expression(
                         artifact,
                         resolved_module,
+                        prepared_cache,
                         lowered_module,
                         type_env,
                         *expr,
@@ -860,6 +960,7 @@ fn build_expression(
                 Some(expr) => Some(Box::new(build_expression(
                     artifact,
                     resolved_module,
+                    prepared_cache,
                     lowered_module,
                     type_env,
                     *expr,
@@ -880,6 +981,7 @@ fn build_expression(
                 mapped_elements.push(build_expression(
                     artifact,
                     resolved_module,
+                    prepared_cache,
                     lowered_module,
                     type_env,
                     *element,
@@ -899,6 +1001,7 @@ fn build_expression(
             let iterable = build_expression(
                 artifact,
                 resolved_module,
+                prepared_cache,
                 lowered_module,
                 type_env,
                 *iterable,
@@ -913,6 +1016,7 @@ fn build_expression(
             let body = build_expression(
                 artifact,
                 resolved_module,
+                prepared_cache,
                 lowered_module,
                 type_env,
                 *body,
@@ -932,6 +1036,7 @@ fn build_expression(
             let base = build_expression(
                 artifact,
                 resolved_module,
+                prepared_cache,
                 lowered_module,
                 type_env,
                 *base,
@@ -941,6 +1046,7 @@ fn build_expression(
             let index = build_expression(
                 artifact,
                 resolved_module,
+                prepared_cache,
                 lowered_module,
                 type_env,
                 *index,
@@ -964,6 +1070,7 @@ fn build_expression(
             match build_union_case_for_member(
                 artifact,
                 resolved_module.id,
+                prepared_cache,
                 lowered_module,
                 *base,
                 member.as_str(),
@@ -1004,6 +1111,7 @@ fn build_expression(
                 let base = build_expression(
                     artifact,
                     resolved_module,
+                    prepared_cache,
                     lowered_module,
                     type_env,
                     *base,
@@ -1027,6 +1135,7 @@ fn build_expression(
                     value: build_expression(
                         artifact,
                         resolved_module,
+                        prepared_cache,
                         lowered_module,
                         type_env,
                         property.value,
@@ -1036,8 +1145,13 @@ fn build_expression(
                     span: property.span,
                 });
             }
-            let (record_name, fields) =
-                record_literal_shape(artifact, resolved_module.id, record.as_str(), diagnostics)?;
+            let (record_name, fields) = record_literal_shape(
+                artifact,
+                resolved_module.id,
+                prepared_cache,
+                record.as_str(),
+                diagnostics,
+            )?;
             CodegenExpressionKind::Record {
                 name: record_name,
                 fields,
@@ -1051,6 +1165,7 @@ fn build_expression(
                 lowered_module,
                 type_env,
                 *element,
+                prepared_cache,
                 scope,
                 diagnostics,
             ) else {
@@ -1090,6 +1205,7 @@ fn build_element_expression(
     lowered_module: &LoweredModule,
     type_env: &TypeEnvironment,
     element_id: nx_hir::ElementId,
+    prepared_cache: &mut PreparedModuleCache,
     scope: &mut LexicalScope,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<CodegenExpressionKind> {
@@ -1102,6 +1218,7 @@ fn build_element_expression(
                 value: build_expression(
                     artifact,
                     resolved_module,
+                    prepared_cache,
                     lowered_module,
                     type_env,
                     property.value,
@@ -1126,6 +1243,7 @@ fn build_element_expression(
         mapped.content.push(build_expression(
             artifact,
             resolved_module,
+            prepared_cache,
             lowered_module,
             type_env,
             *content,
@@ -1139,6 +1257,7 @@ fn build_element_expression(
     match build_union_case_for_tag(
         artifact,
         resolved_module.id,
+        prepared_cache,
         element.tag.as_str(),
         diagnostics,
     ) {
@@ -1172,6 +1291,7 @@ fn build_element_expression(
                 ResolvedItemKind::Function => build_function_element_call(
                     artifact,
                     resolved_module,
+                    prepared_cache,
                     element.span,
                     reference,
                     mapped.properties,
@@ -1181,6 +1301,7 @@ fn build_element_expression(
                 ResolvedItemKind::Component => build_component_descriptor_expression(
                     artifact,
                     resolved_module,
+                    prepared_cache,
                     reference,
                     mapped.properties,
                     mapped.content,
@@ -1190,6 +1311,7 @@ fn build_element_expression(
                     let (record_name, fields) = record_literal_shape(
                         artifact,
                         resolved_module.id,
+                        prepared_cache,
                         element.tag.as_str(),
                         diagnostics,
                     )?;
@@ -1208,15 +1330,20 @@ fn build_element_expression(
 fn build_function_element_call(
     artifact: &ProgramArtifact,
     resolved_module: &ResolvedModule,
+    prepared_cache: &mut PreparedModuleCache,
     element_span: TextSpan,
     function_reference: CodegenReference,
     properties: Vec<CodegenProperty>,
     content: Vec<CodegenExpression>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<CodegenExpressionKind> {
-    let Some(params) =
-        function_params_from_reference(artifact, resolved_module, &function_reference, diagnostics)
-    else {
+    let Some(params) = function_params_from_reference(
+        artifact,
+        resolved_module,
+        prepared_cache,
+        &function_reference,
+        diagnostics,
+    ) else {
         return None;
     };
 
@@ -1276,6 +1403,7 @@ fn build_function_element_call(
 fn build_component_descriptor_expression(
     artifact: &ProgramArtifact,
     resolved_module: &ResolvedModule,
+    prepared_cache: &mut PreparedModuleCache,
     component_reference: CodegenReference,
     properties: Vec<CodegenProperty>,
     content: Vec<CodegenExpression>,
@@ -1315,7 +1443,7 @@ fn build_component_descriptor_expression(
         return None;
     }
 
-    let prepared = prepared_module_for(artifact, target_module);
+    let prepared = prepared_cache.get(artifact, target_module);
     let contract = match nx_hir::effective_component_contract(&prepared, component) {
         Ok(contract) => contract,
         Err(error) => {
@@ -1345,6 +1473,7 @@ fn build_component_descriptor_expression(
 fn function_params_from_reference(
     artifact: &ProgramArtifact,
     resolved_module: &ResolvedModule,
+    prepared_cache: &mut PreparedModuleCache,
     reference: &CodegenReference,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Vec<CodegenParam>> {
@@ -1376,7 +1505,13 @@ fn function_params_from_reference(
                 Some(CodegenParam {
                     name: param.name.as_str().to_string(),
                     ty: param.ty.clone(),
-                    resolved_ty: build_type_ref(artifact, target_module, &param.ty, diagnostics)?,
+                    resolved_ty: build_type_ref(
+                        artifact,
+                        target_module,
+                        prepared_cache,
+                        &param.ty,
+                        diagnostics,
+                    )?,
                     is_content: param.is_content,
                     span: param.span,
                 })
@@ -1413,6 +1548,7 @@ enum UnionCaseLookup {
 fn build_union_case_for_member(
     artifact: &ProgramArtifact,
     module_id: RuntimeModuleId,
+    prepared_cache: &mut PreparedModuleCache,
     lowered_module: &LoweredModule,
     base: ExprId,
     member: &str,
@@ -1431,12 +1567,13 @@ fn build_union_case_for_member(
     if reference.kind != nx_interpreter::ResolvedItemKind::Union {
         return UnionCaseLookup::Missing;
     }
-    build_union_case_from_reference(artifact, reference, member, diagnostics)
+    build_union_case_from_reference(artifact, prepared_cache, reference, member, diagnostics)
 }
 
 fn build_union_case_for_tag(
     artifact: &ProgramArtifact,
     module_id: RuntimeModuleId,
+    prepared_cache: &mut PreparedModuleCache,
     tag: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> UnionCaseLookup {
@@ -1449,11 +1586,12 @@ fn build_union_case_for_tag(
     if reference.kind != nx_interpreter::ResolvedItemKind::Union {
         return UnionCaseLookup::Missing;
     }
-    build_union_case_from_reference(artifact, reference, case_name, diagnostics)
+    build_union_case_from_reference(artifact, prepared_cache, reference, case_name, diagnostics)
 }
 
 fn build_union_case_from_reference(
     artifact: &ProgramArtifact,
+    prepared_cache: &mut PreparedModuleCache,
     union_reference: CodegenReference,
     case_name: &str,
     diagnostics: &mut Vec<Diagnostic>,
@@ -1492,6 +1630,7 @@ fn build_union_case_from_reference(
     let Some(fields) = build_union_case_fields(
         artifact,
         target_module,
+        prepared_cache,
         lowered_module.as_ref(),
         &module_artifact.type_env,
         &case_def.fields,
@@ -1512,6 +1651,7 @@ fn build_union_case_from_reference(
 fn record_literal_shape(
     artifact: &ProgramArtifact,
     module_id: RuntimeModuleId,
+    prepared_cache: &mut PreparedModuleCache,
     record_name: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(String, Vec<CodegenRecordField>)> {
@@ -1548,6 +1688,7 @@ fn record_literal_shape(
     let fields = build_record_fields(
         artifact,
         target_module,
+        prepared_cache,
         lowered_module.as_ref(),
         &module_artifact.type_env,
         &record_def.properties,
@@ -1559,10 +1700,11 @@ fn record_literal_shape(
 fn build_type_ref(
     artifact: &ProgramArtifact,
     resolved_module: &ResolvedModule,
+    prepared_cache: &mut PreparedModuleCache,
     ty: &ast::TypeRef,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<CodegenTypeRef> {
-    let prepared = prepared_module_for(artifact, resolved_module);
+    let prepared = prepared_cache.get(artifact, resolved_module);
     build_type_ref_with_prepared(artifact, resolved_module, &prepared, ty, diagnostics)
 }
 
@@ -1581,7 +1723,16 @@ fn build_type_ref_with_prepared(
                 });
             }
 
-            let Some(binding) = prepared.resolve_binding(PreparedNamespace::Type, name) else {
+            let binding = prepared
+                .resolve_binding(PreparedNamespace::Type, name)
+                .or_else(|| prepared.resolve_binding(PreparedNamespace::Element, name));
+            let Some(binding) = binding else {
+                if name.as_str() == "Element" {
+                    return Some(CodegenTypeRef::Primitive {
+                        name: "object".to_string(),
+                    });
+                }
+
                 diagnostics.push(missing_semantic_data_diagnostic(
                     resolved_module,
                     &format!("type binding '{}'", name.as_str()),
@@ -1705,40 +1856,58 @@ fn library_module_artifact<'a>(
     })
 }
 
-fn prepared_module_for(artifact: &ProgramArtifact, module: &ResolvedModule) -> PreparedModule {
+fn build_prepared_module_for(
+    artifact: &ProgramArtifact,
+    module: &ResolvedModule,
+) -> PreparedModule {
     let mut prepared = PreparedModule::standalone(
         module.prepared_module_identity(),
         module.lowered_module.as_ref().clone(),
     );
 
-    let Some(visible_items) = artifact.resolved_program.imported_items(module.id) else {
-        return prepared;
-    };
-
-    for (visible_name, item_ref) in visible_items {
-        let Some(target_module) = artifact.resolved_program.module(item_ref.module_id) else {
+    for peer_module in artifact.resolved_program.modules() {
+        if peer_module.id == module.id {
             continue;
-        };
-        let kind = prepared_item_kind(item_ref.kind);
-        let target_module_identity = target_module.prepared_module_identity();
-        prepared.add_peer_module(
-            target_module_identity.clone(),
-            target_module.lowered_module.clone(),
-        );
+        }
 
-        for namespace in kind.namespaces() {
-            prepared.insert_binding(PreparedBinding {
-                visible_name: Name::new(visible_name),
-                namespace: *namespace,
-                kind,
-                origin: PreparedBindingOrigin::Peer {
-                    module_identity: target_module_identity.clone(),
-                },
-                target: PreparedBindingTarget::Peer {
-                    module_identity: target_module_identity.clone(),
-                    definition_id: item_ref.definition_id,
-                },
-            });
+        prepared.add_peer_module(
+            peer_module.prepared_module_identity(),
+            peer_module.lowered_module.clone(),
+        );
+    }
+
+    if let Some(visible_items) = artifact.resolved_program.imported_items(module.id) {
+        for (visible_name, item_ref) in visible_items {
+            let Some(target_module) = artifact.resolved_program.module(item_ref.module_id) else {
+                continue;
+            };
+            let kind = prepared_item_kind(item_ref.kind);
+            let target_module_identity = target_module.prepared_module_identity();
+            prepared.add_peer_module(
+                target_module_identity.clone(),
+                target_module.lowered_module.clone(),
+            );
+
+            for namespace in kind.namespaces() {
+                prepared.insert_binding(PreparedBinding {
+                    visible_name: Name::new(visible_name),
+                    namespace: *namespace,
+                    kind,
+                    origin: PreparedBindingOrigin::Peer {
+                        module_identity: target_module_identity.clone(),
+                    },
+                    target: PreparedBindingTarget::Peer {
+                        module_identity: target_module_identity.clone(),
+                        definition_id: item_ref.definition_id,
+                    },
+                });
+            }
+        }
+    }
+
+    if let Some(module_artifact) = module_artifact_for(artifact, module) {
+        for binding in &module_artifact.prepared_bindings {
+            prepared.insert_binding(binding.clone());
         }
     }
 

@@ -6,7 +6,7 @@ use nx_api::{
     LibraryRegistry, NxDiagnostic, NxSeverity, NxWorkspace, NxWorkspaceModule, ProgramArtifact,
     ProgramBuildContext,
 };
-use nx_codegen::{emit_nx_ir, GeneratedNxIr, NxIrMetadata};
+use nx_codegen::{emit_nx_ir, GeneratedNxIr, NxIrEntrypointMetadata, NxIrMetadata};
 use nx_value::NxValue;
 use serde::Serialize;
 
@@ -24,7 +24,18 @@ enum OutputFormat {
 #[serde(rename_all = "camelCase")]
 struct GeneratedNxIrPayload {
     json: String,
-    metadata: NxIrMetadata,
+    metadata: NxIrMetadataPayload,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NxIrMetadataPayload {
+    program_fingerprint: String,
+    schema_version: u32,
+    runtime_abi: String,
+    required_features: Vec<String>,
+    function_entrypoints: Vec<NxIrEntrypointMetadata>,
+    component_entrypoints: Vec<NxIrEntrypointMetadata>,
 }
 
 #[napi(object)]
@@ -267,9 +278,20 @@ fn value_bytes(value: &NxValue, output_format: OutputFormat) -> Result<Vec<u8>> 
 fn generated_nx_ir_json(ir: GeneratedNxIr) -> Result<String> {
     serde_json::to_string(&GeneratedNxIrPayload {
         json: ir.json,
-        metadata: ir.metadata,
+        metadata: ir_metadata_payload(ir.metadata),
     })
     .map_err(|error| native_error(format!("Failed to serialize generated NX IR: {error}")))
+}
+
+fn ir_metadata_payload(metadata: NxIrMetadata) -> NxIrMetadataPayload {
+    NxIrMetadataPayload {
+        program_fingerprint: metadata.program_fingerprint.to_string(),
+        schema_version: metadata.schema_version,
+        runtime_abi: metadata.runtime_abi,
+        required_features: metadata.required_features,
+        function_entrypoints: metadata.function_entrypoints,
+        component_entrypoints: metadata.component_entrypoints,
+    }
 }
 
 fn diagnostics_json(diagnostics: &[NxDiagnostic]) -> Result<String> {

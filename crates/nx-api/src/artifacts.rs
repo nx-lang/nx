@@ -1252,6 +1252,7 @@ fn parse_failure_artifact(
         type_env: TypeEnvironment::new(),
         diagnostics,
         imports: Vec::new(),
+        prepared_bindings: Vec::new(),
     }
 }
 

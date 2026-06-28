@@ -10,7 +10,8 @@ use crate::{
 };
 use nx_api::{
     build_program_artifact_from_source, build_workspace_program_artifact, eval_program_artifact,
-    EvalResult, NxWorkspace, NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
+    validate_workspace, EvalResult, LibraryRegistry, NxWorkspace, NxWorkspaceModule,
+    ProgramArtifact, ProgramBuildContext,
 };
 use nx_diagnostics::{Severity, TextSpan};
 use nx_hir::{ast, LocalDefinitionId};
@@ -205,6 +206,26 @@ fn assert_json_values_eq(actual: &str, expected: &str) {
     assert_eq!(actual, expected);
 }
 
+fn ir_declaration<'a>(document: &'a Value, name: &str) -> &'a Value {
+    document["modules"]
+        .as_array()
+        .expect("modules")
+        .iter()
+        .flat_map(|module| module["declarations"].as_array().expect("declarations"))
+        .find(|declaration| declaration["reference"]["name"] == name)
+        .unwrap_or_else(|| panic!("IR declaration '{name}'"))
+}
+
+fn ir_record_field_type<'a>(declaration: &'a Value, field_name: &str) -> &'a Value {
+    declaration["kind"]["fields"]
+        .as_array()
+        .expect("record fields")
+        .iter()
+        .find(|field| field["name"] == field_name)
+        .map(|field| &field["ty"])
+        .unwrap_or_else(|| panic!("IR record field '{field_name}'"))
+}
+
 #[test]
 fn builds_codegen_program_from_inline_artifact() {
     let artifact = artifact_from_source("let root() = { 1 + 2 }");
@@ -319,6 +340,144 @@ let root(user: User): User = { user }"#,
     assert_ne!(
         param_type["reference"]["module"],
         root["reference"]["module"]
+    );
+}
+
+#[test]
+fn nx_ir_declared_element_type_is_not_shadowed_by_builtin_element_supertype() {
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "app/main.nx",
+                r#"import { Element } from "../shared/model.nx"
+let root(value: Element): Element = { value }"#,
+            ),
+            ("shared/model.nx", r#"export type Element = { id:string }"#),
+        ],
+        "app/main.nx",
+    );
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+    let root = ir_declaration(&document, "root");
+    let param_type = &root["kind"]["params"][0]["ty"];
+
+    assert_eq!(param_type["kind"], "nominal");
+    assert_eq!(param_type["display"], "Element");
+    assert_eq!(param_type["reference"]["name"], "Element");
+    assert_eq!(param_type["reference"]["kind"], "record");
+    assert_ne!(
+        param_type["reference"]["module"],
+        root["reference"]["module"]
+    );
+}
+
+#[test]
+fn nx_ir_preserves_directory_loaded_cross_library_type_refs() {
+    let temp = TempDir::new().expect("temp dir");
+    let flow_step_dir = temp.path().join("flow-step");
+    let ui_dir = temp.path().join("ui");
+    let question_flow_dir = temp.path().join("question-flow");
+    let chat_link_dir = temp.path().join("chat-link");
+    fs::create_dir_all(&flow_step_dir).expect("flow-step dir");
+    fs::create_dir_all(&ui_dir).expect("ui dir");
+    fs::create_dir_all(&question_flow_dir).expect("question-flow dir");
+    fs::create_dir_all(&chat_link_dir).expect("chat-link dir");
+
+    fs::write(
+        flow_step_dir.join("FlowStep.nx"),
+        r#"export type FlowStep = { id:string }"#,
+    )
+    .expect("flow step source");
+    fs::write(
+        ui_dir.join("TextInput.nx"),
+        r#"export external component <TextInput value:string />"#,
+    )
+    .expect("ui source");
+    fs::write(
+        question_flow_dir.join("QuestionFlow.nx"),
+        r#"import { FlowStep } from "../flow-step"
+import { TextInput } from "../ui"
+export type QuestionFlow = { firstStep:FlowStep input:TextInput }"#,
+    )
+    .expect("question flow source");
+    fs::write(
+        chat_link_dir.join("ChatLinkConfig.nx"),
+        r#"import { QuestionFlow } from "../question-flow"
+export type ChatLinkConfig = { questionFlow:QuestionFlow }"#,
+    )
+    .expect("chat link source");
+
+    let registry = LibraryRegistry::new();
+    registry
+        .load_library_from_directory(&question_flow_dir)
+        .expect("question-flow library");
+    registry
+        .load_library_from_directory(&chat_link_dir)
+        .expect("chat-link library");
+    let build_context = registry.build_context();
+    let workspace = NxWorkspace::new(vec![NxWorkspaceModule::from_source(
+        "app/main.nx",
+        r#"import { ChatLinkConfig } from "../chat-link"
+let root() = { "ready" }"#,
+    )
+    .expect("workspace module")])
+    .expect("workspace");
+    let diagnostics = validate_workspace(&workspace, &build_context);
+    assert!(diagnostics.is_empty(), "diagnostics: {:?}", diagnostics);
+
+    let artifact = build_workspace_program_artifact(&workspace, "app/main.nx", &build_context)
+        .expect("workspace artifact");
+    assert_eq!(interpreter_json_artifact_root(&artifact), r#""ready""#);
+
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+    let config = ir_declaration(&document, "ChatLinkConfig");
+    let question_flow = ir_declaration(&document, "QuestionFlow");
+    let question_flow_ty = ir_record_field_type(config, "questionFlow");
+    let flow_step_ty = ir_record_field_type(question_flow, "firstStep");
+    let input_ty = ir_record_field_type(question_flow, "input");
+
+    assert_eq!(question_flow_ty["kind"], "nominal");
+    assert_eq!(question_flow_ty["display"], "QuestionFlow");
+    assert_eq!(question_flow_ty["reference"]["name"], "QuestionFlow");
+    assert_eq!(question_flow_ty["reference"]["kind"], "record");
+    assert_ne!(
+        question_flow_ty["reference"]["module"],
+        config["reference"]["module"]
+    );
+
+    assert_eq!(flow_step_ty["kind"], "nominal");
+    assert_eq!(flow_step_ty["display"], "FlowStep");
+    assert_eq!(flow_step_ty["reference"]["name"], "FlowStep");
+    assert_eq!(flow_step_ty["reference"]["kind"], "record");
+    assert_ne!(
+        flow_step_ty["reference"]["module"],
+        question_flow["reference"]["module"]
+    );
+
+    assert_eq!(input_ty["kind"], "nominal");
+    assert_eq!(input_ty["display"], "TextInput");
+    assert_eq!(input_ty["reference"]["name"], "TextInput");
+    assert_eq!(input_ty["reference"]["kind"], "component");
+    assert_ne!(
+        input_ty["reference"]["module"],
+        question_flow["reference"]["module"]
+    );
+}
+
+#[test]
+fn nx_ir_missing_semantic_data_fails_without_partial_document() {
+    let mut artifact = artifact_from_source("let root() = { 42 }");
+    artifact.root_modules[0].lowered_module = None;
+
+    let error = emit_nx_ir(&artifact).expect_err("missing semantic data should fail IR emission");
+    assert!(
+        error
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code() == Some("codegen-missing-semantic-data")),
+        "diagnostics: {:?}",
+        error.diagnostics
     );
 }
 

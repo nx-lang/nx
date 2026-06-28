@@ -2,7 +2,10 @@
 
 use crate::{InferenceContext, Type, TypeEnvironment};
 use nx_diagnostics::{Diagnostic, Label, Severity};
-use nx_hir::{lower, ExprId, Import, LoweredModule, LoweringDiagnostic, PreparedModule, SourceId};
+use nx_hir::{
+    lower, ExprId, Import, LoweredModule, LoweringDiagnostic, PreparedBinding, PreparedModule,
+    PreparedNamespace, SourceId,
+};
 use nx_syntax::{parse_file as syntax_parse_file, parse_str as syntax_parse_str};
 use rustc_hash::FxHashMap;
 use std::io;
@@ -30,6 +33,8 @@ pub struct ModuleArtifact {
     pub diagnostics: Vec<Diagnostic>,
     /// Import metadata preserved from the lowered module.
     pub imports: Vec<Import>,
+    /// Prepared semantic bindings used during analysis.
+    pub prepared_bindings: Vec<PreparedBinding>,
 }
 
 impl ModuleArtifact {
@@ -191,6 +196,7 @@ pub fn analyze_prepared_module(
     let (type_env, type_diagnostics) = ctx.finish();
     diagnostics.extend(normalize_diagnostics_file_name(type_diagnostics, file_name));
 
+    let prepared_bindings = collect_prepared_bindings(&prepared_module);
     let preserved_module = prepared_module.raw_module().clone();
     let source_id = prepared_module.source_id();
     let imports = preserved_module.imports.clone();
@@ -203,6 +209,44 @@ pub fn analyze_prepared_module(
         type_env,
         diagnostics,
         imports,
+        prepared_bindings,
+    }
+}
+
+fn collect_prepared_bindings(prepared_module: &PreparedModule) -> Vec<PreparedBinding> {
+    let mut bindings = [
+        PreparedNamespace::Value,
+        PreparedNamespace::Type,
+        PreparedNamespace::Element,
+    ]
+    .into_iter()
+    .flat_map(|namespace| prepared_module.bindings(namespace).cloned())
+    .collect::<Vec<_>>();
+    let module_identity = prepared_module.module_identity().to_string();
+
+    bindings.sort_by(|lhs, rhs| {
+        namespace_order(lhs.namespace)
+            .cmp(&namespace_order(rhs.namespace))
+            .then_with(|| lhs.visible_name.as_str().cmp(rhs.visible_name.as_str()))
+            .then_with(|| {
+                lhs.module_identity(&module_identity)
+                    .cmp(rhs.module_identity(&module_identity))
+            })
+            .then_with(|| {
+                lhs.definition_id()
+                    .index()
+                    .cmp(&rhs.definition_id().index())
+            })
+    });
+
+    bindings
+}
+
+fn namespace_order(namespace: PreparedNamespace) -> u8 {
+    match namespace {
+        PreparedNamespace::Value => 0,
+        PreparedNamespace::Type => 1,
+        PreparedNamespace::Element => 2,
     }
 }
 
@@ -277,6 +321,7 @@ fn module_artifact(
         type_env,
         diagnostics,
         imports,
+        prepared_bindings: Vec::new(),
     }
 }
 

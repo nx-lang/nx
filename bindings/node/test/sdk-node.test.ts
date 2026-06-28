@@ -49,6 +49,57 @@ function captureEvaluationError(callback: () => void): NxEvaluationError {
   return thrown as NxEvaluationError;
 }
 
+interface TestIrReference {
+  readonly name: string;
+  readonly kind: string;
+  readonly module: string;
+}
+
+interface TestIrTypeRef {
+  readonly kind: string;
+  readonly display?: string;
+  readonly reference?: TestIrReference;
+}
+
+interface TestIrRecordField {
+  readonly name: string;
+  readonly ty: TestIrTypeRef;
+}
+
+interface TestIrDeclaration {
+  readonly reference: TestIrReference;
+  readonly kind: {
+    readonly fields?: readonly TestIrRecordField[];
+  };
+}
+
+interface TestIrDocument {
+  readonly programFingerprint: string;
+  readonly modules: readonly {
+    readonly declarations: readonly TestIrDeclaration[];
+  }[];
+}
+
+function irDeclaration(document: TestIrDocument, name: string): TestIrDeclaration {
+  const declaration = document.modules
+    .flatMap((module) => module.declarations)
+    .find((candidate) => candidate.reference.name === name);
+  if (declaration === undefined) {
+    throw new Error(`Expected IR declaration '${name}'.`);
+  }
+
+  return declaration;
+}
+
+function irRecordFieldType(declaration: TestIrDeclaration, fieldName: string): TestIrTypeRef {
+  const field = (declaration.kind.fields ?? []).find((candidate) => candidate.name === fieldName);
+  if (field === undefined) {
+    throw new Error(`Expected IR record field '${fieldName}'.`);
+  }
+
+  return field.ty;
+}
+
 describe("@nx-lang/sdk-node", () => {
   it("validates valid and invalid workspaces with structured diagnostics", () => {
     const { registry, buildContext } = createContext();
@@ -175,6 +226,90 @@ let root(): int = { answer() }`;
     }
   });
 
+  it("generates NX IR for directory-loaded cross-library type graphs", () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), "nx-sdk-node-"));
+    const flowStepDir = join(tempRoot, "flow-step");
+    const uiDir = join(tempRoot, "ui");
+    const questionFlowDir = join(tempRoot, "question-flow");
+    const chatLinkDir = join(tempRoot, "chat-link");
+    mkdirSync(flowStepDir, { recursive: true });
+    mkdirSync(uiDir, { recursive: true });
+    mkdirSync(questionFlowDir, { recursive: true });
+    mkdirSync(chatLinkDir, { recursive: true });
+    writeFileSync(join(flowStepDir, "FlowStep.nx"), "export type FlowStep = { id:string }");
+    writeFileSync(join(uiDir, "TextInput.nx"), "export external component <TextInput value:string />");
+    writeFileSync(
+      join(questionFlowDir, "QuestionFlow.nx"),
+      `import { FlowStep } from "../flow-step"
+import { TextInput } from "../ui"
+export type QuestionFlow = { firstStep:FlowStep input:TextInput }`
+    );
+    writeFileSync(
+      join(chatLinkDir, "ChatLinkConfig.nx"),
+      `import { QuestionFlow } from "../question-flow"
+export type ChatLinkConfig = { questionFlow:QuestionFlow }`
+    );
+
+    const registry = new NxLibraryRegistry();
+    registry.loadFromDirectory(questionFlowDir);
+    registry.loadFromDirectory(chatLinkDir);
+    const buildContext = registry.createBuildContext();
+    const workspace = new NxWorkspace([
+      {
+        identity: "app/main.nx",
+        source: `import { ChatLinkConfig } from "../chat-link"
+let root() = { "ready" }`
+      }
+    ]);
+
+    try {
+      expect(workspace.validate(buildContext)).toEqual([]);
+      const artifact = NxProgramArtifact.buildWorkspace(workspace, {
+        buildContext,
+        entryIdentity: "app/main.nx"
+      });
+
+      try {
+        expect(artifact.evaluateJson()).toBe("ready");
+        const ir = artifact.generateNxIr();
+        const document = JSON.parse(ir.json) as TestIrDocument;
+        const config = irDeclaration(document, "ChatLinkConfig");
+        const questionFlow = irDeclaration(document, "QuestionFlow");
+        const questionFlowType = irRecordFieldType(config, "questionFlow");
+        const flowStepType = irRecordFieldType(questionFlow, "firstStep");
+        const inputType = irRecordFieldType(questionFlow, "input");
+
+        expect(typeof ir.metadata.programFingerprint).toBe("string");
+        expect(ir.metadata.programFingerprint).toBe(document.programFingerprint);
+        expect(questionFlowType).toMatchObject({
+          kind: "nominal",
+          display: "QuestionFlow",
+          reference: { kind: "record", name: "QuestionFlow" }
+        });
+        expect(questionFlowType.reference?.module).not.toBe(config.reference.module);
+        expect(flowStepType).toMatchObject({
+          kind: "nominal",
+          display: "FlowStep",
+          reference: { kind: "record", name: "FlowStep" }
+        });
+        expect(flowStepType.reference?.module).not.toBe(questionFlow.reference.module);
+        expect(inputType).toMatchObject({
+          kind: "nominal",
+          display: "TextInput",
+          reference: { kind: "component", name: "TextInput" }
+        });
+        expect(inputType.reference?.module).not.toBe(questionFlow.reference.module);
+      } finally {
+        artifact.dispose();
+      }
+    } finally {
+      workspace.dispose();
+      buildContext.dispose();
+      registry.dispose();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("generates deterministic NX IR JSON and metadata", () => {
     const source = "let root() = { 42 }";
     const first = generateNxIrFromSource(source);
@@ -182,6 +317,7 @@ let root(): int = { answer() }`;
 
     expect(first.json).toBe(second.json);
     expect(first.metadata.programFingerprint).toBe(second.metadata.programFingerprint);
+    expect(typeof first.metadata.programFingerprint).toBe("string");
     expect(first.metadata.runtimeAbi).toContain("nx-ir-runtime");
     expect(first.metadata.functionEntrypoints.some((entrypoint) => entrypoint.name === "root")).toBe(true);
   });

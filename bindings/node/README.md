@@ -94,6 +94,7 @@ const artifact = NxProgramArtifact.buildWorkspace(workspace, {
 });
 
 const ir = artifact.generateNxIr();
+const fingerprint = ir.metadata.programFingerprint; // decimal string, safe for cache comparisons
 const jsonValue = artifact.evaluateJson();
 const messagePackBytes = artifact.evaluateBytes();
 const jsonBytes = artifact.evaluateBytes({ outputFormat: "json" });

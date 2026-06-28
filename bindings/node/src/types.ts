@@ -183,7 +183,7 @@ export interface NxIrMetadata {
   /**
    * Fingerprint of the analyzed NX program used for cache keys and equivalence checks.
    */
-  readonly programFingerprint: number;
+  readonly programFingerprint: string;
 
   /**
    * NX IR schema version.
