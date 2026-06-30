@@ -240,6 +240,77 @@ fn test_union_case_construction_rejects_field_type_mismatch() {
 }
 
 #[test]
+fn test_nullable_union_field_accepts_explicit_null() {
+    let source = r#"
+        type InitialExperience = | welcome { message:string }
+        type ChatLinkConfig = { initialExperience:InitialExperience? }
+        let root(): ChatLinkConfig = <ChatLinkConfig initialExperience={null} />
+    "#;
+
+    let result = check_str(source, "nullable-union-field-null.nx");
+    assert!(
+        result.is_ok(),
+        "Expected explicit null nullable union field to type check, got {:?}",
+        result.errors()
+    );
+}
+
+#[test]
+fn test_nullable_union_helper_return_accepts_explicit_null() {
+    let source = r#"
+        type InitialExperience = | welcome { message:string }
+        let none(): InitialExperience? = { null }
+    "#;
+
+    let result = check_str(source, "nullable-union-return-null.nx");
+    assert!(
+        result.is_ok(),
+        "Expected explicit null nullable union return to type check, got {:?}",
+        result.errors()
+    );
+}
+
+#[test]
+fn test_non_nullable_union_targets_reject_explicit_null() {
+    let return_result = check_str(
+        r#"
+            type InitialExperience = | welcome { message:string }
+            let invalid(): InitialExperience = { null }
+        "#,
+        "non-nullable-union-return-null.nx",
+    );
+    let return_errors = return_result.errors();
+    assert!(
+        return_errors.iter().any(|diag| {
+            diag.code() == Some("return-type-mismatch")
+                && diag.message().contains("InitialExperience")
+                && diag.message().contains("null")
+        }),
+        "Expected precise non-nullable union return diagnostic, got {:?}",
+        return_errors
+    );
+
+    let field_result = check_str(
+        r#"
+            type InitialExperience = | welcome { message:string }
+            type ChatLinkConfig = { initialExperience:InitialExperience }
+            let root(): ChatLinkConfig = <ChatLinkConfig initialExperience={null} />
+        "#,
+        "non-nullable-union-field-null.nx",
+    );
+    let field_errors = field_result.errors();
+    assert!(
+        field_errors.iter().any(|diag| {
+            diag.code() == Some("record-field-type-mismatch")
+                && diag.message().contains("InitialExperience")
+                && diag.message().contains("null")
+        }),
+        "Expected precise non-nullable union field diagnostic, got {:?}",
+        field_errors
+    );
+}
+
+#[test]
 fn test_union_cases_satisfy_extended_abstract_record() {
     let source = r#"
         abstract type EventBase = { source:string = "ui" }

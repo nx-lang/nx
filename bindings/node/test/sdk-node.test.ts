@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   NxDisposedResourceError,
@@ -80,6 +81,8 @@ interface TestIrDocument {
   }[];
 }
 
+type IrRuntimeModule = typeof import("../../../runtime/typescript/dist/src/index.js");
+
 function irDeclaration(document: TestIrDocument, name: string): TestIrDeclaration {
   const declaration = document.modules
     .flatMap((module) => module.declarations)
@@ -98,6 +101,11 @@ function irRecordFieldType(declaration: TestIrDeclaration, fieldName: string): T
   }
 
   return field.ty;
+}
+
+async function importIrRuntime(): Promise<IrRuntimeModule> {
+  const runtimeUrl = pathToFileURL(join(process.cwd(), "../../runtime/typescript/dist/src/index.js"));
+  return import(runtimeUrl.href) as Promise<IrRuntimeModule>;
 }
 
 describe("@nx-lang/sdk-node", () => {
@@ -299,6 +307,59 @@ let root() = { "ready" }`
           reference: { kind: "component", name: "TextInput" }
         });
         expect(inputType.reference?.module).not.toBe(questionFlow.reference.module);
+      } finally {
+        artifact.dispose();
+      }
+    } finally {
+      workspace.dispose();
+      buildContext.dispose();
+      registry.dispose();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("evaluates emitted workspace IR through the TypeScript runtime like native JSON", async () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), "nx-sdk-node-"));
+    const flowDir = join(tempRoot, "flow");
+    const uiDir = join(tempRoot, "ui");
+    mkdirSync(flowDir, { recursive: true });
+    mkdirSync(uiDir, { recursive: true });
+    writeFileSync(
+      join(flowDir, "Flow.nx"),
+      `export type FlowCompletion = | continue | end { message:string }
+export type QuestionFlow = {
+  completion:FlowCompletion?
+  content steps:object
+}`
+    );
+    writeFileSync(join(uiDir, "Panel.nx"), "export external component <Panel content body:object />");
+
+    const registry = new NxLibraryRegistry();
+    registry.loadFromDirectory(flowDir);
+    registry.loadFromDirectory(uiDir);
+    const buildContext = registry.createBuildContext();
+    const workspace = new NxWorkspace([
+      {
+        identity: "app/main.nx",
+        source: `import { QuestionFlow } from "../flow"
+import { Panel } from "../ui"
+let omitted(): QuestionFlow = { <QuestionFlow><Panel><span /></Panel></QuestionFlow> }
+let explicit(): QuestionFlow = { <QuestionFlow completion={null}><Panel><span /></Panel></QuestionFlow> }
+let root(): QuestionFlow[] = { omitted() explicit() }`
+      }
+    ]);
+
+    try {
+      expect(workspace.validate(buildContext)).toEqual([]);
+      const artifact = NxProgramArtifact.buildWorkspace(workspace, {
+        buildContext,
+        entryIdentity: "app/main.nx"
+      });
+
+      try {
+        const irRuntime = await importIrRuntime();
+        const prepared = irRuntime.prepareNxIrProgram(JSON.parse(artifact.generateNxIr().json));
+        expect(irRuntime.evaluateFunction(prepared, "root")).toEqual(artifact.evaluateJson());
       } finally {
         artifact.dispose();
       }

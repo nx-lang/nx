@@ -126,7 +126,7 @@ pub struct NxIrDeclaration {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "tag", rename_all = "camelCase")]
+#[serde(tag = "tag", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum NxIrDeclarationKind {
     Function {
         params: Vec<NxIrParam>,
@@ -216,7 +216,7 @@ pub struct NxIrExpression {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "tag", rename_all = "camelCase")]
+#[serde(tag = "tag", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum NxIrExpressionOp {
     Literal {
         value: NxIrLiteral,
@@ -285,6 +285,8 @@ pub enum NxIrExpressionOp {
         name: String,
         fields: Vec<NxIrRecordField>,
         properties: Vec<NxIrProperty>,
+        content_field: Option<String>,
+        content: Vec<NxIrExpression>,
     },
     UnionCase {
         union: NxIrReference,
@@ -321,7 +323,7 @@ pub struct NxIrMatchArm {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "tag", rename_all = "camelCase")]
+#[serde(tag = "tag", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum NxIrStatement {
     Let {
         name: String,
@@ -353,7 +355,11 @@ pub enum NxIrLiteral {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum NxIrTypeRef {
     Primitive {
         name: String,
@@ -382,7 +388,11 @@ pub struct NxIrSemanticType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum NxIrSemanticTypeShape {
     Primitive {
         name: String,
@@ -756,11 +766,17 @@ fn collect_ir_expression_unsupported_diagnostics(
             collect_ir_expression_unsupported_diagnostics(module, base, diagnostics);
         }
         CodegenExpressionKind::Record {
-            fields, properties, ..
+            fields,
+            properties,
+            content,
+            ..
         } => {
             collect_ir_record_field_unsupported_diagnostics(module, fields, diagnostics);
             for property in properties {
                 collect_ir_expression_unsupported_diagnostics(module, &property.value, diagnostics);
+            }
+            for item in content {
+                collect_ir_expression_unsupported_diagnostics(module, item, diagnostics);
             }
         }
         CodegenExpressionKind::UnionCase {
@@ -1408,6 +1424,8 @@ fn ir_expression(
             name,
             fields,
             properties,
+            content_field,
+            content,
         } => NxIrExpressionOp::Record {
             name: name.clone(),
             fields: ir_record_fields(module_id_value, source.clone(), &id, "field", fields, scope),
@@ -1417,6 +1435,14 @@ fn ir_expression(
                 properties,
                 scope,
                 &format!("{path}:property"),
+            ),
+            content_field: content_field.clone(),
+            content: ir_expressions(
+                module_id_value,
+                source.clone(),
+                content,
+                scope,
+                &format!("{path}:content"),
             ),
         },
         CodegenExpressionKind::ComponentDescriptor(descriptor) => {

@@ -1695,11 +1695,19 @@ impl<'a> InferenceContext<'a> {
         if self.type_satisfies_expected_with_coercion(actual, expected) {
             true
         } else {
+            let actual_display = if Self::is_null_literal_type(actual) {
+                "null".to_string()
+            } else {
+                actual.to_string()
+            };
             let message = if matches!(actual, Type::Array(_)) && !matches!(expected, Type::Array(_))
             {
-                format!("{} expects {}, found list {}", context, expected, actual)
+                format!(
+                    "{} expects {}, found list {}",
+                    context, expected, actual_display
+                )
             } else {
-                format!("{} expects {}, found {}", context, expected, actual)
+                format!("{} expects {}, found {}", context, expected, actual_display)
             };
             self.error(code, message, span);
             false
@@ -2206,6 +2214,7 @@ impl<'a> InferenceContext<'a> {
         }
 
         match (actual, expected) {
+            (_, Type::Nullable(_)) if Self::is_null_literal_type(actual) => true,
             (Type::Named(actual_name), Type::Named(expected_name))
                 if expected_name.as_str() == "Element" =>
             {
@@ -2229,6 +2238,10 @@ impl<'a> InferenceContext<'a> {
             }
             _ => false,
         }
+    }
+
+    fn is_null_literal_type(ty: &Type) -> bool {
+        matches!(ty, Type::Nullable(inner) if matches!(inner.as_ref(), Type::Variable(_)))
     }
 
     fn type_satisfies_expected_with_coercion(&self, actual: &Type, expected: &Type) -> bool {

@@ -271,6 +271,8 @@ pub enum CodegenExpressionKind {
         name: String,
         fields: Vec<CodegenRecordField>,
         properties: Vec<CodegenProperty>,
+        content_field: Option<String>,
+        content: Vec<CodegenExpression>,
     },
     ComponentDescriptor(CodegenComponentDescriptor),
     Element(CodegenElement),

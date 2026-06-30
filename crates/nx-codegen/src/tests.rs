@@ -466,6 +466,106 @@ let root() = { "ready" }"#,
 }
 
 #[test]
+fn nx_ir_preserves_nullable_union_and_content_boundary_metadata() {
+    let temp = TempDir::new().expect("temp dir");
+    let flow_dir = temp.path().join("flow");
+    let ui_dir = temp.path().join("ui");
+    fs::create_dir_all(&flow_dir).expect("flow dir");
+    fs::create_dir_all(&ui_dir).expect("ui dir");
+
+    fs::write(
+        flow_dir.join("Flow.nx"),
+        r#"export type FlowCompletion = | continue | end { message:string }
+export type QuestionFlow = {
+  completion:FlowCompletion?
+  content steps:Element
+}"#,
+    )
+    .expect("flow source");
+    fs::write(
+        ui_dir.join("Panel.nx"),
+        r#"export external component <Panel content body:Element />"#,
+    )
+    .expect("ui source");
+
+    let registry = LibraryRegistry::new();
+    registry
+        .load_library_from_directory(&flow_dir)
+        .expect("flow library");
+    registry
+        .load_library_from_directory(&ui_dir)
+        .expect("ui library");
+    let build_context = registry.build_context();
+    let workspace = NxWorkspace::new(vec![NxWorkspaceModule::from_source(
+        "app/main.nx",
+        r#"import { QuestionFlow } from "../flow"
+import { Panel } from "../ui"
+let omitted(): QuestionFlow = { <QuestionFlow><Panel><span /></Panel></QuestionFlow> }
+let explicit(): QuestionFlow = { <QuestionFlow completion={null}><Panel><span /></Panel></QuestionFlow> }
+let root(): QuestionFlow[] = { omitted() explicit() }"#,
+    )
+    .expect("workspace module")])
+    .expect("workspace");
+
+    let diagnostics = validate_workspace(&workspace, &build_context);
+    assert!(diagnostics.is_empty(), "diagnostics: {:?}", diagnostics);
+    let artifact = build_workspace_program_artifact(&workspace, "app/main.nx", &build_context)
+        .expect("workspace artifact");
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+    let question_flow = ir_declaration(&document, "QuestionFlow");
+    let completion_ty = ir_record_field_type(question_flow, "completion");
+    let steps_field = question_flow["kind"]["fields"]
+        .as_array()
+        .expect("QuestionFlow fields")
+        .iter()
+        .find(|field| field["name"] == "steps")
+        .expect("steps field");
+    let omitted_body = &ir_declaration(&document, "omitted")["kind"]["body"]["op"];
+    let explicit_body = &ir_declaration(&document, "explicit")["kind"]["body"]["op"];
+    let app_module = &ir_declaration(&document, "omitted")["reference"]["module"];
+    let panel_descriptor = &omitted_body["content"][0]["op"];
+
+    assert_eq!(completion_ty["kind"], "nullable");
+    assert_eq!(completion_ty["inner"]["kind"], "nominal");
+    assert_eq!(completion_ty["inner"]["reference"]["kind"], "union");
+    assert_ne!(&completion_ty["inner"]["reference"]["module"], app_module);
+    assert_eq!(steps_field["isContent"], true);
+    assert_eq!(steps_field["isRequired"], true);
+
+    assert_eq!(omitted_body["tag"], "record");
+    assert_eq!(omitted_body["contentField"], "steps");
+    assert_eq!(
+        omitted_body["content"][0]["op"]["tag"],
+        "componentDescriptor"
+    );
+    assert!(omitted_body["properties"]
+        .as_array()
+        .expect("omitted properties")
+        .iter()
+        .all(|property| property["name"] != "completion"));
+
+    assert_eq!(explicit_body["tag"], "record");
+    assert_eq!(explicit_body["contentField"], "steps");
+    let explicit_completion = explicit_body["properties"]
+        .as_array()
+        .expect("explicit properties")
+        .iter()
+        .find(|property| property["name"] == "completion")
+        .expect("completion property");
+    assert_eq!(explicit_completion["value"]["op"]["value"]["kind"], "null");
+
+    assert_eq!(panel_descriptor["tag"], "componentDescriptor");
+    assert_eq!(panel_descriptor["contentField"], "body");
+    assert_eq!(
+        panel_descriptor["content"][0]["op"]["tag"],
+        "intrinsicElement"
+    );
+    assert_eq!(panel_descriptor["component"]["kind"], "component");
+    assert_ne!(&panel_descriptor["component"]["module"], app_module);
+}
+
+#[test]
 fn nx_ir_missing_semantic_data_fails_without_partial_document() {
     let mut artifact = artifact_from_source("let root() = { 42 }");
     artifact.root_modules[0].lowered_module = None;
@@ -922,6 +1022,8 @@ fn materialized_record_iife_uses_collision_free_field_temps() {
                                 value: int_expression(4, 4),
                                 span: TextSpan::default(),
                             }],
+                            content_field: None,
+                            content: Vec::new(),
                         },
                     },
                 },

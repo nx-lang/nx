@@ -289,11 +289,17 @@ fn collect_expression_source_codegen_diagnostics(
             }
         }
         CodegenExpressionKind::Record {
-            fields, properties, ..
+            fields,
+            properties,
+            content,
+            ..
         } => {
             collect_record_field_source_codegen_diagnostics(module, fields, diagnostics);
             for property in properties {
                 collect_expression_source_codegen_diagnostics(module, &property.value, diagnostics);
+            }
+            for item in content {
+                collect_expression_source_codegen_diagnostics(module, item, diagnostics);
             }
         }
         CodegenExpressionKind::ComponentDescriptor(descriptor) => {
@@ -2785,7 +2791,17 @@ fn emit_expression(
             name,
             fields,
             properties,
-        } => emit_record_object(current_module_id, name, fields, properties, context),
+            content_field,
+            content,
+        } => emit_record_object(
+            current_module_id,
+            name,
+            fields,
+            properties,
+            content_field.as_deref(),
+            content,
+            context,
+        ),
         CodegenExpressionKind::ComponentDescriptor(descriptor) => {
             emit_component_descriptor(current_module_id, descriptor, context)
         }
@@ -2803,14 +2819,23 @@ fn emit_record_object(
     name: &str,
     fields: &[CodegenRecordField],
     properties: &[CodegenProperty],
+    content_field: Option<&str>,
+    content: &[CodegenExpression],
     context: &EmitContext,
 ) -> String {
+    let extra_properties = content_extra_properties(
+        current_module_id,
+        properties,
+        content_field,
+        content,
+        context,
+    );
     emit_materialized_record_object(
         current_module_id,
         name,
         fields,
         properties,
-        Vec::new(),
+        extra_properties,
         context,
     )
 }
@@ -2863,6 +2888,30 @@ fn emit_union_case_object(
     content: &[CodegenExpression],
     context: &EmitContext,
 ) -> String {
+    let extra_properties = content_extra_properties(
+        current_module_id,
+        properties,
+        content_field,
+        content,
+        context,
+    );
+    emit_materialized_record_object(
+        current_module_id,
+        &format!("{}.{}", union_reference.name, case_name),
+        fields,
+        properties,
+        extra_properties,
+        context,
+    )
+}
+
+fn content_extra_properties(
+    current_module_id: RuntimeModuleId,
+    properties: &[CodegenProperty],
+    content_field: Option<&str>,
+    content: &[CodegenExpression],
+    context: &EmitContext,
+) -> Vec<(String, String)> {
     let mut extra_properties = Vec::new();
     if let Some(content_field) = content_field {
         if !content.is_empty()
@@ -2876,14 +2925,7 @@ fn emit_union_case_object(
             ));
         }
     }
-    emit_materialized_record_object(
-        current_module_id,
-        &format!("{}.{}", union_reference.name, case_name),
-        fields,
-        properties,
-        extra_properties,
-        context,
-    )
+    extra_properties
 }
 
 fn emit_materialized_record_object(
@@ -3561,7 +3603,10 @@ fn collect_expression_value_references(
             collect_expression_value_references(current_module_id, base, output);
         }
         CodegenExpressionKind::Record {
-            fields, properties, ..
+            fields,
+            properties,
+            content,
+            ..
         } => {
             for field in fields {
                 if let Some(default) = field.default.as_ref() {
@@ -3570,6 +3615,9 @@ fn collect_expression_value_references(
             }
             for property in properties {
                 collect_expression_value_references(current_module_id, &property.value, output);
+            }
+            for item in content {
+                collect_expression_value_references(current_module_id, item, output);
             }
         }
         CodegenExpressionKind::ComponentDescriptor(descriptor) => {
@@ -3839,7 +3887,10 @@ fn collect_expression_runtime_helpers(
             collect_expression_runtime_helpers(base, output);
         }
         CodegenExpressionKind::Record {
-            fields, properties, ..
+            fields,
+            properties,
+            content,
+            ..
         } => {
             for field in fields {
                 if let Some(default) = field.default.as_ref() {
@@ -3848,6 +3899,9 @@ fn collect_expression_runtime_helpers(
             }
             for property in properties {
                 collect_expression_runtime_helpers(&property.value, output);
+            }
+            for item in content {
+                collect_expression_runtime_helpers(item, output);
             }
         }
         CodegenExpressionKind::UnionCase {

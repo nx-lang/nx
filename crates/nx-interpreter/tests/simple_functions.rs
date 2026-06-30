@@ -192,6 +192,59 @@ fn test_union_case_inherits_abstract_base_defaults() {
 }
 
 #[test]
+fn test_omitted_nullable_union_field_materializes_null() {
+    let source = r#"
+        type FlowCompletion = | continue | end { message:string }
+        type QuestionFlow = { completion:FlowCompletion? }
+        let make(): QuestionFlow = { <QuestionFlow /> }
+    "#;
+
+    let result = execute_function(source, "make", vec![])
+        .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+
+    let Value::Record { type_name, fields } = result else {
+        panic!("Expected QuestionFlow record value");
+    };
+    assert_eq!(type_name.as_str(), "QuestionFlow");
+    assert_eq!(fields.get("completion"), Some(&Value::Null));
+}
+
+#[test]
+fn test_explicit_null_nullable_union_field_materializes_null() {
+    let source = r#"
+        type FlowCompletion = | continue | end { message:string }
+        type QuestionFlow = { completion:FlowCompletion? }
+        let make(): QuestionFlow = { <QuestionFlow completion={null} /> }
+    "#;
+
+    let result = execute_function(source, "make", vec![])
+        .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+
+    let Value::Record { type_name, fields } = result else {
+        panic!("Expected QuestionFlow record value");
+    };
+    assert_eq!(type_name.as_str(), "QuestionFlow");
+    assert_eq!(fields.get("completion"), Some(&Value::Null));
+}
+
+#[test]
+fn test_fieldless_union_case_remains_distinct_from_null() {
+    let source = r#"
+        type FlowCompletion = | continue | end { message:string }
+        let make(): FlowCompletion = { FlowCompletion.continue }
+    "#;
+
+    let result = execute_function(source, "make", vec![])
+        .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+
+    let Value::Record { type_name, fields } = result else {
+        panic!("Expected fieldless union case record value");
+    };
+    assert_eq!(type_name.as_str(), "FlowCompletion.continue");
+    assert!(fields.is_empty());
+}
+
+#[test]
 fn test_union_match_compares_case_discriminator() {
     let source = r#"
         type LoadState = | idle | failed { message:string }

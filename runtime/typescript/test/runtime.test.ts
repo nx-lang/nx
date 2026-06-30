@@ -77,6 +77,7 @@ const stringType: NxIrTypeRef = primitive("string");
 const intType: NxIrTypeRef = primitive("int");
 const themeType: NxIrTypeRef = nominal(ref("Theme", "m0:d3", "enum"));
 const loadStateType: NxIrTypeRef = nominal(ref("LoadState", "m0:d5", "union"));
+const nullableLoadStateType: NxIrTypeRef = { kind: "nullable", inner: loadStateType };
 const intSemantic: NxIrSemanticType = { display: "int", shape: { kind: "primitive", name: "int" } };
 const floatSemantic: NxIrSemanticType = { display: "float", shape: { kind: "primitive", name: "float" } };
 
@@ -830,6 +831,134 @@ test("rejects out-of-bounds array indexes", () => {
     () => evaluateFunction(prepared, "outOfBounds"),
     "Array index 2 is out of bounds for length 2",
   );
+});
+
+test("normalizes nullable union null and rejects undeclared union cases", () => {
+  const module = program.modules[0]!;
+  const nullableProgram: NxIrProgram = {
+    ...program,
+    functionEntrypoints: [
+      ...program.functionEntrypoints,
+      { name: "optionalState", reference: ref("optionalState", "m0:d17", "function") },
+    ],
+    modules: [
+      {
+        ...module,
+        declarations: [
+          ...module.declarations,
+          {
+            id: "m0:d17",
+            reference: ref("optionalState", "m0:d17", "function"),
+            span: sourceSpan,
+            kind: {
+              tag: "function",
+              params: [
+                {
+                  name: "state",
+                  slot: "optionalState:param:0",
+                  ty: nullableLoadStateType,
+                  isContent: false,
+                  span: sourceSpan,
+                },
+              ],
+              body: slot("state", "optionalState:param:0"),
+            },
+          },
+        ],
+      },
+    ],
+  };
+  const prepared = prepareNxIrProgram(nullableProgram);
+
+  assertEqual(evaluateFunction(prepared, "optionalState", [null]), null);
+  assertThrows(
+    () => evaluateFunction(prepared, "optionalState", [{ $type: "LoadState.undefined" }]),
+    "Invalid union case",
+  );
+});
+
+test("applies content bindings before required field validation", () => {
+  const module = program.modules[0]!;
+  const bodyField: NxIrRecordField = {
+    name: "body",
+    slot: "ContentBox:field:0",
+    ty: stringType,
+    isContent: true,
+    isRequired: true,
+    span: sourceSpan,
+  };
+  const contentProgram: NxIrProgram = {
+    ...program,
+    functionEntrypoints: [
+      ...program.functionEntrypoints,
+      { name: "recordContent", reference: ref("recordContent", "m0:d17", "function") },
+      { name: "componentContent", reference: ref("componentContent", "m0:d19", "function") },
+    ],
+    componentEntrypoints: [
+      ...program.componentEntrypoints,
+      { name: "Panel", reference: ref("Panel", "m0:d18", "component") },
+    ],
+    modules: [
+      {
+        ...module,
+        declarations: [
+          ...module.declarations,
+          {
+            id: "m0:d17",
+            reference: ref("recordContent", "m0:d17", "function"),
+            span: sourceSpan,
+            kind: {
+              tag: "function",
+              params: [],
+              body: expr({
+                tag: "record",
+                name: "ContentBox",
+                fields: [bodyField],
+                properties: [],
+                contentField: "body",
+                content: [lit("hello")],
+              }),
+            },
+          },
+          {
+            id: "m0:d18",
+            reference: ref("Panel", "m0:d18", "component"),
+            span: sourceSpan,
+            kind: {
+              tag: "component",
+              isAbstract: false,
+              isExternal: true,
+              props: [{ ...bodyField, slot: "Panel:prop:0", ownerModule: "m0" }],
+              state: [],
+            },
+          },
+          {
+            id: "m0:d19",
+            reference: ref("componentContent", "m0:d19", "function"),
+            span: sourceSpan,
+            kind: {
+              tag: "function",
+              params: [],
+              body: expr({
+                tag: "componentDescriptor",
+                component: ref("Panel", "m0:d18", "component"),
+                targetKind: "external",
+                properties: [],
+                contentField: "body",
+                content: [lit("hello")],
+              }),
+            },
+          },
+        ],
+      },
+    ],
+  };
+  const prepared = prepareNxIrProgram(contentProgram);
+
+  assertEqual(evaluateFunction(prepared, "recordContent"), { $type: "ContentBox", body: "hello" });
+  assertEqual(evaluateFunction(prepared, "componentContent"), { $type: "Panel", body: "hello" });
+  assertThrows(() => constructComponentDescriptor(prepared, "Panel"), "Missing required");
+  assertThrows(() => constructComponentDescriptor(prepared, "Panel", { extra: "nope" }), "Unknown Panel props field");
 });
 
 test("constructs descriptors and evaluates components with host-owned state", () => {

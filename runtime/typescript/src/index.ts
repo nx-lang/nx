@@ -369,21 +369,17 @@ export function constructComponentDescriptor(
 ): NxCanonicalValue {
   const prepared = componentDeclaration(program, name);
   const component = prepared.declaration.kind as NxIrComponentDeclaration;
+  const input = { ...props };
+  const contentField = component.props.find((field) => field.isContent);
+  applyContentBinding(input, contentField?.name, content, name);
   const normalizedProps = normalizeFields(
     program,
     component.props,
-    props,
+    input,
     new Map(),
     `${name} props`,
     false,
   );
-  if (content.length > 0) {
-    const contentField = component.props.find((field) => field.isContent);
-    if (contentField === undefined) {
-      fail("nx-ir-component-content", `Component '${name}' does not accept content.`);
-    }
-    normalizedProps[contentField.name] = content.length === 1 ? content[0]! : [...content];
-  }
 
   return { $type: prepared.declaration.reference.name, ...normalizedProps };
 }
@@ -694,6 +690,10 @@ function evalFor(op: Record<string, unknown>, context: EvalContext): NxCanonical
 
 function evalRecord(op: Record<string, unknown>, context: EvalContext): NxCanonicalValue {
   const properties = propertiesObject(op.properties as readonly Record<string, unknown>[], context);
+  const content = ((op.content as readonly NxIrExpression[]) ?? []).map((item) =>
+    evalExpression(item, context),
+  );
+  applyContentBinding(properties, op.contentField, content, String(op.name));
   const fields = (op.fields as readonly NxIrRecordField[]) ?? [];
   const normalized = normalizeFields(context.program, fields, properties, new Map(context.env), String(op.name), false);
   return { $type: String(op.name), ...normalized };
@@ -703,6 +703,10 @@ function evalUnionCase(op: Record<string, unknown>, context: EvalContext): NxCan
   const union = op.union as NxIrReference;
   const caseName = String(op.caseName);
   const properties = propertiesObject(op.properties as readonly Record<string, unknown>[], context);
+  const content = ((op.content as readonly NxIrExpression[]) ?? []).map((item) =>
+    evalExpression(item, context),
+  );
+  applyContentBinding(properties, op.contentField, content, `${union.name}.${caseName}`);
   const fields = (op.fields as readonly NxIrRecordField[]) ?? [];
   const normalized = normalizeFields(
     context.program,
@@ -712,12 +716,6 @@ function evalUnionCase(op: Record<string, unknown>, context: EvalContext): NxCan
     `${union.name}.${caseName}`,
     false,
   );
-  const content = ((op.content as readonly NxIrExpression[]) ?? []).map((item) =>
-    evalExpression(item, context),
-  );
-  if (typeof op.contentField === "string" && content.length > 0) {
-    normalized[op.contentField] = content.length === 1 ? content[0]! : content;
-  }
 
   return { $type: `${union.name}.${caseName}`, ...normalized };
 }
@@ -742,16 +740,32 @@ function evalComponentDescriptor(op: Record<string, unknown>, context: EvalConte
   }
   const component = prepared.declaration.kind;
   const props = propertiesObject(op.properties as readonly Record<string, unknown>[], context);
-  const env = new Map(context.env);
-  const normalized = normalizeFields(context.program, component.props, props, env, `${reference.name} props`, false);
   const content = ((op.content as readonly NxIrExpression[]) ?? []).map((item) =>
     evalExpression(item, context),
   );
-  if (typeof op.contentField === "string" && content.length > 0) {
-    normalized[op.contentField] = content.length === 1 ? content[0]! : content;
-  }
+  applyContentBinding(props, op.contentField, content, reference.name);
+  const env = new Map(context.env);
+  const normalized = normalizeFields(context.program, component.props, props, env, `${reference.name} props`, false);
 
   return { $type: reference.name, ...normalized };
+}
+
+function applyContentBinding(
+  input: Record<string, NxCanonicalValue>,
+  contentField: unknown,
+  content: readonly NxCanonicalValue[],
+  path: string,
+): void {
+  if (content.length === 0) {
+    return;
+  }
+  if (typeof contentField !== "string") {
+    fail("nx-ir-boundary-field", `${path} does not accept content.`);
+  }
+  if (Object.prototype.hasOwnProperty.call(input, contentField)) {
+    fail("nx-ir-boundary-field", `${path} field '${contentField}' was supplied both as a property and as content.`);
+  }
+  input[contentField] = content.length === 1 ? content[0]! : [...content];
 }
 
 function normalizeFields(

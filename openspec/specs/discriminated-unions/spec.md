@@ -85,6 +85,29 @@ unions SHALL remain closed; declarations outside the union case list MUST NOT ad
 - **THEN** semantic validation SHALL reject `MoreLoadState extends LoadState` because a union is
   not an abstract record base
 
+### Requirement: Nullable union absence normalizes to null
+When a discriminated-union value is expected through a nullable type reference, the system SHALL
+represent absence as `null`. The system MUST NOT synthesize undeclared fieldless cases such as
+`<Union>.undefined` or `Union.undefined` to represent nullable absence. Declared fieldless union
+cases SHALL continue to normalize as scoped union case values.
+
+#### Scenario: Omitted nullable union field produces null
+- **WHEN** source contains `type FlowCompletion = | continue | end { message:string } type QuestionFlow = { completion:FlowCompletion? } let root(): QuestionFlow = <QuestionFlow />`
+- **THEN** type checking SHALL accept the omitted nullable `completion` field
+- **AND** interpretation SHALL normalize `completion` to `null`
+- **AND** the normalized output SHALL NOT include `$type: "FlowCompletion.undefined"`
+
+#### Scenario: Explicit null nullable union field produces null
+- **WHEN** source contains `type FlowCompletion = | continue | end { message:string } type QuestionFlow = { completion:FlowCompletion? } let root(): QuestionFlow = <QuestionFlow completion={null} />`
+- **THEN** type checking SHALL accept the explicit nullable `completion` field
+- **AND** interpretation SHALL normalize `completion` to `null`
+- **AND** the normalized output SHALL NOT include a union discriminator for `completion`
+
+#### Scenario: Declared fieldless union case remains a case value
+- **WHEN** source contains `type FlowCompletion = | continue | end { message:string } let root(): FlowCompletion = FlowCompletion.continue`
+- **THEN** interpretation SHALL normalize the result as a `FlowCompletion.continue` union case
+- **AND** the result SHALL remain distinct from `null`
+
 ### Requirement: Union field access respects narrowing
 The type checker SHALL allow access to fields that are known on the static type of an expression.
 On an unnarrowed union value, only fields inherited from an abstract base extended by the union

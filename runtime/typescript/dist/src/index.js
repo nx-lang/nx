@@ -129,14 +129,10 @@ export function evaluateFunction(program, name, args = [], options = {}) {
 export function constructComponentDescriptor(program, name, props = {}, content = []) {
     const prepared = componentDeclaration(program, name);
     const component = prepared.declaration.kind;
-    const normalizedProps = normalizeFields(program, component.props, props, new Map(), `${name} props`, false);
-    if (content.length > 0) {
-        const contentField = component.props.find((field) => field.isContent);
-        if (contentField === undefined) {
-            fail("nx-ir-component-content", `Component '${name}' does not accept content.`);
-        }
-        normalizedProps[contentField.name] = content.length === 1 ? content[0] : [...content];
-    }
+    const input = { ...props };
+    const contentField = component.props.find((field) => field.isContent);
+    applyContentBinding(input, contentField?.name, content, name);
+    const normalizedProps = normalizeFields(program, component.props, input, new Map(), `${name} props`, false);
     return { $type: prepared.declaration.reference.name, ...normalizedProps };
 }
 export function initializeComponent(program, name, props = {}, options = {}) {
@@ -358,6 +354,8 @@ function evalFor(op, context) {
 }
 function evalRecord(op, context) {
     const properties = propertiesObject(op.properties, context);
+    const content = (op.content ?? []).map((item) => evalExpression(item, context));
+    applyContentBinding(properties, op.contentField, content, String(op.name));
     const fields = op.fields ?? [];
     const normalized = normalizeFields(context.program, fields, properties, new Map(context.env), String(op.name), false);
     return { $type: String(op.name), ...normalized };
@@ -366,12 +364,10 @@ function evalUnionCase(op, context) {
     const union = op.union;
     const caseName = String(op.caseName);
     const properties = propertiesObject(op.properties, context);
+    const content = (op.content ?? []).map((item) => evalExpression(item, context));
+    applyContentBinding(properties, op.contentField, content, `${union.name}.${caseName}`);
     const fields = op.fields ?? [];
     const normalized = normalizeFields(context.program, fields, properties, new Map(context.env), `${union.name}.${caseName}`, false);
-    const content = (op.content ?? []).map((item) => evalExpression(item, context));
-    if (typeof op.contentField === "string" && content.length > 0) {
-        normalized[op.contentField] = content.length === 1 ? content[0] : content;
-    }
     return { $type: `${union.name}.${caseName}`, ...normalized };
 }
 function evalIntrinsicElement(op, context) {
@@ -390,13 +386,23 @@ function evalComponentDescriptor(op, context) {
     }
     const component = prepared.declaration.kind;
     const props = propertiesObject(op.properties, context);
+    const content = (op.content ?? []).map((item) => evalExpression(item, context));
+    applyContentBinding(props, op.contentField, content, reference.name);
     const env = new Map(context.env);
     const normalized = normalizeFields(context.program, component.props, props, env, `${reference.name} props`, false);
-    const content = (op.content ?? []).map((item) => evalExpression(item, context));
-    if (typeof op.contentField === "string" && content.length > 0) {
-        normalized[op.contentField] = content.length === 1 ? content[0] : content;
-    }
     return { $type: reference.name, ...normalized };
+}
+function applyContentBinding(input, contentField, content, path) {
+    if (content.length === 0) {
+        return;
+    }
+    if (typeof contentField !== "string") {
+        fail("nx-ir-boundary-field", `${path} does not accept content.`);
+    }
+    if (Object.prototype.hasOwnProperty.call(input, contentField)) {
+        fail("nx-ir-boundary-field", `${path} field '${contentField}' was supplied both as a property and as content.`);
+    }
+    input[contentField] = content.length === 1 ? content[0] : [...content];
 }
 function normalizeFields(program, fields, input, env, path, requireExplicit) {
     const known = new Set(fields.map((field) => field.name));

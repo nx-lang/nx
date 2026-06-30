@@ -1156,6 +1156,8 @@ fn build_expression(
                 name: record_name,
                 fields,
                 properties: mapped_properties,
+                content_field: None,
+                content: Vec::new(),
             }
         }
         ast::Expr::Element { element, .. } => {
@@ -1307,7 +1309,7 @@ fn build_element_expression(
                     mapped.content,
                     diagnostics,
                 ),
-                ResolvedItemKind::Record if mapped.content.is_empty() => {
+                ResolvedItemKind::Record => {
                     let (record_name, fields) = record_literal_shape(
                         artifact,
                         resolved_module.id,
@@ -1315,10 +1317,16 @@ fn build_element_expression(
                         element.tag.as_str(),
                         diagnostics,
                     )?;
+                    let content_field = fields
+                        .iter()
+                        .find(|field| field.is_content)
+                        .map(|field| field.name.clone());
                     Some(CodegenExpressionKind::Record {
                         name: record_name,
                         fields,
                         properties: mapped.properties,
+                        content_field,
+                        content: mapped.content,
                     })
                 }
                 _ => Some(CodegenExpressionKind::Element(mapped)),
