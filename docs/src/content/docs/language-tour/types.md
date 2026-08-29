@@ -27,7 +27,7 @@ abstract type UserBase extends Entity = {
 }
 
 type User extends UserBase = {
-  isAdmin: bool = false
+  isAdmin: boolean = false
 }
 ```
 
@@ -56,7 +56,7 @@ payload fields.
 type LoadState =
   | idle
   | loading
-  | failed { message:string retryable:bool = true }
+  | failed { message:string retryable:boolean = true }
   | loaded { count:int }
 
 let state: LoadState =

@@ -828,7 +828,7 @@ impl CachedImportedLibrary {
     fn type_name_is_reference(&self, name: &str, seen_aliases: &mut BTreeSet<String>) -> bool {
         match name {
             "string" | "object" | "unknown" | "error" => true,
-            "i32" | "i64" | "int" | "f32" | "f64" | "float" | "bool" | "void" => false,
+            "int" | "int32" | "int64" | "float32" | "float64" | "boolean" | "void" => false,
             other => match self.export_kinds.get(other) {
                 Some(PreparedItemKind::Enum) => false,
                 Some(

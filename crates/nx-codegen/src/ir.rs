@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 pub const NX_IR_FORMAT_ID: &str = "nx-ir-json";
-pub const NX_IR_SCHEMA_VERSION: u32 = 1;
+pub const NX_IR_SCHEMA_VERSION: u32 = 2;
 pub const NX_IR_RUNTIME_ABI: &str = "nx-ir-runtime-v1";
 pub const NX_IR_REQUIRED_FEATURE_EAGER_V1: &str = "eager-v1";
 
@@ -1821,14 +1821,13 @@ fn resolved_item_kind_name(kind: ResolvedItemKind) -> &'static str {
 
 fn primitive_name(primitive: Primitive) -> &'static str {
     match primitive {
-        Primitive::I32 => "i32",
-        Primitive::I64 => "i64",
         Primitive::Int => "int",
-        Primitive::F32 => "f32",
-        Primitive::F64 => "f64",
-        Primitive::Float => "float",
+        Primitive::Int32 => "int32",
+        Primitive::Int64 => "int64",
+        Primitive::Float32 => "float32",
+        Primitive::Float64 => "float64",
         Primitive::String => "string",
-        Primitive::Bool => "bool",
+        Primitive::Boolean => "boolean",
         Primitive::Void => "void",
     }
 }

@@ -1822,14 +1822,14 @@ impl Interpreter {
                         match rhs_val {
                             Value::Boolean(b) => Ok(Value::Boolean(b)),
                             v => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                                expected: "bool".to_string(),
+                                expected: "boolean".to_string(),
                                 actual: v.type_name().to_string(),
                                 operation: "logical and".to_string(),
                             })),
                         }
                     }
                     v => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                        expected: "bool".to_string(),
+                        expected: "boolean".to_string(),
                         actual: v.type_name().to_string(),
                         operation: "logical and".to_string(),
                     })),
@@ -1844,14 +1844,14 @@ impl Interpreter {
                         match rhs_val {
                             Value::Boolean(b) => Ok(Value::Boolean(b)),
                             v => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                                expected: "bool".to_string(),
+                                expected: "boolean".to_string(),
                                 actual: v.type_name().to_string(),
                                 operation: "logical or".to_string(),
                             })),
                         }
                     }
                     v => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                        expected: "bool".to_string(),
+                        expected: "boolean".to_string(),
                         actual: v.type_name().to_string(),
                         operation: "logical or".to_string(),
                     })),
@@ -1936,7 +1936,7 @@ impl Interpreter {
             Value::Boolean(b) => b,
             v => {
                 return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                    expected: "bool".to_string(),
+                    expected: "boolean".to_string(),
                     actual: v.type_name().to_string(),
                     operation: "if condition".to_string(),
                 }))
@@ -2388,7 +2388,7 @@ impl Interpreter {
                         }
                         other => {
                             return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                                expected: "bool".to_string(),
+                                expected: "boolean".to_string(),
                                 actual: other.type_name().to_string(),
                                 operation: "property-list if condition".to_string(),
                             }))
@@ -2410,7 +2410,7 @@ impl Interpreter {
                             Value::Boolean(false) => {}
                             other => {
                                 return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                                    expected: "bool".to_string(),
+                                    expected: "boolean".to_string(),
                                     actual: other.type_name().to_string(),
                                     operation: "property-list condition arm".to_string(),
                                 }))
@@ -2670,12 +2670,12 @@ impl Interpreter {
 
     fn runtime_type_of_value(&self, value: &Value) -> Type {
         match value {
-            Value::Int32(_) => Type::i32(),
+            Value::Int32(_) => Type::int32(),
             Value::Int(_) => Type::int(),
-            Value::Float32(_) => Type::f32(),
-            Value::Float(_) => Type::float(),
+            Value::Float32(_) => Type::float32(),
+            Value::Float(_) => Type::float64(),
             Value::String(_) => Type::string(),
-            Value::Boolean(_) => Type::bool(),
+            Value::Boolean(_) => Type::boolean(),
             Value::Null => Type::nullable(Type::named("object")),
             Value::Array(values) => {
                 if values.is_empty() {
@@ -4933,7 +4933,7 @@ mod tests {
     #[test]
     fn test_initialize_external_component_returns_typed_record_and_empty_state() {
         let source = r#"
-            external component <SearchBox placeholder:string = "Find docs" showSearchIcon:bool = true />
+            external component <SearchBox placeholder:string = "Find docs" showSearchIcon:boolean = true />
         "#;
 
         let (module, interpreter) = lower_module_runtime(source);
@@ -5110,7 +5110,7 @@ mod tests {
         assert!(matches!(
             non_record_state.kind(),
             RuntimeErrorKind::TypeMismatch { expected, actual, .. }
-                if expected == "record" && actual == "i64"
+                if expected == "record" && actual == "int"
         ));
 
         let bad_enum = interpreter

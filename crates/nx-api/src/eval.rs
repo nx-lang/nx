@@ -497,7 +497,7 @@ let root() = { <Layout.Button /> }"#;
             let defaultPlaceholder(): string = { "Wrong" }
 
             type SearchConfig extends SearchConfigBase = {
-              showSearchIcon: bool = true
+              showSearchIcon: boolean = true
             }
 
             let root() = { SearchConfig() }
@@ -596,7 +596,7 @@ let root() = { answer() }"#;
               | idle
               | failed {
                   message: string
-                  retryable: bool = true
+                  retryable: boolean = true
                 }
             let root(): LoadState = { <LoadState.failed message={"Offline"} /> }
         "#;

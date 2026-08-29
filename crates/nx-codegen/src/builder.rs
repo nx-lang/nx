@@ -1822,7 +1822,15 @@ fn build_type_ref_with_prepared(
 fn is_builtin_type_name(name: &str) -> bool {
     matches!(
         name,
-        "i32" | "i64" | "int" | "f32" | "f64" | "float" | "string" | "bool" | "void" | "object"
+        "int"
+            | "int32"
+            | "int64"
+            | "float32"
+            | "float64"
+            | "string"
+            | "boolean"
+            | "void"
+            | "object"
     )
 }
 

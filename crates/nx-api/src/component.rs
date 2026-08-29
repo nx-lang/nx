@@ -681,7 +681,7 @@ let root() = { 0 }"#;
     #[test]
     fn initialize_component_source_supports_external_component_entrypoint() {
         let source = r#"
-            external component <SearchBox placeholder:string = "Find docs" showSearchIcon:bool = true />
+            external component <SearchBox placeholder:string = "Find docs" showSearchIcon:boolean = true />
         "#;
 
         let result = initialize_component_source(

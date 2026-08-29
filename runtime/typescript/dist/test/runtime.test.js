@@ -54,7 +54,7 @@ const themeType = nominal(ref("Theme", "m0:d3", "enum"));
 const loadStateType = nominal(ref("LoadState", "m0:d5", "union"));
 const nullableLoadStateType = { kind: "nullable", inner: loadStateType };
 const intSemantic = { display: "int", shape: { kind: "primitive", name: "int" } };
-const floatSemantic = { display: "float", shape: { kind: "primitive", name: "float" } };
+const floatSemantic = { display: "float64", shape: { kind: "primitive", name: "float64" } };
 function expr(op, ty) {
     expressionCounter += 1;
     const base = {
@@ -109,7 +109,7 @@ const userRecordFields = [
 ];
 const program = {
     format: "nx-ir-json",
-    schemaVersion: 1,
+    schemaVersion: 2,
     runtimeAbi: "nx-ir-runtime-v1",
     programFingerprint: "42",
     requiredFeatures: ["eager-v1"],
@@ -597,7 +597,7 @@ test("uses module-qualified nominal type references and entrypoint-only lookup",
     ];
     const collisionProgram = {
         format: "nx-ir-json",
-        schemaVersion: 1,
+        schemaVersion: 2,
         runtimeAbi: "nx-ir-runtime-v1",
         programFingerprint: "43",
         requiredFeatures: ["eager-v1"],

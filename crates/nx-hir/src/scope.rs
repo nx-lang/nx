@@ -915,7 +915,7 @@ mod tests {
     #[test]
     fn property_fragment_condition_branch_identifiers_are_checked() {
         let source = r#"
-            let render(showLabel:bool, label:string) = {
+            let render(showLabel:boolean, label:string) = {
                 <Button if showLabel { text={label} } />
             }
         "#;

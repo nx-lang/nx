@@ -342,7 +342,7 @@ property whose value is the fully scoped NX case name, SHALL include declared an
 with authored wire names, and SHALL allow TypeScript consumers to narrow by `$type`.
 
 #### Scenario: TypeScript generation emits narrowable union cases
-- **WHEN** source contains `export type LoadState = | idle | failed { message:string retryable:bool = true }`
+- **WHEN** source contains `export type LoadState = | idle | failed { message:string retryable:boolean = true }`
 - **THEN** generated TypeScript SHALL include an exported `LoadState` type surface
 - **AND** one generated case member SHALL have `$type: "LoadState.idle"`
 - **AND** one generated case member SHALL have `$type: "LoadState.failed"` and field
@@ -369,7 +369,7 @@ fully scoped NX case names. Generated case DTOs SHALL include declared and inher
 authored NX wire names.
 
 #### Scenario: C# generation emits polymorphic union root and cases
-- **WHEN** source contains `export type LoadState = | idle | failed { message:string retryable:bool = true }`
+- **WHEN** source contains `export type LoadState = | idle | failed { message:string retryable:boolean = true }`
 - **THEN** generated C# SHALL include a generated root type for `LoadState`
 - **AND** generated C# SHALL include generated concrete case DTOs for `LoadState.idle` and
   `LoadState.failed`
@@ -399,25 +399,25 @@ expression, generation SHALL continue and SHALL emit a warning that the default 
 preserved.
 
 #### Scenario: Record field literal defaults are emitted as C# initializers
-- **WHEN** source contains `export type Settings = { enabled:bool = true count:int = 42 title:string = "hello" maybe:string? = null }`
+- **WHEN** source contains `export type Settings = { enabled:boolean = true count:int = 42 title:string = "hello" maybe:string? = null }`
 - **THEN** generated C# SHALL include `public bool Enabled { get; set; } = true;`
 - **AND** generated C# SHALL include `public long Count { get; set; } = 42;`
 - **AND** generated C# SHALL include `public string Title { get; set; } = "hello";`
 - **AND** generated C# SHALL include `public string? Maybe { get; set; } = null;`
 
 #### Scenario: Union case field literal defaults are emitted as C# initializers
-- **WHEN** source contains `export type LoadState = | failed { retryable:bool = true }`
+- **WHEN** source contains `export type LoadState = | failed { retryable:boolean = true }`
 - **THEN** generated C# SHALL include generated case DTO `LoadStateFailed`
 - **AND** generated C# SHALL include `public bool Retryable { get; set; } = true;`
 
 #### Scenario: External component prop literal defaults are emitted as C# initializers
-- **WHEN** source contains `export external component <Toggle selected:bool = true label:string = "On" />`
+- **WHEN** source contains `export external component <Toggle selected:boolean = true label:string = "On" />`
 - **THEN** generated C# SHALL include generated component prop DTO `Toggle`
 - **AND** generated C# SHALL include `public bool Selected { get; set; } = true;`
 - **AND** generated C# SHALL include `public string Label { get; set; } = "On";`
 
 #### Scenario: Unsupported default expressions warn instead of silently changing semantics
-- **WHEN** source contains `export type Settings = { enabled:bool = { !false } }`
+- **WHEN** source contains `export type Settings = { enabled:boolean = { !false } }`
 - **THEN** C# generation SHALL emit a warning that the default for `Settings.enabled` could not be preserved
 - **AND** generated C# SHALL omit a property initializer for `Enabled`
 

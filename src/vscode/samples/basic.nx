@@ -6,7 +6,7 @@ abstract type UserBase extends Models.Entity = {
 }
 
 type User extends UserBase = {
-  isAdmin: bool = false
+  isAdmin: boolean = false
 }
 
 private let titleFontSize = 14
@@ -15,7 +15,7 @@ let <UserCard
     user:User
     className:string = "primary"
     content body:Element[]
-    isLoading:bool = false
+    isLoading:boolean = false
     /> =
   <section class="card {className}">
     if isLoading {

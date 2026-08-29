@@ -131,7 +131,7 @@ describe('NX TextMate grammar', function () {
     const lines = [
       'export type LoadState =',
       '  | idle',
-      '  | failed { message:string retryable:bool = true }'
+      '  | failed { message:string retryable:boolean = true }'
     ];
 
     let ruleStack: StateStack | null = null;
@@ -331,13 +331,23 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(line, tokens, '(')).to.include('source.nx');
   });
 
+  it('highlights every numeric primitive, including int alongside the widths', function () {
+    const line = 'let f(a:int, b:int32, c:int64, d:float32, e:float64): boolean = true';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    for (const name of ['int', 'int32', 'int64', 'float32', 'float64']) {
+      expect(scopesForSubstring(line, tokens, name), name).to.include(
+        'storage.type.primitive.nx',
+      );
+    }
+  });
+
   it('highlights paren-style function definitions', function () {
-    const line = 'let render(title:string, count:int): bool = title == ""';
+    const line = 'let render(title:string, count:int): boolean = title == ""';
     const { tokens } = grammar.tokenizeLine(line, null);
     expect(scopesForSubstring(line, tokens, 'render')).to.include('entity.name.variable.nx');
     expect(scopesForSubstring(line, tokens, 'string')).to.include('storage.type.primitive.nx');
     expect(scopesForSubstring(line, tokens, 'int')).to.include('storage.type.primitive.nx');
-    expect(scopesForSubstring(line, tokens, 'bool')).to.include('storage.type.primitive.nx');
+    expect(scopesForSubstring(line, tokens, 'boolean')).to.include('storage.type.primitive.nx');
   });
 
   it('highlights tags and attributes', function () {

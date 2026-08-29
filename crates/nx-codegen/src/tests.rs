@@ -804,7 +804,7 @@ type LoadState =
   | idle
   | failed {
       message: string
-      retryable: bool = true
+      retryable: boolean = true
     }
 let root(): LoadState = { <LoadState.failed message={"Offline"} /> }
 "#,

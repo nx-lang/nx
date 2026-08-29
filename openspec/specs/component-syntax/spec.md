@@ -17,7 +17,7 @@ body that contains only `state`.
   PROPERTY_DEFINITION for `text`, and a COMPONENT_BODY containing the rendered element
 
 #### Scenario: Bodyless abstract and bodyless external component declarations
-- **WHEN** a file contains `abstract component <SearchBase placeholder:string emits { SearchRequested } /> external component <SearchBox extends SearchBase showSearchIcon:bool = true /> abstract external component <RemoteSearchBase placeholder:string />`
+- **WHEN** a file contains `abstract component <SearchBase placeholder:string emits { SearchRequested } /> external component <SearchBox extends SearchBase showSearchIcon:boolean = true /> abstract external component <RemoteSearchBase placeholder:string />`
 - **THEN** the parser SHALL produce three COMPONENT_DEFINITION nodes
 - **AND** SHALL preserve `SearchBase` as abstract with no base and no COMPONENT_BODY
 - **AND** SHALL preserve `SearchBox` as external with base `SearchBase` and no COMPONENT_BODY
@@ -31,7 +31,7 @@ body that contains only `state`.
 - **AND** SHALL preserve no rendered component body expression
 
 #### Scenario: Concrete derived component declaration
-- **WHEN** a file contains `component <NxSearchUi extends SearchBase showSpinner:bool = false /> = { <SearchBox /> }`
+- **WHEN** a file contains `component <NxSearchUi extends SearchBase showSpinner:boolean = false /> = { <SearchBox /> }`
 - **THEN** the parser SHALL produce a COMPONENT_DEFINITION named `NxSearchUi` whose signature base is `SearchBase`
 - **AND** SHALL preserve one PROPERTY_DEFINITION named `showSpinner` and a COMPONENT_BODY
 

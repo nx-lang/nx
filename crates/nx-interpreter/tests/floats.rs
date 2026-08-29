@@ -95,7 +95,7 @@ fn test_float_literal_zero() {
 #[test]
 fn test_float_addition() {
     let source = r#"
-        let <add a:float b:float /> = { a + b }
+        let <add a:float64 b:float64 /> = { a + b }
     "#;
 
     let result = execute_function(source, "add", vec![Value::Float(1.5), Value::Float(2.3)])
@@ -109,7 +109,7 @@ fn test_float_addition() {
 #[test]
 fn test_float_subtraction() {
     let source = r#"
-        let <sub a:float b:float /> = { a - b }
+        let <sub a:float64 b:float64 /> = { a - b }
     "#;
 
     let result = execute_function(source, "sub", vec![Value::Float(5.5), Value::Float(2.2)])
@@ -123,7 +123,7 @@ fn test_float_subtraction() {
 #[test]
 fn test_float_multiplication() {
     let source = r#"
-        let <mul a:float b:float /> = { a * b }
+        let <mul a:float64 b:float64 /> = { a * b }
     "#;
 
     let result = execute_function(source, "mul", vec![Value::Float(2.5), Value::Float(4.0)])
@@ -137,7 +137,7 @@ fn test_float_multiplication() {
 #[test]
 fn test_float_division() {
     let source = r#"
-        let <div a:float b:float /> = { a / b }
+        let <div a:float64 b:float64 /> = { a / b }
     "#;
 
     let result = execute_function(source, "div", vec![Value::Float(7.5), Value::Float(2.5)])
@@ -151,7 +151,7 @@ fn test_float_division() {
 #[test]
 fn test_float_division_by_zero() {
     let source = r#"
-        let <div a:float b:float /> = { a / b }
+        let <div a:float64 b:float64 /> = { a / b }
     "#;
 
     let result = execute_function(source, "div", vec![Value::Float(1.0), Value::Float(0.0)]);
@@ -174,7 +174,7 @@ fn test_float_division_by_zero() {
 #[test]
 fn test_float_modulo() {
     let source = r#"
-        let <fmod a:float b:float /> = { a % b }
+        let <fmod a:float64 b:float64 /> = { a % b }
     "#;
 
     let result = execute_function(source, "fmod", vec![Value::Float(10.5), Value::Float(3.0)])
@@ -189,7 +189,7 @@ fn test_float_modulo() {
 #[test]
 fn test_float_modulo_smaller_dividend() {
     let source = r#"
-        let <fmod a:float b:float /> = { a % b }
+        let <fmod a:float64 b:float64 /> = { a % b }
     "#;
 
     let result = execute_function(source, "fmod", vec![Value::Float(2.5), Value::Float(4.0)])
@@ -204,7 +204,7 @@ fn test_float_modulo_smaller_dividend() {
 #[test]
 fn test_float_modulo_exact() {
     let source = r#"
-        let <fmod a:float b:float /> = { a % b }
+        let <fmod a:float64 b:float64 /> = { a % b }
     "#;
 
     let result = execute_function(source, "fmod", vec![Value::Float(9.0), Value::Float(3.0)])
@@ -219,7 +219,7 @@ fn test_float_modulo_exact() {
 #[test]
 fn test_float_modulo_by_zero() {
     let source = r#"
-        let <fmod a:float b:float /> = { a % b }
+        let <fmod a:float64 b:float64 /> = { a % b }
     "#;
 
     let result = execute_function(source, "fmod", vec![Value::Float(10.0), Value::Float(0.0)]);
@@ -233,7 +233,7 @@ fn test_float_modulo_by_zero() {
 #[test]
 fn test_mixed_int_float_modulo() {
     let source = r#"
-        let <fmod a:int b:float /> = { a % b }
+        let <fmod a:int b:float64 /> = { a % b }
     "#;
 
     let result = execute_function(source, "fmod", vec![Value::Int(10), Value::Float(4.0)]);
@@ -248,7 +248,7 @@ fn test_mixed_int_float_modulo() {
 #[test]
 fn test_float_modulo_in_expression() {
     let source = r#"
-        let <calc x:float /> = { (x + 1.5) % 3.0 }
+        let <calc x:float64 /> = { (x + 1.5) % 3.0 }
     "#;
 
     // (4.0 + 1.5) % 3.0 = 5.5 % 3.0 = 2.5
@@ -269,7 +269,7 @@ fn test_float_modulo_in_expression() {
 fn test_float_modulo_negative_dividend() {
     // -7.5 % 3.0 = -1.5 (truncated division semantics)
     let source = r#"
-        let <fmod a:float b:float /> = { a % b }
+        let <fmod a:float64 b:float64 /> = { a % b }
     "#;
 
     let result = execute_function(source, "fmod", vec![Value::Float(-7.5), Value::Float(3.0)])
@@ -284,7 +284,7 @@ fn test_float_modulo_negative_dividend() {
 fn test_float_modulo_negative_divisor() {
     // 7.5 % -3.0 = 1.5 (result has same sign as dividend)
     let source = r#"
-        let <fmod a:float b:float /> = { a % b }
+        let <fmod a:float64 b:float64 /> = { a % b }
     "#;
 
     let result = execute_function(source, "fmod", vec![Value::Float(7.5), Value::Float(-3.0)])
@@ -299,7 +299,7 @@ fn test_float_modulo_negative_divisor() {
 fn test_float_modulo_both_negative() {
     // -7.5 % -3.0 = -1.5 (result has same sign as dividend)
     let source = r#"
-        let <fmod a:float b:float /> = { a % b }
+        let <fmod a:float64 b:float64 /> = { a % b }
     "#;
 
     let result = execute_function(source, "fmod", vec![Value::Float(-7.5), Value::Float(-3.0)])
@@ -314,7 +314,7 @@ fn test_float_modulo_both_negative() {
 fn test_float_division_negative_dividend() {
     // -7.5 / 3.0 = -2.5
     let source = r#"
-        let <div a:float b:float /> = { a / b }
+        let <div a:float64 b:float64 /> = { a / b }
     "#;
 
     let result = execute_function(source, "div", vec![Value::Float(-7.5), Value::Float(3.0)])
@@ -329,7 +329,7 @@ fn test_float_division_negative_dividend() {
 fn test_float_division_negative_divisor() {
     // 7.5 / -3.0 = -2.5
     let source = r#"
-        let <div a:float b:float /> = { a / b }
+        let <div a:float64 b:float64 /> = { a / b }
     "#;
 
     let result = execute_function(source, "div", vec![Value::Float(7.5), Value::Float(-3.0)])
@@ -344,7 +344,7 @@ fn test_float_division_negative_divisor() {
 fn test_float_division_both_negative() {
     // -7.5 / -3.0 = 2.5
     let source = r#"
-        let <div a:float b:float /> = { a / b }
+        let <div a:float64 b:float64 /> = { a / b }
     "#;
 
     let result = execute_function(source, "div", vec![Value::Float(-7.5), Value::Float(-3.0)])
@@ -358,7 +358,7 @@ fn test_float_division_both_negative() {
 #[test]
 fn test_float_negation() {
     let source = r#"
-        let <neg a:float /> = { -a }
+        let <neg a:float64 /> = { -a }
     "#;
 
     let result = execute_function(source, "neg", vec![Value::Float(3.14)])
@@ -372,7 +372,7 @@ fn test_float_negation() {
 #[test]
 fn test_float_complex_expression() {
     let source = r#"
-        let <calc a:float b:float c:float /> = { a + b * c }
+        let <calc a:float64 b:float64 c:float64 /> = { a + b * c }
     "#;
 
     // 1.0 + 2.0 * 3.0 = 1.0 + 6.0 = 7.0
@@ -395,7 +395,7 @@ fn test_float_complex_expression() {
 #[test]
 fn test_float_equal() {
     let source = r#"
-        let <eq a:float b:float /> = { a == b }
+        let <eq a:float64 b:float64 /> = { a == b }
     "#;
 
     let result = execute_function(source, "eq", vec![Value::Float(3.14), Value::Float(3.14)])
@@ -410,7 +410,7 @@ fn test_float_equal() {
 #[test]
 fn test_float_not_equal() {
     let source = r#"
-        let <ne a:float b:float /> = { a != b }
+        let <ne a:float64 b:float64 /> = { a != b }
     "#;
 
     let result = execute_function(source, "ne", vec![Value::Float(1.0), Value::Float(2.0)])
@@ -425,7 +425,7 @@ fn test_float_not_equal() {
 #[test]
 fn test_float_less_than() {
     let source = r#"
-        let <lt a:float b:float /> = { a < b }
+        let <lt a:float64 b:float64 /> = { a < b }
     "#;
 
     let result = execute_function(source, "lt", vec![Value::Float(1.0), Value::Float(2.0)])
@@ -440,7 +440,7 @@ fn test_float_less_than() {
 #[test]
 fn test_float_less_than_or_equal() {
     let source = r#"
-        let <le a:float b:float /> = { a <= b }
+        let <le a:float64 b:float64 /> = { a <= b }
     "#;
 
     let result = execute_function(source, "le", vec![Value::Float(1.0), Value::Float(1.0)])
@@ -459,7 +459,7 @@ fn test_float_less_than_or_equal() {
 #[test]
 fn test_float_greater_than() {
     let source = r#"
-        let <gt a:float b:float /> = { a > b }
+        let <gt a:float64 b:float64 /> = { a > b }
     "#;
 
     let result = execute_function(source, "gt", vec![Value::Float(2.0), Value::Float(1.0)])
@@ -474,7 +474,7 @@ fn test_float_greater_than() {
 #[test]
 fn test_float_greater_than_or_equal() {
     let source = r#"
-        let <ge a:float b:float /> = { a >= b }
+        let <ge a:float64 b:float64 /> = { a >= b }
     "#;
 
     let result = execute_function(source, "ge", vec![Value::Float(2.0), Value::Float(2.0)])
@@ -508,12 +508,12 @@ fn test_float_in_conditional() {
     let params = vec![
         Param::new(
             Name::new("a"),
-            nx_hir::ast::TypeRef::name("float"),
+            nx_hir::ast::TypeRef::name("float64"),
             span(0, 1),
         ),
         Param::new(
             Name::new("b"),
-            nx_hir::ast::TypeRef::name("float"),
+            nx_hir::ast::TypeRef::name("float64"),
             span(2, 3),
         ),
     ];
@@ -587,7 +587,7 @@ fn test_float_in_conditional() {
 fn test_mixed_int_float_addition() {
     // Test if int + float works (may coerce int to float)
     let source = r#"
-        let <add a:int b:float /> = { a + b }
+        let <add a:int b:float64 /> = { a + b }
     "#;
 
     let result = execute_function(source, "add", vec![Value::Int(1), Value::Float(2.5)]);
@@ -604,7 +604,7 @@ fn test_mixed_int_float_addition() {
 fn test_float_literal_in_expression() {
     // Test float literals used inline
     let source = r#"
-        let <calc x:float /> = { x * 2.0 + 1.5 }
+        let <calc x:float64 /> = { x * 2.0 + 1.5 }
     "#;
 
     let result = execute_function(source, "calc", vec![Value::Float(3.0)])

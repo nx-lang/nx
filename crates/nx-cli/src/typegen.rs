@@ -342,7 +342,7 @@ mod tests {
             export abstract type EventBase = { source:string }
             export type LoadState =
               | idle
-              | failed { message:string retryable:bool = true }
+              | failed { message:string retryable:boolean = true }
             export type UiEvent extends EventBase =
               | clicked { x:int }
               | closed
@@ -659,16 +659,124 @@ mod tests {
     }
 
     #[test]
+    fn capitalized_primitive_spellings_are_not_mapped_to_host_primitives() {
+        // Primitive names are case-sensitive. `INT64` and friends are ordinary named types, so
+        // they must never be emitted as C# primitives.
+        let source = r#"
+            export type Weird = {
+              a:INT64
+              b:Boolean
+              c:String
+            }
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.Models".to_string()),
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(!output.contains("public long A"), "got: {}", output);
+        assert!(!output.contains("public bool B"), "got: {}", output);
+        assert!(!output.contains("public string C"), "got: {}", output);
+    }
+
+    #[test]
+    fn generates_csharp_numeric_widths_including_int() {
+        let source = r#"
+            export type Sizes = {
+              count:int
+              narrow:int32
+              wide:int64
+              ratio:float32
+              precise:float64
+            }
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.Models".to_string()),
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        // `int` is exact over +/-(2^53-1), which does not fit a C# `int`, so it maps to `long`.
+        assert!(
+            output.contains("public long Count { get; set; }"),
+            "{}",
+            output
+        );
+        assert!(
+            output.contains("public int Narrow { get; set; }"),
+            "{}",
+            output
+        );
+        assert!(
+            output.contains("public long Wide { get; set; }"),
+            "{}",
+            output
+        );
+        assert!(
+            output.contains("public float Ratio { get; set; }"),
+            "{}",
+            output
+        );
+        assert!(
+            output.contains("public double Precise { get; set; }"),
+            "{}",
+            output
+        );
+    }
+
+    #[test]
+    fn generates_typescript_numeric_widths_including_int() {
+        let source = r#"
+            export type Sizes = {
+              count:int
+              narrow:int32
+              wide:int64
+              ratio:float32
+              precise:float64
+            }
+        "#;
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+
+        // Every numeric primitive is a TypeScript `number`, `int64` included. Carrying `int64`
+        // as `bigint` is a separate change; today it is still emitted as `number`.
+        for field in ["count", "narrow", "wide", "ratio", "precise"] {
+            assert!(
+                output.contains(&format!("{}: number", field)),
+                "expected `{}: number` in: {}",
+                field,
+                output
+            );
+        }
+    }
+
+    #[test]
     fn generates_csharp_record_field_literal_default_initializers() {
         let source = r#"
             export type Settings = {
-              enabled:bool = true
+              enabled:boolean = true
               count:int = 42
               title:string = "hello"
               maybe:string? = null
-              ratio:float = 0.25
-              small:f32 = 0.5
-              maybeSmall:f32? = 0.5
+              ratio:float64 = 0.25
+              small:float32 = 0.5
+              maybeSmall:float32? = 0.5
             }
         "#;
         let module = lower_module(source, "types.nx");
@@ -695,8 +803,8 @@ mod tests {
     fn generates_csharp_union_and_external_component_literal_default_initializers() {
         let source = r#"
             export type LoadState =
-              | failed { retryable:bool = true }
-            export external component <Toggle selected:bool = true label:string = "On" />
+              | failed { retryable:boolean = true }
+            export external component <Toggle selected:boolean = true label:string = "On" />
         "#;
         let module = lower_module(source, "types.nx");
         let opts = GenerateTypesOptions {
@@ -720,7 +828,7 @@ mod tests {
     fn warns_when_csharp_literal_default_initializer_cannot_be_preserved() {
         let source = r#"
             export type Settings = {
-              enabled:bool = { !false }
+              enabled:boolean = { !false }
               title:string = { "hello" + "world" }
             }
         "#;
@@ -812,7 +920,7 @@ mod tests {
             export abstract type EventBase = { source:string }
             export type LoadState =
               | idle
-              | failed { message:string retryable:bool = true }
+              | failed { message:string retryable:boolean = true }
             export type UiEvent extends EventBase =
               | clicked { x:int }
               | closed
@@ -1081,7 +1189,7 @@ mod tests {
         .expect("_nx source file");
         fs::write(
             library_dir.join("_nx1.nx"),
-            "export type PayloadExtra = { flag:bool }",
+            "export type PayloadExtra = { flag:boolean }",
         )
         .expect("_nx1 source file");
 

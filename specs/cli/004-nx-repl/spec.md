@@ -19,7 +19,7 @@ As a developer or learner, I want to type a NX expression into an interactive pr
 
 1. **Given** the REPL is running, **When** I type a valid arithmetic expression like `1 + 2` and press Enter, **Then** the result `3` is displayed on the next line
 2. **Given** the REPL is running, **When** I type a valid string expression like `"hello"` and press Enter, **Then** the string value `hello` is displayed
-3. **Given** the REPL is running, **When** I type a valid bool expression like `true && false` and press Enter, **Then** the result `false` is displayed
+3. **Given** the REPL is running, **When** I type a valid boolean expression like `true && false` and press Enter, **Then** the result `false` is displayed
 
 ---
 

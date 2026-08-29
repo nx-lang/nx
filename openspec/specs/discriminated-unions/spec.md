@@ -12,7 +12,7 @@ fields using the existing `PropertyDefinition` shape. Simple scalar choices SHAL
 discriminated union.
 
 #### Scenario: Union declaration with fieldless and payload cases parses
-- **WHEN** a file contains `type LoadState = | idle | loading | failed { message:string retryable:bool = true } | loaded { items:Item[] }`
+- **WHEN** a file contains `type LoadState = | idle | loading | failed { message:string retryable:boolean = true } | loaded { items:Item[] }`
 - **THEN** the parser and lowering SHALL preserve a union definition named `LoadState`
 - **AND** the union SHALL contain cases `idle`, `loading`, `failed`, and `loaded` in source order
 - **AND** the `failed` and `loaded` cases SHALL preserve their declared fields and defaults
@@ -41,7 +41,7 @@ defaulted fields, nullable fields, content fields, unknown fields, and field typ
 binding rules as record construction.
 
 #### Scenario: Payload case construction validates fields
-- **WHEN** a file contains `type LoadState = | failed { message:string retryable:bool = true } let state:LoadState = <LoadState.failed message={"Offline"} />`
+- **WHEN** a file contains `type LoadState = | failed { message:string retryable:boolean = true } let state:LoadState = <LoadState.failed message={"Offline"} />`
 - **THEN** type checking SHALL accept the construction
 - **AND** interpretation SHALL produce a case value with discriminator `LoadState.failed`
 - **AND** the case value SHALL include `retryable = true` from the case default

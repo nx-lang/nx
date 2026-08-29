@@ -53,7 +53,7 @@ the same object/map shape with `$type` and no case-specific fields. Discriminate
 NOT serialize as bare strings; bare-string raw output remains the enum value contract.
 
 #### Scenario: Payload union case returns `$type` and fields
-- **WHEN** a host evaluates `type LoadState = | failed { message:string retryable:bool = true } let root() = { <LoadState.failed message={"Offline"} /> }`
+- **WHEN** a host evaluates `type LoadState = | failed { message:string retryable:boolean = true } let root() = { <LoadState.failed message={"Offline"} /> }`
 - **AND** requests either JSON or MessagePack output
 - **THEN** the returned canonical raw value SHALL include `$type` with value `LoadState.failed`
 - **AND** it SHALL include fields `message` and `retryable`

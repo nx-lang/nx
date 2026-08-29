@@ -34,9 +34,10 @@ Keywords
 
 Primitive types (keywords)
 - STRING ("string")
-- I32 ("i32"), I64 ("i64"), INT ("int")
-- F32 ("f32"), F64 ("f64"), FLOAT ("float")
-- BOOL ("bool")
+- INT ("int")
+- INT32 ("int32"), INT64 ("int64")
+- FLOAT32 ("float32"), FLOAT64 ("float64")
+- BOOLEAN ("boolean")
 - VOID ("void")
 - OBJECT ("object")
 
@@ -198,11 +199,11 @@ TypeDefinition (AST: TypeDefinitionSyntax is a sum type)
 
 RecordDefinition (AST: RecordDefinitionSyntax)
 - RecordDefinition → VisibilityModifier? ABSTRACT? TYPE IDENTIFIER RecordExtendsClauseOpt EQ LBRACE RecordPropertyDefinition* RBRACE
-  - fields: visibility?: "private"|"export", isAbstract: bool, name: string, base?: QualifiedNameSyntax, properties: RecordPropertyDefinitionSyntax[]
+  - fields: visibility?: "private"|"export", isAbstract: boolean, name: string, base?: QualifiedNameSyntax, properties: RecordPropertyDefinitionSyntax[]
 
 ActionDefinition (AST: ActionDefinitionSyntax)
 - ActionDefinition → VisibilityModifier? ABSTRACT? ACTION IDENTIFIER RecordExtendsClauseOpt EQ LBRACE RecordPropertyDefinition* RBRACE
-  - fields: visibility?: "private"|"export", isAbstract: bool, name: string, base?: QualifiedNameSyntax, properties: RecordPropertyDefinitionSyntax[]
+  - fields: visibility?: "private"|"export", isAbstract: boolean, name: string, base?: QualifiedNameSyntax, properties: RecordPropertyDefinitionSyntax[]
 
 RecordExtendsClauseOpt
 - RecordExtendsClauseOpt → EXTENDS QualifiedName
@@ -282,8 +283,8 @@ reapplying `QMARK` to the same outer type layer. `string?[]?` is valid; `string?
 `string?[]??` are invalid.
 
 PrimitiveType (AST: PrimitiveTypeSyntax)
-- PrimitiveType → STRING | I32 | I64 | INT | F32 | F64 | FLOAT | BOOL | VOID | OBJECT
-  - fields: name: "string"|"i32"|"i64"|"int"|"f32"|"f64"|"float"|"bool"|"void"|"object"
+- PrimitiveType → STRING | INT32 | INT64 | FLOAT32 | FLOAT64 | BOOLEAN | VOID | OBJECT
+  - fields: name: "string"|"int"|"int32"|"int64"|"float32"|"float64"|"boolean"|"void"|"object"
 
 UserDefinedType (AST: UserTypeSyntax)
 - UserDefinedType → QualifiedName
@@ -680,10 +681,10 @@ This section lists the AST node types with fields for implementers.
 - TypeDefinitionSyntax: TypeAliasDefinitionSyntax | EnumDefinitionSyntax | RecordDefinitionSyntax | UnionDefinitionSyntax
 - TypeAliasDefinitionSyntax: visibility?: "private"|"export", name: string, type: TypeSyntax
 - EnumDefinitionSyntax: visibility?: "private"|"export", name: string, members: EnumMemberSyntax[]
-- RecordDefinitionSyntax: visibility?: "private"|"export", isAbstract: bool, name: string, base?: QualifiedNameSyntax, properties: RecordPropertyDefinitionSyntax[]
+- RecordDefinitionSyntax: visibility?: "private"|"export", isAbstract: boolean, name: string, base?: QualifiedNameSyntax, properties: RecordPropertyDefinitionSyntax[]
 - UnionDefinitionSyntax: visibility?: "private"|"export", name: string, base?: QualifiedNameSyntax, cases: UnionCaseSyntax[]
 - UnionCaseSyntax: name: string, properties: PropertyDefinitionSyntax[]
-- ActionDefinitionSyntax: visibility?: "private"|"export", isAbstract: bool, name: string, base?: QualifiedNameSyntax, properties: RecordPropertyDefinitionSyntax[]
+- ActionDefinitionSyntax: visibility?: "private"|"export", isAbstract: boolean, name: string, base?: QualifiedNameSyntax, properties: RecordPropertyDefinitionSyntax[]
 - RecordPropertyDefinitionSyntax: modifier?: "content", name: string, type: TypeSyntax, default?: ExpressionSyntax
 - ValueDefinitionSyntax: visibility?: "private"|"export", name: string, type?: TypeSyntax, value: ExpressionSyntax
 - TypeSyntax: kind: "primitive"|"user", name: string (qualified), suffixes: ("nullable"|"sequence")[]

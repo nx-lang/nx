@@ -137,7 +137,7 @@ let <SortableList<T> where T : IComparable items:T[]/> =
 ```nx
 // HOC that adds loading state
 let withLoading<T>(Component:<T/>) =
-  let <WithLoadingWrapper props:T isLoading:bool/> =
+  let <WithLoadingWrapper props:T isLoading:boolean/> =
     {if isLoading => <LoadingSpinner/> else <Component {...props}/>}
   WithLoadingWrapper
 

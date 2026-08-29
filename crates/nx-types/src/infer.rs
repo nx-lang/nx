@@ -170,11 +170,11 @@ impl<'a> InferenceContext<'a> {
             } => {
                 let cond_ty = self.infer_expr(*condition);
 
-                // Condition must be bool
-                if !cond_ty.is_compatible_with(&Type::bool()) && !cond_ty.is_error() {
+                // Condition must be boolean
+                if !cond_ty.is_compatible_with(&Type::boolean()) && !cond_ty.is_error() {
                     self.error(
                         "type-mismatch",
-                        format!("If condition must be bool, found {}", cond_ty),
+                        format!("If condition must be boolean, found {}", cond_ty),
                         *span,
                     );
                 }
@@ -215,11 +215,11 @@ impl<'a> InferenceContext<'a> {
                 let base_ty = self.infer_expr(*base);
                 let index_ty = self.infer_expr(*index);
 
-                // Index must be int
+                // Index must be an integer of any width
                 if !index_ty.is_compatible_with(&Type::int()) && !index_ty.is_error() {
                     self.error(
                         "type-mismatch",
-                        format!("Array index must be int, found {}", index_ty),
+                        format!("Array index must be an integer, found {}", index_ty),
                         *span,
                     );
                 }
@@ -432,8 +432,8 @@ impl<'a> InferenceContext<'a> {
         match lit {
             ast::Literal::String(_) => Type::string(),
             ast::Literal::Int(_) => Type::int(),
-            ast::Literal::Float(_) => Type::float(),
-            ast::Literal::Boolean(_) => Type::bool(),
+            ast::Literal::Float(_) => Type::float64(),
+            ast::Literal::Boolean(_) => Type::boolean(),
             ast::Literal::Null => Type::nullable(self.fresh_var()),
         }
     }
@@ -666,7 +666,7 @@ impl<'a> InferenceContext<'a> {
             Eq | Ne | Lt | Le | Gt | Ge => {
                 if self.type_satisfies_expected(lhs, rhs) || self.type_satisfies_expected(rhs, lhs)
                 {
-                    Type::bool()
+                    Type::boolean()
                 } else {
                     self.error(
                         "type-mismatch",
@@ -677,15 +677,15 @@ impl<'a> InferenceContext<'a> {
                 }
             }
 
-            // Logical: bool × bool → bool
+            // Logical: boolean × boolean → boolean
             And | Or => {
-                if lhs == &Type::bool() && rhs == &Type::bool() {
-                    Type::bool()
+                if lhs == &Type::boolean() && rhs == &Type::boolean() {
+                    Type::boolean()
                 } else {
                     self.error(
                         "type-mismatch",
                         format!(
-                            "Logical operator {:?} requires bool operands, found {} and {}",
+                            "Logical operator {:?} requires boolean operands, found {} and {}",
                             op, lhs, rhs
                         ),
                         span,
@@ -739,12 +739,12 @@ impl<'a> InferenceContext<'a> {
                 Type::Error
             }
             ast::UnOp::Not => {
-                if operand == &Type::bool() {
-                    Type::bool()
+                if operand == &Type::boolean() {
+                    Type::boolean()
                 } else {
                     self.error(
                         "type-mismatch",
-                        format!("Logical NOT requires bool, found {}", operand),
+                        format!("Logical NOT requires boolean, found {}", operand),
                         span,
                     );
                     Type::Error
@@ -1550,10 +1550,12 @@ impl<'a> InferenceContext<'a> {
 
     fn check_boolean_condition(&mut self, condition: ExprId, span: TextSpan, context: &str) {
         let condition_ty = self.infer_expr(condition);
-        if !condition_ty.is_error() && !self.type_satisfies_expected(&condition_ty, &Type::bool()) {
+        if !condition_ty.is_error()
+            && !self.type_satisfies_expected(&condition_ty, &Type::boolean())
+        {
             self.error(
                 "type-mismatch",
-                format!("{} expects bool, found {}", context, condition_ty),
+                format!("{} expects boolean, found {}", context, condition_ty),
                 span,
             );
         }
@@ -2389,7 +2391,7 @@ mod tests {
         let mut ctx = InferenceContext::new(&prepared);
         let ty = ctx.infer_expr(expr_id);
 
-        assert_eq!(ty, Type::bool());
+        assert_eq!(ty, Type::boolean());
     }
 
     #[test]

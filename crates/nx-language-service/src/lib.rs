@@ -37,8 +37,11 @@ const KEYWORD_COMPLETIONS: &[&str] = &[
 ];
 
 const PRIMITIVE_TYPE_COMPLETIONS: &[&str] = &[
-    "string", "int", "long", "float", "double", "bool", "void", "object", "Element",
+    "string", "int", "int32", "int64", "float32", "float64", "boolean", "void", "object",
 ];
+
+/// Built-in type names that are valid in type position but are not primitives.
+const BUILTIN_TYPE_COMPLETIONS: &[&str] = &["Element"];
 
 /// Client-owned document URI.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1369,6 +1372,12 @@ fn type_completion_items(declarations: &[Declaration]) -> Vec<CompletionItem> {
         })
         .collect::<Vec<_>>();
 
+    items.extend(BUILTIN_TYPE_COMPLETIONS.iter().map(|label| CompletionItem {
+        label: (*label).to_string(),
+        kind: CompletionItemKind::Type,
+        detail: Some("built-in type".to_string()),
+    }));
+
     items.extend(declarations.iter().filter_map(|declaration| {
         matches!(
             declaration.kind,
@@ -1732,8 +1741,14 @@ component <SearchBox placeholder:string /> = {
             .collect::<Vec<_>>();
 
         assert!(labels.contains(&"string"));
-        assert!(labels.contains(&"bool"));
+        assert!(labels.contains(&"boolean"));
+        assert!(labels.contains(&"int"));
+        assert!(labels.contains(&"int32"));
+        assert!(labels.contains(&"int64"));
         assert!(labels.contains(&"User"));
+        assert!(!labels.contains(&"bool"));
+        assert!(!labels.contains(&"long"));
+        assert!(!labels.contains(&"double"));
     }
 
     #[test]

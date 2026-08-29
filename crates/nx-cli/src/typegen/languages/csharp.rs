@@ -670,27 +670,34 @@ fn csharp_type_name_inner(
             is_reference: true,
             is_nullable: false,
         },
-        "i32" => CSharpType {
-            text: "int".to_string(),
-            is_reference: false,
-            is_nullable: false,
-        },
-        "i64" | "int" => CSharpType {
+        // NX `int` is exact over +/-(2^53-1), which does not fit a C# `int`; `long` is the
+        // narrowest C# type that holds the whole range.
+        "int" => CSharpType {
             text: "long".to_string(),
             is_reference: false,
             is_nullable: false,
         },
-        "f32" => CSharpType {
+        "int32" => CSharpType {
+            text: "int".to_string(),
+            is_reference: false,
+            is_nullable: false,
+        },
+        "int64" => CSharpType {
+            text: "long".to_string(),
+            is_reference: false,
+            is_nullable: false,
+        },
+        "float32" => CSharpType {
             text: "float".to_string(),
             is_reference: false,
             is_nullable: false,
         },
-        "f64" | "float" => CSharpType {
+        "float64" => CSharpType {
             text: "double".to_string(),
             is_reference: false,
             is_nullable: false,
         },
-        "bool" => CSharpType {
+        "boolean" => CSharpType {
             text: "bool".to_string(),
             is_reference: false,
             is_nullable: false,
@@ -837,27 +844,34 @@ fn csharp_imported_alias_target_name(
             is_reference: true,
             is_nullable: false,
         },
-        "i32" => CSharpType {
-            text: "int".to_string(),
-            is_reference: false,
-            is_nullable: false,
-        },
-        "i64" | "int" => CSharpType {
+        // NX `int` is exact over +/-(2^53-1), which does not fit a C# `int`; `long` is the
+        // narrowest C# type that holds the whole range.
+        "int" => CSharpType {
             text: "long".to_string(),
             is_reference: false,
             is_nullable: false,
         },
-        "f32" => CSharpType {
+        "int32" => CSharpType {
+            text: "int".to_string(),
+            is_reference: false,
+            is_nullable: false,
+        },
+        "int64" => CSharpType {
+            text: "long".to_string(),
+            is_reference: false,
+            is_nullable: false,
+        },
+        "float32" => CSharpType {
             text: "float".to_string(),
             is_reference: false,
             is_nullable: false,
         },
-        "f64" | "float" => CSharpType {
+        "float64" => CSharpType {
             text: "double".to_string(),
             is_reference: false,
             is_nullable: false,
         },
-        "bool" => CSharpType {
+        "boolean" => CSharpType {
             text: "bool".to_string(),
             is_reference: false,
             is_nullable: false,
@@ -950,13 +964,12 @@ fn imported_alias_target_uses_dependency_namespace(ty: &TypeRef) -> bool {
         TypeRef::Name(name) => !matches!(
             name.as_str(),
             "string"
-                | "i32"
-                | "i64"
                 | "int"
-                | "f32"
-                | "f64"
-                | "float"
-                | "bool"
+                | "int32"
+                | "int64"
+                | "float32"
+                | "float64"
+                | "boolean"
                 | "void"
                 | "object"
                 | "unknown"

@@ -1,5 +1,5 @@
 export const NX_IR_FORMAT_ID = "nx-ir-json";
-export const NX_IR_SCHEMA_VERSION = 1;
+export const NX_IR_SCHEMA_VERSION = 2;
 export const NX_IR_RUNTIME_ABI = "nx-ir-runtime-v1";
 
 export type NxDiagnosticSeverity = "error" | "warning" | "info" | "hint";
@@ -849,12 +849,11 @@ function normalizePrimitiveValue(
   path: string,
 ): NxCanonicalValue {
   switch (name) {
-    case "i32":
-    case "i64":
     case "int":
-    case "f32":
-    case "f64":
-    case "float":
+    case "int32":
+    case "int64":
+    case "float32":
+    case "float64":
       if (typeof value !== "number") {
         fail("nx-ir-boundary-type", `Expected ${path} to be a number.`);
       }
@@ -864,7 +863,7 @@ function normalizePrimitiveValue(
         fail("nx-ir-boundary-type", `Expected ${path} to be a string.`);
       }
       return value;
-    case "bool":
+    case "boolean":
       if (typeof value !== "boolean") {
         fail("nx-ir-boundary-type", `Expected ${path} to be a boolean.`);
       }
@@ -1332,7 +1331,7 @@ function isIntegerSemanticType(ty: NxIrSemanticType | undefined): boolean {
     return false;
   }
   const name = ty.shape.name;
-  return name === "int" || name === "i32" || name === "i64";
+  return name === "int" || name === "int32" || name === "int64";
 }
 
 function normalizeSignedZero(value: number): number {

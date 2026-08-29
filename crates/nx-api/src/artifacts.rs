@@ -2698,7 +2698,7 @@ export type UiEvent extends EventBase =
   | clicked {
       x:int
       y:int
-      retryable:bool = true
+      retryable:boolean = true
     }
   | closed
 type InternalState = | idle
@@ -2895,7 +2895,7 @@ let root() = { 0 }"#;
 
         let main_path = app_dir.join("main.nx");
         let source = r#"import "../ui"
-component <SearchBox extends SearchBase showSearchIcon:bool = true /> = {
+component <SearchBox extends SearchBase showSearchIcon:boolean = true /> = {
   <section>{body}</section>
 }
 let root() = { <SearchBox placeholder={"Docs"}><Badge /></SearchBox> }"#;

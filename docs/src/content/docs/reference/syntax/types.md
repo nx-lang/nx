@@ -28,7 +28,7 @@ abstract type UserBase extends Entity = {
 }
 
 type User extends UserBase = {
-  isAdmin: bool = false
+  isAdmin: boolean = false
 }
 ```
 
@@ -61,7 +61,7 @@ required leading-pipe case list.
 type LoadState =
   | idle
   | loading
-  | failed { message:string retryable:bool = true }
+  | failed { message:string retryable:boolean = true }
   | loaded { items:string[] }
 ```
 

@@ -2441,7 +2441,7 @@ fn test_snapshot_error_diagnostics() {
 #[test]
 fn test_snapshot_union_definition() {
     let result = parse_str(
-        "type LoadState = | idle | failed { message:string retryable:bool = true }",
+        "type LoadState = | idle | failed { message:string retryable:boolean = true }",
         "test.nx",
     );
     let root = result.root().expect("Should have root");
@@ -2625,16 +2625,16 @@ fn test_binary_expressions_comparison() {
 #[test]
 fn test_binary_expressions_logical() {
     // Logical AND
-    let result = parse_str("let <Test x: bool y: bool /> = {x && y}", "test.nx");
+    let result = parse_str("let <Test x: boolean y: boolean /> = {x && y}", "test.nx");
     assert!(result.is_ok());
 
     // Logical OR
-    let result = parse_str("let <Test x: bool y: bool /> = {x || y}", "test.nx");
+    let result = parse_str("let <Test x: boolean y: boolean /> = {x || y}", "test.nx");
     assert!(result.is_ok());
 
     // Complex: precedence (AND before OR)
     let result = parse_str(
-        "let <Test x: bool y: bool z: bool /> = {x && y || z}",
+        "let <Test x: boolean y: boolean z: boolean /> = {x && y || z}",
         "test.nx",
     );
     assert!(result.is_ok());
@@ -2651,7 +2651,7 @@ fn test_unary_expressions() {
     assert!(result.is_ok());
 
     // Logical not
-    let result = parse_str("let <Test flag: bool /> = {!flag}", "test.nx");
+    let result = parse_str("let <Test flag: boolean /> = {!flag}", "test.nx");
     assert!(result.is_ok());
 }
 
@@ -2844,8 +2844,8 @@ fn test_property_defaults_with_expressions() {
     let source = r#"let <Test
   sum: int = {1 + 2 + 3}
   product: int = {4 * 5}
-  comparison: bool = {10 > 5}
-  logical: bool = {true && false}
+  comparison: boolean = {10 > 5}
+  logical: boolean = {true && false}
   ternary: int = {5 > 3 ? 100 : 200}
   nested: int = {(1 + 2) * (3 + 4)}
 /> = {sum + product}"#;

@@ -504,7 +504,7 @@ fn test_for_loop_float_array() {
     // Function: double_floats(items) = for item in items { item * 2.0 }
     let params = vec![Param::new(
         Name::new("items"),
-        nx_hir::ast::TypeRef::array(nx_hir::ast::TypeRef::name("float")),
+        nx_hir::ast::TypeRef::array(nx_hir::ast::TypeRef::name("float64")),
         span(0, 5),
     )];
 

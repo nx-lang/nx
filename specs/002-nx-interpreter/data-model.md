@@ -157,7 +157,7 @@ pub fn to_bool(&self) -> Result<bool, RuntimeError>
 - Int ⟷ Float: Allowed with explicit conversion
 - String + any type: Converts to string and concatenates
 - Boolean operations: Only on Boolean values
-- Comparison: Same types only (int/int, float/float, string/string, bool/bool)
+- Comparison: Same types only (Int/Int, Float/Float, String/String, Boolean/Boolean)
 
 ---
 

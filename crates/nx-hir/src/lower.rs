@@ -24,10 +24,11 @@ use smol_str::SmolStr;
 /// allocating expressions and handling errors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TypeTag {
-    I32,
     Int,
-    F32,
-    Float,
+    Int32,
+    Int64,
+    Float32,
+    Float64,
     Boolean,
     String,
     Null,
@@ -37,18 +38,16 @@ enum TypeTag {
 impl TypeTag {
     fn from_type_ref(ty: &TypeRef) -> Self {
         match ty {
-            TypeRef::Name(name) => {
-                let lower = name.as_str().to_ascii_lowercase();
-                match lower.as_str() {
-                    "string" => TypeTag::String,
-                    "i32" => TypeTag::I32,
-                    "i64" | "int" => TypeTag::Int,
-                    "f32" => TypeTag::F32,
-                    "f64" | "float" => TypeTag::Float,
-                    "bool" => TypeTag::Boolean,
-                    _ => TypeTag::Unknown,
-                }
-            }
+            TypeRef::Name(name) => match name.as_str() {
+                "string" => TypeTag::String,
+                "int" => TypeTag::Int,
+                "int32" => TypeTag::Int32,
+                "int64" => TypeTag::Int64,
+                "float32" => TypeTag::Float32,
+                "float64" => TypeTag::Float64,
+                "boolean" => TypeTag::Boolean,
+                _ => TypeTag::Unknown,
+            },
             TypeRef::Nullable(inner) => TypeTag::from_type_ref(inner),
             _ => TypeTag::Unknown,
         }
@@ -56,14 +55,19 @@ impl TypeTag {
 
     fn combine_numeric(lhs: TypeTag, rhs: TypeTag) -> TypeTag {
         match (lhs, rhs) {
-            // Same-category integer promotion
-            (TypeTag::I32, TypeTag::I32) => TypeTag::I32,
-            (TypeTag::I32, TypeTag::Int) | (TypeTag::Int, TypeTag::I32) => TypeTag::Int,
-            (TypeTag::Int, TypeTag::Int) => TypeTag::Int,
+            // Same-category integer promotion, by the rank order int32 < int < int64
+            (TypeTag::Int64, TypeTag::Int32 | TypeTag::Int | TypeTag::Int64)
+            | (TypeTag::Int32 | TypeTag::Int, TypeTag::Int64) => TypeTag::Int64,
+            (TypeTag::Int, TypeTag::Int32 | TypeTag::Int) | (TypeTag::Int32, TypeTag::Int) => {
+                TypeTag::Int
+            }
+            (TypeTag::Int32, TypeTag::Int32) => TypeTag::Int32,
             // Same-category float promotion
-            (TypeTag::F32, TypeTag::F32) => TypeTag::F32,
-            (TypeTag::F32, TypeTag::Float) | (TypeTag::Float, TypeTag::F32) => TypeTag::Float,
-            (TypeTag::Float, TypeTag::Float) => TypeTag::Float,
+            (TypeTag::Float32, TypeTag::Float32) => TypeTag::Float32,
+            (TypeTag::Float32, TypeTag::Float64) | (TypeTag::Float64, TypeTag::Float32) => {
+                TypeTag::Float64
+            }
+            (TypeTag::Float64, TypeTag::Float64) => TypeTag::Float64,
             _ => TypeTag::Unknown,
         }
     }
@@ -854,7 +858,7 @@ impl LoweringContext {
                     expr
                 } else if let Ok(value) = text.parse::<f64>() {
                     let expr = self.alloc_expr(Expr::Literal(Literal::Float(OrderedFloat(value))));
-                    self.set_expr_type(expr, TypeTag::Float);
+                    self.set_expr_type(expr, TypeTag::Float64);
                     expr
                 } else {
                     self.error_expr(node.span())
@@ -1016,7 +1020,11 @@ impl LoweringContext {
                 let result_ty = match op {
                     UnOp::Not => TypeTag::Boolean,
                     UnOp::Neg => match operand_ty {
-                        TypeTag::I32 | TypeTag::Int | TypeTag::F32 | TypeTag::Float => operand_ty,
+                        TypeTag::Int
+                        | TypeTag::Int32
+                        | TypeTag::Int64
+                        | TypeTag::Float32
+                        | TypeTag::Float64 => operand_ty,
                         _ => TypeTag::Unknown,
                     },
                 };
@@ -2268,7 +2276,7 @@ enum Mode = light | dark"#;
 
     #[test]
     fn test_lower_function_with_multiple_params() {
-        let source = "let <Button text:string disabled:bool /> = <button />";
+        let source = "let <Button text:string disabled:boolean /> = <button />";
         let parse_result = parse_str(source, "test.nx");
 
         let tree = parse_result.tree.unwrap();
@@ -2499,7 +2507,7 @@ enum Mode = light | dark"#;
               | clicked {
                   x:int
                   y:int
-                  retryable:bool = true
+                  retryable:boolean = true
                 }
               | closed
         "#;
@@ -3762,7 +3770,7 @@ enum Mode = light | dark"#;
     #[test]
     fn test_lower_dynamic_element_content_is_preserved() {
         let source = r#"
-            let <Panel flag:bool items:object /> = <div>
+            let <Panel flag:boolean items:object /> = <div>
               {<A /> <B />}
               if flag { <Shown /> } else { <Hidden /> }
               for item in items { <Row /> }
@@ -4064,7 +4072,7 @@ enum Mode = light | dark"#;
     #[test]
     fn test_lower_ternary_expression() {
         // Ternary: condition ? consequent : alternative
-        let source = "let choose(cond:bool): int = { cond ? 1 : 0 }";
+        let source = "let choose(cond:boolean): int = { cond ? 1 : 0 }";
         let parse_result = parse_str(source, "test.nx");
 
         assert!(
@@ -4556,7 +4564,7 @@ enum Mode = light | dark"#;
     fn test_lower_component_preserves_modifier_base_and_optional_body_metadata() {
         let source = r#"
             abstract component <SearchBase placeholder:string emits { ValueChanged { value:string } } />
-            external component <SearchBox extends SearchBase showSearchIcon:bool = true />
+            external component <SearchBox extends SearchBase showSearchIcon:boolean = true />
             abstract external component <RemoteSearchBase />
         "#;
 

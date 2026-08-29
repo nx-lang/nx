@@ -303,7 +303,7 @@ fn test_undefined_enum() {
 #[test]
 fn test_complex_boolean_expression() {
     let source = r#"
-        let <complex a:bool b:bool c:bool /> = { (a && b) || c }
+        let <complex a:boolean b:boolean c:boolean /> = { (a && b) || c }
     "#;
 
     // (true && false) || true = false || true = true
@@ -354,7 +354,7 @@ fn test_boolean_double_negation() {
 
     let params = vec![Param::new(
         Name::new("x"),
-        nx_hir::ast::TypeRef::name("bool"),
+        nx_hir::ast::TypeRef::name("boolean"),
         span(0, 5),
     )];
 

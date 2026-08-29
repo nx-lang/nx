@@ -24,7 +24,7 @@ abstract type UserBase extends Entity = {
 }
 
 type User extends UserBase = {
-  isAdmin: bool = false
+  isAdmin: boolean = false
 }
 
 type StaffUser extends UserBase = {
@@ -39,7 +39,7 @@ type UserCard = {
 type LoadState =
   | idle
   | loading
-  | failed { message:string retryable:bool = true }
+  | failed { message:string retryable:boolean = true }
   | loaded { users:UserList }
 
 let <UserCard

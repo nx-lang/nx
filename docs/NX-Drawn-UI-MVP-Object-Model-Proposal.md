@@ -124,7 +124,11 @@ DrawnUI uses one `SkiaLayout` with `Type="Row|Column|Grid|Absolute|Wrap"` and on
 
 ## 4. Canonical document model
 
-Type notation in this document uses TypeScript-like syntax. Every property marked `?` is optional. Unless stated otherwise, numeric values must be finite JSON numbers and default units are logical/device-independent pixels.
+Type notation in this document is [NX](../nx-grammar.md) source. Records use `type Name = { ... }`, closed scalar choices use `enum`, discriminated unions use `type Name =` with leading-pipe cases, and renderer-provided catalog components use `external component`, whose signature declares props and whose body is supplied by the host rather than by NX.
+
+Three NX conventions carry meaning here. A `?` suffix makes a property nullable, which in this model means the property may be omitted — the **Default** column of each table says what the renderer does when it is. A `= value` clause gives a real default. And exactly one property per signature may be marked `content`, which is the property that receives element body content, so it is the property that the wire format spells as `children`.
+
+Unless stated otherwise, numeric values must be finite JSON numbers and default units are logical/device-independent pixels. Appendix A lists both catalogs as complete NX source; Appendix B records where NX's current syntax cannot express this model, and what the listing does instead.
 
 ### 4.1 `NxUiDocument`
 
@@ -134,8 +138,21 @@ Type notation in this document uses TypeScript-like syntax. Every property marke
 | `schemaVersion` | `string` | yes | NX document schema version, in semantic-version form. MVP value: `"0.1.0"`. |
 | `catalogs` | `CatalogUse[]` | yes | Catalogs and exact versions needed to interpret component types. |
 | `root` | `ElementId` | yes | ID of the single root element. |
-| `elements` | `Record<ElementId, Element>` | yes | Flat element map. Every referenced ID must exist. Unreachable elements are invalid in MVP. |
-| `metadata` | `DocumentMetadata` | no | Non-rendered document information. |
+| `elements` | map of `ElementId` to `Element` | yes | Flat element map. Every referenced ID must exist. Unreachable elements are invalid in MVP. NX has no map type; see Appendix B. |
+| `metadata` | `DocumentMetadata?` | no | Non-rendered document information. |
+
+```nx
+type ElementId = string   // ^[A-Za-z_][A-Za-z0-9_.-]{0,63}$
+
+type NxUiDocument = {
+  format: string = "nx-ui-json"
+  schemaVersion: string = "0.1.0"
+  catalogs: CatalogUse[]
+  root: ElementId
+  elements: Element[]     // serialized as an object keyed by ElementId; see Appendix B
+  metadata: DocumentMetadata?
+}
+```
 
 Precedent: json-render's [`Spec`](https://github.com/vercel-labs/json-render/blob/main/packages/core/src/types.ts) uses `root` and `elements`; A2UI's [`updateComponents`](https://a2ui.org/specification/v0.9.1-a2ui/) uses stable component IDs within a surface, and A2UI v1.0 makes the implicit surface root explicit as a reserved `Surface` component whose `child` is the root ID.
 
@@ -147,6 +164,13 @@ Serialized documents use the media type `application/nx-ui+json` and the file ex
 |---|---|---:|---|
 | `id` | `string` | yes | Reverse-DNS or registered catalog ID. Core IDs: `nx.ui`, `nx.graphics`. |
 | `version` | `string` | yes | Exact semantic version understood by the producer. MVP core version: `0.1.0`. |
+
+```nx
+type CatalogUse = {
+  id: string
+  version: string
+}
+```
 
 Catalogs are peers named for their content, never nested beneath one another. The MVP defines two and reserves the IDs the roadmap in §11 will need:
 
@@ -166,9 +190,17 @@ Exact versions make generated documents reproducible. A later negotiation protoc
 
 | Property | Type | Required | Meaning |
 |---|---|---:|---|
-| `title` | `string` | no | Human-readable document title. |
-| `description` | `string` | no | Human-readable summary. |
-| `generator` | `string` | no | Producer identifier for diagnostics, not behavior. |
+| `title` | `string?` | no | Human-readable document title. |
+| `description` | `string?` | no | Human-readable summary. |
+| `generator` | `string?` | no | Producer identifier for diagnostics, not behavior. |
+
+```nx
+type DocumentMetadata = {
+  title: string?
+  description: string?
+  generator: string?
+}
+```
 
 ### 4.4 `Element`
 
@@ -177,6 +209,8 @@ Exact versions make generated documents reproducible. A later negotiation protoc
 | `type` | `ComponentType` | yes | Namespaced catalog type, such as `nx.ui.VStack` or `nx.graphics.Path`. |
 | `props` | component-specific object | yes | Literal properties validated against that component's catalog schema. Use `{}` when empty. |
 | `children` | `ElementId[]` | conditional | Ordered child IDs. Allowed only by components documented as containers. |
+
+There is no `Element` record to declare in NX source, because NX has no envelope: an element *is* an `external component` invocation, and the `type`/`props`/`children` envelope is what a compiler produces from it. `<ui.VStack gap={12.0}> ... </ui.VStack>` names the component, binds props by name, and binds body content to the component's `content` property. That is inherently the nested authoring form this section calls sugar, and NX cannot write the flat map at all — see Appendix B — so NX is the authoring surface over this model while the flat map remains its interchange and validation form.
 
 `ElementId` matches `^[A-Za-z_][A-Za-z0-9_.-]{0,63}$` and is unique within a document. Constraining the charset keeps IDs usable as RFC 6901 JSON Pointer tokens for post-MVP patch streaming, keeps them safe as debug/accessibility identifiers, and rules out empty or whitespace-only IDs. `ComponentType` is a non-empty `<catalog>.<Component>` name whose catalog ID appears in `catalogs`. MVP elements do **not** have `state`, `visible` expressions, `repeat`, `slots`, `on`, or `watch`; those are useful json-render precedents for post-MVP work.
 
@@ -197,20 +231,46 @@ Exact versions make generated documents reproducible. A later negotiation protoc
 
 ### 5.1 Geometry and sizing types
 
-```ts
-type Length = number | "auto" | `${number}%`;
-type Insets = number | { top?: number; right?: number; bottom?: number; left?: number };
-type Point = { x: number; y: number };
-type ViewBox = { x: number; y: number; width: number; height: number };
-type CornerRadii = number | {
-  topLeft: number; topRight: number; bottomRight: number; bottomLeft: number;
-};
-type Alignment = "start" | "center" | "end" | "stretch";
-type Distribution =
-  | "start" | "center" | "end"
-  | "spaceBetween" | "spaceAround" | "spaceEvenly";
-type Axis = "horizontal" | "vertical";
+```nx
+enum Alignment = start | center | end | stretch
+enum AlignSelf = auto | start | center | end | stretch
+enum Anchor = start | center | end
+enum Axis = horizontal | vertical
+enum Distribution = start | center | end | spaceBetween | spaceAround | spaceEvenly
+
+type Length =
+  | auto
+  | px { value: float64 }
+  | percent { value: float64 }
+
+type Point = {
+  x: float64
+  y: float64
+}
+
+type ViewBox = {
+  x: float64
+  y: float64
+  width: float64
+  height: float64
+}
+
+type Insets = {
+  top: float64 = 0.0
+  right: float64 = 0.0
+  bottom: float64 = 0.0
+  left: float64 = 0.0
+}
+
+type CornerRadii = {
+  topLeft: float64 = 0.0
+  topRight: float64 = 0.0
+  bottomRight: float64 = 0.0
+  bottomLeft: float64 = 0.0
+}
 ```
+
+Three of these declarations lose a shorthand that the JSON form keeps, all for the same reason: NX unions are named cases, so they cannot mix a scalar with a record or a string literal. `Length` becomes three cases instead of `120`/`"auto"`/`"50%"`; `Insets` and `CornerRadii` lose their uniform-scalar form, so `padding: 20` has to be written with all four sides; and `Alignment | "auto"` becomes a separate `AlignSelf` enum. Appendix B gives the details and the wire-format consequences.
 
 `start`/`end` are chosen over `left`/`right` so layout can adapt to writing direction. The vocabulary follows [CSS Box Alignment](https://www.w3.org/TR/css-align-3/) and A2UI's `align`/`justify` conventions. DrawnUI adapters map these to MAUI layout options.
 
@@ -220,33 +280,40 @@ Omitted `Insets` sides default to `0`, so `{ "top": 8 }` is valid and cheap to g
 
 ### 5.2 Color and paint
 
-```ts
-type Color = string; // CSS Color syntax subset accepted by the host
+```nx
+type Color = string   // CSS Color syntax subset accepted by the host
 
-type Paint = Color | LinearGradient | RadialGradient;
+enum GradientUnits = objectBoundingBox | userSpaceOnUse
 
-interface GradientStop {
-  offset: number;       // 0..1
-  color: Color;
-  opacity?: number;     // 0..1, default 1
+type GradientStop = {
+  offset: float64          // 0..1
+  color: Color
+  opacity: float64 = 1.0   // 0..1
 }
 
-interface LinearGradient {
-  type: "linearGradient";
-  x1: number; y1: number;
-  x2: number; y2: number;
-  units?: "objectBoundingBox" | "userSpaceOnUse"; // default objectBoundingBox
-  stops: GradientStop[];
-}
-
-interface RadialGradient {
-  type: "radialGradient";
-  cx: number; cy: number; r: number;
-  fx?: number; fy?: number;
-  units?: "objectBoundingBox" | "userSpaceOnUse"; // default objectBoundingBox
-  stops: GradientStop[];
-}
+type Paint =
+  | none
+  | solid { color: Color }
+  | linearGradient {
+      x1: float64
+      y1: float64
+      x2: float64
+      y2: float64
+      units: GradientUnits = {GradientUnits.objectBoundingBox}
+      stops: GradientStop[]
+    }
+  | radialGradient {
+      cx: float64
+      cy: float64
+      r: float64
+      fx: float64?
+      fy: float64?
+      units: GradientUnits = {GradientUnits.objectBoundingBox}
+      stops: GradientStop[]
+    }
 ```
+
+`Paint` is tidier as an NX union than it was as a TypeScript one: `"none"`, which the TypeScript form had to bolt on at each use site as `Paint | "none"`, is simply a case, and the discriminator stops being a hand-written `type` field. The cost is at the other end — a plain color is no longer a bare string but a `solid` case with a `$type` tag. See Appendix B.
 
 Use the portable subset of [CSS Color 4](https://www.w3.org/TR/css-color-4/) for `Color`: named colors, `transparent`, hex, `rgb()`/`rgba()`, and `hsl()`/`hsla()`. Renderers must normalize colors; unsupported CSS-wide keywords and environment-dependent values are invalid.
 
@@ -256,51 +323,56 @@ Gradient terms and coordinate modes intentionally follow [SVG gradients](https:/
 
 ### 5.3 Stroke, shadow, transform, border
 
-```ts
-interface Stroke {
-  paint: Paint;
-  width?: number; // default 1
-  lineCap?: "butt" | "round" | "square"; // default butt
-  lineJoin?: "miter" | "round" | "bevel"; // default miter
-  miterLimit?: number; // default 4
-  dashArray?: number[];
-  dashOffset?: number; // default 0
+```nx
+enum LineCap = butt | round | square
+enum LineJoin = miter | round | bevel
+
+type Stroke = {
+  paint: Paint
+  width: float64 = 1.0
+  lineCap: LineCap = {LineCap.butt}
+  lineJoin: LineJoin = {LineJoin.miter}
+  miterLimit: float64 = 4.0
+  dashArray: float64[]?
+  dashOffset: float64 = 0.0
 }
 
-interface Shadow {
-  color: Color;
-  offsetX?: number; // default 0
-  offsetY?: number; // default 0
-  blur?: number;    // >= 0, default 0
+type Shadow = {
+  color: Color
+  offsetX: float64 = 0.0
+  offsetY: float64 = 0.0
+  blur: float64 = 0.0      // >= 0
 }
 
 type Transform =
-  | { type: "translate"; x: number; y: number }
-  | { type: "scale"; x: number; y?: number }        // y defaults to x (uniform scale)
-  | { type: "rotate"; degrees: number; cx?: number; cy?: number } // center defaults to 0,0
-  | { type: "skewX"; degrees: number }
-  | { type: "skewY"; degrees: number }
-  | { type: "matrix"; a: number; b: number; c: number; d: number; e: number; f: number };
+  | translate { x: float64 y: float64 }
+  | scale { x: float64 y: float64? }        // null y means uniform scale
+  | rotate { degrees: float64 cx: float64 = 0.0 cy: float64 = 0.0 }
+  | skewX { degrees: float64 }
+  | skewY { degrees: float64 }
+  | matrix { a: float64 b: float64 c: float64 d: float64 e: float64 f: float64 }
 
-interface Border {
-  paint: Paint;
-  width?: number; // default 1
+type Border = {
+  paint: Paint
+  width: float64 = 1.0
 }
 ```
+
+`Transform` is the case NX models best: a closed set of variants with per-variant payloads is exactly what a discriminated union is for, and the hand-written `type` field disappears. The one thing it cannot carry is `scale.y` defaulting to `scale.x`, since an NX default is a literal or a constant expression and cannot reference a sibling property; `y` is therefore nullable, with null meaning uniform scale.
 
 Stroke terminology follows [SVG painting](https://www.w3.org/TR/SVG2/painting.html). Transform names and the six-value affine matrix follow [SVG/CSS Transforms](https://www.w3.org/TR/css-transforms-1/). The array is equivalent to an SVG `transform` list read left to right: matrices are concatenated in array order, so the *last* entry is the one applied first to the node's own geometry. `rotate` uses positive degrees clockwise in NX's y-down coordinate space, matching SVG. A stroke is scaled by the transforms in effect, as in SVG; there is no MVP equivalent of `vector-effect: non-scaling-stroke`. DrawnUI's `StrokeColor`, `StrokeWidth`, `StrokeCap`, dash path, gradients, and multiple shadows map directly to these portable objects.
 
 ### 5.4 Image source and accessibility
 
-```ts
+```nx
 type ImageSource =
-  | { kind: "uri"; uri: string }
-  | { kind: "resource"; name: string };
+  | uri { uri: string }
+  | resource { name: string }
 
-interface Accessibility {
-  label?: string;
-  description?: string;
-  hidden?: boolean; // default false; true means decorative/ignored by accessibility APIs
+type Accessibility = {
+  label: string?
+  description: string?
+  hidden: boolean = false   // true means decorative/ignored by accessibility APIs
 }
 ```
 
@@ -314,29 +386,51 @@ The graphics catalog is an SVG-shaped, retained-mode scene tree, and it is the h
 
 ### 6.1 Shared graphics properties
 
-Every node inside a `Drawing` accepts `GraphicsCommonProps`:
+Every node inside a `Drawing` accepts `GraphicsCommonProps`, declared in NX as an abstract external component that concrete components extend:
+
+```nx
+abstract external component <GraphicsCommon
+  opacity: float64 = 1.0
+  transform: Transform[]?
+  clipPath: string?
+  accessibility: Accessibility?
+/>
+```
 
 | Property | Type | Default | Meaning |
 |---|---|---:|---|
-| `opacity` | `number` (0..1) | `1` | Group opacity: the node and its descendants are composited as one layer, then that layer is blended at this alpha. |
-| `transform` | `Transform[]` | `[]` | Ordered local transforms. |
-| `clipPath` | `string` | none | SVG path-data geometry used as a local clip, in the node's own coordinate system. |
-| `accessibility` | `Accessibility` | derived | Optional accessible name/description or decorative status. |
+| `opacity` | `float64` (0..1) | `1` | Group opacity: the node and its descendants are composited as one layer, then that layer is blended at this alpha. |
+| `transform` | `Transform[]?` | `[]` | Ordered local transforms. |
+| `clipPath` | `string?` | none | SVG path-data geometry used as a local clip, in the node's own coordinate system. |
+| `accessibility` | `Accessibility?` | derived | Optional accessible name/description or decorative status. |
 
 `opacity` is deliberately specified as group opacity rather than a per-descendant multiplier: the two differ visibly wherever descendants overlap, and SVG, Skia, and Canvas 2D all provide the group form.
 
 `clipPath` geometry is interpreted in the node's local coordinate system — the space established *after* the node's own `transform` is applied — and clips the node and all of its descendants. It uses the `nonzero` rule regardless of `fillRule`. It is purposefully a small MVP subset of SVG clipping; referenced clip trees, masks, and filter regions are deferred.
 
-Every filled/stroked geometry accepts `ShapeProps` in addition to its own properties:
+Every filled/stroked geometry accepts `ShapeProps` in addition to its own properties. NX allows only one base per component, so `ShapeProps` is expressed as a link in a chain rather than as a second mixin — which works here because everything that takes shape properties also takes graphics properties:
+
+```nx
+enum FillRule = nonzero | evenodd
+
+abstract external component <ShapeCommon extends GraphicsCommon
+  fill: Paint?
+  stroke: Stroke?
+  fillRule: FillRule = {FillRule.nonzero}
+  shadows: Shadow[]?
+/>
+```
 
 | Property | Type | Default | Meaning |
 |---|---|---:|---|
-| `fill` | `Paint \| "none"` | component-specific | Interior paint. |
-| `stroke` | `Stroke` | none | Outline paint and stroke geometry. |
-| `fillRule` | `"nonzero" \| "evenodd"` | `"nonzero"` | Interior rule; matches [SVG fill-rule](https://www.w3.org/TR/SVG2/painting.html#FillRuleProperty). |
-| `shadows` | `Shadow[]` | `[]` | Ordered drop shadows. |
+| `fill` | `Paint?` | component-specific | Interior paint. `Paint.none` is the explicit no-fill case. |
+| `stroke` | `Stroke?` | none | Outline paint and stroke geometry. |
+| `fillRule` | `FillRule` | `nonzero` | Interior rule; matches [SVG fill-rule](https://www.w3.org/TR/SVG2/painting.html#FillRuleProperty). |
+| `shadows` | `Shadow[]?` | `[]` | Ordered drop shadows. |
 
-The default fill is `"none"` for `Line` and `Polyline`, and black for closed shapes and `Path`. Closed-shape behavior matches SVG's initial `fill: black`. `Polyline` is a deliberate divergence: SVG also fills a polyline by default, which surprises nearly everyone and produces a wrong-looking region whenever a model draws an open multi-segment stroke. §12 tracks whether `Path` should diverge the same way.
+`fill` is nullable rather than defaulted because the default is component-specific and NX has no way to override an inherited default in a derived component — declaring `fill` again on `Line` would be rejected as a duplicate property. The renderer resolves null per component type.
+
+The default fill is `Paint.none` for `Line` and `Polyline`, and black for closed shapes and `Path`. Closed-shape behavior matches SVG's initial `fill: black`. `Polyline` is a deliberate divergence: SVG also fills a polyline by default, which surprises nearly everyone and produces a wrong-looking region whenever a model draws an open multi-segment stroke. §12 tracks whether `Path` should diverge the same way.
 
 ### 6.2 `nx.graphics.Drawing`
 
@@ -346,8 +440,17 @@ Root drawing surface and bridge into Level 2 UI. Accepts ordered drawing childre
 |---|---|---:|---|
 | all `UiCommonProps` | see §7.1 | no | Controls the surface's size and placement when embedded in UI. |
 | `viewBox` | `ViewBox` | yes | Internal coordinate rectangle; width and height must be positive. |
-| `fit` | `"contain" \| "cover" \| "fill"` | no | `"contain"`; fit, crop, or non-uniformly stretch the view box into the surface. |
-| `contentAlignment` | `{ x: "start"\|"center"\|"end"; y: "start"\|"center"\|"end" }` | no | Center/center; only meaningful when `fit` preserves the aspect ratio. |
+| `fit` | `ViewBoxFit` | no | `contain`; fit, crop, or non-uniformly stretch the view box into the surface. |
+| `contentAlignment` | `ContentAlignment?` | no | Center/center; only meaningful when `fit` preserves the aspect ratio. |
+
+```nx
+enum ViewBoxFit = contain | cover | fill
+
+type ContentAlignment = {
+  x: Anchor = {Anchor.center}
+  y: Anchor = {Anchor.center}
+}
+```
 
 When `width` and `height` are `auto`, the surface's intrinsic size is the view box's `width` and `height` in logical pixels, and its intrinsic aspect ratio is `width / height`; a single specified dimension resolves the other through that ratio. Content is always clipped to the surface box. The common `background` paints the surface before its drawing children, and common `accessibility` describes the surface.
 
@@ -368,12 +471,12 @@ Rationale: equivalent to SVG [`g`](https://www.w3.org/TR/SVG2/struct.html#Groups
 | Property | Type | Required | Default / meaning |
 |---|---|---:|---|
 | all `GraphicsCommonProps`, `ShapeProps` | see §6.1 | no | Shared drawing and paint properties. |
-| `x` | `number` | no | `0`; left coordinate. |
-| `y` | `number` | no | `0`; top coordinate. |
-| `width` | `number` | yes | Non-negative width. |
-| `height` | `number` | yes | Non-negative height. |
-| `rx` | `number` | no | `0`; horizontal corner radius. |
-| `ry` | `number` | no | `rx`; vertical corner radius. |
+| `x` | `float64` | no | `0`; left coordinate. |
+| `y` | `float64` | no | `0`; top coordinate. |
+| `width` | `float64` | yes | Non-negative width. |
+| `height` | `float64` | yes | Non-negative height. |
+| `rx` | `float64` | no | `0`; horizontal corner radius. |
+| `ry` | `float64?` | no | `rx`; vertical corner radius. NX cannot spell this default; see Appendix B. |
 
 Rationale: names and radius behavior follow SVG [`rect`](https://www.w3.org/TR/SVG2/shapes.html#RectElement). DrawnUI `Rectangle` + `CornerRadius` maps here; adapters may approximate unequal radii if necessary.
 
@@ -382,9 +485,9 @@ Rationale: names and radius behavior follow SVG [`rect`](https://www.w3.org/TR/S
 | Property | Type | Required | Meaning |
 |---|---|---:|---|
 | all `GraphicsCommonProps`, `ShapeProps` | see §6.1 | no | Shared properties. |
-| `cx` | `number` | yes | Center x. |
-| `cy` | `number` | yes | Center y. |
-| `r` | `number` | yes | Non-negative radius. |
+| `cx` | `float64` | yes | Center x. |
+| `cy` | `float64` | yes | Center y. |
+| `r` | `float64` | yes | Non-negative radius. |
 
 Rationale: matches SVG [`circle`](https://www.w3.org/TR/SVG2/shapes.html#CircleElement) and DrawnUI's explicit `Circle` shape. Keeping it separate from `Ellipse` is more legible for models and people.
 
@@ -393,10 +496,10 @@ Rationale: matches SVG [`circle`](https://www.w3.org/TR/SVG2/shapes.html#CircleE
 | Property | Type | Required | Meaning |
 |---|---|---:|---|
 | all `GraphicsCommonProps`, `ShapeProps` | see §6.1 | no | Shared properties. |
-| `cx` | `number` | yes | Center x. |
-| `cy` | `number` | yes | Center y. |
-| `rx` | `number` | yes | Non-negative horizontal radius. |
-| `ry` | `number` | yes | Non-negative vertical radius. |
+| `cx` | `float64` | yes | Center x. |
+| `cy` | `float64` | yes | Center y. |
+| `rx` | `float64` | yes | Non-negative horizontal radius. |
+| `ry` | `float64` | yes | Non-negative vertical radius. |
 
 Rationale: matches SVG [`ellipse`](https://www.w3.org/TR/SVG2/shapes.html#EllipseElement) and DrawnUI `Ellipse`.
 
@@ -405,10 +508,10 @@ Rationale: matches SVG [`ellipse`](https://www.w3.org/TR/SVG2/shapes.html#Ellips
 | Property | Type | Required | Meaning |
 |---|---|---:|---|
 | all `GraphicsCommonProps`, `ShapeProps` | see §6.1 | no | Shared properties; `fill` has no effect. |
-| `x1` | `number` | yes | Start x. |
-| `y1` | `number` | yes | Start y. |
-| `x2` | `number` | yes | End x. |
-| `y2` | `number` | yes | End y. |
+| `x1` | `float64` | yes | Start x. |
+| `y1` | `float64` | yes | Start y. |
+| `x2` | `float64` | yes | End x. |
+| `y2` | `float64` | yes | End y. |
 
 Rationale: follows SVG [`line`](https://www.w3.org/TR/SVG2/shapes.html#LineElement). DrawnUI models lines as point collections; NX adds the common two-point primitive and retains `Polyline` for multi-segment lines.
 
@@ -444,19 +547,19 @@ Single-line or explicitly line-broken text positioned in drawing coordinates. It
 | Property | Type | Required | Default / meaning |
 |---|---|---:|---|
 | all `GraphicsCommonProps` | see §6.1 | no | Shared properties. |
-| `x` | `number` | yes | Text anchor x. |
-| `y` | `number` | yes | Baseline y. |
+| `x` | `float64` | yes | Text anchor x. |
+| `y` | `float64` | yes | Baseline y. |
 | `text` | `string` | yes | Literal text; `\n` requests explicit line breaks. |
-| `fontFamily` | `string` | no | Host default. |
-| `fontSize` | `number` | no | `16`. |
-| `fontWeight` | `number` (1..1000) | no | `400`. |
-| `fontStyle` | `"normal" \| "italic"` | no | `"normal"`. |
-| `textAnchor` | `"start" \| "middle" \| "end"` | no | `"start"`. |
-| `dominantBaseline` | `"auto" \| "middle" \| "hanging"` | no | `"auto"`. |
-| `letterSpacing` | `number` | no | `0`. |
-| `fill` | `Paint \| "none"` | no | Black. |
-| `stroke` | `Stroke` | no | None. |
-| `shadows` | `Shadow[]` | no | `[]`. |
+| `fontFamily` | `string?` | no | Host default. |
+| `fontSize` | `float64` | no | `16`. |
+| `fontWeight` | `float64` (1..1000) | no | `400`. |
+| `fontStyle` | `FontStyle` | no | `normal`. |
+| `textAnchor` | `TextAnchor` | no | `start`. |
+| `dominantBaseline` | `DominantBaseline` | no | `auto`. |
+| `letterSpacing` | `float64` | no | `0`. |
+| `fill` | `Paint?` | no | Black. |
+| `stroke` | `Stroke?` | no | None. |
+| `shadows` | `Shadow[]?` | no | `[]`. |
 
 Rationale: positioning and anchor terms follow [SVG text](https://www.w3.org/TR/SVG2/text.html). Numeric weight follows modern CSS/OpenType and is more portable than `Bold` flags. DrawnUI `SkiaLabel` supplies the implementation precedent for family, size, weight, spacing, fill/stroke, and shadows. Rich spans, text-on-path, shaping controls, and automatic fit are deferred.
 
@@ -465,13 +568,13 @@ Rationale: positioning and anchor terms follow [SVG text](https://www.w3.org/TR/
 | Property | Type | Required | Default / meaning |
 |---|---|---:|---|
 | all `GraphicsCommonProps` | see §6.1 | no | Shared properties. |
-| `x` | `number` | no | `0`. |
-| `y` | `number` | no | `0`. |
-| `width` | `number` | yes | Non-negative destination width. |
-| `height` | `number` | yes | Non-negative destination height. |
+| `x` | `float64` | no | `0`. |
+| `y` | `float64` | no | `0`. |
+| `width` | `float64` | yes | Non-negative destination width. |
+| `height` | `float64` | yes | Non-negative destination height. |
 | `source` | `ImageSource` | yes | Trusted resource or host-approved URI. |
 | `alt` | `string` | yes | Accessible alternative; use `""` for a purely decorative image. |
-| `fit` | `"contain" \| "cover" \| "fill" \| "none" \| "scaleDown"` | no | `"contain"`. |
+| `fit` | `ObjectFit` | no | `contain`. |
 
 Rationale: destination rectangle follows SVG [`image`](https://www.w3.org/TR/SVG2/embedded.html#ImageElement); fit names and values follow CSS `object-fit`, including `scaleDown` (contain, but never upscale past intrinsic size), which A2UI also carries. `alt` is required on both image components so that no image can be generated without an accessibility decision. DrawnUI `SkiaImage.Source` and `Aspect` map naturally. Filters, tint, sprite sheets, loading strategy, resampling quality, and cache policy stay renderer-specific or post-MVP.
 
@@ -497,28 +600,56 @@ The cost is accepted rather than denied: `Row`/`Column` is what [A2UI's](https:/
 
 ### 7.1 `UiCommonProps`
 
-Every Level 2 component, plus `nx.graphics.Drawing`, accepts these optional flattened properties:
+Every Level 2 component, plus `nx.graphics.Drawing`, accepts these optional flattened properties. In NX this is one abstract external component that every Level 2 component extends:
+
+```nx
+abstract external component <UiCommon
+  width: Length = {Length.auto}
+  height: Length = {Length.auto}
+  minWidth: float64 = 0.0
+  minHeight: float64 = 0.0
+  maxWidth: float64?
+  maxHeight: float64?
+  margin: Insets?
+  padding: Insets?
+  alignSelf: AlignSelf = {AlignSelf.auto}
+  justifySelf: AlignSelf = {AlignSelf.auto}
+  grow: float64 = 0.0
+  shrink: float64 = 1.0
+  gridColumn: int?
+  gridRow: int?
+  columnSpan: int = 1
+  rowSpan: int = 1
+  background: Paint = {Paint.none}
+  border: Border?
+  cornerRadius: CornerRadii?
+  shadows: Shadow[]?
+  clip: boolean = false
+  opacity: float64 = 1.0
+  accessibility: Accessibility?
+/>
+```
 
 | Property | Type | Default | Meaning |
 |---|---|---:|---|
-| `width`, `height` | `Length` | `"auto"` | Preferred dimensions. |
-| `minWidth`, `minHeight` | `number` | `0` | Minimum dimensions. |
-| `maxWidth`, `maxHeight` | `number` | unbounded | Maximum dimensions. |
-| `margin` | `Insets` | `0` | Space outside the component. |
-| `padding` | `Insets` | `0` | Space between border and content. |
-| `alignSelf` | `Alignment \| "auto"` | `"auto"` | Override the parent-assigned alignment on the block (vertical) axis. |
-| `justifySelf` | `Alignment \| "auto"` | `"auto"` | Override the parent-assigned alignment on the inline (horizontal) axis. |
-| `grow` | `number` | `0` | Share of positive free space in an `HStack` or `VStack`. |
-| `shrink` | `number` | `1` | Relative shrink factor in an `HStack` or `VStack`. |
-| `gridColumn`, `gridRow` | `integer >= 0` | auto-placement | Zero-based grid position. Set both or neither. |
-| `columnSpan`, `rowSpan` | `integer >= 1` | `1` | Grid cell span. |
-| `background` | `Paint \| "none"` | `"none"` | Background inside the border. |
-| `border` | `Border` | none | Uniform border. |
-| `cornerRadius` | `CornerRadii` | `0` | Box corner radii. |
-| `shadows` | `Shadow[]` | `[]` | Ordered box shadows. |
+| `width`, `height` | `Length` | `auto` | Preferred dimensions. |
+| `minWidth`, `minHeight` | `float64` | `0` | Minimum dimensions. |
+| `maxWidth`, `maxHeight` | `float64?` | unbounded | Maximum dimensions. |
+| `margin` | `Insets?` | `0` | Space outside the component. |
+| `padding` | `Insets?` | `0` | Space between border and content. |
+| `alignSelf` | `AlignSelf` | `auto` | Override the parent-assigned alignment on the block (vertical) axis. |
+| `justifySelf` | `AlignSelf` | `auto` | Override the parent-assigned alignment on the inline (horizontal) axis. |
+| `grow` | `float64` | `0` | Share of positive free space in an `HStack` or `VStack`. |
+| `shrink` | `float64` | `1` | Relative shrink factor in an `HStack` or `VStack`. |
+| `gridColumn`, `gridRow` | `int?` (>= 0) | auto-placement | Zero-based grid position. Set both or neither. |
+| `columnSpan`, `rowSpan` | `int` (>= 1) | `1` | Grid cell span. |
+| `background` | `Paint` | `none` | Background inside the border. |
+| `border` | `Border?` | none | Uniform border. |
+| `cornerRadius` | `CornerRadii?` | `0` | Box corner radii. |
+| `shadows` | `Shadow[]?` | `[]` | Ordered box shadows. |
 | `clip` | `boolean` | `false` | Clip descendants to the padding box/corner radii. |
-| `opacity` | `number` (0..1) | `1` | Component subtree opacity. |
-| `accessibility` | `Accessibility` | derived | Accessible name/description/decorative status. |
+| `opacity` | `float64` (0..1) | `1` | Component subtree opacity. |
+| `accessibility` | `Accessibility?` | derived | Accessible name/description/decorative status. |
 
 `alignSelf` and `justifySelf` are bound to fixed physical axes rather than to "main" and "cross," because a child does not know what kind of container holds it and the same document is generated once for every renderer. The resulting mapping is:
 
@@ -540,9 +671,9 @@ Horizontal flow container; accepts zero or more UI children.
 | Property | Type | Default | Meaning |
 |---|---|---:|---|
 | all `UiCommonProps` | see §7.1 | — | Shared constraints and appearance. |
-| `gap` | `number` | `0` | Space between adjacent children. |
-| `justify` | `Distribution` | `"start"` | Distribution along the horizontal main axis. |
-| `align` | `Alignment` | `"stretch"` | Alignment on the vertical cross axis. |
+| `gap` | `float64` | `0` | Space between adjacent children. |
+| `justify` | `Distribution` | `start` | Distribution along the horizontal main axis. |
+| `align` | `Alignment` | `stretch` | Alignment on the vertical cross axis. |
 | `wrap` | `boolean` | `false` | Wrap children into additional lines. |
 
 ### 7.3 `nx.ui.VStack`
@@ -552,9 +683,9 @@ Vertical flow container; accepts zero or more UI children.
 | Property | Type | Default | Meaning |
 |---|---|---:|---|
 | all `UiCommonProps` | see §7.1 | — | Shared constraints and appearance. |
-| `gap` | `number` | `0` | Space between adjacent children. |
-| `justify` | `Distribution` | `"start"` | Distribution along the vertical main axis. |
-| `align` | `Alignment` | `"stretch"` | Alignment on the horizontal cross axis. |
+| `gap` | `float64` | `0` | Space between adjacent children. |
+| `justify` | `Distribution` | `start` | Distribution along the vertical main axis. |
+| `align` | `Alignment` | `stretch` | Alignment on the horizontal cross axis. |
 | `wrap` | `boolean` | `false` | Wrap children into additional lines. |
 
 `justify` distributes only the free space that remains after `grow` has been applied, so a child with `grow > 0` and a `spaceBetween` parent is not double-counted. When `wrap` is `true`, `gap` separates both adjacent children and adjacent lines, and lines are packed toward the cross-axis start; per-line distribution (CSS `align-content`) is deferred.
@@ -565,19 +696,22 @@ Rationale: A2UI's basic catalog defines the same two containers (as `Row` and `C
 
 Two-dimensional container; accepts zero or more UI children.
 
-```ts
-type TrackSize = number | "auto" | { fr: number };
+```nx
+type TrackSize =
+  | auto
+  | fixed { value: float64 }
+  | fraction { value: float64 }   // CSS `fr` units
 ```
 
 | Property | Type | Required | Default / meaning |
 |---|---|---:|---|
 | all `UiCommonProps` | see §7.1 | no | Shared constraints and appearance. |
 | `columns` | `TrackSize[]` | yes | Fixed logical units, intrinsic `auto`, or fractional remaining space. At least one. |
-| `rows` | `TrackSize[]` | no | Explicit rows; omitted rows are created as `auto`. |
-| `columnGap` | `number` | no | `0`. |
-| `rowGap` | `number` | no | `0`. |
-| `justifyItems` | `Alignment` | no | `"stretch"`; horizontal alignment in cells. |
-| `alignItems` | `Alignment` | no | `"stretch"`; vertical alignment in cells. |
+| `rows` | `TrackSize[]?` | no | Explicit rows; omitted rows are created as `auto`. |
+| `columnGap` | `float64` | no | `0`. |
+| `rowGap` | `float64` | no | `0`. |
+| `justifyItems` | `Alignment` | no | `stretch`; horizontal alignment in cells. |
+| `alignItems` | `Alignment` | no | `stretch`; vertical alignment in cells. |
 
 Children use `gridColumn`, `gridRow`, `columnSpan`, and `rowSpan` from `UiCommonProps`. Auto-placement is row-major and skips cells already claimed by explicitly placed children. Explicit placements may overlap; overlapping children paint in `children` order, like a `ZStack`. A span or explicit position past the last declared column is a validation error; past the last declared row it creates implicit `auto` rows. The model borrows the useful subset of [CSS Grid](https://www.w3.org/TR/css-grid-2/) and directly maps DrawnUI's grid definitions and attached row/column properties. `minmax`, named lines, dense placement, and subgrid are deferred.
 
@@ -588,8 +722,8 @@ Overlay container; accepts zero or more UI children. Later children paint above 
 | Property | Type | Default | Meaning |
 |---|---|---:|---|
 | all `UiCommonProps` | see §7.1 | — | Shared constraints and appearance. |
-| `justifyItems` | `Alignment` | `"stretch"` | Default horizontal child alignment. |
-| `alignItems` | `Alignment` | `"stretch"` | Default vertical child alignment. |
+| `justifyItems` | `Alignment` | `stretch` | Default horizontal child alignment. |
+| `alignItems` | `Alignment` | `stretch` | Default vertical child alignment. |
 
 The alignment properties are named `justifyItems`/`alignItems` so that a container that positions children on both axes spells it the same way `Grid` does, and so children override them with the same `justifySelf`/`alignSelf` pair.
 
@@ -604,8 +738,8 @@ Viewport for exactly one UI child.
 | Property | Type | Default | Meaning |
 |---|---|---:|---|
 | all `UiCommonProps` | see §7.1 | — | Shared constraints and appearance. |
-| `axis` | `Axis \| "both"` | `"vertical"` | Allowed scroll direction. |
-| `scrollbar` | `"auto" \| "visible" \| "hidden"` | `"auto"` | Host scrollbar presentation hint. |
+| `axis` | `ScrollAxis` | `vertical` | Allowed scroll direction. |
+| `scrollbar` | `ScrollbarVisibility` | `auto` | Host scrollbar presentation hint. |
 
 The child is measured unbounded along each scrollable axis and constrained to the viewport on any non-scrollable axis; `Length` percentages on the child resolve against the viewport, not against the scrollable content. A `Scroll` never sizes itself to its content along a scrollable axis, so it needs a bounded `height` (or `width`) from its parent or from `UiCommonProps`.
 
@@ -624,7 +758,7 @@ Themed single-child surface.
 | Property | Type | Default | Meaning |
 |---|---|---:|---|
 | all `UiCommonProps` | see §7.1 | theme | Explicit values override theme defaults. |
-| `variant` | `"outlined" \| "elevated" \| "filled"` | `"elevated"` | Host-theme card profile. |
+| `variant` | `CardVariant` | `elevated` | Host-theme card profile. |
 
 `Card` is retained despite overlap with `Box` because it is a highly familiar GenUI primitive in A2UI and json-render examples and lets a model request design-system intent without inventing border/shadow values. A renderer without card theming must fall back to a documented `Box` profile.
 
@@ -633,9 +767,9 @@ Themed single-child surface.
 | Property | Type | Default | Meaning |
 |---|---|---:|---|
 | all `UiCommonProps` | see §7.1 | — | Shared layout properties; background/border are ignored. |
-| `axis` | `Axis` | `"horizontal"` | Line direction. |
-| `color` | `Color` | theme | Divider color. |
-| `thickness` | `number` | `1` | Line thickness. |
+| `axis` | `Axis` | `horizontal` | Line direction. |
+| `color` | `Color?` | theme | Divider color. |
+| `thickness` | `float64` | `1` | Line thickness. |
 
 Rationale: directly matches A2UI's horizontal/vertical `Divider`. Length is controlled by common width/height and parent alignment rather than another bespoke property.
 
@@ -647,18 +781,18 @@ Measured, wrapping output text; accepts no children.
 |---|---|---:|---|
 | all `UiCommonProps` | see §7.1 | no | Shared constraints and appearance. |
 | `text` | `string` | yes | Literal displayed content. |
-| `format` | `"plain" \| "markdown"` | no | `"plain"`; markdown uses a host-defined safe common subset. |
-| `variant` | `"h1"\|"h2"\|"h3"\|"title"\|"body"\|"caption"\|"code"` | no | `"body"`; theme typography role. |
-| `color` | `Color` | no | Theme value. |
-| `fontFamily` | `string` | no | Variant/theme value. |
-| `fontSize` | `number` | no | Variant/theme value. |
-| `fontWeight` | `number` (1..1000) | no | Variant/theme value. |
-| `fontStyle` | `"normal" \| "italic"` | no | `"normal"`. |
-| `textAlign` | `"start"\|"center"\|"end"\|"justify"` | no | `"start"`. |
-| `lineHeight` | `number` | no | Unitless multiplier; theme default. |
-| `letterSpacing` | `number` | no | `0`. |
-| `maxLines` | `integer >= 1` | no | Unlimited. |
-| `overflow` | `"clip" \| "ellipsis"` | no | `"clip"`; applies when constrained/maxLines is reached. |
+| `format` | `TextFormat` | no | `plain`; markdown uses a host-defined safe common subset. |
+| `variant` | `TextVariant` | no | `body`; theme typography role. |
+| `color` | `Color?` | no | Theme value. |
+| `fontFamily` | `string?` | no | Variant/theme value. |
+| `fontSize` | `float64?` | no | Variant/theme value. |
+| `fontWeight` | `float64?` (1..1000) | no | Variant/theme value. |
+| `fontStyle` | `FontStyle` | no | `normal`. |
+| `textAlign` | `TextAlign` | no | `start`. |
+| `lineHeight` | `float64?` | no | Unitless multiplier; theme default. |
+| `letterSpacing` | `float64` | no | `0`. |
+| `maxLines` | `int?` (>= 1) | no | Unlimited. |
+| `overflow` | `TextOverflow` | no | `clip`; applies when constrained/maxLines is reached. |
 
 `variant` is a semantic role, not only a type ramp: renderers must expose `h1`, `h2`, and `h3` as platform heading elements at the corresponding level, and `code` with a monospace face and a code role where the platform has one. Nothing else in the read-only MVP conveys document structure to assistive technology, so a model that reaches for `fontSize` instead of `variant` silently produces a flat, unnavigable document.
 
@@ -675,8 +809,8 @@ Measured raster/vector image output; accepts no children.
 | all `UiCommonProps` | see §7.1 | no | Shared constraints and appearance. |
 | `source` | `ImageSource` | yes | Trusted resource or host-approved URI. |
 | `alt` | `string` | yes | Accessible alternative; use `""` only when decorative. |
-| `fit` | `"contain" \| "cover" \| "fill" \| "none" \| "scaleDown"` | no | `"contain"`. |
-| `aspectRatio` | `number` | no | Intrinsic ratio when dimensions do not establish one. |
+| `fit` | `ObjectFit` | no | `contain`. |
+| `aspectRatio` | `float64?` | no | Intrinsic ratio when dimensions do not establish one. |
 
 `alt` is the image's accessible name: `alt: ""` is exactly equivalent to `accessibility.hidden: true`, and supplying both `alt` and `accessibility.label` is a validation error rather than a silently resolved conflict. `accessibility.description` remains available for a longer description alongside `alt`.
 
@@ -690,9 +824,9 @@ Host-provided symbolic icon; accepts no children.
 |---|---|---:|---|
 | all `UiCommonProps` | see §7.1 | no | Shared constraints and appearance. |
 | `name` | `string` | yes | Icon name from the negotiated host icon catalog. |
-| `set` | `string` | no | Host/default icon set if omitted. |
-| `size` | `number` | no | Theme default, normally 24. Sets both dimensions; an explicit `width`/`height` from `UiCommonProps` wins over `size`. |
-| `color` | `Color` | no | Current theme/content color. |
+| `set` | `string?` | no | Host/default icon set if omitted. |
+| `size` | `float64?` | no | Theme default, normally 24. Sets both dimensions; an explicit `width`/`height` from `UiCommonProps` wins over `size`. |
+| `color` | `Color?` | no | Current theme/content color. |
 
 Rationale: A2UI's `Icon.name` is primarily a predefined enum of system icon names, with an escape hatch (`{ "svgPath": ... }`) for supplying path data directly. NX takes the enumerated half and drops the escape hatch: a model that needs custom vector art already has `nx.graphics`, where the geometry is validated, bounded, and composable, so admitting a second, unmeasured path-data channel through `Icon` would add attack surface for no new capability. Use common `accessibility.label` for a meaningful icon or `accessibility.hidden: true` for a decorative one. A catalog capability exchange must enumerate supported names; unknown icons use a documented fallback glyph.
 
@@ -770,6 +904,49 @@ Rationale: A2UI's `Icon.name` is primarily a predefined enum of system icon name
 ```
 
 Note what the example does *not* do: the caption takes its color from the `caption` variant instead of naming one. A literal such as `"#555"` is legible on the light surface a model imagines and nearly invisible on a dark one, and nothing else in the document can correct it. Literal colors are appropriate for graphics that supply their own ground — the white curve above sits on a gradient this document draws — and inappropriate for content the host themes. §12.9 tracks whether the MVP needs semantic color roles to make that distinction enforceable rather than advisory.
+
+### 8.1 The same document as NX source
+
+The JSON above is the interchange form. The same document authored in NX is the tree a person or a compiler would actually write:
+
+```nx
+import "../core"
+import { Card as ui.Card, VStack as ui.VStack, Text as ui.Text, TextVariant } from "../ui"
+import "../graphics" as gfx
+
+<ui.Card width={<Length.px value={360.0} />}
+         padding={<Insets top={20.0} right={20.0} bottom={20.0} left={20.0} />}>
+  <ui.VStack gap={12.0}>
+    <ui.Text: variant={TextVariant.h2}>NX UI</ui.Text>
+    <gfx.Drawing
+      height={<Length.px value={140.0} />}
+      viewBox={<ViewBox x={0.0} y={0.0} width={320.0} height={140.0} />}>
+      <gfx.Rect
+        width={320.0} height={140.0} rx={12.0}
+        fill={<Paint.linearGradient
+                x1={0.0} y1={0.0} x2={1.0} y2={1.0}
+                stops={ <GradientStop offset={0.0} color={"#5B5BD6"} />
+                        <GradientStop offset={1.0} color={"#14B8A6"} /> } />} />
+      <gfx.Path
+        data={"M20 105 C90 15 210 125 300 35"}
+        fill={Paint.none}
+        stroke={<Stroke paint={<Paint.solid color={"white"} />} width={5.0} lineCap={LineCap.round} />} />
+      <gfx.Circle cx={300.0} cy={35.0} r={7.0} fill={<Paint.solid color={"white"} />} />
+    </gfx.Drawing>
+    <ui.Text: variant={TextVariant.caption}>Portable layout above; portable drawing below.</ui.Text>
+  </ui.VStack>
+</ui.Card>
+```
+
+Four differences from the JSON are worth reading off directly, because each one is a property of NX rather than of this proposal.
+
+The IDs are gone. NX nests, so structure is expressed by containment rather than by `children: ["title", "graphic"]` pointing into a map. Producing the flat form is a compilation step, not something NX source can state.
+
+The prefixes are one segment deep. `ui.` and `gfx.` are import aliases, and NX allows exactly one qualifying segment, so `nx.ui.` and `nx.graphics.` are not spellable as prefixes — the alias is the local abbreviation for a catalog whose real ID lives in `catalogs`. The two catalogs are also imported differently on purpose: `nx.graphics` uses the wildcard alias form, while `nx.ui` uses the selective form so that `TextVariant` arrives unqualified, because an enum member cannot be reached through a wildcard alias today. Appendix B has the detail.
+
+Sizes and insets got longer. `"width": 360` becomes `<Length.px value={360.0} />` and `"padding": 20` becomes a four-sided `Insets`, both because NX cannot union a scalar with a structured alternative.
+
+Text reads better. `<ui.Text: ...>NX UI</ui.Text>` uses NX's text-element form, which binds the body to the component's `content` property — the one place where NX authoring is more compact than the JSON, not less.
 
 ## 9. DrawnUI evolution and adapter mapping
 
@@ -898,6 +1075,416 @@ The test corpus should include a text/image card, grid dashboard shell, layered 
 - [DrawnUI shapes and SVG paths](https://drawnui.net/articles/controls/shapes.html)
 - [DrawnUI scroll controls](https://drawnui.net/articles/controls/scroll.html)
 - [DrawnUI.Net GitHub repository](https://github.com/DrawnUi/DrawnUi.Net)
+
+### NX language
+
+- [NX grammar (EBNF)](../nx-grammar.md) and [machine-readable grammar spec](../nx-grammar-spec.md)
+- [NX types reference](src/content/docs/reference/syntax/types.md) and [elements reference](src/content/docs/reference/syntax/elements.md)
+- [`component-syntax` specification](../openspec/specs/component-syntax/spec.md) and [`component-contract-inheritance` specification](../openspec/specs/component-contract-inheritance/spec.md), which define `external component`
+
+## Appendix A — The catalogs as NX source
+
+Three libraries: `nx/core` holds the shared value types from §5, `nx/ui` holds Level 2, and `nx/graphics` holds Level 1. `nx/graphics` imports `UiCommon` from `nx/ui` because `Drawing` is the element that carries a graphics scene into a laid-out box; nothing flows the other way.
+
+Every declaration below was checked with `nxlang typegen` against the NX toolchain in this repository. The one construct that does not check today is the cross-library use shown in §8.1; Appendix B says why.
+
+### `nx/core/types.nx`
+
+```nx
+export type Color = string          // CSS Color syntax subset accepted by the host
+export type ElementId = string      // ^[A-Za-z_][A-Za-z0-9_.-]{0,63}$
+
+export enum Alignment = start | center | end | stretch
+export enum AlignSelf = auto | start | center | end | stretch
+export enum Anchor = start | center | end
+export enum Axis = horizontal | vertical
+export enum Distribution = start | center | end | spaceBetween | spaceAround | spaceEvenly
+export enum ObjectFit = contain | cover | fill | none | scaleDown
+export enum FontStyle = normal | italic
+export enum GradientUnits = objectBoundingBox | userSpaceOnUse
+export enum LineCap = butt | round | square
+export enum LineJoin = miter | round | bevel
+
+export type Length =
+  | auto
+  | px { value: float64 }
+  | percent { value: float64 }
+
+export type Point = {
+  x: float64
+  y: float64
+}
+
+export type ViewBox = {
+  x: float64
+  y: float64
+  width: float64
+  height: float64
+}
+
+export type Insets = {
+  top: float64 = 0.0
+  right: float64 = 0.0
+  bottom: float64 = 0.0
+  left: float64 = 0.0
+}
+
+export type CornerRadii = {
+  topLeft: float64 = 0.0
+  topRight: float64 = 0.0
+  bottomRight: float64 = 0.0
+  bottomLeft: float64 = 0.0
+}
+
+export type GradientStop = {
+  offset: float64                       // 0..1
+  color: Color
+  opacity: float64 = 1.0                // 0..1
+}
+
+export type Paint =
+  | none
+  | solid { color: Color }
+  | linearGradient {
+      x1: float64
+      y1: float64
+      x2: float64
+      y2: float64
+      units: GradientUnits = {GradientUnits.objectBoundingBox}
+      stops: GradientStop[]
+    }
+  | radialGradient {
+      cx: float64
+      cy: float64
+      r: float64
+      fx: float64?
+      fy: float64?
+      units: GradientUnits = {GradientUnits.objectBoundingBox}
+      stops: GradientStop[]
+    }
+
+export type Stroke = {
+  paint: Paint
+  width: float64 = 1.0
+  lineCap: LineCap = {LineCap.butt}
+  lineJoin: LineJoin = {LineJoin.miter}
+  miterLimit: float64 = 4.0
+  dashArray: float64[]?
+  dashOffset: float64 = 0.0
+}
+
+export type Shadow = {
+  color: Color
+  offsetX: float64 = 0.0
+  offsetY: float64 = 0.0
+  blur: float64 = 0.0                   // >= 0
+}
+
+export type Transform =
+  | translate { x: float64 y: float64 }
+  | scale { x: float64 y: float64? }        // null y means uniform scale
+  | rotate { degrees: float64 cx: float64 = 0.0 cy: float64 = 0.0 }
+  | skewX { degrees: float64 }
+  | skewY { degrees: float64 }
+  | matrix { a: float64 b: float64 c: float64 d: float64 e: float64 f: float64 }
+
+export type Border = {
+  paint: Paint
+  width: float64 = 1.0
+}
+
+export type ImageSource =
+  | uri { uri: string }
+  | resource { name: string }
+
+export type Accessibility = {
+  label: string?
+  description: string?
+  hidden: boolean = false
+}
+```
+
+### `nx/ui/catalog.nx`
+
+```nx
+import "../core"
+
+export enum ScrollAxis = horizontal | vertical | both
+export enum ScrollbarVisibility = auto | visible | hidden
+export enum CardVariant = outlined | elevated | filled
+export enum TextFormat = plain | markdown
+export enum TextVariant = h1 | h2 | h3 | title | body | caption | code
+export enum TextAlign = start | center | end | justify
+export enum TextOverflow = clip | ellipsis
+
+export type TrackSize =
+  | auto
+  | fixed { value: float64 }
+  | fraction { value: float64 }
+
+export abstract external component <UiCommon
+  width: Length = {Length.auto}
+  height: Length = {Length.auto}
+  minWidth: float64 = 0.0
+  minHeight: float64 = 0.0
+  maxWidth: float64?
+  maxHeight: float64?
+  margin: Insets?
+  padding: Insets?
+  alignSelf: AlignSelf = {AlignSelf.auto}
+  justifySelf: AlignSelf = {AlignSelf.auto}
+  grow: float64 = 0.0
+  shrink: float64 = 1.0
+  gridColumn: int?
+  gridRow: int?
+  columnSpan: int = 1
+  rowSpan: int = 1
+  background: Paint = {Paint.none}
+  border: Border?
+  cornerRadius: CornerRadii?
+  shadows: Shadow[]?
+  clip: boolean = false
+  opacity: float64 = 1.0
+  accessibility: Accessibility?
+/>
+
+export external component <HStack extends UiCommon
+  gap: float64 = 0.0
+  justify: Distribution = {Distribution.start}
+  align: Alignment = {Alignment.stretch}
+  wrap: boolean = false
+  content children: Element[]?
+/>
+
+export external component <VStack extends UiCommon
+  gap: float64 = 0.0
+  justify: Distribution = {Distribution.start}
+  align: Alignment = {Alignment.stretch}
+  wrap: boolean = false
+  content children: Element[]?
+/>
+
+export external component <Grid extends UiCommon
+  columns: TrackSize[]
+  rows: TrackSize[]?
+  columnGap: float64 = 0.0
+  rowGap: float64 = 0.0
+  justifyItems: Alignment = {Alignment.stretch}
+  alignItems: Alignment = {Alignment.stretch}
+  content children: Element[]?
+/>
+
+export external component <ZStack extends UiCommon
+  justifyItems: Alignment = {Alignment.stretch}
+  alignItems: Alignment = {Alignment.stretch}
+  content children: Element[]?
+/>
+
+export external component <Scroll extends UiCommon
+  axis: ScrollAxis = {ScrollAxis.vertical}
+  scrollbar: ScrollbarVisibility = {ScrollbarVisibility.auto}
+  content child: Element
+/>
+
+export external component <Box extends UiCommon
+  content child: Element
+/>
+
+export external component <Card extends UiCommon
+  variant: CardVariant = {CardVariant.elevated}
+  content child: Element
+/>
+
+export external component <Divider extends UiCommon
+  axis: Axis = {Axis.horizontal}
+  color: Color?
+  thickness: float64 = 1.0
+/>
+
+export external component <Text extends UiCommon
+  format: TextFormat = {TextFormat.plain}
+  variant: TextVariant = {TextVariant.body}
+  color: Color?
+  fontFamily: string?
+  fontSize: float64?
+  fontWeight: float64?
+  fontStyle: FontStyle = {FontStyle.normal}
+  textAlign: TextAlign = {TextAlign.start}
+  lineHeight: float64?
+  letterSpacing: float64 = 0.0
+  maxLines: int?
+  overflow: TextOverflow = {TextOverflow.clip}
+  content text: string
+/>
+
+export external component <Image extends UiCommon
+  source: ImageSource
+  alt: string
+  fit: ObjectFit = {ObjectFit.contain}
+  aspectRatio: float64?
+/>
+
+export external component <Icon extends UiCommon
+  name: string
+  set: string?
+  size: float64?
+  color: Color?
+/>
+```
+
+### `nx/graphics/catalog.nx`
+
+```nx
+import "../core"
+import { UiCommon } from "../ui"
+
+export enum FillRule = nonzero | evenodd
+export enum ViewBoxFit = contain | cover | fill
+export enum TextAnchor = start | middle | end
+export enum DominantBaseline = auto | middle | hanging
+
+export type ContentAlignment = {
+  x: Anchor = {Anchor.center}
+  y: Anchor = {Anchor.center}
+}
+
+export abstract external component <GraphicsCommon
+  opacity: float64 = 1.0
+  transform: Transform[]?
+  clipPath: string?
+  accessibility: Accessibility?
+/>
+
+export abstract external component <ShapeCommon extends GraphicsCommon
+  fill: Paint?
+  stroke: Stroke?
+  fillRule: FillRule = {FillRule.nonzero}
+  shadows: Shadow[]?
+/>
+
+export external component <Drawing extends UiCommon
+  viewBox: ViewBox
+  fit: ViewBoxFit = {ViewBoxFit.contain}
+  contentAlignment: ContentAlignment?
+  content children: Element[]?
+/>
+
+export external component <Group extends GraphicsCommon
+  content children: Element[]?
+/>
+
+export external component <Rect extends ShapeCommon
+  x: float64 = 0.0
+  y: float64 = 0.0
+  width: float64
+  height: float64
+  rx: float64 = 0.0
+  ry: float64?                          // null means "same as rx"
+/>
+
+export external component <Circle extends ShapeCommon
+  cx: float64
+  cy: float64
+  r: float64
+/>
+
+export external component <Ellipse extends ShapeCommon
+  cx: float64
+  cy: float64
+  rx: float64
+  ry: float64
+/>
+
+export external component <Line extends ShapeCommon
+  x1: float64
+  y1: float64
+  x2: float64
+  y2: float64
+/>
+
+export external component <Polyline extends ShapeCommon
+  points: Point[]
+/>
+
+export external component <Polygon extends ShapeCommon
+  points: Point[]
+/>
+
+export external component <Path extends ShapeCommon
+  data: string
+/>
+
+export external component <Text extends GraphicsCommon
+  x: float64
+  y: float64
+  fontFamily: string?
+  fontSize: float64 = 16.0
+  fontWeight: float64 = 400.0
+  fontStyle: FontStyle = {FontStyle.normal}
+  textAnchor: TextAnchor = {TextAnchor.start}
+  dominantBaseline: DominantBaseline = {DominantBaseline.auto}
+  letterSpacing: float64 = 0.0
+  fill: Paint?
+  stroke: Stroke?
+  shadows: Shadow[]?
+  content text: string
+/>
+
+export external component <Image extends GraphicsCommon
+  x: float64 = 0.0
+  y: float64 = 0.0
+  width: float64
+  height: float64
+  source: ImageSource
+  alt: string
+  fit: ObjectFit = {ObjectFit.contain}
+/>
+```
+
+## Appendix B — Where NX syntax does not yet fit this model
+
+The same findings are tracked as numbered NX language items in
+[drawn-ui-proposal-nx-enhancements.md](drawn-ui-proposal-nx-enhancements.md), with reproducers and
+suggested enhancements; this appendix states them from the object model's point of view.
+
+NX turns out to fit this proposal better than expected in one important respect and worse in another, and the two are worth separating.
+
+The fit is `external component`. A catalog entry is precisely a component signature with no NX body, rendered by a host — which is what `external component` already means, down to `abstract external component` for shared property bundles and `extends` for reuse. The `UiCommonProps`/`GraphicsCommonProps`/`ShapeProps` structure in §6.1 and §7.1 was designed before this was known and maps onto it without adjustment. NX also gets the `content` property right: the wire format's `children` is a declared property with a declared type, so a container that accepts many children (`content children: Element[]?`) and one that accepts exactly one (`content child: Element`) are different signatures rather than a prose rule.
+
+The misfit is the shape of the data. What follows are the specific gaps, in rough order of how much they cost.
+
+**No map type, and no generics.** `elements: Record<ElementId, Element>` has no NX spelling; NX has records, sequences, unions, and enums, and generic type parameters are a post-1.0 item. The listing uses `Element[]`, which is not the same type — it loses key-uniqueness and O(1) ID lookup, and it forces `id` onto the element rather than onto the map key, which is why §4.1 keeps the map in the table and flags the divergence. It costs less than it looks: `elements` is the *only* map-typed site in the model, and NX has no occasion to author it, because NX source is the nested form and the flat map is what a compiler emits. The gap becomes real for the post-MVP catalogs in §11 — a state or data model, themes and design tokens, localization tables, per-element extension metadata — each of which needs a map-typed property inside a catalog.
+
+**No literal types, so no compact scalar-or-structured values.** NX union cases are named, so a union cannot mix a bare scalar with an alternative shape. Three MVP types depend on exactly that: `Length` (`120` / `"auto"` / `"50%"`), `Insets` and `CornerRadii` (a scalar meaning all sides), and `Paint | "none"`. The listing spells `Length` as a three-case union and drops the scalar shorthands entirely, which is why `"padding": 20` becomes a four-field record in §8.1. String-literal union types are on NX's roadmap as a 1.1 feature; if they arrive, `Length` and `Insets` should be revisited, because the shorthand is not cosmetic — it is most of the token cost of a generated layout.
+
+**Every record and union case carries a `$type` tag.** NX's serialization gives each record a `$type` discriminator and each union case a qualified one, so a `Point` is `{"$type": "Point", "x": 10, "y": 20}` and a solid fill is `{"$type": "Paint.solid", "color": "#fff"}` rather than `"#fff"`. The key is fixed and not configurable. This is the most consequential difference for a format whose §12.10 open question is token cost: the NX-native encoding is materially heavier than the JSON in §8, so NX source and NX serialization are separable decisions. Adopting the language does not oblige the wire format to adopt its encoding.
+
+**Nullable is the only way to say "optional."** NX has no absent-versus-null distinction, so a property with no meaningful default is written `T?` and the renderer resolves null. Most of the `?` marks in §6 and §7 exist for this reason rather than because null is a meaningful value.
+
+**A derived component cannot override an inherited default.** Redeclaring an inherited property is rejected as a duplicate. §6.1 wants `fill` to default to `Paint.none` on `Line` and `Polyline` and to black on closed shapes; that is not expressible, so `fill` is nullable on `ShapeCommon` and the per-component default becomes renderer prose.
+
+**A default cannot reference a sibling property.** `Transform.scale.y` defaulting to `x`, and `nx.graphics.Rect.ry` defaulting to `rx`, both become nullable with the relationship stated in a comment. (Component `state` defaults *can* read props; property defaults cannot.)
+
+**A default cannot be an empty sequence.** `= []` and `= {}` are both rejected — a braced default must contain at least one item, and bracket-list literals are not accepted in default position at all. Every `T[]` property whose default is "empty" is therefore written `T[]?`.
+
+**A default cannot be a bare negative number or a bare enum member.** `= -1.0` and `= Alignment.start` are syntax errors; both must be braced, as `= {-1.0}` and `= {Alignment.start}`. Hence the `{...}` around every enum default in Appendix A. Integer literals also do not widen: `float64` properties must be written `= 0.0`, not `= 0`.
+
+**No refinement or pattern constraints.** `ElementId`'s regex, `opacity`'s 0..1 range, `fontWeight`'s 1..1000, `columnSpan >= 1`, and "at least two gradient stops" are all invisible to NX's type system. They stay in the JSON Schema, which means the schema — not the NX declarations — remains the normative validator. The NX listing is the shape; the schema is the contract.
+
+**An enum member cannot be reached through a wildcard import alias.** With `import "../ui" as ui`, the type `ui.TextVariant` resolves but `ui.TextVariant.h2` fails with *"Member access not yet implemented"* — the third qualifying segment is not supported. The workaround is the selective form used in §8.1, `import { ..., TextVariant } from "../ui"`, which brings the enum in unqualified; a wildcard import of the same library cannot be combined with it, because importing one library path twice in a file is an error.
+
+**Qualification is one segment deep.** `import "../ui" as ui` takes a single identifier, and the selective form is validated to contain *exactly* one dot; `import "../ui" as nx.ui` is a syntax error and `import { VStack as nx.ui.VStack } from "../ui"` is rejected with "Selective import alias must contain exactly one dot." A two-segment catalog prefix is therefore not reachable in NX source. `nx.ui.VStack` remains the catalog type name in the document format; in NX it is written under a one-segment local alias, and the mapping from alias to catalog ID is the `catalogs` list.
+
+**Structure is nested, and cannot be flat.** This follows from the first gap but is worth stating on its own: NX has no way to write the canonical flat element map, so NX is an authoring syntax that a compiler lowers into it. §3 already anticipated a recursive authoring form as sugar over the flat model; NX is that form.
+
+Two further items are implementation gaps rather than language gaps, and both were reproduced against the toolchain in this repository:
+
+- **Prop defaults on an imported external component are not applied at the call site.** Given `lib/a.nx` with `export external component <Rect extends Base x: float64 = 0.0 y: float64 />` and `app/main.nx` with `<lib.Rect y={5.0} />`, analysis reports *"Element 'lib.Rect' requires property 'x'"*. The same declarations in one library check cleanly.
+- **Props inherited from an imported abstract external base are not visible at the call site.** With the same two libraries, `<lib.Rect ... width={2.0} fill={"red"} />` reports *"Element 'lib.Rect' has no property 'width'"* and the same for `fill`, though both are declared on `Base`.
+
+Together these make the three-library layout in Appendix A uncheckable today: it is valid NX, and each library checks on its own, but a document that imports two catalogs cannot yet be type-checked against them. A single-library variant of the same catalog plus the §8.1 document does check end to end. Both should be filed against the NX toolchain before an NX-authored catalog is committed to.
+
+Finally, one convention clash worth a decision rather than a fix: NX documents `snake_case` as the enum-member convention and serializes members verbatim, while this model's enum values are camelCase (`spaceBetween`, `objectBoundingBox`, `scaleDown`) because they follow CSS and SVG. camelCase members are legal NX identifiers, so Appendix A keeps the wire spelling and diverges from the convention. Changing the wire format to satisfy an NX style rule would be the wrong trade.
 
 ---
 

@@ -29,9 +29,15 @@ pub enum Value {
     /// 32-bit signed integer value (i32)
     Int32(i32),
 
-    /// 64-bit signed integer value (i64)
+    /// Default integer value (`int`)
     ///
-    /// This is the default integer type (`int` / `i64`).
+    /// This is the type integer literals take, and the one NX programs use unless they have a
+    /// reason not to. `int` is specified as exact over +/-(2^53-1) — the widest range every
+    /// backend represents exactly — and is carried here in an `i64`, which holds that range with
+    /// room to spare.
+    ///
+    /// `int64` has no distinct runtime carrier yet and also evaluates to this variant; the two
+    /// are separated once `int64` gets its checked, bigint-backed representation.
     Int(i64),
 
     /// 32-bit floating-point value (f32)
@@ -39,7 +45,7 @@ pub enum Value {
 
     /// 64-bit floating-point value (f64)
     ///
-    /// This is the default float type (`float` / `f64`).
+    /// This is the default float type (`float64`).
     Float(f64),
 
     /// String value
@@ -144,12 +150,12 @@ impl Value {
     /// Useful for error messages and debugging.
     pub fn type_name(&self) -> &'static str {
         match self {
-            Value::Int32(_) => "i32",
-            Value::Int(_) => "i64",
-            Value::Float32(_) => "f32",
-            Value::Float(_) => "f64",
+            Value::Int32(_) => "int32",
+            Value::Int(_) => "int",
+            Value::Float32(_) => "float32",
+            Value::Float(_) => "float64",
             Value::String(_) => "string",
-            Value::Boolean(_) => "bool",
+            Value::Boolean(_) => "boolean",
             Value::Null => "null",
             Value::Array(_) => "array",
             Value::EnumValue { .. } => "enum",
@@ -265,12 +271,12 @@ mod tests {
 
     #[test]
     fn test_type_names() {
-        assert_eq!(Value::Int32(42).type_name(), "i32");
-        assert_eq!(Value::Int(42).type_name(), "i64");
-        assert_eq!(Value::Float32(2.5).type_name(), "f32");
-        assert_eq!(Value::Float(2.5).type_name(), "f64");
+        assert_eq!(Value::Int32(42).type_name(), "int32");
+        assert_eq!(Value::Int(42).type_name(), "int");
+        assert_eq!(Value::Float32(2.5).type_name(), "float32");
+        assert_eq!(Value::Float(2.5).type_name(), "float64");
         assert_eq!(Value::String(SmolStr::new("test")).type_name(), "string");
-        assert_eq!(Value::Boolean(true).type_name(), "bool");
+        assert_eq!(Value::Boolean(true).type_name(), "boolean");
         assert_eq!(Value::Null.type_name(), "null");
         assert_eq!(
             Value::Record {

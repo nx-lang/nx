@@ -204,10 +204,10 @@ let Hive5Survey =
       <Option "No"/>
     }
 
-    let <myOptions allowBoth:bool = false/> =
+    let <myOptions allowBoth:boolean = false/> =
       <Option "Yes, borrowed"/>
 
-    let <myOptions allowBoth:bool = false/> = <:>
+    let <myOptions allowBoth:boolean = false/> = <:>
       <Option "Yes, borrowed"/>
       <Option "Yes, lent"/>
       if allowBoth {

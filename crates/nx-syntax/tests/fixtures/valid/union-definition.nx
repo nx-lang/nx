@@ -9,7 +9,7 @@ type LoadState =
   | loading
   | failed {
       message: string
-      retryable: bool = true
+      retryable: boolean = true
     }
   | loaded {
       items: string[]

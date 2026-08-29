@@ -1098,7 +1098,7 @@ mod tests {
     fn effective_external_component_contract_excludes_declared_state_fields() {
         let source = r#"
             abstract external component <SearchBase placeholder:string />
-            external component <SearchBox extends SearchBase showSearchIcon:bool = true /> = {
+            external component <SearchBox extends SearchBase showSearchIcon:boolean = true /> = {
               state { query:string }
             }
         "#;

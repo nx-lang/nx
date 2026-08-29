@@ -237,13 +237,12 @@ module.exports = grammar({
 
     primitive_type: $ => choice(
       'string',
-      'i32',
-      'i64',
       'int',
-      'f32',
-      'f64',
-      'float',
-      'bool',
+      'int32',
+      'int64',
+      'float32',
+      'float64',
+      'boolean',
       'void',
       'object',
     ),

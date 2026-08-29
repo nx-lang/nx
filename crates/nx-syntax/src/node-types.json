@@ -2474,7 +2474,7 @@
     "extra": true
   },
   {
-    "type": "bool",
+    "type": "boolean",
     "named": false
   },
   {
@@ -2526,19 +2526,15 @@
     "named": false
   },
   {
-    "type": "f32",
-    "named": false
-  },
-  {
-    "type": "f64",
-    "named": false
-  },
-  {
     "type": "false",
     "named": false
   },
   {
-    "type": "float",
+    "type": "float32",
+    "named": false
+  },
+  {
+    "type": "float64",
     "named": false
   },
   {
@@ -2559,14 +2555,6 @@
     "extra": true
   },
   {
-    "type": "i32",
-    "named": false
-  },
-  {
-    "type": "i64",
-    "named": false
-  },
-  {
     "type": "identifier",
     "named": true
   },
@@ -2584,6 +2572,14 @@
   },
   {
     "type": "int",
+    "named": false
+  },
+  {
+    "type": "int32",
+    "named": false
+  },
+  {
+    "type": "int64",
     "named": false
   },
   {

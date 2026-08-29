@@ -2242,11 +2242,11 @@ fn emit_named_type_schema(
     seen: &mut FxHashSet<ReferenceKey>,
 ) -> String {
     match name {
-        "i32" | "i64" | "int" | "f32" | "f64" | "float" => {
+        "int" | "int32" | "int64" | "float32" | "float64" => {
             return "nxNumberSchema".to_string();
         }
         "string" => return "nxStringSchema".to_string(),
-        "bool" => return "nxBooleanSchema".to_string(),
+        "boolean" => return "nxBooleanSchema".to_string(),
         _ => {}
     }
 
@@ -2619,9 +2619,9 @@ fn emit_named_type(
     context: &EmitContext,
 ) -> String {
     match name {
-        "i32" | "i64" | "int" | "f32" | "f64" | "float" => "number".to_string(),
+        "int" | "int32" | "int64" | "float32" | "float64" => "number".to_string(),
         "string" => "string".to_string(),
-        "bool" => "boolean".to_string(),
+        "boolean" => "boolean".to_string(),
         "void" => "void".to_string(),
         _ => context
             .type_reference(current_module_id, name)
@@ -2647,14 +2647,13 @@ fn emit_named_type(
 
 fn emit_primitive_type(primitive: Primitive) -> String {
     match primitive {
-        Primitive::I32
-        | Primitive::I64
-        | Primitive::Int
-        | Primitive::F32
-        | Primitive::F64
-        | Primitive::Float => "number".to_string(),
+        Primitive::Int
+        | Primitive::Int32
+        | Primitive::Int64
+        | Primitive::Float32
+        | Primitive::Float64 => "number".to_string(),
         Primitive::String => "string".to_string(),
-        Primitive::Bool => "boolean".to_string(),
+        Primitive::Boolean => "boolean".to_string(),
         Primitive::Void => "void".to_string(),
     }
 }
@@ -3759,13 +3758,13 @@ fn collect_component_schema_runtime_helpers(
 fn collect_type_ref_schema_runtime_helpers(ty: &TypeRef, output: &mut FxHashSet<&'static str>) {
     match ty {
         TypeRef::Name(name) => match name.as_str() {
-            "i32" | "i64" | "int" | "f32" | "f64" | "float" => {
+            "int" | "int32" | "int64" | "float32" | "float64" => {
                 output.insert("nxNumberSchema");
             }
             "string" => {
                 output.insert("nxStringSchema");
             }
-            "bool" => {
+            "boolean" => {
                 output.insert("nxBooleanSchema");
             }
             _ => {

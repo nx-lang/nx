@@ -1,5 +1,5 @@
 export declare const NX_IR_FORMAT_ID = "nx-ir-json";
-export declare const NX_IR_SCHEMA_VERSION = 1;
+export declare const NX_IR_SCHEMA_VERSION = 2;
 export declare const NX_IR_RUNTIME_ABI = "nx-ir-runtime-v1";
 export type NxDiagnosticSeverity = "error" | "warning" | "info" | "hint";
 export interface NxIrDiagnostic {

@@ -125,7 +125,7 @@ fn test_payload_union_case_construction_applies_defaults() {
           | idle
           | failed {
               message: string
-              retryable: bool = true
+              retryable: boolean = true
               code: int?
             }
 
@@ -373,7 +373,7 @@ fn test_enum_member_return() {
 fn test_enum_comparison() {
     let source = r#"
         enum Direction = | north | south | east | west
-        let isNorth(value:Direction): bool = { value == Direction.north }
+        let isNorth(value:Direction): boolean = { value == Direction.north }
     "#;
 
     let result = execute_function(
@@ -430,7 +430,7 @@ fn test_derived_record_argument_satisfies_abstract_ancestor_parameter() {
         }
 
         type User extends UserBase = {
-          isAdmin: bool = false
+          isAdmin: boolean = false
         }
 
         let consume(entity:Entity): int = { 1 }
@@ -465,7 +465,7 @@ fn test_derived_record_return_satisfies_abstract_ancestor_return_type() {
         }
 
         type User extends UserBase = {
-          isAdmin: bool = false
+          isAdmin: boolean = false
         }
 
         let make(): UserBase = { <User id={1} name={"Ada"} /> }
@@ -626,7 +626,7 @@ fn test_record_inheritance_applies_inherited_defaults() {
         }
 
         type User extends UserBase = {
-          isAdmin: bool = false
+          isAdmin: boolean = false
         }
     "#;
 
@@ -1202,7 +1202,7 @@ fn test_element_call_braced_child_list_flattens_content_array() {
 fn test_element_call_conditional_content_expression_preserves_selected_element() {
     let source = r#"
         let <collect content items: object[] />: object[] = { items }
-        let root(flag: bool): object[] = { <collect>if flag { <A /> } else { <B /> }</collect> }
+        let root(flag: boolean): object[] = { <collect>if flag { <A /> } else { <B /> }</collect> }
     "#;
 
     let true_result = execute_function(source, "root", vec![Value::Boolean(true)])

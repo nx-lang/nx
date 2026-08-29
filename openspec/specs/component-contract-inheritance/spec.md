@@ -18,7 +18,7 @@ non-component symbols MUST NOT be usable as base components.
 
 #### Scenario: Peer file abstract component can be extended
 - **WHEN** `base.nx` in one library contains `abstract component <SearchBase placeholder:string emits { SearchRequested } />`
-- **AND** `search.nx` in the same library contains `component <SearchBox extends SearchBase showSearchIcon:bool = true /> = { <button /> }`
+- **AND** `search.nx` in the same library contains `component <SearchBox extends SearchBase showSearchIcon:boolean = true /> = { <button /> }`
 - **THEN** analysis SHALL accept `SearchBox extends SearchBase`
 
 #### Scenario: Imported abstract component can be extended
@@ -29,7 +29,7 @@ non-component symbols MUST NOT be usable as base components.
 - **THEN** analysis SHALL accept `SearchBox extends UI.SearchBase`
 
 #### Scenario: Abstract external component can act as a base component
-- **WHEN** a file contains `abstract external component <SearchBase placeholder:string /> external component <SearchBox extends SearchBase showSearchIcon:bool = true />`
+- **WHEN** a file contains `abstract external component <SearchBase placeholder:string /> external component <SearchBox extends SearchBase showSearchIcon:boolean = true />`
 - **THEN** analysis SHALL accept `SearchBox extends SearchBase`
 
 #### Scenario: Non-component base is rejected
@@ -44,7 +44,7 @@ more than one effective content prop across the base chain and derived declarati
 rejected.
 
 #### Scenario: Derived component accepts inherited and local props at call site
-- **WHEN** a file contains `abstract component <SearchBase placeholder:string emits { SearchRequested } /> component <NxSearchUi extends SearchBase showSpinner:bool = false /> = { <button /> } let render() = <NxSearchUi placeholder="Recipe ingredient" showSpinner=true />`
+- **WHEN** a file contains `abstract component <SearchBase placeholder:string emits { SearchRequested } /> component <NxSearchUi extends SearchBase showSpinner:boolean = false /> = { <button /> } let render() = <NxSearchUi placeholder="Recipe ingredient" showSpinner=true />`
 - **THEN** analysis SHALL accept the invocation of `NxSearchUi` using both inherited prop `placeholder` and local prop `showSpinner`
 
 #### Scenario: Base prop default applies to derived component initialization
@@ -61,7 +61,7 @@ rejected.
 - **THEN** analysis SHALL bind the markup body content to inherited content prop `body`
 
 #### Scenario: Duplicate inherited prop name is rejected
-- **WHEN** a file contains `abstract component <SearchBase placeholder:string /> component <NxSearchUi extends SearchBase placeholder:string showSpinner:bool = false /> = { <button /> }`
+- **WHEN** a file contains `abstract component <SearchBase placeholder:string /> component <NxSearchUi extends SearchBase placeholder:string showSpinner:boolean = false /> = { <button /> }`
 - **THEN** analysis SHALL reject `NxSearchUi` because `placeholder` duplicates an inherited component prop
 
 #### Scenario: Duplicate effective content prop is rejected

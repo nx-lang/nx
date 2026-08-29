@@ -44,7 +44,7 @@ NX reuses element syntax for object definitions and instantiation so that data a
 ```nx
 type <User id:string name:string email:string avatarUrl:string?/>
 type <Point x:int y:int/>
-type <Color r:int g:int b:int a:float = 1.0/>
+type <Color r:int g:int b:int a:float64 = 1.0/>
 
 let user =
   <User

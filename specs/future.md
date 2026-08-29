@@ -2,42 +2,164 @@
 
 ## Numeric Width Semantics
 
-The type system supports `i32`, `i64`/`int`, `f32`, `f64`/`float` but there are
+The type system supports `int`, `int32`, `int64`, `float32`, `float64` but there are
 several open questions about how width should behave at runtime.
+
+`int` is the default integer type and is specified as exact over ±(2^53−1) on every
+backend — the widest range that C# `long`, JavaScript `number`, and Rust `i64` all
+represent exactly. Enforcing that range is deferred; see "Bounds checks are specified
+but not enforced" below.
 
 ### Interpreter does not produce 32-bit values from source
 
-The interpreter always produces `Value::Int` (i64) and `Value::Float` (f64) for
+The interpreter always produces `Value::Int` (`int`) and `Value::Float` (`float64`) for
 numeric literals. `Value::Int32` and `Value::Float32` only appear when injected
-by FFI or host code. This means `let x: i32 = 42` produces a 64-bit value at
+by FFI or host code. This means `let x: int32 = 42` produces a 64-bit value at
 runtime.
+
+`int64` has no distinct runtime carrier either — it also evaluates to `Value::Int`, so
+`Value::type_name` reports `int` for both. The two separate when `int64` gets its
+checked, bigint-backed representation.
 
 Options to address:
 - **Type-directed literal narrowing**: thread the expected type into literal
-  evaluation so `let x: i32 = 42` produces `Value::Int32(42)`.
+  evaluation so `let x: int32 = 42` produces `Value::Int32(42)`.
 - **Coercion at boundaries**: narrow values at `let` bindings and function call
-  sites when the target type is known.
-- **Keep as-is**: treat `i32`/`f32` as FFI/serialization hints only, with the
+  sites when the target type is known. Note that coercion is currently check-only —
+  `coerce_non_record_value` returns a value unchanged or errors, and never converts.
+- **Keep as-is**: treat `int32`/`float32` as FFI/serialization hints only, with the
   runtime always using 64-bit internally.
 
-### Overflow semantics are undefined
+The first two options are the "value-directed" design costed under "Bounds checks are
+specified but not enforced" below; making runtime values width-correct and enforcing
+bounds are largely the same piece of work.
 
-If 32-bit values are produced at runtime, overflow behavior needs to be defined.
-For example, `let x: i32 = 3000000000` — should this be a runtime error,
-wrapping, or a compile-time error?
+### Bounds checks are specified but not enforced
+
+`int` is specified as exact over ±(2^53−1) on every backend, and arithmetic is
+specified as checked rather than wrapping. Neither is enforced yet:
+`crates/nx-interpreter/src/eval/arithmetic.rs` still uses `wrapping_add`,
+`wrapping_sub`, and `wrapping_mul` for every integer type, so the specified range is
+currently a documentation-level guarantee.
+
+Enforcing it is deliberately deferred. It most likely wants to be implemented
+together with user-declared integer ranges (`1..10`), since both need the same
+`check_range(value, lo, hi)` primitive and the same runtime error — one bounds-check
+mechanism, not two. Whether the two actually land as a single change is undecided;
+the implementation notes below apply either way.
+
+Measured cost on Node v24 for the JavaScript backend: an unchecked add is ~0.74 ns/op
+and a `Number.isSafeInteger`-guarded add is ~2.51 ns/op. `Number.isSafeInteger` is a
+V8 intrinsic and beats a hand-written comparison (1.03 ns vs 1.35 ns).
+
+The same question remains open for the narrow types: `let x: int32 = 3000000000`
+should be a runtime error, wrapping, or a compile-time error.
 
 Options:
 - **Runtime error** (safest, matches Rust debug / C# checked)
 - **Wrapping** (matches C / Rust release)
 - **Compile-time rejection** (requires constant evaluation)
 
+#### JavaScript runtime: the plumbing already exists
+
+The TypeScript IR runtime is close to ready. Every IR expression already carries its
+inferred type (`crates/nx-codegen/src/ir.rs` sets `ty` on each emitted expression),
+and `evalDivision` and `evalModulo` in `runtime/typescript/src/index.ts` already
+consume it through `isIntegerSemanticType`. What is missing is that `add`, `sub`, and
+`mul` in `evalBinary` ignore `expression.ty`, and `evalUnary` never receives it.
+
+Work needed: a range table and a `checkRange` helper alongside the existing
+`checkedInteger`, wired into the five arithmetic binary operators; `ty` threaded into
+`evalUnary` for `neg` (one call site); and a runtime diagnostic code for overflow.
+
+`int64` cannot be range-checked on this backend while it is carried as a `number` —
+its specified range is not representable. See "`int64` is still a JavaScript
+`number`" below.
+
+#### Interpreter: the types are computed and then discarded
+
+The interpreter cannot distinguish `int` from `int64` at an arithmetic site, because
+it has no per-expression type information at all. That information does exist — it is
+dropped just before the interpreter would receive it:
+
+- `TypeEnvironment` holds `expr_types: FxHashMap<ExprId, Arc<Type>>`
+  (`crates/nx-types/src/env.rs`), populated by inference through
+  `Primitive::numeric_promotion`, so binary nodes already carry the correctly
+  promoted integer type.
+- Every `ModuleArtifact` carries that environment (`crates/nx-types/src/check.rs`).
+- `build_resolved_program` (`crates/nx-api/src/artifacts.rs`) walks
+  `&[ModuleArtifact]`, keeps `artifact.lowered_module`, and discards
+  `artifact.type_env` — the field directly beside it.
+
+Two designs, in increasing cost.
+
+**Type-directed** (roughly 1–1.5 days). Route the existing types through to
+evaluation:
+- `ResolvedModule` gains the expression-type map beside `lowered_module`.
+- `build_resolved_program` passes `artifact.type_env` instead of discarding it.
+- `Interpreter` keys the environments by `SourceId`, so `eval_expr` can look one up
+  from the `module` it already holds — no module-id threading through eval
+  signatures.
+- `eval_binary_op` gains its own `ExprId`; it currently receives only `lhs` and
+  `rhs`. Its single call site in `eval_expr` already has it. Same for `neg`.
+- `arithmetic.rs` takes bounds and uses `checked_*` plus a range check.
+
+This mirrors how the JavaScript runtime already works — static type on the expression
+node — which keeps the two runtimes structurally aligned. It needs no new `Value`
+variant, so it avoids exhaustive-match churn and leaves existing `Value::Int(...)`
+test expectations valid.
+
+Two decisions it forces:
+- **Missing type entries.** Defaulting to the `int` bounds when `get_expr_type`
+  returns `None` fails safe. Defaulting to "unchecked" would silently skip checks,
+  which is the worse failure mode.
+- **Direct-HIR paths have no inference.** `ResolvedProgram::single_root_module` and
+  the `interpreter_direct_hir.rs` tests build programs with no type environment, so
+  overflow tests must run through the real analysis pipeline.
+
+Its limit: this makes *expressions* width-correct, not *values*. `Value::Int` still
+cannot distinguish an `int` from an `int64` inside a record field or array element,
+and the FFI boundary cannot either — `NxValue` has `Int32` and `Int(i64)` but no
+`Int64`. That is sufficient for arithmetic, where the declared type is known at every
+operation.
+
+**Value-directed** (roughly 3–4 days). Add `Value::Int64` and make coercion convert
+rather than check. This is full width correctness, and it is where the cost lives:
+- Three mirror enums, not one: `Value`, `NxValue`, and the private `SerializedValue`
+  in `interpreter.rs` — plus their serde, and the .NET and Node bindings that
+  deserialize `NxValue` JSON.
+- Roughly 50 non-test match sites.
+- `coerce_non_record_value` currently returns a value unchanged or errors. Making it
+  convert changes semantics at every typed boundary — parameters, returns, fields,
+  array elements — and moves test expectations. This part is not mechanical.
+
+The value-directed work is best done with the `int64`-as-`bigint` change rather than
+before it: a JavaScript `bigint` crossing FFI needs a distinct Rust carrier, so both
+are solving the same boundary problem and would otherwise design it twice.
+
+Also fixed by this work: `interpreter.rs` negates with `Value::Int32(-n)`, which
+panics in debug builds on `i32::MIN`. It is reachable only through an FFI-supplied
+`int32`, since evaluation never produces `Value::Int32` from source.
+
+### `int64` is still a JavaScript `number`
+
+`int64` is specified as a full 64-bit signed integer, but the TypeScript backend
+still emits it as `number`, which is exact only to 2^53−1. Carrying it as `bigint`
+(with `BigInt64Array` for arrays, following Kotlin/JS 2.2.20) is the intended
+direction and is deferred to its own change. Note that `JSON.stringify` throws on a
+`bigint`, so the IR's existing string encoding for large integer literals stays
+mandatory.
+
 ### Type compatibility is widening-only at the type level but not enforced directionally
 
 `Type::is_compatible_with` treats any integer width as compatible with any other
-(same for floats). This means `i64 → i32` is implicitly allowed in argument
+(same for floats). This means `int64 → int32` is implicitly allowed in argument
 passing and assignment. If width should be enforced, this needs to be split into
-directional "assignable" (widening only: i32 → i64 ok, i64 → i32 error) vs
-"comparable" (either direction) checks.
+directional "assignable" (widening only: int32 → int → int64 ok, the reverse an
+error) vs "comparable" (either direction) checks.
+
+`Primitive::numeric_promotion` already encodes the rank order int32 < int < int64,
+so the widening direction is defined even though compatibility does not enforce it.
 
 ### FFI boundary validation
 

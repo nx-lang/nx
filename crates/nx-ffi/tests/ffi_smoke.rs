@@ -679,7 +679,7 @@ fn ffi_codegen_nx_ir_returns_json_and_metadata() {
     let document: serde_json::Value = serde_json::from_str(&payload.json).unwrap();
 
     assert_eq!(document["format"], "nx-ir-json");
-    assert_eq!(payload.metadata.schema_version, 1);
+    assert_eq!(payload.metadata.schema_version, 2);
     assert_eq!(payload.metadata.runtime_abi, "nx-ir-runtime-v1");
     assert!(payload.metadata.program_fingerprint > 0);
     assert_eq!(payload.metadata.function_entrypoints[0].name, "root");
