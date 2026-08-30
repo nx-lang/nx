@@ -1,0 +1,2 @@
+component <C flag:boolean /> = { <div /> }
+<C flag=!true />

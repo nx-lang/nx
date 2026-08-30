@@ -414,7 +414,9 @@ impl<'a> UndefinedIdentifierChecker<'a> {
 
     fn check_expr(&mut self, expr_id: ExprId, scope: ScopeId) {
         match self.module.raw_module().expr(expr_id) {
-            ast::Expr::Literal(_) | ast::Expr::Error(_) => {}
+            // A contextual name resolves against the expected type at its binding site, never
+            // against lexical scope, so it is deliberately not checked for an undefined name here.
+            ast::Expr::Literal(_) | ast::Expr::ContextualName { .. } | ast::Expr::Error(_) => {}
             ast::Expr::Ident(name) => {
                 if self.scope_manager.resolve(name, scope).is_none() {
                     self.report_undefined(name, self.module.raw_module().expr_span(expr_id));

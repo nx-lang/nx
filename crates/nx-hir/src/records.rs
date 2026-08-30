@@ -232,6 +232,18 @@ pub fn resolve_record_definition(module: &PreparedModule, name: &Name) -> Option
     resolve_record_definition_with_identity(module, name).map(|resolved| resolved.record)
 }
 
+/// Resolves a record definition together with the identity of the module that declares it.
+///
+/// The declaring module is the context in which the record's own field type references were
+/// written, so a caller that needs to resolve those references needs it alongside the definition.
+pub fn resolve_record_definition_with_module(
+    module: &PreparedModule,
+    name: &Name,
+) -> Option<(String, RecordDef)> {
+    resolve_record_definition_with_identity(module, name)
+        .map(|resolved| (resolved.module_identity, resolved.record))
+}
+
 pub fn effective_record_shape_for_name(
     module: &PreparedModule,
     name: &Name,

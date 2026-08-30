@@ -299,7 +299,7 @@ type Paint =
       y1: float64
       x2: float64
       y2: float64
-      units: GradientUnits = {GradientUnits.objectBoundingBox}
+      units: GradientUnits = objectBoundingBox
       stops: GradientStop[]
     }
   | radialGradient {
@@ -308,7 +308,7 @@ type Paint =
       r: float64
       fx: float64?
       fy: float64?
-      units: GradientUnits = {GradientUnits.objectBoundingBox}
+      units: GradientUnits = objectBoundingBox
       stops: GradientStop[]
     }
 ```
@@ -330,8 +330,8 @@ enum LineJoin = miter | round | bevel
 type Stroke = {
   paint: Paint
   width: float64 = 1.0
-  lineCap: LineCap = {LineCap.butt}
-  lineJoin: LineJoin = {LineJoin.miter}
+  lineCap: LineCap = butt
+  lineJoin: LineJoin = miter
   miterLimit: float64 = 4.0
   dashArray: float64[]?
   dashOffset: float64 = 0.0
@@ -416,7 +416,7 @@ enum FillRule = nonzero | evenodd
 abstract external component <ShapeCommon extends GraphicsCommon
   fill: Paint?
   stroke: Stroke?
-  fillRule: FillRule = {FillRule.nonzero}
+  fillRule: FillRule = nonzero
   shadows: Shadow[]?
 />
 ```
@@ -447,8 +447,8 @@ Root drawing surface and bridge into Level 2 UI. Accepts ordered drawing childre
 enum ViewBoxFit = contain | cover | fill
 
 type ContentAlignment = {
-  x: Anchor = {Anchor.center}
-  y: Anchor = {Anchor.center}
+  x: Anchor = center
+  y: Anchor = center
 }
 ```
 
@@ -604,23 +604,23 @@ Every Level 2 component, plus `nx.graphics.Drawing`, accepts these optional flat
 
 ```nx
 abstract external component <UiCommon
-  width: Length = {Length.auto}
-  height: Length = {Length.auto}
+  width: Length = auto
+  height: Length = auto
   minWidth: float64 = 0.0
   minHeight: float64 = 0.0
   maxWidth: float64?
   maxHeight: float64?
   margin: Insets?
   padding: Insets?
-  alignSelf: AlignSelf = {AlignSelf.auto}
-  justifySelf: AlignSelf = {AlignSelf.auto}
+  alignSelf: AlignSelf = auto
+  justifySelf: AlignSelf = auto
   grow: float64 = 0.0
   shrink: float64 = 1.0
   gridColumn: int?
   gridRow: int?
   columnSpan: int = 1
   rowSpan: int = 1
-  background: Paint = {Paint.none}
+  background: Paint = none
   border: Border?
   cornerRadius: CornerRadii?
   shadows: Shadow[]?
@@ -911,13 +911,13 @@ The JSON above is the interchange form. The same document authored in NX is the 
 
 ```nx
 import "../core"
-import { Card as ui.Card, VStack as ui.VStack, Text as ui.Text, TextVariant } from "../ui"
+import { Card as ui.Card, VStack as ui.VStack, Text as ui.Text } from "../ui"
 import "../graphics" as gfx
 
 <ui.Card width={<Length.px value={360.0} />}
          padding={<Insets top={20.0} right={20.0} bottom={20.0} left={20.0} />}>
   <ui.VStack gap={12.0}>
-    <ui.Text: variant={TextVariant.h2}>NX UI</ui.Text>
+    <ui.Text: variant=h2>NX UI</ui.Text>
     <gfx.Drawing
       height={<Length.px value={140.0} />}
       viewBox={<ViewBox x={0.0} y={0.0} width={320.0} height={140.0} />}>
@@ -929,11 +929,11 @@ import "../graphics" as gfx
                         <GradientStop offset={1.0} color={"#14B8A6"} /> } />} />
       <gfx.Path
         data={"M20 105 C90 15 210 125 300 35"}
-        fill={Paint.none}
-        stroke={<Stroke paint={<Paint.solid color={"white"} />} width={5.0} lineCap={LineCap.round} />} />
+        fill=none
+        stroke={<Stroke paint={<Paint.solid color={"white"} />} width={5.0} lineCap=round />} />
       <gfx.Circle cx={300.0} cy={35.0} r={7.0} fill={<Paint.solid color={"white"} />} />
     </gfx.Drawing>
-    <ui.Text: variant={TextVariant.caption}>Portable layout above; portable drawing below.</ui.Text>
+    <ui.Text: variant=caption>Portable layout above; portable drawing below.</ui.Text>
   </ui.VStack>
 </ui.Card>
 ```
@@ -942,7 +942,7 @@ Four differences from the JSON are worth reading off directly, because each one 
 
 The IDs are gone. NX nests, so structure is expressed by containment rather than by `children: ["title", "graphic"]` pointing into a map. Producing the flat form is a compilation step, not something NX source can state.
 
-The prefixes are one segment deep. `ui.` and `gfx.` are import aliases, and NX allows exactly one qualifying segment, so `nx.ui.` and `nx.graphics.` are not spellable as prefixes — the alias is the local abbreviation for a catalog whose real ID lives in `catalogs`. The two catalogs are also imported differently on purpose: `nx.graphics` uses the wildcard alias form, while `nx.ui` uses the selective form so that `TextVariant` arrives unqualified, because an enum member cannot be reached through a wildcard alias today. Appendix B has the detail.
+The prefixes are one segment deep. `ui.` and `gfx.` are import aliases, and NX allows exactly one qualifying segment, so `nx.ui.` and `nx.graphics.` are not spellable as prefixes — the alias is the local abbreviation for a catalog whose real ID lives in `catalogs`. Both catalogs can now use the same import style: contextual literal binding means `variant=h2` resolves against the property's declared type, so `TextVariant` never has to be named at the use site and no longer has to be imported unqualified to work around wildcard-alias member access. Appendix B has the detail.
 
 Sizes and insets got longer. `"width": 360` becomes `<Length.px value={360.0} />` and `"padding": 20` becomes a four-sided `Insets`, both because NX cannot union a scalar with a structured alternative.
 
@@ -1150,7 +1150,7 @@ export type Paint =
       y1: float64
       x2: float64
       y2: float64
-      units: GradientUnits = {GradientUnits.objectBoundingBox}
+      units: GradientUnits = objectBoundingBox
       stops: GradientStop[]
     }
   | radialGradient {
@@ -1159,15 +1159,15 @@ export type Paint =
       r: float64
       fx: float64?
       fy: float64?
-      units: GradientUnits = {GradientUnits.objectBoundingBox}
+      units: GradientUnits = objectBoundingBox
       stops: GradientStop[]
     }
 
 export type Stroke = {
   paint: Paint
   width: float64 = 1.0
-  lineCap: LineCap = {LineCap.butt}
-  lineJoin: LineJoin = {LineJoin.miter}
+  lineCap: LineCap = butt
+  lineJoin: LineJoin = miter
   miterLimit: float64 = 4.0
   dashArray: float64[]?
   dashOffset: float64 = 0.0
@@ -1223,23 +1223,23 @@ export type TrackSize =
   | fraction { value: float64 }
 
 export abstract external component <UiCommon
-  width: Length = {Length.auto}
-  height: Length = {Length.auto}
+  width: Length = auto
+  height: Length = auto
   minWidth: float64 = 0.0
   minHeight: float64 = 0.0
   maxWidth: float64?
   maxHeight: float64?
   margin: Insets?
   padding: Insets?
-  alignSelf: AlignSelf = {AlignSelf.auto}
-  justifySelf: AlignSelf = {AlignSelf.auto}
+  alignSelf: AlignSelf = auto
+  justifySelf: AlignSelf = auto
   grow: float64 = 0.0
   shrink: float64 = 1.0
   gridColumn: int?
   gridRow: int?
   columnSpan: int = 1
   rowSpan: int = 1
-  background: Paint = {Paint.none}
+  background: Paint = none
   border: Border?
   cornerRadius: CornerRadii?
   shadows: Shadow[]?
@@ -1250,16 +1250,16 @@ export abstract external component <UiCommon
 
 export external component <HStack extends UiCommon
   gap: float64 = 0.0
-  justify: Distribution = {Distribution.start}
-  align: Alignment = {Alignment.stretch}
+  justify: Distribution = start
+  align: Alignment = stretch
   wrap: boolean = false
   content children: Element[]?
 />
 
 export external component <VStack extends UiCommon
   gap: float64 = 0.0
-  justify: Distribution = {Distribution.start}
-  align: Alignment = {Alignment.stretch}
+  justify: Distribution = start
+  align: Alignment = stretch
   wrap: boolean = false
   content children: Element[]?
 />
@@ -1269,20 +1269,20 @@ export external component <Grid extends UiCommon
   rows: TrackSize[]?
   columnGap: float64 = 0.0
   rowGap: float64 = 0.0
-  justifyItems: Alignment = {Alignment.stretch}
-  alignItems: Alignment = {Alignment.stretch}
+  justifyItems: Alignment = stretch
+  alignItems: Alignment = stretch
   content children: Element[]?
 />
 
 export external component <ZStack extends UiCommon
-  justifyItems: Alignment = {Alignment.stretch}
-  alignItems: Alignment = {Alignment.stretch}
+  justifyItems: Alignment = stretch
+  alignItems: Alignment = stretch
   content children: Element[]?
 />
 
 export external component <Scroll extends UiCommon
-  axis: ScrollAxis = {ScrollAxis.vertical}
-  scrollbar: ScrollbarVisibility = {ScrollbarVisibility.auto}
+  axis: ScrollAxis = vertical
+  scrollbar: ScrollbarVisibility = auto
   content child: Element
 />
 
@@ -1291,36 +1291,36 @@ export external component <Box extends UiCommon
 />
 
 export external component <Card extends UiCommon
-  variant: CardVariant = {CardVariant.elevated}
+  variant: CardVariant = elevated
   content child: Element
 />
 
 export external component <Divider extends UiCommon
-  axis: Axis = {Axis.horizontal}
+  axis: Axis = horizontal
   color: Color?
   thickness: float64 = 1.0
 />
 
 export external component <Text extends UiCommon
-  format: TextFormat = {TextFormat.plain}
-  variant: TextVariant = {TextVariant.body}
+  format: TextFormat = plain
+  variant: TextVariant = body
   color: Color?
   fontFamily: string?
   fontSize: float64?
   fontWeight: float64?
-  fontStyle: FontStyle = {FontStyle.normal}
-  textAlign: TextAlign = {TextAlign.start}
+  fontStyle: FontStyle = normal
+  textAlign: TextAlign = start
   lineHeight: float64?
   letterSpacing: float64 = 0.0
   maxLines: int?
-  overflow: TextOverflow = {TextOverflow.clip}
+  overflow: TextOverflow = clip
   content text: string
 />
 
 export external component <Image extends UiCommon
   source: ImageSource
   alt: string
-  fit: ObjectFit = {ObjectFit.contain}
+  fit: ObjectFit = contain
   aspectRatio: float64?
 />
 
@@ -1344,8 +1344,8 @@ export enum TextAnchor = start | middle | end
 export enum DominantBaseline = auto | middle | hanging
 
 export type ContentAlignment = {
-  x: Anchor = {Anchor.center}
-  y: Anchor = {Anchor.center}
+  x: Anchor = center
+  y: Anchor = center
 }
 
 export abstract external component <GraphicsCommon
@@ -1358,13 +1358,13 @@ export abstract external component <GraphicsCommon
 export abstract external component <ShapeCommon extends GraphicsCommon
   fill: Paint?
   stroke: Stroke?
-  fillRule: FillRule = {FillRule.nonzero}
+  fillRule: FillRule = nonzero
   shadows: Shadow[]?
 />
 
 export external component <Drawing extends UiCommon
   viewBox: ViewBox
-  fit: ViewBoxFit = {ViewBoxFit.contain}
+  fit: ViewBoxFit = contain
   contentAlignment: ContentAlignment?
   content children: Element[]?
 />
@@ -1420,9 +1420,9 @@ export external component <Text extends GraphicsCommon
   fontFamily: string?
   fontSize: float64 = 16.0
   fontWeight: float64 = 400.0
-  fontStyle: FontStyle = {FontStyle.normal}
-  textAnchor: TextAnchor = {TextAnchor.start}
-  dominantBaseline: DominantBaseline = {DominantBaseline.auto}
+  fontStyle: FontStyle = normal
+  textAnchor: TextAnchor = start
+  dominantBaseline: DominantBaseline = auto
   letterSpacing: float64 = 0.0
   fill: Paint?
   stroke: Stroke?
@@ -1437,7 +1437,7 @@ export external component <Image extends GraphicsCommon
   height: float64
   source: ImageSource
   alt: string
-  fit: ObjectFit = {ObjectFit.contain}
+  fit: ObjectFit = contain
 />
 ```
 
@@ -1467,11 +1467,11 @@ The misfit is the shape of the data. What follows are the specific gaps, in roug
 
 **A default cannot be an empty sequence.** `= []` and `= {}` are both rejected — a braced default must contain at least one item, and bracket-list literals are not accepted in default position at all. Every `T[]` property whose default is "empty" is therefore written `T[]?`.
 
-**A default cannot be a bare negative number or a bare enum member.** `= -1.0` and `= Alignment.start` are syntax errors; both must be braced, as `= {-1.0}` and `= {Alignment.start}`. Hence the `{...}` around every enum default in Appendix A. Integer literals also do not widen: `float64` properties must be written `= 0.0`, not `= 0`.
+**A default cannot be a bare negative number or a bare enum member.** `= -1.0` and `= Alignment.start` are syntax errors; both must be braced, as `= {-1.0}` and `= start`. Hence the `{...}` around every enum default in Appendix A. Integer literals also do not widen: `float64` properties must be written `= 0.0`, not `= 0`.
 
 **No refinement or pattern constraints.** `ElementId`'s regex, `opacity`'s 0..1 range, `fontWeight`'s 1..1000, `columnSpan >= 1`, and "at least two gradient stops" are all invisible to NX's type system. They stay in the JSON Schema, which means the schema — not the NX declarations — remains the normative validator. The NX listing is the shape; the schema is the contract.
 
-**An enum member cannot be reached through a wildcard import alias.** With `import "../ui" as ui`, the type `ui.TextVariant` resolves but `ui.TextVariant.h2` fails with *"Member access not yet implemented"* — the third qualifying segment is not supported. The workaround is the selective form used in §8.1, `import { ..., TextVariant } from "../ui"`, which brings the enum in unqualified; a wildcard import of the same library cannot be combined with it, because importing one library path twice in a file is an error.
+**An enum member cannot be reached through a wildcard import alias.** With `import "../ui" as ui`, the type `ui.TextVariant` resolves but `ui.TextVariant.h2` fails with *"Member access not yet implemented"* — the third qualifying segment is not supported. This no longer bites at a typed site: contextual literal binding lets `variant=h2` resolve against the property's declared type without naming the enum at all, so §8.1 uses the same import style for both catalogs. The limitation remains for a member named inside a braced expression, where `ui.TextVariant.h2` is still the only spelling and still fails.
 
 **Qualification is one segment deep.** `import "../ui" as ui` takes a single identifier, and the selective form is validated to contain *exactly* one dot; `import "../ui" as nx.ui` is a syntax error and `import { VStack as nx.ui.VStack } from "../ui"` is rejected with "Selective import alias must contain exactly one dot." A two-segment catalog prefix is therefore not reachable in NX source. `nx.ui.VStack` remains the catalog type name in the document format; in NX it is written under a one-segment local alias, and the mapping from alias to catalog ID is the `catalogs` list.
 

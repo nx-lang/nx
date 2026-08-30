@@ -2094,7 +2094,9 @@ fn type_to_type_ref(ty: &Type) -> Option<TypeRef> {
             let qualified_name = format!("{}.{}", case_type.union, case_type.case);
             Some(TypeRef::name(qualified_name))
         }
-        Type::Variable(_) | Type::Unknown | Type::Error => None,
+        // A pending contextual name is resolved (or reported) at its binding site, so it never
+        // reaches a published artifact type.
+        Type::ContextualName(_) | Type::Variable(_) | Type::Unknown | Type::Error => None,
     }
 }
 
@@ -3438,6 +3440,109 @@ let root(): int = { answer }"#
         let diagnostics = validate_workspace(&workspace, &ProgramBuildContext::empty());
 
         assert_eq!(diagnostics, Vec::<NxDiagnostic>::new());
+    }
+
+    /// A declaration's property types are written in its own module's namespace.
+    ///
+    /// These cover the cross-module half of `unbraced-literal-forms`: what a bare name resolves
+    /// against when the declaring type is not the consumer's.
+    fn contextual_workspace(app: &str) -> Vec<NxDiagnostic> {
+        let workspace = workspace(vec![
+            workspace_module("app.nx", app.as_bytes().to_vec()),
+            workspace_module(
+                "widgets.nx",
+                br#"export enum Fit = fill | contain | cover
+export type LoadState = | idle | loading
+export let <Img fit: Fit = {Fit.fill}  state: LoadState = {LoadState.idle} /> = <div class="img" />"#
+                    .to_vec(),
+            ),
+        ]);
+        validate_workspace(&workspace, &ProgramBuildContext::empty())
+    }
+
+    fn contextual_messages(app: &str) -> Vec<String> {
+        contextual_workspace(app)
+            .iter()
+            .map(|diagnostic| diagnostic.message.clone())
+            .collect()
+    }
+
+    #[test]
+    fn bare_name_resolves_against_the_declaring_module_when_the_type_is_imported() {
+        let diagnostics = contextual_workspace(
+            r#"import { Img, Fit, LoadState } from "./widgets.nx"
+let root() = { <Img fit=cover state=loading /> }"#,
+        );
+
+        assert_eq!(diagnostics, Vec::<NxDiagnostic>::new());
+    }
+
+    #[test]
+    fn bare_name_at_an_imported_property_reports_that_the_type_needs_importing() {
+        let messages = contextual_messages(
+            r#"import { Img } from "./widgets.nx"
+let root() = { <Img fit=cover state=loading /> }"#,
+        );
+
+        // Resolution succeeds against the declaring module, so the member is never reported as
+        // unknown; what it cannot yet do is carry that origin through lowering.
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("'cover' resolves to 'Fit.cover'")
+                    && message.contains("import 'Fit'")),
+            "expected the import guidance for a foreign enum, got: {messages:?}"
+        );
+        assert!(
+            !messages
+                .iter()
+                .any(|message| message.contains("resolves only against an enum or union")),
+            "the member must resolve, not fall through as a non-nominal type: {messages:?}"
+        );
+    }
+
+    #[test]
+    fn imported_property_type_does_not_bind_to_a_same_named_local_enum() {
+        // `Img.fit` is the widgets `Fit`. A local enum sharing the spelling is a different type,
+        // and neither its members nor the type itself may stand in for it.
+        let bare = contextual_messages(
+            r#"import { Img } from "./widgets.nx"
+enum Fit = stretch | squish
+let root() = { <Img fit=stretch state={LoadState.idle} /> }"#,
+        );
+        assert!(
+            bare.iter()
+                .any(|message| message.contains("'stretch' is not a member of enum 'Fit'")
+                    && message.contains("fill, contain, cover")),
+            "expected the declaring module's members, got: {bare:?}"
+        );
+
+        let qualified = contextual_messages(
+            r#"import { Img } from "./widgets.nx"
+enum Fit = stretch | squish
+let root() = { <Img fit={Fit.stretch} state={LoadState.idle} /> }"#,
+        );
+        assert!(
+            qualified
+                .iter()
+                .any(|message| message.contains("Property 'fit' on 'Img'")),
+            "a foreign enum must not unify with a local one by name alone, got: {qualified:?}"
+        );
+    }
+
+    #[test]
+    fn bare_name_under_a_wildcard_alias_resolves_and_reports_the_same_guidance() {
+        let messages = contextual_messages(
+            r#"import "./widgets.nx" as ui
+let root() = { <ui.Img fit=cover state=loading /> }"#,
+        );
+
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("'cover' resolves to 'Fit.cover'")),
+            "expected resolution through the alias, got: {messages:?}"
+        );
     }
 
     #[test]

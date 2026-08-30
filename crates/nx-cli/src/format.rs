@@ -212,18 +212,48 @@ fn format_nested_record(
     }
 }
 
+/// Renders a float so it reads back as a real literal rather than an integer one.
+///
+/// `1.0` formats as `1` by default, which would bind as an integer literal at a float-typed site.
+fn format_real_literal(value: f64) -> String {
+    let rendered = format!("{}", value);
+    if rendered.contains(['.', 'e', 'E']) || !value.is_finite() {
+        rendered
+    } else {
+        format!("{}.0", rendered)
+    }
+}
+
+/// Returns the bare case name of a payloadless union case value, if that is what this is.
+fn payloadless_union_case(value: &Value) -> Option<&str> {
+    match value {
+        Value::Record { type_name, fields } if fields.is_empty() => {
+            type_name.as_str().rsplit_once('.').map(|(_, case)| case)
+        }
+        _ => None,
+    }
+}
+
+/// Emits a scalar in attribute position using its unbraced literal form.
+///
+/// Every scalar here has an unbraced spelling, so quoting them all — as this did — produced output
+/// that could not be read back: a quoted number, boolean, or enum is a `string` at a typed site.
 fn format_attribute_value(value: &Value, output: &mut String) {
+    if let Some(case) = payloadless_union_case(value) {
+        output.push_str(case);
+        return;
+    }
+
     match value {
         Value::String(s) => write!(output, "\"{}\"", escape_string(s.as_str())).unwrap(),
-        Value::Int32(n) => write!(output, "\"{}\"", n).unwrap(),
-        Value::Int(n) => write!(output, "\"{}\"", n).unwrap(),
-        Value::Float32(f) => write!(output, "\"{}\"", f).unwrap(),
-        Value::Float(f) => write!(output, "\"{}\"", f).unwrap(),
-        Value::Boolean(b) => write!(output, "\"{}\"", b).unwrap(),
-        Value::Null => output.push_str("\"null\""),
-        Value::EnumValue { type_name, member } => {
-            write!(output, "\"{}.{}\"", type_name, member).unwrap()
-        }
+        Value::Int32(n) => write!(output, "{}", n).unwrap(),
+        Value::Int(n) => write!(output, "{}", n).unwrap(),
+        Value::Float32(f) => output.push_str(&format_real_literal(f64::from(*f))),
+        Value::Float(f) => output.push_str(&format_real_literal(*f)),
+        Value::Boolean(b) => write!(output, "{}", b).unwrap(),
+        Value::Null => output.push_str("null"),
+        // A bare member name; the declaring enum comes from the target type.
+        Value::EnumValue { member, .. } => output.push_str(member.as_str()),
         Value::ActionHandler { .. } | Value::Array(_) | Value::Record { .. } => {
             // Complex values shouldn't be formatted as attributes
             output.push_str("\"...\"");
@@ -232,6 +262,10 @@ fn format_attribute_value(value: &Value, output: &mut String) {
 }
 
 fn is_complex_value(value: &Value) -> bool {
+    // A payloadless union case has an unbraced spelling, so it belongs inline like any scalar.
+    if payloadless_union_case(value).is_some() {
+        return false;
+    }
     match value {
         Value::Record { .. } | Value::ActionHandler { .. } => true,
         Value::Array(elements) => !elements.is_empty(),
@@ -251,6 +285,105 @@ fn escape_string(s: &str) -> String {
 mod tests {
     use super::*;
     use rustc_hash::FxHashMap;
+    use smol_str::SmolStr;
+
+    /// Every scalar in attribute position must be emitted in a form that reads back.
+    #[test]
+    fn test_format_attribute_scalars_are_unquoted() {
+        let mut fields = FxHashMap::default();
+        fields.insert(SmolStr::new("w"), Value::Float(1.5));
+        fields.insert(SmolStr::new("flag"), Value::Boolean(true));
+        fields.insert(SmolStr::new("opt"), Value::Null);
+        fields.insert(
+            SmolStr::new("fit"),
+            Value::EnumValue {
+                type_name: nx_hir::Name::new("Fit"),
+                member: SmolStr::new("cover"),
+            },
+        );
+        fields.insert(
+            SmolStr::new("state"),
+            Value::Record {
+                type_name: nx_hir::Name::new("LoadState.loading"),
+                fields: FxHashMap::default(),
+            },
+        );
+        let value = Value::Record {
+            type_name: nx_hir::Name::new("Box"),
+            fields,
+        };
+
+        let formatted = format_value(&value);
+        assert_eq!(
+            formatted.trim(),
+            "<Box fit=cover flag=true opt=null state=loading w=1.5 />"
+        );
+        assert!(
+            !formatted.contains('"'),
+            "no scalar should be quoted: {formatted}"
+        );
+    }
+
+    /// A float must keep a real-literal spelling, or it binds as an integer at a float site.
+    #[test]
+    fn test_format_attribute_negative_float_keeps_real_spelling() {
+        let mut fields = FxHashMap::default();
+        fields.insert(SmolStr::new("neg"), Value::Float(-1.0));
+        let value = Value::Record {
+            type_name: nx_hir::Name::new("Box"),
+            fields,
+        };
+
+        let formatted = format_value(&value);
+        assert!(formatted.contains("neg=-1.0"), "got: {formatted}");
+        assert!(!formatted.contains("neg=-1 "), "got: {formatted}");
+        assert!(!formatted.contains("neg=\"-1\""), "got: {formatted}");
+    }
+
+    /// Formatted output must re-parse and type check against the types it came from.
+    #[test]
+    fn test_format_attribute_output_round_trips() {
+        let mut fields = FxHashMap::default();
+        fields.insert(SmolStr::new("w"), Value::Float(1.5));
+        fields.insert(SmolStr::new("neg"), Value::Float(-1.0));
+        fields.insert(SmolStr::new("n"), Value::Int(42));
+        fields.insert(SmolStr::new("flag"), Value::Boolean(true));
+        fields.insert(SmolStr::new("opt"), Value::Null);
+        fields.insert(
+            SmolStr::new("fit"),
+            Value::EnumValue {
+                type_name: nx_hir::Name::new("Fit"),
+                member: SmolStr::new("cover"),
+            },
+        );
+        fields.insert(
+            SmolStr::new("state"),
+            Value::Record {
+                type_name: nx_hir::Name::new("LoadState.loading"),
+                fields: FxHashMap::default(),
+            },
+        );
+        let value = Value::Record {
+            type_name: nx_hir::Name::new("Box"),
+            fields,
+        };
+
+        let source = format!(
+            "enum Fit = fill | contain | cover\n\
+             type LoadState = | idle | loading\n\
+             type Box = {{ w: float64 neg: float64 n: int flag: boolean opt: string? \
+             fit: Fit state: LoadState }}\n{}",
+            format_value(&value)
+        );
+
+        let result = nx_types::check_str(&source, "roundtrip.nx");
+        assert!(
+            result.errors().is_empty(),
+            "formatted output should type check, got: {:?}\nsource:\n{}",
+            result.errors(),
+            source
+        );
+    }
 
     #[test]
     fn test_format_int() {
@@ -296,7 +429,8 @@ mod tests {
         // Should be a self-closing tag with attributes
         assert!(output.contains("<result"));
         assert!(output.contains("name=\"Alice\""));
-        assert!(output.contains("age=\"30\""));
+        // A number is emitted unquoted: `age="30"` is a string at an int-typed site.
+        assert!(output.contains("age=30"));
         assert!(output.contains("/>"));
     }
 

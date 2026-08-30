@@ -173,6 +173,19 @@ impl LoweringContext {
     fn lower_pattern_expr(&mut self, node: SyntaxNode) -> ExprId {
         let pattern_node = node.children().next().unwrap_or(node);
         if pattern_node.kind() == SyntaxKind::QUALIFIED_NAME {
+            // A single-segment pattern is a contextual name resolved against the scrutinee's type,
+            // not a lexical identifier. Qualified patterns (`LoadState.idle`) keep their existing
+            // member-access lowering.
+            let text = pattern_node.text();
+            if !text.contains('.') {
+                let name = Name::new(text.trim());
+                if !name.as_str().is_empty() {
+                    return self.alloc_expr(Expr::ContextualName {
+                        name,
+                        span: pattern_node.span(),
+                    });
+                }
+            }
             self.lower_qualified_name_expr(pattern_node)
         } else {
             self.lower_expr(pattern_node)
@@ -207,6 +220,23 @@ impl LoweringContext {
             }
         }
         TypeTag::Unknown
+    }
+
+    /// Folds `-` applied directly to a numeric literal into a negative literal.
+    ///
+    /// Returns `None` for any other operand, so negation of a non-literal stays a unary operation.
+    /// Folding everywhere — unbraced, braced, and inside a larger expression — keeps a single
+    /// lowered representation for `-1.0`, `{-1.0}`, and the `-90` in `{-90 + rotation}`.
+    fn fold_negated_literal(&mut self, operand: ExprId) -> Option<ExprId> {
+        let folded = match self.module.expr(operand) {
+            Expr::Literal(Literal::Int(value)) => Literal::Int(value.wrapping_neg()),
+            Expr::Literal(Literal::Float(value)) => Literal::Float(OrderedFloat(-value.0)),
+            _ => return None,
+        };
+        let ty = self.expr_type(operand);
+        let expr = self.alloc_expr(Expr::Literal(folded));
+        self.set_expr_type(expr, ty);
+        Some(expr)
     }
 
     fn set_expr_type(&mut self, expr: ExprId, ty: TypeTag) {
@@ -1010,6 +1040,12 @@ impl LoweringContext {
                         }
                     });
 
+                if op == UnOp::Neg {
+                    if let Some(folded) = self.fold_negated_literal(expr) {
+                        return folded;
+                    }
+                }
+
                 let expr_id = self.alloc_expr(Expr::UnaryOp {
                     op,
                     expr,
@@ -1153,6 +1189,27 @@ impl LoweringContext {
                 .children()
                 .next()
                 .map(|n| self.lower_expr(n))
+                .unwrap_or_else(|| self.error_expr(node.span())),
+
+            // A bare name written where a literal is required. Deliberately not `Expr::Ident`:
+            // it resolves against the expected type at its binding site, not against lexical scope.
+            SyntaxKind::CONTEXTUAL_NAME => {
+                let name = Name::new(node.text().trim());
+                self.alloc_expr(Expr::ContextualName {
+                    name,
+                    span: node.span(),
+                })
+            }
+
+            // `-` directly before a numeric literal, folded to a negative literal.
+            SyntaxKind::SIGNED_NUMERIC_LITERAL => node
+                .children()
+                .find(|n| !matches!(n.kind(), SyntaxKind::MINUS))
+                .map(|n| {
+                    let operand = self.lower_expr(n);
+                    self.fold_negated_literal(operand)
+                        .unwrap_or_else(|| self.error_expr(node.span()))
+                })
                 .unwrap_or_else(|| self.error_expr(node.span())),
 
             SyntaxKind::VALUE_EXPRESSION | SyntaxKind::VALUE_EXPR | SyntaxKind::RHS_EXPRESSION => {

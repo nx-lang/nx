@@ -343,7 +343,20 @@ impl WorkspaceSnapshot {
         let offset = index.position_to_byte_offset(document.source(), position);
         let declarations = self.workspace_declarations();
 
-        let items = if let Some(context) =
+        let items = if let Some(members) =
+            property_value_context(document.source(), offset, &declarations)
+        {
+            // A bare value resolves against the property's declared type, so only its members are
+            // valid here; lexically visible names cannot appear unbraced.
+            members
+                .into_iter()
+                .map(|member| CompletionItem {
+                    label: member,
+                    kind: CompletionItemKind::Member,
+                    detail: None,
+                })
+                .collect()
+        } else if let Some(context) =
             component_property_context(document.source(), offset, &declarations)
         {
             property_completion_items(context)
@@ -688,6 +701,8 @@ pub enum CompletionItemKind {
     Component,
     /// Component property.
     Property,
+    /// Enum member or payloadless union case, offered at a property value position.
+    Member,
 }
 
 /// Completion candidate.
@@ -764,6 +779,10 @@ struct Declaration {
     kind: DocumentSymbolKind,
     detail: String,
     properties: Vec<String>,
+    /// Property name paired with the base name of its declared type, for contextual completions.
+    property_types: Vec<(String, String)>,
+    /// Enum members or union case names, for contextual completions at a value position.
+    members: Vec<String>,
 }
 
 fn identity_from_uri(
@@ -1160,6 +1179,21 @@ fn declaration_from_item(item: &Item, source: &str) -> Declaration {
                 } else {
                     Vec::new()
                 },
+                property_types: if is_markup_function {
+                    function
+                        .params
+                        .iter()
+                        .map(|param| {
+                            (
+                                param.name.as_str().to_string(),
+                                base_type_name(&param.ty),
+                            )
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                },
+                members: Vec::new(),
             }
         }
         Item::Value(value) => Declaration {
@@ -1171,6 +1205,8 @@ fn declaration_from_item(item: &Item, source: &str) -> Declaration {
                 .map(|ty| format!("value: {}", type_ref_display(ty)))
                 .unwrap_or_else(|| "value".to_string()),
             properties: Vec::new(),
+            property_types: Vec::new(),
+            members: Vec::new(),
         },
         Item::Component(component) => Declaration {
             name: component.name.as_str().to_string(),
@@ -1181,24 +1217,52 @@ fn declaration_from_item(item: &Item, source: &str) -> Declaration {
                 .iter()
                 .map(|property| property.name.as_str().to_string())
                 .collect(),
+            property_types: component
+                .props
+                .iter()
+                .map(|property| {
+                    (
+                        property.name.as_str().to_string(),
+                        base_type_name(&property.ty),
+                    )
+                })
+                .collect(),
+            members: Vec::new(),
         },
         Item::TypeAlias(alias) => Declaration {
             name: alias.name.as_str().to_string(),
             kind: DocumentSymbolKind::TypeAlias,
             detail: format!("type = {}", type_ref_display(&alias.ty)),
             properties: Vec::new(),
+            property_types: Vec::new(),
+            members: Vec::new(),
         },
         Item::Enum(enum_def) => Declaration {
             name: enum_def.name.as_str().to_string(),
             kind: DocumentSymbolKind::Enum,
             detail: "enum".to_string(),
             properties: Vec::new(),
+            property_types: Vec::new(),
+            members: enum_def
+                .members
+                .iter()
+                .map(|member| member.name.as_str().to_string())
+                .collect(),
         },
         Item::Union(union_def) => Declaration {
             name: union_def.name.as_str().to_string(),
             kind: DocumentSymbolKind::Union,
             detail: "union".to_string(),
+            // Only payloadless cases have a bare spelling; a payload case needs element-style
+            // construction and must not be offered here.
             properties: Vec::new(),
+            property_types: Vec::new(),
+            members: union_def
+                .cases
+                .iter()
+                .filter(|case| case.fields.is_empty())
+                .map(|case| case.name.as_str().to_string())
+                .collect(),
         },
         Item::Record(record) => Declaration {
             name: record.name.as_str().to_string(),
@@ -1217,6 +1281,17 @@ fn declaration_from_item(item: &Item, source: &str) -> Declaration {
                 .iter()
                 .map(|property| property.name.as_str().to_string())
                 .collect(),
+            property_types: record
+                .properties
+                .iter()
+                .map(|property| {
+                    (
+                        property.name.as_str().to_string(),
+                        base_type_name(&property.ty),
+                    )
+                })
+                .collect(),
+            members: Vec::new(),
         },
     }
 }
@@ -1242,6 +1317,18 @@ fn function_signature(function: &nx_hir::Function) -> String {
     format!("{}({}){}", function.name.as_str(), params, return_type)
 }
 
+/// Strips nullability and one list level to reach the type a bare value would resolve against.
+///
+/// Mirrors the checker's normalization, so completions offer members exactly where the compiler
+/// would accept a bare name.
+fn base_type_name(ty: &TypeRef) -> String {
+    match ty {
+        TypeRef::Name(name) => name.as_str().to_string(),
+        TypeRef::Nullable(inner) | TypeRef::Array(inner) => base_type_name(inner),
+        TypeRef::Function { .. } => String::new(),
+    }
+}
+
 fn type_ref_display(ty: &TypeRef) -> String {
     match ty {
         TypeRef::Name(name) => name.as_str().to_string(),
@@ -1259,6 +1346,82 @@ fn type_ref_display(ty: &TypeRef) -> String {
             format!("({}) => {}", params, type_ref_display(return_type))
         }
     }
+}
+
+/// Detects a property *value* position — immediately after `prop=` inside an opening tag — and
+/// returns the members a bare name could resolve to there.
+///
+/// Returns `None` when the element or property is unknown, or when the property's declared type is
+/// not an enum or a union, because a bare name is not accepted at those sites either.
+fn property_value_context(
+    source: &str,
+    offset: usize,
+    declarations: &[Declaration],
+) -> Option<Vec<String>> {
+    let prefix = source.get(..offset)?;
+    let line_start = prefix.rfind('\n').map(|idx| idx + 1).unwrap_or(0);
+    let line_prefix = &prefix[line_start..];
+    let tag_start = line_prefix.rfind('<')?;
+    if line_prefix[tag_start..].starts_with("</") || line_prefix[tag_start..].starts_with("<:") {
+        return None;
+    }
+    if line_prefix[tag_start..].contains('>') {
+        return None;
+    }
+
+    // The cursor must sit in the value of `name=`, with nothing typed yet or a partial bare word.
+    let mut cursor = line_prefix.len();
+    let bytes = line_prefix.as_bytes();
+    while cursor > 0 && is_identifier_continue(bytes[cursor - 1] as char) {
+        cursor -= 1;
+    }
+    if cursor == 0 || bytes[cursor - 1] != b'=' {
+        return None;
+    }
+    // A quoted or braced value is not a contextual-name position.
+    let name_end = cursor - 1;
+    let mut name_start = name_end;
+    while name_start > 0 && is_identifier_continue(bytes[name_start - 1] as char) {
+        name_start -= 1;
+    }
+    if name_start == name_end {
+        return None;
+    }
+    let property_name = &line_prefix[name_start..name_end];
+
+    let after_lt = &line_prefix[tag_start + 1..];
+    let tag_name = after_lt
+        .chars()
+        .take_while(|ch| ch.is_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+        .collect::<String>();
+    if tag_name.is_empty() {
+        return None;
+    }
+
+    let element = declarations.iter().find(|declaration| {
+        matches!(
+            declaration.kind,
+            DocumentSymbolKind::Component | DocumentSymbolKind::Record
+        ) && declaration.name == tag_name
+    })?;
+
+    let type_name = element
+        .property_types
+        .iter()
+        .find(|(name, _)| name == property_name)
+        .map(|(_, type_name)| type_name.clone())?;
+
+    let target = declarations.iter().find(|declaration| {
+        matches!(
+            declaration.kind,
+            DocumentSymbolKind::Enum | DocumentSymbolKind::Union
+        ) && declaration.name == type_name
+    })?;
+
+    if target.members.is_empty() {
+        return None;
+    }
+    Some(target.members.clone())
 }
 
 fn component_property_context(
@@ -1749,6 +1912,81 @@ component <SearchBox placeholder:string /> = {
         assert!(!labels.contains(&"bool"));
         assert!(!labels.contains(&"long"));
         assert!(!labels.contains(&"double"));
+    }
+
+    #[test]
+    fn property_value_completions_offer_members_of_the_declared_type() {
+        let source = "enum Fit = fill | contain | cover\nlet <Img fit:Fit /> = <img />\n<Img fit= />\n";
+        let snapshot = snapshot_for("nx://tenant/form.nx", source, 1);
+        let uri = DocumentUri::from("nx://tenant/form.nx");
+
+        let completions = snapshot
+            .completions(&uri, TextPosition::new(2, 9))
+            .expect("completions");
+        let labels = completions
+            .items
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(labels.contains(&"fill"), "got: {labels:?}");
+        assert!(labels.contains(&"contain"), "got: {labels:?}");
+        assert!(labels.contains(&"cover"), "got: {labels:?}");
+        // Only members are valid unbraced, so nothing lexical may be offered here.
+        assert!(!labels.contains(&"Img"), "got: {labels:?}");
+        assert!(!labels.contains(&"Fit"), "got: {labels:?}");
+        assert!(
+            completions
+                .items
+                .iter()
+                .all(|item| item.kind == CompletionItemKind::Member),
+            "every item should be a member: {:?}",
+            completions.items
+        );
+    }
+
+    #[test]
+    fn property_value_completions_offer_only_payloadless_union_cases() {
+        let source = concat!(
+            "type LoadState = | idle | failed { message:string }\n",
+            "let <View state:LoadState /> = <div />\n",
+            "<View state= />\n"
+        );
+        let snapshot = snapshot_for("nx://tenant/form.nx", source, 1);
+        let uri = DocumentUri::from("nx://tenant/form.nx");
+
+        let completions = snapshot
+            .completions(&uri, TextPosition::new(2, 12))
+            .expect("completions");
+        let labels = completions
+            .items
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(labels.contains(&"idle"), "got: {labels:?}");
+        // `failed` carries a payload, so it has no bare spelling.
+        assert!(!labels.contains(&"failed"), "got: {labels:?}");
+    }
+
+    #[test]
+    fn property_value_completions_absent_without_a_nominal_type() {
+        let source = "let <Img alt:string /> = <img />\n<Img alt= />\n";
+        let snapshot = snapshot_for("nx://tenant/form.nx", source, 1);
+        let uri = DocumentUri::from("nx://tenant/form.nx");
+
+        let completions = snapshot
+            .completions(&uri, TextPosition::new(1, 9))
+            .expect("completions");
+
+        assert!(
+            completions
+                .items
+                .iter()
+                .all(|item| item.kind != CompletionItemKind::Member),
+            "a string-typed property has no contextual members: {:?}",
+            completions.items
+        );
     }
 
     #[test]

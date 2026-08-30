@@ -376,6 +376,42 @@ pub fn validate_component_definitions(module: &PreparedModule) -> Vec<ComponentR
     errors
 }
 
+/// Rewrites resolved contextual names into the qualified member access they resolved to.
+///
+/// Type analysis resolves a bare name against the declared type of its binding site and reports
+/// which enum member or union case it named. Applying those resolutions here means nothing after
+/// type checking — the interpreter, codegen, or the IR — can tell a contextual literal from the
+/// qualified form, which is what lets every downstream consumer stay unchanged.
+pub fn apply_contextual_name_resolutions<T>(
+    module: &mut PreparedModule,
+    resolutions: &FxHashMap<ExprId, T>,
+    parts: impl Fn(&T) -> (Name, Name),
+) -> Vec<(ExprId, ExprId)> {
+    if resolutions.is_empty() {
+        return Vec::new();
+    }
+
+    let mut allocated_bases = Vec::new();
+    let raw_module = module.raw_module_mut();
+    for (expr_id, resolution) in resolutions {
+        let span = match raw_module.expr(*expr_id) {
+            ast::Expr::ContextualName { span, .. } => *span,
+            // Already rewritten, or never a contextual name: leave it alone.
+            _ => continue,
+        };
+        let (type_name, member) = parts(resolution);
+        let base = raw_module.alloc_expr(ast::Expr::Ident(type_name));
+        raw_module.set_expr_span(base, span);
+        *raw_module.expr_mut(*expr_id) = ast::Expr::Member {
+            base,
+            member,
+            span,
+        };
+        allocated_bases.push((*expr_id, base));
+    }
+    allocated_bases
+}
+
 pub fn promote_component_handler_bindings(module: &mut PreparedModule) {
     let rewrites = collect_component_handler_rewrites(module);
     if rewrites.is_empty() {
@@ -465,7 +501,11 @@ fn collect_handler_rewrites_in_expr(
     rewrites: &mut Vec<PendingHandlerRewrite>,
 ) {
     match module.raw_module().expr(expr_id) {
-        ast::Expr::Literal(_) | ast::Expr::Ident(_) | ast::Expr::Error(_) => {}
+        // `ContextualName` is a leaf: it carries no sub-expressions to rewrite.
+        ast::Expr::Literal(_)
+        | ast::Expr::Ident(_)
+        | ast::Expr::ContextualName { .. }
+        | ast::Expr::Error(_) => {}
         ast::Expr::BinaryOp { lhs, rhs, .. } => {
             collect_handler_rewrites_in_expr(module, *lhs, rewrites);
             collect_handler_rewrites_in_expr(module, *rhs, rewrites);

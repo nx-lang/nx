@@ -134,6 +134,16 @@ pub enum Expr {
     /// Example: `x`, `myVar`
     Ident(Name),
 
+    /// Unresolved contextual literal: a bare name written where a literal is required.
+    ///
+    /// Resolved against the declared type of the binding site rather than against lexical scope,
+    /// so it is deliberately a different node from [`Expr::Ident`]. Type analysis replaces it with
+    /// an enum member or a payloadless union case; reaching a site with no expected type is a
+    /// diagnostic.
+    ///
+    /// Example: `cover` in `<Img fit=cover />`
+    ContextualName { name: Name, span: TextSpan },
+
     /// Binary operation.
     ///
     /// Example: `a + b`, `x == y`
@@ -292,6 +302,7 @@ impl Expr {
         match self {
             Expr::Literal(_) => TextSpan::new(TextSize::from(0), TextSize::from(0)), // Literals don't track spans yet
             Expr::Ident(_) => TextSpan::new(TextSize::from(0), TextSize::from(0)),
+            Expr::ContextualName { span, .. } => *span,
             Expr::BinaryOp { span, .. } => *span,
             Expr::UnaryOp { span, .. } => *span,
             Expr::Call { span, .. } => *span,

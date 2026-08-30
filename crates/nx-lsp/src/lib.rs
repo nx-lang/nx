@@ -496,6 +496,7 @@ fn to_lsp_completion(item: nx_language_service::CompletionItem) -> CompletionIte
             ServiceCompletionItemKind::Declaration => CompletionItemKind::VARIABLE,
             ServiceCompletionItemKind::Component => CompletionItemKind::CLASS,
             ServiceCompletionItemKind::Property => CompletionItemKind::PROPERTY,
+            ServiceCompletionItemKind::Member => CompletionItemKind::ENUM_MEMBER,
         }),
         detail: item.detail,
         ..CompletionItem::default()

@@ -1761,7 +1761,8 @@ fn ir_semantic_type_shape(ty: &Type) -> NxIrSemanticTypeShape {
             case_name: case_ty.case.as_str().to_string(),
         },
         Type::Variable(id) => NxIrSemanticTypeShape::Variable { id: *id },
-        Type::Unknown => NxIrSemanticTypeShape::Unknown,
+        // Never survives type analysis; treated as unknown if it somehow reaches IR.
+        Type::ContextualName(_) | Type::Unknown => NxIrSemanticTypeShape::Unknown,
         Type::Error => NxIrSemanticTypeShape::Error,
     }
 }

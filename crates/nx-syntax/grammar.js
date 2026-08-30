@@ -402,11 +402,27 @@ module.exports = grammar({
     ),
 
     // ===== Expressions =====
+    // An unbraced value is always a literal, never an expression. `literal` comes first so
+    // `true`, `false`, and `null` keep lexing as bool/null literals rather than contextual names.
+    // `contextual_name` is a single identifier and deliberately never a qualified_name: admitting
+    // `fit=Fit.cover` would also admit `fit=obj.field`, and the invariant would be gone.
     rhs_expression: $ => choice(
       $.element,
       $.literal,
+      $.signed_numeric_literal,
+      $.contextual_name,
       $.values_braced_expression,
     ),
+
+    // A `-` directly before a numeric literal, accepted only where a literal is grammatically
+    // required. Tokenization is unchanged and `prefix_unary_expression` is untouched, so binary
+    // subtraction keeps its meaning in every expression context.
+    signed_numeric_literal: $ => seq(
+      '-',
+      choice($.int_literal, $.real_literal, $.hex_literal),
+    ),
+
+    contextual_name: $ => $.identifier,
 
     values_braced_expression: $ => seq(
       '{',
@@ -918,6 +934,7 @@ module.exports = grammar({
     // ===== Patterns =====
     pattern: $ => choice(
       $.literal,
+      $.signed_numeric_literal,
       $.qualified_name,
     ),
 

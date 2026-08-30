@@ -410,15 +410,27 @@
         { "include": "#strings" },
         { "include": "#values-braced-expression" },
         { "include": "#tags" },
+        { "include": "#signed-number" },
         { "include": "#numbers" },
         { "include": "#keywords-core" },
         { "include": "#keywords-control" },
+        { "include": "#contextual-name" },
         { "include": "#operators" }
       ]
     },
+    "signed-number": {
+      "name": "constant.numeric.nx",
+      "match": "-(?=[0-9])"
+    },
+    "contextual-name": {
+      "comment": "A bare value in an unbraced property position: an enum member or payloadless union case, resolved against the property's declared type.",
+      "name": "variable.other.enummember.nx",
+      "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+    },
     "attr-name": {
+      "comment": "Requires the following '=' so a bare property value is not mistaken for a name.",
       "name": "entity.other.attribute-name.nx",
-      "match": "[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*"
+      "match": "[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*(?=\\s*=(?!>))"
     },
     "module-root-element": {
       "begin": "^(?=<[A-Za-z_])",

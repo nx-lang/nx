@@ -4,5 +4,5 @@ assertion_line: 372
 expression: errors
 ---
 [
-    "Expected string_literal here",
+    "Expected identifier here",
 ]

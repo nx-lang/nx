@@ -2596,7 +2596,9 @@ fn emit_type(
                 emit_named_type(current_module_id, case_ty.union.as_str(), module, context);
             union_case_type_name(&union_name, case_ty.case.as_str())
         }
-        Type::Variable(_) | Type::Unknown | Type::Error => "unknown".to_string(),
+        Type::ContextualName(_) | Type::Variable(_) | Type::Unknown | Type::Error => {
+            "unknown".to_string()
+        }
     }
 }
 
@@ -3438,7 +3440,11 @@ fn collect_type_references(module: &CodegenModule, ty: &Type, output: &mut Vec<C
         Type::UnionCase(case_ty) => {
             collect_named_type_reference(module, case_ty.union.as_str(), output);
         }
-        Type::Primitive(_) | Type::Variable(_) | Type::Unknown | Type::Error => {}
+        Type::Primitive(_)
+        | Type::ContextualName(_)
+        | Type::Variable(_)
+        | Type::Unknown
+        | Type::Error => {}
     }
 }
 

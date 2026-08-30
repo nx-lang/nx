@@ -275,17 +275,35 @@ change. `Length.auto` becomes `"auto"` instead of `{"$type": "Length.auto"}`. De
 unambiguous: at a `Length`-typed field a bare string can only be a payloadless case. On its own this
 gets `Paint | "none"` to the exact JSON the proposal wants. Overlaps [NXE3](#nxe3); belongs there.
 
-**2. Contextual literal binding at typed sites.** Where the expected type is known — and in NX it
-always is, at props, fields, and annotated `let`s — a bare literal resolves against it:
+**2. Contextual literal binding at typed sites.** ✅ **Implemented**, as the
+`contextual-literal-binding` change. Where the expected type is known — and in NX it always is, at
+props, fields, annotated `let`s, and match patterns — a bare name resolves against it:
 
 ```nx
-<Img fit="cover" />        // today: fit={Fit.cover}
+<Img fit=cover />          // was: fit={Fit.cover}
 ```
 
 Swift's implicit member expression, or C#'s target-typed `new`. Source-only, applies to every enum
-in every NX program, and it makes source agree with serialization — currently the wire says
-`"cover"` while the source insists on `{Fit.cover}`. Applied to numerics it also **subsumes
-[NXE8](#nxe8)**: `w=120` binds to a `float64` site instead of erroring with *"expects float64, found int"*.
+in every NX program, and it makes source agree with serialization — the wire already said `"cover"`
+while the source insisted on `{Fit.cover}`.
+
+**Shipped unquoted rather than quoted.** This sketch originally spelled it `fit="cover"`. The bare
+form was chosen instead, under a **strict split**: a bare name resolves *only* against the closed
+nominal set — enum members and payloadless union cases — and a quoted string resolves *only* as
+string data, with no fallback between the two in NX source. That keeps both spellable once change 3
+lands (`fill=none` is the case, `fill="none"` is a colour whose text is `none`), and it removes the
+"unspellable `none`" cost the amended rule below concedes. It also closes a schema-evolution hazard
+the quoted form has: under fallback, adding a payloadless case named `currentColor` to a union
+would silently reinterpret every existing `fill="currentColor"` from string data into that case,
+changing the serialized shape of documents nobody edited.
+
+The closed-set-then-fallback rule below still governs the **JSON deserialization boundary**, where
+no bare/quoted distinction exists. The two rules differ because source carries a lexical signal that
+JSON does not.
+
+**Numerics were not part of it.** Applied to numerics this would also subsume [NXE8](#nxe8), but
+integer-literal widening is numeric coercion rather than name resolution and remains open; see NXE8
+for what did and did not ship.
 
 **3. One primitive alternative per union, partitioned by JSON kind.** The only real type-system
 addition, under a rule that keeps it decidable:
@@ -535,6 +553,28 @@ the kind of thing that will hit every newcomer once.
 
 **Possible enhancement:** widen integer literals to float64 in a float64-typed position; and admit bare
 member access and prefix-negated literals as `RhsExpression`.
+
+**Status:** partly resolved by the `contextual-literal-binding` change.
+
+- ✅ **Prefix-negated literals shipped.** `x: float64 = -1.0` and `<C x=-1.5 />` now parse.
+  `SignedNumericLiteral` was added to `RhsExpression` *and* to `Pattern`, which had the same hole —
+  `if n is { -1 => ... }` was a parse error too. Tokenization is unchanged and `-` remains a prefix
+  operator in expressions, so `a-1` is still subtraction; lowering folds `-` applied directly to a
+  numeric literal in every position, so `-1.0`, `{-1.0}`, and the `-90` in `{-90 + rotation}` share
+  one lowered representation.
+- ❌ **Bare member access was deliberately not adopted.** Admitting `a = Alignment.start` unbraced
+  would also admit `a = obj.field`, breaking the invariant that an unbraced value is a literal and
+  never an expression. Contextual literal binding ([NXE2](#nxe2) change 2) delivers the same
+  ergonomic win — `a: Alignment = start` — without it.
+- ⏳ **Integer widening remains open.** `x: float64 = -1` still errors while `x: float64 = -1.0`
+  works. That is numeric coercion rather than grammar or name resolution, and it is the one item of
+  this finding still outstanding.
+
+A related pre-existing bug surfaced while implementing the above and is **not** fixed: an integer
+literal that exceeds its type is silently swallowed to `null` with no diagnostic — `{9223372036854775808}`
+evaluates to `null`, and negating it fails at runtime with *Type mismatch in negation: expected
+number, got null*, so `int64`'s minimum cannot currently be written. It needs its own change; the
+folding above is a prerequisite, since the sign must be folded before the magnitude is range-checked.
 
 <a id="nxe9"></a>
 ### NXE9 — No refinement, range, or pattern constraints

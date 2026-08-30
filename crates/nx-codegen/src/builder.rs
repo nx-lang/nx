@@ -1191,6 +1191,16 @@ fn build_expression(
             ));
             return None;
         }
+        // Type analysis resolves every contextual name before codegen runs, so one reaching here
+        // means analysis was skipped rather than that the source is ambiguous.
+        ast::Expr::ContextualName { span, .. } => {
+            diagnostics.push(unsupported_diagnostic(
+                resolved_module,
+                *span,
+                "unresolved contextual name cannot be emitted",
+            ));
+            return None;
+        }
     };
 
     Some(CodegenExpression {

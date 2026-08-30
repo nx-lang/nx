@@ -153,6 +153,13 @@ pub enum Type {
     /// Used during type inference before the concrete type is known.
     Variable(TypeId),
 
+    /// A bare name awaiting resolution against the expected type of its binding site.
+    ///
+    /// Produced by inference for `Expr::ContextualName`, which has no context-free type. It is
+    /// replaced by the resolved enum member or union case type at the binding site, and reaching a
+    /// site that supplies no expected type is a diagnostic rather than a silent success.
+    ContextualName(Name),
+
     /// Unknown type (inference failed or error)
     ///
     /// Used as a placeholder when type checking fails.
@@ -384,6 +391,7 @@ impl fmt::Display for Type {
             Type::Union(union_ty) => write!(f, "{}", union_ty.name),
             Type::UnionCase(case_ty) => write!(f, "{}.{}", case_ty.union, case_ty.case),
             Type::Variable(id) => write!(f, "T{}", id),
+            Type::ContextualName(name) => write!(f, "{}", name),
             Type::Unknown => write!(f, "?"),
             Type::Error => write!(f, "<error>"),
         }

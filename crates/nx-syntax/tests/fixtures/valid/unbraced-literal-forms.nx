@@ -1,0 +1,23 @@
+// Unbraced value forms: contextual names and signed numeric literals.
+enum Fit = fill | contain | cover
+
+type LoadState =
+  | idle
+  | loading
+
+type Opts = {
+  fit: Fit = contain
+  x: float64 = -1.0
+  n: int = -7
+  h: int = -0x1F
+}
+
+external component <Img fit:Fit = cover alt:string />
+external component <View state:LoadState = idle />
+component <Box w:float64 flag:boolean fit:Fit /> = { <div /> }
+
+let classify(n: int) = {if n is { -1 => "neg one" 0 => "zero" else => "other" }}
+
+let pick(f: Fit) = {if f is { cover => "cover" contain => "contain" fill => "fill" }}
+
+<Box w=-1.5 flag=true fit=cover />

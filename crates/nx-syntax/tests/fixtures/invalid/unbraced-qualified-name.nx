@@ -1,0 +1,3 @@
+enum Fit = fill | contain | cover
+component <Img fit:Fit /> = { <img /> }
+<Img fit=Fit.cover />

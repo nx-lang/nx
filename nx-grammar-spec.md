@@ -361,7 +361,24 @@ PropertyDefinition (AST: PropertyDefinitionSyntax)
 RhsExpression (AST: ExpressionSyntax; see mappings below)
 - RhsExpression → Element
 - RhsExpression → Literal
+- RhsExpression → SignedNumericLiteral
+- RhsExpression → ContextualName
 - RhsExpression → ValuesBracedExpression
+  - Note: an unbraced value is always a literal, never an expression. Every form admitted here must
+    preserve that, so it can be recognized without consulting lexical scope.
+
+ContextualName (AST: ContextualNameSyntax)
+- ContextualName → IDENTIFIER
+  - fields: name: string
+  - A single identifier only, never a QualifiedName: admitting `fit=Fit.cover` would also admit
+    `fit=obj.field`, and the unbraced-is-a-literal invariant would be gone.
+
+SignedNumericLiteral (AST: LiteralExpressionSyntax)
+- SignedNumericLiteral → MINUS ( INT_LITERAL | REAL_LITERAL | HEX_LITERAL )
+  - Accepted only where a literal is grammatically required: unbraced values and patterns.
+    Tokenization is unchanged and MINUS remains a prefix operator in expressions, so `a-1` is still
+    subtraction. Lowering folds `-` applied directly to a numeric literal into a negative literal in
+    every position, so the braced and unbraced forms share one lowered representation.
 
 ValuesBracedExpression (AST: ValuesBracedExpressionSyntax)
 - ValuesBracedExpression → LBRACE ValueExpressions RBRACE
@@ -772,6 +789,22 @@ This section lists the AST node types with fields for implementers.
     - If target resolves to a union type and name is a fieldless case → union case value shorthand
     - If target resolves to a value → property/field access (verify name is valid property/field on target's type)
   - Examples: `Status.pending_review` (if Status is enum type), `LoadState.idle` (if LoadState is a union), `obj.field` (if obj is value), `foo.bar` (ambiguous at parse time, resolved during type checking)
+- ContextualName resolves against the declared type of its binding site, never against lexical scope:
+  - Legal at element and component property values, property and field defaults, annotated value
+    definitions, and match patterns — every unbraced position where the expected type is declared
+  - Resolution normalizes the expected type by stripping nullability then one list level, then
+    resolves only against a closed nominal set: enum members and payloadless union cases
+  - A bare name resolves only nominally and a quoted string only as string data; there is no
+    fallback between the two in NX source, so `fill=none` is a case and `fill="none"` is string data
+  - In pattern position a bare name takes precedence over a lexically visible binding of the same
+    name, and displacing a visible binding is reported so the change in meaning is never silent.
+    Patterns match on the discriminator, so a payload case name is a valid pattern even though it is
+    not a valid way to construct one
+  - Unresolved names are diagnostics naming the expected type and its members, never silently
+    treated as strings
+  - After type checking the node is rewritten to the qualified member access it resolved to, so no
+    consumer downstream can observe the bare spelling
+  - Examples: `<Img fit=cover />`, `a: Alignment = start`, `if f is { cover => ... }`
 - Element names may also resolve to payload union case constructors during semantic analysis:
   - Example: `<LoadState.failed message={"Offline"} />`
 - Match-style `if value is { ... }` patterns may name union cases with QualifiedName. When the scrutinee is a local identifier, semantic analysis narrows that identifier to the matched case for the arm body and requires union matches without `else` to cover all cases.

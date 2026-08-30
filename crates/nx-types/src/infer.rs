@@ -32,6 +32,18 @@ struct ElementPropertySpec {
     is_required: bool,
 }
 
+/// One resolved contextual name, and everything needed to rewrite it to the qualified form.
+#[derive(Clone, Debug)]
+pub struct ContextualResolution {
+    /// The enum or union that the bare name resolved against.
+    pub type_name: Name,
+    /// The member or case it named.
+    pub member: Name,
+    /// The type the rewritten base identifier should carry, so the rewritten node is typed exactly
+    /// as the qualified form would have been.
+    pub base_ty: Option<Type>,
+}
+
 #[derive(Clone)]
 struct PropertyPath {
     properties: Vec<PropertyPathBinding>,
@@ -42,6 +54,9 @@ struct PropertyPathBinding {
     key: Name,
     ty: Type,
     span: TextSpan,
+    /// The expression the type was inferred from, so a contextual name can be recorded once it
+    /// resolves against this binding's expected type.
+    value: ExprId,
 }
 
 fn handler_prop_name(emit_name: &str) -> String {
@@ -71,6 +86,17 @@ pub struct InferenceContext<'a> {
     enum_defs: FxHashMap<Name, EnumType>,
     /// Registered discriminated union definitions.
     union_defs: FxHashMap<Name, UnionDef>,
+    /// Union definitions reached through a foreign declaration's own signature.
+    ///
+    /// Keyed by the union's declared name. Consulted only when resolving a contextual name against
+    /// an expected type that came from another module, so it can neither shadow a local union nor
+    /// make a foreign name spellable in source.
+    foreign_union_defs: FxHashMap<Name, UnionDef>,
+    /// Contextual names resolved at binding sites, as `expr → (declaring type, member)`.
+    ///
+    /// Consumed after analysis to rewrite each `Expr::ContextualName` into the qualified member
+    /// access it resolved to, so nothing downstream of type checking can observe the bare spelling.
+    resolved_contextual_names: FxHashMap<ExprId, ContextualResolution>,
 }
 
 impl<'a> InferenceContext<'a> {
@@ -90,7 +116,9 @@ impl<'a> InferenceContext<'a> {
             function_return_placeholders: FxHashMap::default(),
             type_aliases: FxHashMap::default(),
             enum_defs: FxHashMap::default(),
+            foreign_union_defs: FxHashMap::default(),
             union_defs: FxHashMap::default(),
+            resolved_contextual_names: FxHashMap::default(),
         };
         ctx.register_type_definitions();
         ctx.register_function_signatures();
@@ -127,6 +155,11 @@ impl<'a> InferenceContext<'a> {
         let ty = match expr {
             // Literals have known types
             ast::Expr::Literal(lit) => self.infer_literal(lit),
+
+            // A bare name has no context-free type. It carries its own name forward as a pending
+            // marker and is resolved at the binding site, which is the only place that knows the
+            // expected type.
+            ast::Expr::ContextualName { name, .. } => Type::ContextualName(name.clone()),
 
             // Identifiers look up in environment
             ast::Expr::Ident(name) => {
@@ -463,7 +496,7 @@ impl<'a> InferenceContext<'a> {
                 .patterns
                 .iter()
                 .map(|pattern| {
-                    let pattern_ty = self.infer_match_pattern(*pattern);
+                    let pattern_ty = self.infer_match_pattern(*pattern, &scrutinee_ty);
                     self.check_match_pattern(
                         &scrutinee_ty,
                         union_ty.as_ref(),
@@ -525,7 +558,38 @@ impl<'a> InferenceContext<'a> {
         self.common_result_type(&result_tys)
     }
 
-    fn infer_match_pattern(&mut self, pattern: ExprId) -> Type {
+    fn infer_match_pattern(&mut self, pattern: ExprId, scrutinee_ty: &Type) -> Type {
+        // A bare pattern resolves against the scrutinee's type in preference to any lexically
+        // visible binding of the same name. The preference is reported so a pattern that used to
+        // compare against a variable never changes meaning silently.
+        if let ast::Expr::ContextualName { name, span } = self.module.raw_module().expr(pattern) {
+            let name = name.clone();
+            let span = *span;
+            if self.env.lookup(&name).is_some() {
+                self.error(
+                    "contextual-name-displaces-binding",
+                    format!(
+                        "Pattern '{}' resolves as a case of '{}', not as the binding named '{}' \
+                         that is in scope here",
+                        name, scrutinee_ty, name
+                    ),
+                    span,
+                );
+            }
+            let context = format!("Pattern '{}'", name);
+            let resolved = self.resolve_contextual_name_in(
+                pattern,
+                &name,
+                scrutinee_ty,
+                span,
+                &context,
+                true,
+            );
+            let ty = resolved.unwrap_or(Type::Error);
+            self.env.set_expr_type(pattern, ty.clone());
+            return ty;
+        }
+
         if let Some(name) = self.flattened_expr_name(pattern) {
             if let Some((union_def, case)) = self.union_case_from_qualified_name(&name) {
                 let ty = Type::union_case_type(union_def.name.clone(), case.name.clone());
@@ -920,7 +984,8 @@ impl<'a> InferenceContext<'a> {
                     Some(field_ty) => {
                         let actual = self.infer_expr(property.value);
                         let expected = self.type_from_type_ref(&field_ty);
-                        self.check_typed_binding(
+                        self.check_typed_binding_for(
+                            Some(property.value),
                             &actual,
                             &expected,
                             property.span,
@@ -967,12 +1032,18 @@ impl<'a> InferenceContext<'a> {
 
     fn infer_element_expression(&mut self, element: &nx_hir::Element, span: TextSpan) -> Type {
         if let Some(function) = self.resolve_function_definition(&element.tag) {
+            let declaring_module = function.module_identity().to_string();
             match function {
                 ResolvedPreparedItem::Raw {
                     item: Item::Function(function),
                     ..
                 } => {
-                    self.check_element_bindings_against_function(element, &function, span);
+                    self.check_element_bindings_against_function(
+                        element,
+                        &function,
+                        span,
+                        Some(declaring_module.as_str()),
+                    );
                     if let Some(func_ty) = self.env.lookup(&element.tag) {
                         if let Type::Function { ret, .. } = func_ty {
                             return (**ret).clone();
@@ -988,7 +1059,9 @@ impl<'a> InferenceContext<'a> {
                     if let Some((_name, _visibility, params, return_type, _span)) =
                         interface_function_signature(&item)
                     {
-                        let spec = self.build_element_binding_spec(
+                        let declaring_module = item.module_identity.clone();
+                        let spec = self.build_element_binding_spec_in(
+                            Some(declaring_module.as_str()),
                             params
                                 .iter()
                                 .map(|param| (&param.name, &param.ty, param.is_content, true)),
@@ -1002,6 +1075,7 @@ impl<'a> InferenceContext<'a> {
         }
 
         if let Some(component) = self.resolve_component_definition(&element.tag) {
+            let declaring_module = component.module_identity().to_string();
             match component {
                 ResolvedPreparedItem::Raw {
                     item: Item::Component(component),
@@ -1014,7 +1088,12 @@ impl<'a> InferenceContext<'a> {
                             span,
                         );
                     }
-                    self.check_element_bindings_against_component(element, &component, span);
+                    self.check_element_bindings_against_component(
+                        element,
+                        &component,
+                        span,
+                        Some(declaring_module.as_str()),
+                    );
                     return Type::named(element.tag.clone());
                 }
                 ResolvedPreparedItem::Imported { item, .. } => {
@@ -1029,7 +1108,12 @@ impl<'a> InferenceContext<'a> {
                                 span,
                             );
                         }
-                        self.check_element_bindings_against_component(element, &component, span);
+                        self.check_element_bindings_against_component(
+                            element,
+                            &component,
+                            span,
+                            Some(declaring_module.as_str()),
+                        );
                         return Type::named(element.tag.clone());
                     }
                 }
@@ -1037,7 +1121,8 @@ impl<'a> InferenceContext<'a> {
             }
         }
 
-        if let Some(record_def) = self.resolve_record_definition(&element.tag) {
+        if let Some((declaring_module, record_def)) = self.resolve_record_definition_with_origin(&element.tag)
+        {
             if record_def.is_abstract {
                 self.error(
                     "abstract-record-instantiation",
@@ -1045,7 +1130,12 @@ impl<'a> InferenceContext<'a> {
                     span,
                 );
             }
-            self.check_element_bindings_against_record(element, &record_def, span);
+            self.check_element_bindings_against_record(
+                element,
+                &record_def,
+                span,
+                Some(declaring_module.as_str()),
+            );
             return Type::named(element.tag.clone());
         }
 
@@ -1064,8 +1154,10 @@ impl<'a> InferenceContext<'a> {
         element: &nx_hir::Element,
         function: &nx_hir::Function,
         span: TextSpan,
+        declaring_module: Option<&str>,
     ) {
-        let spec = self.build_element_binding_spec(
+        let spec = self.build_element_binding_spec_in(
+            declaring_module,
             function
                 .params
                 .iter()
@@ -1079,20 +1171,22 @@ impl<'a> InferenceContext<'a> {
         element: &nx_hir::Element,
         component: &nx_hir::Component,
         span: TextSpan,
+        declaring_module: Option<&str>,
     ) {
         let effective_contract = self
             .effective_component_contract(&component.name)
             .ok()
             .flatten();
         let mut spec = if let Some(contract) = effective_contract.as_ref() {
-            self.build_element_binding_spec(
+            self.build_element_binding_spec_in(
+                declaring_module,
                 contract
                     .props
                     .iter()
                     .map(|field| (&field.name, &field.ty, field.is_content, field.is_required)),
             )
         } else {
-            self.build_element_binding_spec(component.props.iter().map(|field| {
+            self.build_element_binding_spec_in(declaring_module, component.props.iter().map(|field| {
                 (
                     &field.name,
                     &field.ty,
@@ -1118,17 +1212,19 @@ impl<'a> InferenceContext<'a> {
         element: &nx_hir::Element,
         record_def: &nx_hir::RecordDef,
         span: TextSpan,
+        declaring_module: Option<&str>,
     ) {
         let effective_shape = self.effective_record_shape(&record_def.name).ok().flatten();
         let spec = if let Some(shape) = effective_shape.as_ref() {
-            self.build_element_binding_spec(
+            self.build_element_binding_spec_in(
+                declaring_module,
                 shape
                     .fields
                     .iter()
                     .map(|field| (&field.name, &field.ty, field.is_content, field.is_required)),
             )
         } else {
-            self.build_element_binding_spec(record_def.properties.iter().map(|field| {
+            self.build_element_binding_spec_in(declaring_module, record_def.properties.iter().map(|field| {
                 (
                     &field.name,
                     &field.ty,
@@ -1309,7 +1405,104 @@ impl<'a> InferenceContext<'a> {
         );
     }
 
-    fn build_element_binding_spec<'b, I>(&mut self, bindings: I) -> ElementBindingSpec
+    /// Resolves a nominal name written by a declaration in `module_identity`.
+    ///
+    /// A declaration's type references are written in its own namespace: `fit: Fit` in a library
+    /// means that library's `Fit`. Resolving it in the consumer's scope is what leaves the type as
+    /// an unresolved `Type::Named`, and what lets an unrelated local `Fit` stand in for it.
+    fn nominal_type_in_module(&mut self, module_identity: &str, name: &Name) -> Option<Type> {
+        if module_identity == self.module.module_identity() {
+            return None;
+        }
+
+        // A workspace peer keeps its whole lowered module, so its own definitions are readable
+        // directly, whether or not the consumer imported them.
+        if let Some(peer) = self.module.peer_module(module_identity) {
+            match peer.find_item(name.as_str()) {
+                Some(Item::Enum(enum_def)) => {
+                    let members = enum_def
+                        .members
+                        .iter()
+                        .map(|member| member.name.clone())
+                        .collect();
+                    return Some(Type::Enum(EnumType::new(enum_def.name.clone(), members)));
+                }
+                Some(Item::Union(union_def)) => {
+                    let union_def = union_def.clone();
+                    let ty = self.union_type_from_def(&union_def);
+                    self.foreign_union_defs
+                        .insert(union_def.name.clone(), union_def);
+                    return Some(ty);
+                }
+                _ => {}
+            }
+        }
+
+        // A library reaches the consumer as interface items. Those it did bind are readable here,
+        // including under a wildcard alias, where the visible name differs from the declared one.
+        let bindings = self
+            .module
+            .bindings(PreparedNamespace::Type)
+            .cloned()
+            .collect::<Vec<_>>();
+        for binding in bindings {
+            let Some(resolved) = self.module.resolve_prepared_item(&binding) else {
+                continue;
+            };
+            if resolved.module_identity() != module_identity {
+                continue;
+            }
+            let ResolvedPreparedItem::Imported { item, .. } = &resolved else {
+                continue;
+            };
+            if let Some(enum_def) = interface_enum(item) {
+                if enum_def.name == *name {
+                    let members = enum_def
+                        .members
+                        .iter()
+                        .map(|member| member.name.clone())
+                        .collect();
+                    return Some(Type::Enum(EnumType::new(enum_def.name.clone(), members)));
+                }
+            } else if let Some(union_def) = interface_union(item) {
+                if union_def.name == *name {
+                    let ty = self.union_type_from_def(&union_def);
+                    self.foreign_union_defs
+                        .insert(union_def.name.clone(), union_def);
+                    return Some(ty);
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Converts a type reference written by a declaration owned by `declaring_module`.
+    ///
+    /// The declaring module is tried first, so an unrelated local type that merely shares the
+    /// spelling cannot stand in for the one the declaration actually named.
+    fn type_from_type_ref_in(
+        &mut self,
+        declaring_module: Option<&str>,
+        type_ref: &ast::TypeRef,
+    ) -> Type {
+        let Some(module_identity) = declaring_module else {
+            return self.type_from_type_ref(type_ref);
+        };
+        let module_identity = module_identity.to_string();
+        resolve_type_ref_with(type_ref, &mut |name, seen| {
+            if let Some(ty) = self.nominal_type_in_module(&module_identity, name) {
+                return ty;
+            }
+            self.resolve_named_type(name, seen)
+        })
+    }
+
+    fn build_element_binding_spec_in<'b, I>(
+        &mut self,
+        declaring_module: Option<&str>,
+        bindings: I,
+    ) -> ElementBindingSpec
     where
         I: IntoIterator<Item = (&'b Name, &'b ast::TypeRef, bool, bool)>,
     {
@@ -1317,7 +1510,7 @@ impl<'a> InferenceContext<'a> {
         let mut properties = FxHashMap::default();
 
         for (name, ty_ref, is_content, is_required) in bindings {
-            let ty = self.type_from_type_ref(ty_ref);
+            let ty = self.type_from_type_ref_in(declaring_module, ty_ref);
             if is_content {
                 content_property = Some(name.clone());
             }
@@ -1424,6 +1617,7 @@ impl<'a> InferenceContext<'a> {
                     key: property.key.clone(),
                     ty: self.infer_expr(property.value),
                     span: property.span,
+                    value: property.value,
                 }],
             }],
             PropertyEntry::If {
@@ -1486,7 +1680,7 @@ impl<'a> InferenceContext<'a> {
                 .patterns
                 .iter()
                 .map(|pattern| {
-                    let pattern_ty = self.infer_match_pattern(*pattern);
+                    let pattern_ty = self.infer_match_pattern(*pattern, &scrutinee_ty);
                     self.check_match_pattern(
                         &scrutinee_ty,
                         union_ty.as_ref(),
@@ -1600,7 +1794,8 @@ impl<'a> InferenceContext<'a> {
         for path in paths {
             for property in &path.properties {
                 if let Some(expected) = spec.properties.get(&property.key) {
-                    self.check_typed_binding(
+                    self.check_typed_binding_for(
+                        Some(property.value),
                         &property.ty,
                         &expected.ty,
                         property.span,
@@ -1686,6 +1881,263 @@ impl<'a> InferenceContext<'a> {
         current
     }
 
+    /// Strips the wrappers a contextual name is allowed to resolve through.
+    ///
+    /// Nullability first, then one list level, so `Fit?` and `Fit[]` both resolve against `Fit` and
+    /// the existing scalar-to-list coercion applies to the resolved value.
+    fn contextual_target<'ty>(expected: &'ty Type) -> &'ty Type {
+        let expected = match expected {
+            Type::Nullable(inner) => inner.as_ref(),
+            other => other,
+        };
+        match expected {
+            Type::Array(inner) => match inner.as_ref() {
+                Type::Nullable(inner) => inner.as_ref(),
+                other => other,
+            },
+            other => other,
+        }
+    }
+
+    /// Suggests the closest candidate to `name`, for a did-you-mean on an unresolved bare name.
+    fn closest_candidate(name: &Name, candidates: &[Name]) -> Option<Name> {
+        candidates
+            .iter()
+            .map(|candidate| (Self::edit_distance(name.as_str(), candidate.as_str()), candidate))
+            .filter(|(distance, candidate)| {
+                *distance <= 2.max(candidate.as_str().len() / 3)
+            })
+            .min_by_key(|(distance, _)| *distance)
+            .map(|(_, candidate)| candidate.clone())
+    }
+
+    fn edit_distance(a: &str, b: &str) -> usize {
+        let b_chars: Vec<char> = b.chars().collect();
+        let mut prev: Vec<usize> = (0..=b_chars.len()).collect();
+        let mut current = vec![0usize; b_chars.len() + 1];
+        for (i, a_char) in a.chars().enumerate() {
+            current[0] = i + 1;
+            for (j, b_char) in b_chars.iter().enumerate() {
+                let cost = usize::from(a_char != *b_char);
+                current[j + 1] = (prev[j] + cost).min(prev[j + 1] + 1).min(current[j] + 1);
+            }
+            std::mem::swap(&mut prev, &mut current);
+        }
+        prev[b_chars.len()]
+    }
+
+    fn candidate_list(candidates: &[Name]) -> String {
+        candidates
+            .iter()
+            .map(|c| c.as_str().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// Resolves a bare name against the expected type of its binding site.
+    ///
+    /// The single entry point for contextual literal resolution, shared by every binding site so
+    /// the rule cannot drift between them. Resolves only against the closed nominal set — enum
+    /// members and payloadless union cases — and never falls back to treating the name as a string.
+    fn resolve_contextual_name(
+        &mut self,
+        expr: ExprId,
+        name: &Name,
+        expected: &Type,
+        span: TextSpan,
+        context: &str,
+    ) -> Option<Type> {
+        self.resolve_contextual_name_in(expr, name, expected, span, context, false)
+    }
+
+    /// Resolves a bare name, optionally admitting union cases that carry a payload.
+    ///
+    /// A pattern matches on the discriminator, so `failed` is a valid pattern for a payload case
+    /// even though it is not a valid way to construct one.
+    fn resolve_contextual_name_in(
+        &mut self,
+        expr: ExprId,
+        name: &Name,
+        expected: &Type,
+        span: TextSpan,
+        context: &str,
+        allow_payload_cases: bool,
+    ) -> Option<Type> {
+        let target = Self::contextual_target(expected).clone();
+
+        // An enum type, whether already resolved or still a bare name reference.
+        let enum_info = match &target {
+            Type::Enum(info) => Some(info.clone()),
+            Type::Named(named) => self
+                .enum_info_from_name(named, &mut FxHashSet::default())
+                .cloned(),
+            _ => None,
+        };
+        if let Some(info) = enum_info {
+            if info.members.iter().any(|member| member == name) {
+                if !self.nominal_is_nameable_here(&info) {
+                    self.report_unnameable_contextual_type(&info.name, name, span);
+                    return Some(Type::Error);
+                }
+                // The base identifier denotes the enum type itself, exactly as it does in the
+                // qualified form.
+                let base_ty = Some(Type::Enum(info.clone()));
+                self.resolved_contextual_names.insert(
+                    expr,
+                    ContextualResolution {
+                        type_name: info.name.clone(),
+                        member: name.clone(),
+                        base_ty,
+                    },
+                );
+                // Overwrite the pending marker so the expression carries the type the qualified
+                // form would have given it; the IR reads this node's type directly.
+                let resolved = Type::Enum(info);
+                self.env.set_expr_type(expr, resolved.clone());
+                return Some(resolved);
+            }
+            let suggestion = Self::closest_candidate(name, &info.members)
+                .map(|s| format!("; did you mean `{}`?", s))
+                .unwrap_or_default();
+            self.error(
+                "unresolved-contextual-name",
+                format!(
+                    "'{}' is not a member of enum '{}'{} Members: {}",
+                    name,
+                    info.name,
+                    suggestion,
+                    Self::candidate_list(&info.members)
+                ),
+                span,
+            );
+            return Some(Type::Error);
+        }
+
+        // A discriminated union: resolve against its payloadless cases.
+        let union_name = match &target {
+            Type::Union(info) => Some(info.name.clone()),
+            Type::Named(named) if self.union_def_for_contextual(named).is_some() => {
+                Some(named.clone())
+            }
+            _ => None,
+        };
+        if let Some(union_name) = union_name {
+            let is_foreign = !self.union_defs.contains_key(&union_name);
+            let matched = self
+                .union_def_for_contextual(&union_name)
+                .and_then(|def| {
+                    def.cases
+                        .iter()
+                        .find(|case| case.name == *name)
+                        .map(|case| (case.clone(), def.base.clone()))
+                });
+            if let Some((case, union_base)) = matched {
+                let is_fieldless = case.fields.is_empty();
+                let case_name = case.name.clone();
+                // Everything downstream of type checking still reaches a union case by name in
+                // this module, so a union visible only through the declaring signature has no
+                // spelling that survives lowering.
+                let _ = &union_base;
+                if is_foreign && !allow_payload_cases {
+                    self.report_unnameable_contextual_type(&union_name, name, span);
+                    return Some(Type::Error);
+                }
+                if is_fieldless || allow_payload_cases {
+                    let base_ty = self.union_def_for_contextual(&union_name).map(|def| {
+                        Type::union_type(
+                            union_name.clone(),
+                            def.cases.iter().map(|case| case.name.clone()).collect(),
+                            def.base.clone(),
+                        )
+                    });
+                    self.resolved_contextual_names.insert(
+                        expr,
+                        ContextualResolution {
+                            type_name: union_name.clone(),
+                            member: case_name.clone(),
+                            base_ty,
+                        },
+                    );
+                    let resolved = Type::union_case_type(union_name, case_name);
+                    self.env.set_expr_type(expr, resolved.clone());
+                    return Some(resolved);
+                }
+                self.error(
+                    "payload-union-case-requires-constructor",
+                    format!(
+                        "Union case '{}.{}' requires element-style payload construction; write                          `<{}.{} ... />`",
+                        union_name, case_name, union_name, case_name
+                    ),
+                    span,
+                );
+                return Some(Type::Error);
+            }
+            let cases: Vec<Name> = self
+                .union_def_for_contextual(&union_name)
+                .map(|def| def.cases.iter().map(|case| case.name.clone()).collect())
+                .unwrap_or_default();
+            let suggestion = Self::closest_candidate(name, &cases)
+                .map(|s| format!("; did you mean `{}`?", s))
+                .unwrap_or_default();
+            self.error(
+                "unresolved-contextual-name",
+                format!(
+                    "'{}' is not a case of union '{}'{} Cases: {}",
+                    name,
+                    union_name,
+                    suggestion,
+                    Self::candidate_list(&cases)
+                ),
+                span,
+            );
+            return Some(Type::Error);
+        }
+
+        // Not a nominal type: a bare name never falls back to being a string.
+        self.error(
+            "contextual-name-requires-nominal-type",
+            format!(
+                "{} expects {}, and a bare name resolves only against an enum or union; \
+                 for a string value write \"{}\"",
+                context, expected, name
+            ),
+            span,
+        );
+        Some(Type::Error)
+    }
+
+    /// Suggests the bare form when a string was written at a site that wants a nominal value.
+    ///
+    /// A quoted string never resolves to an enum member or union case, so the fix is the bare
+    /// spelling rather than a different string.
+    fn bare_form_hint(&self, actual: &Type, expected: &Type) -> String {
+        if !matches!(actual, Type::Primitive(crate::ty::Primitive::String)) {
+            return String::new();
+        }
+        let target = Self::contextual_target(expected);
+        let candidates: Vec<Name> = match target {
+            Type::Enum(info) => info.members.clone(),
+            Type::Named(named) => match self.enum_info_from_name(named, &mut FxHashSet::default()) {
+                Some(info) => info.members.clone(),
+                None => self
+                    .union_defs
+                    .get(named)
+                    .map(|def| def.cases.iter().map(|case| case.name.clone()).collect())
+                    .unwrap_or_default(),
+            },
+            Type::Union(info) => info.cases.clone(),
+            _ => Vec::new(),
+        };
+        if candidates.is_empty() {
+            return String::new();
+        }
+        format!(
+            "; a quoted string is never a member of {}, so write the bare form, one of: {}",
+            expected,
+            Self::candidate_list(&candidates)
+        )
+    }
+
     fn check_typed_binding(
         &mut self,
         actual: &Type,
@@ -1694,6 +2146,47 @@ impl<'a> InferenceContext<'a> {
         code: &str,
         context: String,
     ) -> bool {
+        self.check_typed_binding_for(None, actual, expected, span, code, context)
+    }
+
+    /// Checks a binding, recording the resolution when `expr` is a contextual name.
+    ///
+    /// Sites that know which expression they are checking pass it, so a resolved contextual name
+    /// can be rewritten to its qualified form after analysis. Sites that do not pass `None`, and a
+    /// contextual name reaching one of those is reported rather than silently accepted.
+    fn check_typed_binding_for(
+        &mut self,
+        expr: Option<ExprId>,
+        actual: &Type,
+        expected: &Type,
+        span: TextSpan,
+        code: &str,
+        context: String,
+    ) -> bool {
+        // A pending contextual name resolves here, where the expected type is finally known.
+        if let Type::ContextualName(name) = actual {
+            let name = name.clone();
+            let Some(expr) = expr else {
+                self.error(
+                    "contextual-name-without-expected-type",
+                    format!(
+                        "{}: a bare name is only allowed where the declared type is known;                          write the qualified form in braces instead",
+                        context
+                    ),
+                    span,
+                );
+                return false;
+            };
+            let resolved = self.resolve_contextual_name(expr, &name, expected, span, &context);
+            return match resolved {
+                Some(Type::Error) => false,
+                Some(resolved) => {
+                    self.check_typed_binding_for(None, &resolved, expected, span, code, context)
+                }
+                None => false,
+            };
+        }
+
         if self.type_satisfies_expected_with_coercion(actual, expected) {
             true
         } else {
@@ -1709,7 +2202,11 @@ impl<'a> InferenceContext<'a> {
                     context, expected, actual_display
                 )
             } else {
-                format!("{} expects {}, found {}", context, expected, actual_display)
+                let hint = self.bare_form_hint(actual, expected);
+                format!(
+                    "{} expects {}, found {}{}",
+                    context, expected, actual_display, hint
+                )
             };
             self.error(code, message, span);
             false
@@ -1723,6 +2220,11 @@ impl<'a> InferenceContext<'a> {
             .with_label(Label::primary(self.file_name.clone(), span))
             .build();
         self.diagnostics.push(diag);
+    }
+
+    /// Returns the contextual names resolved during analysis, as `expr → (type, member)`.
+    pub fn resolved_contextual_names(&self) -> &FxHashMap<ExprId, ContextualResolution> {
+        &self.resolved_contextual_names
     }
 
     /// Returns the collected diagnostics.
@@ -1825,7 +2327,8 @@ impl<'a> InferenceContext<'a> {
                     if let Some(default_expr) = prop.default {
                         let expected = self.type_from_type_ref(&prop.ty);
                         let actual = self.infer_expr(default_expr);
-                        self.check_typed_binding(
+                        self.check_typed_binding_for(
+                            Some(default_expr),
                             &actual,
                             &expected,
                             prop.span,
@@ -1847,7 +2350,8 @@ impl<'a> InferenceContext<'a> {
                         if let Some(default_expr) = field.default {
                             let expected = self.type_from_type_ref(&field.ty);
                             let actual = self.infer_expr(default_expr);
-                            self.check_typed_binding(
+                            self.check_typed_binding_for(
+                                Some(default_expr),
                                 &actual,
                                 &expected,
                                 field.span,
@@ -1941,7 +2445,8 @@ impl<'a> InferenceContext<'a> {
                         let actual = self.infer_expr(value.value);
                         if let Some(ty_ref) = value.ty.as_ref() {
                             let expected = self.type_from_type_ref(ty_ref);
-                            self.check_typed_binding(
+                            self.check_typed_binding_for(
+                                Some(value.value),
                                 &actual,
                                 &expected,
                                 value.span,
@@ -2013,6 +2518,13 @@ impl<'a> InferenceContext<'a> {
         nx_hir::resolve_record_definition(self.module, name)
     }
 
+    fn resolve_record_definition_with_origin(
+        &self,
+        name: &Name,
+    ) -> Option<(String, nx_hir::RecordDef)> {
+        nx_hir::resolve_record_definition_with_module(self.module, name)
+    }
+
     fn enum_info_for_expr(&self, expr_id: ExprId) -> Option<&EnumType> {
         match self.module.raw_module().expr(expr_id) {
             ast::Expr::Ident(name) => {
@@ -2045,6 +2557,42 @@ impl<'a> InferenceContext<'a> {
         }
 
         None
+    }
+
+    /// Whether a nominal type resolved for a binding site can also be named in this module.
+    ///
+    /// Resolution now reaches a type through the declaring module's own namespace, but the rewrite
+    /// this produces, and every consumer below it, still reaches that type by name here.
+    fn nominal_is_nameable_here(&self, info: &EnumType) -> bool {
+        self.enum_defs
+            .get(&info.name)
+            .map(|local| local == info)
+            .unwrap_or(false)
+    }
+
+    /// Reports a contextual name that resolved correctly but has no spelling that survives lowering.
+    fn report_unnameable_contextual_type(
+        &mut self,
+        type_name: &Name,
+        member: &Name,
+        span: TextSpan,
+    ) {
+        let message = format!(
+            "'{member}' resolves to '{type_name}.{member}', but '{type_name}' is declared in another module and is not imported here. A bare name cannot yet carry that origin through code generation, so import '{type_name}' and write '{type_name}.{member}'."
+        );
+        self.error("contextual-name-requires-import", message, span);
+    }
+
+    /// A union definition for contextual resolution: local first, then one reached through a
+    /// foreign declaration's own signature.
+    ///
+    /// The foreign map is consulted only from here, so a union that the consumer never imported
+    /// stays unspellable in source; it becomes resolvable only at a site whose declared type
+    /// already names it.
+    fn union_def_for_contextual(&self, name: &Name) -> Option<&UnionDef> {
+        self.union_defs
+            .get(name)
+            .or_else(|| self.foreign_union_defs.get(name))
     }
 
     fn union_type_from_def(&self, union_def: &UnionDef) -> Type {

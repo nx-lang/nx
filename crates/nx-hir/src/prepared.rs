@@ -428,6 +428,16 @@ impl PreparedModule {
         }
     }
 
+    /// Returns a peer module's lowered form by its stable module identity.
+    ///
+    /// A declaration's own module is the right context in which to resolve the type references it
+    /// writes: `fit: Fit` in a library means *that library's* `Fit`, whatever the consumer can see.
+    pub fn peer_module(&self, module_identity: &str) -> Option<&LoweredModule> {
+        self.peer_modules
+            .get(module_identity)
+            .map(|module| module.as_ref())
+    }
+
     /// Resolves an imported raw item reference back to a lowered item when available.
     pub fn resolve_imported_raw_item(&self, raw: &ImportedRawRef) -> Option<Item> {
         self.peer_modules

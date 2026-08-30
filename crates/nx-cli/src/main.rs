@@ -1128,7 +1128,8 @@ let root() = { Ui.title() }"#,
         assert!(result.is_ok());
         let output = format_output(&result.unwrap(), OutputFormat::Nx).unwrap();
         assert!(output.contains("name=\"Alice\""));
-        assert!(output.contains("age=\"30\""));
+        // Numbers are emitted unquoted so the output reads back at an int-typed site.
+        assert!(output.contains("age=30"));
     }
 
     #[test]
@@ -2168,6 +2169,126 @@ export type QuestionFlowInitialExperience = {
         assert!(error.contains("escapes the output directory"));
     }
 
+    /// A contextual literal and the qualified form must be indistinguishable after type checking.
+    #[test]
+    fn test_cli_contextual_literal_matches_qualified_form() {
+        let bare = r#"
+            enum Fit = fill | contain | cover
+            type LoadState = | idle | loading
+            type Box = { fit: Fit  state: LoadState }
+            let root() = { <Box fit=cover state=loading /> }
+        "#;
+        let qualified = r#"
+            enum Fit = fill | contain | cover
+            type LoadState = | idle | loading
+            type Box = { fit: Fit  state: LoadState }
+            let root() = { <Box fit={Fit.cover} state={LoadState.loading} /> }
+        "#;
+
+        let (_bare_dir, bare_path) = create_temp_nx_file(bare);
+        let (_qual_dir, qual_path) = create_temp_nx_file(qualified);
+
+        let bare_out = run_cli(&["run", bare_path.to_str().unwrap()]);
+        let qual_out = run_cli(&["run", qual_path.to_str().unwrap()]);
+
+        assert!(bare_out.status.success(), "bare form should run");
+        assert!(qual_out.status.success(), "qualified form should run");
+        assert_eq!(
+            String::from_utf8_lossy(&bare_out.stdout),
+            String::from_utf8_lossy(&qual_out.stdout),
+            "the source spelling must not be observable downstream of type checking"
+        );
+    }
+
+    /// The same equivalence must hold in the generated IR, not only in interpreted output.
+    #[test]
+    fn test_cli_contextual_literal_codegen_matches_qualified_form() {
+        let bare = r#"
+            enum Fit = fill | contain | cover
+            type Box = { fit: Fit }
+            let root() = { <Box fit=cover /> }
+        "#;
+        let qualified = r#"
+            enum Fit = fill | contain | cover
+            type Box = { fit: Fit }
+            let root() = { <Box fit={Fit.cover} /> }
+        "#;
+
+        let (_bare_dir, bare_path) = create_temp_nx_file(bare);
+        let (_qual_dir, qual_path) = create_temp_nx_file(qualified);
+
+        let bare_dest = _bare_dir.path().join("bare-out");
+        let qual_dest = _qual_dir.path().join("qual-out");
+
+        let bare_out = run_cli(&[
+            "codegen",
+            bare_path.to_str().unwrap(),
+            "--target",
+            "nx-ir",
+            "--output",
+            bare_dest.to_str().unwrap(),
+        ]);
+        let qual_out = run_cli(&[
+            "codegen",
+            qual_path.to_str().unwrap(),
+            "--target",
+            "nx-ir",
+            "--output",
+            qual_dest.to_str().unwrap(),
+        ]);
+
+        assert!(bare_out.status.success(), "bare form should generate");
+        assert!(qual_out.status.success(), "qualified form should generate");
+
+        // The IR embeds spans, node ids, and the source text, all of which legitimately differ
+        // between two different spellings. Everything else must match.
+        fn strip_volatile(value: &mut serde_json::Value) {
+            const VOLATILE: &[&str] = &[
+                "start",
+                "end",
+                "id",
+                "slot",
+                "programFingerprint",
+                "source",
+                "identity",
+            ];
+            match value {
+                serde_json::Value::Object(map) => {
+                    map.retain(|key, _| !VOLATILE.contains(&key.as_str()));
+                    for entry in map.values_mut() {
+                        strip_volatile(entry);
+                    }
+                }
+                serde_json::Value::Array(items) => {
+                    for item in items {
+                        strip_volatile(item);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let read_ir = |dir: &std::path::Path| -> serde_json::Value {
+            let path = std::fs::read_dir(dir)
+                .expect("generated output directory")
+                .filter_map(|entry| entry.ok())
+                .map(|entry| entry.path())
+                .find(|path| path.extension().is_some_and(|ext| ext == "json"))
+                .expect("generated IR file");
+            let mut value: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(path).expect("read IR"))
+                    .expect("parse IR");
+            strip_volatile(&mut value);
+            value
+        };
+
+        assert_eq!(
+            read_ir(&bare_dest),
+            read_ir(&qual_dest),
+            "generated IR must not depend on the source spelling"
+        );
+    }
+
     #[test]
     fn test_cli_run_typed_record_preserves_name() {
         let source = r#"
@@ -2187,7 +2308,8 @@ export type QuestionFlowInitialExperience = {
         // Should use "User" as the tag name, not generic "result"
         assert!(stdout.contains("<User"));
         assert!(stdout.contains("name=\"Bob\""));
-        assert!(stdout.contains("age=\"30\""));
+        // Numbers are emitted unquoted so the output reads back at an int-typed site.
+        assert!(stdout.contains("age=30"));
     }
 
     #[test]

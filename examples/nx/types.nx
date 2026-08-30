@@ -66,16 +66,26 @@ let currentStaff: StaffUser =
 let labels: UserList =
   { currentUser currentStaff }
 
-let sortMode: CardSortMode = { CardSortMode.closed }
+// A bare name at a typed site resolves against the declared type; `{CardSortMode.closed}` also
+// works, and is what you write inside a braced expression.
+let sortMode: CardSortMode = closed
+
+let defaultStage: DealStage = draft
 
 let loadState: LoadState =
   <LoadState.failed message={"Network unavailable"} />
 
+// Bare case names in pattern position resolve against the scrutinee's type.
 let loadStatus = {
   if loadState is {
-    LoadState.idle => "Idle"
-    LoadState.loading => "Loading"
-    LoadState.failed => loadState.message
-    LoadState.loaded => "Loaded"
+    idle => "Idle"
+    loading => "Loading"
+    failed => loadState.message
+    loaded => "Loaded"
   }
 }
+
+// Negative numeric literals need no braces where a literal is required.
+type Offset = { dx: float64 = -1.0  dy: float64 = -1.0 }
+
+let shifted: Offset = <Offset dx=-2.5 />

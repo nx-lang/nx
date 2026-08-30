@@ -234,7 +234,21 @@ receives element body content during markup-style invocation.
 RhsExpression ::=
     Element
     | Literal
+    | SignedNumericLiteral
+    | ContextualName
     | ValuesBracedExpression
+
+(* An unbraced value is always a literal, never an expression. A ContextualName is a single
+   Identifier and deliberately never a QualifiedName: admitting `fit=Fit.cover` would also admit
+   `fit=obj.field`, and that invariant would be gone. It resolves against the declared type of the
+   binding site — an enum member or a payloadless union case — rather than against lexical scope. *)
+ContextualName ::=
+    Identifier
+
+(* A `-` directly before a numeric literal, accepted only where a literal is required. Tokenization
+   is unchanged and `-` remains a prefix operator in expressions, so `a-1` is still subtraction. *)
+SignedNumericLiteral ::=
+    "-" ( IntegerLiteral | RealLiteral | HexLiteral )
 
 (* A braced expression can be a single value or muliple, space delimited *)
 ValuesBracedExpression ::=
@@ -304,7 +318,9 @@ ParenFunctionCall ::=
     ValueExpression "(" [ ValueExpression { "," ValueExpression } ] ")"
 
 Pattern ::=
-    Literal | QualifiedName
+    Literal | SignedNumericLiteral | QualifiedName
+    (* A single-segment name in pattern position is a ContextualName resolved against the
+       scrutinee's type, in preference to any lexically visible binding of that name. *)
 
 Unit ::=
     "()"

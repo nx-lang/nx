@@ -47,7 +47,8 @@ pub use prepared::{
 
 pub use components::{
     effective_component_contract, effective_component_contract_for_name,
-    promote_component_handler_bindings, resolve_component_definition,
+    apply_contextual_name_resolutions, promote_component_handler_bindings,
+    resolve_component_definition,
     validate_component_definitions, ComponentResolutionError, EffectiveComponentContract,
     InvalidComponentBaseReason,
 };
@@ -58,7 +59,8 @@ pub use db::{DatabaseImpl, NxDatabase};
 // Re-export scope and symbol types
 pub use records::{
     effective_record_shape, effective_record_shape_for_name, is_record_subtype,
-    resolve_record_definition, validate_record_definitions, EffectiveRecordShape,
+    resolve_record_definition, resolve_record_definition_with_module, validate_record_definitions,
+    EffectiveRecordShape,
     InvalidBaseReason, RecordResolutionError,
 };
 pub use scope::{

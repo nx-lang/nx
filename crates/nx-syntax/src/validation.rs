@@ -680,6 +680,20 @@ fn analyze_error_context(
         );
     }
 
+    // An unbraced property value is always a literal, so a dotted name there is a common first
+    // mistake: authors reach for the qualified form they would write inside braces.
+    if let Some((property, qualified)) = unbraced_qualified_property(error_text) {
+        let member = qualified.rsplit('.').next().unwrap_or(qualified);
+        return (
+            "Qualified name in unbraced property value".to_string(),
+            Some(format!(
+                "An unbraced property value must be a literal. If `{qualified}` names an enum \
+                 member or union case, write `{property}={member}` and it resolves against the \
+                 property's type; otherwise wrap the expression: `{property}={{{qualified}}}`."
+            )),
+        );
+    }
+
     // Common error patterns
     if error_text.contains('{') && !error_text.contains('}') {
         return (
@@ -1354,4 +1368,44 @@ mod tests {
             "Expected state-only concrete component diagnostic, got: {messages}"
         );
     }
+}
+
+/// Finds an unbraced property value that is a dotted name, as in `fit=Fit.cover`.
+///
+/// Returns the property name and the qualified value it was given.
+fn unbraced_qualified_property(text: &str) -> Option<(&str, &str)> {
+    let bytes = text.as_bytes();
+    let is_name_byte = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'-';
+
+    for (index, byte) in bytes.iter().enumerate() {
+        if *byte != b'=' {
+            continue;
+        }
+        // The property name immediately before the `=`.
+        let mut start = index;
+        while start > 0 && is_name_byte(bytes[start - 1]) {
+            start -= 1;
+        }
+        if start == index {
+            continue;
+        }
+        let property = &text[start..index];
+        if !property.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
+            continue;
+        }
+
+        // The value, which must be an unquoted, unbraced dotted name.
+        let mut end = index + 1;
+        if end >= bytes.len() || !(bytes[end].is_ascii_alphabetic() || bytes[end] == b'_') {
+            continue;
+        }
+        while end < bytes.len() && (is_name_byte(bytes[end]) || bytes[end] == b'.') {
+            end += 1;
+        }
+        let value = &text[index + 1..end];
+        if value.contains('.') && !value.ends_with('.') {
+            return Some((property, value));
+        }
+    }
+    None
 }

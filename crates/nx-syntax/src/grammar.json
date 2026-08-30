@@ -1678,9 +1678,47 @@
         },
         {
           "type": "SYMBOL",
+          "name": "signed_numeric_literal"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "contextual_name"
+        },
+        {
+          "type": "SYMBOL",
           "name": "values_braced_expression"
         }
       ]
+    },
+    "signed_numeric_literal": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "-"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "int_literal"
+            },
+            {
+              "type": "SYMBOL",
+              "name": "real_literal"
+            },
+            {
+              "type": "SYMBOL",
+              "name": "hex_literal"
+            }
+          ]
+        }
+      ]
+    },
+    "contextual_name": {
+      "type": "SYMBOL",
+      "name": "identifier"
     },
     "values_braced_expression": {
       "type": "SEQ",
@@ -4237,6 +4275,10 @@
         {
           "type": "SYMBOL",
           "name": "literal"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "signed_numeric_literal"
         },
         {
           "type": "SYMBOL",

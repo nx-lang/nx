@@ -193,8 +193,26 @@ pub fn analyze_prepared_module(
         }
     }
 
-    let (type_env, type_diagnostics) = ctx.finish();
+    // Apply contextual name resolutions before the module is snapshotted, so every consumer after
+    // type checking sees the qualified member access rather than the bare source spelling.
+    let contextual_resolutions = ctx.resolved_contextual_names().clone();
+    let (mut type_env, type_diagnostics) = ctx.finish();
     diagnostics.extend(normalize_diagnostics_file_name(type_diagnostics, file_name));
+    let rewritten_bases = nx_hir::apply_contextual_name_resolutions(
+        &mut prepared_module,
+        &contextual_resolutions,
+        |resolution| (resolution.type_name.clone(), resolution.member.clone()),
+    );
+    // Type the identifier each rewrite introduced exactly as the qualified form's base would be,
+    // so downstream consumers see the same typed tree either way.
+    for (expr_id, base_id) in rewritten_bases {
+        if let Some(base_ty) = contextual_resolutions
+            .get(&expr_id)
+            .and_then(|resolution| resolution.base_ty.clone())
+        {
+            type_env.set_expr_type(base_id, base_ty);
+        }
+    }
 
     let prepared_bindings = collect_prepared_bindings(&prepared_module);
     let preserved_module = prepared_module.raw_module().clone();

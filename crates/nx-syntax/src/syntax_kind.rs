@@ -140,6 +140,10 @@ pub enum SyntaxKind {
     BOOLEAN_LITERAL,
     BOOL_LITERAL,
     NULL_LITERAL,
+    SIGNED_NUMERIC_LITERAL,
+
+    // === Unbraced value forms ===
+    CONTEXTUAL_NAME,
 
     // === Names and Identifiers ===
     IDENTIFIER,
@@ -466,6 +470,8 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "boolean_literal" => SyntaxKind::BOOLEAN_LITERAL,
         "bool_literal" => SyntaxKind::BOOL_LITERAL,
         "null_literal" => SyntaxKind::NULL_LITERAL,
+        "signed_numeric_literal" => SyntaxKind::SIGNED_NUMERIC_LITERAL,
+        "contextual_name" => SyntaxKind::CONTEXTUAL_NAME,
         "identifier" => SyntaxKind::IDENTIFIER,
         "qualified_name" => SyntaxKind::QUALIFIED_NAME,
         "qualified_markup_name" => SyntaxKind::QUALIFIED_MARKUP_NAME,
