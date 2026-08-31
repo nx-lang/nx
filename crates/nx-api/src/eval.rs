@@ -573,7 +573,7 @@ let root() = { answer() }"#;
     }
 
     #[test]
-    fn eval_source_returns_bare_authored_enum_member_string() {
+    fn eval_source_returns_bare_authored_case_string() {
         let source = r#"
             type Status = active | disabled
             let root() = { Status.active }

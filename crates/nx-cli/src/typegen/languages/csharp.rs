@@ -227,8 +227,8 @@ fn emit_declaration(
 }
 
 /// Emits a constant union as a CLR `enum` with its authored-string wire format (design D4).
-fn emit_constant_union(writer: &mut CodeWriter, enum_def: &ExportedUnion) {
-    let enum_name = sanitize_csharp_identifier(&enum_def.name);
+fn emit_constant_union(writer: &mut CodeWriter, union: &ExportedUnion) {
+    let enum_name = sanitize_csharp_identifier(&union.name);
     writer.line(&format!(
         "[JsonConverter(typeof(NxEnumJsonConverter<{enum_name}, {enum_name}WireFormat>))]"
     ));
@@ -236,8 +236,8 @@ fn emit_constant_union(writer: &mut CodeWriter, enum_def: &ExportedUnion) {
         "[MessagePackFormatter(typeof(NxEnumMessagePackFormatter<{enum_name}, {enum_name}WireFormat>))]"
     ));
     writer.block(&format!("public enum {enum_name}"), |writer| {
-        for (index, case) in enum_def.cases.iter().enumerate() {
-            let comma = if index + 1 == enum_def.cases.len() {
+        for (index, case) in union.cases.iter().enumerate() {
+            let comma = if index + 1 == union.cases.len() {
                 ""
             } else {
                 ","
@@ -251,7 +251,7 @@ fn emit_constant_union(writer: &mut CodeWriter, enum_def: &ExportedUnion) {
     });
 
     writer.blank_line();
-    emit_constant_union_wire_format(writer, enum_def);
+    emit_constant_union_wire_format(writer, union);
 }
 
 fn emit_record(
@@ -604,8 +604,8 @@ fn emit_dual_annotated_auto_property(
     writer.line(declaration);
 }
 
-fn emit_constant_union_wire_format(writer: &mut CodeWriter, enum_def: &ExportedUnion) {
-    let enum_name = sanitize_csharp_identifier(&enum_def.name);
+fn emit_constant_union_wire_format(writer: &mut CodeWriter, union: &ExportedUnion) {
+    let enum_name = sanitize_csharp_identifier(&union.name);
     writer.block(
         &format!("internal sealed class {enum_name}WireFormat : INxEnumWireFormat<{enum_name}>"),
         |writer| {
@@ -616,7 +616,7 @@ fn emit_constant_union_wire_format(writer: &mut CodeWriter, enum_def: &ExportedU
             writer.line("value switch");
             writer.line("{");
             writer.indent();
-            for case in &enum_def.cases {
+            for case in &union.cases {
                 let member_literal = escape_csharp_string_literal(&case.name);
                 let member_ident = sanitize_csharp_member_name(&case.name);
                 writer.line(&format!(
@@ -635,7 +635,7 @@ fn emit_constant_union_wire_format(writer: &mut CodeWriter, enum_def: &ExportedU
             writer.line("value switch");
             writer.line("{");
             writer.indent();
-            for case in &enum_def.cases {
+            for case in &union.cases {
                 let member_literal = escape_csharp_string_literal(&case.name);
                 let member_ident = sanitize_csharp_member_name(&case.name);
                 writer.line(&format!(

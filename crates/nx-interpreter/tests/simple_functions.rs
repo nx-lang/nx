@@ -379,11 +379,11 @@ fn test_paren_function_without_return_annotation() {
 }
 
 // ============================================================================
-// Enum Support Tests
+// Constant Union Tests
 // ============================================================================
 
 #[test]
-fn test_enum_member_return() {
+fn test_constant_case_return() {
     let source = r#"
         type Direction = north | south | east | west
         let <north /> = { Direction.north }
@@ -400,7 +400,7 @@ fn test_enum_member_return() {
 }
 
 #[test]
-fn test_enum_comparison() {
+fn test_constant_case_comparison() {
     let source = r#"
         type Direction = north | south | east | west
         let isNorth(value:Direction): boolean = { value == Direction.north }

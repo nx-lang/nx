@@ -965,7 +965,7 @@
       "match": "-(?=[0-9])"
     },
     "contextual-name": {
-      "comment": "A bare value in an unbraced property position: a union case, resolved against the property's declared type.",
+      "comment": "A bare value in an unbraced property position: a union case, resolved against the property's declared type. Keeps the conventional `enummember` scope, which themes style; a bespoke union-case scope would go unstyled in most of them.",
       "name": "variable.other.enummember.nx",
       "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
     },

@@ -4799,7 +4799,7 @@ mod tests {
             RuntimeErrorKind::TypeMismatch { actual, .. } if actual == "unknown state field 'extra'"
         ));
 
-        let bad_enum = interpreter
+        let bad_case = interpreter
             .evaluate_component(
                 module.as_ref(),
                 "SearchBox",
@@ -4817,7 +4817,7 @@ mod tests {
             )
             .expect_err("Expected unknown enum state value to fail");
         assert!(matches!(
-            bad_enum.kind(),
+            bad_case.kind(),
             RuntimeErrorKind::TypeMismatch { actual, .. }
                 if actual == "unknown union case 'sparkly'"
         ));
@@ -5124,7 +5124,7 @@ mod tests {
                 if expected == "record" && actual == "int"
         ));
 
-        let bad_enum = interpreter
+        let bad_case = interpreter
             .evaluate_component(
                 module.as_ref(),
                 "SearchBox",
@@ -5142,7 +5142,7 @@ mod tests {
             )
             .expect_err("Expected external component evaluation to reject invalid enum state");
         assert!(matches!(
-            bad_enum.kind(),
+            bad_case.kind(),
             RuntimeErrorKind::TypeMismatch { actual, .. }
                 if actual == "unknown union case 'sparkly'"
         ));

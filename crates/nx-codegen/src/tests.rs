@@ -768,7 +768,7 @@ let root(): int = { answer }"#,
 }
 
 #[test]
-fn generated_javascript_serializes_records_enums_and_elements() {
+fn generated_javascript_serializes_records_constant_cases_and_elements() {
     let cases = [
         r#"
 type User = {
@@ -1103,7 +1103,7 @@ let root() = { <User age=42 name="Ada" /> }"#,
 }
 
 #[test]
-fn emits_strong_typescript_records_and_string_union_enums() {
+fn emits_strong_typescript_records_and_constant_unions() {
     let record_artifact = artifact_from_source(
         r#"
 type User = { name: string tags: string[] age: int }
@@ -1126,22 +1126,22 @@ let root() = { <User age=42 name="Ada" tags={ "admin" "editor" } /> }
     assert!(!record_module.contains("nxArray"));
     assert!(!record_module.contains("nxRecord"));
 
-    let enum_artifact = artifact_from_source(
+    let constant_union_artifact = artifact_from_source(
         r#"
 type Theme = light | dark
 let root() = { Theme.dark }
 "#,
     );
-    let enum_module = generated_file(&enum_artifact, CodegenTarget::TypeScript, "m0_main.ts");
+    let constant_union_module = generated_file(&constant_union_artifact, CodegenTarget::TypeScript, "m0_main.ts");
 
-    assert!(enum_module.contains("export const Theme = {"));
-    assert!(enum_module.contains("light: \"light\","));
-    assert!(enum_module.contains("dark: \"dark\","));
-    assert!(enum_module.contains("} as const;"));
-    assert!(enum_module.contains("export type Theme = typeof Theme[keyof typeof Theme];"));
-    assert!(enum_module.contains("export function root(): Theme"));
-    assert!(enum_module.contains("return Theme.dark;"));
-    assert!(!enum_module.contains("nxEnum"));
+    assert!(constant_union_module.contains("export const Theme = {"));
+    assert!(constant_union_module.contains("light: \"light\","));
+    assert!(constant_union_module.contains("dark: \"dark\","));
+    assert!(constant_union_module.contains("} as const;"));
+    assert!(constant_union_module.contains("export type Theme = typeof Theme[keyof typeof Theme];"));
+    assert!(constant_union_module.contains("export function root(): Theme"));
+    assert!(constant_union_module.contains("return Theme.dark;"));
+    assert!(!constant_union_module.contains("nxEnum"));
 }
 
 #[test]
@@ -2092,7 +2092,7 @@ let root() = { 1 }
 }
 
 #[test]
-fn generated_component_entry_handles_enums_nullable_fields_and_lists() {
+fn generated_component_entry_handles_constant_cases_nullable_fields_and_lists() {
     let artifact = artifact_from_source(
         r#"
 type Mode = exact | fuzzy
@@ -2131,7 +2131,7 @@ let root() = { 1 }
 }
 
 #[test]
-fn generated_component_entry_rejects_invalid_enum_host_input() {
+fn generated_component_entry_rejects_invalid_constant_case_host_input() {
     let artifact = artifact_from_source(
         r#"
 type Mode = exact | fuzzy

@@ -2489,7 +2489,7 @@ type Mode = light | dark"#;
     }
 
     #[test]
-    fn test_lower_type_alias_and_enum() {
+    fn test_lower_type_alias_and_union() {
         let source = r#"
             type UserId = string
             type Direction = north | south | east | west
@@ -3434,7 +3434,7 @@ type Mode = light | dark"#;
     }
 
     #[test]
-    fn test_lower_enum_with_leading_pipe() {
+    fn test_lower_union_with_leading_pipe() {
         let source = r#"
             type Orientation = horizontal | vertical
         "#;

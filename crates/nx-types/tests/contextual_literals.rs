@@ -29,7 +29,7 @@ const FIT: &str = "type Fit = fill | contain | cover\n";
 const LOAD_STATE: &str = "type LoadState = idle | loading\n";
 
 #[test]
-fn bare_name_resolves_to_an_enum_member_at_an_enum_typed_property() {
+fn bare_name_resolves_to_a_case_at_a_union_typed_property() {
     assert_clean(&format!("{FIT}type Box = {{ fit: Fit }}\n<Box fit=cover />"));
 }
 
@@ -124,7 +124,7 @@ fn nominal_resolution_in_pattern_position_reports_a_displaced_binding() {
 }
 
 #[test]
-fn quoted_string_at_an_enum_typed_property_is_rejected() {
+fn quoted_string_at_a_union_typed_property_is_rejected() {
     assert_reports(
         &format!("{FIT}type Box = {{ fit: Fit }}\n<Box fit=\"cover\" />"),
         "a quoted string is never a member of Fit",

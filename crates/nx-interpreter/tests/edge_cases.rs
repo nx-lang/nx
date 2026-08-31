@@ -1,6 +1,6 @@
 //! Integration tests for edge cases and special scenarios
 //!
-//! Tests for variable shadowing, Unicode strings, null handling, enum error handling,
+//! Tests for variable shadowing, Unicode strings, null handling, union error handling,
 //! boolean operations, and other edge cases.
 //!
 //! Note: Ternary and if-else expression tests are in conditionals.rs
@@ -257,12 +257,12 @@ fn test_void_value() {
 }
 
 // ============================================================================
-// Enum Edge Cases
+// Constant Union Edge Cases
 // ============================================================================
 
-/// Test enum value access
+/// Test constant case access
 #[test]
-fn test_enum_value_access() {
+fn test_constant_case_access() {
     let source = r#"type Color = red | green | blue
 let <color /> = { Color.green }"#;
 
@@ -276,9 +276,9 @@ let <color /> = { Color.green }"#;
     }
 }
 
-/// Test undefined enum member (should error)
+/// Test undefined union case (should error)
 #[test]
-fn test_undefined_enum_member() {
+fn test_undefined_union_case() {
     let source = r#"type Color = red | green | blue
 let <color /> = { Color.yellow }"#;
 
@@ -286,10 +286,10 @@ let <color /> = { Color.yellow }"#;
     assert!(result.is_err(), "Expected error for undefined enum variant");
 }
 
-/// Test undefined enum (should error)
+/// Test undefined union (should error)
 #[test]
-fn test_undefined_enum() {
-    let source = r#"let <color /> = { UnknownEnum.Value }"#;
+fn test_undefined_union() {
+    let source = r#"let <color /> = { UnknownUnion.value }"#;
 
     let result = execute_function(source, "color", vec![]);
     assert!(result.is_err(), "Expected error for undefined enum");

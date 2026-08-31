@@ -330,7 +330,7 @@ mod tests {
     }
 
     #[test]
-    fn test_format_enum_value() {
+    fn test_format_constant_case_value() {
         let value = Value::UnionCase {
             union: nx_hir::Name::new("Status"),
             case: SmolStr::new("active"),

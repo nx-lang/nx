@@ -178,7 +178,7 @@ mod tests {
     }
 
     #[test]
-    fn interpreter_enum_value_lowers_to_bare_authored_member_string() {
+    fn interpreter_constant_case_lowers_to_bare_authored_case_string() {
         let runtime = Value::UnionCase {
             union: Name::new("Status"),
             case: SmolStr::new("active"),

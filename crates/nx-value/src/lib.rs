@@ -15,10 +15,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A JSON-like tree value used as the stable NX API value type.
 ///
-/// Enum values are represented as [`NxValue::String`] carrying the bare authored member name.
-/// The declaring enum type is recovered from the target schema (declared NX type, typed DTO
+/// Constant union cases are represented as [`NxValue::String`] carrying the bare authored case
+/// name. The declaring union is recovered from the target schema (declared NX type, typed DTO
 /// property, or other type annotation) at the point where the value is consumed; the IR itself
-/// carries no in-payload enum type wrapper.
+/// carries no in-payload union type wrapper.
 #[derive(Debug, Clone, PartialEq)]
 pub enum NxValue {
     Null,
@@ -29,7 +29,7 @@ pub enum NxValue {
     Float(f64),
     /// String value.
     ///
-    /// A string value may represent either a plain string or an enum member. The two are
+    /// A string value may represent either a plain string or a constant union case. The two are
     /// distinguishable only against the target schema — a schema-less consumer cannot tell
     /// them apart from the payload alone.
     String(String),
@@ -355,7 +355,7 @@ mod tests {
     }
 
     #[test]
-    fn json_round_trip_enum_member_as_bare_string() {
+    fn json_round_trip_constant_case_as_bare_string() {
         let value = NxValue::String("active".to_string());
 
         let json = value.to_json_string().unwrap();
@@ -493,7 +493,7 @@ mod tests {
     }
 
     #[test]
-    fn msgpack_round_trip_enum_member_as_bare_string() {
+    fn msgpack_round_trip_constant_case_as_bare_string() {
         let value = NxValue::String("active".to_string());
 
         let bytes = value.to_msgpack_vec().unwrap();

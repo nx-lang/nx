@@ -153,7 +153,7 @@ pub enum Type {
     /// A bare name awaiting resolution against the expected type of its binding site.
     ///
     /// Produced by inference for `Expr::ContextualName`, which has no context-free type. It is
-    /// replaced by the resolved enum member or union case type at the binding site, and reaching a
+    /// replaced by the resolved union case type at the binding site, and reaching a
     /// site that supplies no expected type is a diagnostic rather than a silent success.
     ContextualName(Name),
 

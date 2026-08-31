@@ -576,7 +576,7 @@ let root() = { 0 }"#;
     }
 
     #[test]
-    fn evaluate_component_source_returns_json_compatible_enum_output() {
+    fn evaluate_component_source_returns_json_compatible_constant_case_output() {
         let source = r#"
             type ThemeMode = light | dark
 
@@ -880,7 +880,7 @@ let root() = { 0 }"#;
     }
 
     #[test]
-    fn initialize_component_source_round_trips_enum_props_in_rendered_output() {
+    fn initialize_component_source_round_trips_constant_case_props_in_rendered_output() {
         let source = r#"
             type ThemeMode = light | dark
 
@@ -920,7 +920,7 @@ let root() = { 0 }"#;
     }
 
     #[test]
-    fn initialize_component_source_rejects_unknown_enum_member_in_prop() {
+    fn initialize_component_source_rejects_unknown_union_case_in_prop() {
         let source = r#"
             type ThemeMode = light | dark
 
@@ -959,7 +959,7 @@ let root() = { 0 }"#;
     }
 
     #[test]
-    fn dispatch_component_actions_source_round_trips_enum_effects_and_snapshot() {
+    fn dispatch_component_actions_source_round_trips_constant_case_effects_and_snapshot() {
         let source = r#"
             type ThemeMode = light | dark
 

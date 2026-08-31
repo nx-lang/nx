@@ -3485,8 +3485,8 @@ let root() = { <Img fit=cover state=loading /> }"#,
     }
 
     #[test]
-    fn imported_property_type_does_not_bind_to_a_same_named_local_enum() {
-        // `Img.fit` is the widgets `Fit`. A local enum sharing the spelling is a different type,
+    fn imported_property_type_does_not_bind_to_a_same_named_local_union() {
+        // `Img.fit` is the widgets `Fit`. A local union sharing the spelling is a different type,
         // and neither its members nor the type itself may stand in for it.
         let bare = contextual_messages(
             r#"import { Img } from "./widgets.nx"

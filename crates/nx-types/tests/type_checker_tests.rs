@@ -56,7 +56,7 @@ fn test_infer_array_types() {
 }
 
 #[test]
-fn test_enum_definition_type_checks() {
+fn test_constant_union_definition_type_checks() {
     let source = r#"
         type Direction = north | south | east | west
         let current: Direction = { Direction.north }

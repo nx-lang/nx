@@ -698,7 +698,7 @@ pub enum CompletionItemKind {
     Component,
     /// Component property.
     Property,
-    /// Enum member or payloadless union case, offered at a property value position.
+    /// Constant union case, offered at a property value position.
     Member,
 }
 
@@ -778,7 +778,7 @@ struct Declaration {
     properties: Vec<String>,
     /// Property name paired with the base name of its declared type, for contextual completions.
     property_types: Vec<(String, String)>,
-    /// Enum members or union case names, for contextual completions at a value position.
+    /// Union case names, for contextual completions at a value position.
     members: Vec<String>,
 }
 
@@ -1333,7 +1333,7 @@ fn type_ref_display(ty: &TypeRef) -> String {
 /// returns the members a bare name could resolve to there.
 ///
 /// Returns `None` when the element or property is unknown, or when the property's declared type is
-/// not an enum or a union, because a bare name is not accepted at those sites either.
+/// not a union, because a bare name is not accepted at those sites either.
 fn property_value_context(
     source: &str,
     offset: usize,

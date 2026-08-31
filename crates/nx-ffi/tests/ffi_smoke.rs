@@ -518,7 +518,7 @@ fn ffi_json_success_round_trip() {
 }
 
 #[test]
-fn ffi_msgpack_enum_value_emits_bare_authored_member_string() {
+fn ffi_msgpack_constant_case_emits_bare_authored_case_string() {
     let (status, bytes) = eval_msgpack(
         r#"
             type Status = active | disabled
@@ -533,7 +533,7 @@ fn ffi_msgpack_enum_value_emits_bare_authored_member_string() {
 }
 
 #[test]
-fn ffi_json_enum_value_emits_bare_authored_member_string() {
+fn ffi_json_constant_case_emits_bare_authored_case_string() {
     let (status, json) = eval_json(
         r#"
             type Status = active | disabled
@@ -1493,7 +1493,7 @@ fn ffi_component_dispatch_round_trips_effect_payloads_in_msgpack_and_json() {
 }
 
 #[test]
-fn ffi_component_init_round_trips_enum_props_in_msgpack_and_json() {
+fn ffi_component_init_round_trips_constant_case_props_in_msgpack_and_json() {
     let source = r#"
         type ThemeMode = light | dark
 
@@ -1566,7 +1566,7 @@ fn ffi_component_init_round_trips_enum_props_in_msgpack_and_json() {
 }
 
 #[test]
-fn ffi_component_dispatch_round_trips_enum_effect_payloads_in_msgpack_and_json() {
+fn ffi_component_dispatch_round_trips_constant_case_effect_payloads_in_msgpack_and_json() {
     let source = r#"
         type ThemeMode = light | dark
 

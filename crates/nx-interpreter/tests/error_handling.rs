@@ -194,7 +194,7 @@ fn test_undeclared_union_runtime_error() {
         .expect_err("Missing union should fail at runtime");
 
     // With one nominal kind, a name that reaches no declaration at all is simply undefined —
-    // there is no separate "enum not found" state to be in.
+    // there is no separate "union not found" state to be in.
     match err.kind() {
         RuntimeErrorKind::UndefinedVariable { name } => {
             assert_eq!(name.as_str(), "Direction");

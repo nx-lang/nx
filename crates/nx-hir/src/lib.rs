@@ -773,7 +773,7 @@ pub type ElementId = Idx<Element>;
 /// High-level intermediate representation of a module.
 ///
 /// A module corresponds to a single .nx source file and contains all top-level
-/// items (functions, type aliases, enums, records) along with the expression
+/// items (functions, type aliases, unions, records) along with the expression
 /// and element arenas. Top-level elements are represented as implicit 'root'
 /// functions rather than as separate items.
 #[derive(Debug, Clone, PartialEq, Eq)]

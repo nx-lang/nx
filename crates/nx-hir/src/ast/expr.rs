@@ -138,7 +138,7 @@ pub enum Expr {
     ///
     /// Resolved against the declared type of the binding site rather than against lexical scope,
     /// so it is deliberately a different node from [`Expr::Ident`]. Type analysis replaces it with
-    /// an enum member or a payloadless union case; reaching a site with no expected type is a
+    /// a constant union case; reaching a site with no expected type is a
     /// diagnostic.
     ///
     /// Example: `cover` in `<Img fit=cover />`

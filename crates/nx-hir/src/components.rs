@@ -379,7 +379,7 @@ pub fn validate_component_definitions(module: &PreparedModule) -> Vec<ComponentR
 /// Rewrites resolved contextual names into the qualified member access they resolved to.
 ///
 /// Type analysis resolves a bare name against the declared type of its binding site and reports
-/// which enum member or union case it named. Applying those resolutions here means nothing after
+/// which union case it named. Applying those resolutions here means nothing after
 /// type checking — the interpreter, codegen, or the IR — can tell a contextual literal from the
 /// qualified form, which is what lets every downstream consumer stay unchanged.
 pub fn apply_contextual_name_resolutions<T>(

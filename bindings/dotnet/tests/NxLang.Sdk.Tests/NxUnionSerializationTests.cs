@@ -302,7 +302,7 @@ public class NxUnionSerializationTests
     }
 
     [Fact]
-    public void TypedEnumWorkflow_RemainsBareStringBased()
+    public void TypedConstantUnionWorkflow_RemainsBareStringBased()
     {
         string json = JsonSerializer.Serialize(CardSortMode.Closed);
         byte[] bytes = MessagePackSerializer.Serialize(

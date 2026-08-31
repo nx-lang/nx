@@ -2529,7 +2529,7 @@ let z = {
     }
 
     /// A fieldless case of a base-less union is a constant case, and carries no more information
-    /// than its name — so it serializes as a bare string, exactly as an enum member does, rather
+    /// than its name — so it serializes as a bare string, exactly as an enum member did, rather
     /// than as a `$type` map.
     #[test]
     fn constant_union_case_serializes_as_a_bare_string() {

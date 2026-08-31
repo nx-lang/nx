@@ -675,7 +675,7 @@ test("uses module-qualified nominal type references and entrypoint-only lookup",
     assertEqual(evaluateFunction(prepared, "acceptUser", [{ name: "Ada" }]), { $type: "User", name: "Ada" });
     assertThrows(() => evaluateFunction(prepared, "helper"), "Function entrypoint 'helper' was not found");
 });
-test("evaluates function calls, records, union cases, enums, loops, and match expressions", () => {
+test("evaluates function calls, records, union cases, loops, and match expressions", () => {
     const prepared = prepareNxIrProgram(program);
     assertEqual(evaluateFunction(prepared, "root"), 42);
     assertEqual(evaluateFunction(prepared, "values"), { $type: "User", name: "Ada", score: 42 });

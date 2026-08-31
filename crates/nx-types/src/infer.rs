@@ -34,7 +34,7 @@ struct ElementPropertySpec {
 /// One resolved contextual name, and everything needed to rewrite it to the qualified form.
 #[derive(Clone, Debug)]
 pub struct ContextualResolution {
-    /// The enum or union that the bare name resolved against.
+    /// The union that the bare name resolved against.
     pub type_name: Name,
     /// The member or case it named.
     pub member: Name,
@@ -1905,8 +1905,8 @@ impl<'a> InferenceContext<'a> {
     /// Resolves a bare name against the expected type of its binding site.
     ///
     /// The single entry point for contextual literal resolution, shared by every binding site so
-    /// the rule cannot drift between them. Resolves only against the closed nominal set — enum
-    /// members and payloadless union cases — and never falls back to treating the name as a string.
+    /// the rule cannot drift between them. Resolves only against the closed nominal set — the
+    /// constant cases of a union — and never falls back to treating the name as a string.
     fn resolve_contextual_name(
         &mut self,
         expr: ExprId,
@@ -2043,7 +2043,7 @@ impl<'a> InferenceContext<'a> {
 
     /// Suggests the bare form when a string was written at a site that wants a nominal value.
     ///
-    /// A quoted string never resolves to an enum member or union case, so the fix is the bare
+    /// A quoted string never resolves to a union case, so the fix is the bare
     /// spelling rather than a different string.
     fn bare_form_hint(&self, actual: &Type, expected: &Type) -> String {
         if !matches!(actual, Type::Primitive(crate::ty::Primitive::String)) {
@@ -3046,7 +3046,7 @@ mod tests {
     }
 
     #[test]
-    fn test_infer_enum_member_access() {
+    fn test_infer_union_case_access() {
         let mut module = LoweredModule::new(SourceId::new(0));
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
         let union_def = UnionDef {
@@ -3094,7 +3094,7 @@ mod tests {
     }
 
     #[test]
-    fn test_infer_enum_invalid_member() {
+    fn test_infer_invalid_union_case() {
         let mut module = LoweredModule::new(SourceId::new(0));
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
         let union_def = UnionDef {
@@ -3126,7 +3126,7 @@ mod tests {
     }
 
     #[test]
-    fn test_enum_member_access_via_alias() {
+    fn test_union_case_access_via_alias() {
         let mut module = LoweredModule::new(SourceId::new(0));
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
         let union_def = UnionDef {
@@ -3168,7 +3168,7 @@ mod tests {
     }
 
     #[test]
-    fn test_function_signature_uses_enum_type() {
+    fn test_function_signature_uses_union_type() {
         let mut module = LoweredModule::new(SourceId::new(0));
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
         let union_def = UnionDef {
