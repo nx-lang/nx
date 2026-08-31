@@ -66,7 +66,6 @@ export interface NxIrDeclaration {
 export type NxIrDeclarationKind =
   | NxIrFunctionDeclaration
   | NxIrValueDeclaration
-  | NxIrEnumDeclaration
   | NxIrRecordDeclaration
   | NxIrComponentDeclaration
   | NxIrUnionDeclaration
@@ -83,11 +82,6 @@ export interface NxIrValueDeclaration {
   readonly tag: "value";
   readonly value: NxIrExpression;
   readonly ty?: NxIrSemanticType;
-}
-
-export interface NxIrEnumDeclaration {
-  readonly tag: "enum";
-  readonly members: readonly string[];
 }
 
 export interface NxIrRecordDeclaration {
@@ -138,6 +132,13 @@ export interface NxIrComponentField extends NxIrRecordField {
 export interface NxIrUnionCase {
   readonly name: string;
   readonly fields: readonly NxIrRecordField[];
+  /**
+   * Whether this case declares no fields in a union that declares no base.
+   *
+   * A constant case carries nothing beyond its own name, so its wire form is that bare string
+   * rather than a `$type` object.
+   */
+  readonly isConstant: boolean;
   readonly span: NxIrSourceSpan;
 }
 
@@ -230,7 +231,6 @@ const knownExpressionTags = new Set([
   "member",
   "record",
   "unionCase",
-  "enumMember",
   "intrinsicElement",
   "componentDescriptor",
 ]);
@@ -571,8 +571,6 @@ function evalExpression(expression: NxIrExpression, context: EvalContext): NxCan
       return evalRecord(op, context);
     case "unionCase":
       return evalUnionCase(op, context);
-    case "enumMember":
-      return String(op.member);
     case "intrinsicElement":
       return evalIntrinsicElement(op, context);
     case "componentDescriptor":
@@ -716,6 +714,11 @@ function evalUnionCase(op: Record<string, unknown>, context: EvalContext): NxCan
     `${union.name}.${caseName}`,
     false,
   );
+
+  // A constant case carries nothing beyond its own name.
+  if (op.isConstant === true) {
+    return caseName;
+  }
 
   return { $type: `${union.name}.${caseName}`, ...normalized };
 }
@@ -887,17 +890,20 @@ function normalizeNominalValue(
     fail("nx-ir-schema", `Missing nominal type declaration '${reference.declaration}'.`);
   }
   const kind = prepared.declaration.kind;
-  if (kind.tag === "enum") {
-    if (typeof value !== "string" || !kind.members.includes(value)) {
-      fail("nx-ir-boundary-type", `Invalid enum member for ${path}: '${String(value)}'.`);
-    }
-    return value;
-  }
   if (kind.tag === "record") {
     const object = requireObject(value, path);
     return { $type: display, ...normalizeFields(program, kind.fields, object, new Map(), path, false) };
   }
   if (kind.tag === "union") {
+    // A constant case arrives as its bare name rather than as a `$type` object.
+    if (typeof value === "string") {
+      const constantCase = kind.cases.find((item) => item.name === value && item.isConstant);
+      if (constantCase === undefined) {
+        fail("nx-ir-boundary-type", `Invalid constant union case for ${path}: '${value}'.`);
+      }
+      return value;
+    }
+
     const object = requireObject(value, path);
     const typeName = object.$type;
     if (typeof typeName !== "string") {
@@ -974,7 +980,6 @@ function validateDeclaration(
         validateFields(item.fields, declarationsById, diagnostics);
       }
       break;
-    case "enum":
     case "typeAlias":
       break;
     default:

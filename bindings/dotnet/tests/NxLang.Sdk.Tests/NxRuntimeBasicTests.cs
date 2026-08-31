@@ -68,10 +68,10 @@ public class NxRuntimeBasicTests
     }
 
     [Fact]
-    public void EvaluateJson_EnumValue_ReturnsBareAuthoredMemberString()
+    public void EvaluateJson_ConstantUnionCase_ReturnsBareAuthoredCaseString()
     {
         string source = """
-            enum ThemeMode = | light | dark
+            type ThemeMode = light | dark
 
             let root() = { ThemeMode.dark }
             """;

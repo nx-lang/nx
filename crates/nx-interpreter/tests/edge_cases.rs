@@ -263,23 +263,23 @@ fn test_void_value() {
 /// Test enum value access
 #[test]
 fn test_enum_value_access() {
-    let source = r#"enum Color = red | green | blue
+    let source = r#"type Color = red | green | blue
 let <color /> = { Color.green }"#;
 
     let result = execute_function(source, "color", vec![]).unwrap_or_else(|e| panic!("{}", e));
     match result {
-        Value::EnumValue { type_name, member } => {
-            assert_eq!(type_name.as_str(), "Color");
-            assert_eq!(member.as_str(), "green");
+        Value::UnionCase { union, case } => {
+            assert_eq!(union.as_str(), "Color");
+            assert_eq!(case.as_str(), "green");
         }
-        other => panic!("Expected EnumValue, got {:?}", other),
+        other => panic!("Expected a constant union case, got {:?}", other),
     }
 }
 
 /// Test undefined enum member (should error)
 #[test]
 fn test_undefined_enum_member() {
-    let source = r#"enum Color = red | green | blue
+    let source = r#"type Color = red | green | blue
 let <color /> = { Color.yellow }"#;
 
     let result = execute_function(source, "color", vec![]);

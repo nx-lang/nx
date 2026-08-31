@@ -37,12 +37,11 @@ use smol_str::SmolStr;
 // Re-export lowering function
 pub use lower::lower;
 pub use prepared::{
-    binding_specs_for_item, interface_component, interface_enum, interface_function_signature,
-    interface_record, interface_type_alias, interface_union, local_definition_id,
-    prepared_item_kind, ImportedRawRef, InterfaceField, InterfaceItem, InterfaceItemKind,
-    InterfaceParam, InterfaceUnionCase, LocalDefinitionId, PreparedBinding, PreparedBindingOrigin,
-    PreparedBindingTarget, PreparedItemKind, PreparedModule, PreparedNamespace,
-    ResolvedPreparedItem,
+    binding_specs_for_item, interface_component, interface_function_signature, interface_record,
+    interface_type_alias, interface_union, local_definition_id, prepared_item_kind, ImportedRawRef,
+    InterfaceField, InterfaceItem, InterfaceItemKind, InterfaceParam, InterfaceUnionCase,
+    LocalDefinitionId, PreparedBinding, PreparedBindingOrigin, PreparedBindingTarget,
+    PreparedItemKind, PreparedModule, PreparedNamespace, ResolvedPreparedItem,
 };
 
 pub use components::{
@@ -274,28 +273,6 @@ pub struct TypeAlias {
     pub span: TextSpan,
 }
 
-/// Enum member.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EnumMember {
-    /// Member name
-    pub name: Name,
-    /// Source span
-    pub span: TextSpan,
-}
-
-/// Enum definition.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EnumDef {
-    /// Enum name
-    pub name: Name,
-    /// Declaration visibility
-    pub visibility: Visibility,
-    /// Members for the enum
-    pub members: Vec<EnumMember>,
-    /// Source span
-    pub span: TextSpan,
-}
-
 /// Field declared on one discriminated union case.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnionCaseField {
@@ -356,6 +333,22 @@ impl UnionCaseDef {
     /// Returns true when this case has no payload fields.
     pub fn is_fieldless(&self) -> bool {
         self.fields.is_empty()
+    }
+}
+
+impl UnionDef {
+    /// Returns true when `case` is a constant case: it declares no fields and this union declares
+    /// no base, so the case carries nothing beyond its own name.
+    ///
+    /// <para>A fieldless case of a union that extends an abstract base is not constant. It inherits
+    /// the base's fields, so it still needs the record representation.</para>
+    pub fn is_constant_case(&self, case: &UnionCaseDef) -> bool {
+        self.base.is_none() && case.is_fieldless()
+    }
+
+    /// Returns true when every case is constant. This is what an `enum` declared.
+    pub fn is_constant_union(&self) -> bool {
+        self.base.is_none() && self.cases.iter().all(UnionCaseDef::is_fieldless)
     }
 }
 
@@ -702,8 +695,6 @@ pub enum Item {
     Component(Component),
     /// Type alias declaration
     TypeAlias(TypeAlias),
-    /// Enum declaration
-    Enum(EnumDef),
     /// Discriminated union declaration
     Union(UnionDef),
     /// Record declaration
@@ -718,7 +709,6 @@ impl Item {
             Item::Value(value) => &value.name,
             Item::Component(component) => &component.name,
             Item::TypeAlias(alias) => &alias.name,
-            Item::Enum(enum_def) => &enum_def.name,
             Item::Union(union_def) => &union_def.name,
             Item::Record(record_def) => &record_def.name,
         }
@@ -731,7 +721,6 @@ impl Item {
             Item::Value(value) => value.visibility,
             Item::Component(component) => component.visibility,
             Item::TypeAlias(alias) => alias.visibility,
-            Item::Enum(enum_def) => enum_def.visibility,
             Item::Union(union_def) => union_def.visibility,
             Item::Record(record_def) => record_def.visibility,
         }

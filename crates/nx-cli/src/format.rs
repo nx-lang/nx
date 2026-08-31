@@ -1,215 +1,143 @@
 //! Pretty printing for NX values in NX syntax format.
 //!
-//! This module provides formatting of runtime values in NX syntax,
-//! which resembles XML with self-closing tags for elements.
+//! Every field of a record is emitted in property position as `key=value`. NX has no
+//! property-element syntax — an element body binds to the single field marked `is_content`, which
+//! is schema information no [`Value`] carries — so a property name written in body position has
+//! nowhere to go and cannot be read back. Rendering is therefore uniform: the simple/complex split
+//! decides line layout only, never whether a field becomes body content.
 
 use nx_interpreter::Value;
 use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
 use std::fmt::Write;
 
-/// Pretty print a Value to NX format string.
+/// Pretty print a value as NX source.
 ///
-/// # Rules
-/// - Literal values (string, number, bool, null) are printed directly
-/// - Records and objects are printed as XML-like elements
-/// - Arrays are printed as a sequence of their elements
-pub fn format_value(value: &Value) -> String {
+/// Fails for a value with no NX spelling rather than emitting output that does not read back.
+/// Two values are in that position today: an empty list, because `items={}` is a syntax error, and
+/// [`Value::ActionHandler`], which has no source form at all.
+pub fn format_value(value: &Value) -> Result<String, String> {
     let mut output = String::new();
-    format_value_inner(value, &mut output, 0);
-    output
+    format_value_inner(value, &mut output, 0)?;
+    Ok(output)
 }
 
-fn format_value_inner(value: &Value, output: &mut String, indent: usize) {
+fn format_value_inner(value: &Value, output: &mut String, indent: usize) -> Result<(), String> {
     match value {
-        // Literal values - print directly
         Value::Int32(n) => write!(output, "{}", n).unwrap(),
         Value::Int(n) => write!(output, "{}", n).unwrap(),
-        Value::Float32(f) => write!(output, "{}", f).unwrap(),
-        Value::Float(f) => write!(output, "{}", f).unwrap(),
+        Value::Float32(f) => output.push_str(&format_real_literal(f64::from(*f))),
+        Value::Float(f) => output.push_str(&format_real_literal(*f)),
         Value::String(s) => output.push_str(s.as_str()),
         Value::Boolean(b) => write!(output, "{}", b).unwrap(),
         Value::Null => output.push_str("null"),
 
-        // Enum value
-        Value::EnumValue { type_name, member } => {
-            write!(output, "{}.{}", type_name, member).unwrap();
+        // A constant union case names its union, exactly as the qualified source form does.
+        Value::UnionCase { union, case } => {
+            write!(output, "{}.{}", union, case).unwrap();
         }
 
-        // Array - print each element
+        // A top-level sequence is a run of values, one per line.
         Value::Array(elements) => {
             for (i, elem) in elements.iter().enumerate() {
                 if i > 0 {
                     output.push('\n');
                 }
-                format_value_inner(elem, output, indent);
+                format_value_inner(elem, output, indent)?;
             }
         }
 
         Value::Record { type_name, fields } => {
-            format_record_with_name(type_name.as_str(), fields, output, indent);
+            format_record(type_name.as_str(), fields, output, indent)?;
         }
-        Value::ActionHandler {
-            component,
-            emit,
-            action_name,
-            ..
-        } => {
-            write!(
-                output,
-                "<ActionHandler component=\"{}\" emit=\"{}\" action=\"{}\" />",
-                component.as_str(),
-                emit.as_str(),
-                action_name.as_str()
-            )
-            .unwrap();
-        }
+        Value::ActionHandler { .. } => return Err(unspellable_action_handler()),
     }
+
+    Ok(())
 }
 
-fn format_record_with_name(
+/// Emits a record as an element whose every field is a property.
+fn format_record(
     tag_name: &str,
     fields: &FxHashMap<SmolStr, Value>,
     output: &mut String,
     indent: usize,
-) {
-    // Collect and sort fields for deterministic output
+) -> Result<(), String> {
+    // Sorted for deterministic output.
     let mut field_vec: Vec<_> = fields.iter().collect();
     field_vec.sort_by_key(|(k, _)| k.as_str());
-
-    // Check if any field contains a complex value (record or non-empty array)
-    let has_complex_children = field_vec.iter().any(|(_, v)| is_complex_value(v));
-
-    if has_complex_children {
-        // Multi-line format with children
-        write!(output, "<{}", tag_name).unwrap();
-
-        // Print simple attributes on the opening tag
-        for (key, value) in &field_vec {
-            if !is_complex_value(value) {
-                output.push(' ');
-                output.push_str(key.as_str());
-                output.push('=');
-                format_attribute_value(value, output);
-            }
-        }
-
-        output.push_str(">\n");
-
-        // Print complex children as nested elements
-        let child_indent = indent + 2;
-        for (key, value) in &field_vec {
-            if is_complex_value(value) {
-                write!(output, "{:indent$}", "", indent = child_indent).unwrap();
-                format_nested_element(key.as_str(), value, output, child_indent);
-            }
-        }
-
-        write!(output, "{:indent$}</{}>", "", tag_name, indent = indent).unwrap();
-    } else {
-        // Single-line format with all attributes
-        write!(output, "<{}", tag_name).unwrap();
-
-        for (key, value) in &field_vec {
-            output.push(' ');
-            output.push_str(key.as_str());
-            output.push('=');
-            format_attribute_value(value, output);
-        }
-
-        output.push_str(" />");
-    }
-}
-
-/// Format a nested element with proper opening and closing tags.
-fn format_nested_element(tag_name: &str, value: &Value, output: &mut String, indent: usize) {
-    match value {
-        Value::Record { type_name, fields } => {
-            format_nested_record(type_name.as_str(), fields, output, indent);
-        }
-        Value::Array(elements) => {
-            write!(output, "<{}>", tag_name).unwrap();
-            output.push('\n');
-            let child_indent = indent + 2;
-            for elem in elements {
-                write!(output, "{:indent$}", "", indent = child_indent).unwrap();
-                format_value_inner(elem, output, child_indent);
-                output.push('\n');
-            }
-            write!(output, "{:indent$}</{}>", "", tag_name, indent = indent).unwrap();
-            output.push('\n');
-        }
-        Value::ActionHandler {
-            component,
-            emit,
-            action_name,
-            ..
-        } => {
-            write!(
-                output,
-                "<{} component=\"{}\" emit=\"{}\" action=\"{}\" />\n",
-                tag_name,
-                component.as_str(),
-                emit.as_str(),
-                action_name.as_str()
-            )
-            .unwrap();
-        }
-        _ => {
-            // Simple value - shouldn't happen for complex values but handle gracefully
-            write!(output, "<{}", tag_name).unwrap();
-            output.push('=');
-            format_attribute_value(value, output);
-            output.push_str(" />\n");
-        }
-    }
-}
-
-fn format_nested_record(
-    tag_name: &str,
-    fields: &FxHashMap<SmolStr, Value>,
-    output: &mut String,
-    indent: usize,
-) {
-    let mut field_vec: Vec<_> = fields.iter().collect();
-    field_vec.sort_by_key(|(k, _)| k.as_str());
-
-    let has_complex = field_vec.iter().any(|(_, v)| is_complex_value(v));
 
     write!(output, "<{}", tag_name).unwrap();
 
-    if has_complex {
-        // Print simple attrs, then children
-        for (key, val) in &field_vec {
-            if !is_complex_value(val) {
-                output.push(' ');
-                output.push_str(key.as_str());
-                output.push('=');
-                format_attribute_value(val, output);
-            }
+    if field_vec.iter().any(|(_, value)| is_complex_value(value)) {
+        // One property per line. This is layout only — every field is still a property.
+        let property_indent = indent + 2;
+        for (key, value) in &field_vec {
+            output.push('\n');
+            write!(output, "{:width$}", "", width = property_indent).unwrap();
+            output.push_str(key.as_str());
+            output.push('=');
+            format_property_value(value, output, property_indent)?;
         }
-        output.push_str(">\n");
-
-        let child_indent = indent + 2;
-        for (key, val) in &field_vec {
-            if is_complex_value(val) {
-                write!(output, "{:indent$}", "", indent = child_indent).unwrap();
-                format_nested_element(key.as_str(), val, output, child_indent);
-            }
-        }
-
-        write!(output, "{:indent$}</{}>", "", tag_name, indent = indent).unwrap();
         output.push('\n');
+        write!(output, "{:width$}/>", "", width = indent).unwrap();
     } else {
-        // All simple - inline
-        for (key, val) in &field_vec {
+        for (key, value) in &field_vec {
             output.push(' ');
             output.push_str(key.as_str());
             output.push('=');
-            format_attribute_value(val, output);
+            format_property_value(value, output, indent)?;
         }
-        output.push_str(" />\n");
+        output.push_str(" />");
     }
+
+    Ok(())
+}
+
+/// Emits one value in property position, in a form that reads back at a typed site.
+fn format_property_value(value: &Value, output: &mut String, indent: usize) -> Result<(), String> {
+    match value {
+        Value::String(s) => write!(output, "\"{}\"", escape_string(s.as_str())).unwrap(),
+        Value::Int32(n) => write!(output, "{}", n).unwrap(),
+        Value::Int(n) => write!(output, "{}", n).unwrap(),
+        Value::Float32(f) => output.push_str(&format_real_literal(f64::from(*f))),
+        Value::Float(f) => output.push_str(&format_real_literal(*f)),
+        Value::Boolean(b) => write!(output, "{}", b).unwrap(),
+        Value::Null => output.push_str("null"),
+        // A bare case name; the declaring union comes from the target type.
+        Value::UnionCase { case, .. } => output.push_str(case.as_str()),
+        // `rhs_expression` admits an element, so a record value needs no braces.
+        Value::Record { type_name, fields } => {
+            format_record(type_name.as_str(), fields, output, indent)?
+        }
+        // A sequence needs them.
+        Value::Array(elements) => {
+            if elements.is_empty() {
+                return Err(unspellable_empty_list());
+            }
+            output.push('{');
+            for (i, element) in elements.iter().enumerate() {
+                if i > 0 {
+                    output.push(' ');
+                }
+                format_property_value(element, output, indent)?;
+            }
+            output.push('}');
+        }
+        Value::ActionHandler { .. } => return Err(unspellable_action_handler()),
+    }
+
+    Ok(())
+}
+
+fn unspellable_empty_list() -> String {
+    "Cannot format an empty list: NX has no spelling for one (`items={}` is a syntax error), so \
+     any output here would read back as a different value"
+        .to_string()
+}
+
+fn unspellable_action_handler() -> String {
+    "Cannot format an action handler: it has no NX source spelling".to_string()
 }
 
 /// Renders a float so it reads back as a real literal rather than an integer one.
@@ -224,48 +152,8 @@ fn format_real_literal(value: f64) -> String {
     }
 }
 
-/// Returns the bare case name of a payloadless union case value, if that is what this is.
-fn payloadless_union_case(value: &Value) -> Option<&str> {
-    match value {
-        Value::Record { type_name, fields } if fields.is_empty() => {
-            type_name.as_str().rsplit_once('.').map(|(_, case)| case)
-        }
-        _ => None,
-    }
-}
-
-/// Emits a scalar in attribute position using its unbraced literal form.
-///
-/// Every scalar here has an unbraced spelling, so quoting them all — as this did — produced output
-/// that could not be read back: a quoted number, boolean, or enum is a `string` at a typed site.
-fn format_attribute_value(value: &Value, output: &mut String) {
-    if let Some(case) = payloadless_union_case(value) {
-        output.push_str(case);
-        return;
-    }
-
-    match value {
-        Value::String(s) => write!(output, "\"{}\"", escape_string(s.as_str())).unwrap(),
-        Value::Int32(n) => write!(output, "{}", n).unwrap(),
-        Value::Int(n) => write!(output, "{}", n).unwrap(),
-        Value::Float32(f) => output.push_str(&format_real_literal(f64::from(*f))),
-        Value::Float(f) => output.push_str(&format_real_literal(*f)),
-        Value::Boolean(b) => write!(output, "{}", b).unwrap(),
-        Value::Null => output.push_str("null"),
-        // A bare member name; the declaring enum comes from the target type.
-        Value::EnumValue { member, .. } => output.push_str(member.as_str()),
-        Value::ActionHandler { .. } | Value::Array(_) | Value::Record { .. } => {
-            // Complex values shouldn't be formatted as attributes
-            output.push_str("\"...\"");
-        }
-    }
-}
-
+/// Whether a value forces the one-property-per-line layout.
 fn is_complex_value(value: &Value) -> bool {
-    // A payloadless union case has an unbraced spelling, so it belongs inline like any scalar.
-    if payloadless_union_case(value).is_some() {
-        return false;
-    }
     match value {
         Value::Record { .. } | Value::ActionHandler { .. } => true,
         Value::Array(elements) => !elements.is_empty(),
@@ -287,6 +175,11 @@ mod tests {
     use rustc_hash::FxHashMap;
     use smol_str::SmolStr;
 
+    /// Formats a value that is expected to have an NX spelling.
+    fn formatted(value: &Value) -> String {
+        format_value(value).expect("value should have an NX spelling")
+    }
+
     /// Every scalar in attribute position must be emitted in a form that reads back.
     #[test]
     fn test_format_attribute_scalars_are_unquoted() {
@@ -296,16 +189,18 @@ mod tests {
         fields.insert(SmolStr::new("opt"), Value::Null);
         fields.insert(
             SmolStr::new("fit"),
-            Value::EnumValue {
-                type_name: nx_hir::Name::new("Fit"),
-                member: SmolStr::new("cover"),
+            Value::UnionCase {
+                union: nx_hir::Name::new("Fit"),
+                case: SmolStr::new("cover"),
             },
         );
+        // A payloadless case is a `Value::UnionCase` now, not an empty dotted record, so there is
+        // nothing left for a heuristic to guess at.
         fields.insert(
             SmolStr::new("state"),
-            Value::Record {
-                type_name: nx_hir::Name::new("LoadState.loading"),
-                fields: FxHashMap::default(),
+            Value::UnionCase {
+                union: nx_hir::Name::new("LoadState"),
+                case: SmolStr::new("loading"),
             },
         );
         let value = Value::Record {
@@ -313,7 +208,7 @@ mod tests {
             fields,
         };
 
-        let formatted = format_value(&value);
+        let formatted = formatted(&value);
         assert_eq!(
             formatted.trim(),
             "<Box fit=cover flag=true opt=null state=loading w=1.5 />"
@@ -334,7 +229,7 @@ mod tests {
             fields,
         };
 
-        let formatted = format_value(&value);
+        let formatted = formatted(&value);
         assert!(formatted.contains("neg=-1.0"), "got: {formatted}");
         assert!(!formatted.contains("neg=-1 "), "got: {formatted}");
         assert!(!formatted.contains("neg=\"-1\""), "got: {formatted}");
@@ -351,9 +246,9 @@ mod tests {
         fields.insert(SmolStr::new("opt"), Value::Null);
         fields.insert(
             SmolStr::new("fit"),
-            Value::EnumValue {
-                type_name: nx_hir::Name::new("Fit"),
-                member: SmolStr::new("cover"),
+            Value::UnionCase {
+                union: nx_hir::Name::new("Fit"),
+                case: SmolStr::new("cover"),
             },
         );
         fields.insert(
@@ -369,11 +264,11 @@ mod tests {
         };
 
         let source = format!(
-            "enum Fit = fill | contain | cover\n\
-             type LoadState = | idle | loading\n\
+            "type Fit = fill | contain | cover\n\
+             type LoadState = idle | loading\n\
              type Box = {{ w: float64 neg: float64 n: int flag: boolean opt: string? \
              fit: Fit state: LoadState }}\n{}",
-            format_value(&value)
+            formatted(&value)
         );
 
         let result = nx_types::check_str(&source, "roundtrip.nx");
@@ -388,30 +283,30 @@ mod tests {
     #[test]
     fn test_format_int() {
         let value = Value::Int(42);
-        assert_eq!(format_value(&value), "42");
+        assert_eq!(formatted(&value), "42");
     }
 
     #[test]
     fn test_format_float() {
         let value = Value::Float(3.14);
-        assert_eq!(format_value(&value), "3.14");
+        assert_eq!(formatted(&value), "3.14");
     }
 
     #[test]
     fn test_format_string() {
         let value = Value::String(SmolStr::new("hello world"));
-        assert_eq!(format_value(&value), "hello world");
+        assert_eq!(formatted(&value), "hello world");
     }
 
     #[test]
     fn test_format_boolean() {
-        assert_eq!(format_value(&Value::Boolean(true)), "true");
-        assert_eq!(format_value(&Value::Boolean(false)), "false");
+        assert_eq!(formatted(&Value::Boolean(true)), "true");
+        assert_eq!(formatted(&Value::Boolean(false)), "false");
     }
 
     #[test]
     fn test_format_null() {
-        assert_eq!(format_value(&Value::Null), "null");
+        assert_eq!(formatted(&Value::Null), "null");
     }
 
     #[test]
@@ -424,7 +319,7 @@ mod tests {
             type_name: nx_hir::Name::new("result"),
             fields,
         };
-        let output = format_value(&value);
+        let output = formatted(&value);
 
         // Should be a self-closing tag with attributes
         assert!(output.contains("<result"));
@@ -436,17 +331,17 @@ mod tests {
 
     #[test]
     fn test_format_enum_value() {
-        let value = Value::EnumValue {
-            type_name: nx_hir::Name::new("Status"),
-            member: SmolStr::new("active"),
+        let value = Value::UnionCase {
+            union: nx_hir::Name::new("Status"),
+            case: SmolStr::new("active"),
         };
-        assert_eq!(format_value(&value), "Status.active");
+        assert_eq!(formatted(&value), "Status.active");
     }
 
     #[test]
     fn test_format_array_of_primitives() {
         let value = Value::Array(vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
-        assert_eq!(format_value(&value), "1\n2\n3");
+        assert_eq!(formatted(&value), "1\n2\n3");
     }
 
     #[test]
@@ -469,20 +364,27 @@ mod tests {
             type_name: nx_hir::Name::new("result"),
             fields,
         };
-        let output = format_value(&value);
+        let output = formatted(&value);
 
-        // Should have nested structure
+        // The nested record is a property value, not body content: the property name `address`
+        // has nowhere to go in body position, so emitting it there loses which field it bound to.
         assert!(output.contains("<result"));
         assert!(output.contains("name=\"Alice\""));
-        assert!(output.contains("<Address"));
+        assert!(
+            output.contains("address=<Address"),
+            "a record-valued property is an unbraced element, got: {output}"
+        );
         assert!(output.contains("city=\"Boston\""));
-        assert!(output.contains("</result>"));
+        assert!(
+            !output.contains("</result>"),
+            "no field becomes body content, got: {output}"
+        );
     }
 
     #[test]
     fn test_format_string_with_special_chars() {
         let value = Value::String(SmolStr::new("Hello \"World\"\nNew line"));
-        assert_eq!(format_value(&value), "Hello \"World\"\nNew line");
+        assert_eq!(formatted(&value), "Hello \"World\"\nNew line");
     }
 
     #[test]
@@ -498,9 +400,64 @@ mod tests {
             captured: FxHashMap::default(),
         };
 
-        assert_eq!(
-            format_value(&value),
-            "<ActionHandler component=\"SearchBox\" emit=\"SearchSubmitted\" action=\"SearchSubmitted\" />"
+        // `<ActionHandler ... />` is not a real element, so printing one produced output that
+        // could never be read back. It fails explicitly instead.
+        let error = format_value(&value).expect_err("an action handler has no NX spelling");
+        assert!(error.contains("action handler"), "got: {error}");
+    }
+
+    /// An empty qualified record is not a union case. Formatting must not rewrite it into one.
+    ///
+    /// This is RF2 in `contextual-literal-binding`'s `review.md`. It is asserted on the value
+    /// rather than through a source round-trip because the interpreter cannot yet construct a
+    /// record imported under a module alias (`RecordTypeNotFound`), so `<div data={<foo.bar />} />`
+    /// has no end-to-end spelling today. The defect is entirely in this module regardless.
+    #[test]
+    fn test_format_empty_qualified_record_is_not_rendered_as_a_union_case() {
+        let mut fields = FxHashMap::default();
+        fields.insert(
+            SmolStr::new("data"),
+            Value::Record {
+                type_name: nx_hir::Name::new("foo.bar"),
+                fields: FxHashMap::default(),
+            },
         );
+        let value = Value::Record {
+            type_name: nx_hir::Name::new("div"),
+            fields,
+        };
+
+        let formatted = formatted(&value);
+
+        assert_ne!(
+            formatted.trim(),
+            "<div data=bar />",
+            "an empty qualified record must not be rewritten as a bare union case name"
+        );
+        assert!(
+            formatted.contains("data="),
+            "the property name must survive, got `{}`",
+            formatted.trim()
+        );
+        assert!(
+            formatted.contains("foo.bar"),
+            "the record's own type name must survive, got `{}`",
+            formatted.trim()
+        );
+    }
+
+    /// An empty list has no NX spelling — `items={}` is a syntax error — so it must fail rather
+    /// than emit `items="..."`, which is a `string` where a list was meant.
+    #[test]
+    fn test_format_empty_list_property_has_no_readable_spelling() {
+        let mut fields = FxHashMap::default();
+        fields.insert(SmolStr::new("items"), Value::Array(Vec::new()));
+        let value = Value::Record {
+            type_name: nx_hir::Name::new("div"),
+            fields,
+        };
+
+        let error = format_value(&value).expect_err("an empty list has no NX spelling");
+        assert!(error.contains("empty list"), "got: {error}");
     }
 }

@@ -1650,7 +1650,6 @@ fn build_resolved_program(
     let mut entry_functions = FxHashMap::default();
     let mut entry_components = FxHashMap::default();
     let mut entry_records = FxHashMap::default();
-    let mut entry_enums = FxHashMap::default();
     let mut imports = FxHashMap::default();
 
     for artifact in root_modules {
@@ -1666,7 +1665,6 @@ fn build_resolved_program(
                 &mut entry_functions,
                 &mut entry_components,
                 &mut entry_records,
-                &mut entry_enums,
                 item.name().as_str(),
                 ModuleQualifiedItemRef {
                     module_id,
@@ -1687,7 +1685,6 @@ fn build_resolved_program(
                 &mut entry_functions,
                 &mut entry_components,
                 &mut entry_records,
-                &mut entry_enums,
                 export_name,
                 ModuleQualifiedItemRef {
                     module_id,
@@ -1854,7 +1851,6 @@ fn build_resolved_program(
         entry_functions,
         entry_components,
         entry_records,
-        entry_enums,
         imports,
     )
 }
@@ -2005,10 +2001,6 @@ fn build_interface_item(
             ty: type_alias.ty.clone(),
             span: type_alias.span,
         },
-        Item::Enum(enum_def) => LibraryInterfaceKind::Enum {
-            members: enum_def.members.clone(),
-            span: enum_def.span,
-        },
         Item::Union(union_def) => LibraryInterfaceKind::Union {
             base: union_def.base.clone(),
             cases: union_def
@@ -2088,7 +2080,6 @@ fn type_to_type_ref(ty: &Type) -> Option<TypeRef> {
             type_to_type_ref(ret)?,
         )),
         Type::Named(name) => Some(TypeRef::name(name.clone())),
-        Type::Enum(enum_type) => Some(TypeRef::name(enum_type.name.clone())),
         Type::Union(union_type) => Some(TypeRef::name(union_type.name.clone())),
         Type::UnionCase(case_type) => {
             let qualified_name = format!("{}.{}", case_type.union, case_type.case);
@@ -2104,7 +2095,6 @@ fn insert_entry_symbol(
     entry_functions: &mut FxHashMap<String, ModuleQualifiedItemRef>,
     entry_components: &mut FxHashMap<String, ModuleQualifiedItemRef>,
     entry_records: &mut FxHashMap<String, ModuleQualifiedItemRef>,
-    entry_enums: &mut FxHashMap<String, ModuleQualifiedItemRef>,
     visible_name: &str,
     item_ref: ModuleQualifiedItemRef,
 ) {
@@ -2129,11 +2119,6 @@ fn insert_entry_symbol(
                 .entry(visible_name.to_string())
                 .or_insert(item_ref);
         }
-        ResolvedItemKind::Enum => {
-            entry_enums
-                .entry(visible_name.to_string())
-                .or_insert(item_ref);
-        }
     }
 }
 
@@ -2143,7 +2128,6 @@ fn resolved_item_kind_from_interface(kind: nx_hir::PreparedItemKind) -> Resolved
         nx_hir::PreparedItemKind::Value => ResolvedItemKind::Value,
         nx_hir::PreparedItemKind::Component => ResolvedItemKind::Component,
         nx_hir::PreparedItemKind::TypeAlias => ResolvedItemKind::TypeAlias,
-        nx_hir::PreparedItemKind::Enum => ResolvedItemKind::Enum,
         nx_hir::PreparedItemKind::Union => ResolvedItemKind::Union,
         nx_hir::PreparedItemKind::Record => ResolvedItemKind::Record,
     }
@@ -2155,7 +2139,6 @@ fn resolved_item_kind(item: &Item) -> ResolvedItemKind {
         Item::Value(_) => ResolvedItemKind::Value,
         Item::Component(_) => ResolvedItemKind::Component,
         Item::TypeAlias(_) => ResolvedItemKind::TypeAlias,
-        Item::Enum(_) => ResolvedItemKind::Enum,
         Item::Union(_) => ResolvedItemKind::Union,
         Item::Record(_) => ResolvedItemKind::Record,
     }
@@ -3451,8 +3434,8 @@ let root(): int = { answer }"#
             workspace_module("app.nx", app.as_bytes().to_vec()),
             workspace_module(
                 "widgets.nx",
-                br#"export enum Fit = fill | contain | cover
-export type LoadState = | idle | loading
+                br#"export type Fit = fill | contain | cover
+export type LoadState = idle | loading
 export let <Img fit: Fit = {Fit.fill}  state: LoadState = {LoadState.idle} /> = <div class="img" />"#
                     .to_vec(),
             ),
@@ -3507,19 +3490,20 @@ let root() = { <Img fit=cover state=loading /> }"#,
         // and neither its members nor the type itself may stand in for it.
         let bare = contextual_messages(
             r#"import { Img } from "./widgets.nx"
-enum Fit = stretch | squish
+type Fit = stretch | squish
 let root() = { <Img fit=stretch state={LoadState.idle} /> }"#,
         );
         assert!(
-            bare.iter()
-                .any(|message| message.contains("'stretch' is not a member of enum 'Fit'")
-                    && message.contains("fill, contain, cover")),
-            "expected the declaring module's members, got: {bare:?}"
+            bare.iter().any(
+                |message| message.contains("'stretch' is not a case of union 'Fit'")
+                    && message.contains("fill, contain, cover")
+            ),
+            "expected the declaring module's cases, got: {bare:?}"
         );
 
         let qualified = contextual_messages(
             r#"import { Img } from "./widgets.nx"
-enum Fit = stretch | squish
+type Fit = stretch | squish
 let root() = { <Img fit={Fit.stretch} state={LoadState.idle} /> }"#,
         );
         assert!(

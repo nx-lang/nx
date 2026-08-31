@@ -7,11 +7,10 @@ use crate::ast::{
     BinOp, Expr, Literal, MatchArm, OrderedFloat, RecordLiteralProperty, Stmt, TypeRef, UnOp,
 };
 use crate::{
-    Component, ComponentEmit, ComponentEmitKind, Element, EnumDef, EnumMember, ExprId, Function,
-    Import, ImportKind, Item, LoweredModule, LoweringDiagnostic, Name, Param, Property,
-    PropertyConditionArm, PropertyEntry, PropertyMatchArm, RecordDef, RecordField, RecordKind,
-    SelectiveImport, SourceId, TypeAlias, UnionCaseDef, UnionCaseField, UnionDef, ValueDef,
-    Visibility,
+    Component, ComponentEmit, ComponentEmitKind, Element, ExprId, Function, Import, ImportKind,
+    Item, LoweredModule, LoweringDiagnostic, Name, Param, Property, PropertyConditionArm,
+    PropertyEntry, PropertyMatchArm, RecordDef, RecordField, RecordKind, SelectiveImport, SourceId,
+    TypeAlias, UnionCaseDef, UnionCaseField, UnionDef, ValueDef, Visibility,
 };
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_syntax::{SyntaxKind, SyntaxNode};
@@ -1542,34 +1541,6 @@ impl LoweringContext {
         }
     }
 
-    /// Lowers an enum definition node.
-    pub fn lower_enum_definition(&self, node: SyntaxNode) -> EnumDef {
-        let name = node
-            .child_by_field("name")
-            .map(|n| Name::new(n.text()))
-            .unwrap_or_else(|| Name::new("unknown"));
-
-        let members = node
-            .child_by_field("members")
-            .map(|list| {
-                list.children()
-                    .filter(|child| child.kind() == SyntaxKind::ENUM_MEMBER)
-                    .map(|child| EnumMember {
-                        name: Name::new(child.text()),
-                        span: child.span(),
-                    })
-                    .collect()
-            })
-            .unwrap_or_else(Vec::new);
-
-        EnumDef {
-            name,
-            visibility: Self::lower_visibility(node),
-            members,
-            span: node.span(),
-        }
-    }
-
     /// Lowers a discriminated union definition node.
     pub fn lower_union_definition(&mut self, node: SyntaxNode) -> UnionDef {
         let name = node
@@ -2031,10 +2002,6 @@ impl LoweringContext {
                     let action = self.lower_action_definition(child);
                     self.module.add_item(Item::Record(action));
                 }
-                SyntaxKind::ENUM_DEFINITION => {
-                    let enum_def = self.lower_enum_definition(child);
-                    self.module.add_item(Item::Enum(enum_def));
-                }
                 SyntaxKind::UNION_DEFINITION => {
                     let union_def = self.lower_union_definition(child);
                     self.module.add_item(Item::Union(union_def));
@@ -2224,7 +2191,7 @@ private action SaveRequested = {}
 export component <SearchBox /> = { <input /> }
 type Theme = string
 private let <Render /> = <div />
-enum Mode = light | dark"#;
+type Mode = light | dark"#;
         let parse_result = parse_str(source, "visibility.nx");
 
         let tree = parse_result.tree.expect("Visibility source should parse");
@@ -2525,7 +2492,7 @@ enum Mode = light | dark"#;
     fn test_lower_type_alias_and_enum() {
         let source = r#"
             type UserId = string
-            enum Direction = | north | south | east | west
+            type Direction = north | south | east | west
         "#;
         let parse_result = parse_str(source, "types.nx");
         let tree = parse_result.tree.expect("Should parse enum/type defs");
@@ -2542,17 +2509,21 @@ enum Mode = light | dark"#;
         }
 
         match &module.items()[1] {
-            Item::Enum(enum_def) => {
-                assert_eq!(enum_def.name.as_str(), "Direction");
-                let names: Vec<_> = enum_def
-                    .members
+            Item::Union(union_def) => {
+                assert_eq!(union_def.name.as_str(), "Direction");
+                assert!(
+                    union_def.is_constant_union(),
+                    "an enum lowers to a constant union"
+                );
+                let names: Vec<_> = union_def
+                    .cases
                     .iter()
-                    .map(|member| member.name.as_str())
+                    .map(|case| case.name.as_str())
                     .collect();
                 assert!(names.contains(&"north"));
                 assert!(names.contains(&"west"));
             }
-            other => panic!("Expected enum definition, got {:?}", other),
+            other => panic!("Expected union definition, got {:?}", other),
         }
     }
 
@@ -2606,7 +2577,7 @@ enum Mode = light | dark"#;
 
     #[test]
     fn test_prepared_union_binds_only_union_name_in_type_namespace() {
-        let source = "export type LoadState = | idle | failed { message:string }";
+        let source = "export type LoadState = idle | failed { message:string }";
         let parse_result = parse_str(source, "union-binding.nx");
         assert!(parse_result.is_ok(), "Union source should parse");
         let tree = parse_result.tree.expect("Should parse union source");
@@ -3465,27 +3436,28 @@ enum Mode = light | dark"#;
     #[test]
     fn test_lower_enum_with_leading_pipe() {
         let source = r#"
-            enum Orientation = | horizontal | vertical
+            type Orientation = horizontal | vertical
         "#;
         let parse_result = parse_str(source, "enum-lead.nx");
         let tree = parse_result.tree.expect("Should parse enum");
         let root = tree.root();
         let module = lower(root, SourceId::new(0));
 
-        let enums: Vec<_> = module
+        let unions: Vec<_> = module
             .items()
             .iter()
             .filter_map(|item| match item {
-                Item::Enum(def) => Some(def),
+                Item::Union(def) => Some(def),
                 _ => None,
             })
             .collect();
-        assert_eq!(enums.len(), 1);
-        let enum_def = enums[0];
-        assert_eq!(enum_def.name.as_str(), "Orientation");
-        assert_eq!(enum_def.members.len(), 2);
-        assert_eq!(enum_def.members[0].name.as_str(), "horizontal");
-        assert_eq!(enum_def.members[1].name.as_str(), "vertical");
+        assert_eq!(unions.len(), 1);
+        let union_def = unions[0];
+        assert_eq!(union_def.name.as_str(), "Orientation");
+        assert!(union_def.is_constant_union());
+        assert_eq!(union_def.cases.len(), 2);
+        assert_eq!(union_def.cases[0].name.as_str(), "horizontal");
+        assert_eq!(union_def.cases[1].name.as_str(), "vertical");
     }
 
     #[test]

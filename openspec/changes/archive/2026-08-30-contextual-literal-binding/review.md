@@ -189,6 +189,13 @@
   Nothing is changed in this change for RF2. Rendering `<div data={<foo.bar />} />` as
   `<div data=bar />` is a live corruption until `replace-enums-with-unions` lands, and that is
   recorded here rather than worked around.
+- **Fixed by `replace-enums-with-unions` (2026-08-30):** The heuristic is gone, and so is the value
+  shape it guessed at — a payloadless case of a base-less union is now a `Value::UnionCase` scalar
+  rather than an empty dotted record, so an empty record is unambiguously a record. Covered by
+  `format::tests::test_format_empty_qualified_record_is_not_rendered_as_a_union_case` (that change's
+  task 1.3), which asserts the value does not render as `<div data=bar />` and that both the property
+  name and the record's own type name survive. It passed only once task group 6 landed, exactly as
+  predicted here.
 - **Verification:** The deferral is fully specified in the planning-complete
   `replace-enums-with-unions` change: task 1.3 pins the empty-qualified-record failure, task 5.4
   deletes `payloadless_union_case`, and task group 6 fixes the coupled property-rendering path. This
@@ -340,6 +347,14 @@
   resolved as an explicit successor-change disposition; the current formatter defect remains live
   until that successor is implemented.
 
+- **Fixed by `replace-enums-with-unions` (2026-08-30):** `format_nested_element` and
+  `format_nested_record` are deleted. Every field is emitted in property position — a record value as
+  an unbraced element (`home=<Address city="Boston" />`) and a list as a braced sequence
+  (`items={<Item /> <Item />}`) — so no property name reaches element-tag position or body position.
+  Covered by three round-trip tests in `crates/nx-cli/src/main.rs` (that change's tasks 1.5 and 1.6):
+  `record_valued_property_round_trips`, `two_properties_of_the_same_record_type_stay_distinguishable`,
+  and `list_valued_property_round_trips`. Each formats a value, re-evaluates the formatted source at
+  the same typed site, and compares — so the guarantee is measured rather than asserted by shape.
 ### ✅ Resolved (fix carried by `nominal-type-identity`) - RF6 Same-name isolation was implemented for enums but not for unions
 - **Severity:** High
 - **Raised by:** this fix pass, while reproducing RF1's reopening. Not in the original review.
@@ -421,6 +436,17 @@ identity, are `nominal-type-identity`'s.
 RF3 and RF6 to `nominal-type-identity`. Nothing further is owed here for any of them.
 
 **Left open (0).**
+
+**Carried fixes since landed (2026-08-30).** `replace-enums-with-unions` fixed RF2 and RF5, and each
+entry above now names its covering test. RF6 was also closed in part there, ahead of schedule: the
+unified resolution path required it. Collapsing two nominal kinds into one exposed the same
+name-only union matching in two places — a `(UnionCase, Union)` compatibility rule in both
+`crates/nx-types/src/ty.rs` and `crates/nx-types/src/infer.rs`, the second shadowing the first — and
+leaving either would have regressed every enum, since `EnumType` equality had compared member lists.
+Both now require the union to declare the case, and contextual resolution searches the resolved
+type's own cases instead of looking the name up again. That closes RF6's same-name/different-case-
+names half; the payload-field-type half is still `nominal-type-identity`'s, because `UnionType`
+equality covers case names and not payload types.
 
 How each was dispositioned. RF1 and RF2 were both **reproduced** and proved more concrete than the
 report indicated. RF1 was an unimplemented spec requirement — both scenarios under `enum-values` →

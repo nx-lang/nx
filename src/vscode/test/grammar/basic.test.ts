@@ -113,18 +113,33 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(line, tokens, 'SearchBox')).to.include('entity.name.type.nx');
   });
 
-  it('highlights enum definitions with leading pipe', function () {
-    const line = 'enum Status = | active | pending_review | disabled';
+  it('highlights a constant union with a leading pipe', function () {
+    const line = 'type Status = | active | pending_review | disabled';
     const { tokens } = grammar.tokenizeLine(line, null);
-    expect(scopesForSubstring(line, tokens, 'enum')).to.include('keyword.declaration.type.nx');
-    expect(scopesForSubstring(line, tokens, '|')).to.include('punctuation.separator.enum.nx');
+    expect(scopesForSubstring(line, tokens, 'type')).to.include('keyword.declaration.type.nx');
+    expect(scopesForSubstring(line, tokens, '|')).to.include('punctuation.separator.union-case.nx');
+    expect(scopesForSubstring(line, tokens, 'active')).to.include('entity.name.type.union.case.nx');
   });
 
-  it('highlights enum definitions without leading pipe', function () {
+  it('highlights a constant union without a leading pipe', function () {
+    const line = 'type Color = red | green | blue';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    expect(scopesForSubstring(line, tokens, 'type')).to.include('keyword.declaration.type.nx');
+    expect(scopesForSubstring(line, tokens, 'red')).to.include('entity.name.type.union.case.nx');
+    expect(scopesForSubstring(line, tokens, 'green')).to.include('entity.name.type.union.case.nx');
+    expect(scopesForSubstring(line, tokens, '|')).to.include('punctuation.separator.union-case.nx');
+  });
+
+  it('still highlights a type alias as an alias, not a union', function () {
+    const line = 'type Alias = Other';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    expect(scopesForSubstring(line, tokens, 'Other')).to.not.include('entity.name.type.union.case.nx');
+  });
+
+  it('does not highlight the removed enum keyword as a declaration', function () {
     const line = 'enum Color = red | green | blue';
     const { tokens } = grammar.tokenizeLine(line, null);
-    expect(scopesForSubstring(line, tokens, 'enum')).to.include('keyword.declaration.type.nx');
-    expect(scopesForSubstring(line, tokens, '|')).to.include('punctuation.separator.enum.nx');
+    expect(scopesForSubstring(line, tokens, 'enum')).to.not.include('keyword.declaration.type.nx');
   });
 
   it('highlights discriminated union definitions and case fields', function () {

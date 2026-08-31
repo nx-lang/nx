@@ -169,9 +169,7 @@ fn collect_source_codegen_diagnostics(
                 collect_record_field_source_codegen_diagnostics(module, &case.fields, diagnostics);
             }
         }
-        CodegenDeclarationKind::Enum { .. }
-        | CodegenDeclarationKind::TypeAlias
-        | CodegenDeclarationKind::Unsupported(_) => {}
+        CodegenDeclarationKind::TypeAlias | CodegenDeclarationKind::Unsupported(_) => {}
     }
 }
 
@@ -320,7 +318,6 @@ fn collect_expression_source_codegen_diagnostics(
         }
         CodegenExpressionKind::Literal(_)
         | CodegenExpressionKind::Identifier { .. }
-        | CodegenExpressionKind::EnumMember { .. }
         | CodegenExpressionKind::Unsupported(_) => {}
     }
 }
@@ -661,9 +658,6 @@ struct SchemaDeclaration {
 impl SchemaDeclaration {
     fn from_declaration(declaration: &CodegenDeclaration) -> Option<Self> {
         let kind = match &declaration.kind {
-            CodegenDeclarationKind::Enum { members } => SchemaDeclarationKind::Enum {
-                members: members.clone(),
-            },
             CodegenDeclarationKind::Record { fields } => SchemaDeclarationKind::Record {
                 fields: fields.clone(),
             },
@@ -689,9 +683,6 @@ impl SchemaDeclaration {
 
 #[derive(Debug, Clone)]
 enum SchemaDeclarationKind {
-    Enum {
-        members: Vec<String>,
-    },
     Record {
         fields: Vec<CodegenRecordField>,
     },
@@ -1138,36 +1129,6 @@ fn emit_declaration(
                 ));
             }
         }
-        CodegenDeclarationKind::Enum { members } => {
-            if target.is_typescript() {
-                out.push_str(&format!("{}const {} = {{\n", export_prefix, name));
-                for member in members {
-                    out.push_str(&format!(
-                        "  {}: {},\n",
-                        safe_object_key(member),
-                        js_string(member)
-                    ));
-                }
-                out.push_str("} as const;\n\n");
-                out.push_str(&format!(
-                    "{}type {} = typeof {}[keyof typeof {}];\n",
-                    export_prefix, name, name, name
-                ));
-            } else {
-                out.push_str(&format!(
-                    "{}const {} = Object.freeze({{\n",
-                    export_prefix, name
-                ));
-                for member in members {
-                    out.push_str(&format!(
-                        "  {}: {},\n",
-                        safe_object_key(member),
-                        js_string(member)
-                    ));
-                }
-                out.push_str("});\n");
-            }
-        }
         CodegenDeclarationKind::Record { fields } => {
             if target.is_typescript() {
                 emit_record_type(
@@ -1196,7 +1157,39 @@ fn emit_declaration(
             );
         }
         CodegenDeclarationKind::Union { cases } => {
-            if target.is_typescript() {
+            // A constant union is what `enum` declared, and generates what `enum` generated: a
+            // frozen value object whose entries are the authored case names.
+            if !cases.is_empty() && cases.iter().all(|case| case.is_constant) {
+                let case_names = cases.iter().map(|case| case.name.as_str());
+                if target.is_typescript() {
+                    out.push_str(&format!("{}const {} = {{\n", export_prefix, name));
+                    for case in case_names {
+                        out.push_str(&format!(
+                            "  {}: {},\n",
+                            safe_object_key(case),
+                            js_string(case)
+                        ));
+                    }
+                    out.push_str("} as const;\n\n");
+                    out.push_str(&format!(
+                        "{}type {} = typeof {}[keyof typeof {}];\n",
+                        export_prefix, name, name, name
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        "{}const {} = Object.freeze({{\n",
+                        export_prefix, name
+                    ));
+                    for case in case_names {
+                        out.push_str(&format!(
+                            "  {}: {},\n",
+                            safe_object_key(case),
+                            js_string(case)
+                        ));
+                    }
+                    out.push_str("});\n");
+                }
+            } else if target.is_typescript() {
                 emit_union_type(
                     &name,
                     &declaration.reference.name,
@@ -1259,9 +1252,20 @@ fn emit_union_type(
 ) {
     let case_type_names = cases
         .iter()
-        .map(|case| union_case_type_name(name, &case.name))
+        .map(|case| {
+            if case.is_constant {
+                // A constant case is a bare string on the wire, so it contributes a string
+                // literal rather than a record type.
+                js_string(&case.name)
+            } else {
+                union_case_type_name(name, &case.name)
+            }
+        })
         .collect::<Vec<_>>();
     for (case, case_type_name) in cases.iter().zip(case_type_names.iter()) {
+        if case.is_constant {
+            continue;
+        }
         emit_record_type(
             case_type_name,
             &format!("{}.{}", runtime_name, case.name),
@@ -2262,7 +2266,6 @@ fn emit_named_type_schema(
         .schema_declarations
         .get(&key)
         .map(|declaration| match &declaration.kind {
-            SchemaDeclarationKind::Enum { members } => emit_enum_schema(members),
             SchemaDeclarationKind::Record { fields } => emit_record_schema(
                 current_module_id,
                 declaration.reference.module_id,
@@ -2311,6 +2314,30 @@ fn emit_named_type_schema(
     schema
 }
 
+/// Whether a named union's case declares no fields in a union that declares no base.
+fn union_case_is_constant(
+    current_module_id: RuntimeModuleId,
+    union_name: &str,
+    case_name: &str,
+    context: &EmitContext,
+) -> bool {
+    let Some(reference) = resolve_schema_reference(current_module_id, union_name, context) else {
+        return false;
+    };
+    let Some(declaration) = context
+        .schema_declarations
+        .get(&ReferenceKey::new(&reference))
+    else {
+        return false;
+    };
+    let SchemaDeclarationKind::Union { cases } = &declaration.kind else {
+        return false;
+    };
+    cases
+        .iter()
+        .any(|case| case.name == case_name && case.is_constant)
+}
+
 fn resolve_schema_reference(
     schema_module_id: RuntimeModuleId,
     name: &str,
@@ -2331,13 +2358,18 @@ fn resolve_schema_reference(
         })
 }
 
-fn emit_enum_schema(members: &[String]) -> String {
-    let members = members
+/// The schema for a set of constant cases.
+///
+/// The runtime helper keeps its `nxEnumSchema` name: it describes a closed set of authored
+/// strings, which is exactly what a constant union is, and renaming it would change the runtime
+/// ABI without changing what it does.
+fn emit_constant_case_schema(cases: &[String]) -> String {
+    let cases = cases
         .iter()
-        .map(|member| js_string(member))
+        .map(|case| js_string(case))
         .collect::<Vec<_>>()
         .join(", ");
-    format!("nxEnumSchema([{}])", members)
+    format!("nxEnumSchema([{}])", cases)
 }
 
 fn emit_record_schema(
@@ -2383,9 +2415,23 @@ fn emit_union_schema(
     context: &EmitContext,
     seen: &mut FxHashSet<ReferenceKey>,
 ) -> String {
+    // A constant union is a closed set of authored strings, which is what an enum was.
+    if !cases.is_empty() && cases.iter().all(|case| case.is_constant) {
+        return emit_constant_case_schema(
+            &cases
+                .iter()
+                .map(|case| case.name.clone())
+                .collect::<Vec<_>>(),
+        );
+    }
+
     let cases = cases
         .iter()
         .map(|case| {
+            // Within a mixed union a constant case is still a bare string on the wire.
+            if case.is_constant {
+                return emit_constant_case_schema(std::slice::from_ref(&case.name));
+            }
             emit_record_schema(
                 current_module_id,
                 schema_module_id,
@@ -2472,7 +2518,11 @@ fn emit_schema_field_default(
 fn emit_schema_literal_default(default: &CodegenExpression) -> Option<String> {
     match &default.kind {
         CodegenExpressionKind::Literal(literal) => Some(emit_literal(literal)),
-        CodegenExpressionKind::EnumMember { member, .. } => Some(js_string(member)),
+        CodegenExpressionKind::UnionCase {
+            case_name,
+            is_constant: true,
+            ..
+        } => Some(js_string(case_name)),
         CodegenExpressionKind::Array(elements) => elements
             .iter()
             .map(emit_schema_literal_default)
@@ -2585,15 +2635,22 @@ fn emit_type(
             )
         }
         Type::Named(name) => emit_named_type(current_module_id, name.as_str(), module, context),
-        Type::Enum(enum_ty) => {
-            emit_named_type(current_module_id, enum_ty.name.as_str(), module, context)
-        }
         Type::Union(union_ty) => {
             emit_named_type(current_module_id, union_ty.name.as_str(), module, context)
         }
         Type::UnionCase(case_ty) => {
             let union_name =
                 emit_named_type(current_module_id, case_ty.union.as_str(), module, context);
+            // A constant case has no record type of its own, so it is named by its union — which
+            // is also what the enum spelling produced for a member.
+            if union_case_is_constant(
+                current_module_id,
+                case_ty.union.as_str(),
+                case_ty.case.as_str(),
+                context,
+            ) {
+                return union_name;
+            }
             union_case_type_name(&union_name, case_ty.case.as_str())
         }
         Type::ContextualName(_) | Type::Variable(_) | Type::Unknown | Type::Error => {
@@ -2764,13 +2821,6 @@ fn emit_expression(
                     js_string(member)
                 )
             }),
-        CodegenExpressionKind::EnumMember {
-            enum_reference,
-            member,
-        } => {
-            let enum_name = context.reference_name(current_module_id, enum_reference);
-            format!("{}{}", enum_name, member_access(member))
-        }
         CodegenExpressionKind::UnionCase {
             union_reference,
             case_name,
@@ -2778,16 +2828,31 @@ fn emit_expression(
             properties,
             content_field,
             content,
-        } => emit_union_case_object(
-            current_module_id,
-            union_reference,
-            case_name,
-            fields,
-            properties,
-            content_field.as_deref(),
-            content,
-            context,
-        ),
+            is_constant,
+            union_is_constant,
+        } => {
+            if *union_is_constant {
+                // The union emitted a frozen value object, so the case is reached through it —
+                // exactly as an enum member was.
+                let union_name = context.reference_name(current_module_id, union_reference);
+                format!("{}{}", union_name, member_access(case_name))
+            } else if *is_constant {
+                // A constant case of a mixed union has no value object to reach through, and
+                // carries nothing beyond its name.
+                js_string(case_name)
+            } else {
+                emit_union_case_object(
+                    current_module_id,
+                    union_reference,
+                    case_name,
+                    fields,
+                    properties,
+                    content_field.as_deref(),
+                    content,
+                    context,
+                )
+            }
+        }
         CodegenExpressionKind::Record {
             name,
             fields,
@@ -3287,8 +3352,7 @@ fn collect_declaration_value_references(
             collect_component_value_references(module, component, output);
         }
         CodegenDeclarationKind::Unsupported(_) => {}
-        CodegenDeclarationKind::Enum { .. }
-        | CodegenDeclarationKind::Record { .. }
+        CodegenDeclarationKind::Record { .. }
         | CodegenDeclarationKind::Union { .. }
         | CodegenDeclarationKind::TypeAlias => {}
     }
@@ -3343,9 +3407,7 @@ fn collect_declaration_type_references(
                 collect_expression_render_type_references(module.id, body, output);
             }
         }
-        CodegenDeclarationKind::Enum { .. }
-        | CodegenDeclarationKind::TypeAlias
-        | CodegenDeclarationKind::Unsupported(_) => {}
+        CodegenDeclarationKind::TypeAlias | CodegenDeclarationKind::Unsupported(_) => {}
     }
 }
 
@@ -3433,7 +3495,6 @@ fn collect_type_references(module: &CodegenModule, ty: &Type, output: &mut Vec<C
             collect_type_references(module, ret, output);
         }
         Type::Named(name) => collect_named_type_reference(module, name.as_str(), output),
-        Type::Enum(enum_ty) => collect_named_type_reference(module, enum_ty.name.as_str(), output),
         Type::Union(union_ty) => {
             collect_named_type_reference(module, union_ty.name.as_str(), output)
         }
@@ -3524,9 +3585,15 @@ fn collect_expression_value_references(
                 output.push(reference.clone());
             }
         }
-        CodegenExpressionKind::EnumMember { enum_reference, .. } => {
-            if enum_reference.module_id != current_module_id {
-                output.push(enum_reference.clone());
+        CodegenExpressionKind::UnionCase {
+            union_reference,
+            union_is_constant: true,
+            ..
+        } => {
+            // Only a constant union has a value object to import; every other case is emitted
+            // inline as a literal.
+            if union_reference.module_id != current_module_id {
+                output.push(union_reference.clone());
             }
         }
         CodegenExpressionKind::Binary { lhs, rhs, .. } => {
@@ -3742,8 +3809,7 @@ fn collect_declaration_runtime_helpers(
                 collect_expression_runtime_helpers(body, output);
             }
         }
-        CodegenDeclarationKind::Enum { .. }
-        | CodegenDeclarationKind::Record { .. }
+        CodegenDeclarationKind::Record { .. }
         | CodegenDeclarationKind::Union { .. }
         | CodegenDeclarationKind::TypeAlias => {}
     }
@@ -3819,9 +3885,7 @@ fn collect_expression_runtime_helpers(
         CodegenExpressionKind::Unsupported(_) => {
             output.insert("nxRuntimeError");
         }
-        CodegenExpressionKind::Literal(_)
-        | CodegenExpressionKind::Identifier { .. }
-        | CodegenExpressionKind::EnumMember { .. } => {}
+        CodegenExpressionKind::Literal(_) | CodegenExpressionKind::Identifier { .. } => {}
         CodegenExpressionKind::Binary { lhs, rhs, .. } => {
             collect_expression_runtime_helpers(lhs, output);
             collect_expression_runtime_helpers(rhs, output);
@@ -3943,7 +4007,7 @@ fn should_import_value_reference(kind: ResolvedItemKind) -> bool {
         kind,
         ResolvedItemKind::Function
             | ResolvedItemKind::Value
-            | ResolvedItemKind::Enum
+            | ResolvedItemKind::Union
             | ResolvedItemKind::Component
     )
 }
@@ -3951,8 +4015,7 @@ fn should_import_value_reference(kind: ResolvedItemKind) -> bool {
 fn is_type_reference_kind(kind: ResolvedItemKind) -> bool {
     matches!(
         kind,
-        ResolvedItemKind::Enum
-            | ResolvedItemKind::Record
+        ResolvedItemKind::Record
             | ResolvedItemKind::Union
             | ResolvedItemKind::TypeAlias
             | ResolvedItemKind::Component

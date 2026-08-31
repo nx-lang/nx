@@ -491,7 +491,7 @@ fn collect_handler_rewrites_in_item(
                 }
             }
         }
-        Item::TypeAlias(_) | Item::Enum(_) => {}
+        Item::TypeAlias(_) => {}
     }
 }
 

@@ -39,23 +39,29 @@ type User extends UserBase = {
 - Record construction is closed: supplied fields must be declared on the effective record shape,
   including inherited fields. Unknown fields are rejected instead of being ignored.
 
-## Enum Types
-Enums declare a fixed set of named values.
+## Constant Unions
+A union whose cases all carry no payload declares a fixed set of named values. This is the form
+enums take in NX: there is no `enum` keyword, and no separate declaration for a closed set of
+constants.
 
 ```nx
-enum DealStage = draft | pending_review | approved_for_launch
+type DealStage = draft | pending_review | approved_for_launch
 
 let stage = DealStage.pending_review
 ```
 
-- Enum members conventionally use `snake_case`.
-- NX serializes enum values exactly as they appear in source, so `pending_review` stays
+- Case names conventionally use `snake_case`.
+- NX serializes a constant case exactly as it appears in source, so `pending_review` stays
   `"pending_review"` over the wire or in storage.
-- Use enums for simple scalar choices. Use discriminated unions when cases need per-state payloads.
+- A union whose cases all carry no payload is a *constant union*: it is the plain scalar-choice
+  form, and it generates a C# `enum` and a TypeScript string-literal union. Give a case a payload
+  when that state needs to carry data.
 
 ## Discriminated Union Types
 Discriminated unions declare a closed set of scoped cases. A union uses `type Name =` followed by a
-required leading-pipe case list.
+case list, with cases separated by `|`. A leading `|` before the first case is optional when the
+list holds two or more cases, and required when it holds exactly one, because `type A = B` without
+it is a type alias.
 
 ```nx
 type LoadState =

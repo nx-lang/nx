@@ -56,7 +56,7 @@ export interface NxIrDeclaration {
     readonly span: NxIrSourceSpan;
     readonly kind: NxIrDeclarationKind;
 }
-export type NxIrDeclarationKind = NxIrFunctionDeclaration | NxIrValueDeclaration | NxIrEnumDeclaration | NxIrRecordDeclaration | NxIrComponentDeclaration | NxIrUnionDeclaration | NxIrTypeAliasDeclaration;
+export type NxIrDeclarationKind = NxIrFunctionDeclaration | NxIrValueDeclaration | NxIrRecordDeclaration | NxIrComponentDeclaration | NxIrUnionDeclaration | NxIrTypeAliasDeclaration;
 export interface NxIrFunctionDeclaration {
     readonly tag: "function";
     readonly params: readonly NxIrParam[];
@@ -67,10 +67,6 @@ export interface NxIrValueDeclaration {
     readonly tag: "value";
     readonly value: NxIrExpression;
     readonly ty?: NxIrSemanticType;
-}
-export interface NxIrEnumDeclaration {
-    readonly tag: "enum";
-    readonly members: readonly string[];
 }
 export interface NxIrRecordDeclaration {
     readonly tag: "record";
@@ -113,6 +109,13 @@ export interface NxIrComponentField extends NxIrRecordField {
 export interface NxIrUnionCase {
     readonly name: string;
     readonly fields: readonly NxIrRecordField[];
+    /**
+     * Whether this case declares no fields in a union that declares no base.
+     *
+     * A constant case carries nothing beyond its own name, so its wire form is that bare string
+     * rather than a `$type` object.
+     */
+    readonly isConstant: boolean;
     readonly span: NxIrSourceSpan;
 }
 export interface NxIrExpression {

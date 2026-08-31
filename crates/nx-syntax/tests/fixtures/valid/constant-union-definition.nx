@@ -1,0 +1,13 @@
+type Status = pending_review | active | disabled
+
+// Keeps the optional leading `|` on purpose: the parser accepts both spellings on one line,
+// and this fixture is where the pipe-bearing form stays covered. Authored NX omits it.
+type Direction = | north | south | east | west
+
+let <Indicator current:Direction /> = {
+    if current == Direction.north {
+        1
+    } else {
+        0
+    }
+}

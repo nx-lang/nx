@@ -43,6 +43,29 @@ if (condition)
 if (condition)
     DoSomething();
 ```
+### NX Conventions
+
+- **Union declarations**: omit the leading `|` when the case list is on one line
+  (`type ThemeMode = light | dark`). Use a leading `|` on every case, including the first, when the
+  list spans multiple lines. This matches F#, OCaml, and TypeScript, where the leading bar is a
+  multi-line alignment device rather than part of the declaration.
+- A **single-case** union always keeps its leading `|` (`type Wrapper = | only`). There the bar is
+  syntax, not style: `type Wrapper = only` is a type alias.
+
+```nx
+// One line: no leading bar
+type ThemeMode = light | dark
+
+// Multi-line: a bar on every case
+type LoadState =
+  | idle
+  | loading
+  | failed { message:string }
+
+// One case: the bar is required
+type Wrapper = | only
+```
+
 ## Development Guidelines
 
 ### Refactoring

@@ -54,6 +54,8 @@ public sealed class NxPolymorphicMessagePackFormatter<TBase> : IMessagePackForma
 
     private static readonly IReadOnlyDictionary<string, Type> DiscriminatorToType = BuildDiscriminatorMap();
     private static readonly IReadOnlyDictionary<Type, string> TypeToDiscriminator = BuildTypeMap();
+    private static readonly IReadOnlyDictionary<string, Type> ConstantCaseNameToType = BuildConstantCaseNameMap();
+    private static readonly IReadOnlyDictionary<Type, string> TypeToConstantCaseName = BuildConstantCaseTypeMap();
     private static readonly IReadOnlyDictionary<Type, IReadOnlyList<SerializableProperty>> TypeProperties = BuildTypeProperties();
     private static readonly IReadOnlyDictionary<Type, IReadOnlyDictionary<string, SerializableProperty>> TypePropertiesByWireName = BuildTypePropertiesByWireName();
 
@@ -67,6 +69,14 @@ public sealed class NxPolymorphicMessagePackFormatter<TBase> : IMessagePackForma
         }
 
         Type runtimeType = value.GetType();
+
+        // A constant case carries nothing beyond its name, so its wire form is that bare name.
+        if (TypeToConstantCaseName.TryGetValue(runtimeType, out string? constantCaseName))
+        {
+            writer.Write(constantCaseName);
+            return;
+        }
+
         if (!TypeToDiscriminator.TryGetValue(runtimeType, out string? discriminator))
         {
             throw new MessagePackSerializationException(
@@ -99,10 +109,23 @@ public sealed class NxPolymorphicMessagePackFormatter<TBase> : IMessagePackForma
             return null!;
         }
 
+        // A constant case arrives as its bare name rather than as a `$type` map.
+        if (reader.NextMessagePackType == MessagePackType.String)
+        {
+            string? caseName = reader.ReadString();
+            if (caseName is null || !ConstantCaseNameToType.TryGetValue(caseName, out Type? caseType))
+            {
+                throw new MessagePackSerializationException(
+                    $"Unknown constant union case '{caseName}' for base type '{typeof(TBase).FullName}'.");
+            }
+
+            return (TBase)ConstantCaseInstance(caseType);
+        }
+
         if (reader.NextMessagePackType != MessagePackType.Map)
         {
             throw new MessagePackSerializationException(
-                $"Expected polymorphic MessagePack payload for '{typeof(TBase).FullName}' to be a map.");
+                $"Expected polymorphic MessagePack payload for '{typeof(TBase).FullName}' to be a map or a constant case name.");
         }
 
         int entryCount = reader.ReadMapHeader();
@@ -197,6 +220,20 @@ public sealed class NxPolymorphicMessagePackFormatter<TBase> : IMessagePackForma
     private static IReadOnlyDictionary<string, Type> BuildDiscriminatorMap()
     {
         Dictionary<string, Type> map = new(StringComparer.Ordinal);
+
+        // A union with more than one wire shape registers its cases with NxUnionCase, because
+        // System.Text.Json will not accept JsonDerivedType alongside the converter such a union
+        // needs. Either registration is authoritative here.
+        foreach (NxUnionCaseAttribute attribute in typeof(TBase).GetCustomAttributes<NxUnionCaseAttribute>())
+        {
+            map[attribute.Discriminator] = attribute.CaseType;
+        }
+
+        if (map.Count > 0)
+        {
+            return map;
+        }
+
         foreach (JsonDerivedTypeAttribute attribute in typeof(TBase).GetCustomAttributes<JsonDerivedTypeAttribute>())
         {
             if (attribute.DerivedType is null || attribute.TypeDiscriminator is null)
@@ -216,7 +253,43 @@ public sealed class NxPolymorphicMessagePackFormatter<TBase> : IMessagePackForma
         if (map.Count == 0)
         {
             throw new InvalidOperationException(
-                $"No JsonDerivedType registrations with string discriminators were found for polymorphic base type '{typeof(TBase).FullName}'.");
+                $"No NxUnionCase or JsonDerivedType registrations with string discriminators were found for polymorphic base type '{typeof(TBase).FullName}'.");
+        }
+
+        return map;
+    }
+
+    /// <summary>Returns the single instance of a constant case type.</summary>
+    private static object ConstantCaseInstance(Type caseType)
+    {
+        FieldInfo? instance = caseType.GetField("Instance", BindingFlags.Public | BindingFlags.Static);
+        return instance?.GetValue(null)
+            ?? Activator.CreateInstance(caseType)
+            ?? throw new MessagePackSerializationException(
+                $"Could not obtain an instance of constant union case '{caseType.FullName}'.");
+    }
+
+    private static IReadOnlyDictionary<string, Type> BuildConstantCaseNameMap()
+    {
+        Dictionary<string, Type> map = new(StringComparer.Ordinal);
+        foreach (Type type in DiscriminatorToType.Values)
+        {
+            NxConstantCaseAttribute? constant = type.GetCustomAttribute<NxConstantCaseAttribute>();
+            if (constant is not null)
+            {
+                map[constant.WireName] = type;
+            }
+        }
+
+        return map;
+    }
+
+    private static IReadOnlyDictionary<Type, string> BuildConstantCaseTypeMap()
+    {
+        Dictionary<Type, string> map = new();
+        foreach (KeyValuePair<string, Type> pair in ConstantCaseNameToType)
+        {
+            map[pair.Value] = pair.Key;
         }
 
         return map;

@@ -58,7 +58,7 @@ fn test_infer_array_types() {
 #[test]
 fn test_enum_definition_type_checks() {
     let source = r#"
-        enum Direction = | north | south | east | west
+        type Direction = north | south | east | west
         let current: Direction = { Direction.north }
     "#;
 
@@ -67,9 +67,9 @@ fn test_enum_definition_type_checks() {
 }
 
 #[test]
-fn test_unknown_enum_member_diagnostic() {
+fn test_unknown_union_case_diagnostic() {
     let source = r#"
-        enum Direction = | north | south
+        type Direction = north | south
         let useDirection(): Direction = { Direction.nort }
     "#;
 
@@ -78,8 +78,13 @@ fn test_unknown_enum_member_diagnostic() {
         result
             .errors()
             .iter()
-            .any(|diag| diag.code() == Some("undefined-enum-member")),
-        "Expected undefined-enum-member diagnostic"
+            .any(|diag| diag.code() == Some("undefined-union-case")),
+        "Expected undefined-union-case diagnostic, got {:?}",
+        result
+            .errors()
+            .iter()
+            .map(|diag| diag.code())
+            .collect::<Vec<_>>()
     );
 }
 
@@ -156,7 +161,7 @@ fn test_union_payload_case_construction_type_checks() {
 #[test]
 fn test_union_fieldless_case_shorthand_type_checks() {
     let source = r#"
-        type LoadState = | idle | loading
+        type LoadState = idle | loading
         let state: LoadState = { LoadState.idle }
     "#;
 
@@ -330,7 +335,7 @@ fn test_union_cases_satisfy_extended_abstract_record() {
 fn test_union_cases_compare_with_extended_abstract_record() {
     let source = r#"
         abstract type EventBase = { source:string = "ui" }
-        type UiEvent extends EventBase = | clicked { x:int } | closed
+        type UiEvent extends EventBase = clicked { x:int } | closed
         let compareUnion(event: UiEvent, base: EventBase): boolean = { event == base }
         let compareCase(base: EventBase): boolean = { <UiEvent.clicked x={1} /> != base }
     "#;
@@ -345,7 +350,7 @@ fn test_union_cases_compare_with_extended_abstract_record() {
 
 #[test]
 fn test_duplicate_union_case_syntax_diagnostic_suppresses_hir_duplicate() {
-    let source = "type LoadState = | idle | idle";
+    let source = "type LoadState = idle | idle";
 
     let result = check_str(source, "union-duplicate-case.nx");
     let duplicate_diagnostics = result
@@ -378,7 +383,7 @@ fn test_duplicate_union_case_syntax_diagnostic_suppresses_hir_duplicate() {
 #[test]
 fn test_union_sibling_cases_infer_owning_union_in_sequences() {
     let source = r#"
-        type LoadState = | idle | failed { message:string }
+        type LoadState = idle | failed { message:string }
         let states: LoadState[] = { LoadState.idle <LoadState.failed message={"Offline"} /> }
     "#;
 
@@ -394,7 +399,7 @@ fn test_union_sibling_cases_infer_owning_union_in_sequences() {
 fn test_union_shared_inherited_field_is_accessible() {
     let source = r#"
         abstract type EventBase = { source:string }
-        type UiEvent extends EventBase = | clicked { x:int } | closed
+        type UiEvent extends EventBase = clicked { x:int } | closed
         let read(event: UiEvent): string = { event.source }
     "#;
 
@@ -409,7 +414,7 @@ fn test_union_shared_inherited_field_is_accessible() {
 #[test]
 fn test_union_case_field_requires_narrowing() {
     let source = r#"
-        type LoadState = | failed { message:string } | loaded { count:int }
+        type LoadState = failed { message:string } | loaded { count:int }
         let read(state: LoadState): string = { state.message }
     "#;
 
@@ -427,7 +432,7 @@ fn test_union_case_field_requires_narrowing() {
 #[test]
 fn test_exhaustive_union_match_narrows_identifier() {
     let source = r#"
-        type LoadState = | idle | failed { message:string }
+        type LoadState = idle | failed { message:string }
         let view(state: LoadState): string = {
             if state is {
                 LoadState.idle => ""
@@ -447,7 +452,7 @@ fn test_exhaustive_union_match_narrows_identifier() {
 #[test]
 fn test_non_exhaustive_union_match_without_else_is_rejected() {
     let source = r#"
-        type LoadState = | idle | failed { message:string }
+        type LoadState = idle | failed { message:string }
         let view(state: LoadState): string = {
             if state is {
                 LoadState.idle => ""
@@ -469,7 +474,7 @@ fn test_non_exhaustive_union_match_without_else_is_rejected() {
 #[test]
 fn test_union_match_else_allows_partial_coverage() {
     let source = r#"
-        type LoadState = | idle | failed { message:string }
+        type LoadState = idle | failed { message:string }
         let view(state: LoadState): string = {
             if state is {
                 LoadState.idle => ""
@@ -649,7 +654,7 @@ fn test_property_fragment_content_property_rules_are_path_sensitive() {
 #[test]
 fn test_property_fragment_match_uses_union_narrowing() {
     let source = r#"
-        type LoadState = | idle | failed { message:string }
+        type LoadState = idle | failed { message:string }
         let <Notice message:string /> = <div>{message}</div>
         let view(state: LoadState) = {
             <Notice if state is {
@@ -670,7 +675,7 @@ fn test_property_fragment_match_uses_union_narrowing() {
 #[test]
 fn test_property_fragment_match_rejects_non_exhaustive_union() {
     let source = r#"
-        type LoadState = | idle | failed { message:string }
+        type LoadState = idle | failed { message:string }
         let <Notice message:string /> = <div>{message}</div>
         let view(state: LoadState) = {
             <Notice if state is {
@@ -693,7 +698,7 @@ fn test_property_fragment_match_rejects_non_exhaustive_union() {
 #[test]
 fn test_property_fragment_match_rejects_wrong_union_pattern() {
     let source = r#"
-        type LoadState = | idle | failed { message:string }
+        type LoadState = idle | failed { message:string }
         type SaveState = | failed
         let <Notice message:string /> = <div>{message}</div>
         let view(state: LoadState) = {

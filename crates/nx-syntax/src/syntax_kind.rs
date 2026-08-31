@@ -25,9 +25,6 @@ pub enum SyntaxKind {
     UNION_DEFINITION,
     UNION_CASE_LIST,
     UNION_CASE,
-    ENUM_DEFINITION,
-    ENUM_MEMBER_LIST,
-    ENUM_MEMBER,
     VALUE_DEFINITION,
     TYPE,
     PRIMITIVE_TYPE,
@@ -164,7 +161,6 @@ pub enum SyntaxKind {
     EMITS,
     STATE,
     TYPE_KW,
-    ENUM,
     IMPORT,
     FROM,
     AS,
@@ -248,7 +244,6 @@ impl SyntaxKind {
                 | SyntaxKind::EXPORT
                 | SyntaxKind::ABSTRACT
                 | SyntaxKind::EXTENDS
-                | SyntaxKind::ENUM
                 | SyntaxKind::IF
                 | SyntaxKind::ELSE
                 | SyntaxKind::FOR
@@ -328,7 +323,6 @@ impl SyntaxKind {
                 | SyntaxKind::TRUE
                 | SyntaxKind::FALSE
                 | SyntaxKind::NULL_KW
-                | SyntaxKind::ENUM
         )
     }
 
@@ -369,9 +363,6 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "union_definition" => SyntaxKind::UNION_DEFINITION,
         "union_case_list" => SyntaxKind::UNION_CASE_LIST,
         "union_case" => SyntaxKind::UNION_CASE,
-        "enum_definition" => SyntaxKind::ENUM_DEFINITION,
-        "enum_member_list" => SyntaxKind::ENUM_MEMBER_LIST,
-        "enum_member" => SyntaxKind::ENUM_MEMBER,
         "value_definition" => SyntaxKind::VALUE_DEFINITION,
         "type" => SyntaxKind::TYPE,
         "primitive_type" => SyntaxKind::PRIMITIVE_TYPE,
@@ -496,7 +487,6 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "export" => SyntaxKind::EXPORT,
         "abstract" => SyntaxKind::ABSTRACT,
         "extends" => SyntaxKind::EXTENDS,
-        "enum" => SyntaxKind::ENUM,
         "if" => SyntaxKind::IF,
         "else" => SyntaxKind::ELSE,
         "for" => SyntaxKind::FOR,

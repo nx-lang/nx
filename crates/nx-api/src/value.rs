@@ -45,8 +45,8 @@ impl Error for FromNxValueError {}
 /// Record values become [`NxValue::Record`] with their `type_name` preserved and fields
 /// sorted alphabetically (via [`BTreeMap`]).
 ///
-/// Enum values become [`NxValue::String`] carrying the bare authored member name. The
-/// declaring enum type is not preserved on the wire; consumers recover it from the target
+/// Constant union cases become [`NxValue::String`] carrying the bare authored case name. The
+/// declaring union type is not preserved on the wire; consumers recover it from the target
 /// schema (declared NX type, typed DTO property, or other type annotation).
 ///
 /// `Value::ActionHandler` is encoded as a record for display and inspection only. That shape is
@@ -61,7 +61,7 @@ pub fn to_nx_value(value: &Value) -> NxValue {
         Value::Float(value) => NxValue::Float(*value),
         Value::String(value) => NxValue::String(value.to_string()),
         Value::Array(elements) => NxValue::Array(elements.iter().map(to_nx_value).collect()),
-        Value::EnumValue { member, .. } => NxValue::String(member.to_string()),
+        Value::UnionCase { case, .. } => NxValue::String(case.to_string()),
         Value::Record { type_name, fields } => NxValue::Record {
             type_name: Some(type_name.as_str().to_string()),
             properties: fields_to_properties(fields),
@@ -179,9 +179,9 @@ mod tests {
 
     #[test]
     fn interpreter_enum_value_lowers_to_bare_authored_member_string() {
-        let runtime = Value::EnumValue {
-            type_name: Name::new("Status"),
-            member: SmolStr::new("active"),
+        let runtime = Value::UnionCase {
+            union: Name::new("Status"),
+            case: SmolStr::new("active"),
         };
 
         assert_eq!(to_nx_value(&runtime), NxValue::String("active".to_string()));

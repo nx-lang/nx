@@ -18,7 +18,7 @@ let statusBadge = if isActive {
 ### Match-style conditions
 
 ```nx
-enum DealStage = draft | pending_review | approved
+type DealStage = draft | pending_review | approved
 
 let badge = if stage is {
   DealStage.draft => <Badge tone="neutral">Draft</Badge>
@@ -27,7 +27,7 @@ let badge = if stage is {
 }
 ```
 
-The first matching arm wins. Enums are useful for scalar choices; discriminated unions add
+The first matching arm wins. Cases without payloads are useful for scalar choices; cases with them add
 case-specific payloads and narrow the matched identifier inside each arm.
 
 ```nx

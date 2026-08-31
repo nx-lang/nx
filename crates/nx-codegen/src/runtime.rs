@@ -98,7 +98,7 @@ export function nxEnumSchema(members: readonly string[]): NxSchema {
   return { enum: members };
 }
 
-export function nxUnionSchema(cases: readonly NxRecordSchema[]): NxSchema {
+export function nxUnionSchema(cases: readonly NxSchema[]): NxSchema {
   return { union: cases };
 }
 

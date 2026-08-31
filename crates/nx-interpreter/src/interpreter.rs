@@ -78,9 +78,9 @@ enum SerializedValue {
     Boolean(bool),
     Null,
     Array(Vec<SerializedValue>),
-    EnumValue {
-        type_name: String,
-        member: String,
+    UnionCase {
+        union: String,
+        case: String,
     },
     Record {
         type_name: String,
@@ -1532,9 +1532,9 @@ impl Interpreter {
             Value::Array(values) => {
                 SerializedValue::Array(values.iter().map(Self::serialize_runtime_value).collect())
             }
-            Value::EnumValue { type_name, member } => SerializedValue::EnumValue {
-                type_name: type_name.as_str().to_string(),
-                member: member.to_string(),
+            Value::UnionCase { union, case } => SerializedValue::UnionCase {
+                union: union.as_str().to_string(),
+                case: case.to_string(),
             },
             Value::Record { type_name, fields } => SerializedValue::Record {
                 type_name: type_name.as_str().to_string(),
@@ -1583,9 +1583,9 @@ impl Interpreter {
                     .map(|value| self.deserialize_runtime_value(module, value))
                     .collect::<Result<Vec<_>, _>>()?,
             )),
-            SerializedValue::EnumValue { type_name, member } => Ok(Value::EnumValue {
-                type_name: Name::new(&type_name),
-                member: SmolStr::new(member.as_str()),
+            SerializedValue::UnionCase { union, case } => Ok(Value::UnionCase {
+                union: Name::new(&union),
+                case: SmolStr::new(case.as_str()),
             }),
             SerializedValue::Record { type_name, fields } => Ok(Value::Record {
                 type_name: Name::new(&type_name),
@@ -2590,24 +2590,36 @@ impl Interpreter {
             };
         }
 
-        // Enum values arrive from host input as bare authored member strings. When the declared
-        // target type is an enum, resolve the string against the enum's member set and lift it
-        // into Value::EnumValue; unknown members surface through the standard TypeMismatch path.
-        if let (Value::String(member), Type::Named(expected_name)) = (&value, expected) {
-            if let Some(enum_def) = self.resolve_enum_definition(module, expected_name) {
-                if enum_def
-                    .members
+        // A constant case arrives from host input as its bare authored name. When the declared
+        // target type is a union, resolve the string against that union's constant cases and lift
+        // it into Value::UnionCase; unknown names surface through the standard TypeMismatch path.
+        let expected_union_name = match expected {
+            Type::Named(name) => Some(name.clone()),
+            Type::Union(union_ty) => Some(union_ty.name.clone()),
+            _ => None,
+        };
+        if let (Value::String(case_name), Some(expected_name)) = (&value, &expected_union_name) {
+            if let Some(union_def) = self.resolve_union_definition(module, expected_name) {
+                if let Some(case) = union_def
+                    .cases
                     .iter()
-                    .any(|m| m.name.as_str() == member.as_str())
+                    .find(|case| case.name.as_str() == case_name.as_str())
                 {
-                    return Ok(Value::EnumValue {
-                        type_name: enum_def.name.clone(),
-                        member: member.clone(),
-                    });
+                    if union_def.is_constant_case(case) {
+                        return Ok(Value::UnionCase {
+                            union: union_def.name.clone(),
+                            case: case_name.clone(),
+                        });
+                    }
+                    return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                        expected: expected.to_string(),
+                        actual: format!("union case '{}' carries a payload", case_name),
+                        operation: operation.to_string(),
+                    }));
                 }
                 return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
                     expected: expected.to_string(),
-                    actual: format!("unknown enum member '{}'", member),
+                    actual: format!("unknown union case '{}'", case_name),
                     operation: operation.to_string(),
                 }));
             }
@@ -2624,6 +2636,20 @@ impl Interpreter {
                     Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
                         expected: expected.to_string(),
                         actual: type_name.as_str().to_string(),
+                        operation: operation.to_string(),
+                    }))
+                }
+            }
+            // A constant case is a scalar, but it is still a union case, and satisfies an
+            // expected type the same way a payload case does.
+            Value::UnionCase { union, case } => {
+                let qualified = Name::new(&format!("{}.{}", union, case));
+                if self.union_case_value_matches_expected_type(module, &qualified, expected) {
+                    Ok(Value::UnionCase { union, case })
+                } else {
+                    Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                        expected: expected.to_string(),
+                        actual: qualified.as_str().to_string(),
                         operation: operation.to_string(),
                     }))
                 }
@@ -2689,7 +2715,7 @@ impl Interpreter {
                     Type::array(current)
                 }
             }
-            Value::EnumValue { type_name, .. } => Type::named(type_name.clone()),
+            Value::UnionCase { union, .. } => Type::named(union.clone()),
             Value::Record { type_name, .. } => Type::named(type_name.clone()),
             // Handlers are opaque runtime callback objects rather than first-class typed functions.
             Value::ActionHandler { .. } => Type::named("action_handler"),
@@ -2770,46 +2796,22 @@ impl Interpreter {
                 );
             }
 
-            if let Some(enum_def) = self.resolve_enum_definition(module, base_name) {
-                if enum_def
-                    .members
-                    .iter()
-                    .any(|m| m.name.as_str() == member.as_str())
-                {
-                    return Ok(Value::EnumValue {
-                        type_name: enum_def.name.clone(),
-                        member: SmolStr::new(member.as_str()),
-                    });
-                } else {
-                    return Err(RuntimeError::new(RuntimeErrorKind::EnumMemberNotFound {
-                        enum_name: SmolStr::new(enum_def.name.as_str()),
-                        member: SmolStr::new(member.as_str()),
-                    }));
-                }
-            } else {
-                return Err(RuntimeError::new(RuntimeErrorKind::EnumNotFound {
-                    name: SmolStr::new(base_name.as_str()),
+            // The union's own name reaches here only when the case above did not match, so the
+            // case does not exist on it.
+            if let Some(union_def) = self.resolve_union_definition(module, base_name) {
+                return Err(RuntimeError::new(RuntimeErrorKind::UnionCaseNotFound {
+                    union: SmolStr::new(union_def.name.as_str()),
+                    case: SmolStr::new(member.as_str()),
                 }));
             }
         }
 
         if let Some(base_name) = self.flattened_expr_name(module, base_expr) {
             let base_name = Name::new(&base_name);
-            if let Some(enum_def) = self.resolve_enum_definition(module, &base_name) {
-                if enum_def
-                    .members
-                    .iter()
-                    .any(|m| m.name.as_str() == member.as_str())
-                {
-                    return Ok(Value::EnumValue {
-                        type_name: enum_def.name.clone(),
-                        member: SmolStr::new(member.as_str()),
-                    });
-                }
-
-                return Err(RuntimeError::new(RuntimeErrorKind::EnumMemberNotFound {
-                    enum_name: SmolStr::new(enum_def.name.as_str()),
-                    member: SmolStr::new(member.as_str()),
+            if let Some(union_def) = self.resolve_union_definition(module, &base_name) {
+                return Err(RuntimeError::new(RuntimeErrorKind::UnionCaseNotFound {
+                    union: SmolStr::new(union_def.name.as_str()),
+                    case: SmolStr::new(member.as_str()),
                 }));
             }
         }
@@ -2836,9 +2838,9 @@ impl Interpreter {
                     }))
                 }
             }
-            Value::EnumValue { .. } => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+            Value::UnionCase { .. } => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
                 expected: "record".to_string(),
-                actual: "enum".to_string(),
+                actual: "union case".to_string(),
                 operation: format!("member access .{}", member.as_str()),
             })),
             other => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
@@ -2966,12 +2968,12 @@ impl Interpreter {
         Ok(Value::Array(results))
     }
 
-    fn resolve_enum_definition<'a>(
+    fn resolve_union_definition<'a>(
         &'a self,
         module: &'a LoweredModule,
         name: &Name,
-    ) -> Option<&'a nx_hir::EnumDef> {
-        self.resolve_enum_definition_inner(module, name, &mut FxHashSet::default())
+    ) -> Option<&'a UnionDef> {
+        self.resolve_union_definition_inner(module, name, &mut FxHashSet::default())
     }
 
     fn resolve_record_definition(
@@ -3005,22 +3007,22 @@ impl Interpreter {
         Some((target_module, union_def, case))
     }
 
-    fn resolve_enum_definition_inner<'a>(
+    fn resolve_union_definition_inner<'a>(
         &'a self,
         module: &'a LoweredModule,
         name: &Name,
         seen: &mut FxHashSet<SmolStr>,
-    ) -> Option<&'a nx_hir::EnumDef> {
+    ) -> Option<&'a UnionDef> {
         let key = SmolStr::new(name.as_str());
         if !seen.insert(key.clone()) {
             return None;
         }
 
         let result = match self.resolve_item(module, name.as_str()) {
-            Some((_, nx_hir::Item::Enum(enum_def))) => Some(enum_def),
+            Some((_, nx_hir::Item::Union(union_def))) => Some(union_def),
             Some((target_module, nx_hir::Item::TypeAlias(alias))) => match &alias.ty {
                 ast::TypeRef::Name(target) => {
-                    self.resolve_enum_definition_inner(target_module, target, seen)
+                    self.resolve_union_definition_inner(target_module, target, seen)
                 }
                 _ => None,
             },
@@ -3402,7 +3404,6 @@ fn runtime_prepared_item_kind(kind: ResolvedItemKind) -> Option<PreparedItemKind
         ResolvedItemKind::Value => Some(PreparedItemKind::Value),
         ResolvedItemKind::Component => Some(PreparedItemKind::Component),
         ResolvedItemKind::TypeAlias => Some(PreparedItemKind::TypeAlias),
-        ResolvedItemKind::Enum => Some(PreparedItemKind::Enum),
         ResolvedItemKind::Union => Some(PreparedItemKind::Union),
         ResolvedItemKind::Record => Some(PreparedItemKind::Record),
     }
@@ -3540,6 +3541,16 @@ impl Interpreter {
                 actual: format!("unknown field '{}'", unknown),
                 operation: "union case construction".to_string(),
             }));
+        }
+
+        // A constant case declares no fields and its union declares no base, so `materialized` is
+        // empty and the case carries nothing beyond its name. It is a scalar, not an empty record
+        // that would be indistinguishable from an empty qualified record.
+        if union_def.is_constant_case(case) {
+            return Ok(Value::UnionCase {
+                union: union_def.name.clone(),
+                case: SmolStr::new(case.name.as_str()),
+            });
         }
 
         Ok(Value::Record {
@@ -4702,7 +4713,7 @@ mod tests {
     #[test]
     fn test_evaluate_component_validates_explicit_state_fields() {
         let source = r#"
-            enum ThemeMode = | light | dark
+            type ThemeMode = light | dark
 
             component <SearchBox /> = {
               state {
@@ -4732,9 +4743,9 @@ mod tests {
             .expect("Expected enum and nullable state evaluation to succeed");
         assert_eq!(
             extract_record_field(&evaluated.rendered, "theme"),
-            &Value::EnumValue {
-                type_name: Name::new("ThemeMode"),
-                member: SmolStr::new("dark"),
+            &Value::UnionCase {
+                union: Name::new("ThemeMode"),
+                case: SmolStr::new("dark"),
             }
         );
         assert_eq!(
@@ -4808,7 +4819,7 @@ mod tests {
         assert!(matches!(
             bad_enum.kind(),
             RuntimeErrorKind::TypeMismatch { actual, .. }
-                if actual == "unknown enum member 'sparkly'"
+                if actual == "unknown union case 'sparkly'"
         ));
     }
 
@@ -5006,7 +5017,7 @@ mod tests {
     #[test]
     fn test_evaluate_external_component_preserves_prop_only_rendering() {
         let source = r#"
-            enum ThemeMode = | light | dark
+            type ThemeMode = light | dark
 
             external component <SearchBox placeholder:string = "Find docs" /> = {
               state {
@@ -5133,7 +5144,7 @@ mod tests {
         assert!(matches!(
             bad_enum.kind(),
             RuntimeErrorKind::TypeMismatch { actual, .. }
-                if actual == "unknown enum member 'sparkly'"
+                if actual == "unknown union case 'sparkly'"
         ));
     }
 

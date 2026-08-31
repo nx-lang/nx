@@ -1952,39 +1952,39 @@ fn test_parse_invalid_component_emits_reference_is_error() {
 }
 
 #[test]
-fn test_parse_enum_definition() {
-    let path = fixture_path("valid/enum-definition.nx");
+fn test_parse_constant_union_definition() {
+    let path = fixture_path("valid/constant-union-definition.nx");
     let result = parse_file(&path).unwrap();
 
-    assert!(result.is_ok(), "Enum definition file should parse");
+    assert!(result.is_ok(), "Constant union file should parse");
     let root = result.root().expect("Should produce root node");
 
-    let enums: Vec<_> = root
+    let unions: Vec<_> = root
         .children()
-        .filter(|child| child.kind() == SyntaxKind::ENUM_DEFINITION)
+        .filter(|child| child.kind() == SyntaxKind::UNION_DEFINITION)
         .collect();
-    assert_eq!(enums.len(), 2, "Expected two enum definitions");
+    assert_eq!(unions.len(), 2, "Expected two union definitions");
 
-    let status = enums.first().expect("First enum definition should exist");
+    let status = unions.first().expect("First union definition should exist");
     let name_node = status
         .child_by_field("name")
-        .expect("Enum definition should expose name field");
+        .expect("Union definition should expose name field");
     assert_eq!(name_node.text(), "Status");
 
-    let members_node = status
-        .child_by_field("members")
-        .expect("Enum definition should contain members list");
-    let member_names: Vec<_> = members_node
+    let cases_node = status
+        .child_by_field("cases")
+        .expect("Union definition should contain a case list");
+    let case_names: Vec<_> = cases_node
         .children()
-        .filter(|child| child.kind() == SyntaxKind::ENUM_MEMBER)
-        .map(|member| member.text().to_string())
+        .filter(|child| child.kind() == SyntaxKind::UNION_CASE)
+        .map(|case| {
+            case.child_by_field("name")
+                .expect("Union case should expose name")
+                .text()
+                .to_string()
+        })
         .collect();
-    assert!(
-        member_names.contains(&"pending_review".to_string())
-            && member_names.contains(&"active".to_string())
-            && member_names.contains(&"disabled".to_string()),
-        "All enum members should be captured"
-    );
+    assert_eq!(case_names, vec!["pending_review", "active", "disabled"]);
 }
 
 #[test]
@@ -2003,9 +2003,17 @@ fn test_parse_union_definition() {
         .children()
         .filter(|child| child.kind() == SyntaxKind::UNION_DEFINITION)
         .collect();
-    assert_eq!(unions.len(), 2, "Expected two union definitions");
+    // `CardSortMode` is a constant union: the fixture's former `enum` declaration.
+    assert_eq!(unions.len(), 3, "Expected three union definitions");
+    assert_eq!(
+        unions[0]
+            .child_by_field("name")
+            .expect("Union should expose name field")
+            .text(),
+        "CardSortMode"
+    );
 
-    let load_state = unions.first().expect("First union should exist");
+    let load_state = unions.get(1).expect("LoadState union should exist");
     assert_eq!(
         load_state
             .child_by_field("name")
@@ -2046,7 +2054,7 @@ fn test_parse_union_definition() {
         "Case field default should be preserved"
     );
 
-    let ui_event = unions.get(1).expect("Second union should exist");
+    let ui_event = unions.get(2).expect("UiEvent union should exist");
     assert_eq!(
         ui_event
             .child_by_field("base")
@@ -2057,24 +2065,85 @@ fn test_parse_union_definition() {
 }
 
 #[test]
-fn test_parse_union_definition_requires_leading_pipe() {
-    let path = fixture_path("invalid/union-missing-leading-pipe.nx");
+fn test_parse_union_definition_leading_pipe_is_optional_for_multiple_cases() {
+    let path = fixture_path("valid/union-without-leading-pipe.nx");
     let result = parse_file(&path).unwrap();
 
     assert!(
-        !result.is_ok(),
-        "Union-looking type declaration without leading pipe should fail"
+        result.is_ok(),
+        "A union of two or more cases needs no leading pipe. Errors: {:?}",
+        result.errors
+    );
+    let root = result.root().expect("Should produce root node");
+
+    let unions: Vec<_> = root
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::UNION_DEFINITION)
+        .collect();
+    assert_eq!(unions.len(), 3, "Expected three union definitions");
+
+    let case_names = |union: &nx_syntax::SyntaxNode| -> Vec<String> {
+        union
+            .child_by_field("cases")
+            .expect("Union should expose case list")
+            .children()
+            .filter(|child| child.kind() == SyntaxKind::UNION_CASE)
+            .map(|case| {
+                case.child_by_field("name")
+                    .expect("Union case should expose name")
+                    .text()
+                    .to_string()
+            })
+            .collect()
+    };
+
+    assert_eq!(case_names(&unions[0]), vec!["idle", "loading"]);
+    assert_eq!(case_names(&unions[1]), vec!["point", "circle"]);
+    assert_eq!(case_names(&unions[2]), vec!["solo"]);
+}
+
+/// A single bare case would be ambiguous with the alias form, so `type A = B` stays an alias.
+#[test]
+fn test_parse_single_bare_name_is_a_type_alias_not_a_union() {
+    let result = parse_str("type Alias = Other", "alias.nx");
+
+    assert!(
+        result.is_ok(),
+        "Expected a clean parse. Errors: {:?}",
+        result.errors
+    );
+    let root = result.root().expect("Should produce root node");
+    let kinds: Vec<_> = root.children().map(|child| child.kind()).collect();
+
+    assert!(
+        kinds.contains(&SyntaxKind::TYPE_DEFINITION),
+        "Expected a type_definition, got {kinds:?}"
     );
     assert!(
-        !result.errors.is_empty(),
-        "Missing leading pipe should produce diagnostics"
+        !kinds.contains(&SyntaxKind::UNION_DEFINITION),
+        "A single bare name must not parse as a union, got {kinds:?}"
     );
-    let messages = result
+}
+
+/// The removed `enum` keyword is reported by name rather than as an unhelpful parse error.
+#[test]
+fn test_parse_removed_enum_keyword_names_the_replacement() {
+    let path = fixture_path("invalid/removed-enum-keyword.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(!result.is_ok(), "`enum` is no longer an NX declaration");
+
+    let codes: Vec<_> = result
         .errors
         .iter()
-        .map(|diagnostic| diagnostic.message())
-        .collect::<Vec<_>>()
-        .join(" ");
+        .filter_map(|diagnostic| diagnostic.code())
+        .collect();
+    assert_eq!(
+        codes,
+        vec!["removed-enum-keyword"],
+        "the targeted diagnostic replaces the generic parse error rather than joining it"
+    );
+
     let notes = result
         .errors
         .iter()
@@ -2082,12 +2151,8 @@ fn test_parse_union_definition_requires_leading_pipe() {
         .collect::<Vec<_>>()
         .join(" ");
     assert!(
-        messages.contains("Invalid discriminated union definition"),
-        "Missing leading pipe should produce a union-specific diagnostic, got: {messages}"
-    );
-    assert!(
-        notes.contains("Expected: type UnionName"),
-        "Missing leading pipe should include the union syntax hint, got: {notes}"
+        notes.contains("Write `type Fit = fill | contain | cover` instead"),
+        "expected the concrete replacement form, got: {notes}"
     );
 }
 
@@ -2441,7 +2506,7 @@ fn test_snapshot_error_diagnostics() {
 #[test]
 fn test_snapshot_union_definition() {
     let result = parse_str(
-        "type LoadState = | idle | failed { message:string retryable:boolean = true }",
+        "type LoadState = idle | failed { message:string retryable:boolean = true }",
         "test.nx",
     );
     let root = result.root().expect("Should have root");

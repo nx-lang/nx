@@ -578,7 +578,7 @@ let root() = { 0 }"#;
     #[test]
     fn evaluate_component_source_returns_json_compatible_enum_output() {
         let source = r#"
-            enum ThemeMode = | light | dark
+            type ThemeMode = light | dark
 
             component <ThemeView /> = {
               state { theme:ThemeMode }
@@ -882,7 +882,7 @@ let root() = { 0 }"#;
     #[test]
     fn initialize_component_source_round_trips_enum_props_in_rendered_output() {
         let source = r#"
-            enum ThemeMode = | light | dark
+            type ThemeMode = light | dark
 
             external component <SearchBox theme:ThemeMode />
         "#;
@@ -922,7 +922,7 @@ let root() = { 0 }"#;
     #[test]
     fn initialize_component_source_rejects_unknown_enum_member_in_prop() {
         let source = r#"
-            enum ThemeMode = | light | dark
+            type ThemeMode = light | dark
 
             external component <SearchBox theme:ThemeMode />
         "#;
@@ -943,14 +943,14 @@ let root() = { 0 }"#;
             &props,
         );
         let ComponentInitEvalResult::Err(diagnostics) = result else {
-            panic!("Expected unknown enum member to be rejected");
+            panic!("Expected an unknown union case to be rejected");
         };
 
         assert!(
             diagnostics
                 .iter()
-                .any(|diagnostic| diagnostic.message.contains("unknown enum member 'sparkly'")),
-            "Expected unknown-enum-member diagnostic, got {:?}",
+                .any(|diagnostic| diagnostic.message.contains("unknown union case 'sparkly'")),
+            "Expected unknown-union-case diagnostic, got {:?}",
             diagnostics
                 .iter()
                 .map(|diagnostic| diagnostic.message.as_str())
@@ -961,7 +961,7 @@ let root() = { 0 }"#;
     #[test]
     fn dispatch_component_actions_source_round_trips_enum_effects_and_snapshot() {
         let source = r#"
-            enum ThemeMode = | light | dark
+            type ThemeMode = light | dark
 
             action SearchSubmitted = { theme:ThemeMode }
             action DoSearch = { theme:ThemeMode }

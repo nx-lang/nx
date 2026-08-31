@@ -296,25 +296,34 @@ Use the JSON convenience APIs when C# needs a parsed JSON view without introduci
 that call path. Use the raw-byte overloads with `NxOutputFormat.Json` when you want UTF-8 JSON
 bytes that can be forwarded directly to another client.
 
-### Enum Encoding
+### Constant Case Encoding
 
-NX enum values are encoded as the bare authored member string on the wire, both in raw and typed
+NX has one declaration form for a union. A case is **constant** when it declares no fields and its
+union declares no base, so the case carries nothing beyond its own name. A **constant union** is one
+whose cases are all constant — the closed set of named constants that `enum` used to declare.
+
+A constant case is encoded as the bare authored case string on the wire, both in raw and typed
 layers, for JSON and MessagePack alike:
 
 ```json
 "dark"
 ```
 
-Raw APIs (`EvaluateBytes`, `EvaluateJson`, `EvaluateComponentJson`, `InitializeComponentJson`,
-`DispatchComponentActionsJson`) emit the member string directly. When the host feeds a raw value
-back into the runtime for a slot whose declared NX type is an enum, the runtime resolves the string
-against that enum's member list. Unknown members surface through the standard argument
-type-mismatch error path.
+This holds wherever the case appears. In a constant union such as `type ThemeMode = light | dark`
+every value takes this form; in a union that also has payload cases, the constant ones take it while
+the payload ones take the `$type` map described below.
 
-Typed generated DTOs use the same member-string contract. Generated enums emit an explicit
-wire-format mapping type and rely on `NxEnumJsonConverter<TEnum, TWire>` and
-`NxEnumMessagePackFormatter<TEnum, TWire>` from `NxLang.Sdk` to (de)serialize the authored
-member string.
+Raw APIs (`EvaluateBytes`, `EvaluateJson`, `EvaluateComponentJson`, `InitializeComponentJson`,
+`DispatchComponentActionsJson`) emit the case string directly. When the host feeds a raw value back
+into the runtime for a slot whose declared NX type is that union, the runtime resolves the string
+against the union's case list. Unknown cases surface through the standard argument type-mismatch
+error path.
+
+Typed generated DTOs use the same string contract. A constant union generates a CLR `enum` plus an
+explicit wire-format mapping type, and relies on `NxEnumJsonConverter<TEnum, TWire>` and
+`NxEnumMessagePackFormatter<TEnum, TWire>` from `NxLang.Sdk` to (de)serialize the authored case
+string. The CLR `enum` is the generated *host* shape for a constant union; it is not a separate NX
+concept.
 
 Use the raw APIs when you need a schema-free value tree. Use typed generated models when you want
 ergonomic host-side enums.
@@ -331,14 +340,15 @@ is the fully scoped case name. Payload fields keep their authored NX wire names:
 }
 ```
 
-Raw APIs expose the same shape for JSON and MessagePack. A fieldless case such as `LoadState.idle`
-is still a map, not a bare string:
+Raw APIs expose the same shape for JSON and MessagePack. A constant case of the same union, such as
+`LoadState.idle`, is a bare string rather than a map, because it carries nothing a map would hold:
 
 ```json
-{
-  "$type": "LoadState.idle"
-}
+"idle"
 ```
+
+A fieldless case of a union that `extends` an abstract base is **not** constant — it carries the
+base's fields — and so keeps the `$type` map form.
 
 Generated C# union roots use `JsonPolymorphic`/`JsonDerivedType` for JSON and
 `NxPolymorphicMessagePackFormatter<T>` for MessagePack, so serializing or deserializing through the
@@ -357,8 +367,11 @@ LoadState fromJson = JsonSerializer.Deserialize<LoadState>(json)!;
 LoadState fromMessagePack = MessagePackSerializer.Deserialize<LoadState>(bytes);
 ```
 
-Enums and discriminated unions intentionally remain separate wire contracts: enums are bare authored
-member strings, while union cases are `$type` maps.
+A union that mixes the two kinds of case therefore has two wire shapes, and generated readers accept
+both. `NxPolymorphicMessagePackFormatter<T>` and the generated JSON converter read a bare string as
+the union's constant case of that name and a `$type` map as a payload case; generated C# exposes a
+constant case as a `[NxConstantCase]` singleton, for example `LoadStateIdle.Instance`, which
+serializes back to the bare string.
 
 ### Component Evaluation
 
@@ -549,14 +562,16 @@ nxlang typegen ./models --language csharp --csharp-namespace MyApp.Models --outp
 
 Generation now honors NX export visibility, so only declarations marked `export` are emitted.
 Library generation writes one `.g.cs` file per contributing module under the requested output
-directory. Generated enums use the authored NX member spellings for both JSON and MessagePack, the
-same bare-string shape raw runtime payloads carry. Generated discriminated unions emit an abstract
-root plus sealed case DTOs whose JSON and MessagePack attributes use the canonical `$type` map
-shape. Generated C# enums and unions rely on shared helpers from `NxLang.Sdk` under
+directory. The generated host shape for a union follows from whether it is constant. A constant
+union generates a CLR `enum` using the authored NX case spellings for both JSON and MessagePack, the
+same bare-string shape raw runtime payloads carry. A union with any payload case generates an
+abstract root plus sealed case DTOs whose JSON and MessagePack attributes use the canonical `$type`
+map shape, with each constant case emitted as a `[NxConstantCase]` singleton that serializes as its
+bare string. Generated C# enums and unions rely on shared helpers from `NxLang.Sdk` under
 `NxLang.Nx.Serialization`, so the project that compiles the generated files must reference
-`NxLang.Sdk` in addition to the serializer packages it already uses. The generated enum output
-emits the enum itself plus an explicit wire-format mapping type; the JSON converter and MessagePack
-formatter implementation comes from the shared SDK assembly.
+`NxLang.Sdk` in addition to the serializer packages it already uses. The generated constant-union
+output emits the `enum` itself plus an explicit wire-format mapping type; the JSON converter and
+MessagePack formatter implementation comes from the shared SDK assembly.
 
 ## Troubleshooting
 

@@ -26,7 +26,6 @@ Keywords
 - TYPE ("type")
 - ABSTRACT ("abstract")
 - EXTENDS ("extends")
-- ENUM ("enum")
 - LET ("let")
 - IF ("if"), ELSE ("else"), IS ("is")
 - FOR ("for"), IN ("in")
@@ -107,7 +106,7 @@ Conventional expressions (non-markup) use a Pratt parser with the following prec
   - form: callee LPAREN [Expr (COMMA Expr)*] RPAREN → ParenFunctionCall(callee, args)
 - Member access: led token: DOT IDENTIFIER, left-associative
   - form: left DOT IDENTIFIER → MemberAccess(left, name)
-  - Note: Handles both property/field access on values and enum member access; semantic analysis distinguishes based on whether left resolves to a type or value
+  - Note: Handles both property/field access on values and union case access; semantic analysis distinguishes based on whether left resolves to a type or value
 
  130: Prefix unary, right-associative
  - Prefix minus: nud token: MINUS
@@ -194,7 +193,6 @@ VisibilityModifier
 TypeDefinition (AST: TypeDefinitionSyntax is a sum type)
 - TypeDefinition → RecordDefinition (RecordDefinitionSyntax)
 - TypeDefinition → UnionDefinition (UnionDefinitionSyntax)
-- TypeDefinition → EnumDefinition (EnumDefinitionSyntax)
 - TypeDefinition → TypeAliasDefinition (TypeAliasDefinitionSyntax)
 
 RecordDefinition (AST: RecordDefinitionSyntax)
@@ -241,25 +239,6 @@ RecordPropertyDefaultOpt
 TypeAliasDefinition (AST: TypeAliasDefinitionSyntax)
 - TypeAliasDefinition → VisibilityModifier? TYPE IDENTIFIER EQ Type
   - fields: visibility?: "private"|"export", name: string, type: TypeSyntax
-
-EnumDefinition (AST: EnumDefinitionSyntax)
-- EnumDefinition → VisibilityModifier? ENUM IDENTIFIER EQ EnumMemberList
-  - fields: visibility?: "private"|"export", name: string, members: EnumMemberSyntax[]
-
-EnumMemberList
-- EnumMemberList → EnumMemberListLead EnumMemberListTail
-
-EnumMemberListLead
-- EnumMemberListLead → EnumMember
-- EnumMemberListLead → PIPE EnumMember
-
-EnumMemberListTail
-- EnumMemberListTail → PIPE EnumMember EnumMemberListTail
-- EnumMemberListTail → ε
-
-EnumMember (AST: EnumMemberSyntax)
-- EnumMember → IDENTIFIER
-  - fields: name: string
 
 ValueDefinition (AST: ValueDefinitionSyntax)
 - ValueDefinition → VisibilityModifier? LET IDENTIFIER ValueDefinitionTypeOpt EQ RhsExpression
@@ -695,9 +674,8 @@ This section lists the AST node types with fields for implementers.
 - SelectiveImportListSyntax: entries: SelectiveImportSyntax[]
 - SelectiveImportSyntax: name: string, alias?: QualifiedNameSyntax
 - LibraryPathSyntax: value: string
-- TypeDefinitionSyntax: TypeAliasDefinitionSyntax | EnumDefinitionSyntax | RecordDefinitionSyntax | UnionDefinitionSyntax
+- TypeDefinitionSyntax: TypeAliasDefinitionSyntax | RecordDefinitionSyntax | UnionDefinitionSyntax
 - TypeAliasDefinitionSyntax: visibility?: "private"|"export", name: string, type: TypeSyntax
-- EnumDefinitionSyntax: visibility?: "private"|"export", name: string, members: EnumMemberSyntax[]
 - RecordDefinitionSyntax: visibility?: "private"|"export", isAbstract: boolean, name: string, base?: QualifiedNameSyntax, properties: RecordPropertyDefinitionSyntax[]
 - UnionDefinitionSyntax: visibility?: "private"|"export", name: string, base?: QualifiedNameSyntax, cases: UnionCaseSyntax[]
 - UnionCaseSyntax: name: string, properties: PropertyDefinitionSyntax[]
@@ -714,7 +692,7 @@ This section lists the AST node types with fields for implementers.
 - PropertyDefinitionSyntax: modifier?: "content", name: string, type: TypeSyntax, default?: ExpressionSyntax
 - ExpressionSyntax: union of MarkupElementSyntax | ValuesBracedExpressionSyntax | LiteralExpressionSyntax | IdentifierNameSyntax | ValueIfSimpleExpressionSyntax | ValueIfMatchExpressionSyntax | ValueIfConditionListExpressionSyntax | ValueForExpressionSyntax | ConditionalExpressionSyntax | ParenFunctionCallExpressionSyntax | MemberAccessExpressionSyntax | BinaryExpressionSyntax | PrefixUnaryExpressionSyntax | ParenthesizedExpressionSyntax | UnitLiteralSyntax
  - ParenFunctionCallExpressionSyntax: callee: ExpressionSyntax, args: ExpressionSyntax[]
- - MemberAccessExpressionSyntax: target: ExpressionSyntax, name: string (includes both property access and enum member access; distinguished during semantic analysis)
+ - MemberAccessExpressionSyntax: target: ExpressionSyntax, name: string (includes both property access and union case access; distinguished during semantic analysis)
  - ConditionalExpressionSyntax: condition: ExpressionSyntax, whenTrue: ExpressionSyntax, whenFalse: ExpressionSyntax
  - BinaryExpressionSyntax: op: token, left: ExpressionSyntax, right: ExpressionSyntax
  - PrefixUnaryExpressionSyntax: op: token, expr: ExpressionSyntax
@@ -782,18 +760,17 @@ This section lists the AST node types with fields for implementers.
   - After IF, parse a required ValueExpression before IS as the scrutinee
   - Condition-list form begins directly with LBRACE and never has a scrutinee
 - Element is left-factored: after LT ElementName, COLON selects the text branch; otherwise parse PropertyList and choose SLASH GT (self-closing) or GT … LT SLASH ElementName GT using lookahead at SLASH vs GT.
-- MemberAccess handles property/field access, enum member access, and fieldless union case shorthand:
+- MemberAccess handles property/field access and fieldless union case shorthand:
   - All `target.name` expressions parse uniformly as MemberAccessExpressionSyntax
   - Semantic analysis resolves the target expression to determine interpretation:
-    - If target resolves to an enum type → enum member access (verify name is valid enum member)
     - If target resolves to a union type and name is a fieldless case → union case value shorthand
     - If target resolves to a value → property/field access (verify name is valid property/field on target's type)
-  - Examples: `Status.pending_review` (if Status is enum type), `LoadState.idle` (if LoadState is a union), `obj.field` (if obj is value), `foo.bar` (ambiguous at parse time, resolved during type checking)
+  - Examples: `Status.pending_review` (if Status is a union), `LoadState.idle` (if LoadState is a union), `obj.field` (if obj is value), `foo.bar` (ambiguous at parse time, resolved during type checking)
 - ContextualName resolves against the declared type of its binding site, never against lexical scope:
   - Legal at element and component property values, property and field defaults, annotated value
     definitions, and match patterns — every unbraced position where the expected type is declared
   - Resolution normalizes the expected type by stripping nullability then one list level, then
-    resolves only against a closed nominal set: enum members and payloadless union cases
+    resolves only against a closed nominal set: the cases of the union that types the binding site
   - A bare name resolves only nominally and a quoted string only as string data; there is no
     fallback between the two in NX source, so `fill=none` is a case and `fill="none"` is string data
   - In pattern position a bare name takes precedence over a lexically visible binding of the same

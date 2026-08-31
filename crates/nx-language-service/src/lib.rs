@@ -621,8 +621,6 @@ pub enum DocumentSymbolKind {
     Record,
     /// Action declaration.
     Action,
-    /// Enum declaration.
-    Enum,
     /// Union declaration.
     Union,
     /// Component declaration.
@@ -639,7 +637,6 @@ impl DocumentSymbolKind {
             Self::TypeAlias => "type",
             Self::Record => "record",
             Self::Action => "action",
-            Self::Enum => "enum",
             Self::Union => "union",
             Self::Component => "component",
             Self::Element => "element",
@@ -998,7 +995,6 @@ fn item_span(item: &Item) -> ByteTextRange {
         Item::Value(value) => value.span,
         Item::Component(component) => component.span,
         Item::TypeAlias(alias) => alias.span,
-        Item::Enum(enum_def) => enum_def.span,
         Item::Union(union_def) => union_def.span,
         Item::Record(record) => record.span,
     }
@@ -1048,9 +1044,6 @@ fn symbol_name_node(node: SyntaxNode<'_>) -> Option<(DocumentSymbolKind, SyntaxN
         }
         SyntaxKind::ACTION_DEFINITION => {
             declaration_name(node).map(|name| (DocumentSymbolKind::Action, name))
-        }
-        SyntaxKind::ENUM_DEFINITION => {
-            declaration_name(node).map(|name| (DocumentSymbolKind::Enum, name))
         }
         SyntaxKind::UNION_DEFINITION => {
             declaration_name(node).map(|name| (DocumentSymbolKind::Union, name))
@@ -1237,18 +1230,6 @@ fn declaration_from_item(item: &Item, source: &str) -> Declaration {
             property_types: Vec::new(),
             members: Vec::new(),
         },
-        Item::Enum(enum_def) => Declaration {
-            name: enum_def.name.as_str().to_string(),
-            kind: DocumentSymbolKind::Enum,
-            detail: "enum".to_string(),
-            properties: Vec::new(),
-            property_types: Vec::new(),
-            members: enum_def
-                .members
-                .iter()
-                .map(|member| member.name.as_str().to_string())
-                .collect(),
-        },
         Item::Union(union_def) => Declaration {
             name: union_def.name.as_str().to_string(),
             kind: DocumentSymbolKind::Union,
@@ -1412,10 +1393,7 @@ fn property_value_context(
         .map(|(_, type_name)| type_name.clone())?;
 
     let target = declarations.iter().find(|declaration| {
-        matches!(
-            declaration.kind,
-            DocumentSymbolKind::Enum | DocumentSymbolKind::Union
-        ) && declaration.name == type_name
+        matches!(declaration.kind, DocumentSymbolKind::Union) && declaration.name == type_name
     })?;
 
     if target.members.is_empty() {
@@ -1547,7 +1525,6 @@ fn type_completion_items(declarations: &[Declaration]) -> Vec<CompletionItem> {
             DocumentSymbolKind::TypeAlias
                 | DocumentSymbolKind::Record
                 | DocumentSymbolKind::Action
-                | DocumentSymbolKind::Enum
                 | DocumentSymbolKind::Union
                 | DocumentSymbolKind::Component
         )
@@ -1914,9 +1891,30 @@ component <SearchBox placeholder:string /> = {
         assert!(!labels.contains(&"double"));
     }
 
+    /// `enum` was removed from the language, so it must not be offered as a declaration keyword.
+    #[test]
+    fn declaration_completions_do_not_offer_the_removed_enum_keyword() {
+        let source = "\n";
+        let snapshot = snapshot_for("nx://tenant/form.nx", source, 1);
+        let uri = DocumentUri::from("nx://tenant/form.nx");
+
+        let completions = snapshot
+            .completions(&uri, TextPosition::new(0, 0))
+            .expect("completions");
+        let labels = completions
+            .items
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(labels.contains(&"type"), "got: {labels:?}");
+        assert!(!labels.contains(&"enum"), "got: {labels:?}");
+    }
+
     #[test]
     fn property_value_completions_offer_members_of_the_declared_type() {
-        let source = "enum Fit = fill | contain | cover\nlet <Img fit:Fit /> = <img />\n<Img fit= />\n";
+        let source =
+            "type Fit = fill | contain | cover\nlet <Img fit:Fit /> = <img />\n<Img fit= />\n";
         let snapshot = snapshot_for("nx://tenant/form.nx", source, 1);
         let uri = DocumentUri::from("nx://tenant/form.nx");
 
@@ -1948,7 +1946,7 @@ component <SearchBox placeholder:string /> = {
     #[test]
     fn property_value_completions_offer_only_payloadless_union_cases() {
         let source = concat!(
-            "type LoadState = | idle | failed { message:string }\n",
+            "type LoadState = idle | failed { message:string }\n",
             "let <View state:LoadState /> = <div />\n",
             "<View state= />\n"
         );

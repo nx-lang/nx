@@ -1,6 +1,6 @@
 use crate::{
-    ast, Component, ComponentEmit, EnumMember, Item, LoweredModule, LoweringDiagnostic, Name,
-    Param, RecordField, RecordKind, SourceId, TypeAlias, UnionCaseDef, UnionCaseField, UnionDef,
+    ast, Component, ComponentEmit, Item, LoweredModule, LoweringDiagnostic, Name, Param,
+    RecordField, RecordKind, SourceId, TypeAlias, UnionCaseDef, UnionCaseField, UnionDef,
     Visibility,
 };
 use nx_diagnostics::TextSpan;
@@ -44,7 +44,6 @@ pub enum PreparedItemKind {
     Value,
     Component,
     TypeAlias,
-    Enum,
     Union,
     Record,
 }
@@ -57,7 +56,6 @@ impl PreparedItemKind {
             PreparedItemKind::Value => &[PreparedNamespace::Value],
             PreparedItemKind::Component => &[PreparedNamespace::Element],
             PreparedItemKind::TypeAlias => &[PreparedNamespace::Type],
-            PreparedItemKind::Enum => &[PreparedNamespace::Type],
             PreparedItemKind::Union => &[PreparedNamespace::Type],
             PreparedItemKind::Record => &[PreparedNamespace::Type, PreparedNamespace::Element],
         }
@@ -123,10 +121,6 @@ pub enum InterfaceItemKind {
         ty: ast::TypeRef,
         span: TextSpan,
     },
-    Enum {
-        members: Vec<EnumMember>,
-        span: TextSpan,
-    },
     Union {
         base: Option<Name>,
         cases: Vec<InterfaceUnionCase>,
@@ -149,7 +143,6 @@ impl InterfaceItemKind {
             Self::Value { .. } => PreparedItemKind::Value,
             Self::Component { .. } => PreparedItemKind::Component,
             Self::TypeAlias { .. } => PreparedItemKind::TypeAlias,
-            Self::Enum { .. } => PreparedItemKind::Enum,
             Self::Union { .. } => PreparedItemKind::Union,
             Self::Record { .. } => PreparedItemKind::Record,
         }
@@ -485,7 +478,6 @@ pub fn prepared_item_kind(item: &Item) -> PreparedItemKind {
         Item::Value(_) => PreparedItemKind::Value,
         Item::Component(_) => PreparedItemKind::Component,
         Item::TypeAlias(_) => PreparedItemKind::TypeAlias,
-        Item::Enum(_) => PreparedItemKind::Enum,
         Item::Union(_) => PreparedItemKind::Union,
         Item::Record(_) => PreparedItemKind::Record,
     }
@@ -584,19 +576,6 @@ pub fn interface_component(item: &InterfaceItem) -> Option<Component> {
                 })
                 .collect(),
             body: None,
-            span: *span,
-        }),
-        _ => None,
-    }
-}
-
-/// Converts imported interface metadata into enum-like view when possible.
-pub fn interface_enum(item: &InterfaceItem) -> Option<crate::EnumDef> {
-    match &item.item {
-        InterfaceItemKind::Enum { members, span } => Some(crate::EnumDef {
-            name: Name::new(item.item_name.as_str()),
-            visibility: item.visibility,
-            members: members.clone(),
             span: *span,
         }),
         _ => None,

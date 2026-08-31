@@ -54,7 +54,7 @@ prepared binding model SHALL include visible same-library peer declarations and 
 imported-library declarations resolved through the caller's build context, and it SHALL be able to
 follow visible alias chains to the underlying declaration. Plain record declarations may extend only
 abstract plain records. Action declarations may extend only abstract action declarations. Concrete
-declarations, mismatched declaration kinds, non-record aliases, and enums MUST NOT be usable as
+declarations, mismatched declaration kinds, non-record aliases, and unions MUST NOT be usable as
 base records.
 
 #### Scenario: Concrete record cannot be extended

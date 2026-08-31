@@ -50,7 +50,7 @@ function nominal(reference, display = reference.name) {
 }
 const stringType = primitive("string");
 const intType = primitive("int");
-const themeType = nominal(ref("Theme", "m0:d3", "enum"));
+const themeType = nominal(ref("Theme", "m0:d3", "union"));
 const loadStateType = nominal(ref("LoadState", "m0:d5", "union"));
 const nullableLoadStateType = { kind: "nullable", inner: loadStateType };
 const intSemantic = { display: "int", shape: { kind: "primitive", name: "int" } };
@@ -184,9 +184,15 @@ const program = {
                 },
                 {
                     id: "m0:d3",
-                    reference: ref("Theme", "m0:d3", "enum"),
+                    reference: ref("Theme", "m0:d3", "union"),
                     span: sourceSpan,
-                    kind: { tag: "enum", members: ["light", "dark"] },
+                    kind: {
+                        tag: "union",
+                        cases: [
+                            { name: "light", fields: [], isConstant: true, span: sourceSpan },
+                            { name: "dark", fields: [], isConstant: true, span: sourceSpan },
+                        ],
+                    },
                 },
                 {
                     id: "m0:d4",
@@ -204,7 +210,7 @@ const program = {
                     kind: {
                         tag: "union",
                         cases: [
-                            { name: "idle", fields: [], span: sourceSpan },
+                            { name: "idle", fields: [], isConstant: true, span: sourceSpan },
                             {
                                 name: "failed",
                                 fields: [
@@ -217,6 +223,7 @@ const program = {
                                         span: sourceSpan,
                                     },
                                 ],
+                                isConstant: false,
                                 span: sourceSpan,
                             },
                         ],
@@ -383,9 +390,14 @@ const program = {
                         tag: "function",
                         params: [],
                         body: expr({
-                            tag: "enumMember",
-                            enum: ref("Theme", "m0:d3", "enum"),
-                            member: "dark",
+                            tag: "unionCase",
+                            union: ref("Theme", "m0:d3", "union"),
+                            caseName: "dark",
+                            fields: [],
+                            properties: [],
+                            contentField: null,
+                            content: [],
+                            isConstant: true,
                         }),
                     },
                 },
@@ -672,14 +684,14 @@ test("evaluates function calls, records, union cases, enums, loops, and match ex
         message: "offline",
     });
     assertEqual(evaluateFunction(prepared, "describe", [{ $type: "LoadState.failed", message: "x" }]), "failed");
-    assertEqual(evaluateFunction(prepared, "describe", [{ $type: "LoadState.idle" }]), "ok");
+    assertEqual(evaluateFunction(prepared, "describe", ["idle"]), "ok");
     assertEqual(evaluateFunction(prepared, "describeOffline", [{ $type: "LoadState.failed", message: "online" }]), "failed-type");
     assertEqual(evaluateFunction(prepared, "echoTheme", ["dark"]), "dark");
     assertEqual(evaluateFunction(prepared, "themeValue"), "dark");
     assertEqual(evaluateFunction(prepared, "mappedValues"), [10, 21]);
     assertEqual(evaluateFunction(prepared, "flow"), 42);
     assertEqual(evaluateFunction(prepared, "letValue"), -12);
-    assertThrows(() => evaluateFunction(prepared, "echoTheme", ["blue"]), "Invalid enum member");
+    assertThrows(() => evaluateFunction(prepared, "echoTheme", ["blue"]), "Invalid constant union case");
 });
 test("matches native numeric division and modulo semantics", () => {
     const module = program.modules[0];

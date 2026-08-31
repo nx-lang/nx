@@ -814,7 +814,7 @@ fn render_codegen_diagnostics(program: &ProgramArtifact, diagnostics: &[Diagnost
 
 fn format_output(value: &Value, format: OutputFormat) -> Result<String, String> {
     match format {
-        OutputFormat::Nx => Ok(format::format_value(value)),
+        OutputFormat::Nx => format::format_value(value),
         OutputFormat::Json => json::format_value_json_pretty(value),
     }
 }
@@ -1894,7 +1894,7 @@ let root() = { <ShortTextQuestion /> }"#,
     #[test]
     fn test_cli_typegen_library_requires_output_directory() {
         let (_dir, library_path) =
-            create_temp_library(&[("theme.nx", "export enum ThemeMode = | light | dark")]);
+            create_temp_library(&[("theme.nx", "export type ThemeMode = light | dark")]);
 
         let output = run_cli(&[
             "typegen",
@@ -1962,7 +1962,7 @@ let root() = { <ShortTextQuestion /> }"#,
     #[test]
     fn test_cli_typegen_library_writes_typescript_output() {
         let (dir, library_path) = create_temp_library(&[
-            ("theme.nx", "export enum ThemeMode = | light | dark"),
+            ("theme.nx", "export type ThemeMode = light | dark"),
             (
                 "forms.nx",
                 "export type FormState = { theme: ThemeMode }\nexport type FormTheme = ThemeMode",
@@ -2047,7 +2047,7 @@ export type QuestionFlowInitialExperience = {
     #[test]
     fn test_cli_typegen_library_writes_external_component_state_output() {
         let (dir, library_path) = create_temp_library(&[
-            ("theme.nx", "export enum ThemeMode = | light | dark"),
+            ("theme.nx", "export type ThemeMode = light | dark"),
             (
                 "search-box.nx",
                 r#"export external component <SearchBox /> = {
@@ -2083,7 +2083,7 @@ export type QuestionFlowInitialExperience = {
     #[test]
     fn test_cli_typegen_library_writes_csharp_external_component_state_output() {
         let (dir, library_path) = create_temp_library(&[
-            ("theme.nx", "export enum ThemeMode = | light | dark"),
+            ("theme.nx", "export type ThemeMode = light | dark"),
             (
                 "search-box.nx",
                 r#"export external component <SearchBox /> = {
@@ -2127,7 +2127,7 @@ export type QuestionFlowInitialExperience = {
     #[test]
     fn test_cli_typegen_library_writes_csharp_output() {
         let (dir, library_path) = create_temp_library(&[
-            ("theme.nx", "export enum ThemeMode = | light | dark"),
+            ("theme.nx", "export type ThemeMode = light | dark"),
             ("forms.nx", "export type FormState = { theme: ThemeMode }"),
         ]);
         let output_path = dir.path().join("generated-cs");
@@ -2173,14 +2173,14 @@ export type QuestionFlowInitialExperience = {
     #[test]
     fn test_cli_contextual_literal_matches_qualified_form() {
         let bare = r#"
-            enum Fit = fill | contain | cover
-            type LoadState = | idle | loading
+            type Fit = fill | contain | cover
+            type LoadState = idle | loading
             type Box = { fit: Fit  state: LoadState }
             let root() = { <Box fit=cover state=loading /> }
         "#;
         let qualified = r#"
-            enum Fit = fill | contain | cover
-            type LoadState = | idle | loading
+            type Fit = fill | contain | cover
+            type LoadState = idle | loading
             type Box = { fit: Fit  state: LoadState }
             let root() = { <Box fit={Fit.cover} state={LoadState.loading} /> }
         "#;
@@ -2204,12 +2204,12 @@ export type QuestionFlowInitialExperience = {
     #[test]
     fn test_cli_contextual_literal_codegen_matches_qualified_form() {
         let bare = r#"
-            enum Fit = fill | contain | cover
+            type Fit = fill | contain | cover
             type Box = { fit: Fit }
             let root() = { <Box fit=cover /> }
         "#;
         let qualified = r#"
-            enum Fit = fill | contain | cover
+            type Fit = fill | contain | cover
             type Box = { fit: Fit }
             let root() = { <Box fit={Fit.cover} /> }
         "#;
@@ -2326,16 +2326,28 @@ export type QuestionFlowInitialExperience = {
         "#;
         let (_dir, path) = create_temp_nx_file(source);
 
-        let output = run_cli(&["run", path.to_str().unwrap()]);
-
+        // The root executes through the resolved-program runtime — JSON output proves it.
+        let json = run_cli(&["run", path.to_str().unwrap(), "--format", "json"]);
         assert!(
-            output.status.success(),
+            json.status.success(),
             "CLI should execute handler-producing roots"
         );
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(stdout.contains("<onSearchSubmitted"));
-        assert!(stdout.contains("component=\"SearchBox\""));
-        assert!(stdout.contains("action=\"SearchSubmitted\""));
+        let json_stdout = String::from_utf8_lossy(&json.stdout);
+        assert!(json_stdout.contains("SearchBox"), "got: {json_stdout}");
+        assert!(
+            json_stdout.contains("SearchSubmitted"),
+            "got: {json_stdout}"
+        );
+
+        // Rendering it as NX source does not: an action handler has no source spelling, and the
+        // old output put the property name in element-tag position, which never read back.
+        let nx = run_cli(&["run", path.to_str().unwrap()]);
+        assert!(
+            !nx.status.success(),
+            "a value with no NX spelling must not be printed as if it had one"
+        );
+        let stderr = String::from_utf8_lossy(&nx.stderr);
+        assert!(stderr.contains("action handler"), "got: {stderr}");
     }
 
     #[test]
@@ -2425,6 +2437,203 @@ let z = {
             stderr.contains("let z = {"),
             "Error should include the problematic source line. Got: {}",
             stderr
+        );
+    }
+
+    // --- Value round-tripping (OpenSpec change `replace-enums-with-unions`, task group 1) ---
+
+    /// Builds a program that imports one sibling library, reporting analysis errors instead of
+    /// panicking on them, so a round-trip that fails to read back can be asserted on.
+    fn build_program_reporting_errors(path: &Path) -> Result<ProgramArtifact, String> {
+        let source = fs::read_to_string(path).expect("source file should load");
+        let file_name = path.display().to_string();
+        let module = lower_source_module(&source, &file_name)
+            .map_err(|diagnostics| format!("{diagnostics:?}"))?;
+        let registry = LibraryRegistry::new();
+        for import in &module.imports {
+            let parent = path.parent().expect("main file has a parent");
+            registry
+                .load_library_from_directory(&parent.join(&import.library_path))
+                .map_err(|diagnostics| format!("{diagnostics:?}"))?;
+        }
+        let artifact =
+            build_program_artifact_from_source(&source, &file_name, &registry.build_context())
+                .map_err(|diagnostics| format!("{diagnostics:?}"))?;
+        let errors = artifact
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity() == Severity::Error)
+            .map(|diagnostic| {
+                format!(
+                    "{}: {}",
+                    diagnostic.code().unwrap_or("?"),
+                    diagnostic.message()
+                )
+            })
+            .collect::<Vec<_>>();
+        if errors.is_empty() {
+            Ok(artifact)
+        } else {
+            Err(errors.join("; "))
+        }
+    }
+
+    struct RoundTrip {
+        value: Value,
+        formatted: String,
+        read_back: Result<Value, String>,
+    }
+
+    /// Evaluates `root`, formats the value it produces, then reads that formatting back at the
+    /// same typed site. A value with a correct NX spelling round-trips: `read_back` succeeds and
+    /// equals `value`.
+    fn round_trip_root(library: &[(&str, &str)], preamble: &str, root_body: &str) -> RoundTrip {
+        let dir = TempDir::new().expect("temp dir");
+        let app_dir = dir.path().join("app");
+        let library_dir = dir.path().join("lib");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&library_dir).expect("library dir");
+        for (name, content) in library {
+            fs::write(library_dir.join(name), content).expect("library file");
+        }
+
+        let main = app_dir.join("main.nx");
+        let evaluate = |source: &str| -> Result<Value, String> {
+            fs::write(&main, source).expect("main file");
+            let program = build_program_reporting_errors(&main)?;
+            Interpreter::from_resolved_program(program.resolved_program.clone())
+                .execute_resolved_program_function("root", vec![])
+                .map_err(|error| format!("{error:?}"))
+        };
+
+        let value = evaluate(&format!("{preamble}\nlet root() = {root_body}\n"))
+            .expect("the original program should analyze and evaluate");
+        let formatted = format::format_value(&value).expect("the value should have an NX spelling");
+        let read_back = evaluate(&format!("{preamble}\nlet root() = {formatted}\n"));
+
+        RoundTrip {
+            value,
+            formatted,
+            read_back,
+        }
+    }
+
+    /// Evaluates `root` in a single-file program and returns the value it produces.
+    fn evaluate_root(source: &str) -> Value {
+        let (_dir, path) = create_temp_nx_file(source);
+        let program =
+            build_program_reporting_errors(&path).expect("the program should analyze cleanly");
+        Interpreter::from_resolved_program(program.resolved_program.clone())
+            .execute_resolved_program_function("root", vec![])
+            .expect("root should evaluate")
+    }
+
+    /// A fieldless case of a base-less union is a constant case, and carries no more information
+    /// than its name — so it serializes as a bare string, exactly as an enum member does, rather
+    /// than as a `$type` map.
+    #[test]
+    fn constant_union_case_serializes_as_a_bare_string() {
+        let value = evaluate_root(
+            r#"type Fit = fill | contain | cover
+type Shape =
+  | point
+  | circle { radius: float64 }
+type Box = { fit: Fit  shape: Shape }
+let root() = <Box fit=cover shape={<Shape.point />} />
+"#,
+        );
+        let nx_value = nx_api::to_nx_value(&value);
+        let json: serde_json::Value =
+            serde_json::from_str(&nx_value.to_json_string_pretty().expect("json")).expect("parse");
+
+        assert_eq!(
+            json["shape"],
+            serde_json::Value::String("point".to_string()),
+            "a constant case must serialize like an enum member ({}), got {}",
+            json["fit"],
+            json["shape"]
+        );
+
+        let bytes = nx_value.to_msgpack_vec().expect("messagepack");
+        let decoded =
+            nx_value::NxValue::from_msgpack_slice(&bytes).expect("messagepack round-trip");
+        let nx_value::NxValue::Record { properties, .. } = &decoded else {
+            panic!("expected a record, got {decoded:?}");
+        };
+        assert_eq!(
+            properties["shape"],
+            nx_value::NxValue::String("point".to_string()),
+            "MessagePack must carry the same bare string, got {:?}",
+            properties["shape"]
+        );
+    }
+
+    /// A record-valued property must keep its name. Today the value is emitted as element body
+    /// content, which discards the property name. This is RF5 in `contextual-literal-binding`'s
+    /// `review.md`.
+    #[test]
+    fn record_valued_property_round_trips() {
+        let trip = round_trip_root(
+            &[],
+            "type Address = { city: string }\nexternal component <div home:Address />",
+            "<div home={<Address city=\"Boston\" />} />",
+        );
+
+        assert_eq!(
+            trip.read_back.as_ref().ok(),
+            Some(&trip.value),
+            "a record-valued property must read back as itself, but formatted as `{}` \
+             and read back as {:?}",
+            trip.formatted.trim(),
+            trip.read_back
+        );
+    }
+
+    /// Two properties of the same record type must stay distinguishable. Emitting both as body
+    /// content renders them as identical siblings, so which field each belongs to is lost.
+    #[test]
+    fn two_properties_of_the_same_record_type_stay_distinguishable() {
+        let trip = round_trip_root(
+            &[],
+            "type Address = { city: string }\nexternal component <div home:Address work:Address />",
+            "<div home={<Address city=\"Boston\" />} work={<Address city=\"Denver\" />} />",
+        );
+
+        assert!(
+            trip.formatted.contains("home=") && trip.formatted.contains("work="),
+            "both property names must survive formatting, got `{}`",
+            trip.formatted.trim()
+        );
+        assert_eq!(
+            trip.read_back.as_ref().ok(),
+            Some(&trip.value),
+            "read back as {:?}",
+            trip.read_back
+        );
+    }
+
+    /// A list-valued property must be emitted as a braced sequence, not as an element named after
+    /// the property — NX has no property-element syntax, so `<items>` does not read back.
+    #[test]
+    fn list_valued_property_round_trips() {
+        let trip = round_trip_root(
+            &[],
+            "type Item = { n: int }\nexternal component <div items:Item[] />",
+            "<div items={<Item n=1 /> <Item n=2 />} />",
+        );
+
+        assert!(
+            !trip.formatted.contains("<items>"),
+            "the property name must not become an element tag, got `{}`",
+            trip.formatted.trim()
+        );
+        assert_eq!(
+            trip.read_back.as_ref().ok(),
+            Some(&trip.value),
+            "a list-valued property must read back as itself, but formatted as `{}` \
+             and read back as {:?}",
+            trip.formatted.trim(),
+            trip.read_back
         );
     }
 }

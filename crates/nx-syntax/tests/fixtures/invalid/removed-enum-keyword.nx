@@ -1,0 +1,2 @@
+// `enum` was removed: a closed set of constants is a union whose cases carry no payload.
+enum Fit = fill | contain | cover

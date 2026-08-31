@@ -41,22 +41,22 @@ did, replacing a hand-written `type` / `kind` field with a real discriminator.
 |---|---|---|---|---|
 | [NXE1](#nxe1) | Language gap | Types | Revised | No map type — one MVP site NX would not author; real post-MVP. Carries a `V[K]` syntax sketch |
 | [NXE2](#nxe2) | Language gap | Types | Revised | Two findings under one number; the cheap half was mis-filed. Carries a design sketch |
-| [NXE3](#nxe3) | Language gap | Serialization | Open | Every record and union case carries a `$type` tag; the key is fixed |
+| [NXE3](#nxe3) | Language gap | Serialization | Partly resolved | Records and payload cases carry a `$type` tag; the key is fixed. Constant cases now serialize bare |
 | [NXE4](#nxe4) | Language gap | Types | Open | Nullable is the only way to say "optional" |
 | [NXE5](#nxe5) | Language gap | Components | Open | A derived component cannot override an inherited default |
 | [NXE6](#nxe6) | Language gap | Defaults | Open | A default cannot reference a sibling property |
 | [NXE7](#nxe7) | Language gap | Sequences | Open | There is no empty-sequence literal, in any position |
-| [NXE8](#nxe8) | Language gap | Defaults | Open | Non-literal defaults need braces; integer literals do not widen to `float64` |
+| [NXE8](#nxe8) | Language gap | Defaults | Partly resolved | Qualified names in defaults still need braces; integer literals do not widen to `float64` |
 | [NXE9](#nxe9) | Language gap | Types | Open | No refinement, range, or pattern constraints |
 | [NXE10](#nxe10) | Language gap | Modules | Open | Name qualification is exactly one segment deep |
 | [NXE11](#nxe11) | Language gap | Elements | Informational | No flat, ID-addressed authoring form |
 | [NXE18](#nxe18) | Language gap | Types | Deferred | No way to declare a value's textual form, so string-encoded scalars stay opaque |
 | [NXE12](#nxe12) | Toolchain bug | Components | Open | Prop defaults on an imported external component are not applied at call sites |
 | [NXE13](#nxe13) | Toolchain bug | Components | Open | Props inherited from an imported abstract external base are invisible at call sites |
-| [NXE14](#nxe14) | Toolchain bug | Modules | Open | An enum member cannot be reached through a wildcard import alias |
+| [NXE14](#nxe14) | Toolchain bug | Modules | Open | A union case cannot be reached through a wildcard import alias |
 | [NXE15](#nxe15) | Docs drift | Grammar | Open | `external component` and `abstract component` are absent from the grammar documents |
 | [NXE16](#nxe16) | Docs drift | Docs | Open | Published docs and a shipped example use syntax that does not parse |
-| [NXE17](#nxe17) | Convention | Enums | Accepted as-is | The `snake_case` enum convention conflicts with camelCase wire vocabularies |
+| [NXE17](#nxe17) | Convention | Unions | Accepted as-is | The `snake_case` case-name convention conflicts with camelCase wire vocabularies |
 
 ---
 
@@ -129,7 +129,7 @@ but *the index suffix with its key type elided*. A sequence is the case where th
 ```nx
 Color[]              // Color indexed by position
 Color[string]        // Color indexed by string
-Color[TextVariant]   // Color indexed by an enum member
+Color[TextVariant]   // Color indexed by a constant union case
 ```
 
 One concept, one bracket, two spellings. D reached the same place with `int64[string]`.
@@ -145,11 +145,11 @@ means a nullable list of strings"), and an index suffix falls straight into that
 | `Color[string][]` | sequence of maps |
 | `Color[][string]` | map of sequences |
 
-**Key types should be restricted** to `string`, the integer primitives, and enums. Not a
+**Key types should be restricted** to `string`, the integer primitives, and constant unions. Not a
 representational limit — a round-tripping one. JSON objects have string keys only, so an
-unrestricted key type produces a declaration that silently cannot serialize. Enum keys stay safe
-because NX serializes enum members verbatim, which is what makes `TypographySpec[TextVariant]` a
-realistic theme declaration rather than a curiosity.
+unrestricted key type produces a declaration that silently cannot serialize. Constant-union keys stay
+safe because NX serializes a constant case verbatim, which is what makes `TypographySpec[TextVariant]`
+a realistic theme declaration rather than a curiosity.
 
 **No new literal syntax.** Reuse the braced sequence literal with pair elements:
 
@@ -222,30 +222,27 @@ serializing it.
 
 #### What NX already has
 
-NX has string literal types today. That is what an enum is:
+NX has string literal types today. A union whose cases carry no payload is one:
 
 ```nx
-enum Fit = fill | contain | cover
+type Fit = fill | contain | cover
 ```
 
 generates `export type Fit = "fill" | "contain" | "cover"`, and
-[enum-values/spec.md](../openspec/specs/enum-values/spec.md) requires the member to serialize as
-"the bare authored member string", with the consumer recovering identity from the target type. So
+[enum-values/spec.md](../openspec/specs/enum-values/spec.md) requires the case to serialize as
+"the bare authored case name", with the consumer recovering identity from the target type. So
 `Fit` on the wire is `"cover"` — untagged, exactly the JSON Schema `enum` shape.
 
-A payloadless *union case* carries the same information — zero fields, identity is the name — and
-serializes as `{"$type": "Length.auto"}`:
+**The asymmetry this section was written about is gone.** It described two declaration forms —
+`enum Fit = ...` and `type Fit = | ...` — carrying identical information and serializing
+differently, the second as `{"$type": "Length.auto"}`. `replace-enums-with-unions` removed the
+`enum` keyword and made the union form serialize bare, so there is now one declaration form and one
+encoding. Which form the author reached for is no longer a question.
 
-```ts
-export interface LengthAuto extends NxRecord<"Length.auto"> {}
-```
-
-Same information, strictly worse encoding, and the only difference is which declaration form the
-author reached for. That asymmetry is a design defect rather than a missing feature.
-
-The parser states its own constraint in the diagnostic: `type UnionName [extends AbstractRecord] =
-| caseName | payloadCase { prop:type }`. `type L = string | int`, `| "auto" | int`, `F | Px`, and
-`| px float64` are all rejected with it.
+What remains is the parser's constraint on what a case can *be*: `type UnionName [extends
+AbstractRecord] = caseName | payloadCase { prop:type }`. `type L = string | int`, `| "auto" | int`,
+`F | Px`, and `| px float64` are all still rejected. A case is a name, optionally with fields — it
+is never a bare scalar.
 
 #### Precedent
 
@@ -270,10 +267,19 @@ not be try-in-order.
 
 #### Recommended changes
 
-**1. Payloadless union cases serialize bare, like enum members.** No type-system change, no syntax
-change. `Length.auto` becomes `"auto"` instead of `{"$type": "Length.auto"}`. Deserialization stays
-unambiguous: at a `Length`-typed field a bare string can only be a payloadless case. On its own this
-gets `Paint | "none"` to the exact JSON the proposal wants. Overlaps [NXE3](#nxe3); belongs there.
+**1. Constant union cases serialize bare.** ✅ **Implemented**, as the
+`replace-enums-with-unions` change. `Length.auto` is `"auto"` rather than `{"$type": "Length.auto"}`,
+and deserialization stays unambiguous: at a `Length`-typed field a bare string can only be such a
+case. This gets `Paint | "none"` to the exact JSON the proposal wants.
+
+**Shipped narrower than sketched, and deliberately.** The rule is not "payloadless" but *constant*:
+a case that declares no fields **in a union that declares no base**. A fieldless case of a union
+that extends an abstract base is not constant, because it carries the base's fields at runtime —
+`type UiEvent extends EventBase = clicked { x: int } | closed` evaluates `closed` to
+`{"$type": "UiEvent.closed", "source": "ui"}`, and there is nothing bare about a value with fields
+in it. Reading "payloadless" literally would have dropped those fields. Nothing in this proposal's
+Appendix A declares a base on a closed-set type, so every one of them is constant and gets the bare
+form.
 
 **2. Contextual literal binding at typed sites.** ✅ **Implemented**, as the
 `contextual-literal-binding` change. Where the expected type is known — and in NX it always is, at
@@ -283,13 +289,13 @@ props, fields, annotated `let`s, and match patterns — a bare name resolves aga
 <Img fit=cover />          // was: fit={Fit.cover}
 ```
 
-Swift's implicit member expression, or C#'s target-typed `new`. Source-only, applies to every enum
-in every NX program, and it makes source agree with serialization — the wire already said `"cover"`
-while the source insisted on `{Fit.cover}`.
+Swift's implicit member expression, or C#'s target-typed `new`. Source-only, applies to every
+closed set in every NX program, and it makes source agree with serialization — the wire already said
+`"cover"` while the source insisted on `{Fit.cover}`.
 
 **Shipped unquoted rather than quoted.** This sketch originally spelled it `fit="cover"`. The bare
 form was chosen instead, under a **strict split**: a bare name resolves *only* against the closed
-nominal set — enum members and payloadless union cases — and a quoted string resolves *only* as
+nominal set — the cases of the union that types the site — and a quoted string resolves *only* as
 string data, with no fallback between the two in NX source. That keeps both spellable once change 3
 lands (`fill=none` is the case, `fill="none"` is a colour whose text is `none`), and it removes the
 "unspellable `none`" cost the amended rule below concedes. It also closes a schema-evolution hazard
@@ -385,8 +391,8 @@ misses the closed set and falls through to the open `Color` alternative. Same sy
 resolution paths, both decided at compile time.
 
 The `TextVariant` import also disappears from the document header, because change 2 removes the need
-to name the enum type at all. That incidentally routes around [NXE14](#nxe14) for every enum-valued
-prop.
+to name the union type at all. That incidentally routes around [NXE14](#nxe14) for every
+closed-set-valued prop.
 
 #### Scope: percentages are out
 
@@ -525,18 +531,22 @@ specified".
 literals are meant to exist at all — see [NXE16](#nxe16), because the published docs say they do.
 
 <a id="nxe8"></a>
-### NXE8 — Non-literal defaults need braces, and integer literals do not widen to `float64`
+### NXE8 — Qualified names in defaults need braces, and integer literals do not widen to `float64`
 
-**Impact:** Low individually; high in aggregate noise, since it touches every enum default in a
-catalog.
+**Status:** Partly resolved, by the `contextual-literal-binding` change. The aggregate-noise half of
+this finding is gone.
 
-`RhsExpression` admits only an element, a literal, or a braced expression, so anything else — a
-negative number, an enum member, a member access — has to be wrapped:
+**Impact:** Low. What remains touches only defaults written in qualified form, which authors now
+have no reason to write.
+
+An unbraced value position takes a literal, and a bare name at a typed site resolves against the
+declared type, so a negative number and a case name are both fine unbraced. Only a *qualified* name
+still has to be wrapped:
 
 ```nx
-external component <C x: float64 = -1.0 />                    // error: Invalid component definition
-external component <C x: float64 = {-1.0} />                  // OK
-external component <C a: Alignment = Alignment.start />   // error
+external component <C x: float64 = -1.0 />                // OK — signed literals are literals
+external component <C a: Alignment = start />             // OK — resolves against Alignment
+external component <C a: Alignment = Alignment.start />   // error: Invalid component definition
 external component <C a: Alignment = {Alignment.start} /> // OK
 ```
 
@@ -547,9 +557,10 @@ type Insets = { top: float64 = 0 }
 // error: Default value for record property 'top' expects float64, found int
 ```
 
-**Impact on the proposal:** every enum default in Appendix A is braced, and every `float64` default is
-written `0.0` / `1.0` / `4.0`. Both are pure ceremony in a schema listing, and the `float64 = 0` error is
-the kind of thing that will hit every newcomer once.
+**Impact on the proposal:** Appendix A writes its closed-set defaults bare (`lineCap: LineCap = butt`),
+which is now correct and reads better than the braced form this finding originally required. What is
+left is that every `float64` default must be written `0.0` / `1.0` / `4.0`; that is pure ceremony in a
+schema listing, and the `float64 = 0` error is the kind of thing that will hit every newcomer once.
 
 **Possible enhancement:** widen integer literals to float64 in a float64-typed position; and admit bare
 member access and prefix-negated literals as `RhsExpression`.
@@ -691,10 +702,10 @@ The simple version does not generalize to units. A CSS-style `Length` is `50%`, 
 | dimension { value: float64 unit: LengthUnit } as "{value}{unit}"
 ```
 
-— has adjacent holes, so it is ambiguous, and it needs enum members spelled `%` and `vw`, which are
-not identifiers. That runs straight into [NXE17](#nxe17), the enum-spelling-versus-wire-vocabulary
-conflict. A real dimension type therefore needs templates *plus* explicit wire spellings on enum
-members, which is a much larger feature than it looks and should not ride along on NXE2.
+— has adjacent holes, so it is ambiguous, and it needs case names spelled `%` and `vw`, which are
+not identifiers. That runs straight into [NXE17](#nxe17), the case-spelling-versus-wire-vocabulary
+conflict. A real dimension type therefore needs templates *plus* explicit wire spellings on union
+cases, which is a much larger feature than it looks and should not ride along on NXE2.
 
 ---
 
@@ -749,7 +760,7 @@ component can be extended" scenario covers the cross-library case for `extends` 
 declaration side works and only the invocation side is missing.
 
 <a id="nxe14"></a>
-### NXE14 — An enum member cannot be reached through a wildcard import alias
+### NXE14 — A union case cannot be reached through a wildcard import alias
 
 **Reproducer:**
 
@@ -760,14 +771,14 @@ import "../ui" as ui
 ```
 
 The third qualifying segment is unsupported. The workaround is the selective import form, which
-brings the enum in unqualified:
+brings the union in unqualified:
 
 ```nx
 import { Card as ui.Card, Text as ui.Text, TextVariant } from "../ui"
 ```
 
 A wildcard import of the same library cannot be added alongside it, because importing one library
-path twice in a file is an error — so a module that needs both aliased components and an enum member
+path twice in a file is an error — so a module that needs both aliased components and a union case
 from one library must use the selective form for everything it takes from that library. The
 proposal's §8.1 example does exactly this, and imports its two catalogs in two different styles as a
 result.
@@ -824,16 +835,16 @@ docs and the example. See [NXE7](#nxe7) for the sequence-literal question specif
 ## Convention
 
 <a id="nxe17"></a>
-### NXE17 — The `snake_case` enum convention conflicts with camelCase wire vocabularies
+### NXE17 — The `snake_case` case-name convention conflicts with camelCase wire vocabularies
 
-NX documents `snake_case` as the enum-member convention and serializes members verbatim, so
+NX documents `snake_case` as the case-name convention and serializes case names verbatim, so
 `pending_review` stays `"pending_review"` on the wire. That is the right default when NX owns both
 ends.
 
-It is the wrong default when NX describes someone else's vocabulary. The proposal's enum values —
-`spaceBetween`, `objectBoundingBox`, `scaleDown`, `userSpaceOnUse` — come from CSS and SVG and
-cannot be renamed. camelCase members are legal NX identifiers, so Appendix A keeps the wire spelling
-and diverges from the convention deliberately.
+It is the wrong default when NX describes someone else's vocabulary. The proposal's closed-set
+values — `spaceBetween`, `objectBoundingBox`, `scaleDown`, `userSpaceOnUse` — come from CSS and SVG
+and cannot be renamed. camelCase case names are legal NX identifiers, so Appendix A keeps the wire
+spelling and diverges from the convention deliberately.
 
 **Not a defect.** Recorded so the choice is visible, and so the style guidance can acknowledge that
 a schema mirroring an external vocabulary should follow that vocabulary rather than NX house style.

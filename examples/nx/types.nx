@@ -5,9 +5,9 @@ type MaybeUser = User?
 type UserList = UserBase[]
 type EntityList = Entity[]
 
-// Enums model scalar choices
-enum CardSortMode = open | closed
-enum DealStage =
+// A closed set of constants is a union whose cases carry no payload
+type CardSortMode = open | closed
+type DealStage =
   | draft
   | pending_review
   | closed_won

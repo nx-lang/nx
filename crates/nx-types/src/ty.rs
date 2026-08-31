@@ -139,9 +139,6 @@ pub enum Type {
     /// Example: `MyType`, `Person`
     Named(Name),
 
-    /// Enum type (nominal with fixed set of members)
-    Enum(EnumType),
-
     /// Discriminated union type (nominal with fixed set of cases)
     Union(UnionType),
 
@@ -235,11 +232,6 @@ impl Type {
         Type::Named(name.into())
     }
 
-    /// Creates an enum type.
-    pub fn enum_type(name: impl Into<Name>, members: Vec<Name>) -> Self {
-        Type::Enum(EnumType::new(name.into(), members))
-    }
-
     /// Creates a discriminated union type.
     pub fn union_type(name: impl Into<Name>, cases: Vec<Name>, base: Option<Name>) -> Self {
         Type::Union(UnionType::new(name.into(), cases, base))
@@ -328,8 +320,11 @@ impl Type {
             }
         }
 
+        // A case satisfies a union only when that union actually declares it. Comparing names
+        // alone would let a same-named local declaration's case stand in for a foreign union's,
+        // which is the soundness hole `enum` avoided by comparing its member list.
         if let (Type::UnionCase(case), Type::Union(union)) = (self, other) {
-            return case.union == union.name;
+            return case.union == union.name && union.cases.contains(&case.case);
         }
 
         // Arrays: T[] is compatible with U[] if T is compatible with U
@@ -387,7 +382,6 @@ impl fmt::Display for Type {
                 write!(f, ") => {}", ret)
             }
             Type::Named(name) => write!(f, "{}", name),
-            Type::Enum(enum_ty) => write!(f, "{}", enum_ty.name),
             Type::Union(union_ty) => write!(f, "{}", union_ty.name),
             Type::UnionCase(case_ty) => write!(f, "{}.{}", case_ty.union, case_ty.case),
             Type::Variable(id) => write!(f, "T{}", id),
@@ -403,15 +397,6 @@ fn write_postfix_type(f: &mut fmt::Formatter<'_>, inner: &Type, suffix: &str) ->
         Type::Function { .. } => write!(f, "({inner}){suffix}"),
         _ => write!(f, "{inner}{suffix}"),
     }
-}
-
-/// Describes an enum type with its members.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct EnumType {
-    /// Enum name
-    pub name: Name,
-    /// Ordered member names
-    pub members: Vec<Name>,
 }
 
 /// Describes a discriminated union type with its cases.
@@ -445,13 +430,6 @@ impl UnionCaseType {
     /// Creates a new union case type.
     pub fn new(union: Name, case: Name) -> Self {
         Self { union, case }
-    }
-}
-
-impl EnumType {
-    /// Creates a new enum type definition.
-    pub fn new(name: Name, members: Vec<Name>) -> Self {
-        Self { name, members }
     }
 }
 
@@ -714,7 +692,7 @@ mod tests {
             "(int, int) => int"
         );
         assert_eq!(
-            Type::enum_type(Name::new("Direction"), vec![Name::new("north")]).to_string(),
+            Type::union_type(Name::new("Direction"), vec![Name::new("north")], None).to_string(),
             "Direction"
         );
     }

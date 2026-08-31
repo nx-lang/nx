@@ -36,10 +36,6 @@
               },
               {
                 "type": "SYMBOL",
-                "name": "enum_definition"
-              },
-              {
-                "type": "SYMBOL",
                 "name": "value_definition"
               },
               {
@@ -588,11 +584,37 @@
       ]
     },
     "union_case_list": {
-      "type": "REPEAT1",
-      "content": {
-        "type": "SYMBOL",
-        "name": "union_case"
-      }
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "REPEAT1",
+          "content": {
+            "type": "SYMBOL",
+            "name": "union_case"
+          }
+        },
+        {
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "ALIAS",
+              "content": {
+                "type": "SYMBOL",
+                "name": "_bare_union_case"
+              },
+              "named": true,
+              "value": "union_case"
+            },
+            {
+              "type": "REPEAT1",
+              "content": {
+                "type": "SYMBOL",
+                "name": "union_case"
+              }
+            }
+          ]
+        }
+      ]
     },
     "union_case": {
       "type": "SEQ",
@@ -601,6 +623,19 @@
           "type": "STRING",
           "value": "|"
         },
+        {
+          "type": "SYMBOL",
+          "name": "_union_case_name_and_body"
+        }
+      ]
+    },
+    "_bare_union_case": {
+      "type": "SYMBOL",
+      "name": "_union_case_name_and_body"
+    },
+    "_union_case_name_and_body": {
+      "type": "SEQ",
+      "members": [
         {
           "type": "FIELD",
           "name": "name",
@@ -642,96 +677,6 @@
           ]
         }
       ]
-    },
-    "enum_definition": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "CHOICE",
-          "members": [
-            {
-              "type": "FIELD",
-              "name": "visibility",
-              "content": {
-                "type": "SYMBOL",
-                "name": "visibility_modifier"
-              }
-            },
-            {
-              "type": "BLANK"
-            }
-          ]
-        },
-        {
-          "type": "STRING",
-          "value": "enum"
-        },
-        {
-          "type": "FIELD",
-          "name": "name",
-          "content": {
-            "type": "SYMBOL",
-            "name": "identifier"
-          }
-        },
-        {
-          "type": "STRING",
-          "value": "="
-        },
-        {
-          "type": "FIELD",
-          "name": "members",
-          "content": {
-            "type": "SYMBOL",
-            "name": "enum_member_list"
-          }
-        }
-      ]
-    },
-    "enum_member_list": {
-      "type": "SEQ",
-      "members": [
-        {
-          "type": "CHOICE",
-          "members": [
-            {
-              "type": "STRING",
-              "value": "|"
-            },
-            {
-              "type": "BLANK"
-            }
-          ]
-        },
-        {
-          "type": "SYMBOL",
-          "name": "enum_member"
-        },
-        {
-          "type": "REPEAT",
-          "content": {
-            "type": "SEQ",
-            "members": [
-              {
-                "type": "STRING",
-                "value": "|"
-              },
-              {
-                "type": "SYMBOL",
-                "name": "enum_member"
-              }
-            ]
-          }
-        }
-      ]
-    },
-    "enum_member": {
-      "type": "FIELD",
-      "name": "name",
-      "content": {
-        "type": "SYMBOL",
-        "name": "identifier"
-      }
     },
     "value_definition": {
       "type": "SEQ",

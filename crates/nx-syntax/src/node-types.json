@@ -851,73 +851,6 @@
     }
   },
   {
-    "type": "enum_definition",
-    "named": true,
-    "fields": {
-      "members": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "enum_member_list",
-            "named": true
-          }
-        ]
-      },
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      },
-      "visibility": {
-        "multiple": false,
-        "required": false,
-        "types": [
-          {
-            "type": "visibility_modifier",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "enum_member",
-    "named": true,
-    "fields": {
-      "name": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "identifier",
-            "named": true
-          }
-        ]
-      }
-    }
-  },
-  {
-    "type": "enum_member_list",
-    "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": true,
-      "types": [
-        {
-          "type": "enum_member",
-          "named": true
-        }
-      ]
-    }
-  },
-  {
     "type": "function_definition",
     "named": true,
     "fields": {
@@ -1168,10 +1101,6 @@
         },
         {
           "type": "element",
-          "named": true
-        },
-        {
-          "type": "enum_definition",
           "named": true
         },
         {
@@ -2546,10 +2475,6 @@
   {
     "type": "entity",
     "named": true
-  },
-  {
-    "type": "enum",
-    "named": false
   },
   {
     "type": "escaped_at",

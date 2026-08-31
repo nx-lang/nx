@@ -73,7 +73,6 @@ module.exports = grammar({
         $.action_definition,
         $.union_definition,
         $.type_definition,
-        $.enum_definition,
         $.value_definition,
         $.function_definition,
         $.component_definition,
@@ -183,10 +182,26 @@ module.exports = grammar({
       field('cases', $.union_case_list),
     ),
 
-    union_case_list: $ => repeat1($.union_case),
+    // The leading `|` is optional for a list of two or more cases, and required for a single
+    // case. A single bare case would be ambiguous with `type_definition`'s alias form
+    // (`type A = B`); two or more cannot be, because an alias's right-hand side is one `$.type`
+    // and cannot contain `|`.
+    union_case_list: $ => choice(
+      repeat1($.union_case),
+      seq(
+        alias($._bare_union_case, $.union_case),
+        repeat1($.union_case),
+      ),
+    ),
 
     union_case: $ => seq(
       '|',
+      $._union_case_name_and_body,
+    ),
+
+    _bare_union_case: $ => $._union_case_name_and_body,
+
+    _union_case_name_and_body: $ => seq(
       field('name', $.identifier),
       optional(seq(
         '{',
@@ -194,22 +209,6 @@ module.exports = grammar({
         '}',
       )),
     ),
-
-    enum_definition: $ => seq(
-      optional(field('visibility', $.visibility_modifier)),
-      'enum',
-      field('name', $.identifier),
-      '=',
-      field('members', $.enum_member_list),
-    ),
-
-    enum_member_list: $ => seq(
-      optional('|'),
-      $.enum_member,
-      repeat(seq('|', $.enum_member)),
-    ),
-
-    enum_member: $ => field('name', $.identifier),
 
     // ===== Value Definitions =====
     value_definition: $ => seq(

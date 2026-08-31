@@ -464,7 +464,6 @@ fn to_lsp_document_symbol(symbol: nx_language_service::DocumentSymbol) -> Docume
             ServiceDocumentSymbolKind::TypeAlias => SymbolKind::TYPE_PARAMETER,
             ServiceDocumentSymbolKind::Record => SymbolKind::STRUCT,
             ServiceDocumentSymbolKind::Action => SymbolKind::STRUCT,
-            ServiceDocumentSymbolKind::Enum => SymbolKind::ENUM,
             ServiceDocumentSymbolKind::Union => SymbolKind::ENUM,
             ServiceDocumentSymbolKind::Component => SymbolKind::CLASS,
             ServiceDocumentSymbolKind::Element => SymbolKind::OBJECT,

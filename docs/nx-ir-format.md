@@ -20,13 +20,15 @@ An `.nxir.json` document contains:
 Type references distinguish built-in primitives from nominal declarations. Primitive references use
 `{ "kind": "primitive", "name": "string" }` or another built-in type name. Nominal references use
 `{ "kind": "nominal", "reference": { ... }, "display": "User" }`, where `reference` is the
-module-qualified declaration identity used by runtimes for record, union, enum, and type-alias
+module-qualified declaration identity used by runtimes for record, union, and type-alias
 boundary normalization. Display names are retained for canonical `$type` values, diagnostics, and
 human-readable tooling output.
 
 Expression records use tagged `op` payloads for literals, slots, top-level references, calls,
 unary/binary operations, `if`, match-style `if is`, `let`, blocks, arrays, `for`, index/member
-access, records, union cases, enum members, intrinsic elements, and component descriptors.
+access, records, union cases, intrinsic elements, and component descriptors. A union case carries
+`isConstant`: a case that declares no fields in a union that declares no base carries nothing beyond
+its own name, so its wire form is that bare string rather than a `$type` object.
 Index access requires an array base and integer index. Negative or out-of-bounds indexes produce a
 runtime diagnostic rather than a synthetic `null` value.
 

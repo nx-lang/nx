@@ -75,7 +75,7 @@ function nominal(reference: ReturnType<typeof ref>, display = reference.name): N
 
 const stringType: NxIrTypeRef = primitive("string");
 const intType: NxIrTypeRef = primitive("int");
-const themeType: NxIrTypeRef = nominal(ref("Theme", "m0:d3", "enum"));
+const themeType: NxIrTypeRef = nominal(ref("Theme", "m0:d3", "union"));
 const loadStateType: NxIrTypeRef = nominal(ref("LoadState", "m0:d5", "union"));
 const nullableLoadStateType: NxIrTypeRef = { kind: "nullable", inner: loadStateType };
 const intSemantic: NxIrSemanticType = { display: "int", shape: { kind: "primitive", name: "int" } };
@@ -220,9 +220,15 @@ const program: NxIrProgram = {
         },
         {
           id: "m0:d3",
-          reference: ref("Theme", "m0:d3", "enum"),
+          reference: ref("Theme", "m0:d3", "union"),
           span: sourceSpan,
-          kind: { tag: "enum", members: ["light", "dark"] },
+          kind: {
+            tag: "union",
+            cases: [
+              { name: "light", fields: [], isConstant: true, span: sourceSpan },
+              { name: "dark", fields: [], isConstant: true, span: sourceSpan },
+            ],
+          },
         },
         {
           id: "m0:d4",
@@ -240,7 +246,7 @@ const program: NxIrProgram = {
           kind: {
             tag: "union",
             cases: [
-              { name: "idle", fields: [], span: sourceSpan },
+              { name: "idle", fields: [], isConstant: true, span: sourceSpan },
               {
                 name: "failed",
                 fields: [
@@ -253,6 +259,7 @@ const program: NxIrProgram = {
                     span: sourceSpan,
                   },
                 ],
+                isConstant: false,
                 span: sourceSpan,
               },
             ],
@@ -419,9 +426,14 @@ const program: NxIrProgram = {
             tag: "function",
             params: [],
             body: expr({
-              tag: "enumMember",
-              enum: ref("Theme", "m0:d3", "enum"),
-              member: "dark",
+              tag: "unionCase",
+              union: ref("Theme", "m0:d3", "union"),
+              caseName: "dark",
+              fields: [],
+              properties: [],
+              contentField: null,
+              content: [],
+              isConstant: true,
             }),
           },
         },
@@ -716,7 +728,7 @@ test("evaluates function calls, records, union cases, enums, loops, and match ex
     message: "offline",
   });
   assertEqual(evaluateFunction(prepared, "describe", [{ $type: "LoadState.failed", message: "x" }]), "failed");
-  assertEqual(evaluateFunction(prepared, "describe", [{ $type: "LoadState.idle" }]), "ok");
+  assertEqual(evaluateFunction(prepared, "describe", ["idle"]), "ok");
   assertEqual(
     evaluateFunction(prepared, "describeOffline", [{ $type: "LoadState.failed", message: "online" }]),
     "failed-type",
@@ -726,7 +738,10 @@ test("evaluates function calls, records, union cases, enums, loops, and match ex
   assertEqual(evaluateFunction(prepared, "mappedValues"), [10, 21]);
   assertEqual(evaluateFunction(prepared, "flow"), 42);
   assertEqual(evaluateFunction(prepared, "letValue"), -12);
-  assertThrows(() => evaluateFunction(prepared, "echoTheme", ["blue"]), "Invalid enum member");
+  assertThrows(
+    () => evaluateFunction(prepared, "echoTheme", ["blue"]),
+    "Invalid constant union case",
+  );
 });
 
 test("matches native numeric division and modulo semantics", () => {

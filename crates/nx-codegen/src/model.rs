@@ -101,9 +101,6 @@ pub enum CodegenDeclarationKind {
         value: CodegenExpression,
         ty: Option<Type>,
     },
-    Enum {
-        members: Vec<String>,
-    },
     Record {
         fields: Vec<CodegenRecordField>,
     },
@@ -187,6 +184,12 @@ pub struct CodegenComponentField {
 pub struct CodegenUnionCase {
     pub name: String,
     pub fields: Vec<CodegenRecordField>,
+    /// Whether this case declares no fields in a union that declares no base.
+    ///
+    /// A constant case carries nothing beyond its own name, so it is emitted as a bare string
+    /// rather than a `$type` object, and a union whose cases are all constant generates what an
+    /// `enum` generated.
+    pub is_constant: bool,
     pub span: TextSpan,
 }
 
@@ -255,10 +258,6 @@ pub enum CodegenExpressionKind {
         member: String,
         reference: Option<CodegenReference>,
     },
-    EnumMember {
-        enum_reference: CodegenReference,
-        member: String,
-    },
     UnionCase {
         union_reference: CodegenReference,
         case_name: String,
@@ -266,6 +265,13 @@ pub enum CodegenExpressionKind {
         properties: Vec<CodegenProperty>,
         content_field: Option<String>,
         content: Vec<CodegenExpression>,
+        /// Whether this case declares no fields in a union that declares no base.
+        is_constant: bool,
+        /// Whether every case of the declaring union is constant.
+        ///
+        /// A constant union emits a frozen value object, so its cases are reached through it; a
+        /// constant case of a mixed union has no such object and is emitted as a bare string.
+        union_is_constant: bool,
     },
     Record {
         name: String,

@@ -212,6 +212,10 @@ pub fn parse_str(source: &str, file_name: &str) -> ParseResult {
             let validation_errors = validation::validate(&syntax_tree, file_name);
             errors.extend(validation_errors);
 
+            // A removed declaration form reports itself by name; the parse error it also provokes
+            // adds nothing, so it does not reach the caller.
+            validation::suppress_parse_errors_for_removed_declarations(&mut errors);
+
             ParseResult {
                 tree: Some(syntax_tree),
                 errors,

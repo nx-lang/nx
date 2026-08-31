@@ -575,7 +575,7 @@ let root() = { answer() }"#;
     #[test]
     fn eval_source_returns_bare_authored_enum_member_string() {
         let source = r#"
-            enum Status = | active | disabled
+            type Status = active | disabled
             let root() = { Status.active }
         "#;
 
@@ -627,9 +627,9 @@ let root() = { answer() }"#;
     }
 
     #[test]
-    fn eval_source_returns_fieldless_union_case_as_type_map() {
+    fn eval_source_returns_constant_union_case_as_a_bare_string() {
         let source = r#"
-            type LoadState = | idle | loading
+            type LoadState = idle | loading
             let root(): LoadState = { LoadState.idle }
         "#;
 
@@ -641,15 +641,11 @@ let root() = { answer() }"#;
             panic!("Expected fieldless union source evaluation to succeed");
         };
 
-        let expected = NxValue::Record {
-            type_name: Some("LoadState.idle".to_string()),
-            properties: BTreeMap::new(),
-        };
+        // A constant case carries nothing beyond its name, so it serializes as that bare string
+        // rather than as a `$type` map. **BREAKING** relative to the record representation.
+        let expected = NxValue::String("idle".to_string());
         assert_eq!(value, expected);
-        assert_eq!(
-            value.to_json_string().unwrap(),
-            r#"{"$type":"LoadState.idle"}"#
-        );
+        assert_eq!(value.to_json_string().unwrap(), r#""idle""#);
         let bytes = value.to_msgpack_vec().unwrap();
         assert_eq!(NxValue::from_msgpack_slice(&bytes).unwrap(), expected);
     }

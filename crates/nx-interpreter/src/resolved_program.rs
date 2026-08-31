@@ -27,7 +27,6 @@ pub enum ResolvedItemKind {
     Value,
     Component,
     TypeAlias,
-    Enum,
     Union,
     Record,
 }
@@ -112,7 +111,6 @@ pub struct ResolvedProgram {
     pub entry_functions: FxHashMap<String, ModuleQualifiedItemRef>,
     pub entry_components: FxHashMap<String, ModuleQualifiedItemRef>,
     pub entry_records: FxHashMap<String, ModuleQualifiedItemRef>,
-    pub entry_enums: FxHashMap<String, ModuleQualifiedItemRef>,
     pub imports: FxHashMap<RuntimeModuleId, FxHashMap<String, ModuleQualifiedItemRef>>,
 }
 
@@ -125,7 +123,6 @@ impl ResolvedProgram {
         entry_functions: FxHashMap<String, ModuleQualifiedItemRef>,
         entry_components: FxHashMap<String, ModuleQualifiedItemRef>,
         entry_records: FxHashMap<String, ModuleQualifiedItemRef>,
-        entry_enums: FxHashMap<String, ModuleQualifiedItemRef>,
         imports: FxHashMap<RuntimeModuleId, FxHashMap<String, ModuleQualifiedItemRef>>,
     ) -> Self {
         let source_provider_modules = build_source_provider_modules(&modules);
@@ -141,7 +138,6 @@ impl ResolvedProgram {
             entry_functions,
             entry_components,
             entry_records,
-            entry_enums,
             imports,
         }
     }
@@ -163,7 +159,6 @@ impl ResolvedProgram {
                 },
                 lowered_module,
             }],
-            FxHashMap::default(),
             FxHashMap::default(),
             FxHashMap::default(),
             FxHashMap::default(),
@@ -303,7 +298,6 @@ fn resolved_item_kind(item: &nx_hir::Item) -> ResolvedItemKind {
         nx_hir::Item::Value(_) => ResolvedItemKind::Value,
         nx_hir::Item::Component(_) => ResolvedItemKind::Component,
         nx_hir::Item::TypeAlias(_) => ResolvedItemKind::TypeAlias,
-        nx_hir::Item::Enum(_) => ResolvedItemKind::Enum,
         nx_hir::Item::Union(_) => ResolvedItemKind::Union,
         nx_hir::Item::Record(_) => ResolvedItemKind::Record,
     }

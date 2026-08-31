@@ -68,14 +68,16 @@ pub enum Value {
     /// Represents a collection of values, used for iteration and collections
     Array(Vec<Value>),
 
-    /// Enum value
+    /// Constant union case.
     ///
-    /// Stores the enum type name and selected member.
-    EnumValue {
-        /// Enum type name
-        type_name: Name,
-        /// Member name
-        member: SmolStr,
+    /// A case that declares no fields in a union that declares no base carries nothing beyond its
+    /// own name, so it is a scalar rather than an empty record. Every other case is a
+    /// [`Value::Record`].
+    UnionCase {
+        /// Declaring union's name.
+        union: Name,
+        /// Case name, scoped to that union.
+        case: SmolStr,
     },
 
     /// Record value (always typed).
@@ -158,7 +160,7 @@ impl Value {
             Value::Boolean(_) => "boolean",
             Value::Null => "null",
             Value::Array(_) => "array",
-            Value::EnumValue { .. } => "enum",
+            Value::UnionCase { .. } => "union_case",
             Value::Record { .. } => "record",
             Value::ActionHandler { .. } => "action_handler",
         }
@@ -185,7 +187,7 @@ impl std::fmt::Display for Value {
                 }
                 write!(f, "]")
             }
-            Value::EnumValue { type_name, member } => write!(f, "{}.{}", type_name, member),
+            Value::UnionCase { union, case } => write!(f, "{}.{}", union, case),
             Value::Record { type_name, fields } => {
                 write!(f, "{}{{ ", type_name)?;
                 for (i, (k, v)) in fields.iter().enumerate() {
@@ -249,9 +251,9 @@ mod tests {
         assert_eq!(Value::Boolean(true).to_string(), "true");
         assert_eq!(Value::Null.to_string(), "null");
         assert_eq!(
-            Value::EnumValue {
-                type_name: Name::new("Status"),
-                member: SmolStr::new("active")
+            Value::UnionCase {
+                union: Name::new("Status"),
+                case: SmolStr::new("active")
             }
             .to_string(),
             "Status.active"

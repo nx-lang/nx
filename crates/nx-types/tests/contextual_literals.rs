@@ -25,8 +25,8 @@ fn assert_reports(source: &str, needle: &str) {
     );
 }
 
-const FIT: &str = "enum Fit = fill | contain | cover\n";
-const LOAD_STATE: &str = "type LoadState = | idle | loading\n";
+const FIT: &str = "type Fit = fill | contain | cover\n";
+const LOAD_STATE: &str = "type LoadState = idle | loading\n";
 
 #[test]
 fn bare_name_resolves_to_an_enum_member_at_an_enum_typed_property() {
@@ -90,13 +90,13 @@ fn match_pattern_accepts_a_bare_name() {
 fn payload_case_is_matchable_by_bare_name_but_not_constructible() {
     // A pattern matches on the discriminator, so a payload case name is a valid pattern.
     assert_clean(
-        "type LoadState = | idle | failed { message: string }\n\
+        "type LoadState = idle | failed { message: string }\n\
          let view(s: LoadState) = {if s is { idle => \"idle\" failed => s.message }}\n\
          let v = {view(LoadState.idle)}",
     );
     // Constructing one still requires the element-style form.
     assert_reports(
-        "type LoadState = | idle | failed { message: string }\n\
+        "type LoadState = idle | failed { message: string }\n\
          type V = { state: LoadState }\n\
          <V state=failed />",
         "requires element-style payload construction",
@@ -107,9 +107,9 @@ fn payload_case_is_matchable_by_bare_name_but_not_constructible() {
 fn bare_pattern_from_another_type_is_rejected() {
     assert_reports(
         &format!(
-            "{FIT}enum Align = start | center\nlet label(f: Fit) = {{if f is {{ center => \"c\" else => \"\" }}}}\nlet v = {{label(Fit.fill)}}"
+            "{FIT}type Align = start | center\nlet label(f: Fit) = {{if f is {{ center => \"c\" else => \"\" }}}}\nlet v = {{label(Fit.fill)}}"
         ),
-        "is not a member of enum 'Fit'",
+        "is not a case of union 'Fit'",
     );
 }
 
@@ -135,7 +135,7 @@ fn quoted_string_at_an_enum_typed_property_is_rejected() {
 fn bare_name_at_a_string_typed_property_is_rejected() {
     assert_reports(
         "type Box = { alt: string }\n<Box alt=cover />",
-        "a bare name resolves only against an enum or union",
+        "a bare name resolves only against a union's cases",
     );
 }
 

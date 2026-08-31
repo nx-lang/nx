@@ -52,7 +52,7 @@ describe('NX unbraced property values', function () {
     expect(grammar).to.exist;
   });
 
-  it('scopes a bare value as an enum member, distinctly from a string', function () {
+  it('scopes a bare value as a union case, distinctly from a string', function () {
     const line = '<Img fit=cover alt="cover" />';
     const { tokens } = grammar.tokenizeLine(line, null);
 

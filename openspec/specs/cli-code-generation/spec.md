@@ -25,8 +25,8 @@ library generation. Any other input kind or unsupported file extension MUST be r
 When `nxlang typegen` targets a single `.nx` file, the generated output SHALL include source
 declarations marked `export` in that file plus companion state contracts synthesized from any
 exported external components in that file that declare state. The generated type surface SHALL
-cover exported type aliases, exported enums, exported record-like declarations, exported action
-records, and generated external-component state contracts.
+cover exported type aliases, exported discriminated unions, exported record-like declarations,
+exported action records, and generated external-component state contracts.
 
 #### Scenario: Internal and private declarations are omitted from file generation
 - **WHEN** `types.nx` contains `private type Hidden = string`, `type InternalThing = string`, and
@@ -54,7 +54,7 @@ analyzed as a valid NX library.
 
 #### Scenario: Exported declarations from multiple files are generated together
 - **WHEN** library `./ui` contains `button.nx` with `export type ButtonSize = string` and
-  `theme.nx` with `export enum ThemeMode = | light | dark`
+  `theme.nx` with `export type ThemeMode = light | dark`
 - **THEN** library generation SHALL include generated output for both `ButtonSize` and `ThemeMode`
 
 #### Scenario: Exported external component state from a library module is generated
@@ -106,7 +106,7 @@ import targets SHALL be derived from the dependency library name and the optiona
 - **THEN** `forms.ts` SHALL include a relative `import type` for `ThemeMode` from `theme.ts`
 
 #### Scenario: TypeScript emits relative imports for external component state contracts
-- **WHEN** library module `theme.nx` exports `enum ThemeMode = | light | dark`
+- **WHEN** library module `theme.nx` exports `type ThemeMode = light | dark`
 - **AND** library module `search-box.nx` exports `external component <SearchBox /> = { state { theme:ThemeMode } }`
 - **THEN** generated file `search-box.ts` SHALL include a relative `import type` for `ThemeMode`
   from `theme.ts`
@@ -241,23 +241,26 @@ MessagePack polymorphism SHALL use the same `$type`-keyed map contract as canoni
 - **AND** generated C# SHALL not emit any extra `__NxType` or `$type` data member on `Payload`
 
 ### Requirement: Generated C# enums use authored member strings across JSON and MessagePack
-Generated C# enums SHALL preserve the authored NX enum member spellings across both
-`System.Text.Json` and MessagePack. Generated C# enum properties and values SHALL serialize as the
-plain authored enum member string rather than as the canonical raw `NxValue` enum map, and typed
-generated enum deserialization SHALL use that same string form for both serializers.
+Generated C# enums SHALL preserve the authored NX case spellings across both `System.Text.Json` and
+MessagePack. Generated C# enum properties and values SHALL serialize as the plain authored case
+string rather than as a canonical raw `NxValue` map, and typed generated enum deserialization SHALL
+use that same string form for both serializers.
+
+A generated C# enum SHALL be produced for a constant union — one whose cases all declare no fields
+and which declares no base. A union with any payload case SHALL NOT generate a C# enum.
 
 #### Scenario: Generated C# JSON enum serialization uses the authored member string
-- **WHEN** source contains `export enum DealStage = | draft | pending_review | closed_won`
+- **WHEN** source contains `export type DealStage = draft | pending_review | closed_won`
 - **THEN** generated C# SHALL include JSON enum serialization support that emits
   `"pending_review"` for `DealStage.PendingReview`
-- **AND** SHALL NOT require a `"$enum"` or `"$member"` wrapper for the typed JSON enum value
+- **AND** SHALL NOT require a `"$enum"` or `"$member"` wrapper for the typed JSON value
 
 #### Scenario: Generated C# MessagePack enum serialization uses the authored member string
-- **WHEN** source contains `export enum DealStage = | draft | pending_review | closed_won`
+- **WHEN** source contains `export type DealStage = draft | pending_review | closed_won`
 - **THEN** generated C# SHALL include MessagePack enum serialization support that emits the string
   `pending_review`
-- **AND** typed MessagePack enum handling SHALL use that string-based wire shape rather than the
-  canonical raw enum map shape
+- **AND** typed MessagePack handling SHALL use that string-based wire shape rather than a canonical
+  raw map shape
 
 ### Requirement: Generated external component state contracts use stable companion names
 Generated external component state contracts SHALL use stable companion names. When generated
@@ -318,7 +321,7 @@ enum. Generated output SHALL continue to emit an enum-specific wire-format mappi
 preserves the authored NX member strings explicitly.
 
 #### Scenario: Generated C# enum references shared runtime helpers
-- **WHEN** source contains `export enum DealStage = | draft | pending_review | closed_won`
+- **WHEN** source contains `export type DealStage = draft | pending_review | closed_won`
 - **THEN** generated C# SHALL include `using NxLang.Nx.Serialization;`
 - **AND** SHALL annotate `DealStage` with `NxEnumJsonConverter<DealStage, DealStageWireFormat>`
 - **AND** SHALL annotate `DealStage` with
@@ -329,7 +332,7 @@ preserves the authored NX member strings explicitly.
   types
 
 #### Scenario: Generated C# enum mapping remains explicit when CLR names are normalized
-- **WHEN** source contains `export enum BuildTarget = | web_api | ios_app`
+- **WHEN** source contains `export type BuildTarget = web_api | ios_app`
 - **THEN** generated C# SHALL emit CLR members `WebApi` and `IosApp`
 - **AND** SHALL preserve the authored wire strings `"web_api"` and `"ios_app"` through the
   generated wire-format mapping type rather than inferring them from CLR member names at runtime
@@ -383,11 +386,6 @@ authored NX wire names.
 - **THEN** generated C# SHALL expose `source` on every generated `UiEvent` case DTO through the
   generated inheritance or shared contract shape
 - **AND** serializers SHALL write the field using wire name `source`
-
-#### Scenario: C# generation keeps enums separate from fieldless unions
-- **WHEN** source contains `export enum CardSortMode = closed | open` and `export type LoadState = | idle | loading`
-- **THEN** generated C# SHALL use enum serialization helpers for `CardSortMode`
-- **AND** generated C# SHALL use `$type` polymorphic DTO support for `LoadState`
 
 ### Requirement: Generated C# DTO properties preserve supported literal defaults
 C# type generation SHALL preserve authored NX literal defaults on generated DTO properties when the
@@ -450,3 +448,47 @@ JavaScript or TypeScript source-generation target.
 - **THEN** the CLI SHALL report that NX IR codegen does not use source output formats
 - **AND** it SHALL NOT write an NX IR artifact
 
+### Requirement: Generated host types for a union are chosen by constant-ness
+Type generation SHALL decide a union's generated host shape from the union's declaration rather
+than from which keyword declared it. A constant union SHALL generate the host language's idiomatic
+closed constant type: a C# `enum` with its authored-string wire format, and a TypeScript union of
+the authored string literals. Generated TypeScript type declarations SHALL remain a pure type
+surface — the generated module SHALL NOT export runtime values — which is why a constant union does
+not generate a value object here; executable code generation, whose modules carry runtime code, is
+specified separately and does generate one. A union with any payload case SHALL generate the
+polymorphic shape: a C# abstract base with one derived type per case and `$type` discriminator
+metadata, and a TypeScript union of per-case types.
+
+Within a union that generates the polymorphic shape, a constant case SHALL be generated so that its
+wire form is the bare authored case string. Generated C# SHALL expose such a case as a singleton
+instance of its case type, and generated TypeScript SHALL include the case's string literal as a
+member of the union type.
+
+#### Scenario: A constant union generates a C# enum
+- **WHEN** source contains `export type ThemeMode = light | dark`
+- **THEN** generated C# SHALL declare `ThemeMode` as an `enum` with the authored-string wire format
+- **AND** generated TypeScript SHALL declare `ThemeMode` as the union of its authored string
+  literals
+
+#### Scenario: A union with a payload case generates the polymorphic shape
+- **WHEN** source contains `export type LoadState = idle | failed { message:string }`
+- **THEN** generated C# SHALL declare an abstract `LoadState` with a derived type per case
+- **AND** generated TypeScript SHALL declare `LoadState` as a union of its per-case types
+
+#### Scenario: A constant case in a polymorphic union carries the bare string wire form
+- **WHEN** source contains `export type LoadState = idle | failed { message:string }`
+- **THEN** the generated TypeScript `LoadState` union SHALL include the string literal `"idle"` as
+  the form of the `idle` case
+- **AND** generated C# SHALL expose the `idle` case as a singleton whose serialized form is the bare
+  string `"idle"`
+
+#### Scenario: Generated TypeScript type declarations export no runtime values
+- **WHEN** `types.nx` contains `export type ThemeMode = light | dark`
+- **THEN** the generated TypeScript module SHALL declare `ThemeMode` as `"light" | "dark"`
+- **AND** SHALL NOT emit an `as const` value object or any other runtime export
+
+#### Scenario: Generated output for a constant union is unchanged from the enum form
+- **WHEN** a declaration previously written `export enum ThemeMode = light | dark` is rewritten as
+  `export type ThemeMode = light | dark`
+- **THEN** the generated C# and TypeScript SHALL be byte-identical to the output produced for the
+  enum form before this change

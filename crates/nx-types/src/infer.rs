@@ -3,16 +3,15 @@
 use crate::{
     common_supertype as generic_common_supertype, is_object_type, resolve_type_ref_with,
     resolve_type_ref_with_seen,
-    ty::{EnumType, UnionCaseType, UnionType},
+    ty::{UnionCaseType, UnionType},
     type_satisfies_expected as generic_type_satisfies_expected, Type, TypeEnvironment,
 };
 use nx_diagnostics::{Diagnostic, Label, TextSpan};
 use nx_hir::{
     ast, effective_component_contract_for_name, effective_record_shape_for_name,
-    interface_component, interface_enum, interface_function_signature, interface_type_alias,
-    interface_union, is_record_subtype, ExprId, InterfaceItemKind, Item, Name,
-    PreparedBindingOrigin, PreparedModule, PreparedNamespace, PropertyEntry, ResolvedPreparedItem,
-    UnionCaseDef, UnionDef,
+    interface_component, interface_function_signature, interface_type_alias, interface_union,
+    is_record_subtype, ExprId, InterfaceItemKind, Item, Name, PreparedBindingOrigin,
+    PreparedModule, PreparedNamespace, PropertyEntry, ResolvedPreparedItem, UnionCaseDef, UnionDef,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -82,8 +81,6 @@ pub struct InferenceContext<'a> {
     function_return_placeholders: FxHashMap<Name, Type>,
     /// Registered type aliases
     type_aliases: FxHashMap<Name, TypeAliasInfo>,
-    /// Registered enum definitions
-    enum_defs: FxHashMap<Name, EnumType>,
     /// Registered discriminated union definitions.
     union_defs: FxHashMap<Name, UnionDef>,
     /// Union definitions reached through a foreign declaration's own signature.
@@ -115,7 +112,6 @@ impl<'a> InferenceContext<'a> {
             next_var_id: 0,
             function_return_placeholders: FxHashMap::default(),
             type_aliases: FxHashMap::default(),
-            enum_defs: FxHashMap::default(),
             foreign_union_defs: FxHashMap::default(),
             union_defs: FxHashMap::default(),
             resolved_contextual_names: FxHashMap::default(),
@@ -296,37 +292,26 @@ impl<'a> InferenceContext<'a> {
                             );
                             Type::Error
                         }
-                    } else if let Some(enum_info) =
-                        self.enum_info_from_name(&name, &mut FxHashSet::default())
-                    {
-                        Type::Enum(enum_info.clone())
-                    } else if let Some(enum_info) = self.enum_info_for_expr(*base) {
-                        if enum_info.members.iter().any(|m| m == member) {
-                            Type::Enum(enum_info.clone())
+                    } else if let Some(union_info) = self.union_info_for_expr(*base) {
+                        let union_name = union_info.name.clone();
+                        let cases = union_info.cases.clone();
+                        if cases.iter().any(|case| case == member) {
+                            Type::union_case_type(union_name, member.clone())
                         } else {
-                            self.error(
-                                "undefined-enum-member",
-                                format!(
-                                    "Enum '{}' has no member named '{}'",
-                                    enum_info.name, member
-                                ),
-                                *span,
-                            );
+                            self.report_unknown_union_case(&union_name, member, &cases, *span);
                             Type::Error
                         }
                     } else {
                         let base_ty = self.infer_expr(*base);
                         self.infer_member_access(&base_ty, member, *span)
                     }
-                } else if let Some(enum_info) = self.enum_info_for_expr(*base) {
-                    if enum_info.members.iter().any(|m| m == member) {
-                        Type::Enum(enum_info.clone())
+                } else if let Some(union_info) = self.union_info_for_expr(*base) {
+                    let union_name = union_info.name.clone();
+                    let cases = union_info.cases.clone();
+                    if cases.iter().any(|case| case == member) {
+                        Type::union_case_type(union_name, member.clone())
                     } else {
-                        self.error(
-                            "undefined-enum-member",
-                            format!("Enum '{}' has no member named '{}'", enum_info.name, member),
-                            *span,
-                        );
+                        self.report_unknown_union_case(&union_name, member, &cases, *span);
                         Type::Error
                     }
                 } else {
@@ -1419,14 +1404,6 @@ impl<'a> InferenceContext<'a> {
         // directly, whether or not the consumer imported them.
         if let Some(peer) = self.module.peer_module(module_identity) {
             match peer.find_item(name.as_str()) {
-                Some(Item::Enum(enum_def)) => {
-                    let members = enum_def
-                        .members
-                        .iter()
-                        .map(|member| member.name.clone())
-                        .collect();
-                    return Some(Type::Enum(EnumType::new(enum_def.name.clone(), members)));
-                }
                 Some(Item::Union(union_def)) => {
                     let union_def = union_def.clone();
                     let ty = self.union_type_from_def(&union_def);
@@ -1455,16 +1432,7 @@ impl<'a> InferenceContext<'a> {
             let ResolvedPreparedItem::Imported { item, .. } = &resolved else {
                 continue;
             };
-            if let Some(enum_def) = interface_enum(item) {
-                if enum_def.name == *name {
-                    let members = enum_def
-                        .members
-                        .iter()
-                        .map(|member| member.name.clone())
-                        .collect();
-                    return Some(Type::Enum(EnumType::new(enum_def.name.clone(), members)));
-                }
-            } else if let Some(union_def) = interface_union(item) {
+            if let Some(union_def) = interface_union(item) {
                 if union_def.name == *name {
                     let ty = self.union_type_from_def(&union_def);
                     self.foreign_union_defs
@@ -1965,128 +1933,95 @@ impl<'a> InferenceContext<'a> {
     ) -> Option<Type> {
         let target = Self::contextual_target(expected).clone();
 
-        // An enum type, whether already resolved or still a bare name reference.
-        let enum_info = match &target {
-            Type::Enum(info) => Some(info.clone()),
-            Type::Named(named) => self
-                .enum_info_from_name(named, &mut FxHashSet::default())
-                .cloned(),
+        // One nominal kind. What `enum` declared is a union whose cases are all constant, so a
+        // bare name resolves against one closed set rather than two.
+        let union_info = match &target {
+            Type::Union(info) => Some(info.clone()),
+            Type::Named(named) => self.union_info_from_name(named, &mut FxHashSet::default()),
             _ => None,
         };
-        if let Some(info) = enum_info {
-            if info.members.iter().any(|member| member == name) {
-                if !self.nominal_is_nameable_here(&info) {
-                    self.report_unnameable_contextual_type(&info.name, name, span);
-                    return Some(Type::Error);
-                }
-                // The base identifier denotes the enum type itself, exactly as it does in the
-                // qualified form.
-                let base_ty = Some(Type::Enum(info.clone()));
-                self.resolved_contextual_names.insert(
-                    expr,
-                    ContextualResolution {
-                        type_name: info.name.clone(),
-                        member: name.clone(),
-                        base_ty,
-                    },
-                );
-                // Overwrite the pending marker so the expression carries the type the qualified
-                // form would have given it; the IR reads this node's type directly.
-                let resolved = Type::Enum(info);
-                self.env.set_expr_type(expr, resolved.clone());
-                return Some(resolved);
-            }
-            let suggestion = Self::closest_candidate(name, &info.members)
-                .map(|s| format!("; did you mean `{}`?", s))
-                .unwrap_or_default();
-            self.error(
-                "unresolved-contextual-name",
-                format!(
-                    "'{}' is not a member of enum '{}'{} Members: {}",
-                    name,
-                    info.name,
-                    suggestion,
-                    Self::candidate_list(&info.members)
-                ),
-                span,
-            );
-            return Some(Type::Error);
-        }
+        if let Some(info) = union_info {
+            let union_name = info.name.clone();
 
-        // A discriminated union: resolve against its payloadless cases.
-        let union_name = match &target {
-            Type::Union(info) => Some(info.name.clone()),
-            Type::Named(named) if self.union_def_for_contextual(named).is_some() => {
-                Some(named.clone())
-            }
-            _ => None,
-        };
-        if let Some(union_name) = union_name {
-            let is_foreign = !self.union_defs.contains_key(&union_name);
-            let matched = self
-                .union_def_for_contextual(&union_name)
-                .and_then(|def| {
-                    def.cases
-                        .iter()
-                        .find(|case| case.name == *name)
-                        .map(|case| (case.clone(), def.base.clone()))
-                });
-            if let Some((case, union_base)) = matched {
-                let is_fieldless = case.fields.is_empty();
-                let case_name = case.name.clone();
-                // Everything downstream of type checking still reaches a union case by name in
-                // this module, so a union visible only through the declaring signature has no
-                // spelling that survives lowering.
-                let _ = &union_base;
-                if is_foreign && !allow_payload_cases {
-                    self.report_unnameable_contextual_type(&union_name, name, span);
-                    return Some(Type::Error);
-                }
-                if is_fieldless || allow_payload_cases {
-                    let base_ty = self.union_def_for_contextual(&union_name).map(|def| {
-                        Type::union_type(
-                            union_name.clone(),
-                            def.cases.iter().map(|case| case.name.clone()).collect(),
-                            def.base.clone(),
-                        )
-                    });
-                    self.resolved_contextual_names.insert(
-                        expr,
-                        ContextualResolution {
-                            type_name: union_name.clone(),
-                            member: case_name.clone(),
-                            base_ty,
-                        },
-                    );
-                    let resolved = Type::union_case_type(union_name, case_name);
-                    self.env.set_expr_type(expr, resolved.clone());
-                    return Some(resolved);
-                }
+            // The resolved type's own cases are authoritative. Looking the name up again here
+            // would find whatever declaration *this* module binds to that spelling, which need
+            // not be the same type — that is how a same-named local declaration used to stand in
+            // for a foreign one.
+            if !info.cases.iter().any(|case| case == name) {
+                let suggestion = Self::closest_candidate(name, &info.cases)
+                    .map(|s| format!("; did you mean `{}`?", s))
+                    .unwrap_or_default();
                 self.error(
-                    "payload-union-case-requires-constructor",
+                    "unresolved-contextual-name",
                     format!(
-                        "Union case '{}.{}' requires element-style payload construction; write                          `<{}.{} ... />`",
-                        union_name, case_name, union_name, case_name
+                        "'{}' is not a case of union '{}'{} Cases: {}",
+                        name,
+                        union_name,
+                        suggestion,
+                        Self::candidate_list(&info.cases)
                     ),
                     span,
                 );
                 return Some(Type::Error);
             }
-            let cases: Vec<Name> = self
-                .union_def_for_contextual(&union_name)
-                .map(|def| def.cases.iter().map(|case| case.name.clone()).collect())
-                .unwrap_or_default();
-            let suggestion = Self::closest_candidate(name, &cases)
-                .map(|s| format!("; did you mean `{}`?", s))
-                .unwrap_or_default();
+
+            // The declaration reached under that name, and only when it really is that type.
+            // A union visible only through a foreign declaration's own signature is resolvable
+            // but not nameable, because everything below type checking still reaches a case by
+            // name in this module.
+            let same_shape = |def: &&UnionDef| Self::union_type_shape(def) == info;
+            let nameable_here = self
+                .union_defs
+                .get(&union_name)
+                .filter(same_shape)
+                .is_some();
+            let def = self
+                .union_defs
+                .get(&union_name)
+                .filter(same_shape)
+                .or_else(|| self.foreign_union_defs.get(&union_name).filter(same_shape))
+                .cloned();
+
+            if !nameable_here && !allow_payload_cases {
+                self.report_unnameable_contextual_type(&union_name, name, span);
+                return Some(Type::Error);
+            }
+
+            let Some(def) = def else {
+                self.report_unnameable_contextual_type(&union_name, name, span);
+                return Some(Type::Error);
+            };
+            let case = def
+                .cases
+                .iter()
+                .find(|case| case.name == *name)
+                .expect("the resolved type lists this case");
+            let case_name = case.name.clone();
+            // A fieldless case of a union with an abstract base still constructs — it takes the
+            // base's fields and their defaults — so nameability, not constant-ness, is what the
+            // bare form needs here.
+            let is_fieldless = case.fields.is_empty();
+
+            if is_fieldless || allow_payload_cases {
+                self.resolved_contextual_names.insert(
+                    expr,
+                    ContextualResolution {
+                        type_name: union_name.clone(),
+                        member: case_name.clone(),
+                        base_ty: Some(Type::Union(info)),
+                    },
+                );
+                let resolved = Type::union_case_type(union_name, case_name);
+                self.env.set_expr_type(expr, resolved.clone());
+                return Some(resolved);
+            }
+
             self.error(
-                "unresolved-contextual-name",
+                "payload-union-case-requires-constructor",
                 format!(
-                    "'{}' is not a case of union '{}'{} Cases: {}",
-                    name,
-                    union_name,
-                    suggestion,
-                    Self::candidate_list(&cases)
+                    "Union case '{}.{}' requires element-style payload construction; write \
+                     `<{}.{} ... />`",
+                    union_name, case_name, union_name, case_name
                 ),
                 span,
             );
@@ -2097,7 +2032,7 @@ impl<'a> InferenceContext<'a> {
         self.error(
             "contextual-name-requires-nominal-type",
             format!(
-                "{} expects {}, and a bare name resolves only against an enum or union; \
+                "{} expects {}, and a bare name resolves only against a union's cases; \
                  for a string value write \"{}\"",
                 context, expected, name
             ),
@@ -2116,16 +2051,11 @@ impl<'a> InferenceContext<'a> {
         }
         let target = Self::contextual_target(expected);
         let candidates: Vec<Name> = match target {
-            Type::Enum(info) => info.members.clone(),
-            Type::Named(named) => match self.enum_info_from_name(named, &mut FxHashSet::default()) {
-                Some(info) => info.members.clone(),
-                None => self
-                    .union_defs
-                    .get(named)
-                    .map(|def| def.cases.iter().map(|case| case.name.clone()).collect())
-                    .unwrap_or_default(),
-            },
             Type::Union(info) => info.cases.clone(),
+            Type::Named(named) => self
+                .union_info_from_name(named, &mut FxHashSet::default())
+                .map(|info| info.cases)
+                .unwrap_or_default(),
             _ => Vec::new(),
         };
         if candidates.is_empty() {
@@ -2276,35 +2206,11 @@ impl<'a> InferenceContext<'a> {
                                 span: alias.span,
                             },
                         );
-                    } else if let Some(enum_def) = interface_enum(&item) {
-                        let members = enum_def
-                            .members
-                            .iter()
-                            .map(|member| member.name.clone())
-                            .collect();
-                        self.enum_defs.insert(
-                            binding.visible_name.clone(),
-                            EnumType::new(binding.visible_name.clone(), members),
-                        );
                     } else if let Some(mut union_def) = interface_union(&item) {
                         union_def.name = binding.visible_name.clone();
                         self.union_defs
                             .insert(binding.visible_name.clone(), union_def);
                     }
-                }
-                ResolvedPreparedItem::Raw {
-                    item: Item::Enum(enum_def),
-                    ..
-                } => {
-                    let members = enum_def
-                        .members
-                        .iter()
-                        .map(|member| member.name.clone())
-                        .collect();
-                    self.enum_defs.insert(
-                        binding.visible_name.clone(),
-                        EnumType::new(binding.visible_name.clone(), members),
-                    );
                 }
                 ResolvedPreparedItem::Raw {
                     item: Item::Union(mut union_def),
@@ -2525,23 +2431,20 @@ impl<'a> InferenceContext<'a> {
         nx_hir::resolve_record_definition_with_module(self.module, name)
     }
 
-    fn enum_info_for_expr(&self, expr_id: ExprId) -> Option<&EnumType> {
+    fn union_info_for_expr(&self, expr_id: ExprId) -> Option<UnionType> {
         match self.module.raw_module().expr(expr_id) {
             ast::Expr::Ident(name) => {
                 let mut seen = FxHashSet::default();
-                self.enum_info_from_name(name, &mut seen)
+                self.union_info_from_name(name, &mut seen)
             }
             _ => None,
         }
     }
 
-    fn enum_info_from_name<'info>(
-        &'info self,
-        name: &Name,
-        seen: &mut FxHashSet<Name>,
-    ) -> Option<&'info EnumType> {
-        if let Some(info) = self.enum_defs.get(name) {
-            return Some(info);
+    /// The union a type name denotes here, following type aliases.
+    fn union_info_from_name(&self, name: &Name, seen: &mut FxHashSet<Name>) -> Option<UnionType> {
+        if let Some(def) = self.union_defs.get(name) {
+            return Some(Self::union_type_shape(def));
         }
 
         if let Some(alias) = self.type_aliases.get(name) {
@@ -2549,7 +2452,7 @@ impl<'a> InferenceContext<'a> {
                 return None;
             }
             if let ast::TypeRef::Name(target) = &alias.target {
-                let target_info = self.enum_info_from_name(target, seen);
+                let target_info = self.union_info_from_name(target, seen);
                 seen.remove(name);
                 return target_info;
             }
@@ -2559,15 +2462,37 @@ impl<'a> InferenceContext<'a> {
         None
     }
 
-    /// Whether a nominal type resolved for a binding site can also be named in this module.
-    ///
-    /// Resolution now reaches a type through the declaring module's own namespace, but the rewrite
-    /// this produces, and every consumer below it, still reaches that type by name here.
-    fn nominal_is_nameable_here(&self, info: &EnumType) -> bool {
-        self.enum_defs
-            .get(&info.name)
-            .map(|local| local == info)
-            .unwrap_or(false)
+    /// The `UnionType` shape of a lowered union definition.
+    fn union_type_shape(def: &UnionDef) -> UnionType {
+        UnionType::new(
+            def.name.clone(),
+            def.cases.iter().map(|case| case.name.clone()).collect(),
+            def.base.clone(),
+        )
+    }
+
+    /// Reports a member access that names something the union does not declare.
+    fn report_unknown_union_case(
+        &mut self,
+        union_name: &Name,
+        case: &Name,
+        cases: &[Name],
+        span: TextSpan,
+    ) {
+        let suggestion = Self::closest_candidate(case, cases)
+            .map(|s| format!("; did you mean `{}`?", s))
+            .unwrap_or_default();
+        self.error(
+            "undefined-union-case",
+            format!(
+                "Union '{}' has no case named '{}'{} Cases: {}",
+                union_name,
+                case,
+                suggestion,
+                Self::candidate_list(cases)
+            ),
+            span,
+        );
     }
 
     /// Reports a contextual name that resolved correctly but has no spelling that survives lowering.
@@ -2581,18 +2506,6 @@ impl<'a> InferenceContext<'a> {
             "'{member}' resolves to '{type_name}.{member}', but '{type_name}' is declared in another module and is not imported here. A bare name cannot yet carry that origin through code generation, so import '{type_name}' and write '{type_name}.{member}'."
         );
         self.error("contextual-name-requires-import", message, span);
-    }
-
-    /// A union definition for contextual resolution: local first, then one reached through a
-    /// foreign declaration's own signature.
-    ///
-    /// The foreign map is consulted only from here, so a union that the consumer never imported
-    /// stays unspellable in source; it becomes resolvable only at a site whose declared type
-    /// already names it.
-    fn union_def_for_contextual(&self, name: &Name) -> Option<&UnionDef> {
-        self.union_defs
-            .get(name)
-            .or_else(|| self.foreign_union_defs.get(name))
     }
 
     fn union_type_from_def(&self, union_def: &UnionDef) -> Type {
@@ -2642,10 +2555,6 @@ impl<'a> InferenceContext<'a> {
             });
             seen.remove(name);
             return ty;
-        }
-
-        if let Some(enum_ty) = self.enum_defs.get(name) {
-            return Type::Enum(enum_ty.clone());
         }
 
         if let Some(union_def) = self.union_defs.get(name) {
@@ -2773,7 +2682,11 @@ impl<'a> InferenceContext<'a> {
             (Type::Named(actual_name), Type::Named(expected_name)) => {
                 self.named_type_satisfies_expected(actual_name, expected_name)
             }
-            (Type::UnionCase(case), Type::Union(union)) => case.union == union.name,
+            // The union must actually declare the case. Matching on the name alone would let a
+            // same-named local declaration's case stand in for a foreign union's.
+            (Type::UnionCase(case), Type::Union(union)) => {
+                case.union == union.name && union.cases.contains(&case.case)
+            }
             (Type::UnionCase(case), Type::Named(expected_name)) => {
                 self.union_type_satisfies_record(&case.union, expected_name)
             }
@@ -2897,8 +2810,8 @@ mod tests {
     use super::*;
     use nx_diagnostics::{TextSize, TextSpan};
     use nx_hir::{
-        ast::BinOp, ast::Expr, ast::Literal, ast::TypeRef, EnumDef, EnumMember, Function, Item,
-        LoweredModule, Name, Param, PreparedModule, SourceId, TypeAlias,
+        ast::BinOp, ast::Expr, ast::Literal, ast::TypeRef, Function, Item, LoweredModule, Name,
+        Param, PreparedModule, SourceId, TypeAlias,
     };
 
     fn prepared(module: &LoweredModule) -> PreparedModule {
@@ -3136,22 +3049,25 @@ mod tests {
     fn test_infer_enum_member_access() {
         let mut module = LoweredModule::new(SourceId::new(0));
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
-        let enum_def = EnumDef {
+        let union_def = UnionDef {
             name: Name::new("Direction"),
             visibility: nx_hir::Visibility::Export,
-            members: vec![
-                EnumMember {
+            base: None,
+            cases: vec![
+                UnionCaseDef {
                     name: Name::new("north"),
+                    fields: Vec::new(),
                     span,
                 },
-                EnumMember {
+                UnionCaseDef {
                     name: Name::new("south"),
+                    fields: Vec::new(),
                     span,
                 },
             ],
             span,
         };
-        module.add_item(Item::Enum(enum_def));
+        module.add_item(Item::Union(union_def));
 
         let base = module.alloc_expr(Expr::Ident(Name::new("Direction")));
         let expr_id = module.alloc_expr(Expr::Member {
@@ -3165,7 +3081,10 @@ mod tests {
         let ty = ctx.infer_expr(expr_id);
 
         match ty {
-            Type::Enum(enum_ty) => assert_eq!(enum_ty.name.as_str(), "Direction"),
+            Type::UnionCase(case_ty) => {
+                assert_eq!(case_ty.union.as_str(), "Direction");
+                assert_eq!(case_ty.case.as_str(), "north");
+            }
             other => panic!("Expected enum type, got {:?}", other),
         }
         assert!(
@@ -3178,16 +3097,18 @@ mod tests {
     fn test_infer_enum_invalid_member() {
         let mut module = LoweredModule::new(SourceId::new(0));
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
-        let enum_def = EnumDef {
+        let union_def = UnionDef {
             name: Name::new("Status"),
             visibility: nx_hir::Visibility::Export,
-            members: vec![EnumMember {
+            base: None,
+            cases: vec![UnionCaseDef {
                 name: Name::new("active"),
+                fields: Vec::new(),
                 span,
             }],
             span,
         };
-        module.add_item(Item::Enum(enum_def));
+        module.add_item(Item::Union(union_def));
 
         let base = module.alloc_expr(Expr::Ident(Name::new("Status")));
         let expr_id = module.alloc_expr(Expr::Member {
@@ -3208,16 +3129,18 @@ mod tests {
     fn test_enum_member_access_via_alias() {
         let mut module = LoweredModule::new(SourceId::new(0));
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
-        let enum_def = EnumDef {
+        let union_def = UnionDef {
             name: Name::new("Status"),
             visibility: nx_hir::Visibility::Export,
-            members: vec![EnumMember {
+            base: None,
+            cases: vec![UnionCaseDef {
                 name: Name::new("active"),
+                fields: Vec::new(),
                 span,
             }],
             span,
         };
-        module.add_item(Item::Enum(enum_def));
+        module.add_item(Item::Union(union_def));
         let alias = TypeAlias {
             name: Name::new("State"),
             visibility: nx_hir::Visibility::Export,
@@ -3238,7 +3161,7 @@ mod tests {
         let ty = ctx.infer_expr(expr_id);
 
         match ty {
-            Type::Enum(enum_ty) => assert_eq!(enum_ty.name.as_str(), "Status"),
+            Type::UnionCase(case_ty) => assert_eq!(case_ty.union.as_str(), "Status"),
             other => panic!("Expected enum type, got {:?}", other),
         }
         assert!(ctx.diagnostics().is_empty());
@@ -3248,16 +3171,18 @@ mod tests {
     fn test_function_signature_uses_enum_type() {
         let mut module = LoweredModule::new(SourceId::new(0));
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
-        let enum_def = EnumDef {
+        let union_def = UnionDef {
             name: Name::new("Direction"),
             visibility: nx_hir::Visibility::Export,
-            members: vec![EnumMember {
+            base: None,
+            cases: vec![UnionCaseDef {
                 name: Name::new("north"),
+                fields: Vec::new(),
                 span,
             }],
             span,
         };
-        module.add_item(Item::Enum(enum_def));
+        module.add_item(Item::Union(union_def));
 
         let base = module.alloc_expr(Expr::Ident(Name::new("Direction")));
         let member = module.alloc_expr(Expr::Member {
@@ -3286,7 +3211,7 @@ mod tests {
         let func_ty = env.lookup(&Name::new("north")).expect("function type");
         match func_ty {
             Type::Function { ret, .. } => match ret.as_ref() {
-                Type::Enum(enum_ty) => assert_eq!(enum_ty.name.as_str(), "Direction"),
+                Type::UnionCase(case_ty) => assert_eq!(case_ty.union.as_str(), "Direction"),
                 other => panic!("Expected enum return type, got {:?}", other),
             },
             other => panic!("Expected function type, got {:?}", other),

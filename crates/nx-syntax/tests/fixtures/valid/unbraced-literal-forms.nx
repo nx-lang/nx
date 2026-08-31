@@ -1,5 +1,5 @@
 // Unbraced value forms: contextual names and signed numeric literals.
-enum Fit = fill | contain | cover
+type Fit = fill | contain | cover
 
 type LoadState =
   | idle

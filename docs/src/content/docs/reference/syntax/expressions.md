@@ -33,7 +33,7 @@ let cssClass = if (isActive) { "active" } else { "inactive" }
 Match-style `if` evaluates arms in order; the first match wins.
 
 ```nx
-enum AccessLevel = read_only | member | admin
+type AccessLevel = read_only | member | admin
 
 let dashboard = if accessLevel is {
   AccessLevel.admin => <AdminPanel/>
@@ -44,7 +44,7 @@ let dashboard = if accessLevel is {
 
 - Arms never fall through; each case is independent.
 - Multiple patterns can share a result: `"saturday", "sunday" => <Weekend/>`.
-- Enum and scalar matches may use `else` for fallbacks. For discriminated union scrutinees, omitting
+- Constant-case and scalar matches may use `else` for fallbacks. For union scrutinees, omitting
   `else` requires every union case to be covered.
 - A union case arm narrows the matched identifier inside that arm.
 

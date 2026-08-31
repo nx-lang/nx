@@ -28,7 +28,7 @@ component <SearchBox
   <TextInput value={query} placeholder={placeholder} />
 }
 
-type LoadState = | idle | failed { message:string }
+type LoadState = idle | failed { message:string }
 
 component <Notice message:string tone:string density:string /> = {
   <aside tone={tone} density={density}>{message}</aside>

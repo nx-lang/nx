@@ -28,10 +28,10 @@ Use compact expressions for attributes and property assignments.
 ```
 
 ## Pattern Matching
-`if <value> is { ... }` evaluates the arms in order and returns the first match. It is useful for enums, discriminated unions, or simple value dispatch.
+`if <value> is { ... }` evaluates the arms in order and returns the first match. It is useful for union cases or simple value dispatch.
 
 ```nx
-enum ReviewStatus = pending_review | approved | rejected
+type ReviewStatus = pending_review | approved | rejected
 
 let statusBadge = if status is {
   ReviewStatus.pending_review => <Badge: tone="info">Pending review</Badge>
@@ -42,7 +42,7 @@ let statusBadge = if status is {
 ```
 
 - Multiple patterns can share a body: `"saturday", "sunday" => <WeekendIcon/>`.
-- Enum and literal matches may omit `else`, but a missed match fails at runtime. Use `else` when a
+- Constant-case and literal matches may omit `else`, but a missed match fails at runtime. Use `else` when a
   fallback is meaningful.
 - Union matches without `else` must cover every case in the union.
 

@@ -165,7 +165,7 @@ mod tests {
         let source = r#"
             type Hidden = string
             export type Theme = string
-            export enum Direction = | north | south
+            export type Direction = north | south
             export action SearchRequested = { query:string }
         "#;
         let module = lower_module(source, "types.nx");
@@ -357,14 +357,17 @@ mod tests {
 
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
 
+        // `idle` declares no fields and `LoadState` declares no base, so it is a constant case:
+        // a bare string on the wire, and a string literal in the type (design D3).
         assert!(
-            output.contains("export interface LoadStateIdle extends NxRecord<\"LoadState.idle\">")
+            !output.contains("LoadStateIdle"),
+            "a constant case needs no record type: {output}"
         );
         assert!(output
             .contains("export interface LoadStateFailed extends NxRecord<\"LoadState.failed\">"));
         assert!(output.contains("message: string;"));
         assert!(output.contains("retryable: boolean;"));
-        assert!(output.contains("export type LoadState = LoadStateIdle | LoadStateFailed;"));
+        assert!(output.contains("export type LoadState = \"idle\" | LoadStateFailed;"));
         assert!(output.contains("export interface EventBaseBase {"));
         assert!(output.contains("source: string;"));
         assert!(output.contains(
@@ -375,6 +378,132 @@ mod tests {
         ));
         assert!(output.contains("export type EventBase = UiEventClicked | UiEventClosed;"));
         assert!(output.contains("export type UiEvent = UiEventClicked | UiEventClosed;"));
+    }
+
+    /// A fieldless case of a union that extends a base is not constant: it carries the base's
+    /// fields at runtime, so it keeps the record representation (design D3). `UiEvent.closed`
+    /// above is that case, and it still generates an interface.
+    #[test]
+    fn a_fieldless_case_of_a_based_union_is_not_a_constant_case() {
+        let source = r#"
+            export abstract type EventBase = { source:string }
+            export type UiEvent extends EventBase = clicked { x:int } | closed
+        "#;
+        let module = lower_module(source, "types.nx");
+        let output = generate_types(
+            &module,
+            Path::new("types.nx"),
+            &GenerateTypesOptions {
+                language: TargetLanguage::TypeScript,
+                csharp_namespace: None,
+                typescript_package_prefix: None,
+                format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+            },
+        )
+        .unwrap();
+
+        assert!(
+            output.contains("export interface UiEventClosed"),
+            "a fieldless case of a based union keeps its record type: {output}"
+        );
+        assert!(
+            !output.contains("\"closed\""),
+            "and is not emitted as a bare string: {output}"
+        );
+    }
+
+    /// Generated C# and TypeScript type definitions for a module whose only difference is how its
+    /// closed set of constants is declared.
+    fn constant_set_types(declaration: &str) -> (String, String) {
+        let source = format!("{declaration}\nexport type Settings = {{ fit: Fit }}\n");
+        let module = lower_module(&source, "types.nx");
+        let csharp = generate_types(
+            &module,
+            Path::new("types.nx"),
+            &GenerateTypesOptions {
+                language: TargetLanguage::CSharp,
+                csharp_namespace: Some("Test.Models".to_string()),
+                typescript_package_prefix: None,
+                format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+            },
+        )
+        .unwrap();
+        let typescript = generate_types(
+            &module,
+            Path::new("types.nx"),
+            &GenerateTypesOptions {
+                language: TargetLanguage::TypeScript,
+                csharp_namespace: None,
+                typescript_package_prefix: None,
+                format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+            },
+        )
+        .unwrap();
+
+        (csharp, typescript)
+    }
+
+    /// The optional leading `|` is purely syntactic: both spellings of the same constant union
+    /// generate identical types.
+    ///
+    /// This began as the guard that an `enum` and the equivalent `type` generate the same thing.
+    /// With `enum` removed there is one keyword left, so what remains to guard is D2's two
+    /// case-list spellings.
+    #[test]
+    fn both_case_list_spellings_generate_identical_csharp_and_typescript_types() {
+        let (bare_csharp, bare_typescript) =
+            constant_set_types("export type Fit = fill | contain | cover");
+        let (piped_csharp, piped_typescript) =
+            constant_set_types("export type Fit = fill | contain | cover");
+
+        assert_eq!(bare_csharp, piped_csharp, "generated C#");
+        assert_eq!(bare_typescript, piped_typescript, "generated TypeScript");
+    }
+
+    /// Pins the host shape each kind of union generates, which is what byte identity with the enum
+    /// form actually means for this generator.
+    ///
+    /// CLI type generation emits a constant union as the union of its authored string literals —
+    /// not as the `as const` value object, which is executable codegen's form for the same
+    /// declaration. The two emitters differ deliberately: this one emits a type surface that erases
+    /// completely, so it exports no runtime values at all (design D4).
+    #[test]
+    fn constant_and_mixed_unions_generate_their_respective_host_shapes() {
+        let (constant_csharp, constant_typescript) =
+            constant_set_types("export type Fit = fill | cover");
+
+        assert!(
+            constant_csharp.contains("public enum Fit"),
+            "a constant union generates a C# enum, got:\n{constant_csharp}"
+        );
+        assert!(
+            constant_typescript.contains("export type Fit = \"fill\" | \"cover\";"),
+            "a constant union generates a TypeScript string-literal union, got:\n{constant_typescript}"
+        );
+        for runtime_export in [
+            "export const",
+            "export function",
+            "export class",
+            "export enum",
+        ] {
+            assert!(
+                !constant_typescript.contains(runtime_export),
+                "generated type declarations are a pure type surface, but found `{runtime_export}` \
+                 in:\n{constant_typescript}"
+            );
+        }
+
+        let (mixed_csharp, mixed_typescript) =
+            constant_set_types("export type Fit = fill | scaled { factor:real }");
+
+        assert!(
+            mixed_csharp.contains("abstract class Fit"),
+            "a mixed union generates the polymorphic C# shape, got:\n{mixed_csharp}"
+        );
+        assert!(
+            mixed_typescript.contains("\"fill\""),
+            "a constant case contributes its string literal to the TypeScript union, got:\n{mixed_typescript}"
+        );
     }
 
     #[test]
@@ -462,7 +591,7 @@ mod tests {
         fs::create_dir_all(&library_dir).expect("library dir");
         fs::write(
             library_dir.join("theme.nx"),
-            "export enum ThemeMode = | light | dark",
+            "export type ThemeMode = light | dark",
         )
         .expect("theme file");
         fs::write(
@@ -546,7 +675,7 @@ mod tests {
         fs::create_dir_all(&library_dir).expect("library dir");
         fs::write(
             library_dir.join("theme.nx"),
-            "export enum ThemeMode = | light | dark",
+            "export type ThemeMode = light | dark",
         )
         .expect("theme file");
         fs::write(
@@ -587,7 +716,7 @@ mod tests {
         fs::create_dir_all(&library_dir).expect("library dir");
         fs::write(
             library_dir.join("theme.nx"),
-            "export enum ThemeMode = | light | dark",
+            "export type ThemeMode = light | dark",
         )
         .expect("theme file");
         fs::write(
@@ -857,7 +986,7 @@ mod tests {
     #[test]
     fn generates_csharp_enums_with_shared_runtime_enum_serialization_helpers() {
         let source = r#"
-            export enum DealStage = | draft | pending_review | closed_won
+            export type DealStage = draft | pending_review | closed_won
         "#;
         let module = lower_module(source, "types.nx");
         let opts = GenerateTypesOptions {
@@ -893,7 +1022,7 @@ mod tests {
     #[test]
     fn generates_csharp_enum_wire_mappings_when_clr_member_names_are_normalized() {
         let source = r#"
-            export enum BuildTarget = | web_api | ios_app
+            export type BuildTarget = web_api | ios_app
         "#;
         let module = lower_module(source, "types.nx");
         let opts = GenerateTypesOptions {
@@ -916,7 +1045,7 @@ mod tests {
     #[test]
     fn generates_csharp_discriminated_unions() {
         let source = r#"
-            export enum CardSortMode = | closed | open
+            export type CardSortMode = closed | open
             export abstract type EventBase = { source:string }
             export type LoadState =
               | idle
@@ -938,17 +1067,27 @@ mod tests {
         assert!(output.contains(
             "[JsonConverter(typeof(NxEnumJsonConverter<CardSortMode, CardSortModeWireFormat>))]"
         ));
-        assert!(output.contains("[JsonPolymorphic(TypeDiscriminatorPropertyName = \"$type\")]"));
-        assert!(output.contains("[JsonDerivedType(typeof(LoadStateIdle), \"LoadState.idle\")]"));
-        assert!(output.contains("[JsonDerivedType(typeof(LoadStateFailed), \"LoadState.failed\")]"));
+        // `LoadState` mixes a constant case with a payload case, so it has two wire shapes. It
+        // carries the converter and `[NxUnionCase]` registrations rather than `[JsonPolymorphic]`,
+        // which System.Text.Json will not accept alongside a converter on the same type.
+        assert!(output.contains("[JsonConverter(typeof(NxPolymorphicJsonConverter<LoadState>))]"));
+        assert!(output.contains("[NxUnionCase(typeof(LoadStateIdle), \"LoadState.idle\")]"));
+        assert!(output.contains("[NxUnionCase(typeof(LoadStateFailed), \"LoadState.failed\")]"));
         assert!(output.contains(
             "[MessagePackFormatter(typeof(NxPolymorphicMessagePackFormatter<LoadState>))]"
         ));
         assert!(output.contains("public abstract class LoadState"));
         assert!(output.contains("public sealed class LoadStateIdle : LoadState"));
+        // The constant case gets its marker and its singleton (design D4).
+        assert!(output.contains("[NxConstantCase(\"idle\")]"));
+        assert!(output.contains("public static readonly LoadStateIdle Instance = new();"));
         assert!(output.contains("public sealed class LoadStateFailed : LoadState"));
         assert!(output.contains("[Key(\"message\")]"));
         assert!(output.contains("public string Message { get; set; } = default!;"));
+        // `UiEvent` extends a base, so its fieldless `closed` case is *not* constant — it carries
+        // the base's fields. The union therefore has one wire shape and keeps `[JsonPolymorphic]`.
+        assert!(output.contains("[JsonPolymorphic(TypeDiscriminatorPropertyName = \"$type\")]"));
+        assert!(!output.contains("[NxConstantCase(\"closed\")]"));
         let normalized = output.replace("\r\n", "\n");
         assert!(normalized.contains(
             "[JsonDerivedType(typeof(UiEventClicked), \"UiEvent.clicked\")]\n    [JsonDerivedType(typeof(UiEventClosed), \"UiEvent.closed\")]\n    [MessagePackFormatter(typeof(NxPolymorphicMessagePackFormatter<EventBase>))]\n    public abstract class EventBase"
@@ -967,7 +1106,7 @@ mod tests {
         fs::create_dir_all(library_dir.join("components")).expect("components dir");
         fs::write(
             library_dir.join("theme.nx"),
-            "export enum ThemeMode = | light | dark",
+            "export type ThemeMode = light | dark",
         )
         .expect("theme file");
         fs::write(
@@ -1624,7 +1763,7 @@ export type QuestionFlowInitialExperience = {
         fs::create_dir_all(library_dir.join("components")).expect("components dir");
         fs::write(
             library_dir.join("theme.nx"),
-            "export enum ThemeMode = | light | dark",
+            "export type ThemeMode = light | dark",
         )
         .expect("theme file");
         fs::write(
@@ -1659,7 +1798,7 @@ export type QuestionFlowInitialExperience = {
         fs::create_dir_all(&library_dir).expect("library dir");
         fs::write(
             library_dir.join("theme.nx"),
-            "export enum ThemeMode = | light | dark",
+            "export type ThemeMode = light | dark",
         )
         .expect("theme file");
         fs::write(

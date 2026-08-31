@@ -26,8 +26,6 @@ pub enum SymbolKind {
     Parameter,
     /// A type definition
     Type,
-    /// An enum member
-    EnumMember,
 }
 
 impl SymbolKind {
@@ -39,7 +37,6 @@ impl SymbolKind {
             SymbolKind::Variable => "variable",
             SymbolKind::Parameter => "parameter",
             SymbolKind::Type => "type",
-            SymbolKind::EnumMember => "enum member",
         }
     }
 }
@@ -272,10 +269,9 @@ fn symbol_kind_from_prepared_kind(kind: PreparedItemKind) -> SymbolKind {
         PreparedItemKind::Function => SymbolKind::Function,
         PreparedItemKind::Value => SymbolKind::Variable,
         PreparedItemKind::Component => SymbolKind::Component,
-        PreparedItemKind::TypeAlias
-        | PreparedItemKind::Enum
-        | PreparedItemKind::Union
-        | PreparedItemKind::Record => SymbolKind::Type,
+        PreparedItemKind::TypeAlias | PreparedItemKind::Union | PreparedItemKind::Record => {
+            SymbolKind::Type
+        }
     }
 }
 
@@ -286,7 +282,6 @@ fn resolved_item_span(item: &crate::ResolvedPreparedItem) -> Option<TextSpan> {
             Item::Value(value) => value.span,
             Item::Component(component) => component.span,
             Item::TypeAlias(alias) => alias.span,
-            Item::Enum(enum_def) => enum_def.span,
             Item::Union(union_def) => union_def.span,
             Item::Record(record) => record.span,
         }),
@@ -295,7 +290,6 @@ fn resolved_item_span(item: &crate::ResolvedPreparedItem) -> Option<TextSpan> {
             | crate::InterfaceItemKind::Value { span, .. }
             | crate::InterfaceItemKind::Component { span, .. }
             | crate::InterfaceItemKind::TypeAlias { span, .. }
-            | crate::InterfaceItemKind::Enum { span, .. }
             | crate::InterfaceItemKind::Union { span, .. }
             | crate::InterfaceItemKind::Record { span, .. } => *span,
         }),
@@ -367,7 +361,7 @@ impl<'a> UndefinedIdentifierChecker<'a> {
                         self.check_expr(body, scope);
                     }
                 }
-                Item::TypeAlias(_) | Item::Enum(_) | Item::Union(_) | Item::Record(_) => {}
+                Item::TypeAlias(_) | Item::Union(_) | Item::Record(_) => {}
             }
         }
     }
@@ -941,7 +935,7 @@ mod tests {
     #[test]
     fn property_fragment_match_branch_reports_undefined_identifier() {
         let source = r#"
-            type LoadState = | idle | failed { message:string }
+            type LoadState = idle | failed { message:string }
             let render(state:LoadState) = {
                 <Notice if state is {
                     LoadState.failed => message={missing}

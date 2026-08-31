@@ -144,7 +144,7 @@ fn test_property_fragment_condition_list_selects_first_matching_arm_and_else() {
 #[test]
 fn test_property_fragment_match_selects_matching_arm() {
     let source = r#"
-        type LoadState = | idle | failed { message:string }
+        type LoadState = idle | failed { message:string }
         let view(state:LoadState) = {
             <notice if state is {
                 LoadState.failed => message={state.message}

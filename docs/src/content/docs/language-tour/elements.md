@@ -42,7 +42,7 @@ let isLoading = true
 Conditional property fragments choose a set of attributes without repeating the element call.
 
 ```nx
-type LoadState = | idle | failed { message:string }
+type LoadState = idle | failed { message:string }
 
 let <Notice message:string tone:string density:string /> =
   <aside tone={tone}>{message}</aside>

@@ -286,13 +286,6 @@ fn build_declaration(
                 ty: type_env.get_expr_type(value.value).cloned(),
             }
         }
-        Item::Enum(enum_def) => CodegenDeclarationKind::Enum {
-            members: enum_def
-                .members
-                .iter()
-                .map(|member| member.name.as_str().to_string())
-                .collect(),
-        },
         Item::Record(record) => CodegenDeclarationKind::Record {
             fields: build_record_fields(
                 artifact,
@@ -320,6 +313,7 @@ fn build_declaration(
                             &case.fields,
                             diagnostics,
                         )?,
+                        is_constant: union_def.is_constant_case(case),
                         span: case.span,
                     })
                 })
@@ -1080,6 +1074,7 @@ fn build_expression(
                 UnionCaseLookup::Found {
                     union_reference,
                     case,
+                    union_is_constant,
                 } => {
                     return Some(CodegenExpression {
                         expr_id: expr_id_u32(expr_id),
@@ -1088,6 +1083,8 @@ fn build_expression(
                         kind: CodegenExpressionKind::UnionCase {
                             union_reference,
                             case_name: case.name,
+                            is_constant: case.is_constant,
+                            union_is_constant,
                             fields: case.fields,
                             properties: Vec::new(),
                             content_field: None,
@@ -1100,29 +1097,20 @@ fn build_expression(
                 }
                 UnionCaseLookup::Missing => {}
             }
-            if let Some(enum_reference) =
-                enum_member_reference(artifact, resolved_module.id, lowered_module, *base, scope)
-            {
-                CodegenExpressionKind::EnumMember {
-                    enum_reference,
-                    member: member.as_str().to_string(),
-                }
-            } else {
-                let base = build_expression(
-                    artifact,
-                    resolved_module,
-                    prepared_cache,
-                    lowered_module,
-                    type_env,
-                    *base,
-                    scope,
-                    diagnostics,
-                )?;
-                CodegenExpressionKind::Member {
-                    base: Box::new(base),
-                    member: member.as_str().to_string(),
-                    reference: combined_reference,
-                }
+            let base = build_expression(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                lowered_module,
+                type_env,
+                *base,
+                scope,
+                diagnostics,
+            )?;
+            CodegenExpressionKind::Member {
+                base: Box::new(base),
+                member: member.as_str().to_string(),
+                reference: combined_reference,
             }
         }
         ast::Expr::RecordLiteral {
@@ -1276,6 +1264,7 @@ fn build_element_expression(
         UnionCaseLookup::Found {
             union_reference,
             case,
+            union_is_constant,
         } => {
             let content_field = case
                 .fields
@@ -1285,6 +1274,8 @@ fn build_element_expression(
             Some(CodegenExpressionKind::UnionCase {
                 union_reference,
                 case_name: case.name,
+                is_constant: case.is_constant,
+                union_is_constant,
                 fields: case.fields,
                 properties: mapped.properties,
                 content_field,
@@ -1560,6 +1551,8 @@ enum UnionCaseLookup {
     Found {
         union_reference: CodegenReference,
         case: CodegenUnionCase,
+        /// Whether every case of the declaring union is constant.
+        union_is_constant: bool,
     },
 }
 
@@ -1661,8 +1654,10 @@ fn build_union_case_from_reference(
         case: CodegenUnionCase {
             name: case_def.name.as_str().to_string(),
             fields,
+            is_constant: union_def.is_constant_case(case_def),
             span: case_def.span,
         },
+        union_is_constant: union_def.is_constant_union(),
     }
 }
 
@@ -1850,7 +1845,6 @@ fn resolved_item_kind_from_prepared(kind: PreparedItemKind) -> ResolvedItemKind 
         PreparedItemKind::Value => ResolvedItemKind::Value,
         PreparedItemKind::Component => ResolvedItemKind::Component,
         PreparedItemKind::TypeAlias => ResolvedItemKind::TypeAlias,
-        PreparedItemKind::Enum => ResolvedItemKind::Enum,
         PreparedItemKind::Union => ResolvedItemKind::Union,
         PreparedItemKind::Record => ResolvedItemKind::Record,
     }
@@ -1946,7 +1940,6 @@ fn prepared_item_kind(kind: ResolvedItemKind) -> PreparedItemKind {
         ResolvedItemKind::Value => PreparedItemKind::Value,
         ResolvedItemKind::Component => PreparedItemKind::Component,
         ResolvedItemKind::TypeAlias => PreparedItemKind::TypeAlias,
-        ResolvedItemKind::Enum => PreparedItemKind::Enum,
         ResolvedItemKind::Union => PreparedItemKind::Union,
         ResolvedItemKind::Record => PreparedItemKind::Record,
     }
@@ -2011,23 +2004,6 @@ fn qualified_member_reference(
     resolve_visible_reference(artifact, module_id, &visible_name)
 }
 
-fn enum_member_reference(
-    artifact: &ProgramArtifact,
-    module_id: RuntimeModuleId,
-    lowered_module: &LoweredModule,
-    base: ExprId,
-    scope: &LexicalScope,
-) -> Option<CodegenReference> {
-    let ast::Expr::Ident(base_name) = lowered_module.expr(base) else {
-        return None;
-    };
-    if scope.contains(base_name.as_str()) {
-        return None;
-    }
-    let reference = resolve_visible_reference(artifact, module_id, base_name.as_str())?;
-    (reference.kind == nx_interpreter::ResolvedItemKind::Enum).then_some(reference)
-}
-
 fn reference_from_item(
     module_id: RuntimeModuleId,
     definition_id: LocalDefinitionId,
@@ -2068,7 +2044,6 @@ fn item_span(item: &Item) -> TextSpan {
         Item::Value(item) => item.span,
         Item::Component(item) => item.span,
         Item::TypeAlias(item) => item.span,
-        Item::Enum(item) => item.span,
         Item::Union(item) => item.span,
         Item::Record(item) => item.span,
     }
@@ -2126,7 +2101,6 @@ fn resolved_item_kind(item: &Item) -> nx_interpreter::ResolvedItemKind {
         Item::Value(_) => nx_interpreter::ResolvedItemKind::Value,
         Item::Component(_) => nx_interpreter::ResolvedItemKind::Component,
         Item::TypeAlias(_) => nx_interpreter::ResolvedItemKind::TypeAlias,
-        Item::Enum(_) => nx_interpreter::ResolvedItemKind::Enum,
         Item::Union(_) => nx_interpreter::ResolvedItemKind::Union,
         Item::Record(_) => nx_interpreter::ResolvedItemKind::Record,
     }

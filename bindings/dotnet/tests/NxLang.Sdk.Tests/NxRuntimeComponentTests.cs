@@ -946,10 +946,10 @@ public class NxRuntimeComponentTests
     }
 
     [Fact]
-    public void InitializeComponent_WithBareStringEnumProp_ReturnsBareStringInRenderedOutput()
+    public void InitializeComponent_WithBareStringConstantUnionProp_ReturnsBareStringInRenderedOutput()
     {
         string source = """
-            enum ThemeMode = | light | dark
+            type ThemeMode = light | dark
 
             external component <ThemePicker theme:ThemeMode />
             """;
@@ -964,10 +964,10 @@ public class NxRuntimeComponentTests
     }
 
     [Fact]
-    public void InitializeComponent_WithUnknownEnumMember_ThrowsEvaluationException()
+    public void InitializeComponent_WithUnknownUnionCase_ThrowsEvaluationException()
     {
         string source = """
-            enum ThemeMode = | light | dark
+            type ThemeMode = light | dark
 
             external component <ThemePicker theme:ThemeMode />
             """;
@@ -980,14 +980,14 @@ public class NxRuntimeComponentTests
 
         Assert.Contains(
             error.Diagnostics,
-            diagnostic => diagnostic.Message.Contains("unknown enum member 'sparkly'"));
+            diagnostic => diagnostic.Message.Contains("unknown union case 'sparkly'"));
     }
 
     [Fact]
     public void InitializeComponent_WithEnumTypedDto_RoundTripsEnumThroughRuntimeWrapper()
     {
         string source = """
-            enum DealStage = | draft | pending_review | closed_won
+            type DealStage = draft | pending_review | closed_won
 
             external component <Pipeline stage:DealStage />
             """;
@@ -1005,7 +1005,7 @@ public class NxRuntimeComponentTests
     public void EvaluateComponent_WithEnumTypedDto_MapsEnumStateAndOutput()
     {
         string source = """
-            enum DealStage = | draft | pending_review | closed_won
+            type DealStage = draft | pending_review | closed_won
 
             component <Pipeline /> = {
               state { stage:DealStage }
@@ -1053,10 +1053,10 @@ public class NxRuntimeComponentTests
     }
 
     [Fact]
-    public void InitializeComponentJson_RawEnumResult_CanBeMappedToEnumTypedDto()
+    public void InitializeComponentJson_RawConstantCaseResult_CanBeMappedToEnumTypedDto()
     {
         string source = """
-            enum DealStage = | draft | pending_review | closed_won
+            type DealStage = draft | pending_review | closed_won
 
             external component <Pipeline stage:DealStage />
             """;
@@ -1077,7 +1077,7 @@ public class NxRuntimeComponentTests
     public void InitializeComponent_WithEnumTypedDtoMismatch_ThrowsWrappedSerializationError()
     {
         string source = """
-            enum DealStage = | draft | pending_review | closed_won
+            type DealStage = draft | pending_review | closed_won
 
             external component <Pipeline stage:DealStage />
             """;

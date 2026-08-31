@@ -124,7 +124,7 @@ DrawnUI uses one `SkiaLayout` with `Type="Row|Column|Grid|Absolute|Wrap"` and on
 
 ## 4. Canonical document model
 
-Type notation in this document is [NX](../nx-grammar.md) source. Records use `type Name = { ... }`, closed scalar choices use `enum`, discriminated unions use `type Name =` with leading-pipe cases, and renderer-provided catalog components use `external component`, whose signature declares props and whose body is supplied by the host rather than by NX.
+Type notation in this document is [NX](../nx-grammar.md) source. Records use `type Name = { ... }` and discriminated unions use `type Name =` followed by their cases, with the leading `|` optional for two or more; a closed set of scalar choices is just a union whose cases carry no payload. Renderer-provided catalog components use `external component`, whose signature declares props and whose body is supplied by the host rather than by NX.
 
 Three NX conventions carry meaning here. A `?` suffix makes a property nullable, which in this model means the property may be omitted — the **Default** column of each table says what the renderer does when it is. A `= value` clause gives a real default. And exactly one property per signature may be marked `content`, which is the property that receives element body content, so it is the property that the wire format spells as `children`.
 
@@ -232,11 +232,11 @@ There is no `Element` record to declare in NX source, because NX has no envelope
 ### 5.1 Geometry and sizing types
 
 ```nx
-enum Alignment = start | center | end | stretch
-enum AlignSelf = auto | start | center | end | stretch
-enum Anchor = start | center | end
-enum Axis = horizontal | vertical
-enum Distribution = start | center | end | spaceBetween | spaceAround | spaceEvenly
+type Alignment = start | center | end | stretch
+type AlignSelf = auto | start | center | end | stretch
+type Anchor = start | center | end
+type Axis = horizontal | vertical
+type Distribution = start | center | end | spaceBetween | spaceAround | spaceEvenly
 
 type Length =
   | auto
@@ -270,7 +270,7 @@ type CornerRadii = {
 }
 ```
 
-Three of these declarations lose a shorthand that the JSON form keeps, all for the same reason: NX unions are named cases, so they cannot mix a scalar with a record or a string literal. `Length` becomes three cases instead of `120`/`"auto"`/`"50%"`; `Insets` and `CornerRadii` lose their uniform-scalar form, so `padding: 20` has to be written with all four sides; and `Alignment | "auto"` becomes a separate `AlignSelf` enum. Appendix B gives the details and the wire-format consequences.
+Three of these declarations lose a shorthand that the JSON form keeps, all for the same reason: NX unions are named cases, so they cannot mix a scalar with a record or a string literal. `Length` becomes three cases instead of `120`/`"auto"`/`"50%"`; `Insets` and `CornerRadii` lose their uniform-scalar form, so `padding: 20` has to be written with all four sides; and `Alignment | "auto"` becomes a separate `AlignSelf` union. Appendix B gives the details and the wire-format consequences.
 
 `start`/`end` are chosen over `left`/`right` so layout can adapt to writing direction. The vocabulary follows [CSS Box Alignment](https://www.w3.org/TR/css-align-3/) and A2UI's `align`/`justify` conventions. DrawnUI adapters map these to MAUI layout options.
 
@@ -283,7 +283,7 @@ Omitted `Insets` sides default to `0`, so `{ "top": 8 }` is valid and cheap to g
 ```nx
 type Color = string   // CSS Color syntax subset accepted by the host
 
-enum GradientUnits = objectBoundingBox | userSpaceOnUse
+type GradientUnits = objectBoundingBox | userSpaceOnUse
 
 type GradientStop = {
   offset: float64          // 0..1
@@ -324,8 +324,8 @@ Gradient terms and coordinate modes intentionally follow [SVG gradients](https:/
 ### 5.3 Stroke, shadow, transform, border
 
 ```nx
-enum LineCap = butt | round | square
-enum LineJoin = miter | round | bevel
+type LineCap = butt | round | square
+type LineJoin = miter | round | bevel
 
 type Stroke = {
   paint: Paint
@@ -411,7 +411,7 @@ abstract external component <GraphicsCommon
 Every filled/stroked geometry accepts `ShapeProps` in addition to its own properties. NX allows only one base per component, so `ShapeProps` is expressed as a link in a chain rather than as a second mixin — which works here because everything that takes shape properties also takes graphics properties:
 
 ```nx
-enum FillRule = nonzero | evenodd
+type FillRule = nonzero | evenodd
 
 abstract external component <ShapeCommon extends GraphicsCommon
   fill: Paint?
@@ -444,7 +444,7 @@ Root drawing surface and bridge into Level 2 UI. Accepts ordered drawing childre
 | `contentAlignment` | `ContentAlignment?` | no | Center/center; only meaningful when `fit` preserves the aspect ratio. |
 
 ```nx
-enum ViewBoxFit = contain | cover | fill
+type ViewBoxFit = contain | cover | fill
 
 type ContentAlignment = {
   x: Anchor = center
@@ -1094,16 +1094,16 @@ Every declaration below was checked with `nxlang typegen` against the NX toolcha
 export type Color = string          // CSS Color syntax subset accepted by the host
 export type ElementId = string      // ^[A-Za-z_][A-Za-z0-9_.-]{0,63}$
 
-export enum Alignment = start | center | end | stretch
-export enum AlignSelf = auto | start | center | end | stretch
-export enum Anchor = start | center | end
-export enum Axis = horizontal | vertical
-export enum Distribution = start | center | end | spaceBetween | spaceAround | spaceEvenly
-export enum ObjectFit = contain | cover | fill | none | scaleDown
-export enum FontStyle = normal | italic
-export enum GradientUnits = objectBoundingBox | userSpaceOnUse
-export enum LineCap = butt | round | square
-export enum LineJoin = miter | round | bevel
+export type Alignment = start | center | end | stretch
+export type AlignSelf = auto | start | center | end | stretch
+export type Anchor = start | center | end
+export type Axis = horizontal | vertical
+export type Distribution = start | center | end | spaceBetween | spaceAround | spaceEvenly
+export type ObjectFit = contain | cover | fill | none | scaleDown
+export type FontStyle = normal | italic
+export type GradientUnits = objectBoundingBox | userSpaceOnUse
+export type LineCap = butt | round | square
+export type LineJoin = miter | round | bevel
 
 export type Length =
   | auto
@@ -1209,13 +1209,13 @@ export type Accessibility = {
 ```nx
 import "../core"
 
-export enum ScrollAxis = horizontal | vertical | both
-export enum ScrollbarVisibility = auto | visible | hidden
-export enum CardVariant = outlined | elevated | filled
-export enum TextFormat = plain | markdown
-export enum TextVariant = h1 | h2 | h3 | title | body | caption | code
-export enum TextAlign = start | center | end | justify
-export enum TextOverflow = clip | ellipsis
+export type ScrollAxis = horizontal | vertical | both
+export type ScrollbarVisibility = auto | visible | hidden
+export type CardVariant = outlined | elevated | filled
+export type TextFormat = plain | markdown
+export type TextVariant = h1 | h2 | h3 | title | body | caption | code
+export type TextAlign = start | center | end | justify
+export type TextOverflow = clip | ellipsis
 
 export type TrackSize =
   | auto
@@ -1338,10 +1338,10 @@ export external component <Icon extends UiCommon
 import "../core"
 import { UiCommon } from "../ui"
 
-export enum FillRule = nonzero | evenodd
-export enum ViewBoxFit = contain | cover | fill
-export enum TextAnchor = start | middle | end
-export enum DominantBaseline = auto | middle | hanging
+export type FillRule = nonzero | evenodd
+export type ViewBoxFit = contain | cover | fill
+export type TextAnchor = start | middle | end
+export type DominantBaseline = auto | middle | hanging
 
 export type ContentAlignment = {
   x: Anchor = center
@@ -1453,11 +1453,15 @@ The fit is `external component`. A catalog entry is precisely a component signat
 
 The misfit is the shape of the data. What follows are the specific gaps, in rough order of how much they cost.
 
-**No map type, and no generics.** `elements: Record<ElementId, Element>` has no NX spelling; NX has records, sequences, unions, and enums, and generic type parameters are a post-1.0 item. The listing uses `Element[]`, which is not the same type — it loses key-uniqueness and O(1) ID lookup, and it forces `id` onto the element rather than onto the map key, which is why §4.1 keeps the map in the table and flags the divergence. It costs less than it looks: `elements` is the *only* map-typed site in the model, and NX has no occasion to author it, because NX source is the nested form and the flat map is what a compiler emits. The gap becomes real for the post-MVP catalogs in §11 — a state or data model, themes and design tokens, localization tables, per-element extension metadata — each of which needs a map-typed property inside a catalog.
+**No map type, and no generics.** `elements: Record<ElementId, Element>` has no NX spelling; NX has records, sequences, and unions, and generic type parameters are a post-1.0 item. The listing uses `Element[]`, which is not the same type — it loses key-uniqueness and O(1) ID lookup, and it forces `id` onto the element rather than onto the map key, which is why §4.1 keeps the map in the table and flags the divergence. It costs less than it looks: `elements` is the *only* map-typed site in the model, and NX has no occasion to author it, because NX source is the nested form and the flat map is what a compiler emits. The gap becomes real for the post-MVP catalogs in §11 — a state or data model, themes and design tokens, localization tables, per-element extension metadata — each of which needs a map-typed property inside a catalog.
 
-**No literal types, so no compact scalar-or-structured values.** NX union cases are named, so a union cannot mix a bare scalar with an alternative shape. Three MVP types depend on exactly that: `Length` (`120` / `"auto"` / `"50%"`), `Insets` and `CornerRadii` (a scalar meaning all sides), and `Paint | "none"`. The listing spells `Length` as a three-case union and drops the scalar shorthands entirely, which is why `"padding": 20` becomes a four-field record in §8.1. String-literal union types are on NX's roadmap as a 1.1 feature; if they arrive, `Length` and `Insets` should be revisited, because the shorthand is not cosmetic — it is most of the token cost of a generated layout.
+**No literal types, so no compact scalar-or-structured values.** NX union cases are named, so a union cannot mix a bare *numeric* scalar with an alternative shape. Two MVP types depend on exactly that: `Length` (`120` / `"auto"` / `"50%"`) and `Insets`/`CornerRadii` (a scalar meaning all sides). The listing spells `Length` as a three-case union and drops the scalar shorthands entirely, which is why `"padding": 20` becomes a four-field record in §8.1. String-literal union types are on NX's roadmap as a 1.1 feature; if they arrive, `Length` and `Insets` should be revisited, because the shorthand is not cosmetic — it is most of the token cost of a generated layout.
 
-**Every record and union case carries a `$type` tag.** NX's serialization gives each record a `$type` discriminator and each union case a qualified one, so a `Point` is `{"$type": "Point", "x": 10, "y": 20}` and a solid fill is `{"$type": "Paint.solid", "color": "#fff"}` rather than `"#fff"`. The key is fixed and not configurable. This is the most consequential difference for a format whose §12.10 open question is token cost: the NX-native encoding is materially heavier than the JSON in §8, so NX source and NX serialization are separable decisions. Adopting the language does not oblige the wire format to adopt its encoding.
+`Paint | "none"` is no longer in that list. A fieldless case of a base-less union serializes as its bare name, so `Paint.none` is `"none"` on the wire and the union already mixes a string with a record shape. The source spelling is a case name rather than a string literal, which is the only remaining difference and is not one the wire format sees.
+
+**Every record and every *payload* union case carries a `$type` tag.** NX's serialization gives each record a `$type` discriminator and each case that carries fields a qualified one, so a `Point` is `{"$type": "Point", "x": 10, "y": 20}` and a solid fill is `{"$type": "Paint.solid", "color": "#fff"}` rather than `"#fff"`. The key is fixed and not configurable.
+
+A case that declares no fields, in a union that declares no base, is the exception: it serializes as its bare name. `Paint.none` is `"none"`, and `align: Alignment` is `"center"` — no wrapper at all. That covers every type in Appendix A's first block, which is most of the model's closed-set properties. What remains heavy is the record and payload-case encoding, and that is still the most consequential difference for a format whose §12.10 open question is token cost: the NX-native encoding is heavier than the JSON in §8, so NX source and NX serialization remain separable decisions. Adopting the language does not oblige the wire format to adopt its encoding.
 
 **Nullable is the only way to say "optional."** NX has no absent-versus-null distinction, so a property with no meaningful default is written `T?` and the renderer resolves null. Most of the `?` marks in §6 and §7 exist for this reason rather than because null is a meaningful value.
 
@@ -1465,13 +1469,13 @@ The misfit is the shape of the data. What follows are the specific gaps, in roug
 
 **A default cannot reference a sibling property.** `Transform.scale.y` defaulting to `x`, and `nx.graphics.Rect.ry` defaulting to `rx`, both become nullable with the relationship stated in a comment. (Component `state` defaults *can* read props; property defaults cannot.)
 
-**A default cannot be an empty sequence.** `= []` and `= {}` are both rejected — a braced default must contain at least one item, and bracket-list literals are not accepted in default position at all. Every `T[]` property whose default is "empty" is therefore written `T[]?`.
+**A default cannot be an empty sequence.** `= []` and `= {}` are both rejected — a braced default must contain at least one item, and bracket-list literals are not accepted in default position at all. Every `T[]` property whose default is "empty" is therefore written `T[]?`. This is filed against NX as the `empty-list-spelling` change: an empty list has no source spelling at all, not merely none in default position, so it also cannot be round-tripped by the formatter.
 
-**A default cannot be a bare negative number or a bare enum member.** `= -1.0` and `= Alignment.start` are syntax errors; both must be braced, as `= {-1.0}` and `= start`. Hence the `{...}` around every enum default in Appendix A. Integer literals also do not widen: `float64` properties must be written `= 0.0`, not `= 0`.
+**A default cannot be a *qualified* case name.** `= Alignment.start` is a syntax error and must be braced as `= {Alignment.start}`. The bare forms are fine and are what Appendix A uses: `= -1.0` and `= start` both parse, because an unbraced value position takes a literal and a bare name resolves against the property's declared type. Integer literals still do not widen: `float64` properties must be written `= 0.0`, not `= 0`.
 
 **No refinement or pattern constraints.** `ElementId`'s regex, `opacity`'s 0..1 range, `fontWeight`'s 1..1000, `columnSpan >= 1`, and "at least two gradient stops" are all invisible to NX's type system. They stay in the JSON Schema, which means the schema — not the NX declarations — remains the normative validator. The NX listing is the shape; the schema is the contract.
 
-**An enum member cannot be reached through a wildcard import alias.** With `import "../ui" as ui`, the type `ui.TextVariant` resolves but `ui.TextVariant.h2` fails with *"Member access not yet implemented"* — the third qualifying segment is not supported. This no longer bites at a typed site: contextual literal binding lets `variant=h2` resolve against the property's declared type without naming the enum at all, so §8.1 uses the same import style for both catalogs. The limitation remains for a member named inside a braced expression, where `ui.TextVariant.h2` is still the only spelling and still fails.
+**A union case cannot be reached through a wildcard import alias.** With `import "../ui" as ui`, the type `ui.TextVariant` resolves but `ui.TextVariant.h2` fails with *"Member access not yet implemented"* — the third qualifying segment is not supported. This no longer bites at a typed site: contextual literal binding lets `variant=h2` resolve against the property's declared type without naming the union at all, so §8.1 uses the same import style for both catalogs. The limitation remains for a case named inside a braced expression, where `ui.TextVariant.h2` is still the only spelling and still fails.
 
 **Qualification is one segment deep.** `import "../ui" as ui` takes a single identifier, and the selective form is validated to contain *exactly* one dot; `import "../ui" as nx.ui` is a syntax error and `import { VStack as nx.ui.VStack } from "../ui"` is rejected with "Selective import alias must contain exactly one dot." A two-segment catalog prefix is therefore not reachable in NX source. `nx.ui.VStack` remains the catalog type name in the document format; in NX it is written under a one-segment local alias, and the mapping from alias to catalog ID is the `catalogs` list.
 
@@ -1484,7 +1488,7 @@ Two further items are implementation gaps rather than language gaps, and both we
 
 Together these make the three-library layout in Appendix A uncheckable today: it is valid NX, and each library checks on its own, but a document that imports two catalogs cannot yet be type-checked against them. A single-library variant of the same catalog plus the §8.1 document does check end to end. Both should be filed against the NX toolchain before an NX-authored catalog is committed to.
 
-Finally, one convention clash worth a decision rather than a fix: NX documents `snake_case` as the enum-member convention and serializes members verbatim, while this model's enum values are camelCase (`spaceBetween`, `objectBoundingBox`, `scaleDown`) because they follow CSS and SVG. camelCase members are legal NX identifiers, so Appendix A keeps the wire spelling and diverges from the convention. Changing the wire format to satisfy an NX style rule would be the wrong trade.
+Finally, one convention clash worth a decision rather than a fix: NX documents `snake_case` as the case-name convention and serializes case names verbatim, while this model's closed-set values are camelCase (`spaceBetween`, `objectBoundingBox`, `scaleDown`) because they follow CSS and SVG. camelCase case names are legal NX identifiers, so Appendix A keeps the wire spelling and diverges from the convention. Changing the wire format to satisfy an NX style rule would be the wrong trade.
 
 ---
 

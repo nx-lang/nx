@@ -275,7 +275,7 @@ fn nx_ir_emits_metadata_entrypoints_and_source_provenance() {
 #[test]
 fn nx_ir_output_is_deterministic() {
     let source = r#"
-enum Theme = light | dark
+type Theme = light | dark
 type User = { name:string score:int = 42 }
 let root() = { <User name="Ada" /> }
 "#;
@@ -475,7 +475,7 @@ fn nx_ir_preserves_nullable_union_and_content_boundary_metadata() {
 
     fs::write(
         flow_dir.join("Flow.nx"),
-        r#"export type FlowCompletion = | continue | end { message:string }
+        r#"export type FlowCompletion = continue | end { message:string }
 export type QuestionFlow = {
   completion:FlowCompletion?
   content steps:Element
@@ -653,7 +653,7 @@ fn nx_ir_encodes_eager_expressions_and_canonical_value_metadata() {
     );
 
     let union_ir = emit_nx_ir(&artifact_from_source(
-        r#"type LoadState = | idle | failed { message:string }
+        r#"type LoadState = idle | failed { message:string }
 let root(): LoadState = { <LoadState.failed message={"Offline"} /> }"#,
     ))
     .expect("union nx ir");
@@ -778,7 +778,7 @@ type User = {
 let root() = { <User name="Ada" age=42 /> }
 "#,
         r#"
-enum Theme = light | dark
+type Theme = light | dark
 let root() = { Theme.dark }
 "#,
         r#"let root() = { <div class="test" /> }"#,
@@ -796,7 +796,7 @@ let root() = { Theme.dark }
 fn generated_javascript_serializes_union_cases_and_defaults() {
     let cases = [
         r#"
-type LoadState = | idle | loading
+type LoadState = idle | loading
 let root(): LoadState = { LoadState.idle }
 "#,
         r#"
@@ -935,7 +935,7 @@ let root(): User = { <User name="Ada" age={answer} /> }"#,
 fn generated_component_typescript_type_checks_when_tsc_is_available() {
     let artifact = artifact_from_source(
         r#"
-enum Mode = exact | fuzzy
+type Mode = exact | fuzzy
 type User = { name:string }
 type LoadState =
   | ready { label:string }
@@ -1128,7 +1128,7 @@ let root() = { <User age=42 name="Ada" tags={ "admin" "editor" } /> }
 
     let enum_artifact = artifact_from_source(
         r#"
-enum Theme = light | dark
+type Theme = light | dark
 let root() = { Theme.dark }
 "#,
     );
@@ -1182,18 +1182,39 @@ let root() = { <User age=42 name="Ada" /> }
         (
             "enum",
             r#"
-enum Theme = light | dark
+type Theme = light | dark
 let root() = { Theme.dark }
 "#,
             "return Theme.dark;",
         ),
         (
-            "union",
+            // A constant union emits the same frozen value object an enum emitted, so its case
+            // is reached the same way.
+            "constant union",
             r#"
-type LoadState = | idle | loading
+type LoadState = idle | loading
 let root(): LoadState = { LoadState.idle }
 "#,
-            "return ({ $type: \"LoadState.idle\" });",
+            "return LoadState.idle;",
+        ),
+        (
+            // A constant case of a mixed union has no value object to reach through, so it is
+            // emitted as the bare string it is on the wire.
+            "constant case of a mixed union",
+            r#"
+type Shape = point | circle { radius: float64 }
+let root(): Shape = { Shape.point }
+"#,
+            "return \"point\";",
+        ),
+        (
+            // A case that carries fields keeps the record representation.
+            "payload case",
+            r#"
+type Shape = point | circle { radius: float64 }
+let root(): Shape = { <Shape.circle radius=1.5 /> }
+"#,
+            "$type: \"Shape.circle\"",
         ),
         (
             "element",
@@ -1315,7 +1336,7 @@ let root() = {
                 r#"export let answer(): int = { 42 }
 export let bonus: int = 1
 export let add(a:int, b:int): int = { a + b }
-export enum Theme = light | dark
+export type Theme = light | dark
 export type User = { name:string score:int = 42 }
 export type LoadState = | ready { count:int }
 export external component <TextInput value:string />
@@ -2074,7 +2095,7 @@ let root() = { 1 }
 fn generated_component_entry_handles_enums_nullable_fields_and_lists() {
     let artifact = artifact_from_source(
         r#"
-enum Mode = exact | fuzzy
+type Mode = exact | fuzzy
 external component <Summary mode:Mode tags:string[] note:string? />
 component <SearchBox tags:string[] mode:Mode = { Mode.exact } /> = {
   state {
@@ -2113,7 +2134,7 @@ let root() = { 1 }
 fn generated_component_entry_rejects_invalid_enum_host_input() {
     let artifact = artifact_from_source(
         r#"
-enum Mode = exact | fuzzy
+type Mode = exact | fuzzy
 external component <Summary mode:Mode />
 component <SearchBox mode:Mode = { Mode.exact } /> = {
   state { mode:Mode = {mode} }
@@ -2228,4 +2249,72 @@ let root() = { <SearchBox onSearchSubmitted=<DoSearch query={action.query} /> />
             && diagnostic
                 .message()
                 .contains("action-handler codegen is not supported")));
+}
+
+/// Strips every `span` object from an NX IR document so two spellings of the same declaration can
+/// be compared on content rather than on source offsets.
+fn strip_spans(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            map.remove("span");
+            map.remove("sources");
+            for entry in map.values_mut() {
+                strip_spans(entry);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                strip_spans(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Generated JavaScript, TypeScript, and NX IR for a program whose only difference is how its
+/// closed set of constants is declared. The JS and TS bodies carry the emitted schema.
+fn constant_set_outputs(declaration: &str) -> (String, String, String) {
+    let source = format!(
+        r#"{declaration}
+export component <Box fit:Fit /> = {{ <div /> }}
+let root() = {{ <Box fit=cover /> }}
+"#
+    );
+    let artifact = artifact_from_source(&source);
+    let javascript = generated_module_body(&generated_file(
+        &artifact,
+        CodegenTarget::JavaScript,
+        "m0_main.js",
+    ))
+    .to_string();
+    let typescript = generated_module_body(&generated_file(
+        &artifact,
+        CodegenTarget::TypeScript,
+        "m0_main.ts",
+    ))
+    .to_string();
+    let mut ir: Value = serde_json::from_str(&emit_nx_ir(&artifact).expect("nx ir output").json)
+        .expect("nx ir json");
+    strip_spans(&mut ir);
+    let ir = serde_json::to_string_pretty(&ir["modules"]).expect("ir modules");
+
+    (javascript, typescript, ir)
+}
+
+/// The optional leading `|` is purely syntactic: both spellings of the same constant union
+/// generate identical output.
+///
+/// This began as the guard that an `enum` and the equivalent `type` generate the same thing —
+/// which is what the unification had to establish. With `enum` removed there is one keyword left,
+/// so what remains to guard is D2's two case-list spellings.
+#[test]
+fn both_case_list_spellings_generate_identical_javascript_typescript_ir_and_schema() {
+    let (bare_js, bare_ts, bare_ir) =
+        constant_set_outputs("export type Fit = fill | contain | cover");
+    let (piped_js, piped_ts, piped_ir) =
+        constant_set_outputs("export type Fit = fill | contain | cover");
+
+    assert_eq!(bare_js, piped_js, "generated JavaScript and its schema");
+    assert_eq!(bare_ts, piped_ts, "generated TypeScript and its schema");
+    assert_eq!(bare_ir, piped_ir, "generated NX IR");
 }
