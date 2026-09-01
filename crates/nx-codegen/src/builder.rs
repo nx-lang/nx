@@ -693,6 +693,57 @@ fn build_expression(
     let ty = type_env.get_expr_type(expr_id).cloned();
     let kind = match expr {
         ast::Expr::Literal(literal) => CodegenExpressionKind::Literal(literal.clone()),
+        // A case already resolved during analysis. The declaration is reached by the origin the
+        // node carries, not by looking its union's name back up in the module using it — that name
+        // need not be visible here at all.
+        ast::Expr::ResolvedUnionCase {
+            union,
+            case,
+            module_identity,
+            definition_id,
+            ..
+        } => {
+            match build_union_case_from_origin(
+                artifact,
+                prepared_cache,
+                module_identity,
+                *definition_id,
+                union.as_str(),
+                case.as_str(),
+                diagnostics,
+            ) {
+                UnionCaseLookup::Found {
+                    union_reference,
+                    case,
+                    union_is_constant,
+                } => CodegenExpressionKind::UnionCase {
+                    union_reference,
+                    case_name: case.name,
+                    is_constant: case.is_constant,
+                    union_is_constant,
+                    fields: case.fields,
+                    properties: Vec::new(),
+                    content_field: None,
+                    content: Vec::new(),
+                },
+                UnionCaseLookup::Failed | UnionCaseLookup::Missing => {
+                    diagnostics.push(
+                        Diagnostic::error("unresolved-union-case-origin")
+                            .with_message(format!(
+                                "Union case '{}.{}' resolved during analysis but its declaration \
+                                 in '{}' could not be reached during code generation",
+                                union, case, module_identity
+                            ))
+                            .with_label(Label::primary(
+                                resolved_module.prepared_module_identity(),
+                                span,
+                            ))
+                            .build(),
+                    );
+                    return None;
+                }
+            }
+        }
         ast::Expr::Ident(name) => CodegenExpressionKind::Identifier {
             name: name.as_str().to_string(),
             reference: if scope.contains(name.as_str()) {
@@ -1566,19 +1617,42 @@ fn build_union_case_for_member(
     scope: &LexicalScope,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> UnionCaseLookup {
-    let ast::Expr::Ident(base_name) = lowered_module.expr(base) else {
+    let Some(base_name) = flattened_visible_name(lowered_module, base, scope) else {
         return UnionCaseLookup::Missing;
     };
-    if scope.contains(base_name.as_str()) {
-        return UnionCaseLookup::Missing;
-    }
-    let Some(reference) = resolve_visible_reference(artifact, module_id, base_name.as_str()) else {
+    let Some(reference) = resolve_visible_reference(artifact, module_id, &base_name) else {
         return UnionCaseLookup::Missing;
     };
     if reference.kind != nx_interpreter::ResolvedItemKind::Union {
         return UnionCaseLookup::Missing;
     }
     build_union_case_from_reference(artifact, prepared_cache, reference, member, diagnostics)
+}
+
+/// The whole name a member chain spells, when every segment is a plain name.
+///
+/// <para>An import alias binds one visible name, dots and all: `Fit as ui.Fit` binds `ui.Fit`, and
+/// there is no `ui` to take a member of. Reading only a single-segment base leaves `ui.Fit.cover`
+/// lowered as a member access on a name that reaches nothing, which is what put an `unresolved:`
+/// slot and a null case reference into otherwise clean output.</para>
+fn flattened_visible_name(
+    lowered_module: &LoweredModule,
+    expr: ExprId,
+    scope: &LexicalScope,
+) -> Option<String> {
+    match lowered_module.expr(expr) {
+        ast::Expr::Ident(name) => {
+            if scope.contains(name.as_str()) {
+                return None;
+            }
+            Some(name.as_str().to_string())
+        }
+        ast::Expr::Member { base, member, .. } => {
+            let base = flattened_visible_name(lowered_module, *base, scope)?;
+            Some(format!("{}.{}", base, member.as_str()))
+        }
+        _ => None,
+    }
 }
 
 fn build_union_case_for_tag(
@@ -1597,6 +1671,32 @@ fn build_union_case_for_tag(
     if reference.kind != nx_interpreter::ResolvedItemKind::Union {
         return UnionCaseLookup::Missing;
     }
+    build_union_case_from_reference(artifact, prepared_cache, reference, case_name, diagnostics)
+}
+
+/// Builds a union case from the declaring origin an analysis-resolved reference carries.
+fn build_union_case_from_origin(
+    artifact: &ProgramArtifact,
+    prepared_cache: &mut PreparedModuleCache,
+    module_identity: &str,
+    definition_id: LocalDefinitionId,
+    union_name: &str,
+    case_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> UnionCaseLookup {
+    let Some(target_module) = artifact
+        .resolved_program
+        .module_by_prepared_identity(module_identity)
+    else {
+        return UnionCaseLookup::Missing;
+    };
+    let reference = reference_from_resolved_module(
+        artifact,
+        target_module.id,
+        definition_id,
+        union_name,
+        nx_interpreter::ResolvedItemKind::Union,
+    );
     build_union_case_from_reference(artifact, prepared_cache, reference, case_name, diagnostics)
 }
 
@@ -1994,13 +2094,8 @@ fn qualified_member_reference(
     member: &str,
     scope: &LexicalScope,
 ) -> Option<CodegenReference> {
-    let ast::Expr::Ident(base_name) = lowered_module.expr(base) else {
-        return None;
-    };
-    if scope.contains(base_name.as_str()) {
-        return None;
-    }
-    let visible_name = format!("{}.{}", base_name.as_str(), member);
+    let base_name = flattened_visible_name(lowered_module, base, scope)?;
+    let visible_name = format!("{}.{}", base_name, member);
     resolve_visible_reference(artifact, module_id, &visible_name)
 }
 

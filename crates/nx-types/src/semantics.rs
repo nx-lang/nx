@@ -33,7 +33,7 @@ pub fn common_supertype(lhs: &Type, rhs: &Type) -> Type {
 }
 
 pub fn is_object_type(ty: &Type) -> bool {
-    matches!(ty, Type::Named(name) if name.as_str() == "object")
+    matches!(ty, Type::Named(named) if named.name.as_str() == "object")
 }
 
 pub fn type_satisfies_expected(actual: &Type, expected: &Type) -> bool {

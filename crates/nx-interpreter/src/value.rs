@@ -100,6 +100,13 @@ pub enum Value {
         emit: Name,
         /// Public action type name expected for invocation
         action_name: Name,
+        /// Stable identity of the module that declared the emit this handler binds to.
+        ///
+        /// <para>`action_name` is resolved here rather than in the handler's own module. A host
+        /// supplies an action value carrying a type name and no origin, so the declaration it is
+        /// checked against has to come from the emit, not from whatever that name happens to reach
+        /// where the handler was written.</para>
+        action_module_identity: String,
         /// Lowered handler body expression
         body: nx_hir::ExprId,
         /// Captured lexical variables from the handler definition site

@@ -34,9 +34,10 @@ mod value;
 mod workspace;
 
 pub use artifacts::{
-    build_library_artifact_from_directory, build_program_artifact_from_source,
-    build_workspace_program_artifact, validate_workspace, LibraryArtifact, LibraryExport,
-    LibraryRegistry, ProgramArtifact, ProgramBuildContext, ProgramSourceEntry,
+    analyze_workspace_modules, build_library_artifact_from_directory,
+    build_program_artifact_from_source, build_workspace_program_artifact, validate_workspace,
+    LibraryArtifact, LibraryExport, LibraryRegistry, ProgramArtifact, ProgramBuildContext,
+    ProgramSourceEntry,
 };
 pub use component::{
     dispatch_component_actions_program_artifact, dispatch_component_actions_source,

@@ -2,8 +2,11 @@
 //!
 //! Defines the core `Type` enum and related types.
 
-use nx_hir::Name;
+use nx_hir::{same_declaration, Name};
 use std::fmt;
+use std::hash::{Hash, Hasher};
+
+pub use nx_hir::DeclaringOrigin;
 
 /// Arena index for types (for future interning/arena allocation).
 pub type TypeId = u32;
@@ -134,10 +137,15 @@ pub enum Type {
         ret: Box<Type>,
     },
 
-    /// User-defined type (nominal type by name)
+    /// A nominal type reached by name: a record, a component, a built-in like `Element`, or a
+    /// name resolution reached no declaration for.
+    ///
+    /// A record carries the declaration it resolved to, so two same-named records in different
+    /// modules are two types. A `Named` with no origin is one resolution reached nothing for, or
+    /// one of the built-in names that has no declaration to point at.
     ///
     /// Example: `MyType`, `Person`
-    Named(Name),
+    Named(NamedType),
 
     /// Discriminated union type (nominal with fixed set of cases)
     Union(UnionType),
@@ -227,19 +235,33 @@ impl Type {
         }
     }
 
-    /// Creates a named type.
+    /// Creates a named type that resolution reached no declaration for.
     pub fn named(name: impl Into<Name>) -> Self {
-        Type::Named(name.into())
+        Type::Named(NamedType::new(name.into(), None))
     }
 
-    /// Creates a discriminated union type.
-    pub fn union_type(name: impl Into<Name>, cases: Vec<Name>, base: Option<Name>) -> Self {
-        Type::Union(UnionType::new(name.into(), cases, base))
+    /// Creates a named type for the declaration at `origin`.
+    pub fn named_at(name: impl Into<Name>, origin: Option<DeclaringOrigin>) -> Self {
+        Type::Named(NamedType::new(name.into(), origin))
     }
 
-    /// Creates a discriminated union case type.
-    pub fn union_case_type(union: impl Into<Name>, case: impl Into<Name>) -> Self {
-        Type::UnionCase(UnionCaseType::new(union.into(), case.into()))
+    /// Creates a discriminated union type declared at `origin`.
+    pub fn union_type(
+        name: impl Into<Name>,
+        cases: Vec<Name>,
+        base: Option<Name>,
+        origin: Option<DeclaringOrigin>,
+    ) -> Self {
+        Type::Union(UnionType::new(name.into(), cases, base, origin))
+    }
+
+    /// Creates a discriminated union case type whose owning union is declared at `origin`.
+    pub fn union_case_type(
+        union: impl Into<Name>,
+        case: impl Into<Name>,
+        origin: Option<DeclaringOrigin>,
+    ) -> Self {
+        Type::UnionCase(UnionCaseType::new(union.into(), case.into(), origin))
     }
 
     /// Creates a type variable.
@@ -320,11 +342,12 @@ impl Type {
             }
         }
 
-        // A case satisfies a union only when that union actually declares it. Comparing names
-        // alone would let a same-named local declaration's case stand in for a foreign union's,
-        // which is the soundness hole `enum` avoided by comparing its member list.
+        // A case satisfies a union only when it is a case of *that* union — the one declared at
+        // the same origin. Comparing names alone would let a same-named local declaration's case
+        // stand in for a foreign union's, and comparing case lists as well still would where the
+        // two declarations happen to agree on them.
         if let (Type::UnionCase(case), Type::Union(union)) = (self, other) {
-            return case.union == union.name && union.cases.contains(&case.case);
+            return case.is_case_of(union);
         }
 
         // Arrays: T[] is compatible with U[] if T is compatible with U
@@ -381,7 +404,7 @@ impl fmt::Display for Type {
                 }
                 write!(f, ") => {}", ret)
             }
-            Type::Named(name) => write!(f, "{}", name),
+            Type::Named(named) => write!(f, "{}", named.name),
             Type::Union(union_ty) => write!(f, "{}", union_ty.name),
             Type::UnionCase(case_ty) => write!(f, "{}.{}", case_ty.union, case_ty.case),
             Type::Variable(id) => write!(f, "T{}", id),
@@ -392,6 +415,92 @@ impl fmt::Display for Type {
     }
 }
 
+/// Renders two types for one diagnostic, qualifying them by declaring module only when needed.
+///
+/// <para>`expects Fit, found Fit` says nothing about why the two do not match. Qualifying every
+/// nominal type in every message would be noise, so the declaring module is added exactly where the
+/// display name alone cannot tell two different declarations apart.</para>
+///
+/// <para>Whether it can is decided on the nominal parts, not on the rendered strings. `expects Fit,
+/// found Fit.cover` renders as two different strings and is exactly as ambiguous as the identical
+/// pair: one `Fit` is the expectation and the other is the author's, and nothing on the line says
+/// so.</para>
+pub fn display_type_pair(lhs: &Type, rhs: &Type) -> (String, String) {
+    if nominal_parts_collide(lhs, rhs) {
+        return (qualified_display(lhs), qualified_display(rhs));
+    }
+    (lhs.to_string(), rhs.to_string())
+}
+
+/// Returns true when the two types spell one display name for two different declarations.
+fn nominal_parts_collide(lhs: &Type, rhs: &Type) -> bool {
+    let (mut lhs_parts, mut rhs_parts) = (Vec::new(), Vec::new());
+    collect_nominal_parts(lhs, &mut lhs_parts);
+    collect_nominal_parts(rhs, &mut rhs_parts);
+    lhs_parts.iter().any(|(lhs_name, lhs_origin)| {
+        rhs_parts.iter().any(|(rhs_name, rhs_origin)| {
+            lhs_name == rhs_name && !same_declaration(*lhs_origin, lhs_name, *rhs_origin, rhs_name)
+        })
+    })
+}
+
+/// Collects every nominal declaration a type names, as `(display name, declaration)`.
+///
+/// A union case contributes its *union's* name, because that is the name the reader has to tell
+/// apart — `Fit.cover` and `Fit` collide on `Fit`.
+fn collect_nominal_parts<'ty>(
+    ty: &'ty Type,
+    parts: &mut Vec<(&'ty Name, Option<&'ty DeclaringOrigin>)>,
+) {
+    match ty {
+        Type::Named(named) => parts.push((&named.name, named.origin())),
+        Type::Union(union_ty) => parts.push((&union_ty.name, union_ty.origin())),
+        Type::UnionCase(case_ty) => parts.push((&case_ty.union, case_ty.origin())),
+        Type::Array(inner) | Type::Nullable(inner) => collect_nominal_parts(inner, parts),
+        Type::Function { params, ret } => {
+            for param in params {
+                collect_nominal_parts(param, parts);
+            }
+            collect_nominal_parts(ret, parts);
+        }
+        _ => {}
+    }
+}
+
+/// Renders a type with each nominal part prefixed by the module that declares it.
+fn qualified_display(ty: &Type) -> String {
+    match ty {
+        Type::Union(union_ty) => match union_ty.origin() {
+            Some(origin) => format!("{}:{}", origin.module_identity(), union_ty.name),
+            None => union_ty.name.to_string(),
+        },
+        Type::UnionCase(case_ty) => match case_ty.origin() {
+            Some(origin) => format!(
+                "{}:{}.{}",
+                origin.module_identity(),
+                case_ty.union,
+                case_ty.case
+            ),
+            None => format!("{}.{}", case_ty.union, case_ty.case),
+        },
+        Type::Named(named) => match named.origin() {
+            Some(origin) => format!("{}:{}", origin.module_identity(), named.name),
+            None => named.name.to_string(),
+        },
+        Type::Array(inner) => format!("{}[]", qualified_display(inner)),
+        Type::Nullable(inner) => format!("{}?", qualified_display(inner)),
+        Type::Function { params, ret } => {
+            let params = params
+                .iter()
+                .map(qualified_display)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("({}) => {}", params, qualified_display(ret))
+        }
+        _ => ty.to_string(),
+    }
+}
+
 fn write_postfix_type(f: &mut fmt::Formatter<'_>, inner: &Type, suffix: &str) -> fmt::Result {
     match inner {
         Type::Function { .. } => write!(f, "({inner}){suffix}"),
@@ -399,37 +508,182 @@ fn write_postfix_type(f: &mut fmt::Formatter<'_>, inner: &Type, suffix: &str) ->
     }
 }
 
+/// Hashes a nominal type consistently with [`same_declaration`].
+fn hash_declaration<H: Hasher>(origin: Option<&DeclaringOrigin>, name: &Name, state: &mut H) {
+    match origin {
+        Some(origin) => origin.hash(state),
+        None => name.hash(state),
+    }
+}
+
+/// A nominal type reached by name, with the declaration that name reached.
+#[derive(Debug, Clone)]
+pub struct NamedType {
+    /// The name, as displayed. Two declarations sharing one are still two types.
+    pub name: Name,
+    /// The declaration this name reached, where the resolving context reached one.
+    origin: Option<DeclaringOrigin>,
+}
+
+impl NamedType {
+    /// Creates a named type for the declaration at `origin`.
+    pub fn new(name: Name, origin: Option<DeclaringOrigin>) -> Self {
+        Self { name, origin }
+    }
+
+    /// Returns the declaration this name reached, if the building context reached one.
+    pub fn origin(&self) -> Option<&DeclaringOrigin> {
+        self.origin.as_ref()
+    }
+
+    /// Returns true when both names reached the same declaration.
+    pub fn is_same_declaration_as(&self, other: &NamedType) -> bool {
+        same_declaration(
+            self.origin.as_ref(),
+            &self.name,
+            other.origin.as_ref(),
+            &other.name,
+        )
+    }
+}
+
+impl PartialEq for NamedType {
+    fn eq(&self, other: &Self) -> bool {
+        self.is_same_declaration_as(other)
+    }
+}
+
+impl Eq for NamedType {}
+
+impl Hash for NamedType {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        hash_declaration(self.origin.as_ref(), &self.name, state);
+    }
+}
+
 /// Describes a discriminated union type with its cases.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct UnionType {
-    /// Union name
+    /// Union name, as displayed. Two unions sharing one are still two types.
     pub name: Name,
     /// Ordered case names
     pub cases: Vec<Name>,
     /// Optional abstract record base.
     pub base: Option<Name>,
+    /// The declaration this union comes from, where the building context could name one.
+    origin: Option<DeclaringOrigin>,
 }
 
 impl UnionType {
-    /// Creates a new discriminated union type definition.
-    pub fn new(name: Name, cases: Vec<Name>, base: Option<Name>) -> Self {
-        Self { name, cases, base }
+    /// Creates a new discriminated union type definition declared at `origin`.
+    pub fn new(
+        name: Name,
+        cases: Vec<Name>,
+        base: Option<Name>,
+        origin: Option<DeclaringOrigin>,
+    ) -> Self {
+        Self {
+            name,
+            cases,
+            base,
+            origin,
+        }
+    }
+
+    /// Returns the declaration this union comes from.
+    pub fn origin(&self) -> Option<&DeclaringOrigin> {
+        self.origin.as_ref()
+    }
+
+    /// Returns true when both denote the same declared union.
+    pub fn is_same_union_as(&self, other: &UnionType) -> bool {
+        same_declaration(
+            self.origin.as_ref(),
+            &self.name,
+            other.origin.as_ref(),
+            &other.name,
+        )
+    }
+}
+
+impl PartialEq for UnionType {
+    fn eq(&self, other: &Self) -> bool {
+        self.is_same_union_as(other)
+    }
+}
+
+impl Eq for UnionType {}
+
+impl Hash for UnionType {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        hash_declaration(self.origin.as_ref(), &self.name, state);
     }
 }
 
 /// Describes a discriminated union case type.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct UnionCaseType {
-    /// Owning union name.
+    /// Owning union name, as displayed.
     pub union: Name,
     /// Case name scoped under the owning union.
     pub case: Name,
+    /// The declaration the owning union comes from.
+    origin: Option<DeclaringOrigin>,
 }
 
 impl UnionCaseType {
-    /// Creates a new union case type.
-    pub fn new(union: Name, case: Name) -> Self {
-        Self { union, case }
+    /// Creates a new union case type whose owning union is declared at `origin`.
+    pub fn new(union: Name, case: Name, origin: Option<DeclaringOrigin>) -> Self {
+        Self {
+            union,
+            case,
+            origin,
+        }
+    }
+
+    /// Returns the declaration the owning union comes from.
+    pub fn origin(&self) -> Option<&DeclaringOrigin> {
+        self.origin.as_ref()
+    }
+
+    /// Returns true when this case's owning union is the union `other` denotes.
+    pub fn is_same_union_as(&self, other: &UnionType) -> bool {
+        same_declaration(
+            self.origin.as_ref(),
+            &self.union,
+            other.origin.as_ref(),
+            &other.name,
+        )
+    }
+
+    /// Returns true when both cases are scoped under the same declared union.
+    pub fn shares_union_with(&self, other: &UnionCaseType) -> bool {
+        same_declaration(
+            self.origin.as_ref(),
+            &self.union,
+            other.origin.as_ref(),
+            &other.union,
+        )
+    }
+
+    /// Returns true when `union` is this case's owning union and declares it.
+    pub fn is_case_of(&self, union: &UnionType) -> bool {
+        self.is_same_union_as(union) && union.cases.contains(&self.case)
+    }
+}
+
+impl PartialEq for UnionCaseType {
+    fn eq(&self, other: &Self) -> bool {
+        self.case == other.case && self.shares_union_with(other)
+    }
+}
+
+impl Eq for UnionCaseType {}
+
+impl Hash for UnionCaseType {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        hash_declaration(self.origin.as_ref(), &self.union, state);
+        self.case.hash(state);
     }
 }
 
@@ -692,7 +946,8 @@ mod tests {
             "(int, int) => int"
         );
         assert_eq!(
-            Type::union_type(Name::new("Direction"), vec![Name::new("north")], None).to_string(),
+            Type::union_type(Name::new("Direction"), vec![Name::new("north")], None, None)
+                .to_string(),
             "Direction"
         );
     }

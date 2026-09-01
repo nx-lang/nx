@@ -94,6 +94,20 @@
   Meanwhile a bare name whose type is not nameable in the using module now reports the needed import
   and the qualified form to write, instead of type checking and then emitting an `unresolved:` slot
   into generated IR. The `enum-values` requirement was restated to match what holds.
+- **Closed by `nominal-type-identity`.** The deferred back end landed there. A resolved contextual
+  name now rewrites to `ast::Expr::ResolvedUnionCase`, which carries the union's declaring origin
+  rather than an `Ident` base resolved by visible name; code generation builds its `CodegenReference`
+  from that origin (`build_union_case_from_origin`) and the interpreter reaches the declaration the
+  same way (`eval_resolved_union_case`), so the base record shape an abstract-based case inherits is
+  resolved in the declaring module. The `contextual-name-requires-import` guard is gone. Covering
+  tests, all in `crates/nx-api/src/artifacts.rs` unless noted:
+  `a_bare_case_of_an_unimported_union_evaluates_as_the_qualified_form_does`,
+  `bare_name_at_an_imported_property_needs_no_import_of_its_type`,
+  `bare_name_under_a_wildcard_alias_is_accepted`,
+  `a_foreign_case_inheriting_an_abstract_base_carries_its_base_fields`,
+  `a_visible_name_does_not_capture_a_reference_to_a_different_definition`, and
+  `nx_ir_carries_no_unresolved_reference_for_a_case_of_an_unimported_union`
+  (`crates/nx-codegen/src/tests.rs`). The same-name half closed there too — see RF6.
 - **Verification:** Reopened. The front-end resolution tests pass, as does the full workspace suite,
   but the same-name isolation fix is incomplete. `EnumType` derives equality from only `name` and
   `members` (`crates/nx-types/src/ty.rs:409-414`), and `nominal_is_nameable_here` accepts a local enum
@@ -246,6 +260,15 @@
   selective-import, wildcard-alias, non-visible-declaration, and duplicate-name coverage. This is a
   verified deferral; the completion implementation in this change remains intentionally
   import-unaware.
+- **Closed by `nominal-type-identity`.** `workspace_declarations` — the flat join of every document's
+  declarations by name — is replaced by `DocumentScope`, built from the prepared bindings
+  `analyze_workspace_modules` returns, which is the resolution the compiler itself performed. A tag
+  is resolved in the editing document's own namespace, and a property's declared type in the
+  namespace of the module that declared the property. Covering tests in
+  `crates/nx-language-service/src/lib.rs`: `member_completions_follow_a_selective_import`,
+  `member_completions_follow_a_wildcard_import_alias`,
+  `completions_are_not_drawn_from_a_document_that_is_not_imported`, and
+  `member_completions_come_from_the_declaring_module_not_a_same_named_local_type`.
 
 ### ✅ Verified - RF4 The syntax AST task is marked complete without implementing the promised typed nodes or accessors
 - **Severity:** Low
@@ -398,6 +421,31 @@
   identity requirement gains *A same-named type is rejected even when it declares an identical
   shape*, which covers the payload-field-type row that case-name comparison cannot. The defect
   remains live until that change is implemented.
+- **Closed by `nominal-type-identity`.** The same-name/different-case-names half closed earlier, in
+  `replace-enums-with-unions`. The payload-field-type half closed here: `UnionType` and
+  `UnionCaseType` carry a `DeclaringOrigin`, and their equality is over that origin rather than over
+  `{name, cases, base}`, so two declarations that agree on every observable are still two types.
+  Covering tests in `crates/nx-api/src/artifacts.rs`:
+  `a_same_named_local_union_does_not_satisfy_a_foreign_union_with_matching_case_names` (the payload
+  row), `a_same_named_local_union_is_rejected_even_when_it_declares_an_identical_shape` (identical
+  shapes), `a_same_named_local_union_with_different_case_names_stays_rejected` (the half closed
+  earlier, asserted so it stays closed), and `one_union_reached_under_two_names_stays_one_type` plus
+  `identity_survives_a_rename_at_the_import_boundary` for the converse.
+
+  The same defect in records and components closed there too, though neither was in scope when this
+  finding was written. A record type is a `Type::Named`, which carried only a spelling, so two
+  same-named records in different modules satisfied each other and a `string` reached a field the
+  declaring module typed `int`. `Type::Named` now carries a `NamedType { name, origin }`, and record
+  and component subtyping compares declarations along inheritance chains resolved in the module that
+  wrote each `extends` clause. Covering tests, also in `crates/nx-api/src/artifacts.rs`:
+  `a_same_named_local_record_does_not_satisfy_a_foreign_record`,
+  `a_same_named_local_record_is_rejected_even_when_it_declares_an_identical_shape`,
+  `a_property_typed_by_a_record_the_declaring_module_imported_does_not_bind_locally`,
+  `a_local_lineage_spelled_like_a_foreign_one_does_not_satisfy_it`,
+  `a_same_named_local_component_lineage_does_not_satisfy_a_foreign_one`, and — for the converse, that
+  origin does not over-reject — `the_imported_record_a_property_names_still_satisfies_it`,
+  `a_foreign_record_satisfies_a_base_the_consumer_cannot_name`, and
+  `a_foreign_component_satisfies_a_base_the_consumer_cannot_name`.
 
 ## Questions
 - None.

@@ -235,6 +235,14 @@ impl ResolvedProgram {
             .and_then(|items| items.get(visible_name))
     }
 
+    /// Returns every item one module declares itself.
+    pub fn local_items(
+        &self,
+        module_id: RuntimeModuleId,
+    ) -> Option<&FxHashMap<String, ModuleQualifiedItemRef>> {
+        self.local_items.get(&module_id)
+    }
+
     /// Returns every imported or peer-visible item prepared for one module.
     pub fn imported_items(
         &self,

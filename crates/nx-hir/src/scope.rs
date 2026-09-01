@@ -410,7 +410,12 @@ impl<'a> UndefinedIdentifierChecker<'a> {
         match self.module.raw_module().expr(expr_id) {
             // A contextual name resolves against the expected type at its binding site, never
             // against lexical scope, so it is deliberately not checked for an undefined name here.
-            ast::Expr::Literal(_) | ast::Expr::ContextualName { .. } | ast::Expr::Error(_) => {}
+            // Nor is the resolved case it becomes: it carries its declaring origin instead of a
+            // name that has to be visible.
+            ast::Expr::Literal(_)
+            | ast::Expr::ContextualName { .. }
+            | ast::Expr::ResolvedUnionCase { .. }
+            | ast::Expr::Error(_) => {}
             ast::Expr::Ident(name) => {
                 if self.scope_manager.resolve(name, scope).is_none() {
                     self.report_undefined(name, self.module.raw_module().expr_span(expr_id));

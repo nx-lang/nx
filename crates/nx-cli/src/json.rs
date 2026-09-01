@@ -26,6 +26,7 @@ mod tests {
             component: Name::new("SearchBox"),
             emit: Name::new("SearchSubmitted"),
             action_name: Name::new("SearchSubmitted"),
+            action_module_identity: "json-test.nx".to_string(),
             body,
             captured: FxHashMap::default(),
         };

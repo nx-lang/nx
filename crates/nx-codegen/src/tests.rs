@@ -245,6 +245,80 @@ fn builds_codegen_program_from_inline_artifact() {
     );
 }
 
+/// Generated IR must contain no reference that failed to resolve to a declaration.
+///
+/// `Fit` is not imported by `app.nx`, so there is no visible name to resolve `cover` by. The
+/// reference carries the union's declaring origin instead, and the emitted slot names the
+/// declaration rather than falling back to `unresolved:`.
+#[test]
+fn nx_ir_carries_no_unresolved_reference_for_a_case_of_an_unimported_union() {
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "app.nx",
+                "import { Img } from \"./widgets.nx\"\nlet root() = { <Img fit=cover /> }",
+            ),
+            (
+                "widgets.nx",
+                "export type Fit = fill | contain | cover\nexport let <Img fit: Fit = {Fit.fill} /> = <div fit={fit} />",
+            ),
+        ],
+        "app.nx",
+    );
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+
+    assert!(
+        !generated.json.contains("unresolved:"),
+        "generated IR carries an unresolved reference: {}",
+        generated.json
+    );
+    assert!(
+        generated.json.contains("\"caseName\": \"cover\""),
+        "expected the case to reach the IR: {}",
+        generated.json
+    );
+}
+
+/// The same, for a case reached through the name a selective import alias bound.
+///
+/// `Fit as ui.Fit` binds the single visible name `ui.Fit`; there is no `ui` to take a member of.
+/// Reading only a single-segment base left `ui.Fit.cover` lowered as a member access on a name that
+/// reaches nothing — an `unresolved:` slot and a null case reference in output the compiler
+/// accepted without a diagnostic.
+#[test]
+fn nx_ir_carries_no_unresolved_reference_for_a_case_of_an_aliased_union() {
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "app.nx",
+                "import { Img, Fit as ui.Fit } from \"./widgets.nx\"\nlet root() = { <Img fit={ui.Fit.cover} /> }",
+            ),
+            (
+                "widgets.nx",
+                "export type Fit = fill | contain | cover\nexport let <Img fit: Fit = {Fit.fill} /> = <div fit={fit} />",
+            ),
+        ],
+        "app.nx",
+    );
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+
+    assert!(
+        !generated.json.contains("unresolved:"),
+        "generated IR carries an unresolved reference: {}",
+        generated.json
+    );
+    assert!(
+        !generated.json.contains("\"reference\": null"),
+        "generated IR carries a reference that resolved to nothing: {}",
+        generated.json
+    );
+    assert!(
+        generated.json.contains("\"caseName\": \"cover\""),
+        "expected the case to reach the IR: {}",
+        generated.json
+    );
+}
+
 #[test]
 fn nx_ir_emits_metadata_entrypoints_and_source_provenance() {
     let artifact = artifact_from_source("let root() = { 1 + 2 }");
@@ -1132,7 +1206,11 @@ type Theme = light | dark
 let root() = { Theme.dark }
 "#,
     );
-    let constant_union_module = generated_file(&constant_union_artifact, CodegenTarget::TypeScript, "m0_main.ts");
+    let constant_union_module = generated_file(
+        &constant_union_artifact,
+        CodegenTarget::TypeScript,
+        "m0_main.ts",
+    );
 
     assert!(constant_union_module.contains("export const Theme = {"));
     assert!(constant_union_module.contains("light: \"light\","));

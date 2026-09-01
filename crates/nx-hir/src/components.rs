@@ -1,17 +1,30 @@
 use crate::{
-    ast, interface_component, Component, ComponentEmit, EffectiveField, Element, ElementId, ExprId,
-    InterfaceField, InterfaceItem, InterfaceItemKind, Item, Name, PreparedModule,
+    ast, interface_component, same_declaration, Component, ComponentEmit, DeclarationKey,
+    DeclaringOrigin, EffectiveEmit, EffectiveField, Element, ElementId, ExprId, InterfaceField,
+    InterfaceItem, InterfaceItemKind, Item, LocalDefinitionId, Name, PreparedModule,
     PreparedNamespace, PropertyEntry, ResolvedPreparedItem,
 };
 use nx_diagnostics::TextSpan;
 use rustc_hash::FxHashMap;
 
+/// One component in another component's inheritance chain.
+///
+/// The name is how the extending component spelled its base; the origin is the declaration that
+/// spelling reached in *that* component's module.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComponentAncestor {
+    pub name: Name,
+    pub origin: Option<DeclaringOrigin>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectiveComponentContract {
     pub component: Component,
     pub props: Vec<EffectiveField>,
-    pub emits: Vec<ComponentEmit>,
-    pub ancestors: Vec<Name>,
+    pub emits: Vec<EffectiveEmit>,
+    pub ancestors: Vec<ComponentAncestor>,
+    /// The declaration this contract was resolved from, where the resolving context reached one.
+    pub origin: Option<DeclaringOrigin>,
 }
 
 impl EffectiveComponentContract {
@@ -27,6 +40,7 @@ struct PendingHandlerRewrite {
     component: Name,
     emit: Name,
     action_name: Name,
+    action_module_identity: String,
     span: TextSpan,
     body: ExprId,
 }
@@ -204,6 +218,7 @@ struct OwnedRecordField {
 struct OwnedComponentEmit {
     emit: ComponentEmit,
     owner: Name,
+    module_identity: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -211,7 +226,7 @@ struct ResolvedComponentContract {
     component: Component,
     props: Vec<OwnedRecordField>,
     emits: Vec<OwnedComponentEmit>,
-    ancestors: Vec<Name>,
+    ancestors: Vec<ComponentAncestor>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -226,11 +241,24 @@ enum ComponentFieldSource {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ResolvedComponentDefinition {
     component: Component,
+    /// The module whose namespace this component's own type references — its base above all —
+    /// were written in.
     module_identity: String,
+    definition_id: Option<LocalDefinitionId>,
     field_source: ComponentFieldSource,
 }
 
 impl ResolvedComponentDefinition {
+    /// The identity an inheritance walk tracks this component by.
+    fn key(&self) -> DeclarationKey {
+        DeclarationKey::new(self.origin(), &self.component.name)
+    }
+
+    fn origin(&self) -> Option<DeclaringOrigin> {
+        self.definition_id
+            .map(|definition_id| DeclaringOrigin::new(&self.module_identity, definition_id))
+    }
+
     fn declared_props(&self) -> Vec<EffectiveField> {
         match &self.field_source {
             ComponentFieldSource::Raw => self
@@ -257,27 +285,140 @@ enum ComponentValidationStatus {
 }
 
 pub fn resolve_component_definition(module: &PreparedModule, name: &Name) -> Option<Component> {
-    resolve_component_definition_with_identity(module, name).map(|resolved| resolved.component)
+    resolve_component_definition_with_identity(module, module.module_identity(), name)
+        .map(|resolved| resolved.component)
+}
+
+/// Returns the declaration a component name reaches, where one exists.
+pub fn component_declaration_origin(
+    module: &PreparedModule,
+    name: &Name,
+) -> Option<DeclaringOrigin> {
+    resolve_component_definition_with_identity(module, module.module_identity(), name)
+        .and_then(|resolved| resolved.origin())
 }
 
 pub fn effective_component_contract_for_name(
     module: &PreparedModule,
     name: &Name,
 ) -> Result<Option<EffectiveComponentContract>, ComponentResolutionError> {
-    let Some(component) = resolve_component_definition_with_identity(module, name) else {
+    let Some(component) =
+        resolve_component_definition_with_identity(module, module.module_identity(), name)
+    else {
         return Ok(None);
     };
 
     effective_component_contract_resolved(module, &component).map(Some)
 }
 
+/// Returns the effective contract of the component declared at `origin`.
+///
+/// The declaration is read straight out of the module that declares it, so the component does not
+/// have to be nameable in the asking module at all.
+pub fn effective_component_contract_at(
+    module: &PreparedModule,
+    origin: &DeclaringOrigin,
+) -> Result<Option<EffectiveComponentContract>, ComponentResolutionError> {
+    let Some(component) = component_definition_at(module, origin) else {
+        return Ok(None);
+    };
+
+    effective_component_contract_resolved(module, &component).map(Some)
+}
+
+/// Reads the component declared at `origin` directly out of the module that declares it.
+fn component_definition_at(
+    module: &PreparedModule,
+    origin: &DeclaringOrigin,
+) -> Option<ResolvedComponentDefinition> {
+    let item = if origin.module_identity() == module.module_identity() {
+        module
+            .raw_module()
+            .item_by_definition(origin.definition_id())
+    } else {
+        module
+            .peer_module(origin.module_identity())
+            .and_then(|peer| peer.item_by_definition(origin.definition_id()))
+    }?;
+
+    match item {
+        Item::Component(component) => Some(ResolvedComponentDefinition {
+            component: component.clone(),
+            module_identity: origin.module_identity().to_string(),
+            definition_id: Some(origin.definition_id()),
+            field_source: ComponentFieldSource::Raw,
+        }),
+        _ => None,
+    }
+}
+
+/// Decides whether a component satisfies an expected component type.
+///
+/// Both sides carry the declaration they were resolved to, and both are compared by it. Comparing
+/// the spellings instead let a consumer's own `Card` satisfy a property typed by a different
+/// module's `Card`.
+pub fn is_component_subtype(
+    module: &PreparedModule,
+    actual: &Name,
+    actual_origin: Option<&DeclaringOrigin>,
+    expected: &Name,
+    expected_origin: Option<&DeclaringOrigin>,
+) -> Result<bool, ComponentResolutionError> {
+    let Some(actual_component) = component_reference(module, actual, actual_origin) else {
+        return Ok(false);
+    };
+    let Some(expected_component) = component_reference(module, expected, expected_origin) else {
+        return Ok(false);
+    };
+
+    let expected_origin = expected_component.origin();
+    if same_declaration(
+        actual_component.origin().as_ref(),
+        &actual_component.component.name,
+        expected_origin.as_ref(),
+        &expected_component.component.name,
+    ) {
+        return Ok(true);
+    }
+
+    let actual_contract = effective_component_contract_resolved(module, &actual_component)?;
+    Ok(actual_contract.ancestors.iter().any(|ancestor| {
+        same_declaration(
+            ancestor.origin.as_ref(),
+            &ancestor.name,
+            expected_origin.as_ref(),
+            &expected_component.component.name,
+        )
+    }))
+}
+
+/// Resolves a component reference by the declaration it names, or by its spelling if it names none.
+///
+/// As with records, a reference that carries an origin never falls back to the local name: a read
+/// that fails resolves to nothing rather than to whatever the asking module happens to call that.
+fn component_reference(
+    module: &PreparedModule,
+    name: &Name,
+    origin: Option<&DeclaringOrigin>,
+) -> Option<ResolvedComponentDefinition> {
+    match origin {
+        Some(origin) => component_definition_at(module, origin),
+        None => resolve_component_definition_with_identity(module, module.module_identity(), name),
+    }
+}
+
 pub fn effective_component_contract(
     module: &PreparedModule,
     component: &Component,
 ) -> Result<EffectiveComponentContract, ComponentResolutionError> {
+    let definition_id = module
+        .raw_module()
+        .find_item_with_definition(component.name.as_str())
+        .map(|(definition_id, _)| definition_id);
     let component = ResolvedComponentDefinition {
         component: component.clone(),
         module_identity: module.module_identity().to_string(),
+        definition_id,
         field_source: ComponentFieldSource::Raw,
     };
     effective_component_contract_resolved(module, &component)
@@ -295,18 +436,25 @@ fn effective_component_contract_resolved(
             .into_iter()
             .map(|field| field.field)
             .collect(),
-        emits: resolved.emits.into_iter().map(|emit| emit.emit).collect(),
+        emits: resolved
+            .emits
+            .into_iter()
+            .map(|emit| EffectiveEmit {
+                emit: emit.emit,
+                module_identity: emit.module_identity,
+            })
+            .collect(),
         ancestors: resolved.ancestors,
+        origin: component.origin(),
     })
 }
 
 fn resolve_component_definition_with_identity(
     module: &PreparedModule,
+    namespace_module: &str,
     name: &Name,
 ) -> Option<ResolvedComponentDefinition> {
-    let resolved = module
-        .resolve_binding(PreparedNamespace::Element, name)
-        .and_then(|binding| module.resolve_prepared_item(binding))?;
+    let resolved = module.resolve_in_module(PreparedNamespace::Element, namespace_module, name)?;
     component_definition_from_prepared_item(module, resolved)
 }
 
@@ -321,6 +469,7 @@ fn component_definition_from_interface_item(
     Some(ResolvedComponentDefinition {
         component,
         module_identity: item.module_identity.clone(),
+        definition_id: Some(item.definition_id),
         field_source: ComponentFieldSource::Interface { props, state },
     })
 }
@@ -332,11 +481,13 @@ fn component_definition_from_prepared_item(
     match resolved {
         ResolvedPreparedItem::Raw {
             module_identity,
+            definition_id,
             item: Item::Component(component),
             ..
         } => Some(ResolvedComponentDefinition {
             component,
             module_identity,
+            definition_id: Some(definition_id),
             field_source: ComponentFieldSource::Raw,
         }),
         ResolvedPreparedItem::Imported { item, raw, .. } => {
@@ -346,6 +497,7 @@ fn component_definition_from_prepared_item(
                     return Some(ResolvedComponentDefinition {
                         component,
                         module_identity: raw_ref.module_identity.clone(),
+                        definition_id: Some(raw_ref.definition_id),
                         field_source: ComponentFieldSource::Raw,
                     });
                 }
@@ -361,16 +513,17 @@ pub fn validate_component_definitions(module: &PreparedModule) -> Vec<ComponentR
     let mut statuses = FxHashMap::default();
     let mut stack = Vec::new();
 
-    for component in module
-        .raw_module()
-        .items()
-        .iter()
-        .filter_map(|item| match item {
-            Item::Component(component) => Some(component),
-            _ => None,
-        })
-    {
-        validate_component_definition(module, component, &mut statuses, &mut stack, &mut errors);
+    for (index, item) in module.raw_module().items().iter().enumerate() {
+        let Item::Component(component) = item else {
+            continue;
+        };
+        let component = ResolvedComponentDefinition {
+            component: component.clone(),
+            module_identity: module.module_identity().to_string(),
+            definition_id: Some(LocalDefinitionId::new(index as u32)),
+            field_source: ComponentFieldSource::Raw,
+        };
+        validate_component_definition(module, &component, &mut statuses, &mut stack, &mut errors);
     }
 
     errors
@@ -382,16 +535,31 @@ pub fn validate_component_definitions(module: &PreparedModule) -> Vec<ComponentR
 /// which union case it named. Applying those resolutions here means nothing after
 /// type checking — the interpreter, codegen, or the IR — can tell a contextual literal from the
 /// qualified form, which is what lets every downstream consumer stay unchanged.
+/// One resolved contextual name, reduced to what the rewrite needs.
+///
+/// The origin is the `(module identity, definition id)` pair addressing the union the bare name
+/// resolved against. A resolution that reached no origin is left as it was written: rewriting it to
+/// a reference nothing can resolve would only move the failure downstream.
+pub struct ContextualRewrite {
+    pub union: Name,
+    pub case: Name,
+    pub module_identity: String,
+    pub definition_id: LocalDefinitionId,
+}
+
+/// Rewrites every resolved [`ast::Expr::ContextualName`] to the case it resolved to.
+///
+/// The rewrite target carries the union's declaring origin rather than a name, so nothing below
+/// type checking has to find the declaration again by a spelling that need not be visible here.
 pub fn apply_contextual_name_resolutions<T>(
     module: &mut PreparedModule,
     resolutions: &FxHashMap<ExprId, T>,
-    parts: impl Fn(&T) -> (Name, Name),
-) -> Vec<(ExprId, ExprId)> {
+    rewrite: impl Fn(&T) -> Option<ContextualRewrite>,
+) {
     if resolutions.is_empty() {
-        return Vec::new();
+        return;
     }
 
-    let mut allocated_bases = Vec::new();
     let raw_module = module.raw_module_mut();
     for (expr_id, resolution) in resolutions {
         let span = match raw_module.expr(*expr_id) {
@@ -399,17 +567,17 @@ pub fn apply_contextual_name_resolutions<T>(
             // Already rewritten, or never a contextual name: leave it alone.
             _ => continue,
         };
-        let (type_name, member) = parts(resolution);
-        let base = raw_module.alloc_expr(ast::Expr::Ident(type_name));
-        raw_module.set_expr_span(base, span);
-        *raw_module.expr_mut(*expr_id) = ast::Expr::Member {
-            base,
-            member,
+        let Some(rewrite) = rewrite(resolution) else {
+            continue;
+        };
+        *raw_module.expr_mut(*expr_id) = ast::Expr::ResolvedUnionCase {
+            union: rewrite.union,
+            case: rewrite.case,
+            module_identity: rewrite.module_identity,
+            definition_id: rewrite.definition_id,
             span,
         };
-        allocated_bases.push((*expr_id, base));
     }
-    allocated_bases
 }
 
 pub fn promote_component_handler_bindings(module: &mut PreparedModule) {
@@ -424,6 +592,7 @@ pub fn promote_component_handler_bindings(module: &mut PreparedModule) {
             component: rewrite.component.clone(),
             emit: rewrite.emit.clone(),
             action_name: rewrite.action_name.clone(),
+            action_module_identity: Some(rewrite.action_module_identity.clone()),
             body: rewrite.body,
             span: rewrite.span,
         });
@@ -501,10 +670,12 @@ fn collect_handler_rewrites_in_expr(
     rewrites: &mut Vec<PendingHandlerRewrite>,
 ) {
     match module.raw_module().expr(expr_id) {
-        // `ContextualName` is a leaf: it carries no sub-expressions to rewrite.
+        // `ContextualName` and the resolved case it becomes are leaves: neither carries a
+        // sub-expression to rewrite.
         ast::Expr::Literal(_)
         | ast::Expr::Ident(_)
         | ast::Expr::ContextualName { .. }
+        | ast::Expr::ResolvedUnionCase { .. }
         | ast::Expr::Error(_) => {}
         ast::Expr::BinaryOp { lhs, rhs, .. } => {
             collect_handler_rewrites_in_expr(module, *lhs, rewrites);
@@ -639,7 +810,7 @@ fn collect_handler_rewrites_in_property_entries(
                         if let Some(emit) = contract
                             .emits
                             .iter()
-                            .find(|emit| handler_prop_name(emit.name.as_str()) == prop_name)
+                            .find(|emit| handler_prop_name(emit.emit.name.as_str()) == prop_name)
                         {
                             if !matches!(
                                 module.raw_module().expr(property.value),
@@ -649,8 +820,9 @@ fn collect_handler_rewrites_in_property_entries(
                                     element: element_id,
                                     property_span: property.span,
                                     component: contract.component.name.clone(),
-                                    emit: emit.name.clone(),
-                                    action_name: emit.action_name.clone(),
+                                    emit: emit.emit.name.clone(),
+                                    action_name: emit.emit.action_name.clone(),
+                                    action_module_identity: emit.module_identity.clone(),
                                     span: property.span,
                                     body: property.value,
                                 });
@@ -797,71 +969,76 @@ fn rewrite_property_entry_handler(
     false
 }
 
+/// Walks one component's inheritance chain, reporting the first thing wrong with it.
+///
+/// <para>Keyed by declaration rather than by spelling, and each base resolved where its `extends`
+/// clause was written, for the same reason as the record walk: a component extending a same-named
+/// component in another module is not a cycle.</para>
 fn validate_component_definition(
     module: &PreparedModule,
-    component: &Component,
-    statuses: &mut FxHashMap<Name, ComponentValidationStatus>,
-    stack: &mut Vec<Name>,
+    component: &ResolvedComponentDefinition,
+    statuses: &mut FxHashMap<DeclarationKey, ComponentValidationStatus>,
+    stack: &mut Vec<(DeclarationKey, Name)>,
     errors: &mut Vec<ComponentResolutionError>,
 ) -> ComponentValidationStatus {
-    if let Some(status) = statuses.get(&component.name) {
+    let key = component.key();
+    if let Some(status) = statuses.get(&key) {
         return *status;
     }
 
-    if let Some(index) = stack.iter().position(|name| name == &component.name) {
-        let mut cycle = stack[index..].to_vec();
-        cycle.push(component.name.clone());
+    if let Some(index) = stack.iter().position(|(seen, _)| *seen == key) {
+        let mut cycle: Vec<Name> = stack[index..]
+            .iter()
+            .map(|(_, name)| name.clone())
+            .collect();
+        cycle.push(component.component.name.clone());
         push_unique_component_error(
             errors,
             ComponentResolutionError::InheritanceCycle {
-                component: component.name.clone(),
-                span: component.span,
-                cycle: cycle.clone(),
+                component: component.component.name.clone(),
+                span: component.component.span,
+                cycle,
             },
         );
 
-        for name in cycle {
-            statuses.insert(name, ComponentValidationStatus::Invalid);
+        for (seen, _) in &stack[index..] {
+            statuses.insert(seen.clone(), ComponentValidationStatus::Invalid);
         }
 
         return ComponentValidationStatus::Invalid;
     }
 
-    stack.push(component.name.clone());
+    stack.push((key.clone(), component.component.name.clone()));
 
-    let status = match resolve_base_component(module, component) {
-        Ok(Some(base_component)) => {
-            if validate_component_definition(
-                module,
-                &base_component.component,
-                statuses,
-                stack,
-                errors,
-            ) == ComponentValidationStatus::Invalid
-            {
-                ComponentValidationStatus::Invalid
-            } else {
-                validate_component_contract(module, component, errors)
+    let status =
+        match resolve_base_component(module, &component.module_identity, &component.component) {
+            Ok(Some(base_component)) => {
+                if validate_component_definition(module, &base_component, statuses, stack, errors)
+                    == ComponentValidationStatus::Invalid
+                {
+                    ComponentValidationStatus::Invalid
+                } else {
+                    validate_component_contract(module, component, errors)
+                }
             }
-        }
-        Ok(None) => validate_component_contract(module, component, errors),
-        Err(error) => {
-            push_unique_component_error(errors, error);
-            ComponentValidationStatus::Invalid
-        }
-    };
+            Ok(None) => validate_component_contract(module, component, errors),
+            Err(error) => {
+                push_unique_component_error(errors, error);
+                ComponentValidationStatus::Invalid
+            }
+        };
 
     stack.pop();
-    statuses.insert(component.name.clone(), status);
+    statuses.insert(key, status);
     status
 }
 
 fn validate_component_contract(
     module: &PreparedModule,
-    component: &Component,
+    component: &ResolvedComponentDefinition,
     errors: &mut Vec<ComponentResolutionError>,
 ) -> ComponentValidationStatus {
-    match effective_component_contract(module, component) {
+    match effective_component_contract_resolved(module, component) {
         Ok(_) => ComponentValidationStatus::Valid,
         Err(error) => {
             push_unique_component_error(errors, error);
@@ -882,13 +1059,14 @@ fn push_unique_component_error(
 fn resolve_component_contract_inner(
     module: &PreparedModule,
     component: &ResolvedComponentDefinition,
-    stack: &mut Vec<Name>,
+    stack: &mut Vec<(DeclarationKey, Name)>,
 ) -> Result<ResolvedComponentContract, ComponentResolutionError> {
-    if let Some(index) = stack
-        .iter()
-        .position(|name| name == &component.component.name)
-    {
-        let mut cycle = stack[index..].to_vec();
+    let key = component.key();
+    if let Some(index) = stack.iter().position(|(seen, _)| *seen == key) {
+        let mut cycle: Vec<Name> = stack[index..]
+            .iter()
+            .map(|(_, name)| name.clone())
+            .collect();
         cycle.push(component.component.name.clone());
         return Err(ComponentResolutionError::InheritanceCycle {
             component: component.component.name.clone(),
@@ -897,9 +1075,10 @@ fn resolve_component_contract_inner(
         });
     }
 
-    stack.push(component.component.name.clone());
+    stack.push((key, component.component.name.clone()));
 
-    let result = if let Some(base_component) = resolve_base_component(module, &component.component)?
+    let result = if let Some(base_component) =
+        resolve_base_component(module, &component.module_identity, &component.component)?
     {
         let base_contract = resolve_component_contract_inner(module, &base_component, stack)?;
         let mut props = base_contract.props;
@@ -982,10 +1161,14 @@ fn resolve_component_contract_inner(
             emits.push(OwnedComponentEmit {
                 emit: emit.clone(),
                 owner: component.component.name.clone(),
+                module_identity: component.module_identity.clone(),
             });
         }
 
-        let mut ancestors = vec![base_component.component.name.clone()];
+        let mut ancestors = vec![ComponentAncestor {
+            name: base_component.component.name.clone(),
+            origin: base_component.origin(),
+        }];
         ancestors.extend(base_contract.ancestors);
 
         ResolvedComponentContract {
@@ -1012,6 +1195,7 @@ fn resolve_component_contract_inner(
             .map(|emit| OwnedComponentEmit {
                 emit,
                 owner: component.component.name.clone(),
+                module_identity: component.module_identity.clone(),
             })
             .collect::<Vec<_>>();
 
@@ -1043,17 +1227,18 @@ fn resolve_component_contract_inner(
     Ok(result)
 }
 
+/// Resolves a component's base in the namespace of the module that wrote the `extends` clause.
 fn resolve_base_component(
     module: &PreparedModule,
+    namespace_module: &str,
     component: &Component,
 ) -> Result<Option<ResolvedComponentDefinition>, ComponentResolutionError> {
     let Some(base_name) = component.base.as_ref() else {
         return Ok(None);
     };
 
-    let resolved = module
-        .resolve_binding(PreparedNamespace::Element, base_name)
-        .and_then(|binding| module.resolve_prepared_item(binding));
+    let resolved =
+        module.resolve_in_module(PreparedNamespace::Element, namespace_module, base_name);
 
     match resolved {
         Some(resolved) => {

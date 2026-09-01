@@ -1,0 +1,188 @@
+// NX UI MVP — Level 2 output/layout catalog (library `ui`, catalog `nx.ui@0.1.0`)
+//
+// Part of docs/drawnui-proposal; see core/core.nx for what the three libraries are and how they
+// relate. Section numbers refer to ../../NX-Drawn-UI-MVP-Object-Model-Proposal.md.
+//
+// Scope: read-only layout and content. No input controls, actions, state, binding, or animation.
+//
+// This is the half of the model where *the layout engine decides position*: a component states
+// constraints — size preferences, spacing, alignment, growth — and its parent resolves them against
+// available space. That, not what the two catalogs depict, is the real boundary between this
+// library and `graphics`, and it is why `Text`, `Image`, and `Box`/`Rect` exist in both: they are
+// the same content under two positioning models.
+
+import "../core"
+
+
+
+// ---------------------------------------------------------------------------
+// Catalog value types (§7)
+// ---------------------------------------------------------------------------
+
+export type ScrollAxis = horizontal | vertical | both
+export type ScrollbarVisibility = auto | visible | hidden
+export type CardVariant = outlined | elevated | filled
+export type TextFormat = plain | markdown
+export type TextVariant = h1 | h2 | h3 | title | body | caption | code
+export type TextAlign = start | center | end | justify
+export type TextOverflow = clip | ellipsis
+
+export type TrackSize =
+  | auto
+  | fixed { value: float64 }
+  | fraction { value: float64 }     // CSS `fr` units
+
+
+// ---------------------------------------------------------------------------
+// Components (§7.1–§7.12)
+// ---------------------------------------------------------------------------
+
+// §7.1 — constraints and portable appearance accepted by every nx.ui component, and by
+// nx.graphics.Drawing. Not a CSS passthrough. `alignSelf`/`justifySelf` are bound to fixed physical
+// axes, not to main/cross, because a child does not know what kind of container holds it; a
+// property the parent ignores is a diagnostic, not a validation error. Where `width` conflicts with
+// `minWidth`/`maxWidth`, the minimum wins, matching CSS.
+export abstract external component <UiCommon
+  width: Length = auto
+  height: Length = auto
+  minWidth: float64 = 0.0
+  minHeight: float64 = 0.0
+  maxWidth: float64?                // null means unbounded
+  maxHeight: float64?
+  margin: Insets?
+  padding: Insets?
+  alignSelf: AlignSelf = auto       // vertical (block) axis
+  justifySelf: AlignSelf = auto     // horizontal (inline) axis
+  grow: float64 = 0.0
+  shrink: float64 = 1.0
+  gridColumn: int?                  // zero-based; set both gridColumn and gridRow, or neither
+  gridRow: int?
+  columnSpan: int = 1
+  rowSpan: int = 1
+  background: Paint = none
+  border: Border?
+  cornerRadius: CornerRadii?
+  shadows: Shadow[]?
+  clip: boolean = false
+  opacity: float64 = 1.0            // 0..1; applies to the component's whole subtree
+  accessibility: Accessibility?     // null means derived from the component type and content
+/>
+
+// §7.2 — horizontal flow container. `justify` distributes only the free space left after `grow` has
+// been applied, so a child with `grow > 0` under a `spaceBetween` parent is not double-counted.
+// When `wrap` is true, `gap` separates both adjacent children and adjacent lines.
+export external component <HStack extends UiCommon
+  gap: float64 = 0.0
+  justify: Distribution = start     // horizontal main axis
+  align: Alignment = stretch        // vertical cross axis
+  wrap: boolean = false
+  content children: Element[]?
+/>
+
+// §7.3 — vertical flow container. Named for its axis, following SwiftUI and Tamagui, so that `row`
+// and `column` keep meaning grid structure in `Grid` below.
+export external component <VStack extends UiCommon
+  gap: float64 = 0.0
+  justify: Distribution = start     // vertical main axis
+  align: Alignment = stretch        // horizontal cross axis
+  wrap: boolean = false
+  content children: Element[]?
+/>
+
+// §7.4 — two-dimensional container, a subset of CSS Grid. Children place themselves with
+// `gridColumn`, `gridRow`, `columnSpan`, and `rowSpan` from UiCommon; auto-placement is row-major
+// over the free cells. Explicit placements may overlap, and overlapping children paint in child
+// order, like a ZStack.
+export external component <Grid extends UiCommon
+  columns: TrackSize[]              // at least one
+  rows: TrackSize[]?                // omitted rows are created as `auto`
+  columnGap: float64 = 0.0
+  rowGap: float64 = 0.0
+  justifyItems: Alignment = stretch
+  alignItems: Alignment = stretch
+  content children: Element[]?
+/>
+
+// §7.5 — z-order overlay and nothing else: children share one box, and later children paint above
+// earlier ones. Free x/y positioning belongs in nx.graphics.Drawing, not here. The alignment
+// properties are spelled the way Grid spells them, so children override both with the same
+// justifySelf/alignSelf pair.
+export external component <ZStack extends UiCommon
+  justifyItems: Alignment = stretch
+  alignItems: Alignment = stretch
+  content children: Element[]?
+/>
+
+// §7.6 — viewport for exactly one child. The child is measured unbounded along each scrollable axis
+// and constrained to the viewport on any non-scrollable one, and `Length` percentages on the child
+// resolve against the viewport rather than the scrollable content. A Scroll never sizes itself to
+// its content along a scrollable axis, so it needs a bounded height (or width) from its parent or
+// from UiCommon.
+export external component <Scroll extends UiCommon
+  axis: ScrollAxis = vertical
+  scrollbar: ScrollbarVisibility = auto
+  content child: Element
+/>
+
+// §7.7 — neutral single-child container: padding, background, border, rounding, shadow, sizing.
+export external component <Box extends UiCommon
+  content child: Element
+/>
+
+// §7.8 — themed single-child surface. Explicit UiCommon values override the theme profile; a
+// renderer without card theming falls back to a documented Box profile.
+export external component <Card extends UiCommon
+  variant: CardVariant = elevated
+  content child: Element
+/>
+
+// §7.9 — rule. Length comes from UiCommon width/height and parent alignment; the inherited
+// `background` and `border` are ignored.
+export external component <Divider extends UiCommon
+  axis: Axis = horizontal
+  color: Color?                     // null means the theme divider color
+  thickness: float64 = 1.0
+/>
+
+// §7.10 — measured, wrapping output text. `variant` is a semantic role, not only a type ramp:
+// h1/h2/h3 must reach the platform as real headings and `code` as a monospace code role, so a model
+// that reaches for `fontSize` instead of `variant` silently produces a flat, unnavigable document.
+// Null typography properties take the variant's theme value. Markdown is a host-defined safe subset
+// that the host sanitizes, with raw HTML disallowed by default; under `markdown`, `variant` sets the
+// block's baseline role and Markdown structure nests below it.
+export external component <Text extends UiCommon
+  format: TextFormat = plain
+  variant: TextVariant = body
+  color: Color?
+  fontFamily: string?
+  fontSize: float64?
+  fontWeight: float64?              // 1..1000
+  fontStyle: FontStyle = normal
+  textAlign: TextAlign = start
+  lineHeight: float64?              // unitless multiplier
+  letterSpacing: float64 = 0.0
+  maxLines: int?                    // >= 1; null 
+  overflow: TextOverflow = clip
+  content text: string
+/>
+
+// §7.11 — measured image output. `alt` is required so that no image can be generated without an
+// accessibility decision: `alt: ""` is exactly `accessibility.hidden: true`, and supplying both
+// `alt` and `accessibility.label` is a validation error rather than a silently resolved conflict.
+export external component <Image extends UiCommon
+  source: ImageSource
+  alt: string
+  fit: ObjectFit = contain
+  aspectRatio: float64?             // intrinsic ratio when the dimensions do not establish one
+/>
+
+// §7.12 — host-provided symbolic icon, from a negotiated icon catalog; unknown names use a
+// documented fallback glyph. There is no path-data escape hatch: custom vector art belongs in
+// graphics.nx, where the geometry is validated, bounded, and composable.
+export external component
+<Icon extends UiCommon
+  name: string
+  set: string?                      // null means the host default icon set
+  size: float64?                    // sets both dimensions; explicit width/height wins over it
+  color: Color?
+/>

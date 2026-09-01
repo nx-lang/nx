@@ -1720,8 +1720,8 @@ fn ir_semantic_type_shape(ty: &Type) -> NxIrSemanticTypeShape {
             params: params.iter().map(ir_semantic_type).collect(),
             return_type: Box::new(ir_semantic_type(ret)),
         },
-        Type::Named(name) => NxIrSemanticTypeShape::Named {
-            name: name.as_str().to_string(),
+        Type::Named(named) => NxIrSemanticTypeShape::Named {
+            name: named.name.as_str().to_string(),
         },
         Type::Union(union_ty) => NxIrSemanticTypeShape::Union {
             name: union_ty.name.as_str().to_string(),

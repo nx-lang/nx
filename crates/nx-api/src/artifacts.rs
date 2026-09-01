@@ -6,10 +6,11 @@ use crate::source_graph::{
 use crate::workspace::{normalize_workspace_identity, normalize_workspace_import_identity};
 use crate::{NxDiagnostic, NxWorkspace};
 use nx_diagnostics::{Diagnostic, Label, Severity, TextSize, TextSpan};
+use nx_hir::module_namespace_from_bindings;
 use nx_hir::{
     ast::TypeRef, binding_specs_for_item, local_definition_id, lower, Import, ImportKind,
     ImportedRawRef, InterfaceField, InterfaceItem, InterfaceItemKind, InterfaceParam, Item,
-    LocalDefinitionId, LoweredModule, LoweringDiagnostic, Name, PreparedBinding,
+    LocalDefinitionId, LoweredModule, LoweringDiagnostic, ModuleNamespace, Name, PreparedBinding,
     PreparedBindingOrigin, PreparedBindingTarget, PreparedModule, PreparedNamespace, RecordField,
     SelectiveImport, SourceId, UnionCaseField, Visibility,
 };
@@ -50,6 +51,11 @@ pub struct LibraryArtifact {
     pub interface_items: Vec<LibraryInterfaceItem>,
     pub exported_items: FxHashMap<String, Vec<usize>>,
     pub visible_to_library_items: FxHashMap<String, Vec<usize>>,
+    /// The namespace each of this library's modules resolves in, keyed by module identity.
+    ///
+    /// A consumer reads a declaration's type references in the namespace of the module that wrote
+    /// them, so it needs the answers that module reached, not only its own items.
+    pub namespaces: FxHashMap<String, Arc<ModuleNamespace>>,
     pub dependency_roots: Vec<PathBuf>,
     pub diagnostics: Vec<Diagnostic>,
     pub fingerprint: u64,
@@ -468,6 +474,23 @@ pub fn validate_workspace(
     diagnostics_to_api_with_sources(&analysis.diagnostics(), "", &analysis.source_map)
 }
 
+/// Analyzes every module of a logical workspace and returns their analysis artifacts.
+///
+/// Unlike [`build_workspace_program_artifact`] this needs no entry module and does not fail on
+/// diagnostics, so it is what an editor can call against a workspace that is mid-edit. Each
+/// artifact carries the module's prepared bindings, which are the resolution the compiler itself
+/// used — an editor resolving through them sees the same import graph rather than a parallel one.
+pub fn analyze_workspace_modules(
+    workspace: &NxWorkspace,
+    build_context: &ProgramBuildContext,
+) -> Vec<ModuleArtifact> {
+    let provider = WorkspaceSourceProvider::new(workspace);
+    let Ok(graph) = provider.load_graph() else {
+        return Vec::new();
+    };
+    analyze_logical_module_graph(&graph, build_context).modules
+}
+
 /// Builds a reusable [`ProgramArtifact`] from a logical workspace and explicit entry identity.
 pub fn build_workspace_program_artifact(
     workspace: &NxWorkspace,
@@ -547,9 +570,34 @@ fn build_library_artifact_with_registry(
     let mut visible_to_library_items = FxHashMap::default();
     let mut diagnostics = Vec::new();
 
-    for (index, source_file) in source_files.iter().enumerate() {
-        let artifact =
-            analyze_library_source_file(&root_path, &source_files, &dependency_context, index);
+    // As in the workspace graph: a library module's contract has to be resolved in that module's
+    // namespace, which is only known once every module has been prepared.
+    let prepared_files = (0..source_files.len())
+        .map(|index| {
+            prepare_library_source_file(&root_path, &source_files, &dependency_context, index)
+        })
+        .collect::<Vec<_>>();
+    let namespaces = graph_namespaces(&prepared_files)
+        .into_iter()
+        .collect::<FxHashMap<_, _>>();
+
+    for prepared in prepared_files {
+        let artifact = match prepared {
+            PreparedSourceFile::ParseFailed(artifact) => artifact,
+            PreparedSourceFile::Prepared {
+                identity,
+                mut module,
+                diagnostics,
+                ..
+            } => {
+                for (peer_identity, namespace) in &namespaces {
+                    if peer_identity != &identity {
+                        module.add_peer_namespace(peer_identity.clone(), namespace.clone());
+                    }
+                }
+                finalize_module_artifact(&identity, *module, diagnostics)
+            }
+        };
         diagnostics.extend(artifact.diagnostics.iter().cloned());
 
         if let Some(module) = artifact.lowered_module.as_ref() {
@@ -581,7 +629,6 @@ fn build_library_artifact_with_registry(
             }
         }
 
-        let _ = source_file;
         modules.push(artifact);
     }
 
@@ -592,6 +639,7 @@ fn build_library_artifact_with_registry(
         interface_items,
         exported_items,
         visible_to_library_items,
+        namespaces,
         dependency_roots,
         diagnostics,
         fingerprint: hasher.finish(),
@@ -649,16 +697,20 @@ fn read_library_source_files(root_path: &Path) -> io::Result<Vec<LibrarySourceFi
     Ok(source_files)
 }
 
-fn analyze_library_source_file(
+fn prepare_library_source_file(
     library_root: &Path,
     source_files: &[LibrarySourceFile],
     dependency_context: &ProgramBuildContext,
     current_file_index: usize,
-) -> ModuleArtifact {
+) -> PreparedSourceFile {
     let source_file = &source_files[current_file_index];
     let diagnostics = source_file.diagnostics.clone();
     let Some(preserved_module) = source_file.preserved_module.clone() else {
-        return parse_failure_artifact(&source_file.file_name, source_file.source_id, diagnostics);
+        return PreparedSourceFile::ParseFailed(parse_failure_artifact(
+            &source_file.file_name,
+            source_file.source_id,
+            diagnostics,
+        ));
     };
     let mut prepared_module = PreparedModule::new(&source_file.file_name, preserved_module);
     apply_build_context_imports(
@@ -673,7 +725,13 @@ fn analyze_library_source_file(
         source_files,
         current_file_index,
     );
-    finalize_module_artifact(&source_file.file_name, prepared_module, diagnostics)
+    PreparedSourceFile::Prepared {
+        identity: source_file.file_name.clone(),
+        module: Box::new(prepared_module),
+        diagnostics,
+        libraries: Vec::new(),
+        selection_diagnostics: Vec::new(),
+    }
 }
 
 fn apply_current_library_items(
@@ -790,17 +848,41 @@ fn analyze_logical_module_graph(
     let mut modules = Vec::with_capacity(source_files.len());
     let mut libraries_by_root = FxHashMap::<PathBuf, Arc<LibraryArtifact>>::default();
 
-    for index in 0..source_files.len() {
-        let (mut artifact, libraries, selection_diagnostics) =
-            analyze_logical_source_file(&source_files, build_context, index);
-        artifact.diagnostics.extend(selection_diagnostics);
-        modules.push(artifact);
+    // Preparing every module before analyzing any of them is what lets each one resolve a type
+    // reference written by a peer in *that* peer's namespace. A peer's namespace is only known once
+    // its own imports have been applied, so it cannot be built while analyzing the module that
+    // needs it.
+    let prepared_files = (0..source_files.len())
+        .map(|index| prepare_logical_source_file(&source_files, build_context, index))
+        .collect::<Vec<_>>();
+    let namespaces = graph_namespaces(&prepared_files);
 
-        for library in libraries {
-            libraries_by_root
-                .entry(library.root_path.clone())
-                .or_insert(library);
-        }
+    for prepared in prepared_files {
+        let artifact = match prepared {
+            PreparedSourceFile::ParseFailed(artifact) => artifact,
+            PreparedSourceFile::Prepared {
+                identity,
+                mut module,
+                diagnostics,
+                libraries,
+                selection_diagnostics,
+            } => {
+                for (peer_identity, namespace) in &namespaces {
+                    if peer_identity != &identity {
+                        module.add_peer_namespace(peer_identity.clone(), namespace.clone());
+                    }
+                }
+                for library in libraries {
+                    libraries_by_root
+                        .entry(library.root_path.clone())
+                        .or_insert(library);
+                }
+                let mut artifact = finalize_module_artifact(&identity, *module, diagnostics);
+                artifact.diagnostics.extend(selection_diagnostics);
+                artifact
+            }
+        };
+        modules.push(artifact);
     }
 
     let mut libraries = libraries_by_root.into_values().collect::<Vec<_>>();
@@ -835,19 +917,58 @@ fn parse_logical_source_files(graph: &LogicalModuleGraph) -> Vec<GraphSourceFile
         .collect()
 }
 
-fn analyze_logical_source_file(
+/// One source file prepared for analysis, before type checking runs on any of them.
+enum PreparedSourceFile {
+    Prepared {
+        // Boxed so the prepared variant does not dwarf `ParseFailed`: a prepared module carries
+        // every binding and peer namespace, and the enum is held one per source file.
+        identity: String,
+        module: Box<PreparedModule>,
+        diagnostics: Vec<Diagnostic>,
+        libraries: Vec<Arc<LibraryArtifact>>,
+        selection_diagnostics: Vec<Diagnostic>,
+    },
+    ParseFailed(ModuleArtifact),
+}
+
+/// The namespace each prepared module resolves in, keyed by module identity.
+/// The namespace each prepared module resolves in, shared rather than copied into every peer.
+///
+/// Every module registers every other module's namespace, so copying the maps would cost a clone
+/// per module pair for something none of them mutates.
+fn graph_namespaces(prepared_files: &[PreparedSourceFile]) -> Vec<(String, Arc<ModuleNamespace>)> {
+    prepared_files
+        .iter()
+        .filter_map(|prepared| match prepared {
+            PreparedSourceFile::Prepared {
+                identity, module, ..
+            } => Some((
+                identity.clone(),
+                Arc::new(module_namespace_from_bindings(
+                    identity,
+                    module
+                        .bindings(PreparedNamespace::Type)
+                        .chain(module.bindings(PreparedNamespace::Element)),
+                )),
+            )),
+            PreparedSourceFile::ParseFailed(_) => None,
+        })
+        .collect()
+}
+
+fn prepare_logical_source_file(
     source_files: &[GraphSourceFile],
     build_context: &ProgramBuildContext,
     current_file_index: usize,
-) -> (ModuleArtifact, Vec<Arc<LibraryArtifact>>, Vec<Diagnostic>) {
+) -> PreparedSourceFile {
     let source_file = &source_files[current_file_index];
     let diagnostics = source_file.diagnostics.clone();
     let Some(preserved_module) = source_file.preserved_module.clone() else {
-        return (
-            parse_failure_artifact(&source_file.identity, source_file.source_id, diagnostics),
-            Vec::new(),
-            Vec::new(),
-        );
+        return PreparedSourceFile::ParseFailed(parse_failure_artifact(
+            &source_file.identity,
+            source_file.source_id,
+            diagnostics,
+        ));
     };
 
     let mut prepared_module = PreparedModule::new(&source_file.identity, preserved_module);
@@ -865,11 +986,13 @@ fn analyze_logical_source_file(
         build_context,
     );
 
-    (
-        finalize_module_artifact(&source_file.identity, prepared_module, diagnostics),
-        selection.libraries,
-        selection.diagnostics,
-    )
+    PreparedSourceFile::Prepared {
+        identity: source_file.identity.clone(),
+        module: Box::new(prepared_module),
+        diagnostics,
+        libraries: selection.libraries,
+        selection_diagnostics: selection.diagnostics,
+    }
 }
 
 fn add_graph_peer_modules(
@@ -1465,6 +1588,9 @@ fn add_imported_interface_bindings(
     for artifact in &library.modules {
         if let Some(lowered_module) = artifact.lowered_module.as_ref() {
             module.add_peer_module(artifact.file_name.clone(), lowered_module.clone());
+        }
+        if let Some(namespace) = library.namespaces.get(&artifact.file_name) {
+            module.add_peer_namespace(artifact.file_name.clone(), namespace.clone());
         }
     }
 
@@ -2079,7 +2205,7 @@ fn type_to_type_ref(ty: &Type) -> Option<TypeRef> {
                 .collect::<Option<Vec<_>>>()?,
             type_to_type_ref(ret)?,
         )),
-        Type::Named(name) => Some(TypeRef::name(name.clone())),
+        Type::Named(named) => Some(TypeRef::name(named.name.clone())),
         Type::Union(union_type) => Some(TypeRef::name(union_type.name.clone())),
         Type::UnionCase(case_type) => {
             let qualified_name = format!("{}.{}", case_type.union, case_type.case);
@@ -2819,6 +2945,108 @@ let root() = { helper() }"#;
             .any(|diagnostic| { diagnostic.message().contains("does not export 'helper'") }));
     }
 
+    /// A union-typed property of a component imported from a built library.
+    ///
+    /// The consumer imports only `Img`, never `Fit`. Reading the contract must not require the
+    /// consumer to be able to name the type the contract mentions.
+    #[test]
+    fn library_component_union_property_resolves_without_importing_the_union() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("widgets.nx"),
+            r#"export type Fit = fill | contain | cover
+export let <Img fit: Fit = {Fit.fill} /> = <div fit={fit} />"#,
+        )
+        .expect("widgets file");
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("Expected ui registry load");
+        let build_context = registry.build_context();
+
+        let main_path = app_dir.join("main.nx");
+        let source = r#"import { Img } from "../ui"
+let root() = { <Img fit=stretch /> }"#;
+        fs::write(&main_path, source).expect("main file");
+
+        let artifact = build_program_artifact_from_source(
+            source,
+            &main_path.display().to_string(),
+            &build_context,
+        )
+        .expect("Expected program artifact");
+
+        assert!(
+            artifact.diagnostics.iter().any(|diagnostic| {
+                diagnostic
+                    .message()
+                    .contains("'stretch' is not a case of union '")
+                    && diagnostic.message().contains("fill, contain, cover")
+            }),
+            "expected the library's own cases, got: {:?}",
+            artifact.diagnostics
+        );
+    }
+
+    /// The same transitive case, across a library boundary.
+    ///
+    /// `Panel` is declared in one library module and typed by a union declared in a sibling module
+    /// of the same library. The consumer imports neither, and declares its own same-named `Fit`.
+    #[test]
+    fn a_library_property_typed_by_a_sibling_module_union_does_not_bind_locally() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("fit.nx"),
+            r#"export type Fit = fill | contain | cover"#,
+        )
+        .expect("fit file");
+        fs::write(
+            ui_dir.join("panel.nx"),
+            r#"export let <Panel fit: Fit = {Fit.fill} /> = <div fit={fit} />"#,
+        )
+        .expect("panel file");
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("Expected ui registry load");
+        let build_context = registry.build_context();
+
+        let main_path = app_dir.join("main.nx");
+        let source = r#"import { Panel } from "../ui"
+type Fit = stretch | squish
+let root() = { <Panel fit=stretch /> }"#;
+        fs::write(&main_path, source).expect("main file");
+
+        let artifact = build_program_artifact_from_source(
+            source,
+            &main_path.display().to_string(),
+            &build_context,
+        )
+        .expect("Expected program artifact");
+
+        assert!(
+            artifact.diagnostics.iter().any(|diagnostic| {
+                diagnostic
+                    .message()
+                    .contains("fit.nx:Fit' Cases: fill, contain, cover")
+            }),
+            "expected the library's `Fit`, not the consumer's, got: {:?}",
+            artifact.diagnostics
+        );
+    }
+
     #[test]
     fn program_artifact_record_inheritance_resolves_imported_abstract_base() {
         let temp = TempDir::new().expect("temp dir");
@@ -3460,28 +3688,19 @@ let root() = { <Img fit=cover state=loading /> }"#,
         assert_eq!(diagnostics, Vec::<NxDiagnostic>::new());
     }
 
+    /// A bare case of a union the using module cannot name is accepted.
+    ///
+    /// `contextual-literal-binding` resolved this correctly and then reported that `Fit` had to be
+    /// imported, because the rewrite it produced was resolved downstream by visible name. The
+    /// rewrite now carries the union's declaring origin, so there is nothing left to import for.
     #[test]
-    fn bare_name_at_an_imported_property_reports_that_the_type_needs_importing() {
-        let messages = contextual_messages(
+    fn bare_name_at_an_imported_property_needs_no_import_of_its_type() {
+        let diagnostics = contextual_workspace(
             r#"import { Img } from "./widgets.nx"
 let root() = { <Img fit=cover state=loading /> }"#,
         );
 
-        // Resolution succeeds against the declaring module, so the member is never reported as
-        // unknown; what it cannot yet do is carry that origin through lowering.
-        assert!(
-            messages
-                .iter()
-                .any(|message| message.contains("'cover' resolves to 'Fit.cover'")
-                    && message.contains("import 'Fit'")),
-            "expected the import guidance for a foreign enum, got: {messages:?}"
-        );
-        assert!(
-            !messages
-                .iter()
-                .any(|message| message.contains("resolves only against an enum or union")),
-            "the member must resolve, not fall through as a non-nominal type: {messages:?}"
-        );
+        assert_eq!(diagnostics, Vec::<NxDiagnostic>::new());
     }
 
     #[test]
@@ -3494,10 +3713,9 @@ type Fit = stretch | squish
 let root() = { <Img fit=stretch state={LoadState.idle} /> }"#,
         );
         assert!(
-            bare.iter().any(
-                |message| message.contains("'stretch' is not a case of union 'Fit'")
-                    && message.contains("fill, contain, cover")
-            ),
+            bare.iter().any(|message| message
+                .contains("'stretch' is not a case of union 'widgets.nx:Fit'")
+                && message.contains("fill, contain, cover")),
             "expected the declaring module's cases, got: {bare:?}"
         );
 
@@ -3514,19 +3732,1087 @@ let root() = { <Img fit={Fit.stretch} state={LoadState.idle} /> }"#,
         );
     }
 
+    /// A workspace where the declaring module and the consumer both declare a union named `S`.
+    ///
+    /// The two agree on their name and on their case names; only a payload field's type differs.
+    /// Nothing observable about the shapes distinguishes them, so only declaring origin can.
+    fn collision_workspace(app: &str) -> Vec<String> {
+        let workspace = workspace(vec![
+            workspace_module("app.nx", app.as_bytes().to_vec()),
+            workspace_module(
+                "widgets.nx",
+                br#"export type S =
+  | idle
+  | busy { n: int }
+export let <Draw s: S = {<S.idle />} /> = <div class="d" />"#
+                    .to_vec(),
+            ),
+        ]);
+        validate_workspace(&workspace, &ProgramBuildContext::empty())
+            .iter()
+            .map(|diagnostic| diagnostic.message.clone())
+            .collect()
+    }
+
+    /// Two unions that agree on every case name are still two types.
+    ///
+    /// This is the half of the same-name collision that survives shape comparison: a `string`
+    /// reaches a field the declaring module typed `int`, because `UnionType` equality never looked
+    /// past the case names.
     #[test]
-    fn bare_name_under_a_wildcard_alias_resolves_and_reports_the_same_guidance() {
-        let messages = contextual_messages(
-            r#"import "./widgets.nx" as ui
-let root() = { <ui.Img fit=cover state=loading /> }"#,
+    fn a_same_named_local_union_does_not_satisfy_a_foreign_union_with_matching_case_names() {
+        let messages = collision_workspace(
+            r#"import { Draw } from "./widgets.nx"
+type S =
+  | idle
+  | busy { n: string }
+let root() = { <Draw s={<S.busy n="wrong" />} /> }"#,
+        );
+
+        assert!(
+            messages.iter().any(|message| {
+                message.contains("Property 's' on 'Draw' expects")
+                    && message.contains("widgets.nx:S")
+                    && message.contains("app.nx:S")
+            }),
+            "expected a rejection naming both declaring modules, got: {messages:?}"
+        );
+    }
+
+    /// The sibling case, where the two unions differ in their case names, is already rejected.
+    ///
+    /// `replace-enums-with-unions` closed it by making `(UnionCase, Union)` compatibility require
+    /// the union to declare the case, and by resolving a contextual name against the resolved
+    /// type's own cases. Asserted here so origin-based identity does not silently reopen it.
+    #[test]
+    fn a_same_named_local_union_with_different_case_names_stays_rejected() {
+        let messages = collision_workspace(
+            r#"import { Draw } from "./widgets.nx"
+type S = idle | spinning
+let root() = { <Draw s=spinning /> }"#,
         );
 
         assert!(
             messages
                 .iter()
-                .any(|message| message.contains("'cover' resolves to 'Fit.cover'")),
-            "expected resolution through the alias, got: {messages:?}"
+                .any(|message| message.contains("'spinning' is not a case of union 'widgets.nx:S'")),
+            "expected the declaring module's cases, got: {messages:?}"
         );
+    }
+
+    /// Identical shapes are still two types.
+    ///
+    /// The consumer's `S` agrees with the widgets `S` on its name, its case names, and its payload
+    /// field types. Nothing observable about the two declarations differs, which is exactly why
+    /// only declaring origin can tell them apart.
+    #[test]
+    fn a_same_named_local_union_is_rejected_even_when_it_declares_an_identical_shape() {
+        let messages = collision_workspace(
+            r#"import { Draw } from "./widgets.nx"
+type S =
+  | idle
+  | busy { n: int }
+let root() = { <Draw s={<S.busy n=1 />} /> }"#,
+        );
+
+        assert!(
+            !messages.is_empty(),
+            "a local `S` is a different type however closely it copies the widgets `S`"
+        );
+    }
+
+    /// A bare case of a union the using module cannot name must reach the runtime.
+    ///
+    /// The bare and qualified spellings differ only in whether the union was imported, which is a
+    /// fact about the use site's namespace, not about the value. Evaluating both is the end-to-end
+    /// check that the spelling is not observable below type checking.
+    #[test]
+    fn a_bare_case_of_an_unimported_union_evaluates_as_the_qualified_form_does() {
+        fn eval_app(app: &str) -> nx_value::NxValue {
+            let workspace = workspace(vec![
+                workspace_module("app.nx", app.as_bytes().to_vec()),
+                workspace_module(
+                    "widgets.nx",
+                    br#"export type Fit = fill | contain | cover
+export let <Img fit: Fit = {Fit.fill} /> = <div fit={fit} />"#
+                        .to_vec(),
+                ),
+            ]);
+            let artifact = build_workspace_program_artifact(
+                &workspace,
+                "app.nx",
+                &ProgramBuildContext::empty(),
+            )
+            .unwrap_or_else(|diagnostics| {
+                panic!("workspace artifact: {diagnostics:?}");
+            });
+            let EvalResult::Ok(value) = eval_program_artifact(&artifact) else {
+                panic!("expected evaluation to succeed");
+            };
+            value
+        }
+
+        let bare = eval_app(
+            r#"import { Img } from "./widgets.nx"
+let root() = { <Img fit=cover /> }"#,
+        );
+        let qualified = eval_app(
+            r#"import { Img, Fit } from "./widgets.nx"
+let root() = { <Img fit={Fit.cover} /> }"#,
+        );
+
+        assert_eq!(
+            bare, qualified,
+            "importing the union changes what the author may write, not what the value is"
+        );
+    }
+
+    /// A workspace where the declaring module and the consumer both declare a record named `Point`.
+    ///
+    /// The two agree on their name and on their field names; only a field's type differs. Nothing
+    /// observable about the shapes distinguishes them, so only declaring origin can.
+    fn record_collision_workspace(app: &str) -> Vec<String> {
+        let workspace = workspace(vec![
+            workspace_module("app.nx", app.as_bytes().to_vec()),
+            workspace_module(
+                "widgets.nx",
+                br#"export type Point = { x: int }
+export let <Plot p: Point = {<Point x=0 />} /> = <div x={p.x} />"#
+                    .to_vec(),
+            ),
+        ]);
+        validate_workspace(&workspace, &ProgramBuildContext::empty())
+            .iter()
+            .map(|diagnostic| diagnostic.message.clone())
+            .collect()
+    }
+
+    /// Two records that agree on every field name are still two types.
+    ///
+    /// This is the record half of the same-name collision: a `string` reaches a field the
+    /// declaring module typed `int`, because a record type carried only its spelling.
+    #[test]
+    fn a_same_named_local_record_does_not_satisfy_a_foreign_record() {
+        let messages = record_collision_workspace(
+            r#"import { Plot } from "./widgets.nx"
+type Point = { x: string }
+let root() = { <Plot p={<Point x="oops" />} /> }"#,
+        );
+
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("expects widgets.nx:Point, found app.nx:Point")),
+            "a local `Point` must not stand in for the widgets `Point`, got: {messages:?}"
+        );
+    }
+
+    /// Identical shapes are still two types.
+    ///
+    /// The consumer's `Point` agrees with the widgets `Point` on its name and on its field types.
+    /// Nothing observable about the two declarations differs, which is exactly why only declaring
+    /// origin can tell them apart.
+    #[test]
+    fn a_same_named_local_record_is_rejected_even_when_it_declares_an_identical_shape() {
+        let messages = record_collision_workspace(
+            r#"import { Plot } from "./widgets.nx"
+type Point = { x: int }
+let root() = { <Plot p={<Point x=1 />} /> }"#,
+        );
+
+        assert!(
+            !messages.is_empty(),
+            "a local `Point` is a different type however closely it copies the widgets `Point`"
+        );
+    }
+
+    /// The record the declaration actually named still satisfies it.
+    ///
+    /// Origin narrows what counts as the same type; it must not reject the type the contract
+    /// names. Importing `Point` reaches the same declaration `Plot`'s property was typed by.
+    #[test]
+    fn the_imported_record_a_property_names_still_satisfies_it() {
+        let messages = record_collision_workspace(
+            r#"import { Plot, Point } from "./widgets.nx"
+let root() = { <Plot p={<Point x=1 />} /> }"#,
+        );
+
+        assert!(
+            messages.is_empty(),
+            "the widgets `Point` is the type the contract names, got: {messages:?}"
+        );
+    }
+
+    /// A record's base is a name *its* module wrote, so it resolves there.
+    ///
+    /// The consumer never names `Shape` and cannot: the inheritance chain is walked in the module
+    /// that declared each link, not in the module doing the asking.
+    #[test]
+    fn a_foreign_record_satisfies_a_base_the_consumer_cannot_name() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "app.nx",
+                br#"import { Draw, Circle } from "./widgets.nx"
+let root() = { <Draw s={<Circle r=1 />} /> }"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "widgets.nx",
+                br#"export abstract type Shape = { label: string? }
+export type Circle extends Shape = { r: int }
+export let <Draw s: Shape = {<Circle r=0 />} /> = <div r={s.r} />"#
+                    .to_vec(),
+            ),
+        ]);
+
+        let messages = validate_workspace(&workspace, &ProgramBuildContext::empty())
+            .iter()
+            .map(|diagnostic| diagnostic.message.clone())
+            .collect::<Vec<_>>();
+
+        assert!(
+            messages.is_empty(),
+            "a base resolved in the declaring module must still be satisfied, got: {messages:?}"
+        );
+    }
+
+    /// A local record extending a same-named local base does not satisfy the foreign base.
+    ///
+    /// Both lineages spell their base `Shape`, so a chain of names alone says they match. The
+    /// declarations do not, and the field types differ, which is what the rejection protects.
+    #[test]
+    fn a_local_lineage_spelled_like_a_foreign_one_does_not_satisfy_it() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "app.nx",
+                br#"import { Draw } from "./widgets.nx"
+abstract type Shape = { label: int? }
+type Circle extends Shape = { r: int }
+let root() = { <Draw s={<Circle r=1 />} /> }"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "widgets.nx",
+                br#"export abstract type Shape = { label: string? }
+export type Circle extends Shape = { r: int }
+export let <Draw s: Shape = {<Circle r=0 />} /> = <div r={s.r} />"#
+                    .to_vec(),
+            ),
+        ]);
+
+        let messages = validate_workspace(&workspace, &ProgramBuildContext::empty())
+            .iter()
+            .map(|diagnostic| diagnostic.message.clone())
+            .collect::<Vec<_>>();
+
+        assert!(
+            !messages.is_empty(),
+            "a local `Shape` lineage must not stand in for the widgets one, got no diagnostics"
+        );
+    }
+
+    /// A workspace whose widgets module declares a union over an abstract base of its own.
+    ///
+    /// `widgetShape` hands the consumer a value of that union without the consumer naming either
+    /// the union or its base, so a declaration the consumer writes under those spellings is the
+    /// only thing that could capture them.
+    fn union_base_workspace(app: &str) -> Vec<String> {
+        let workspace = workspace(vec![
+            workspace_module("app.nx", app.as_bytes().to_vec()),
+            workspace_module(
+                "widgets.nx",
+                br#"export abstract type Drawable = { ink:string = "black" }
+export type Shape extends Drawable =
+  | circle
+  | square
+export let widgetShape: Shape = {Shape.circle}
+export let <Ink d: Drawable /> = <div ink={d.ink} />"#
+                    .to_vec(),
+            ),
+        ]);
+        validate_workspace(&workspace, &ProgramBuildContext::empty())
+            .iter()
+            .map(|diagnostic| diagnostic.message.clone())
+            .collect()
+    }
+
+    /// A union's base is a name *its* module wrote, reached from the union's own declaration.
+    ///
+    /// The union type flowing in carries its origin, so the declaration behind it is the one that
+    /// answers. Selecting the definition by spelling instead finds the consumer's unrelated
+    /// `Shape`, which has no base, and rejects a value that does satisfy `Drawable`.
+    #[test]
+    fn a_foreign_unions_base_is_read_from_its_own_declaration() {
+        let messages = union_base_workspace(
+            r#"import { Ink, widgetShape } from "./widgets.nx"
+type Shape = circle | square
+let root() = { <Ink d={widgetShape} /> }"#,
+        );
+
+        assert!(
+            messages.is_empty(),
+            "a foreign union must still satisfy the base it extends, got: {messages:?}"
+        );
+    }
+
+    /// The mirror: a local union's base does not answer for a foreign union that shares its name.
+    ///
+    /// Both modules spell the base `Drawable`, and the consumer's union extends its own. Reading
+    /// the base off the local declaration would make the widgets `Shape` satisfy a record it has
+    /// no relationship to.
+    #[test]
+    fn a_same_named_local_unions_base_does_not_answer_for_a_foreign_union() {
+        let messages = union_base_workspace(
+            r#"import { widgetShape } from "./widgets.nx"
+abstract type Drawable = { ink:string = "black" }
+type Shape extends Drawable =
+  | circle
+  | square
+let <Ink d: Drawable /> = <div ink={d.ink} />
+let root() = { <Ink d={widgetShape} /> }"#,
+        );
+
+        assert!(
+            !messages.is_empty(),
+            "a local `Drawable` must not accept the widgets `Shape`, got no diagnostics"
+        );
+    }
+
+    /// A shared field of a foreign union is typed by the base that union's module wrote.
+    ///
+    /// The two bases agree on the field's name and disagree on its type, so reading `ink` off the
+    /// local `Drawable` types it `int` and the `string` binding fails.
+    #[test]
+    fn a_shared_field_on_a_foreign_union_is_read_from_its_own_base() {
+        let messages = union_base_workspace(
+            r#"import { widgetShape } from "./widgets.nx"
+abstract type Drawable = { ink:int = 0 }
+type Shape extends Drawable =
+  | circle
+  | square
+let label: string = {widgetShape.ink}
+let root() = { <div label={label} /> }"#,
+        );
+
+        assert!(
+            messages.is_empty(),
+            "`ink` must come from the widgets `Drawable`, got: {messages:?}"
+        );
+    }
+
+    /// A union case's own field types are names its module wrote, so they resolve there.
+    ///
+    /// The consumer imports `Shape` and constructs one of its cases directly. `size` is typed by
+    /// the widgets `Size`, and the consumer declares an unrelated union under that spelling; the
+    /// bare `small` is a case of the former and not of the latter.
+    #[test]
+    fn a_foreign_union_cases_field_types_resolve_in_its_own_module() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "app.nx",
+                br#"import { Shape, Ink } from "./widgets.nx"
+type Size = tiny | huge
+let root() = { <Ink d={<Shape.circle size=small />} /> }"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "widgets.nx",
+                br#"export abstract type Drawable = { ink:string = "black" }
+export type Size = small | large
+export type Shape extends Drawable =
+  | circle { size: Size = {Size.small} }
+  | square
+export let <Ink d: Drawable /> = <div ink={d.ink} />"#
+                    .to_vec(),
+            ),
+        ]);
+
+        let messages = validate_workspace(&workspace, &ProgramBuildContext::empty())
+            .iter()
+            .map(|diagnostic| diagnostic.message.clone())
+            .collect::<Vec<_>>();
+
+        assert!(
+            messages.is_empty(),
+            "`size` must be typed by the widgets `Size`, got: {messages:?}"
+        );
+    }
+
+    /// Two foreign unions a consumer receives under one spelling are still two declarations.
+    ///
+    /// The consumer names neither `Shape`, and each value has to keep reaching the base its own
+    /// module wrote. Caching foreign unions by the spelling they arrived under keeps only whichever
+    /// arrived second, and the other value's base becomes unreachable.
+    #[test]
+    fn two_foreign_unions_sharing_a_name_stay_distinct() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "app.nx",
+                br#"import { Ink, widgetShape } from "./widgets.nx"
+import { Edge, chartShape } from "./charts.nx"
+let inked = <Ink d={widgetShape} />
+let edged = <Edge o={chartShape} />
+let root() = { <div /> }"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "widgets.nx",
+                br#"export abstract type Drawable = { ink:string = "black" }
+export type Shape extends Drawable =
+  | circle
+  | square
+export let widgetShape: Shape = {Shape.circle}
+export let <Ink d: Drawable /> = <div ink={d.ink} />"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "charts.nx",
+                br#"export abstract type Outline = { weight:int = 1 }
+export type Shape extends Outline =
+  | wedge
+  | bar
+export let chartShape: Shape = {Shape.wedge}
+export let <Edge o: Outline /> = <div weight={o.weight} />"#
+                    .to_vec(),
+            ),
+        ]);
+
+        let messages = validate_workspace(&workspace, &ProgramBuildContext::empty())
+            .iter()
+            .map(|diagnostic| diagnostic.message.clone())
+            .collect::<Vec<_>>();
+
+        assert!(
+            messages.is_empty(),
+            "each foreign `Shape` must keep its own base, got: {messages:?}"
+        );
+    }
+
+    /// A contract typed by a *type alias* still names what the declaring module named.
+    ///
+    /// An alias is a type reference like any other, so the module that wrote it is where it
+    /// resolves. Stopping at the alias hands the reference back to the consumer's namespace, where
+    /// a same-named local declaration answers for it — and, because the alias resolves to something
+    /// in the end, silently.
+    #[test]
+    fn a_foreign_contract_typed_by_an_alias_resolves_in_its_own_module() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "app.nx",
+                br#"import { Img } from "./widgets.nx"
+type FitAlias = stretch | squish
+let root() = { <Img fit=stretch /> }"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "widgets.nx",
+                br#"export type Fit = fill | contain | cover
+type FitAlias = Fit
+export let <Img fit: FitAlias = {Fit.fill} /> = <div class="img" />"#
+                    .to_vec(),
+            ),
+        ]);
+
+        let messages = validate_workspace(&workspace, &ProgramBuildContext::empty())
+            .iter()
+            .map(|diagnostic| diagnostic.message.clone())
+            .collect::<Vec<_>>();
+
+        assert!(
+            messages.iter().any(|message| {
+                message.contains("'stretch' is not a case of union 'Fit'")
+                    && message.contains("fill, contain, cover")
+            }),
+            "the alias must denote the widgets `Fit`, got: {messages:?}"
+        );
+    }
+
+    /// The record half of the same rule.
+    #[test]
+    fn a_foreign_contract_typed_by_an_alias_to_a_record_resolves_in_its_own_module() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "app.nx",
+                br#"import { Plot } from "./widgets.nx"
+type PointAlias = { x: string }
+let root() = { <Plot p={<PointAlias x="oops" />} /> }"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "widgets.nx",
+                br#"export type Point = { x: int }
+type PointAlias = Point
+export let <Plot p: PointAlias /> = <div class="plot" />"#
+                    .to_vec(),
+            ),
+        ]);
+
+        let messages = validate_workspace(&workspace, &ProgramBuildContext::empty())
+            .iter()
+            .map(|diagnostic| diagnostic.message.clone())
+            .collect::<Vec<_>>();
+
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("expects Point, found PointAlias")),
+            "the alias must denote the widgets `Point`, got: {messages:?}"
+        );
+    }
+
+    /// An aliased contract the consumer can satisfy is still satisfied.
+    ///
+    /// Following the alias must narrow what counts as the same type, not reject the type the
+    /// contract actually names.
+    #[test]
+    fn an_aliased_contract_still_accepts_the_type_it_names() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "app.nx",
+                br#"import { Img, Fit } from "./widgets.nx"
+let root() = { <Img fit={Fit.cover} /> }"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "widgets.nx",
+                br#"export type Fit = fill | contain | cover
+type FitAlias = Fit
+export let <Img fit: FitAlias = {Fit.fill} /> = <div class="img" />"#
+                    .to_vec(),
+            ),
+        ]);
+
+        let messages = validate_workspace(&workspace, &ProgramBuildContext::empty())
+            .iter()
+            .map(|diagnostic| diagnostic.message.clone())
+            .collect::<Vec<_>>();
+
+        assert!(
+            messages.is_empty(),
+            "the widgets `Fit` must satisfy a property typed by an alias to it, got: {messages:?}"
+        );
+    }
+
+    /// A mismatch between a union and one of its namesake's cases names both declaring modules.
+    ///
+    /// `expects Fit, found Fit.cover` renders as two different strings and says nothing: one `Fit`
+    /// is the expectation and the other is the author's, and the line does not say which is which.
+    #[test]
+    fn a_qualified_form_mismatch_names_the_declaring_modules() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "app.nx",
+                br#"import { Img } from "./widgets.nx"
+type Fit = cover | squish
+let root() = { <Img fit={Fit.cover} /> }"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "widgets.nx",
+                br#"export type Fit = fill | contain | cover
+export let <Img fit: Fit = {Fit.fill} /> = <div class="img" />"#
+                    .to_vec(),
+            ),
+        ]);
+
+        let messages = validate_workspace(&workspace, &ProgramBuildContext::empty())
+            .iter()
+            .map(|diagnostic| diagnostic.message.clone())
+            .collect::<Vec<_>>();
+
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("expects widgets.nx:Fit, found app.nx:Fit.cover")),
+            "expected both declaring modules to be named, got: {messages:?}"
+        );
+    }
+
+    /// A record extending a same-named base in another module is not a cycle.
+    ///
+    /// The inheritance walk crosses module boundaries, so keying it by spelling reads the base as a
+    /// repeat visit of the record that extends it. The inherited fields disappear along with it.
+    #[test]
+    fn a_record_extending_a_same_named_foreign_base_is_not_a_cycle() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "app.nx",
+                br#"import { Shape as ui.Shape } from "./base.nx"
+type Shape extends ui.Shape = { r: int }
+let root() = { <Shape ink="black" r=1 /> }"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "base.nx",
+                br#"export abstract type Shape = { ink: string }"#.to_vec(),
+            ),
+        ]);
+
+        let messages = validate_workspace(&workspace, &ProgramBuildContext::empty())
+            .iter()
+            .map(|diagnostic| diagnostic.message.clone())
+            .collect::<Vec<_>>();
+
+        assert!(
+            messages.is_empty(),
+            "two same-named records in different modules are not a cycle, got: {messages:?}"
+        );
+    }
+
+    /// The component half of the same walk.
+    #[test]
+    fn a_component_extending_a_same_named_foreign_base_is_not_a_cycle() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "app.nx",
+                br#"import { Card as ui.Card } from "./base.nx"
+component <Card extends ui.Card r:int /> = { <div class="card" /> }
+let root() = { <Card ink="black" r=1 /> }"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "base.nx",
+                br#"export abstract component <Card ink:string />"#.to_vec(),
+            ),
+        ]);
+
+        let messages = validate_workspace(&workspace, &ProgramBuildContext::empty())
+            .iter()
+            .map(|diagnostic| diagnostic.message.clone())
+            .collect::<Vec<_>>();
+
+        assert!(
+            messages.is_empty(),
+            "two same-named components in different modules are not a cycle, got: {messages:?}"
+        );
+    }
+
+    /// A workspace whose widgets module exports a function over a union of its own.
+    fn union_signature_workspace(app: &str) -> Vec<String> {
+        let workspace = workspace(vec![
+            workspace_module("app.nx", app.as_bytes().to_vec()),
+            workspace_module(
+                "widgets.nx",
+                br#"export abstract type Drawable = { ink:string = "black" }
+export type Shape extends Drawable =
+  | circle
+  | square
+export let widgetShape: Shape = {Shape.circle}
+export let describe(s: Shape): string = "shape"
+export let makeShape(): Shape = {Shape.circle}
+export let <Ink d: Drawable /> = <div ink={d.ink} />"#
+                    .to_vec(),
+            ),
+        ]);
+        validate_workspace(&workspace, &ProgramBuildContext::empty())
+            .iter()
+            .map(|diagnostic| diagnostic.message.clone())
+            .collect()
+    }
+
+    /// A peer function's parameter annotation is a name its own module wrote.
+    ///
+    /// `describe` takes the widgets `Shape`. Resolving that annotation in the consumer finds the
+    /// consumer's unrelated union of the same name and rejects the argument.
+    #[test]
+    fn a_peer_functions_parameter_type_resolves_in_its_own_module() {
+        let messages = union_signature_workspace(
+            r#"import { widgetShape, describe } from "./widgets.nx"
+type Shape = tiny | huge
+let label: string = {describe(widgetShape)}
+let root() = { <div label={label} /> }"#,
+        );
+
+        assert!(
+            messages.is_empty(),
+            "`describe` must take the widgets `Shape`, got: {messages:?}"
+        );
+    }
+
+    /// The same for a peer function's return annotation.
+    ///
+    /// Resolved in the consumer, `makeShape` returns the consumer's `Shape`, which extends nothing
+    /// and so cannot satisfy the widgets `Drawable`.
+    #[test]
+    fn a_peer_functions_return_type_resolves_in_its_own_module() {
+        let messages = union_signature_workspace(
+            r#"import { Ink, makeShape } from "./widgets.nx"
+type Shape = tiny | huge
+let root() = { <Ink d={makeShape()} /> }"#,
+        );
+
+        assert!(
+            messages.is_empty(),
+            "`makeShape` must return the widgets `Shape`, got: {messages:?}"
+        );
+    }
+
+    /// A workspace using a built library that exports a function over a union of its own.
+    ///
+    /// The consumer imports neither `Fit` nor anything that names it, and declares an unrelated
+    /// union under that spelling. Only the library's own signature can supply the type.
+    fn library_signature_program(temp: &TempDir, source: &str) -> Vec<nx_diagnostics::Diagnostic> {
+        let app_dir = temp.path().join("app");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("widgets.nx"),
+            r#"export type Fit = fill | contain | cover
+export let libraryFit: Fit = {Fit.fill}
+export let describe(fit: Fit): string = "fit"
+export let defaultFit(): Fit = {Fit.fill}
+export let <Img fit: Fit /> = <div fit={fit} />"#,
+        )
+        .expect("widgets file");
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("Expected ui registry load");
+        let build_context = registry.build_context();
+
+        let main_path = app_dir.join("main.nx");
+        fs::write(&main_path, source).expect("main file");
+
+        build_program_artifact_from_source(source, &main_path.display().to_string(), &build_context)
+            .expect("Expected program artifact")
+            .diagnostics
+    }
+
+    /// A library function's parameter annotation, read from its interface.
+    ///
+    /// `libraryFit` already carries the library's `Fit`. Resolving `describe`'s parameter in the
+    /// consumer types it as the consumer's unrelated union and rejects the argument.
+    #[test]
+    fn a_library_functions_parameter_type_resolves_in_its_own_module() {
+        let temp = TempDir::new().expect("temp dir");
+        let diagnostics = library_signature_program(
+            &temp,
+            r#"import { describe, libraryFit } from "../ui"
+type Fit = tiny | huge
+let label: string = {describe(libraryFit)}
+let root() = { <div label={label} /> }"#,
+        );
+
+        assert!(
+            diagnostics.is_empty(),
+            "`describe` must take the library's `Fit`, got: {diagnostics:?}"
+        );
+    }
+
+    /// The same for a library function's return annotation.
+    ///
+    /// `Img`'s property is typed by the library's `Fit`, so a return resolved in the consumer
+    /// cannot satisfy it.
+    #[test]
+    fn a_library_functions_return_type_resolves_in_its_own_module() {
+        let temp = TempDir::new().expect("temp dir");
+        let diagnostics = library_signature_program(
+            &temp,
+            r#"import { Img, defaultFit } from "../ui"
+type Fit = tiny | huge
+let root() = { <Img fit={defaultFit()} /> }"#,
+        );
+
+        assert!(
+            diagnostics.is_empty(),
+            "`defaultFit` must return the library's `Fit`, got: {diagnostics:?}"
+        );
+    }
+
+    /// A property typed by a record the *declaring* module imported resolves where it was written.
+    ///
+    /// The record half of the transitive case: `panel.nx` types `Panel`'s property by a `Point` it
+    /// imported rather than declared, so resolving that reference among `panel.nx`'s own items
+    /// finds nothing and falls back to the consumer's namespace.
+    #[test]
+    fn a_property_typed_by_a_record_the_declaring_module_imported_does_not_bind_locally() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "app.nx",
+                br#"import { Panel } from "./panel.nx"
+type Point = { x: string }
+let root() = { <Panel p={<Point x="oops" />} /> }"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "panel.nx",
+                br#"import { Point } from "./widgets.nx"
+export let <Panel p: Point = {<Point x=0 />} /> = <div x={p.x} />"#
+                    .to_vec(),
+            ),
+            workspace_module("widgets.nx", br#"export type Point = { x: int }"#.to_vec()),
+        ]);
+
+        let messages = validate_workspace(&workspace, &ProgramBuildContext::empty())
+            .iter()
+            .map(|diagnostic| diagnostic.message.clone())
+            .collect::<Vec<_>>();
+
+        assert!(
+            !messages.is_empty(),
+            "expected the widgets `Point`, not the consumer's, got no diagnostics"
+        );
+    }
+
+    /// A workspace where the declaring module and the consumer both declare a component `Card`.
+    ///
+    /// A component is the third nominal kind a property can be typed by, and it shares the
+    /// `Type::Named` representation with records. Both lineages spell their base `Card`, so a
+    /// chain of names alone says they match. The declarations do not.
+    fn component_collision_workspace(app: &str) -> Vec<String> {
+        let workspace = workspace(vec![
+            workspace_module("app.nx", app.as_bytes().to_vec()),
+            workspace_module(
+                "widgets.nx",
+                br#"export abstract component <Card label:string? />
+export component <Plain extends Card /> = { <div /> }
+export let <Draw s: Card /> = <div />"#
+                    .to_vec(),
+            ),
+        ]);
+        validate_workspace(&workspace, &ProgramBuildContext::empty())
+            .iter()
+            .map(|diagnostic| diagnostic.message.clone())
+            .collect()
+    }
+
+    #[test]
+    fn a_same_named_local_component_lineage_does_not_satisfy_a_foreign_one() {
+        let messages = component_collision_workspace(
+            r#"import { Draw } from "./widgets.nx"
+abstract component <Card label:int? />
+component <Fancy extends Card /> = { <div /> }
+let root() = { <Draw s={<Fancy />} /> }"#,
+        );
+
+        assert!(
+            !messages.is_empty(),
+            "a local `Card` lineage must not stand in for the widgets one, got no diagnostics"
+        );
+    }
+
+    /// The component the declaration actually named still satisfies it.
+    #[test]
+    fn a_foreign_component_satisfies_a_base_the_consumer_cannot_name() {
+        let messages = component_collision_workspace(
+            r#"import { Draw, Plain } from "./widgets.nx"
+let root() = { <Draw s={<Plain />} /> }"#,
+        );
+
+        assert!(
+            messages.is_empty(),
+            "a base resolved in the declaring module must still be satisfied, got: {messages:?}"
+        );
+    }
+
+    /// A declaration's property type is written in *its* namespace, which includes its imports.
+    ///
+    /// `Panel` is declared in `panel.nx` and typed by a union `panel.nx` imported rather than
+    /// declared. Resolving that reference among `panel.nx`'s own items finds nothing, and falling
+    /// back to the consumer's namespace is what lets an unrelated local `Fit` stand in for it.
+    #[test]
+    fn a_property_typed_by_a_union_the_declaring_module_imported_does_not_bind_locally() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "app.nx",
+                br#"import { Panel } from "./panel.nx"
+type Fit = stretch | squish
+let root() = { <Panel fit=stretch /> }"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "panel.nx",
+                br#"import { Fit } from "./widgets.nx"
+export let <Panel fit: Fit = {Fit.fill} /> = <div fit={fit} />"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "widgets.nx",
+                br#"export type Fit = fill | contain | cover"#.to_vec(),
+            ),
+        ]);
+
+        let messages = validate_workspace(&workspace, &ProgramBuildContext::empty())
+            .iter()
+            .map(|diagnostic| diagnostic.message.clone())
+            .collect::<Vec<_>>();
+
+        assert!(
+            messages.iter().any(|message| {
+                message.contains("'stretch' is not a case of union 'widgets.nx:Fit'")
+            }),
+            "expected the widgets `Fit`, not the consumer's, got: {messages:?}"
+        );
+    }
+
+    /// Under a wildcard alias the qualified form does not lower at all (`ui.Fit.cover` is
+    /// multi-segment member access), so the bare form is the only spelling that reaches the type.
+    /// `expects Fit, found Fit` says nothing. The declaring modules are what tell them apart.
+    #[test]
+    fn a_same_name_mismatch_names_the_declaring_modules() {
+        let messages = contextual_messages(
+            r#"import { Img } from "./widgets.nx"
+type Fit = fill | contain | cover
+let chosen: Fit = {Fit.cover}
+let root() = { <Img fit={chosen} state={LoadState.idle} /> }"#,
+        );
+
+        assert!(
+            messages.iter().any(|message| {
+                message.contains("expects widgets.nx:Fit") && message.contains("found app.nx:Fit")
+            }),
+            "expected both declaring modules named, got: {messages:?}"
+        );
+        assert!(
+            !messages
+                .iter()
+                .any(|message| message.contains("expects Fit, found Fit")),
+            "a type must not read as incompatible with itself: {messages:?}"
+        );
+    }
+
+    /// A message naming one nominal type stays unqualified.
+    #[test]
+    fn a_mismatch_between_differently_named_types_is_unqualified() {
+        let messages = contextual_messages(
+            r#"import { Img, Fit } from "./widgets.nx"
+let root() = { <Img fit="cover" state={LoadState.idle} /> }"#,
+        );
+
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("expects Fit, found string")),
+            "expected an unqualified message, got: {messages:?}"
+        );
+    }
+
+    /// A type reached under a name it was not declared with is still that type.
+    ///
+    /// A selective import alias makes `Fit` visible as `ui.Fit`. Its cases resolve against the
+    /// declaration, not against the visible spelling.
+    #[test]
+    fn identity_survives_a_rename_at_the_import_boundary() {
+        let diagnostics = contextual_workspace(
+            r#"import { Img, LoadState, Fit as ui.Fit } from "./widgets.nx"
+let chosen: ui.Fit = {ui.Fit.cover}
+let root() = { <Img fit={chosen} state={LoadState.idle} /> }"#,
+        );
+
+        assert_eq!(diagnostics, Vec::<NxDiagnostic>::new());
+    }
+
+    /// Reaching one declaration under two names must not make it two types.
+    ///
+    /// The other half of origin-based identity: it narrows what counts as the same type without
+    /// splitting a type that is legitimately reached by more than one route.
+    #[test]
+    fn one_union_reached_under_two_names_stays_one_type() {
+        let diagnostics = contextual_workspace(
+            r#"import { Img, LoadState, Fit, Fit as ui.Fit } from "./widgets.nx"
+let chosen: ui.Fit = {Fit.cover}
+let root() = { <Img fit={chosen} state={LoadState.idle} /> }"#,
+        );
+
+        assert_eq!(diagnostics, Vec::<NxDiagnostic>::new());
+    }
+
+    /// A visible binding whose name matches must not capture a reference to another definition.
+    ///
+    /// The consumer declares its own `Fit`, so the name is bound here — to a different union. The
+    /// bare case resolved against the widgets `Fit`, and it is that declaration the value must come
+    /// from, at type checking and at evaluation alike.
+    #[test]
+    fn a_visible_name_does_not_capture_a_reference_to_a_different_definition() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "app.nx",
+                br#"import { Img } from "./widgets.nx"
+type Fit = cover | squish
+let root() = { <Img fit=cover /> }"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "widgets.nx",
+                br#"export type Fit = fill | contain | cover
+export let <Img fit: Fit = {Fit.fill} /> = <div fit={fit} />"#
+                    .to_vec(),
+            ),
+        ]);
+
+        let artifact =
+            build_workspace_program_artifact(&workspace, "app.nx", &ProgramBuildContext::empty())
+                .unwrap_or_else(|diagnostics| panic!("workspace artifact: {diagnostics:?}"));
+        let EvalResult::Ok(value) = eval_program_artifact(&artifact) else {
+            panic!("expected evaluation to succeed");
+        };
+
+        assert_eq!(
+            value,
+            nx_value::NxValue::Record {
+                type_name: Some("div".to_string()),
+                properties: std::collections::BTreeMap::from([(
+                    "fit".to_string(),
+                    nx_value::NxValue::String("cover".to_string()),
+                )]),
+            }
+        );
+    }
+
+    /// A foreign case that inherits an abstract base is constructed with the base's fields.
+    ///
+    /// The base is resolved in the declaring module, which is the only module that can see it —
+    /// the consumer imports neither the union nor the base.
+    #[test]
+    fn a_foreign_case_inheriting_an_abstract_base_carries_its_base_fields() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "app.nx",
+                br#"import { Draw } from "./widgets.nx"
+let root() = { <Draw shape=circle /> }"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "widgets.nx",
+                br#"export abstract type Drawable = { ink: string = "black" }
+export type Shape extends Drawable =
+  | circle
+  | square
+export let <Draw shape: Shape = {Shape.circle} /> = <div ink={shape.ink} />"#
+                    .to_vec(),
+            ),
+        ]);
+
+        let artifact =
+            build_workspace_program_artifact(&workspace, "app.nx", &ProgramBuildContext::empty())
+                .unwrap_or_else(|diagnostics| panic!("workspace artifact: {diagnostics:?}"));
+        let EvalResult::Ok(value) = eval_program_artifact(&artifact) else {
+            panic!("expected evaluation to succeed");
+        };
+
+        assert_eq!(
+            value,
+            nx_value::NxValue::Record {
+                type_name: Some("div".to_string()),
+                properties: std::collections::BTreeMap::from([(
+                    "ink".to_string(),
+                    nx_value::NxValue::String("black".to_string()),
+                )]),
+            }
+        );
+    }
+
+    #[test]
+    fn bare_name_under_a_wildcard_alias_is_accepted() {
+        let diagnostics = contextual_workspace(
+            r#"import "./widgets.nx" as ui
+let root() = { <ui.Img fit=cover state=loading /> }"#,
+        );
+
+        assert_eq!(diagnostics, Vec::<NxDiagnostic>::new());
     }
 
     #[test]

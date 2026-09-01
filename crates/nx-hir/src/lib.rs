@@ -38,18 +38,20 @@ use smol_str::SmolStr;
 pub use lower::lower;
 pub use prepared::{
     binding_specs_for_item, interface_component, interface_function_signature, interface_record,
-    interface_type_alias, interface_union, local_definition_id, prepared_item_kind, ImportedRawRef,
+    interface_type_alias, interface_union, local_definition_id, module_namespace_from_bindings,
+    prepared_item_kind, same_declaration, DeclarationKey, DeclaringOrigin, ImportedRawRef,
     InterfaceField, InterfaceItem, InterfaceItemKind, InterfaceParam, InterfaceUnionCase,
-    LocalDefinitionId, PreparedBinding, PreparedBindingOrigin, PreparedBindingTarget,
-    PreparedItemKind, PreparedModule, PreparedNamespace, ResolvedPreparedItem,
+    LocalDefinitionId, ModuleNamespace, PreparedBinding, PreparedBindingOrigin,
+    PreparedBindingTarget, PreparedItemKind, PreparedModule, PreparedNamespace,
+    ResolvedPreparedItem,
 };
 
 pub use components::{
-    effective_component_contract, effective_component_contract_for_name,
-    apply_contextual_name_resolutions, promote_component_handler_bindings,
-    resolve_component_definition,
-    validate_component_definitions, ComponentResolutionError, EffectiveComponentContract,
-    InvalidComponentBaseReason,
+    apply_contextual_name_resolutions, component_declaration_origin, effective_component_contract,
+    effective_component_contract_at, effective_component_contract_for_name, is_component_subtype,
+    promote_component_handler_bindings, resolve_component_definition,
+    validate_component_definitions, ComponentAncestor, ComponentResolutionError, ContextualRewrite,
+    EffectiveComponentContract, InvalidComponentBaseReason,
 };
 
 // Re-export database types
@@ -57,10 +59,10 @@ pub use db::{DatabaseImpl, NxDatabase};
 
 // Re-export scope and symbol types
 pub use records::{
-    effective_record_shape, effective_record_shape_for_name, is_record_subtype,
+    effective_record_shape, effective_record_shape_at, effective_record_shape_for_name,
+    effective_record_shape_for_name_in, is_record_subtype, record_declaration_origin,
     resolve_record_definition, resolve_record_definition_with_module, validate_record_definitions,
-    EffectiveRecordShape,
-    InvalidBaseReason, RecordResolutionError,
+    EffectiveRecordShape, InvalidBaseReason, RecordAncestor, RecordResolutionError,
 };
 pub use scope::{
     build_scopes, check_undefined_identifiers, Scope, ScopeId, ScopeManager, Symbol, SymbolKind,
@@ -475,6 +477,20 @@ impl EffectiveField {
     }
 }
 
+/// One emitted action on a resolved component contract, with the module that declared the emit.
+///
+/// <para>An emit's action record is named in the module that wrote the `emits` clause, which need
+/// not be the module binding a handler to it. Carrying the declaring identity here is what lets a
+/// handler binding resolve the action where it was written — the same rule
+/// [`EffectiveField::module_identity`] applies to a field's declared type.</para>
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectiveEmit {
+    /// The emit as it was declared.
+    pub emit: ComponentEmit,
+    /// Stable identity of the module that declared the emit.
+    pub module_identity: String,
+}
+
 /// Distinguishes ordinary records from action records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecordKind {
@@ -831,6 +847,15 @@ impl LoweredModule {
     /// Find an item by name.
     pub fn find_item(&self, name: &str) -> Option<&Item> {
         self.items.iter().find(|item| item.name().as_str() == name)
+    }
+
+    /// Find an item by name, together with its stable local definition identity.
+    pub fn find_item_with_definition(&self, name: &str) -> Option<(LocalDefinitionId, &Item)> {
+        self.items
+            .iter()
+            .enumerate()
+            .find(|(_, item)| item.name().as_str() == name)
+            .map(|(index, item)| (LocalDefinitionId::new(index as u32), item))
     }
 
     /// Returns the stable local definition identity for one raw item index, if present.

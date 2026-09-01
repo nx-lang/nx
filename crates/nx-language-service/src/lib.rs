@@ -1,17 +1,17 @@
 //! Protocol-independent editor language service for NX.
 
 use nx_api::{
-    validate_workspace, NxDiagnostic, NxDiagnosticLabel, NxSeverity, NxWorkspace,
-    NxWorkspaceInputError, NxWorkspaceModule, ProgramBuildContext,
+    analyze_workspace_modules, validate_workspace, NxDiagnostic, NxDiagnosticLabel, NxSeverity,
+    NxWorkspace, NxWorkspaceInputError, NxWorkspaceModule, ProgramBuildContext,
 };
-use nx_hir::{ast::TypeRef, Item, RecordKind};
+use nx_hir::{ast::TypeRef, Item, LocalDefinitionId, PreparedNamespace, RecordKind};
 use nx_syntax::{parse_str, SyntaxKind, SyntaxNode};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use text_size::TextRange as ByteTextRange;
 use url::Url;
 
@@ -222,6 +222,12 @@ pub struct WorkspaceSnapshot {
     documents: Vec<DocumentSnapshot>,
     by_uri: FxHashMap<DocumentUri, usize>,
     by_identity: FxHashMap<String, usize>,
+    /// The workspace analysis every completion request reads, computed at most once.
+    ///
+    /// <para>Building it type checks every module in the workspace. A snapshot is immutable, so
+    /// the result is too, and a keystroke cannot afford to derive it again — the plain keyword
+    /// path pays for it as much as the ones that use it.</para>
+    declarations: OnceLock<Arc<WorkspaceDeclarations>>,
 }
 
 impl WorkspaceSnapshot {
@@ -269,6 +275,7 @@ impl WorkspaceSnapshot {
             documents: snapshots,
             by_uri,
             by_identity,
+            declarations: OnceLock::new(),
         })
     }
 
@@ -341,10 +348,9 @@ impl WorkspaceSnapshot {
             .ok_or_else(|| SnapshotError::UnknownDocument(uri.to_string()))?;
         let index = LineIndex::new(document.source());
         let offset = index.position_to_byte_offset(document.source(), position);
-        let declarations = self.workspace_declarations();
+        let scope = self.document_scope(document.identity.as_str());
 
-        let items = if let Some(members) =
-            property_value_context(document.source(), offset, &declarations)
+        let items = if let Some(members) = property_value_context(document.source(), offset, &scope)
         {
             // A bare value resolves against the property's declared type, so only its members are
             // valid here; lexically visible names cannot appear unbraced.
@@ -356,14 +362,13 @@ impl WorkspaceSnapshot {
                     detail: None,
                 })
                 .collect()
-        } else if let Some(context) =
-            component_property_context(document.source(), offset, &declarations)
+        } else if let Some(context) = component_property_context(document.source(), offset, &scope)
         {
             property_completion_items(context)
         } else if is_type_position(document.source(), offset) {
-            type_completion_items(&declarations)
+            type_completion_items(&scope)
         } else {
-            general_completion_items(&declarations)
+            general_completion_items(&scope)
         };
 
         Ok(CompletionList {
@@ -478,11 +483,102 @@ impl WorkspaceSnapshot {
         }
     }
 
-    fn workspace_declarations(&self) -> Vec<Declaration> {
-        self.documents
-            .iter()
-            .flat_map(declarations_for_document)
-            .collect()
+    /// Resolves what one document can see, through the same import graph the compiler uses.
+    fn document_scope(&self, identity: &str) -> DocumentScope {
+        let workspace = self.workspace_declarations();
+
+        // Only what the edited document itself can name. A declaration in a document it does not
+        // import is not a completion candidate, however its name is spelled.
+        let mut visible = FxHashMap::default();
+        if let Some(bindings) = workspace.visible_bindings.get(identity) {
+            for (name, target) in bindings {
+                if let Some(declaration) = workspace.by_origin.get(target) {
+                    visible.insert(
+                        name.clone(),
+                        Declaration {
+                            name: name.clone(),
+                            ..declaration.clone()
+                        },
+                    );
+                }
+            }
+        }
+
+        DocumentScope { visible, workspace }
+    }
+
+    /// Analyzes the workspace once and keeps the result for the snapshot's lifetime.
+    fn workspace_declarations(&self) -> Arc<WorkspaceDeclarations> {
+        Arc::clone(
+            self.declarations
+                .get_or_init(|| Arc::new(self.build_workspace_declarations())),
+        )
+    }
+
+    fn build_workspace_declarations(&self) -> WorkspaceDeclarations {
+        let Ok(workspace) = self.to_workspace() else {
+            return WorkspaceDeclarations::default();
+        };
+        let modules = analyze_workspace_modules(&workspace, &ProgramBuildContext::empty());
+
+        let mut declarations = WorkspaceDeclarations::default();
+        for module in &modules {
+            declarations.visible_bindings.insert(
+                module.file_name.clone(),
+                module
+                    .prepared_bindings
+                    .iter()
+                    .map(|binding| {
+                        (
+                            binding.visible_name.as_str().to_string(),
+                            (
+                                binding.module_identity(&module.file_name).to_string(),
+                                binding.definition_id(),
+                            ),
+                        )
+                    })
+                    .collect(),
+            );
+
+            declarations.type_namespaces.insert(
+                module.file_name.clone(),
+                module
+                    .prepared_bindings
+                    .iter()
+                    .filter(|binding| binding.namespace == PreparedNamespace::Type)
+                    .map(|binding| {
+                        (
+                            binding.visible_name.as_str().to_string(),
+                            (
+                                binding.module_identity(&module.file_name).to_string(),
+                                binding.definition_id(),
+                            ),
+                        )
+                    })
+                    .collect(),
+            );
+
+            let Some(lowered) = module.lowered_module.as_ref() else {
+                continue;
+            };
+            let source = self
+                .documents
+                .iter()
+                .find(|document| document.identity.as_str() == module.file_name)
+                .map(|document| document.source())
+                .unwrap_or("");
+            for (item_index, item) in lowered.items().iter().enumerate() {
+                let origin = (
+                    module.file_name.clone(),
+                    LocalDefinitionId::new(item_index as u32),
+                );
+                declarations
+                    .by_origin
+                    .insert(origin.clone(), declaration_from_item(item, source, origin));
+            }
+        }
+
+        declarations
     }
 }
 
@@ -777,9 +873,67 @@ struct Declaration {
     detail: String,
     properties: Vec<String>,
     /// Property name paired with the base name of its declared type, for contextual completions.
+    ///
+    /// The name is the one the *declaring* module wrote, so it is resolved in that module's
+    /// namespace rather than in the namespace of whoever is looking at it.
     property_types: Vec<(String, String)>,
     /// Union case names, for contextual completions at a value position.
     members: Vec<String>,
+    /// The declaration this came from, as `(module identity, definition id)`.
+    origin: DeclarationOrigin,
+}
+
+type DeclarationOrigin = (String, LocalDefinitionId);
+
+/// Everything one document can see, resolved through its own import graph.
+///
+/// Joining a flat list of every workspace declaration by name is what made an element resolve to
+/// whichever document happened to declare that spelling, alias or no alias, imported or not. Names
+/// here are resolved where they are written: a tag in the document being edited against that
+/// document's namespace, and a property's declared type against the namespace of the module that
+/// declared the property.
+#[derive(Default)]
+struct DocumentScope {
+    /// Declarations the edited document can name, keyed by the name it writes.
+    visible: FxHashMap<String, Declaration>,
+    /// The workspace analysis, shared by every document in the snapshot.
+    workspace: Arc<WorkspaceDeclarations>,
+}
+
+/// Everything a document scope reads that does not depend on which document is being edited.
+#[derive(Debug, Default)]
+struct WorkspaceDeclarations {
+    /// Every workspace declaration, keyed by where it is declared.
+    by_origin: FxHashMap<DeclarationOrigin, Declaration>,
+    /// The type namespace of each module, as `module identity → (visible name → origin)`.
+    type_namespaces: FxHashMap<String, FxHashMap<String, DeclarationOrigin>>,
+    /// Every visible binding of each module, as `module identity → (visible name, origin)`.
+    visible_bindings: FxHashMap<String, Vec<(String, DeclarationOrigin)>>,
+}
+
+impl DocumentScope {
+    /// The element or record a tag written in the edited document names.
+    fn element(&self, tag: &str) -> Option<&Declaration> {
+        self.visible.get(tag).filter(|declaration| {
+            matches!(
+                declaration.kind,
+                DocumentSymbolKind::Component | DocumentSymbolKind::Record
+            )
+        })
+    }
+
+    /// The declaration a type name written by the module at `origin` denotes.
+    fn type_in_module(&self, origin: &DeclarationOrigin, name: &str) -> Option<&Declaration> {
+        let target = self.workspace.type_namespaces.get(&origin.0)?.get(name)?;
+        self.workspace.by_origin.get(target)
+    }
+
+    /// Every declaration the edited document can name, in a stable order.
+    fn visible_declarations(&self) -> Vec<&Declaration> {
+        let mut declarations = self.visible.values().collect::<Vec<_>>();
+        declarations.sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
+        declarations
+    }
 }
 
 fn identity_from_uri(
@@ -976,8 +1130,13 @@ fn hir_document_symbols(document: &DocumentSnapshot) -> Vec<DocumentSymbol> {
     module
         .items()
         .iter()
-        .map(|item| {
-            let declaration = declaration_from_item(item, document.source());
+        .enumerate()
+        .map(|(item_index, item)| {
+            let origin = (
+                document.identity.as_str().to_string(),
+                LocalDefinitionId::new(item_index as u32),
+            );
+            let declaration = declaration_from_item(item, document.source(), origin);
             let range = item_span(item);
             DocumentSymbol {
                 name: declaration.name,
@@ -1132,25 +1291,20 @@ fn clean_symbol_name(text: &str) -> String {
         .collect()
 }
 
-fn declarations_for_document(document: &DocumentSnapshot) -> Vec<Declaration> {
-    let artifact = nx_types::analyze_str(document.source(), document.identity.as_str());
-    let Some(module) = artifact.lowered_module else {
-        return Vec::new();
-    };
-
-    module
-        .items()
-        .iter()
-        .map(|item| declaration_from_item(item, document.source()))
-        .collect::<Vec<_>>()
-}
-
-fn declaration_from_item(item: &Item, source: &str) -> Declaration {
+fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -> Declaration {
     match item {
         Item::Function(function) => {
-            let is_markup_function = source_text_for_range(source, function.span)
-                .trim_start()
-                .starts_with("let <");
+            // A markup function is `let <Tag ... />`, optionally behind a visibility keyword. The
+            // span covers the whole declaration, so the keywords have to be skipped rather than
+            // matched away.
+            let declaration_text = source_text_for_range(source, function.span);
+            let is_markup_function = declaration_text
+                .split_whitespace()
+                .find(|word| !matches!(*word, "export" | "private"))
+                .is_some_and(|word| word == "let" || word.starts_with("let<"))
+                && declaration_text
+                    .split_once("let")
+                    .is_some_and(|(_, rest)| rest.trim_start().starts_with('<'));
             Declaration {
                 name: function.name.as_str().to_string(),
                 kind: if is_markup_function {
@@ -1176,17 +1330,13 @@ fn declaration_from_item(item: &Item, source: &str) -> Declaration {
                     function
                         .params
                         .iter()
-                        .map(|param| {
-                            (
-                                param.name.as_str().to_string(),
-                                base_type_name(&param.ty),
-                            )
-                        })
+                        .map(|param| (param.name.as_str().to_string(), base_type_name(&param.ty)))
                         .collect()
                 } else {
                     Vec::new()
                 },
                 members: Vec::new(),
+                origin: origin.clone(),
             }
         }
         Item::Value(value) => Declaration {
@@ -1200,6 +1350,7 @@ fn declaration_from_item(item: &Item, source: &str) -> Declaration {
             properties: Vec::new(),
             property_types: Vec::new(),
             members: Vec::new(),
+            origin: origin.clone(),
         },
         Item::Component(component) => Declaration {
             name: component.name.as_str().to_string(),
@@ -1221,6 +1372,7 @@ fn declaration_from_item(item: &Item, source: &str) -> Declaration {
                 })
                 .collect(),
             members: Vec::new(),
+            origin: origin.clone(),
         },
         Item::TypeAlias(alias) => Declaration {
             name: alias.name.as_str().to_string(),
@@ -1229,6 +1381,7 @@ fn declaration_from_item(item: &Item, source: &str) -> Declaration {
             properties: Vec::new(),
             property_types: Vec::new(),
             members: Vec::new(),
+            origin: origin.clone(),
         },
         Item::Union(union_def) => Declaration {
             name: union_def.name.as_str().to_string(),
@@ -1244,6 +1397,7 @@ fn declaration_from_item(item: &Item, source: &str) -> Declaration {
                 .filter(|case| case.fields.is_empty())
                 .map(|case| case.name.as_str().to_string())
                 .collect(),
+            origin: origin.clone(),
         },
         Item::Record(record) => Declaration {
             name: record.name.as_str().to_string(),
@@ -1273,6 +1427,7 @@ fn declaration_from_item(item: &Item, source: &str) -> Declaration {
                 })
                 .collect(),
             members: Vec::new(),
+            origin: origin.clone(),
         },
     }
 }
@@ -1337,7 +1492,7 @@ fn type_ref_display(ty: &TypeRef) -> String {
 fn property_value_context(
     source: &str,
     offset: usize,
-    declarations: &[Declaration],
+    scope: &DocumentScope,
 ) -> Option<Vec<String>> {
     let prefix = source.get(..offset)?;
     let line_start = prefix.rfind('\n').map(|idx| idx + 1).unwrap_or(0);
@@ -1379,12 +1534,7 @@ fn property_value_context(
         return None;
     }
 
-    let element = declarations.iter().find(|declaration| {
-        matches!(
-            declaration.kind,
-            DocumentSymbolKind::Component | DocumentSymbolKind::Record
-        ) && declaration.name == tag_name
-    })?;
+    let element = scope.element(&tag_name)?;
 
     let type_name = element
         .property_types
@@ -1392,11 +1542,11 @@ fn property_value_context(
         .find(|(name, _)| name == property_name)
         .map(|(_, type_name)| type_name.clone())?;
 
-    let target = declarations.iter().find(|declaration| {
-        matches!(declaration.kind, DocumentSymbolKind::Union) && declaration.name == type_name
-    })?;
-
-    if target.members.is_empty() {
+    // The property's type was written in the declaring module's namespace, so it is resolved
+    // there. Looking it up by name among everything in the workspace is what let an unrelated
+    // same-named declaration supply the members.
+    let target = scope.type_in_module(&element.origin, &type_name)?;
+    if !matches!(target.kind, DocumentSymbolKind::Union) || target.members.is_empty() {
         return None;
     }
     Some(target.members.clone())
@@ -1405,7 +1555,7 @@ fn property_value_context(
 fn component_property_context(
     source: &str,
     offset: usize,
-    declarations: &[Declaration],
+    scope: &DocumentScope,
 ) -> Option<PropertyCompletionContext> {
     let prefix = source.get(..offset)?;
     let line_start = prefix.rfind('\n').map(|idx| idx + 1).unwrap_or(0);
@@ -1427,9 +1577,10 @@ fn component_property_context(
         return None;
     }
 
-    let declaration = declarations.iter().find(|declaration| {
-        declaration.kind == DocumentSymbolKind::Component && declaration.name == tag_name
-    })?;
+    let declaration = scope
+        .visible
+        .get(&tag_name)
+        .filter(|declaration| declaration.kind == DocumentSymbolKind::Component)?;
     let supplied = supplied_properties(after_lt.get(tag_name.len()..).unwrap_or_default());
 
     Some(PropertyCompletionContext {
@@ -1503,7 +1654,7 @@ fn is_type_position(source: &str, offset: usize) -> bool {
         || matches!((colon, equals), (Some(colon), Some(equals)) if colon > equals)
 }
 
-fn type_completion_items(declarations: &[Declaration]) -> Vec<CompletionItem> {
+fn type_completion_items(scope: &DocumentScope) -> Vec<CompletionItem> {
     let mut items = PRIMITIVE_TYPE_COMPLETIONS
         .iter()
         .map(|label| CompletionItem {
@@ -1519,26 +1670,31 @@ fn type_completion_items(declarations: &[Declaration]) -> Vec<CompletionItem> {
         detail: Some("built-in type".to_string()),
     }));
 
-    items.extend(declarations.iter().filter_map(|declaration| {
-        matches!(
-            declaration.kind,
-            DocumentSymbolKind::TypeAlias
-                | DocumentSymbolKind::Record
-                | DocumentSymbolKind::Action
-                | DocumentSymbolKind::Union
-                | DocumentSymbolKind::Component
-        )
-        .then(|| CompletionItem {
-            label: declaration.name.clone(),
-            kind: CompletionItemKind::Type,
-            detail: Some(declaration.detail.clone()),
-        })
-    }));
+    items.extend(
+        scope
+            .visible_declarations()
+            .into_iter()
+            .filter_map(|declaration| {
+                matches!(
+                    declaration.kind,
+                    DocumentSymbolKind::TypeAlias
+                        | DocumentSymbolKind::Record
+                        | DocumentSymbolKind::Action
+                        | DocumentSymbolKind::Union
+                        | DocumentSymbolKind::Component
+                )
+                .then(|| CompletionItem {
+                    label: declaration.name.clone(),
+                    kind: CompletionItemKind::Type,
+                    detail: Some(declaration.detail.clone()),
+                })
+            }),
+    );
 
     dedupe_completions(items)
 }
 
-fn general_completion_items(declarations: &[Declaration]) -> Vec<CompletionItem> {
+fn general_completion_items(scope: &DocumentScope) -> Vec<CompletionItem> {
     let mut items = KEYWORD_COMPLETIONS
         .iter()
         .map(|label| CompletionItem {
@@ -1548,15 +1704,20 @@ fn general_completion_items(declarations: &[Declaration]) -> Vec<CompletionItem>
         })
         .collect::<Vec<_>>();
 
-    items.extend(declarations.iter().map(|declaration| CompletionItem {
-        label: declaration.name.clone(),
-        kind: if declaration.kind == DocumentSymbolKind::Component {
-            CompletionItemKind::Component
-        } else {
-            CompletionItemKind::Declaration
-        },
-        detail: Some(declaration.detail.clone()),
-    }));
+    items.extend(
+        scope
+            .visible_declarations()
+            .into_iter()
+            .map(|declaration| CompletionItem {
+                label: declaration.name.clone(),
+                kind: if declaration.kind == DocumentSymbolKind::Component {
+                    CompletionItemKind::Component
+                } else {
+                    CompletionItemKind::Declaration
+                },
+                detail: Some(declaration.detail.clone()),
+            }),
+    );
 
     dedupe_completions(items)
 }
@@ -1985,6 +2146,109 @@ component <SearchBox placeholder:string /> = {
             "a string-typed property has no contextual members: {:?}",
             completions.items
         );
+    }
+
+    fn snapshot_of(documents: &[(&str, &str)]) -> WorkspaceSnapshot {
+        WorkspaceSnapshot::from_documents(
+            Option::<PathBuf>::None,
+            documents
+                .iter()
+                .map(|(uri, source)| DocumentInput::new(*uri, *source).with_version(1))
+                .collect(),
+        )
+        .expect("snapshot")
+    }
+
+    fn completion_labels(
+        snapshot: &WorkspaceSnapshot,
+        uri: &str,
+        position: TextPosition,
+    ) -> Vec<String> {
+        snapshot
+            .completions(&DocumentUri::from(uri), position)
+            .expect("completions")
+            .items
+            .into_iter()
+            .map(|item| item.label)
+            .collect()
+    }
+
+    /// An element reached through a selective import resolves through that import, not by finding
+    /// some document that happens to declare the tag.
+    #[test]
+    fn member_completions_follow_a_selective_import() {
+        let snapshot = snapshot_of(&[
+            (
+                "nx://tenant/app.nx",
+                "import { Img } from \"./widgets.nx\"\n<Img fit= />\n",
+            ),
+            (
+                "nx://tenant/widgets.nx",
+                "export type Fit = fill | contain | cover\nexport let <Img fit:Fit /> = <img />\n",
+            ),
+        ]);
+
+        let labels = completion_labels(&snapshot, "nx://tenant/app.nx", TextPosition::new(1, 9));
+
+        assert!(labels.contains(&"cover".to_string()), "got: {labels:?}");
+        assert!(labels.contains(&"fill".to_string()), "got: {labels:?}");
+    }
+
+    /// The alias is the name the element is written under, so the lookup has to go through it.
+    #[test]
+    fn member_completions_follow_a_wildcard_import_alias() {
+        let snapshot = snapshot_of(&[
+            (
+                "nx://tenant/app.nx",
+                "import \"./widgets.nx\" as ui\n<ui.Img fit= />\n",
+            ),
+            (
+                "nx://tenant/widgets.nx",
+                "export type Fit = fill | contain | cover\nexport let <Img fit:Fit /> = <img />\n",
+            ),
+        ]);
+
+        let labels = completion_labels(&snapshot, "nx://tenant/app.nx", TextPosition::new(1, 12));
+
+        assert!(labels.contains(&"cover".to_string()), "got: {labels:?}");
+    }
+
+    /// A declaration the document does not import is not a completion candidate.
+    #[test]
+    fn completions_are_not_drawn_from_a_document_that_is_not_imported() {
+        let snapshot = snapshot_of(&[
+            ("nx://tenant/app.nx", "<Img fit= />\n"),
+            (
+                "nx://tenant/widgets.nx",
+                "export type Fit = fill | contain | cover\nexport let <Img fit:Fit /> = <img />\n",
+            ),
+        ]);
+
+        let labels = completion_labels(&snapshot, "nx://tenant/app.nx", TextPosition::new(0, 9));
+
+        assert!(!labels.contains(&"cover".to_string()), "got: {labels:?}");
+        assert!(!labels.contains(&"Img".to_string()), "got: {labels:?}");
+    }
+
+    /// Two documents declaring `Fit` are two types; the members offered are the declaring
+    /// module's, not whichever document the flat list reached first.
+    #[test]
+    fn member_completions_come_from_the_declaring_module_not_a_same_named_local_type() {
+        let snapshot = snapshot_of(&[
+            (
+                "nx://tenant/app.nx",
+                "import { Img } from \"./widgets.nx\"\ntype Fit = stretch | squish\n<Img fit= />\n",
+            ),
+            (
+                "nx://tenant/widgets.nx",
+                "export type Fit = fill | contain | cover\nexport let <Img fit:Fit /> = <img />\n",
+            ),
+        ]);
+
+        let labels = completion_labels(&snapshot, "nx://tenant/app.nx", TextPosition::new(2, 9));
+
+        assert!(labels.contains(&"cover".to_string()), "got: {labels:?}");
+        assert!(!labels.contains(&"stretch".to_string()), "got: {labels:?}");
     }
 
     #[test]

@@ -148,4 +148,6 @@ pub use semantics::{
     common_supertype, is_object_type, resolve_type_ref_with, resolve_type_ref_with_seen,
     type_satisfies_expected, type_satisfies_expected_with_coercion,
 };
-pub use ty::{Primitive, Type, TypeId};
+pub use ty::{
+    display_type_pair, DeclaringOrigin, Primitive, Type, TypeId, UnionCaseType, UnionType,
+};

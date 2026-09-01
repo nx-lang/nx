@@ -396,6 +396,7 @@ mod tests {
             component: nx_hir::Name::new("SearchBox"),
             emit: nx_hir::Name::new("SearchSubmitted"),
             action_name: nx_hir::Name::new("SearchSubmitted"),
+            action_module_identity: "format-test.nx".to_string(),
             body,
             captured: FxHashMap::default(),
         };

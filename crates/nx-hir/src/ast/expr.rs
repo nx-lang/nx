@@ -1,6 +1,6 @@
 //! Expression AST nodes.
 
-use crate::{ElementId, ExprId, Name};
+use crate::{ElementId, ExprId, LocalDefinitionId, Name};
 use nx_diagnostics::{TextSize, TextSpan};
 use smol_str::SmolStr;
 
@@ -144,6 +144,22 @@ pub enum Expr {
     /// Example: `cover` in `<Img fit=cover />`
     ContextualName { name: Name, span: TextSpan },
 
+    /// A union case reached by the declaring origin of its union rather than by a visible name.
+    ///
+    /// Produced by the rewrite that replaces a resolved [`Expr::ContextualName`]. The origin is the
+    /// `(module identity, definition id)` pair a resolved program already addresses items by, so
+    /// code generation and evaluation reach the declaration without the union being nameable at the
+    /// use site. `union` is display information: the name the declaring module gave the type.
+    ///
+    /// Example: what `cover` becomes in `<Img fit=cover />` when `Fit` is not imported here
+    ResolvedUnionCase {
+        union: Name,
+        case: Name,
+        module_identity: String,
+        definition_id: LocalDefinitionId,
+        span: TextSpan,
+    },
+
     /// Binary operation.
     ///
     /// Example: `a + b`, `x == y`
@@ -268,6 +284,17 @@ pub enum Expr {
         emit: Name,
         /// Exported action type name expected at invocation time
         action_name: Name,
+        /// Stable identity of the module that declared the emit this handler binds to.
+        ///
+        /// <para>The action record `action_name` names is resolved here rather than in the module
+        /// that wrote the binding, so a host-supplied action value is checked against the
+        /// declaration the component actually emits.</para>
+        ///
+        /// <para>`None` means the emit is declared in the same module as the handler. Only the
+        /// prepared-module rewrite can bind a handler to a component in another module; a binding
+        /// lowered directly from source reaches a component declared alongside it, so there is no
+        /// other module to name.</para>
+        action_module_identity: Option<String>,
         /// Handler body expression
         body: ExprId,
         /// Source span
@@ -303,6 +330,7 @@ impl Expr {
             Expr::Literal(_) => TextSpan::new(TextSize::from(0), TextSize::from(0)), // Literals don't track spans yet
             Expr::Ident(_) => TextSpan::new(TextSize::from(0), TextSize::from(0)),
             Expr::ContextualName { span, .. } => *span,
+            Expr::ResolvedUnionCase { span, .. } => *span,
             Expr::BinaryOp { span, .. } => *span,
             Expr::UnaryOp { span, .. } => *span,
             Expr::Call { span, .. } => *span,

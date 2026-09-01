@@ -4,7 +4,8 @@
 **Working title superseded:** “NX Drawn UI” — see “Names and terminology” in §1  
 **Research current through:** August 20, 2026  
 **Scope:** Level 1 graphics and Level 2 generic, read-only UI  
-**Explicitly excluded from this MVP:** input controls, actions/events, application state/data binding, animation, and Level 3 semantic/data UI
+**Explicitly excluded from this MVP:** input controls, actions/events, application state/data binding, animation, and Level 3 semantic/data UI  
+**Consolidated NX source:** [drawnui-proposal/](drawnui-proposal/) — the whole proposed model as NX and nothing else, for reading without the prose around it
 
 ## Executive recommendation
 
@@ -128,7 +129,7 @@ Type notation in this document is [NX](../nx-grammar.md) source. Records use `ty
 
 Three NX conventions carry meaning here. A `?` suffix makes a property nullable, which in this model means the property may be omitted — the **Default** column of each table says what the renderer does when it is. A `= value` clause gives a real default. And exactly one property per signature may be marked `content`, which is the property that receives element body content, so it is the property that the wire format spells as `children`.
 
-Unless stated otherwise, numeric values must be finite JSON numbers and default units are logical/device-independent pixels. Appendix A lists both catalogs as complete NX source; Appendix B records where NX's current syntax cannot express this model, and what the listing does instead.
+Unless stated otherwise, numeric values must be finite JSON numbers and default units are logical/device-independent pixels. Appendix A lists both catalogs as complete NX source, and [drawnui-proposal/](drawnui-proposal/) carries the same declarations as an NX-only library; Appendix B records where NX's current syntax cannot express this model, and what the listing does instead.
 
 ### 4.1 `NxUiDocument`
 
@@ -1085,6 +1086,12 @@ The test corpus should include a text/image card, grid dashboard shell, layered 
 ## Appendix A — The catalogs as NX source
 
 Three libraries: `nx/core` holds the shared value types from §5, `nx/ui` holds Level 2, and `nx/graphics` holds Level 1. `nx/graphics` imports `UiCommon` from `nx/ui` because `Drawing` is the element that carries a graphics scene into a laid-out box; nothing flows the other way.
+
+The same declarations exist on disk under [drawnui-proposal/](drawnui-proposal/), as the three libraries this appendix describes — `core/core.nx`, `ui/ui.nx`, and `graphics/graphics.nx` — for reading the model as NX without the prose interleaved. Their comments carry the per-property meaning and the “NX gap” notes that this appendix and Appendix B state at length, and `core/core.nx` additionally carries the document model from §4, which belongs to neither catalog. This appendix is the excerpt; that directory is the copy a tool can read, and the two must be kept in step.
+
+Three libraries rather than three files in one is forced rather than chosen: a single NX library has a flat name space, so `Text` and `Image` — deliberately present in both catalogs, per §7 — collide with *“Library item 'Text' is defined in multiple files. Use unique names within one library.”* The library boundary is what gives each catalog its own name space, which is the same job the `nx.ui` / `nx.graphics` prefix does in the document format.
+
+Each library checks on its own with `nxlang typegen`, including `graphics`'s cross-library `import { UiCommon } from "../ui"`. Declaring an external component that extends an imported base is fine; what does not work yet is *using* one at a call site, which is NXE12 and NXE13 below.
 
 Every declaration below was checked with `nxlang typegen` against the NX toolchain in this repository. The one construct that does not check today is the cross-library use shown in §8.1; Appendix B says why.
 

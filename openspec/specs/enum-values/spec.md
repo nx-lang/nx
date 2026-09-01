@@ -56,9 +56,9 @@ be in lexical scope at the use site. A declaration's property types SHALL be res
 namespace of the module that declares them, so the union a bare name resolves against is the one the
 declaring module named, not whatever the use site happens to spell the same way.
 
-Resolving a case is distinct from carrying it through lowering. Until nominal types carry their
-declaring origin, a resolved case whose union is not nameable in the using module SHALL be reported
-as needing an import, rather than accepted and lowered to an unresolvable reference.
+A resolved case SHALL lower and evaluate whether or not the using module can name its union. The
+system SHALL NOT require an import of the union type beyond what the binding site itself already
+needs.
 
 #### Scenario: Union-valued property resolves against the declaring module
 - **WHEN** a module imports a component whose property is typed by a union declared in another
@@ -72,13 +72,20 @@ as needing an import, rather than accepted and lowered to an unresolvable refere
   component's property
 - **THEN** neither a bare case of the local union nor its qualified form SHALL be accepted at that
   property
-- **AND** the diagnostic SHALL list the declaring module's cases
+- **AND** the diagnostic SHALL list the declaring module's cases and distinguish the two unions by
+  their declaring modules
 
 #### Scenario: A case whose union is not nameable here reports the needed import
 - **WHEN** a bare name resolves against a union that the using module cannot name
-- **THEN** the system SHALL report that the union must be imported, naming the qualified form to
-  write instead
-- **AND** it SHALL NOT emit a reference that fails to resolve during code generation
+- **THEN** the bare case name SHALL be accepted
+- **AND** it SHALL evaluate to the same value as the qualified form of that case
+- **AND** no diagnostic SHALL require the union type to be imported
+
+#### Scenario: Union case is reachable at a typed site under a wildcard import alias
+- **WHEN** a module contains `import "../ui" as ui` and sets a `ui.TextVariant`-typed property on an
+  imported component
+- **THEN** the bare case name SHALL be accepted at that property
+- **AND** authors SHALL NOT be required to switch to the selective import form to reach the case
 
 ### Requirement: First-party constant-union examples and fixtures use snake_case by convention
 First-party NX examples, docs, test fixtures, and grammar tests that introduce constant union cases

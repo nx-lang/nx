@@ -2,15 +2,18 @@
 
 use crate::context::{ExecutionContext, ResourceLimits};
 use crate::error::{RuntimeError, RuntimeErrorKind};
-use crate::resolved_program::{ResolvedItemKind, ResolvedProgram, RuntimeModuleId};
+use crate::resolved_program::{
+    ModuleQualifiedItemRef, ResolvedItemKind, ResolvedProgram, RuntimeModuleId,
+};
 use crate::value::Value;
 use la_arena::RawIdx;
 use nx_hir::{
-    ast, effective_component_contract, effective_component_contract_for_name,
-    effective_record_shape_for_name, resolve_record_definition as resolve_hir_record_definition,
-    EffectiveField, ElementId, ExprId, Function, Item, LoweredModule, Name, PreparedBinding,
-    PreparedBindingOrigin, PreparedBindingTarget, PreparedItemKind, PreparedModule, PropertyEntry,
-    RecordKind, UnionCaseDef, UnionCaseField, UnionDef,
+    ast, effective_component_contract, effective_record_shape_for_name,
+    module_namespace_from_bindings, resolve_record_definition as resolve_hir_record_definition,
+    EffectiveField, ElementId, ExprId, Function, Item, LocalDefinitionId, LoweredModule,
+    ModuleNamespace, Name, PreparedBinding, PreparedBindingOrigin, PreparedBindingTarget,
+    PreparedItemKind, PreparedModule, PropertyEntry, RecordKind, UnionCaseDef, UnionCaseField,
+    UnionDef,
 };
 use nx_types::{
     common_supertype, is_object_type, resolve_type_ref_with, resolve_type_ref_with_seen,
@@ -91,9 +94,20 @@ enum SerializedValue {
         component: String,
         emit: String,
         action_name: String,
+        action_module_identity: String,
         body: u32,
         captured: BTreeMap<String, SerializedValue>,
     },
+}
+
+/// The parts of an [`ast::Expr::ActionHandler`] a handler value is built from.
+struct ActionHandlerParts<'a> {
+    component: &'a Name,
+    emit: &'a Name,
+    action_name: &'a Name,
+    /// `None` when the emit is declared in the same module as the handler.
+    action_module_identity: Option<&'a str>,
+    body: ExprId,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -598,6 +612,7 @@ impl Interpreter {
             return prepared;
         };
 
+        let mut peer_module_ids = FxHashSet::default();
         for (visible_name, item_ref) in visible_items {
             let Some(target_module) = program.module(item_ref.module_id) else {
                 continue;
@@ -611,6 +626,7 @@ impl Interpreter {
                 target_module_identity.clone(),
                 target_module.lowered_module.clone(),
             );
+            peer_module_ids.insert(item_ref.module_id);
 
             for namespace in kind.namespaces() {
                 prepared.insert_binding(PreparedBinding {
@@ -628,11 +644,81 @@ impl Interpreter {
             }
         }
 
+        // A peer's namespace is what *that* module can see, which is not what this one can. A
+        // foreign declaration's `extends` clause is resolved there, so registering the peer's
+        // module without its namespace would leave a base the peer imported unreachable — the same
+        // gap the analysis side closes by preparing every module before analyzing any.
+        for peer_module_id in peer_module_ids {
+            let Some(peer) = program.module(peer_module_id) else {
+                continue;
+            };
+            let identity = peer.prepared_module_identity();
+            let namespace = self.runtime_module_namespace(program, peer_module_id, &identity);
+            prepared.add_peer_namespace(identity, Arc::new(namespace));
+        }
+
         let prepared = Arc::new(prepared);
         self.runtime_prepared_cache
             .borrow_mut()
             .insert(module_id, Arc::clone(&prepared));
         prepared
+    }
+
+    /// Builds one module's own visible type and element namespace from the resolved program.
+    ///
+    /// <para>This is the runtime counterpart of the prepared bindings analysis collects: the
+    /// module's own declarations plus everything it imported, which together are the names a
+    /// declaration written in that module resolves against.</para>
+    fn runtime_module_namespace(
+        &self,
+        program: &ResolvedProgram,
+        module_id: RuntimeModuleId,
+        module_identity: &str,
+    ) -> ModuleNamespace {
+        let mut bindings = Vec::new();
+        let mut push = |visible_name: &str, item_ref: &ModuleQualifiedItemRef, local: bool| {
+            let Some(kind) = runtime_prepared_item_kind(item_ref.kind) else {
+                return;
+            };
+            let Some(target_module) = program.module(item_ref.module_id) else {
+                return;
+            };
+            let target_module_identity = target_module.prepared_module_identity();
+            let target = if local {
+                PreparedBindingTarget::Local {
+                    definition_id: item_ref.definition_id,
+                }
+            } else {
+                PreparedBindingTarget::Peer {
+                    module_identity: target_module_identity.clone(),
+                    definition_id: item_ref.definition_id,
+                }
+            };
+            for namespace in kind.namespaces() {
+                bindings.push(PreparedBinding {
+                    visible_name: Name::new(visible_name),
+                    namespace: *namespace,
+                    kind,
+                    origin: PreparedBindingOrigin::Peer {
+                        module_identity: target_module_identity.clone(),
+                    },
+                    target: target.clone(),
+                });
+            }
+        };
+
+        if let Some(items) = program.local_items(module_id) {
+            for (visible_name, item_ref) in items {
+                push(visible_name, item_ref, true);
+            }
+        }
+        if let Some(items) = program.imported_items(module_id) {
+            for (visible_name, item_ref) in items {
+                push(visible_name, item_ref, false);
+            }
+        }
+
+        module_namespace_from_bindings(module_identity, &bindings)
     }
 
     fn resolve_item<'a>(
@@ -750,15 +836,32 @@ impl Interpreter {
         action: Value,
         limits: ResourceLimits,
     ) -> Result<Vec<Value>, RuntimeError> {
-        let (handler_module_id, component, emit, action_name, body, captured) = match handler {
+        let (
+            handler_module_id,
+            component,
+            emit,
+            action_name,
+            action_module_identity,
+            body,
+            captured,
+        ) = match handler {
             Value::ActionHandler {
                 module_id,
                 component,
                 emit,
                 action_name,
+                action_module_identity,
                 body,
                 captured,
-            } => (*module_id, component, emit, action_name, *body, captured),
+            } => (
+                *module_id,
+                component,
+                emit,
+                action_name,
+                action_module_identity.as_str(),
+                *body,
+                captured,
+            ),
             other => {
                 return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
                     expected: "action handler".to_string(),
@@ -769,8 +872,14 @@ impl Interpreter {
         };
         let handler_module = self.module_for_id(module, handler_module_id)?;
 
-        let action =
-            self.validate_handler_input(handler_module, action, action_name, component, emit)?;
+        let action = self.validate_handler_input(
+            handler_module,
+            action,
+            action_name,
+            action_module_identity,
+            component,
+            emit,
+        )?;
 
         let mut ctx = ExecutionContext::with_limits(limits);
         self.bind_top_level_values(handler_module, &mut ctx)?;
@@ -791,7 +900,9 @@ impl Interpreter {
         props: Value,
         limits: ResourceLimits,
     ) -> Result<ComponentInitResult, RuntimeError> {
-        let component = self.find_component(module, component_name)?;
+        // Everything below reads the component's own module: its body and defaults are expression
+        // ids into that arena, and its snapshot must name it so dispatch reaches the same one.
+        let (module, component) = self.find_component(module, component_name)?;
         let contract = self.effective_component_contract(module, component);
         self.ensure_concrete_component(&contract, "component initialization")?;
         let mut ctx = ExecutionContext::with_limits(limits);
@@ -851,7 +962,7 @@ impl Interpreter {
         state: Value,
         limits: ResourceLimits,
     ) -> Result<ComponentEvaluateResult, RuntimeError> {
-        let component = self.find_component(module, component_name)?;
+        let (module, component) = self.find_component(module, component_name)?;
         let contract = self.effective_component_contract(module, component);
         self.ensure_concrete_component(&contract, "component evaluation")?;
 
@@ -893,14 +1004,14 @@ impl Interpreter {
     ) -> Result<ComponentDispatchResult, RuntimeError> {
         let decoded_snapshot = self.decode_component_snapshot(module, state_snapshot)?;
         let component_module = self.module_for_id(module, decoded_snapshot.component_module_id)?;
-        let component =
+        let (component_module, component) =
             self.find_component(component_module, decoded_snapshot.component.as_str())?;
         let contract = self.effective_component_contract(component_module, component);
         let mut effects = Vec::new();
 
         for action in actions {
             let emit = self.validate_component_action(&contract, &action)?;
-            let handler_name = Self::component_handler_prop_name(emit.name.as_str());
+            let handler_name = Self::component_handler_prop_name(emit.emit.name.as_str());
 
             if let Some(handler) = decoded_snapshot.props.get(handler_name.as_str()) {
                 match handler {
@@ -953,13 +1064,19 @@ impl Interpreter {
         }
     }
 
+    /// Finds a component by name, together with the module that declares it.
+    ///
+    /// <para>The declaring module is not incidental: a component's body, prop defaults, and state
+    /// initializers are `ExprId`s into *its* module's arena, and its top-level values live there
+    /// too. Evaluating any of them against the module that merely named the component reads a
+    /// different arena at the same index.</para>
     fn find_component<'a>(
         &'a self,
         module: &'a LoweredModule,
         name: &str,
-    ) -> Result<&'a nx_hir::Component, RuntimeError> {
+    ) -> Result<(&'a LoweredModule, &'a nx_hir::Component), RuntimeError> {
         match self.resolve_item(module, name) {
-            Some((_, Item::Component(component))) => Ok(component),
+            Some((target_module, Item::Component(component))) => Ok((target_module, component)),
             _ => Err(RuntimeError::new(RuntimeErrorKind::ComponentNotFound {
                 name: SmolStr::new(name),
             })),
@@ -984,8 +1101,17 @@ impl Interpreter {
                         nx_hir::EffectiveField::from_record_field(field, module_identity.clone())
                     })
                     .collect(),
-                emits: component.emits.clone(),
+                emits: component
+                    .emits
+                    .iter()
+                    .cloned()
+                    .map(|emit| nx_hir::EffectiveEmit {
+                        emit,
+                        module_identity: module_identity.clone(),
+                    })
+                    .collect(),
                 ancestors: Vec::new(),
+                origin: None,
             }
         })
     }
@@ -1241,7 +1367,7 @@ impl Interpreter {
             if let Some(emit) = contract
                 .emits
                 .iter()
-                .find(|emit| Self::component_handler_prop_name(emit.name.as_str()) == name)
+                .find(|emit| Self::component_handler_prop_name(emit.emit.name.as_str()) == name)
             {
                 match &value {
                     Value::ActionHandler {
@@ -1250,14 +1376,14 @@ impl Interpreter {
                         action_name,
                         ..
                     } if handler_component == &component.name
-                        && handler_emit == &emit.name
-                        && action_name == &emit.action_name => {}
+                        && handler_emit == &emit.emit.name
+                        && action_name == &emit.emit.action_name => {}
                     Value::ActionHandler { .. } => {
                         return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
                             expected: format!(
                                 "handler for {}.{}",
                                 component.name.as_str(),
-                                emit.name.as_str()
+                                emit.emit.name.as_str()
                             ),
                             actual: "different action handler".to_string(),
                             operation: "component prop initialization".to_string(),
@@ -1390,7 +1516,7 @@ impl Interpreter {
         &self,
         contract: &'a nx_hir::EffectiveComponentContract,
         action: &Value,
-    ) -> Result<&'a nx_hir::ComponentEmit, RuntimeError> {
+    ) -> Result<&'a nx_hir::EffectiveEmit, RuntimeError> {
         let Value::Record { type_name, .. } = action else {
             return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
                 expected: "action".to_string(),
@@ -1405,7 +1531,7 @@ impl Interpreter {
         contract
             .emits
             .iter()
-            .find(|emit| emit.action_name == *type_name)
+            .find(|emit| emit.emit.action_name == *type_name)
             .ok_or_else(|| {
                 RuntimeError::new(RuntimeErrorKind::UnsupportedComponentAction {
                     component: SmolStr::new(contract.component.name.as_str()),
@@ -1548,6 +1674,7 @@ impl Interpreter {
                 component,
                 emit,
                 action_name,
+                action_module_identity,
                 body,
                 captured,
             } => SerializedValue::ActionHandler {
@@ -1555,6 +1682,7 @@ impl Interpreter {
                 component: component.as_str().to_string(),
                 emit: emit.as_str().to_string(),
                 action_name: action_name.as_str().to_string(),
+                action_module_identity: action_module_identity.clone(),
                 body: body.into_raw().into_u32(),
                 captured: captured
                     .iter()
@@ -1604,6 +1732,7 @@ impl Interpreter {
                 component,
                 emit,
                 action_name,
+                action_module_identity,
                 body,
                 captured,
             } => {
@@ -1630,6 +1759,7 @@ impl Interpreter {
                     component: Name::new(&component),
                     emit: Name::new(&emit),
                     action_name: Name::new(&action_name),
+                    action_module_identity,
                     body: ExprId::from_raw(RawIdx::from_u32(body)),
                     captured: captured
                         .into_iter()
@@ -1700,15 +1830,33 @@ impl Interpreter {
                 component,
                 emit,
                 action_name,
+                action_module_identity,
                 body,
                 ..
-            } => self.eval_action_handler_expr(module, ctx, component, emit, action_name, *body),
+            } => self.eval_action_handler_expr(
+                module,
+                ctx,
+                ActionHandlerParts {
+                    component,
+                    emit,
+                    action_name,
+                    action_module_identity: action_module_identity.as_deref(),
+                    body: *body,
+                },
+            ),
             ast::Expr::Element { element, .. } => self.eval_element_expr(module, ctx, *element),
             ast::Expr::RecordLiteral {
                 record, properties, ..
             } => self.eval_record_literal(module, ctx, record, properties),
             ast::Expr::Index { base, index, .. } => self.eval_index(module, ctx, *base, *index),
             ast::Expr::Member { base, member, .. } => self.eval_member(module, ctx, *base, member),
+            ast::Expr::ResolvedUnionCase {
+                union,
+                case,
+                module_identity,
+                definition_id,
+                ..
+            } => self.eval_resolved_union_case(ctx, union, case, module_identity, *definition_id),
             _ => {
                 // Other expression types not yet implemented
                 Ok(Value::Null)
@@ -1732,20 +1880,35 @@ impl Interpreter {
         &self,
         module: &LoweredModule,
         ctx: &ExecutionContext,
-        component: &Name,
-        emit: &Name,
-        action_name: &Name,
-        body: ExprId,
+        parts: ActionHandlerParts<'_>,
     ) -> Result<Value, RuntimeError> {
+        let ActionHandlerParts {
+            component,
+            emit,
+            action_name,
+            action_module_identity,
+            body,
+        } = parts;
         let mut captured = ctx.snapshot_visible_variables();
         captured.remove("action");
         let module_id = self.require_current_module_id(module, "action handler creation")?;
+        // A binding lowered straight from source names an emit declared alongside it, so the
+        // module being evaluated is the declaring one. The handler value records the identity
+        // either way, so invocation never has to ask where it came from.
+        let action_module_identity = match action_module_identity {
+            Some(identity) => identity.to_string(),
+            None => self
+                .runtime_prepared_module(module)
+                .module_identity()
+                .to_string(),
+        };
 
         Ok(Value::ActionHandler {
             module_id,
             component: component.clone(),
             emit: emit.clone(),
             action_name: action_name.clone(),
+            action_module_identity,
             body,
             captured,
         })
@@ -2594,7 +2757,7 @@ impl Interpreter {
         // target type is a union, resolve the string against that union's constant cases and lift
         // it into Value::UnionCase; unknown names surface through the standard TypeMismatch path.
         let expected_union_name = match expected {
-            Type::Named(name) => Some(name.clone()),
+            Type::Named(named) => Some(named.name.clone()),
             Type::Union(union_ty) => Some(union_ty.name.clone()),
             _ => None,
         };
@@ -2744,6 +2907,8 @@ impl Interpreter {
                     self.resolve_runtime_named_type(target_module, nested_name, nested_seen)
                 })
             }
+            // Runtime types are only ever compared against other runtime types, all built the
+            // same way, so they carry no declaring origin and fall back to comparing names.
             Some((_, Item::Union(union_def))) => Type::union_type(
                 name.clone(),
                 union_def
@@ -2752,6 +2917,7 @@ impl Interpreter {
                     .map(|case| case.name.clone())
                     .collect(),
                 union_def.base.clone(),
+                None,
             ),
             _ => Type::named(name.clone()),
         };
@@ -2990,6 +3156,60 @@ impl Interpreter {
         }
     }
 
+    /// Evaluates a case reached by the declaring origin its reference carries.
+    ///
+    /// The declaration is found by address rather than by name, so the union need not be nameable
+    /// in the module being evaluated. The case is built against its *declaring* module, which is
+    /// what gives a case inheriting an abstract base that base's fields and their defaults.
+    fn eval_resolved_union_case(
+        &self,
+        ctx: &mut ExecutionContext,
+        union: &Name,
+        case: &Name,
+        module_identity: &str,
+        definition_id: LocalDefinitionId,
+    ) -> Result<Value, RuntimeError> {
+        let Some(target_module) = self
+            .program
+            .as_ref()
+            .and_then(|program| program.module_by_prepared_identity(module_identity))
+        else {
+            return Err(RuntimeError::new(RuntimeErrorKind::UnionCaseNotFound {
+                union: SmolStr::new(union.as_str()),
+                case: SmolStr::new(case.as_str()),
+            }));
+        };
+        let Some(Item::Union(union_def)) = target_module
+            .lowered_module
+            .item_by_definition(definition_id)
+        else {
+            return Err(RuntimeError::new(RuntimeErrorKind::UnionCaseNotFound {
+                union: SmolStr::new(union.as_str()),
+                case: SmolStr::new(case.as_str()),
+            }));
+        };
+        let Some(case_def) = union_def
+            .cases
+            .iter()
+            .find(|candidate| candidate.name == *case)
+        else {
+            return Err(RuntimeError::new(RuntimeErrorKind::UnionCaseNotFound {
+                union: SmolStr::new(union.as_str()),
+                case: SmolStr::new(case.as_str()),
+            }));
+        };
+
+        self.build_union_case_value(
+            target_module.lowered_module.as_ref(),
+            ctx,
+            union_def,
+            case_def,
+            Name::new(&format!("{}.{}", union, case)),
+            FxHashMap::default(),
+            None,
+        )
+    }
+
     fn resolve_union_case_definition<'a>(
         &'a self,
         module: &'a LoweredModule,
@@ -3053,26 +3273,6 @@ impl Interpreter {
         })
     }
 
-    fn effective_component_contract_by_name(
-        &self,
-        module: &LoweredModule,
-        name: &Name,
-    ) -> Result<nx_hir::EffectiveComponentContract, RuntimeError> {
-        let target_module = self
-            .resolve_item(module, name.as_str())
-            .map(|(target_module, _)| target_module)
-            .unwrap_or(module);
-        let prepared = self.runtime_prepared_module(target_module);
-        let contract = effective_component_contract_for_name(prepared.as_ref(), name)
-            .map_err(|error| self.component_resolution_runtime_error(error))?;
-
-        contract.ok_or_else(|| {
-            RuntimeError::new(RuntimeErrorKind::ComponentNotFound {
-                name: SmolStr::new(name.as_str()),
-            })
-        })
-    }
-
     fn record_resolution_runtime_error(
         &self,
         error: nx_hir::RecordResolutionError,
@@ -3084,57 +3284,39 @@ impl Interpreter {
         })
     }
 
-    fn component_resolution_runtime_error(
-        &self,
-        error: nx_hir::ComponentResolutionError,
-    ) -> RuntimeError {
-        RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-            expected: "valid component definition".to_string(),
-            actual: error.message(),
-            operation: "component resolution".to_string(),
-        })
-    }
-
+    /// Decides whether a value labelled `actual` satisfies a contract expecting the record
+    /// `expected`.
+    ///
+    /// <para>Both names are read in `module`, which callers pass as the module that declared the
+    /// expectation. A record value crossing a host boundary carries a type name and no origin, so
+    /// the label is resolved in the expecting module's namespace rather than taken as a claim about
+    /// which declaration it names.</para>
+    ///
+    /// <para>The lineage is then compared by declaration, not by spelling, so an ancestor that
+    /// merely shares a name with the expected record — reached along a chain that leaves the
+    /// expecting module — does not satisfy it.</para>
     fn record_type_satisfies_expected(
         &self,
         module: &LoweredModule,
         actual: &Name,
         expected: &Name,
     ) -> bool {
-        if actual == expected {
-            return true;
-        }
-
-        self.effective_record_shape(module, actual)
-            .map(|shape| shape.ancestors.iter().any(|ancestor| ancestor == expected))
-            .unwrap_or(false)
+        let prepared = self.runtime_prepared_module(module);
+        nx_hir::is_record_subtype(prepared.as_ref(), actual, None, expected, None).unwrap_or(false)
     }
 
+    /// The component counterpart of [`Self::record_type_satisfies_expected`], with the same rule:
+    /// resolve both names in the expecting module, then compare the inheritance chain by
+    /// declaration.
     fn component_type_satisfies_expected(
         &self,
         module: &LoweredModule,
         actual: &Name,
         expected: &Name,
     ) -> bool {
-        if actual == expected {
-            return true;
-        }
-
-        let (Ok(actual_contract), Ok(expected_contract)) = (
-            self.effective_component_contract_by_name(module, actual),
-            self.effective_component_contract_by_name(module, expected),
-        ) else {
-            return false;
-        };
-
-        if actual_contract.component.name == expected_contract.component.name {
-            return true;
-        }
-
-        actual_contract
-            .ancestors
-            .iter()
-            .any(|ancestor| ancestor == &expected_contract.component.name)
+        let prepared = self.runtime_prepared_module(module);
+        nx_hir::is_component_subtype(prepared.as_ref(), actual, None, expected, None)
+            .unwrap_or(false)
     }
 
     fn record_value_matches_expected_type(
@@ -3151,12 +3333,15 @@ impl Interpreter {
         type_satisfies_expected(&actual, expected)
             || match expected {
                 Type::Named(expected_name) => {
-                    self.record_type_satisfies_expected(module, actual_type_name, expected_name)
-                        || self.component_type_satisfies_expected(
-                            module,
-                            actual_type_name,
-                            expected_name,
-                        )
+                    self.record_type_satisfies_expected(
+                        module,
+                        actual_type_name,
+                        &expected_name.name,
+                    ) || self.component_type_satisfies_expected(
+                        module,
+                        actual_type_name,
+                        &expected_name.name,
+                    )
                 }
                 Type::Nullable(expected_inner) => self.record_value_matches_expected_type(
                     module,
@@ -3188,6 +3373,7 @@ impl Interpreter {
                     || expected_union.name == union_def.name
             }
             Type::Named(expected_name) => {
+                let expected_name = &expected_name.name;
                 expected_name.as_str() == actual_union_name
                     || expected_name == &union_def.name
                     || union_def.base.as_ref().is_some_and(|base| {
@@ -3265,11 +3451,19 @@ impl Interpreter {
         })
     }
 
+    /// Validates one host-supplied action value against the declaration the component emits.
+    ///
+    /// <para>The expected action record is resolved in `action_module_identity` — the module that
+    /// wrote the `emits` clause — rather than in the module that wrote the handler binding. Those
+    /// differ whenever an app binds a handler on an imported component, and resolving in the
+    /// binding module would check host input against whatever the app happens to call by the same
+    /// name.</para>
     fn validate_handler_input(
         &self,
         module: &LoweredModule,
         action: Value,
         expected_action_name: &Name,
+        action_module_identity: &str,
         component: &Name,
         emit: &Name,
     ) -> Result<Value, RuntimeError> {
@@ -3278,6 +3472,7 @@ impl Interpreter {
             component.as_str(),
             emit.as_str()
         );
+        let module = self.module_for_identity(module, action_module_identity, &operation)?;
         let expected_def = self
             .resolve_record_definition(module, expected_action_name.as_str())
             .ok_or_else(|| {
@@ -4065,6 +4260,7 @@ mod tests {
             component: Name::new("SearchBox"),
             emit: Name::new("SearchSubmitted"),
             action_name: Name::new("SearchSubmitted"),
+            action_module_identity: None,
             body,
             span: span(0, 0),
         });

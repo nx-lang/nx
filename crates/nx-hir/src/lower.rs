@@ -1742,6 +1742,9 @@ impl LoweringContext {
                         component: component.name.clone(),
                         emit: emit.name.clone(),
                         action_name: emit.action_name.clone(),
+                        // A binding lowered from source reaches a component declared in this same
+                        // module, so the emit it names is declared here too.
+                        action_module_identity: None,
                         body,
                         span: child.span(),
                     })
@@ -2890,7 +2893,11 @@ type Mode = light | dark"#;
             .expect("Should lower SearchSubmitted action");
 
         let shape = effective_record_shape(&prepared, action).expect("Action shape should resolve");
-        let ancestors: Vec<_> = shape.ancestors.iter().map(|name| name.as_str()).collect();
+        let ancestors: Vec<_> = shape
+            .ancestors
+            .iter()
+            .map(|ancestor| ancestor.name.as_str())
+            .collect();
         assert_eq!(ancestors, vec!["SearchAction", "InputAction"]);
     }
 

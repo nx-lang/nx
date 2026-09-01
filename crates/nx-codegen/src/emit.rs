@@ -2634,7 +2634,9 @@ fn emit_type(
                 emit_type(current_module_id, ret, module, context)
             )
         }
-        Type::Named(name) => emit_named_type(current_module_id, name.as_str(), module, context),
+        Type::Named(named) => {
+            emit_named_type(current_module_id, named.name.as_str(), module, context)
+        }
         Type::Union(union_ty) => {
             emit_named_type(current_module_id, union_ty.name.as_str(), module, context)
         }
@@ -3494,7 +3496,7 @@ fn collect_type_references(module: &CodegenModule, ty: &Type, output: &mut Vec<C
             }
             collect_type_references(module, ret, output);
         }
-        Type::Named(name) => collect_named_type_reference(module, name.as_str(), output),
+        Type::Named(named) => collect_named_type_reference(module, named.name.as_str(), output),
         Type::Union(union_ty) => {
             collect_named_type_reference(module, union_ty.name.as_str(), output)
         }
