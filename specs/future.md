@@ -253,3 +253,64 @@ If this is revisited in the future:
 - Resolve the RF2-style case by making peer-module visibility within an app
   package an explicit package-level behavior rather than an accidental
   extension of the current single-source program artifact model.
+
+## TextMate Grammar: The Bare-Identifier Catch-All
+
+`src/vscode/syntaxes/nx.tmLanguage.json` ends its `#qualifiers` rule with a catch-all
+that matches any identifier or dotted name and scopes it `entity.name.qualifier.nx`.
+That scope means "the module qualifier in `Foo.bar`", but the pattern claims far more
+than that. A variable reference in an expression — `ready` in `if ready { … }`,
+`total` in `total + 1`, `item` in `x={item}` — lands on it, so a variable is painted
+as a qualifier. No default theme styles `entity.name.qualifier`, so all of it renders
+as plain foreground and the mis-scoping is invisible rather than ugly.
+
+The obvious fix — repoint the catch-all at `variable.other.readwrite.nx` — is wrong,
+because the catch-all is load-bearing in four unrelated places at once. Across the
+repository's 19 `.nx` files it claims 139 bare identifiers and 18 dotted names, and
+the bare ones are not all variables:
+
+- **Genuine variable references** (120 of the 139). These do want a variable scope.
+- **Imported names** (2 tokens today, but every import in every future file). There is
+  no import rule in the grammar at all. `import { UiCommon } from "../ui"`
+  (`docs/drawnui-proposal/graphics/graphics.nx:17`) tokenizes by
+  accident: `import`/`from`/`as` match `#keywords-core`, the braces become a
+  `values-braced-expression`, and the imported names fall through to the catch-all.
+  Repointing it would scope an imported type as a variable.
+- **Markup prose** (17 tokens). A non-colon element's content falls through with no
+  context of its own, so `Social media` in
+  `<Option value="social">Social media</Option>` is scoped `entity.name.qualifier.nx`
+  (`src/vscode/samples/survey.nx:20`). Note that this form
+  is not valid NX — `nx-grammar.md:389-392` gives a non-colon element an
+  `ElementsExpression` body, and bare text needs the `TextElement` colon form or a
+  `TextChildElement` nested inside text content. It appears on 19 lines across
+  `survey.nx` (13) and `tally-survey.nx` (6), and nowhere in
+  `docs/drawnui-proposal/` or `examples/nx/`.
+- **The `<:>` text fragment.** `<:>Yes, borrowed</>` is matched as a start tag with an
+  empty `support.type.text.nx`, not as text, so its content falls through too
+  (`src/vscode/samples/tally-survey.nx:318`).
+
+So the catch-all is doing the work of four missing rules, and each has to exist before
+it can be narrowed. This is the reason the `fix-component-signature-highlighting`
+change fixed only the two pieces that are *positional* and therefore safe in isolation:
+a `for` header (`for name[, name] in iterable`, matched from `\G`) and a reserved
+literal used as a condition. Everything else in that area is still on the catch-all.
+
+If this is revisited in the future:
+- Add the missing rules first, then narrow the catch-all last. Narrowing it first is
+  what makes the change look small and then regress imports and prose.
+- Give `import` its own context covering the clause braces, the imported names, and
+  `as`, rather than letting a `values-braced-expression` absorb it. Decide whether an
+  imported name is a type reference or a binding, since NX imports carry both.
+- Give a non-colon element's content its own context ending at the matching close tag,
+  so an `ElementsExpression` body admits elements and control forms but does not treat
+  stray words as expression tokens.
+- Handle `<:>` … `</>` as a text fragment alongside the existing `<>` fragment rule.
+- Only then repoint the bare-identifier catch-all at `variable.other.readwrite.nx`,
+  keeping `entity.name.qualifier.nx` for the segments before a dot.
+- Expect the corpus to change substantially — roughly 120 tokens go from unstyled to
+  the variable colour, which is the point. Verify with a whole-repository token-stream
+  diff rather than the test suite alone; the suite stayed green through a regression
+  that only the corpus diff caught.
+- Fix the 19 invalid lines in the two sample files to the colon form, or accept that
+  invalid source renders as expressions. Sample files are the grammar's fixtures, so
+  they are worth making valid either way.

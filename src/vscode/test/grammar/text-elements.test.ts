@@ -1,47 +1,6 @@
-import * as fs from 'fs';
-import * as path from 'path';
-import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
 import { expect } from 'chai';
-import type { IGrammar, IToken, StateStack } from 'vscode-textmate';
-
-const cjsRequire = createRequire(import.meta.url);
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const onig: any = cjsRequire('vscode-oniguruma');
-const vsctm: any = cjsRequire('vscode-textmate');
-
-async function loadGrammar(): Promise<IGrammar> {
-  const wasmPath = cjsRequire.resolve('vscode-oniguruma/release/onig.wasm');
-  const wasmBin = fs.readFileSync(wasmPath).buffer;
-  await onig.loadWASM(wasmBin);
-
-  const registry = new vsctm.Registry({
-    onigLib: Promise.resolve({
-      createOnigScanner: (patterns: string[]) => new onig.OnigScanner(patterns),
-      createOnigString: (s: string) => new onig.OnigString(s)
-    }),
-    loadGrammar: async (scopeName: string) => {
-      if (scopeName !== 'source.nx') return null as any;
-      const grammarPath = path.join(__dirname, '..', '..', 'syntaxes', 'nx.tmLanguage.json');
-      const content = fs.readFileSync(grammarPath, 'utf8');
-      return vsctm.parseRawGrammar(content, grammarPath);
-    }
-  });
-
-  const grammar = await registry.loadGrammar('source.nx');
-  if (!grammar) throw new Error('Failed to load NX grammar');
-  return grammar;
-}
-
-function scopesForSubstring(line: string, tokens: IToken[], substring: string): string[] {
-  const idx = line.indexOf(substring);
-  if (idx === -1) return [];
-  const pos = idx + Math.floor(substring.length / 2);
-  const token = tokens.find(t => t.startIndex <= pos && pos < t.endIndex);
-  return token ? token.scopes : [];
-}
+import type { IGrammar, StateStack } from 'vscode-textmate';
+import { loadGrammar, scopesForSubstring } from './helpers.js';
 
 describe('NX TextMate text elements', function () {
   let grammar: IGrammar;
@@ -65,6 +24,28 @@ describe('NX TextMate text elements', function () {
 
     expect(scopesForSubstring(lines[0], tokens0.tokens, ':text')).to.include('support.type.text.nx');
     expect(scopesForSubstring(lines[0], tokens0.tokens, 'raw')).to.include('keyword.other.raw.nx');
+  });
+
+  it('scopes a complete TextType, never a prefix of one', function () {
+    // The `=` guard on the TextType must not be satisfied by giving back a character of the name.
+    const textTypeOf = (line: string): string => {
+      const { tokens } = grammar.tokenizeLine(line, null);
+      return tokens
+        .filter(t => t.scopes.includes('support.type.text.nx'))
+        .map(t => line.slice(t.startIndex, t.endIndex))
+        .join('');
+    };
+
+    expect(textTypeOf('<Note:uitext class="x">')).to.equal(':uitext');
+    expect(textTypeOf('<Button content=<:uitext>Click</> />')).to.equal(':uitext');
+
+    // With an attribute rather than a TextType after the colon, no prefix of the name is a type.
+    for (const attribute of ['<Note:xy=1>', '<Button prop=<:xy=1> />']) {
+      expect(textTypeOf(attribute), attribute).to.equal(':');
+      const { tokens } = grammar.tokenizeLine(attribute, null);
+      expect(scopesForSubstring(attribute, tokens, 'xy'), attribute)
+        .to.include('entity.other.attribute-name.nx');
+    }
   });
 
   it('scopes the TextType when present', function () {

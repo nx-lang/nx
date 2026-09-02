@@ -10,10 +10,16 @@
       "include": "#comments"
     },
     {
+      "include": "#function-definition"
+    },
+    {
       "include": "#value-definition"
     },
     {
       "include": "#type-definition"
+    },
+    {
+      "include": "#state-group"
     },
     {
       "include": "#module-root-element"
@@ -182,8 +188,20 @@
           "match": "\\babstract\\b"
         },
         {
+          "name": "storage.modifier.external.nx",
+          "match": "\\bexternal\\b"
+        },
+        {
           "name": "keyword.declaration.extends.nx",
           "match": "\\bextends\\b"
+        },
+        {
+          "name": "keyword.declaration.emits.nx",
+          "match": "\\bemits\\b"
+        },
+        {
+          "name": "keyword.declaration.state.nx",
+          "match": "\\bstate\\b"
         },
         {
           "name": "keyword.declaration.let.nx",
@@ -193,6 +211,14 @@
           "name": "keyword.other.raw.nx",
           "match": "\\braw\\b"
         },
+        {
+          "include": "#literals"
+        }
+      ]
+    },
+    "literals": {
+      "comment": "The reserved value literals. Split out of `keywords-core` so a context can recognise them without also claiming the declaration keywords, which are legal identifiers and attribute names.",
+      "patterns": [
         {
           "name": "constant.language.boolean.nx",
           "match": "\\b(?:true|false)\\b"
@@ -222,7 +248,7 @@
     "types": {
       "patterns": [
         {
-          "name": "storage.type.primitive.nx",
+          "name": "support.type.primitive.nx",
           "match": "\\b(?:string|int|int32|int64|float32|float64|boolean|void|object)\\b"
         },
         {
@@ -288,19 +314,89 @@
           "name": "entity.name.variable.nx"
         }
       },
-      "end": "(?==)",
+      "end": "$|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
       "name": "meta.definition.value.nx",
       "patterns": [
         {
-          "name": "punctuation.separator.type.annotation.nx",
-          "match": ":"
+          "include": "#comments"
         },
         {
-          "name": "entity.name.type.nx",
-          "match": "(?<=:)\\s*(?!string\\b|int\\b|int32\\b|int64\\b|float32\\b|float64\\b|boolean\\b|void\\b|object\\b)[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*"
+          "begin": "\\(",
+          "end": "\\)",
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#declaration-property"
+            },
+            {
+              "include": "#qualifiers"
+            },
+            {
+              "include": "#operators"
+            },
+            {
+              "include": "#keywords-core"
+            },
+            {
+              "include": "#keywords-control"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#strings"
+            }
+          ]
         },
         {
-          "include": "#types"
+          "comment": "The `= RhsExpression` of a definition. The control forms are accepted unbraced for continuity with existing files, though the spec requires braces around an expression.",
+          "begin": "(=)(?!>)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.operator.assignment.nx"
+            }
+          },
+          "end": "(?=$)|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#value-if"
+            },
+            {
+              "include": "#value-for"
+            },
+            {
+              "include": "#elements-if"
+            },
+            {
+              "include": "#elements-for"
+            },
+            {
+              "include": "#rhs-expression"
+            }
+          ]
+        },
+        {
+          "comment": "The declared type of a value definition. Anchored on the colon so the `?` and `[]` suffixes are scoped as type modifiers rather than as a ternary.",
+          "begin": "(:)",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.separator.type.annotation.nx"
+            }
+          },
+          "end": "(?=\\s*=|$)",
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#type-annotation"
+            }
+          ]
         },
         {
           "include": "#qualifiers"
@@ -319,9 +415,6 @@
         },
         {
           "include": "#strings"
-        },
-        {
-          "include": "#comments"
         }
       ]
     },
@@ -350,7 +443,7 @@
               "name": "keyword.operator.assignment.nx"
             }
           },
-          "end": "(?=^\\s*(?:(?:private|export)\\s+)?(?:(?:abstract)\\s+)?(?:type|action|component|let)\\b)",
+          "end": "(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
           "patterns": [
             {
               "include": "#union-case"
@@ -407,7 +500,7 @@
               "name": "entity.name.type.union.case.nx"
             }
           },
-          "end": "(?=^\\s*(?:(?:private|export)\\s+)?(?:(?:abstract)\\s+)?(?:type|action|component|let)\\b)",
+          "end": "(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
           "patterns": [
             {
               "begin": "\\{",
@@ -416,7 +509,7 @@
                   "name": "punctuation.section.block.begin.nx"
                 }
               },
-              "end": "\\}",
+              "end": "\\}|(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
               "endCaptures": {
                 "0": {
                   "name": "punctuation.section.block.end.nx"
@@ -486,7 +579,7 @@
               "name": "punctuation.section.block.begin.nx"
             }
           },
-          "end": "\\}",
+          "end": "\\}|(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
           "endCaptures": {
             "0": {
               "name": "punctuation.section.block.end.nx"
@@ -518,7 +611,7 @@
               "name": "punctuation.section.block.begin.nx"
             }
           },
-          "end": "\\}",
+          "end": "\\}|(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
           "endCaptures": {
             "0": {
               "name": "punctuation.section.block.end.nx"
@@ -532,43 +625,25 @@
         },
         {
           "name": "meta.definition.component.nx",
-          "begin": "^(\\s*)((private|export)\\s+)?(component)\\s+(<)([A-Za-z_][A-Za-z0-9_]*)(?=[\\s/>])",
+          "begin": "^(\\s*)((private|export)\\s+)?((abstract)\\s+)?((external)\\s+)?(component)\\b",
           "beginCaptures": {
             "3": {
               "name": "storage.modifier.visibility.nx"
             },
-            "4": {
-              "name": "keyword.declaration.component.nx"
-            },
             "5": {
-              "name": "punctuation.definition.tag.begin.nx"
+              "name": "storage.modifier.abstract.nx"
             },
-            "6": {
-              "name": "entity.name.type.nx"
+            "7": {
+              "name": "storage.modifier.external.nx"
+            },
+            "8": {
+              "name": "keyword.declaration.component.nx"
             }
           },
-          "end": "(?==)",
+          "end": "(?<=/\\s*>)|(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
           "patterns": [
             {
-              "include": "#keywords-core"
-            },
-            {
-              "include": "#keywords-control"
-            },
-            {
-              "include": "#types"
-            },
-            {
-              "include": "#operators"
-            },
-            {
-              "include": "#qualifiers"
-            },
-            {
-              "include": "#numbers"
-            },
-            {
-              "include": "#strings"
+              "include": "#declaration-signature"
             },
             {
               "include": "#comments"
@@ -608,7 +683,7 @@
               "name": "entity.name.type.union.case.nx"
             }
           },
-          "end": "(?=\\||^\\s*(?:(?:private|export)\\s+)?(?:(?:abstract)\\s+)?(?:type|action|component|let)\\b)",
+          "end": "(?=\\||^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
           "patterns": [
             {
               "begin": "\\{",
@@ -617,7 +692,7 @@
                   "name": "punctuation.section.block.begin.nx"
                 }
               },
-              "end": "\\}",
+              "end": "\\}|(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
               "endCaptures": {
                 "0": {
                   "name": "punctuation.section.block.end.nx"
@@ -729,7 +804,7 @@
               "name": "punctuation.section.block.begin.nx"
             }
           },
-          "end": "\\}",
+          "end": "\\}|(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
           "endCaptures": {
             "0": {
               "name": "punctuation.section.block.end.nx"
@@ -755,11 +830,13 @@
               "name": "punctuation.separator.type.annotation.nx"
             }
           },
-          "end": "(?=\\s*[A-Za-z_][A-Za-z0-9_-]*\\s*:|\\s*\\})",
+          "end": "(?=\\s*[A-Za-z_][A-Za-z0-9_-]*\\s*:|\\s*\\}|^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
           "patterns": [
             {
-              "name": "entity.name.type.nx",
-              "match": "\\G\\s*(?!string\\b|int\\b|int32\\b|int64\\b|float32\\b|float64\\b|boolean\\b|void\\b|object\\b)[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*"
+              "include": "#comments"
+            },
+            {
+              "include": "#type-annotation"
             },
             {
               "include": "#strings"
@@ -798,10 +875,10 @@
               "include": "#operators"
             },
             {
-              "include": "#qualifiers"
+              "include": "#rhs-expression"
             },
             {
-              "include": "#comments"
+              "include": "#qualifiers"
             }
           ]
         }
@@ -836,7 +913,7 @@
           "name": "punctuation.section.values-braced-expression.begin.nx"
         }
       },
-      "end": "\\}",
+      "end": "\\}|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
       "endCaptures": {
         "0": {
           "name": "punctuation.section.values-braced-expression.end.nx"
@@ -863,6 +940,9 @@
           "include": "#numbers"
         },
         {
+          "include": "#state-group"
+        },
+        {
           "include": "#keywords-core"
         },
         {
@@ -886,7 +966,7 @@
           "name": "punctuation.section.embed-braced-expression.begin.nx"
         }
       },
-      "end": "\\}",
+      "end": "\\}|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
       "endCaptures": {
         "0": {
           "name": "punctuation.section.embed-braced-expression.end.nx"
@@ -932,31 +1012,7 @@
     "attr-value": {
       "patterns": [
         {
-          "include": "#strings"
-        },
-        {
-          "include": "#values-braced-expression"
-        },
-        {
-          "include": "#tags"
-        },
-        {
-          "include": "#signed-number"
-        },
-        {
-          "include": "#numbers"
-        },
-        {
-          "include": "#keywords-core"
-        },
-        {
-          "include": "#keywords-control"
-        },
-        {
-          "include": "#contextual-name"
-        },
-        {
-          "include": "#operators"
+          "include": "#rhs-expression"
         }
       ]
     },
@@ -1308,7 +1364,7 @@
           "name": "punctuation.definition.tag.begin.nx"
         }
       },
-      "end": ">",
+      "end": ">|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
       "endCaptures": {
         "0": {
           "name": "punctuation.definition.tag.end.nx"
@@ -1336,7 +1392,7 @@
         },
         {
           "name": "support.type.text.nx",
-          "match": ":\\s*(?:(?!(?:raw|if)\\b)(?:[A-Za-z_][A-Za-z0-9_-]*)(?!\\s*=))?"
+          "match": ":\\s*(?:(?!(?:raw|if)\\b)(?:[A-Za-z_][A-Za-z0-9_-]*)(?![A-Za-z0-9_-])(?!\\s*=))?"
         },
         {
           "name": "keyword.other.raw.nx",
@@ -1357,32 +1413,16 @@
           "include": "#property-list-if"
         },
         {
-          "name": "meta.attribute.nx",
-          "match": "\\.\\.\\.[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*"
+          "include": "#attribute-spread"
+        },
+        {
+          "include": "#attribute-assignment"
         },
         {
           "include": "#keywords-core"
-        },
-        {
-          "begin": "(?=[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*\\s*=(?!>))",
-          "end": "(?=\n|[/>])",
-          "patterns": [
-            {
-              "include": "#keywords-control"
-            },
-            {
-              "include": "#attr-name"
-            },
-            {
-              "name": "keyword.operator.assignment.nx",
-              "match": "=(?!>)"
-            },
-            {
-              "include": "#attr-value"
-            }
-          ]
         }
-      ]
+      ],
+      "comment": "`#keywords-core` comes after the attribute rule: an attribute may be named after a keyword (`type = \"multiple\"`), and at equal match positions the earlier pattern wins."
     },
     "elements-if": {
       "begin": "(?:(?<=^|\\n|\\}|>)[ \\t]*|(?<=\\belse\\s+))(if)\\b",
@@ -1391,7 +1431,7 @@
           "name": "keyword.control.conditional.nx"
         }
       },
-      "end": "(?<=\\})(?!\\s*else\\b)",
+      "end": "(?<=\\})(?!\\s*else\\b)|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
       "name": "meta.control.if.elements.nx",
       "patterns": [
         {
@@ -1425,7 +1465,7 @@
               "name": "punctuation.section.block.begin.nx"
             }
           },
-          "end": "\\}",
+          "end": "\\}|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
           "endCaptures": {
             "0": {
               "name": "punctuation.section.block.end.nx"
@@ -1497,7 +1537,7 @@
           "name": "keyword.control.conditional.nx"
         }
       },
-      "end": "(?<=\\})(?!\\s*else\\b)",
+      "end": "(?<=\\})(?!\\s*else\\b)|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
       "name": "meta.control.if.value.nx",
       "patterns": [
         {
@@ -1531,7 +1571,7 @@
               "name": "punctuation.section.block.begin.nx"
             }
           },
-          "end": "\\}",
+          "end": "\\}|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
           "endCaptures": {
             "0": {
               "name": "punctuation.section.block.end.nx"
@@ -1603,7 +1643,7 @@
           "name": "keyword.control.loop.nx"
         }
       },
-      "end": "\\}",
+      "end": "\\}|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
       "endCaptures": {
         "0": {
           "name": "punctuation.section.block.end.nx"
@@ -1613,6 +1653,12 @@
       "patterns": [
         {
           "include": "#comments"
+        },
+        {
+          "include": "#loop-header"
+        },
+        {
+          "include": "#loop-header-split-binder"
         },
         {
           "include": "#strings"
@@ -1636,7 +1682,7 @@
               "name": "punctuation.section.block.begin.nx"
             }
           },
-          "end": "(?=\\})",
+          "end": "(?=\\})|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
           "patterns": [
             {
               "include": "#comments"
@@ -1689,7 +1735,7 @@
           "name": "keyword.control.loop.nx"
         }
       },
-      "end": "\\}",
+      "end": "\\}|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
       "endCaptures": {
         "0": {
           "name": "punctuation.section.block.end.nx"
@@ -1699,6 +1745,12 @@
       "patterns": [
         {
           "include": "#comments"
+        },
+        {
+          "include": "#loop-header"
+        },
+        {
+          "include": "#loop-header-split-binder"
         },
         {
           "include": "#strings"
@@ -1728,7 +1780,7 @@
               "name": "punctuation.section.block.begin.nx"
             }
           },
-          "end": "(?=\\})",
+          "end": "(?=\\})|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
           "patterns": [
             {
               "include": "#comments"
@@ -1903,7 +1955,7 @@
           "name": "keyword.control.conditional.nx"
         }
       },
-      "end": "(?<=\\})(?!\\s*else\\b)",
+      "end": "(?<=\\})(?!\\s*else\\b)|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
       "name": "meta.control.if.properties.nx",
       "patterns": [
         {
@@ -1937,7 +1989,7 @@
               "name": "punctuation.section.block.begin.nx"
             }
           },
-          "end": "\\}",
+          "end": "\\}|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
           "endCaptures": {
             "0": {
               "name": "punctuation.section.block.end.nx"
@@ -1969,7 +2021,7 @@
               "include": "#tags"
             },
             {
-              "include": "#attributes"
+              "include": "#attributes-condition"
             },
             {
               "include": "#values-braced-expression"
@@ -1998,10 +2050,420 @@
           "include": "#types"
         },
         {
+          "include": "#literals"
+        },
+        {
           "include": "#qualifiers"
         },
         {
           "include": "#operators"
+        }
+      ]
+    },
+    "declaration-property": {
+      "patterns": [
+        {
+          "comment": "A property definition inside an element-shaped declaration signature: `[content] name: Type[[]][?] [= default]`. Unlike an element attribute, the name is a definition and what follows the colon is a type.",
+          "begin": "\\b(?:(content)\\s+)?([A-Za-z_][A-Za-z0-9_-]*)\\s*(:)",
+          "beginCaptures": {
+            "1": {
+              "name": "storage.modifier.content.nx"
+            },
+            "2": {
+              "name": "variable.other.property.nx"
+            },
+            "3": {
+              "name": "punctuation.separator.type.annotation.nx"
+            }
+          },
+          "end": "(?=\\s*(?:content\\s+)?[A-Za-z_][A-Za-z0-9_-]*\\s*:|\\s*/\\s*>|\\s*\\bemits\\b|\\s*[},)]|^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#type-annotation"
+            },
+            {
+              "include": "#attr-value"
+            }
+          ]
+        }
+      ]
+    },
+    "emits-group": {
+      "name": "meta.declaration.emits.nx",
+      "begin": "\\b(emits)\\s*(\\{)",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.declaration.emits.nx"
+        },
+        "2": {
+          "name": "punctuation.section.block.begin.nx"
+        }
+      },
+      "end": "\\}|(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.block.end.nx"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "comment": "An emitted action declared inline, with an optional base action.",
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)(?:\\s+(extends)\\s+([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*))?\\s*(?=\\{)",
+          "captures": {
+            "1": {
+              "name": "entity.name.type.nx"
+            },
+            "2": {
+              "name": "keyword.declaration.extends.nx"
+            },
+            "3": {
+              "name": "entity.name.type.nx"
+            }
+          }
+        },
+        {
+          "begin": "\\{",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.block.begin.nx"
+            }
+          },
+          "end": "\\}|(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.nx"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#declaration-property"
+            },
+            {
+              "include": "#record-body"
+            }
+          ]
+        },
+        {
+          "comment": "A reference to an action declared elsewhere.",
+          "name": "entity.name.type.nx",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*"
+        }
+      ]
+    },
+    "state-group": {
+      "name": "meta.declaration.state.nx",
+      "begin": "\\b(state)\\s*(\\{)",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.declaration.state.nx"
+        },
+        "2": {
+          "name": "punctuation.section.block.begin.nx"
+        }
+      },
+      "end": "\\}|(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.block.end.nx"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#declaration-property"
+        },
+        {
+          "include": "#record-body"
+        }
+      ]
+    },
+    "declaration-signature": {
+      "comment": "The element-shaped signature of a component or `let` function definition. Shaped like a start tag but scoped as a declaration: the name is defined here rather than referenced, and `name: Type` is a property definition rather than an attribute.",
+      "name": "meta.declaration.signature.nx",
+      "begin": "(<)([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*)(?=[\\s/>])",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.definition.tag.begin.nx"
+        },
+        "2": {
+          "name": "entity.name.type.nx"
+        }
+      },
+      "end": "(/)\\s*(>)|(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.tag.self-closing.nx"
+        },
+        "2": {
+          "name": "punctuation.definition.tag.end.nx"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "match": "\\b(extends)\\s+([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.extends.nx"
+            },
+            "2": {
+              "name": "entity.name.type.nx"
+            }
+          }
+        },
+        {
+          "include": "#emits-group"
+        },
+        {
+          "include": "#declaration-property"
+        },
+        {
+          "include": "#keywords-core"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#numbers"
+        }
+      ]
+    },
+    "function-definition": {
+      "comment": "A `let` function whose parameters are written in element form.",
+      "name": "meta.definition.function.nx",
+      "begin": "^(\\s*)((private|export)\\s+)?(let)\\s+(?=<)",
+      "beginCaptures": {
+        "3": {
+          "name": "storage.modifier.visibility.nx"
+        },
+        "4": {
+          "name": "keyword.declaration.let.nx"
+        }
+      },
+      "end": "(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))|$",
+      "patterns": [
+        {
+          "include": "#declaration-signature"
+        },
+        {
+          "include": "#comments"
+        },
+        {
+          "comment": "The `= RhsExpression` of a definition. The control forms are accepted unbraced for continuity with existing files, though the spec requires braces around an expression.",
+          "begin": "(=)(?!>)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.operator.assignment.nx"
+            }
+          },
+          "end": "(?=$)|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#value-if"
+            },
+            {
+              "include": "#value-for"
+            },
+            {
+              "include": "#elements-if"
+            },
+            {
+              "include": "#elements-for"
+            },
+            {
+              "include": "#rhs-expression"
+            }
+          ]
+        },
+        {
+          "comment": "The return type of an element-shaped function definition, scoped by the same rule as every other annotation position.",
+          "begin": "(:)",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.separator.type.annotation.nx"
+            }
+          },
+          "end": "(?=\\s*=|$)",
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#type-annotation"
+            }
+          ]
+        }
+      ]
+    },
+    "type-annotation": {
+      "comment": "The type after an annotation colon, with its sequence and optional suffixes. Anchored with \\G so it only matches immediately after the colon.",
+      "patterns": [
+        {
+          "match": "\\G\\s*(string|int32|int64|int|float32|float64|boolean|void|object)(?![A-Za-z0-9_-])((?:\\[\\]|\\?)*)",
+          "captures": {
+            "1": {
+              "name": "support.type.primitive.nx"
+            },
+            "2": {
+              "name": "keyword.operator.type-modifier.nx"
+            }
+          }
+        },
+        {
+          "match": "\\G\\s*([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*)(?![A-Za-z0-9_-])((?:\\[\\]|\\?)*)",
+          "captures": {
+            "1": {
+              "name": "entity.name.type.nx"
+            },
+            "2": {
+              "name": "keyword.operator.type-modifier.nx"
+            }
+          }
+        }
+      ]
+    },
+    "rhs-expression": {
+      "comment": "RhsExpression: what may follow `=` at a property default, an attribute value, or a value/function definition. An unbraced value is always a literal, never an expression, and a bare name is a ContextualName — a case of the union that types the binding site, never a qualified name.",
+      "patterns": [
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#values-braced-expression"
+        },
+        {
+          "include": "#tags"
+        },
+        {
+          "include": "#signed-number"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#keywords-core"
+        },
+        {
+          "include": "#keywords-control"
+        },
+        {
+          "include": "#contextual-name"
+        },
+        {
+          "include": "#operators"
+        }
+      ]
+    },
+    "attribute-spread": {
+      "comment": "A spread attribute: `...rest`.",
+      "name": "meta.attribute.nx",
+      "match": "\\.\\.\\.[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*"
+    },
+    "attribute-assignment": {
+      "comment": "A `name = value` attribute. Split out of `#attributes` so a property-list condition arm can reuse it without also inheriting the `#keywords-core` fallback. Its end includes `}` so an attribute inside a property-list condition arm releases the arm's closing brace; a braced or quoted value consumes its own `}` in a child context before this end is tried.",
+      "begin": "(?=[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*\\s*=(?!>))",
+      "end": "(?=\n|[/>}])",
+      "patterns": [
+        {
+          "include": "#keywords-control"
+        },
+        {
+          "include": "#attr-name"
+        },
+        {
+          "name": "keyword.operator.assignment.nx",
+          "match": "=(?!>)"
+        },
+        {
+          "include": "#attr-value"
+        }
+      ]
+    },
+    "attributes-condition": {
+      "comment": "The attribute patterns admissible inside a property-list condition arm. Identical to `#attributes` except that the trailing `#keywords-core` fallback is replaced by `#literals`: inside a condition a bare `state` or `type` is an expression name, not a declaration keyword, and only `true`, `false`, and `null` are reserved.",
+      "patterns": [
+        {
+          "include": "#property-list-if"
+        },
+        {
+          "include": "#attribute-spread"
+        },
+        {
+          "include": "#attribute-assignment"
+        },
+        {
+          "include": "#literals"
+        }
+      ]
+    },
+    "loop-header": {
+      "comment": "A loop's header when the binders and `in` are recognisable on one line: `name in`, `name, name in`, `name,` at a line break, or a comment after the first binder. A context rather than a single match, so the scopes survive a line break or an interrupting comment. The begin is guarded rather than a bare `\\G` because `for` also occurs in prose — `an easier way for neighbors to share tools` (`src/vscode/samples/tally-survey.nx:327`) reaches `#value-for` mid-sentence — and an unguarded header scopes every following word as a binding variable. The guard also guarantees the begin consumes the whitespace after `for`, so it always advances. `#loop-header-split-binder` covers the one layout this shape cannot see.",
+      "begin": "\\G[ \\t]*(?=[A-Za-z_][A-Za-z0-9_]*[ \\t]*(?:in(?![A-Za-z0-9_-])|,[ \\t]*(?:[A-Za-z_][A-Za-z0-9_]*[ \\t]*in(?![A-Za-z0-9_-])|$)|/[/*]))",
+      "end": "(?=[{}])|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
+      "patterns": [
+        {
+          "include": "#loop-header-parts"
+        }
+      ]
+    },
+    "loop-header-parts": {
+      "comment": "The pieces of a loop header, shared by the two entries that can open one. Binders and iterable names carry one scope, so the region needs no state beyond `in` itself. The iterable is a full `ValueExpression`, so its control forms are delegated to `#value-if` and `#value-for` ahead of the name rule: their braces belong to the iterable, and a child context has to consume them before an enclosing header's end can mistake one for the body brace.",
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "name": "keyword.control.loop.nx",
+          "match": "(?<![A-Za-z0-9_-])in(?![A-Za-z0-9_-])"
+        },
+        {
+          "name": "punctuation.separator.comma.nx",
+          "match": ","
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#literals"
+        },
+        {
+          "include": "#value-if"
+        },
+        {
+          "include": "#value-for"
+        },
+        {
+          "name": "variable.other.readwrite.nx",
+          "match": "[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*(?![A-Za-z0-9_.-])"
+        },
+        {
+          "include": "#operators"
+        }
+      ]
+    },
+    "loop-header-split-binder": {
+      "comment": "A loop header whose sole binder is separated from its `in` by a line break. A `begin` sees one line, so `for item` at a line end cannot be told apart from prose that wraps after `for item`; this entry opens anyway and bounds the cost in its `end` instead. It pops at the start of the first line that does not continue the header — a line that is not blank, not a comment, and does not begin with `in` — so a false open in prose mis-scopes the one word after `for` and stops there. Blank and comment lines are allowed through because NX treats them as trivia inside a header; a block comment spanning lines needs no alternative of its own, since its own context is on the stack and this end is never tested while it is. The negative lookahead must sit immediately after `^`, with the whitespace run inside it: `(?=^[ \\t]*(?!in…))` lets `[ \\t]*` backtrack to zero width, tests against the leading space, and pops before the iterable is scoped. The residual ambiguity is prose that wraps as `… for neighbors` / `in towns and cities`, which is a header in every visible respect; that line is scoped as one, and the pop still ends it there.",
+      "begin": "\\G[ \\t]*(?=[A-Za-z_][A-Za-z0-9_]*[ \\t]*$)",
+      "end": "(?=[{}])|(?=^(?![ \\t]*(?:in(?![A-Za-z0-9_-])|//|/\\*|$)))|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
+      "patterns": [
+        {
+          "include": "#loop-header-parts"
         }
       ]
     }

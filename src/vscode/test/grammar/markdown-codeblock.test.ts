@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { expect } from 'chai';
 import type { IGrammar, IToken } from 'vscode-textmate';
+import { grammarPath, loadOniguruma, scopesForSubstring } from './helpers.js';
 
 const cjsRequire = createRequire(import.meta.url);
 const __filename = fileURLToPath(import.meta.url);
@@ -13,9 +14,7 @@ const onig: any = cjsRequire('vscode-oniguruma');
 const vsctm: any = cjsRequire('vscode-textmate');
 
 async function loadMarkdownGrammarWithNx(): Promise<IGrammar> {
-  const wasmPath = cjsRequire.resolve('vscode-oniguruma/release/onig.wasm');
-  const wasmBin = fs.readFileSync(wasmPath).buffer;
-  await onig.loadWASM(wasmBin);
+  await loadOniguruma();
 
   const registry = new vsctm.Registry({
     onigLib: Promise.resolve({
@@ -29,7 +28,6 @@ async function loadMarkdownGrammarWithNx(): Promise<IGrammar> {
       }
 
       if (scopeName === 'source.nx') {
-        const grammarPath = path.join(__dirname, '..', '..', 'syntaxes', 'nx.tmLanguage.json');
         return vsctm.parseRawGrammar(fs.readFileSync(grammarPath, 'utf8'), grammarPath);
       }
 
@@ -57,13 +55,6 @@ async function loadMarkdownGrammarWithNx(): Promise<IGrammar> {
   return grammar;
 }
 
-function scopesForSubstring(line: string, tokens: IToken[], substring: string): string[] {
-  const idx = line.indexOf(substring);
-  if (idx === -1) return [];
-  const pos = idx + Math.floor(substring.length / 2);
-  const token = tokens.find(t => t.startIndex <= pos && pos < t.endIndex);
-  return token ? token.scopes : [];
-}
 
 describe('Markdown NX fenced code blocks', function () {
   let markdownGrammar: IGrammar;
