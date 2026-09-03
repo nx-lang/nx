@@ -328,35 +328,54 @@ impl<'a> UndefinedIdentifierChecker<'a> {
                 }
                 Item::Component(component) => {
                     let scope = self.scope_manager.create_child(self.scope_manager.root());
-                    let mut symbols =
-                        crate::effective_component_contract_for_name(self.module, &component.name)
-                            .ok()
-                            .flatten()
-                            .map(|contract| {
-                                contract
-                                    .props
-                                    .into_iter()
-                                    .map(|field| (field.name, SymbolKind::Parameter, field.span))
-                                    .collect::<Vec<_>>()
-                            })
-                            .unwrap_or_else(|| {
-                                component
-                                    .props
-                                    .iter()
-                                    .map(|field| {
-                                        (field.name.clone(), SymbolKind::Parameter, field.span)
-                                    })
-                                    .collect::<Vec<_>>()
-                            });
-                    symbols.extend(
+                    let props = crate::effective_component_contract_for_name(
+                        self.module,
+                        &component.name,
+                    )
+                    .ok()
+                    .flatten()
+                    .map(|contract| {
+                        contract
+                            .props
+                            .into_iter()
+                            .map(|field| (field.name, field.span))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_else(|| {
                         component
-                            .state
+                            .props
                             .iter()
-                            .map(|field| (field.name.clone(), SymbolKind::Variable, field.span)),
-                    );
-                    for (name, kind, span) in symbols {
-                        self.scope_manager_define(scope, name, kind, span);
+                            .map(|field| (field.name.clone(), field.span))
+                            .collect::<Vec<_>>()
+                    });
+
+                    // A default is built where the field it defaults is materialized: the props in
+                    // order, then the state. So a default sees the fields before it and nothing
+                    // else — naming a later one has no value to read at the moment it runs, which
+                    // is why the name is reported here rather than left to fail at run time.
+                    for (name, span) in props {
+                        if let Some(default) = component
+                            .props
+                            .iter()
+                            .find(|field| field.name == name)
+                            .and_then(|field| field.default)
+                        {
+                            self.check_expr(default, scope);
+                        }
+                        self.scope_manager_define(scope, name, SymbolKind::Parameter, span);
                     }
+                    for field in &component.state {
+                        if let Some(default) = field.default {
+                            self.check_expr(default, scope);
+                        }
+                        self.scope_manager_define(
+                            scope,
+                            field.name.clone(),
+                            SymbolKind::Variable,
+                            field.span,
+                        );
+                    }
+
                     if let Some(body) = component.body {
                         self.check_expr(body, scope);
                     }

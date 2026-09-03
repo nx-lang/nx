@@ -1,0 +1,22 @@
+[
+  {
+    "owner": "SkiaRichLabel",
+    "property": "FontSize",
+    "inheritedFrom": "SkiaLabel"
+  },
+  {
+    "owner": "SkiaRichLabel",
+    "property": "Text",
+    "inheritedFrom": "SkiaLabel"
+  },
+  {
+    "owner": "SkiaShape",
+    "property": "Type",
+    "inheritedFrom": "SkiaLayout"
+  },
+  {
+    "owner": "SkiaToggle",
+    "property": "AccessibilityIsPressed",
+    "inheritedFrom": "SkiaControl"
+  }
+]

@@ -1,4 +1,4 @@
-# NX IR JSON v1
+# NX IR JSON v2
 
 NX IR is a deterministic JSON artifact emitted from a successful `ProgramArtifact`. It is intended
 for caching, inspection, and loading by the TypeScript IR runtime without re-reading NX source.
@@ -8,7 +8,7 @@ for caching, inspection, and loading by the TypeScript IR runtime without re-rea
 An `.nxir.json` document contains:
 
 - `format`: `nx-ir-json`
-- `schemaVersion`: `1`
+- `schemaVersion`: `2`
 - `runtimeAbi`: `nx-ir-runtime-v1`
 - `programFingerprint`: decimal string form of the native `u64` fingerprint
 - `requiredFeatures`
@@ -23,6 +23,21 @@ Type references distinguish built-in primitives from nominal declarations. Primi
 module-qualified declaration identity used by runtimes for record, union, and type-alias
 boundary normalization. Display names are retained for canonical `$type` values, diagnostics, and
 human-readable tooling output.
+
+A record declaration and a union declaration each carry `bases`: the abstract records they extend,
+nearest first, as declaration references. Fields reach the IR already flattened — a derived record
+lists its inherited fields before its own — so `bases` answers only what flattening cannot, which is
+whether a value stamped with one name is acceptable where another type was asked for. It holds
+declaration identities rather than names because that is what survives separate modules: two records
+named `Card` are two types, and only the identity says which one a base-typed site meant. A union's
+cases all inherit the union's base, so the chain sits on the union rather than on each case.
+
+A record declaration also carries `isAbstract`, true for a record declared with the `abstract`
+modifier. Such a record has no values of its own: a base-typed site takes a value of a record that
+extends it, and NX rejects constructing the base itself. Boundary normalization needs this because
+host input reaches it too — without it a plain object at an abstract-typed site would be stamped
+with a type name no NX program can produce. A union is never abstract, so union declarations carry
+no such flag.
 
 Expression records use tagged `op` payloads for literals, slots, top-level references, calls,
 unary/binary operations, `if`, match-style `if is`, `let`, blocks, arrays, `for`, index/member

@@ -7,8 +7,10 @@ use nx_syntax::{parse_file, parse_str, SyntaxKind};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 use tree_helpers::{contains_kind, count_kind, find_first_kind};
 
 /// Helper to resolve test fixture paths (works from both crate and workspace root)
@@ -2995,4 +2997,123 @@ fn test_value_definition_vs_function_definition() {
         .children()
         .any(|c| c.kind() == SyntaxKind::FUNCTION_DEFINITION);
     assert!(has_func_def, "Should have function_definition node");
+}
+
+#[test]
+fn test_parse_element_with_empty_body() {
+    // An element whose open and close tags have nothing between them is well-formed, and carries
+    // no content field — the same shape a self-closing tag produces.
+    let source = "<App></App>";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "Element with an empty body should parse: {}",
+        render_diagnostics_cli(&result.errors, &HashMap::new())
+    );
+
+    let element = find_first_kind(&result.root().expect("Should have root node"), SyntaxKind::ELEMENT)
+        .expect("Expected element");
+    assert!(
+        element.child_by_field("content").is_none(),
+        "An empty body should expose no content field"
+    );
+    assert_eq!(
+        element
+            .child_by_field("close_name")
+            .expect("Element should expose closing tag name")
+            .text(),
+        "App"
+    );
+}
+
+#[test]
+fn test_parse_element_with_empty_body_across_lines() {
+    // The whitespace-and-comment-only body is the shape authors actually write.
+    let source = "let root() = {\n  <App VerticalOptions=Fill>\n    // nothing yet\n  </App>\n}";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "Element with a whitespace-only body should parse: {}",
+        render_diagnostics_cli(&result.errors, &HashMap::new())
+    );
+
+    let element = find_first_kind(&result.root().expect("Should have root node"), SyntaxKind::ELEMENT)
+        .expect("Expected element");
+    assert!(
+        element.child_by_field("content").is_none(),
+        "A whitespace-only body should expose no content field"
+    );
+    assert!(
+        element.child_by_field("properties").is_some(),
+        "Properties should still be parsed alongside an empty body"
+    );
+}
+
+#[test]
+fn test_parse_top_level_element_with_empty_body() {
+    // A source file may end in a single element expression, and that element may be empty.
+    let source = "external component <App content Children:Element[]? />\n\n<App>\n</App>";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "A top-level element with an empty body should parse: {}",
+        render_diagnostics_cli(&result.errors, &HashMap::new())
+    );
+    assert!(
+        contains_kind(&result.root().expect("Should have root node"), SyntaxKind::ELEMENT),
+        "Expected a top-level element"
+    );
+}
+
+// ============================================================================
+// External scanner termination
+// ============================================================================
+
+/// Parses on a worker thread, so a scanner that fails to terminate fails this test rather than
+/// hanging the whole suite. Returns whether the parse was clean, or `None` if it never finished.
+fn parse_within(source: &'static str, limit: Duration) -> Option<bool> {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let result = parse_str(source, "test.nx");
+        let _ = sender.send(result.is_ok());
+    });
+    receiver.recv_timeout(limit).ok()
+}
+
+#[test]
+fn test_scan_delimiter_at_end_of_file_terminates() {
+    // The external scanner used to decide these cases by copying `TSLexer` and restoring it, which
+    // rewinds the lookahead character but not the position. At end of input, where `advance` has
+    // nothing left to consume, the restored character came back forever and the parse never
+    // returned. Each of these is a syntax error; the point is that saying so takes finite time.
+    for source in ["@", "let x = @", "<Doc:string>text@", "<Doc:string>text&", "<Doc>text&"] {
+        let outcome = parse_within(source, Duration::from_secs(10));
+        assert_eq!(
+            outcome,
+            Some(false),
+            "Parsing {source:?} should report a syntax error rather than run forever"
+        );
+    }
+}
+
+#[test]
+fn test_scan_lone_at_in_embedded_text_is_literal() {
+    // Only "@{" opens a braced value inside typed text content; a bare '@' is ordinary text, and
+    // the character after it must not be swallowed along with it.
+    let source = "<Doc:string>a@b</Doc>";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "A lone '@' in embedded text should parse: {}",
+        render_diagnostics_cli(&result.errors, &HashMap::new())
+    );
+
+    let element = find_first_kind(&result.root().expect("Should have root node"), SyntaxKind::ELEMENT)
+        .expect("Expected element");
+    let content = element.child_by_field("content").expect("Expected embedded text content");
+    assert_eq!(content.text(), "a@b", "The '@' and the character after it are both text");
 }

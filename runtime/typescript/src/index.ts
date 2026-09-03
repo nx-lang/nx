@@ -87,6 +87,19 @@ export interface NxIrValueDeclaration {
 export interface NxIrRecordDeclaration {
   readonly tag: "record";
   readonly fields: readonly NxIrRecordField[];
+  /**
+   * The record's abstract bases, nearest first.
+   *
+   * Fields arrive already flattened, so this answers only what flattening cannot: a value stamped
+   * with this record's name is acceptable wherever any of these is expected.
+   */
+  readonly bases?: readonly NxIrReference[];
+  /**
+   * Whether the record was declared `abstract`, and so has no values of its own.
+   *
+   * A base-typed site accepts a value of a record that extends this one, never one of this one.
+   */
+  readonly isAbstract?: boolean;
 }
 
 export interface NxIrComponentDeclaration {
@@ -101,6 +114,8 @@ export interface NxIrComponentDeclaration {
 export interface NxIrUnionDeclaration {
   readonly tag: "union";
   readonly cases: readonly NxIrUnionCase[];
+  /** The union's abstract bases, nearest first, inherited by every case. */
+  readonly bases?: readonly NxIrReference[];
 }
 
 export interface NxIrTypeAliasDeclaration {
@@ -183,6 +198,31 @@ export interface NxPreparedProgram {
   readonly functionEntrypoints: ReadonlyMap<string, PreparedDeclaration>;
   readonly componentEntrypoints: ReadonlyMap<string, PreparedDeclaration>;
   readonly sourcesByIdentity: ReadonlyMap<string, string>;
+  /**
+   * Every constructible nominal shape, keyed by the `$type` a value of it carries.
+   *
+   * A value arriving at a base-typed boundary names its own type and nothing more, so this is how
+   * that name is turned back into the schema to normalize it with. One key can hold several shapes:
+   * two modules may each declare a record of the same name.
+   */
+  readonly nominalShapesByDiscriminator: ReadonlyMap<string, readonly NominalShape[]>;
+}
+
+/**
+ * One record or union case as it appears on the wire.
+ *
+ * <para>`bases` holds declaration ids rather than names because that is the only identity that
+ * survives separate modules: two records named `Card` are two types, and only the id says which
+ * one a base-typed site meant.</para>
+ */
+export interface NominalShape {
+  /** The `$type` a value of this shape carries: a record's name, or `Union.case`. */
+  readonly discriminator: string;
+  readonly declaration: string;
+  readonly fields: readonly NxIrRecordField[];
+  readonly bases: readonly string[];
+  /** Whether this shape is an abstract record, which no value may be an instance of. */
+  readonly isAbstract: boolean;
 }
 
 export interface PreparedDeclaration {
@@ -309,6 +349,8 @@ export function tryPrepareNxIrProgram(input: string | NxIrProgram): NxResult<NxP
       validateDeclaration(module, declaration, declarationsById, diagnostics);
     }
   }
+
+  const nominalShapesByDiscriminator = indexNominalShapes(ir);
   for (const entrypoint of ir.functionEntrypoints ?? []) {
     const declaration = declarationsById.get(entrypoint.reference.declaration);
     if (declaration === undefined || declaration.declaration.kind.tag !== "function") {
@@ -343,8 +385,65 @@ export function tryPrepareNxIrProgram(input: string | NxIrProgram): NxResult<NxP
       functionEntrypoints,
       componentEntrypoints,
       sourcesByIdentity,
+      nominalShapesByDiscriminator,
     },
   };
+}
+
+/**
+ * Indexes every nominal shape by the `$type` its values carry.
+ *
+ * An abstract record is indexed too, even though nothing may be an instance of one: a value that
+ * names one is a value to reject, and rejecting it by name reads better than reporting it as a type
+ * the program does not have.
+ *
+ * A record contributes its own name; a union contributes one entry per non-constant case, under
+ * `Union.case`, because that is what `evalUnionCase` stamps. A constant case is a bare string with
+ * no schema to normalize, so it contributes nothing.
+ */
+function indexNominalShapes(ir: NxIrProgram): ReadonlyMap<string, readonly NominalShape[]> {
+  const index = new Map<string, NominalShape[]>();
+  const add = (shape: NominalShape): void => {
+    const existing = index.get(shape.discriminator);
+    if (existing === undefined) {
+      index.set(shape.discriminator, [shape]);
+      return;
+    }
+    existing.push(shape);
+  };
+
+  for (const module of ir.modules ?? []) {
+    for (const declaration of module.declarations ?? []) {
+      const kind = declaration.kind;
+      if (kind.tag === "record") {
+        add({
+          discriminator: declaration.reference.name,
+          declaration: declaration.id,
+          fields: kind.fields ?? [],
+          bases: (kind.bases ?? []).map((base) => base.declaration),
+          isAbstract: kind.isAbstract === true,
+        });
+        continue;
+      }
+      if (kind.tag === "union") {
+        const bases = (kind.bases ?? []).map((base) => base.declaration);
+        for (const unionCase of kind.cases ?? []) {
+          if (unionCase.isConstant) {
+            continue;
+          }
+          add({
+            discriminator: `${declaration.reference.name}.${unionCase.name}`,
+            declaration: declaration.id,
+            fields: unionCase.fields ?? [],
+            bases,
+            isAbstract: false,
+          });
+        }
+      }
+    }
+  }
+
+  return index;
 }
 
 export function evaluateFunction(
@@ -371,7 +470,7 @@ export function constructComponentDescriptor(
   const component = prepared.declaration.kind as NxIrComponentDeclaration;
   const input = { ...props };
   const contentField = component.props.find((field) => field.isContent);
-  applyContentBinding(input, contentField?.name, content, name);
+  applyContentBinding(input, contentField?.name, component.props, content, name);
   const normalizedProps = normalizeFields(
     program,
     component.props,
@@ -691,8 +790,8 @@ function evalRecord(op: Record<string, unknown>, context: EvalContext): NxCanoni
   const content = ((op.content as readonly NxIrExpression[]) ?? []).map((item) =>
     evalExpression(item, context),
   );
-  applyContentBinding(properties, op.contentField, content, String(op.name));
   const fields = (op.fields as readonly NxIrRecordField[]) ?? [];
+  applyContentBinding(properties, op.contentField, fields, content, String(op.name));
   const normalized = normalizeFields(context.program, fields, properties, new Map(context.env), String(op.name), false);
   return { $type: String(op.name), ...normalized };
 }
@@ -704,8 +803,8 @@ function evalUnionCase(op: Record<string, unknown>, context: EvalContext): NxCan
   const content = ((op.content as readonly NxIrExpression[]) ?? []).map((item) =>
     evalExpression(item, context),
   );
-  applyContentBinding(properties, op.contentField, content, `${union.name}.${caseName}`);
   const fields = (op.fields as readonly NxIrRecordField[]) ?? [];
+  applyContentBinding(properties, op.contentField, fields, content, `${union.name}.${caseName}`);
   const normalized = normalizeFields(
     context.program,
     fields,
@@ -746,7 +845,7 @@ function evalComponentDescriptor(op: Record<string, unknown>, context: EvalConte
   const content = ((op.content as readonly NxIrExpression[]) ?? []).map((item) =>
     evalExpression(item, context),
   );
-  applyContentBinding(props, op.contentField, content, reference.name);
+  applyContentBinding(props, op.contentField, component.props, content, reference.name);
   const env = new Map(context.env);
   const normalized = normalizeFields(context.program, component.props, props, env, `${reference.name} props`, false);
 
@@ -756,6 +855,7 @@ function evalComponentDescriptor(op: Record<string, unknown>, context: EvalConte
 function applyContentBinding(
   input: Record<string, NxCanonicalValue>,
   contentField: unknown,
+  fields: readonly NxIrRecordField[],
   content: readonly NxCanonicalValue[],
   path: string,
 ): void {
@@ -768,7 +868,24 @@ function applyContentBinding(
   if (Object.prototype.hasOwnProperty.call(input, contentField)) {
     fail("nx-ir-boundary-field", `${path} field '${contentField}' was supplied both as a property and as content.`);
   }
-  input[contentField] = content.length === 1 ? content[0]! : [...content];
+
+  const declared = fields.find((field) => field.name === contentField)?.ty;
+  const bindsList = declared !== undefined && isListTypeRef(declared);
+  input[contentField] = bindsList || content.length > 1 ? [...content] : content[0]!;
+}
+
+/**
+ * Whether a content property's declared type holds a list, looking through nullability.
+ *
+ * A list-typed content property binds a list however many children were supplied, including exactly
+ * one. Collapsing a single child to the child itself would then fail normalization, and it would
+ * disagree with the interpreter, which lists the single child.
+ */
+function isListTypeRef(ty: NxIrTypeRef): boolean {
+  if (ty.kind === "nullable") {
+    return ty.inner !== undefined && isListTypeRef(ty.inner);
+  }
+  return ty.kind === "array";
 }
 
 function normalizeFields(
@@ -828,13 +945,16 @@ function normalizeValue(
         value,
         path,
       );
-    case "array":
-      if (!Array.isArray(value)) {
-        fail("nx-ir-boundary-type", `Expected ${path} to be an array.`);
-      }
-      return value.map((item, index) =>
+    case "array": {
+      // A single value at a list-typed site is a list of one. That is the language's rule, not a
+      // leniency: `Shadows={ <SkiaShadow /> }` and `xs={3.0}` both evaluate to one-element lists
+      // under the interpreter, and the IR records the value at its own type rather than wrapping
+      // it, leaving the coercion to normalization.
+      const items = Array.isArray(value) ? value : [value];
+      return items.map((item, index) =>
         normalizeValue(program, requiredTypeRef(ty.element, "array element"), item, `${path}[${index}]`),
       );
+    }
     case "nullable":
       return value === null
         ? null
@@ -892,7 +1012,47 @@ function normalizeNominalValue(
   const kind = prepared.declaration.kind;
   if (kind.tag === "record") {
     const object = requireObject(value, path);
-    return { $type: display, ...normalizeFields(program, kind.fields, object, new Map(), path, false) };
+    // The declared type supplies the field list, so a discriminator carried by the value selects
+    // nothing and is dropped rather than used. Record construction stamps one on every value it
+    // produces, so keeping it would make the runtime reject its own output.
+    //
+    // It is still checked before it is dropped, because this path also takes host input: a
+    // discriminator naming some other type is a value of the wrong type, and silently restamping it
+    // with the declared name would report it as the type it is not. Absent is fine — a host writing
+    // a plain object has no discriminator to give.
+    const discriminator = object.$type;
+    if (discriminator !== undefined && discriminator !== display) {
+      // A derived value is not the wrong type: `User extends Base` is acceptable wherever `Base`
+      // is. It keeps its own discriminator and is normalized against its own schema, because the
+      // expected type's field list does not have the derived fields in it.
+      const subtype = resolveSubtype(
+        program,
+        String(discriminator),
+        reference.declaration,
+        display,
+        path,
+      );
+      const { $type: _derived, ...derived } = object;
+      return {
+        $type: subtype.discriminator,
+        ...normalizeFields(program, subtype.fields, derived, new Map(), path, false),
+      };
+    }
+    // Nothing is an instance of an abstract record. Reaching here means the value would be stamped
+    // with this declaration's own name, and analysis rejects that spelling in NX source — so
+    // accepting it from a host would hand back a value no NX program can produce and no consumer
+    // branching on `$type` has a case for.
+    if (kind.isAbstract === true) {
+      fail(
+        "nx-ir-boundary-type",
+        discriminator === undefined
+          ? `Expected ${path} to be a concrete type extending ${display}, got an object with no ` +
+              `'$type' discriminator naming one.`
+          : `Expected ${path} to be a concrete type extending ${display}, got abstract '${display}'.`,
+      );
+    }
+    const { $type: _discard, ...rest } = object;
+    return { $type: display, ...normalizeFields(program, kind.fields, rest, new Map(), path, false) };
   }
   if (kind.tag === "union") {
     // A constant case arrives as its bare name rather than as a `$type` object.
@@ -926,6 +1086,47 @@ function normalizeNominalValue(
   }
 
   return value;
+}
+
+/**
+ * Finds the shape a value's `$type` names, given that a value of `expected` was asked for.
+ *
+ * <para>The discriminator is a name, not an identity, so this can find more than one shape — two
+ * modules may each declare a `Card` extending the same base. That is reported rather than guessed
+ * at: picking one would normalize against the wrong field list and quietly produce a wrong value.
+ * Carrying identity in the value itself is what would remove the ambiguity, and it is not carried
+ * because `$type` is output a host reads and the interpreter emits the same names.</para>
+ */
+function resolveSubtype(
+  program: NxPreparedProgram,
+  discriminator: string,
+  expected: string,
+  display: string,
+  path: string,
+): NominalShape {
+  const candidates = (program.nominalShapesByDiscriminator.get(discriminator) ?? []).filter(
+    (shape) => shape.bases.includes(expected),
+  );
+  if (candidates.length > 1) {
+    fail(
+      "nx-ir-boundary-type",
+      `Ambiguous subtype at ${path}: ${candidates.length} declarations named '${discriminator}' ` +
+        `extend ${display}, and a '$type' discriminator cannot tell them apart.`,
+    );
+  }
+  const only = candidates[0];
+  if (only === undefined) {
+    fail("nx-ir-boundary-type", `Expected ${path} to be a ${display}, got '${discriminator}'.`);
+  }
+  if (only.isAbstract) {
+    // An intermediate abstract record extends the expected one, so it passes the base check, but it
+    // is still a type with no values.
+    fail(
+      "nx-ir-boundary-type",
+      `Expected ${path} to be a concrete type extending ${display}, got abstract '${discriminator}'.`,
+    );
+  }
+  return only;
 }
 
 function propertiesObject(

@@ -103,10 +103,24 @@ pub enum CodegenDeclarationKind {
     },
     Record {
         fields: Vec<CodegenRecordField>,
+        /// The record's abstract bases, nearest first.
+        ///
+        /// A value of this record is acceptable wherever any of them is expected. The fields are
+        /// already flattened, so this exists only to answer that question — a runtime holding a
+        /// value stamped with this record's name needs it to tell a subtype from a foreign type.
+        bases: Vec<CodegenReference>,
+        /// Whether the record was declared `abstract`, and so has no values of its own.
+        ///
+        /// A base-typed site accepts a value of a record that extends it, never one of the base
+        /// itself. A runtime taking host input needs this to hold that line, the way analysis holds
+        /// it for NX source.
+        is_abstract: bool,
     },
     Component(CodegenComponent),
     Union {
         cases: Vec<CodegenUnionCase>,
+        /// The union's abstract bases, nearest first, inherited by every case.
+        bases: Vec<CodegenReference>,
     },
     TypeAlias,
     Unsupported(CodegenUnsupportedConstruct),

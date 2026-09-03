@@ -129,6 +129,122 @@ let root(): int = { 1 / 0 }
 
 withSource(
   `
+external component <Item label:string />
+external component <Stack content Children:Item[] />
+let root() = { <Stack><Item label="only" /></Stack> }
+`,
+  (dir, sourcePath) => {
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    assertEqual(evaluateFunction(prepared, "root"), nativeJson(sourcePath));
+    console.log("ok - a single child of a list-typed content property matches the native interpreter");
+  },
+);
+
+withSource(
+  `
+type Shadow = { Y:float64 = 0.0 }
+external component <Shape shadows:Shadow[]? sizes:float64[]? />
+let root() = { <Shape shadows={ <Shadow Y=6.0 /> } sizes={3.0} /> }
+`,
+  (dir, sourcePath) => {
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    assertEqual(evaluateFunction(prepared, "root"), nativeJson(sourcePath));
+    console.log("ok - a single value at a list-typed property matches the native interpreter");
+  },
+);
+
+withSource(
+  `
+abstract type Base = { name:string = "anon" }
+type User extends Base = { role:string }
+let root() = { <User role="admin" /> }
+`,
+  (dir, sourcePath) => {
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    assertEqual(evaluateFunction(prepared, "root"), nativeJson(sourcePath));
+    console.log("ok - an inherited record field and its default match the native interpreter");
+  },
+);
+
+withSource(
+  `
+abstract type EventBase = { source:string = "app" }
+type UiEvent extends EventBase =
+  | clicked { x:int }
+  | dismissed
+let root(): UiEvent = { <UiEvent.clicked x=3 /> }
+`,
+  (dir, sourcePath) => {
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    assertEqual(evaluateFunction(prepared, "root"), nativeJson(sourcePath));
+    console.log("ok - a union case carries its base's fields like the native interpreter");
+  },
+);
+
+withSource(
+  `
+abstract type Base = { name:string }
+type User extends Base = { role:string }
+external component <Card owner:Base />
+let root() = { <Card owner={<User name="Ada" role="admin" />} /> }
+`,
+  (dir, sourcePath) => {
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    assertEqual(evaluateFunction(prepared, "root"), nativeJson(sourcePath));
+    console.log("ok - a derived record at a base-typed field matches the native interpreter");
+  },
+);
+
+withSource(
+  `
+abstract type Shape = { name:string = "anon" }
+type Figure extends Shape =
+  | circle { r:int }
+  | square { s:int }
+external component <Frame held:Shape />
+let root() = { <Frame held={<Figure.circle r=2 />} /> }
+`,
+  (dir, sourcePath) => {
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    assertEqual(evaluateFunction(prepared, "root"), nativeJson(sourcePath));
+    console.log("ok - a union case at a base-typed field matches the native interpreter");
+  },
+);
+
+withSource(
+  `
+type Ints = int[]
+type AlsoInts = Ints
+abstract external component <Item />
+external component <Leaf extends Item />
+type Items = Item[]
+type MaybeItems = Items?
+external component <Box xs:AlsoInts? content items:MaybeItems />
+let root() = { <Box xs={3}><Leaf /></Box> }
+`,
+  (dir, sourcePath) => {
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    assertEqual(evaluateFunction(prepared, "root"), nativeJson(sourcePath));
+    console.log("ok - a list spelled through aliases coerces like the native interpreter");
+  },
+);
+
+withSource(
+  `
+type Thickness = { Left:float64 = 0.0  Top:float64 = 0.0 }
+abstract external component <Control Padding:Thickness = {<Thickness />} content Children:Control[]? />
+external component <Panel extends Control />
+let root() = { <Panel Padding={<Thickness Left=4.0 />}><Panel /></Panel> }
+`,
+  (dir, sourcePath) => {
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    assertEqual(evaluateFunction(prepared, "root"), nativeJson(sourcePath));
+    console.log("ok - a record-typed property matches the native interpreter");
+  },
+);
+
+withSource(
+  `
 external component <TextInput value:string />
 component <SearchBox placeholder:string = "Find docs" /> = {
   state { query:string = { placeholder } }

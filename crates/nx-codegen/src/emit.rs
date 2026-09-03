@@ -146,7 +146,7 @@ fn collect_source_codegen_diagnostics(
         CodegenDeclarationKind::Value { value, .. } => {
             collect_expression_source_codegen_diagnostics(module, value, diagnostics);
         }
-        CodegenDeclarationKind::Record { fields } => {
+        CodegenDeclarationKind::Record { fields, .. } => {
             collect_record_field_source_codegen_diagnostics(module, fields, diagnostics);
         }
         CodegenDeclarationKind::Component(component) => {
@@ -164,7 +164,7 @@ fn collect_source_codegen_diagnostics(
                 collect_expression_source_codegen_diagnostics(module, body, diagnostics);
             }
         }
-        CodegenDeclarationKind::Union { cases } => {
+        CodegenDeclarationKind::Union { cases, .. } => {
             for case in cases {
                 collect_record_field_source_codegen_diagnostics(module, &case.fields, diagnostics);
             }
@@ -658,10 +658,10 @@ struct SchemaDeclaration {
 impl SchemaDeclaration {
     fn from_declaration(declaration: &CodegenDeclaration) -> Option<Self> {
         let kind = match &declaration.kind {
-            CodegenDeclarationKind::Record { fields } => SchemaDeclarationKind::Record {
+            CodegenDeclarationKind::Record { fields, .. } => SchemaDeclarationKind::Record {
                 fields: fields.clone(),
             },
-            CodegenDeclarationKind::Union { cases } => SchemaDeclarationKind::Union {
+            CodegenDeclarationKind::Union { cases, .. } => SchemaDeclarationKind::Union {
                 cases: cases.clone(),
             },
             CodegenDeclarationKind::Component(component) => SchemaDeclarationKind::Component {
@@ -1129,7 +1129,7 @@ fn emit_declaration(
                 ));
             }
         }
-        CodegenDeclarationKind::Record { fields } => {
+        CodegenDeclarationKind::Record { fields, .. } => {
             if target.is_typescript() {
                 emit_record_type(
                     &name,
@@ -1156,7 +1156,7 @@ fn emit_declaration(
                 out,
             );
         }
-        CodegenDeclarationKind::Union { cases } => {
+        CodegenDeclarationKind::Union { cases, .. } => {
             // A constant union is what `enum` declared, and generates what `enum` generated: a
             // frozen value object whose entries are the authored case names.
             if !cases.is_empty() && cases.iter().all(|case| case.is_constant) {
@@ -3383,12 +3383,12 @@ fn collect_declaration_type_references(
                 collect_type_references(module, ty, output);
             }
         }
-        CodegenDeclarationKind::Record { fields } => {
+        CodegenDeclarationKind::Record { fields, .. } => {
             for field in fields {
                 collect_type_ref_references(module, &field.ty, output);
             }
         }
-        CodegenDeclarationKind::Union { cases } => {
+        CodegenDeclarationKind::Union { cases, .. } => {
             for case in cases {
                 for field in &case.fields {
                     collect_type_ref_references(module, &field.ty, output);

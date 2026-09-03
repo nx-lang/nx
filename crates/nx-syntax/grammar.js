@@ -740,7 +740,7 @@ module.exports = grammar({
             seq('/', '>'),  // self-closing
             seq(
               '>',
-              field('content', $.mixed_content),
+              field('content', optional($.mixed_content)),
               '<',
               '/',
               field('close_name', $.element_name),

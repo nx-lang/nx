@@ -279,6 +279,100 @@ fn nx_ir_carries_no_unresolved_reference_for_a_case_of_an_unimported_union() {
     );
 }
 
+/// A default naming a field materialized after it cannot be emitted.
+///
+/// The slot such a name used to emit — `unresolved:b` — is one no runtime can bind, so the program
+/// generated cleanly and failed the moment it ran. Analysis reports the name now, and emission
+/// carries its diagnostics, so this is what an author sees; the `codegen-unresolved-name` check in
+/// the builder stands behind it for whatever analysis might still miss.
+#[test]
+fn nx_ir_refuses_a_default_naming_a_field_declared_after_it() {
+    let artifact = artifact_from_source(
+        "abstract component <Node />\n\
+         external component <Leaf extends Node />\n\
+         component <A extends Node a:int = {b} b:int = 1 /> = { <Leaf /> }\n\
+         let root() = { <A /> }",
+    );
+
+    let error = emit_nx_ir(&artifact).expect_err("a default with nothing to read should not emit");
+
+    assert!(
+        error
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message().contains("'b'")),
+        "expected the unreadable name to be reported, got: {:?}",
+        error.diagnostics
+    );
+}
+
+/// A component body is a value position like any other, so a bare case there reaches the IR.
+///
+/// Component bodies were skipped by type checking's item loop, so the contextual name inside one
+/// was never resolved and code generation refused it outright with `unresolved contextual name
+/// cannot be emitted`. The qualified form is the control: both spellings must emit the same case.
+#[test]
+fn nx_ir_emits_a_bare_case_written_in_a_component_body() {
+    let preamble = "type Fit = fill | contain | cover\n                    external component <Img fit:Fit? />\n                    abstract external component <Node />\n";
+    let bare = emit_nx_ir(&artifact_from_source(&format!(
+        "{preamble}component <A extends Node /> = {{ <Img fit=cover /> }}\nlet root() = {{ <A /> }}"
+    )))
+    .expect("nx ir for the bare form");
+    let qualified = emit_nx_ir(&artifact_from_source(&format!(
+        "{preamble}component <A extends Node /> = {{ <Img fit={{Fit.cover}} /> }}\nlet root() = {{ <A /> }}"
+    )))
+    .expect("nx ir for the qualified form");
+
+    assert!(
+        bare.json.contains("\"caseName\": \"cover\""),
+        "expected the case to reach the IR: {}",
+        bare.json
+    );
+    assert_eq!(
+        bare.json.matches("\"caseName\": \"cover\"").count(),
+        qualified.json.matches("\"caseName\": \"cover\"").count(),
+        "the bare form emitted a different number of case references than the qualified form"
+    );
+}
+
+/// A record field read inside a component body is typed by the module that declared the field.
+///
+/// `Swatch.hue` is declared against `model.nx`'s `Hue`. Resolving the field's type in the consuming
+/// module would let `main.nx`'s unrelated same-named `Hue` answer for it, which is exactly the
+/// capture nominal identity exists to prevent.
+#[test]
+fn a_record_field_read_resolves_its_type_in_the_declaring_module() {
+    let modules = [
+        (
+            "main.nx",
+            "import { Swatch } from \"./model.nx\"\n             type Hue = Blue | Violet\n             external component <Paint colour:Hue? />\n             abstract external component <Node />\n             component <Chip extends Node s:Swatch /> = { <Paint colour={s.hue} /> }\n             let root() = { <Chip s=<Swatch hue={Swatch} /> /> }",
+        ),
+        (
+            "model.nx",
+            "export type Hue = Red | Green\nexport type Swatch = { hue:Hue }",
+        ),
+    ]
+    .iter()
+    .map(|(identity, source)| {
+        NxWorkspaceModule::from_source(*identity, *source).expect("workspace module")
+    })
+    .collect::<Vec<_>>();
+    let workspace = NxWorkspace::new(modules).expect("workspace");
+    let diagnostics =
+        build_workspace_program_artifact(&workspace, "main.nx", &ProgramBuildContext::empty())
+            .expect_err(
+                "the local Hue must not answer for a field declared against model.nx's Hue",
+            );
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("main.nx:Hue")
+                && diagnostic.message.contains("model.nx:Hue")),
+        "expected a diagnostic distinguishing the two same-named unions: {diagnostics:?}"
+    );
+}
+
 /// The same, for a case reached through the name a selective import alias bound.
 ///
 /// `Fit as ui.Fit` binds the single visible name `ui.Fit`; there is no `ui` to take a member of.
@@ -382,6 +476,83 @@ let root(): int = { answer() }"#,
     assert_eq!(callee_reference["kind"], "function");
     assert_eq!(callee_reference["name"], "answer");
     assert_ne!(callee_reference["module"], "m0");
+}
+
+/// Fields are flattened into the IR, so the base chain is what tells a runtime that a value
+/// stamped `User` is acceptable where a `Base` was asked for. Names cannot carry that across
+/// modules, so the chain is emitted as declaration references.
+#[test]
+fn nx_ir_records_and_unions_carry_their_base_chain() {
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "app/main.nx",
+                r#"import { Base } from "../shared/model.nx"
+abstract type Named extends Base = { label:string }
+type User extends Named = { role:string }
+type Shape extends Base =
+  | circle { r:int }
+  | square { s:int }
+type Loose = { free:string }
+let root(user: User): User = { user }"#,
+            ),
+            (
+                "shared/model.nx",
+                r#"export abstract type Base = { name:string }"#,
+            ),
+        ],
+        "app/main.nx",
+    );
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+    let base = ir_declaration(&document, "Base");
+    let user = ir_declaration(&document, "User");
+    let shape = ir_declaration(&document, "Shape");
+
+    // Nearest first, and reaching past the immediate base to the one it extends.
+    let user_bases = user["kind"]["bases"].as_array().expect("user bases");
+    assert_eq!(user_bases.len(), 2);
+    assert_eq!(user_bases[0]["name"], "Named");
+    assert_eq!(user_bases[1]["name"], "Base");
+    assert_eq!(user_bases[1]["declaration"], base["id"]);
+    assert_eq!(user_bases[1]["kind"], "record");
+    assert_ne!(user_bases[1]["module"], user["reference"]["module"]);
+
+    // A union's cases all inherit the union's base, so the chain sits on the union itself.
+    let shape_bases = shape["kind"]["bases"].as_array().expect("shape bases");
+    assert_eq!(shape_bases.len(), 1);
+    assert_eq!(shape_bases[0]["declaration"], base["id"]);
+
+    assert_eq!(
+        ir_declaration(&document, "Loose")["kind"]["bases"]
+            .as_array()
+            .expect("loose bases")
+            .len(),
+        0
+    );
+    assert_eq!(
+        base["kind"]["bases"].as_array().expect("base bases").len(),
+        0
+    );
+}
+
+#[test]
+fn nx_ir_records_carry_whether_they_are_abstract() {
+    let artifact = artifact_from_source(
+        r#"abstract type Base = { name:string }
+type User extends Base = { role:string }
+let root(user: User): User = { user }"#,
+    );
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+
+    // A base-typed boundary accepts a value of a record that extends the base, never one of the
+    // base itself, and this is the only thing in the IR that says which is which.
+    assert_eq!(ir_declaration(&document, "Base")["kind"]["isAbstract"], true);
+    assert_eq!(
+        ir_declaration(&document, "User")["kind"]["isAbstract"],
+        false
+    );
 }
 
 #[test]

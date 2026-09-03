@@ -185,7 +185,9 @@ pub fn analyze_prepared_module(
                 ctx.infer_function(func);
             }
             nx_hir::Item::Value(_) => {}
-            nx_hir::Item::Component(_) => {}
+            nx_hir::Item::Component(component) => {
+                ctx.infer_component(component);
+            }
             nx_hir::Item::TypeAlias(_) => {}
             nx_hir::Item::Record(_) => {}
             nx_hir::Item::Union(_) => {}

@@ -80,7 +80,7 @@ let <UserProfile userId:string/> = {
 Inline object usage works the same way.
 
 ```nx
-<UserCard user={<User id="456" name="Jane" email="jane@example.com"/>}/>
+<UserCard user=<User id="456" name="Jane" email="jane@example.com"/> />
 
 let users = [
   <User id="1" name="Alice" email="alice@example.com"/>,

@@ -139,10 +139,23 @@ pub enum NxIrDeclarationKind {
     },
     Record {
         fields: Vec<NxIrRecordField>,
+        /// The record's abstract bases, nearest first.
+        ///
+        /// Fields arrive already flattened, so this answers only what flattening cannot: a value
+        /// stamped with this record's name is acceptable wherever any of these is expected.
+        bases: Vec<NxIrReference>,
+        /// Whether the record was declared `abstract`, and so has no values of its own.
+        ///
+        /// A base-typed site accepts a value of a record that extends this one, never one of this
+        /// one. Analysis holds that line for NX source; this is how a runtime holds it for host
+        /// input.
+        is_abstract: bool,
     },
     Component(NxIrComponent),
     Union {
         cases: Vec<NxIrUnionCase>,
+        /// The union's abstract bases, nearest first, inherited by every case.
+        bases: Vec<NxIrReference>,
     },
     TypeAlias,
 }
@@ -617,7 +630,7 @@ fn collect_ir_unsupported_diagnostics(
         CodegenDeclarationKind::Value { value, .. } => {
             collect_ir_expression_unsupported_diagnostics(module, value, diagnostics);
         }
-        CodegenDeclarationKind::Record { fields } => {
+        CodegenDeclarationKind::Record { fields, .. } => {
             collect_ir_record_field_unsupported_diagnostics(module, fields, diagnostics);
         }
         CodegenDeclarationKind::Component(component) => {
@@ -635,7 +648,7 @@ fn collect_ir_unsupported_diagnostics(
                 collect_ir_expression_unsupported_diagnostics(module, body, diagnostics);
             }
         }
-        CodegenDeclarationKind::Union { cases } => {
+        CodegenDeclarationKind::Union { cases, .. } => {
             for case in cases {
                 collect_ir_record_field_unsupported_diagnostics(module, &case.fields, diagnostics);
             }
@@ -876,7 +889,11 @@ fn ir_declaration(
                 ty: ty.as_ref().map(ir_semantic_type),
             }
         }
-        CodegenDeclarationKind::Record { fields } => {
+        CodegenDeclarationKind::Record {
+            fields,
+            bases,
+            is_abstract,
+        } => {
             let scope = SlotScope::new();
             NxIrDeclarationKind::Record {
                 fields: ir_record_fields(
@@ -887,6 +904,8 @@ fn ir_declaration(
                     fields,
                     &scope,
                 ),
+                bases: bases.iter().map(ir_reference).collect(),
+                is_abstract: *is_abstract,
             }
         }
         CodegenDeclarationKind::Component(component) => {
@@ -898,7 +917,7 @@ fn ir_declaration(
                 context,
             ))
         }
-        CodegenDeclarationKind::Union { cases } => NxIrDeclarationKind::Union {
+        CodegenDeclarationKind::Union { cases, bases } => NxIrDeclarationKind::Union {
             cases: cases
                 .iter()
                 .enumerate()
@@ -912,6 +931,7 @@ fn ir_declaration(
                     )
                 })
                 .collect(),
+            bases: bases.iter().map(ir_reference).collect(),
         },
         CodegenDeclarationKind::TypeAlias | CodegenDeclarationKind::Unsupported(_) => {
             NxIrDeclarationKind::TypeAlias

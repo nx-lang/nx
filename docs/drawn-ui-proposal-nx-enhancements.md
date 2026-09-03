@@ -358,37 +358,42 @@ The proposal's §8.1 document, with changes 1–3 applied:
 ```nx
 <ui.Card width=360 padding=20>
   <ui.VStack gap=12>
-    <ui.Text: variant="h2">NX UI</ui.Text>
-    <gfx.Drawing height=140 viewBox={<ViewBox x=0 y=0 width=320 height=140 />}>
+    <ui.Text: variant=h2>NX UI</ui.Text>
+    <gfx.Drawing height=140 viewBox=<ViewBox x=0 y=0 width=320 height=140 /> >
       <gfx.Rect
         width=320 height=140 rx=12
-        fill={<Paint.linearGradient
+        fill=<Paint.linearGradient
                 x1=0 y1=0 x2=1 y2=1
                 stops={ <GradientStop offset=0 color="#5B5BD6" />
-                        <GradientStop offset=1 color="#14B8A6" /> } />} />
+                        <GradientStop offset=1 color="#14B8A6" /> } /> />
       <gfx.Path
         data="M20 105 C90 15 210 125 300 35"
-        fill="none"
-        stroke={<Stroke paint="white" width=5 lineCap="round" />} />
+        fill=none
+        stroke=<Stroke paint="white" width=5 lineCap=round /> />
       <gfx.Circle cx=300 cy=35 r=7 fill="white" />
     </gfx.Drawing>
-    <ui.Text: variant="caption">Portable layout above; portable drawing below.</ui.Text>
+    <ui.Text: variant=caption>Portable layout above; portable drawing below.</ui.Text>
   </ui.VStack>
 </ui.Card>
 ```
 
-1075 → 768 characters against the version in §8.1, 29% off the source. On the wire a representative
-element goes from 161 to 56 bytes:
+956 → 760 characters against the version in §8.1, 21% off the source — markup only, imports
+excluded, and measured against §8.1 as current NX spells it, with literals and single elements
+unbraced. What is left is what changes 1–3 buy. On the wire a representative element goes from 161
+to 56 bytes:
 
 ```json
 {"$type":"Box","width":{"$type":"Length.px","value":120},"height":{"$type":"Length.auto"},"padding":{"$type":"Insets","top":20,"right":20,"bottom":20,"left":20}}
 {"$type":"Box","width":120,"height":"auto","padding":20}
 ```
 
-Two lines exercise the whole amended rule between them. `fill="none"` hits the closed set — `none`
-is a payloadless `Paint` case, so it resolves there and never reaches the fallback. `paint="white"`
-misses the closed set and falls through to the open `Color` alternative. Same syntax, same type, two
-resolution paths, both decided at compile time.
+Two lines exercise the whole rule between them. `fill=none` is bare, so it resolves only against
+the closed set, where `none` is a payloadless `Paint` case. `paint="white"` is quoted, so it is
+never a case name and can only be the open `Color` alternative. Same type, two spellings, two
+resolution paths, both decided at compile time, and neither able to shadow the other — this is the
+strict split that shipped, not the closed-set-then-fallback rule the sketch above started from.
+That fallback rule still governs the JSON deserialization boundary, where no bare/quoted
+distinction exists.
 
 The `TextVariant` import also disappears from the document header, because change 2 removes the need
 to name the union type at all. That incidentally routes around [NXE14](#nxe14) for every
@@ -577,9 +582,14 @@ member access and prefix-negated literals as `RhsExpression`.
   would also admit `a = obj.field`, breaking the invariant that an unbraced value is a literal and
   never an expression. Contextual literal binding ([NXE2](#nxe2) change 2) delivers the same
   ergonomic win — `a: Alignment = start` — without it.
-- ⏳ **Integer widening remains open.** `x: float64 = -1` still errors while `x: float64 = -1.0`
-  works. That is numeric coercion rather than grammar or name resolution, and it is the one item of
-  this finding still outstanding.
+- ⏳ **Integer widening remains open, and now reaches further.** `x: float64 = -1` still errors
+  while `x: float64 = -1.0` works. That is numeric coercion rather than grammar or name resolution,
+  and it is the one item of this finding still outstanding. It used to bite only record and union
+  case defaults, because a component's prop and state defaults were not type checked at all; they
+  are now, so `external component <C x: float64 = 0 />` is rejected where it used to be silently
+  accepted. The rule did not change — the set of places it is enforced did, and the bare
+  closed-set defaults Appendix A writes (`lineCap: LineCap = butt`) are now verified rather than
+  merely parsed.
 
 A related pre-existing bug surfaced while implementing the above and is **not** fixed: an integer
 literal that exceeds its type is silently swallowed to `null` with no diagnostic — `{9223372036854775808}`

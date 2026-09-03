@@ -521,6 +521,107 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
+    /// Infers a component's prop and state defaults and its body.
+    ///
+    /// <para>A component body is markup written against the same binding sites an element in a
+    /// function body has, so it is inferred the same way. Props and state are bound by name, because
+    /// the body reads them, and they are bound in a pushed scope so a prop cannot outlive the
+    /// component that declared it.</para>
+    ///
+    /// <para>The props bound are the component's *effective* ones, so a prop reached through the
+    /// base chain reads at its declared type the way a directly declared one does. Scope building
+    /// already resolves an inherited name, so leaving it unbound would not fail the read — it would
+    /// make it infer vacuously, which is the one outcome worse than either. Each inherited type is
+    /// resolved in the module that declared the field, since that is the module whose names it was
+    /// written against.</para>
+    ///
+    /// <para>Fields are bound in the order both runtimes materialize them — the effective props,
+    /// then the state — and each default is checked *before* its own field is bound. That is what
+    /// makes a default's environment here the same one it will have when it runs: it sees the
+    /// fields materialized before it and nothing else. A name from later in the declaration is
+    /// reported as undefined by scope checking, so nothing is silently accepted; it simply is not
+    /// this pass's diagnostic to give.</para>
+    ///
+    /// <para>A defaulted prop is checked against its own declared type, which is also what lets a
+    /// contextual literal be written as a default: the default's binding site is the declaration
+    /// itself.</para>
+    pub fn infer_component(&mut self, component: &nx_hir::Component) {
+        self.env.push_scope();
+
+        let effective_props = self
+            .effective_component_contract(&component.name)
+            .ok()
+            .flatten()
+            .map(|contract| contract.props);
+
+        match effective_props {
+            Some(props) => {
+                for field in &props {
+                    let field_ty =
+                        self.type_from_type_ref_in(Some(&field.module_identity), &field.ty);
+                    self.check_component_field_default(component, &field.name, &field_ty);
+                    self.env.bind(field.name.clone(), field_ty);
+                }
+            }
+            // Without a contract there is no base chain to read, and the component's own props are
+            // the whole of what its body and its defaults can see.
+            None => {
+                for field in &component.props {
+                    let field_ty = self.type_from_type_ref(&field.ty);
+                    self.check_component_field_default(component, &field.name, &field_ty);
+                    self.env.bind(field.name.clone(), field_ty);
+                }
+            }
+        }
+
+        for field in &component.state {
+            let field_ty = self.type_from_type_ref(&field.ty);
+            self.check_component_field_default(component, &field.name, &field_ty);
+            self.env.bind(field.name.clone(), field_ty);
+        }
+
+        // A body is absent exactly when the component is abstract or external, and there is then
+        // nothing below the declaration to infer.
+        if let Some(body) = component.body {
+            self.infer_expr(body);
+        }
+
+        self.env.pop_scope();
+    }
+
+    /// Checks the default this component declares for one of its fields, where it declares one.
+    ///
+    /// An inherited field's default belongs to the module that declared it and is checked there;
+    /// what is checked here is only what this declaration wrote.
+    fn check_component_field_default(
+        &mut self,
+        component: &nx_hir::Component,
+        name: &Name,
+        field_ty: &Type,
+    ) {
+        let declared = component
+            .props
+            .iter()
+            .chain(component.state.iter())
+            .find(|field| &field.name == name);
+        let Some(field) = declared else {
+            return;
+        };
+        let Some(default) = field.default else {
+            return;
+        };
+
+        let actual = self.infer_expr(default);
+        self.check_typed_binding_for(
+            Some(default),
+            &actual,
+            field_ty,
+            field.span,
+            "component-default-type-mismatch",
+            format!("Default value for '{}.{}'", component.name, field.name),
+        );
+    }
+
     /// Infers the type of a literal.
     fn infer_literal(&mut self, lit: &ast::Literal) -> Type {
         match lit {
@@ -924,7 +1025,12 @@ impl<'a> InferenceContext<'a> {
     }
 
     fn infer_member_access(&mut self, base_ty: &Type, member: &Name, span: TextSpan) -> Type {
-        match base_ty {
+        // A nullable base reads its field like a non-nullable one. NX has no narrowing construct to
+        // discharge the null with, and the catalogs that drive most markup declare every property
+        // optional, so requiring one would make a nullable record or union prop unreadable rather
+        // than safer. The field's own declared type is returned, not a nullable of it, for the same
+        // reason: a `string?` here would fail at every `string` site downstream.
+        match base_ty.strip_nullable() {
             Type::Union(union_ty) => {
                 if let Some(ty) =
                     self.union_shared_field_type(&union_ty.name, union_ty.origin(), member)
@@ -964,16 +1070,47 @@ impl<'a> InferenceContext<'a> {
                     );
                     Type::Error
                 }),
-            Type::Error => Type::Error,
-            _ => {
-                self.error(
-                    "not-implemented",
-                    format!("Member access not yet implemented: .{}", member),
-                    span,
-                );
-                Type::Error
+            // A record's field, reached through the effective shape so an inherited field is
+            // found as readily as a declared one. Each field's type is resolved in the module that
+            // declared *that field*, which is not always the module the record itself came from.
+            Type::Named(named) => {
+                let Ok(Some(shape)) = self.record_shape_of(named) else {
+                    return self.member_access_unsupported(member, span);
+                };
+                let Some(field) = shape.fields.iter().find(|field| field.name == *member) else {
+                    let known = shape
+                        .fields
+                        .iter()
+                        .map(|field| field.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    self.error(
+                        "unknown-record-field",
+                        format!(
+                            "Record '{}' has no field '{}'; it has: {}",
+                            named.name, member, known
+                        ),
+                        span,
+                    );
+                    return Type::Error;
+                };
+                let declaring_module = field.module_identity.clone();
+                let field_ty = field.ty.clone();
+                self.type_from_type_ref_in(Some(&declaring_module), &field_ty)
             }
+            Type::Error => Type::Error,
+            _ => self.member_access_unsupported(member, span),
         }
+    }
+
+    /// Reports a member access on a base that has no fields to reach.
+    fn member_access_unsupported(&mut self, member: &Name, span: TextSpan) -> Type {
+        self.error(
+            "not-implemented",
+            format!("Member access not yet implemented: .{}", member),
+            span,
+        );
+        Type::Error
     }
 
     /// Returns the union declaration a resolved union type denotes.

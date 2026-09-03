@@ -1,0 +1,567 @@
+// NX Display List — the renderer-facing rendering program (library `displaylist`)
+//
+// A consolidated, NX-only view of the model proposed in
+// ../../NX-Display-List-Model-Proposal.md, for reading the model as NX without the prose
+// interleaved. Section numbers in comments refer to that proposal, which remains normative for
+// meaning, validation rules, and the defaults a renderer resolves.
+//
+// This is the layer *below* the nx.ui / nx.graphics catalogs. Those catalogs describe what a UI is;
+// this describes how one resolved frame of it should be drawn. Everything here is already resolved:
+// layout has run, inheritance has been applied, view boxes have been mapped, `Length` percentages
+// have become numbers, SVG transform lists have become matrices, and object-bounding-box gradient
+// coordinates have become user-space coordinates.
+//
+// Deliberately self-contained: it imports nothing. A backend generated from this library — a
+// TypeScript Canvas2D renderer, a Rust/Skia or Rust/wgpu renderer — should not have to carry
+// NxUiDocument, Length, Alignment, or a component catalog in order to draw. Six scalar types
+// (Color, GradientStop, LineCap, LineJoin, FontStyle, ImageSource) are near-duplicates of
+// declarations in the object model's `core` library and are commented where they differ; §3.2 of
+// the proposal explains why sharing them would need `core` split into a values-only sub-library
+// first. Under NX's nominal type identity, the same-named types in the two libraries are distinct
+// types, which is correct here: they sit at different layers and two of them differ in meaning.
+//
+// Three structural decisions distinguish this from the Canvas2D/Skia shape of a display list, and
+// each is argued in the proposal: transforms live in a parent-linked spatial tree that ops index
+// into rather than in a save/restore CTM stack (§4); the push/pop stack therefore carries only
+// clips and layers (§7); and dynamic values are whole-entity bindings on transforms, layer alpha,
+// and brush colors rather than a constant-or-slot wrapper on every field (§8).
+//
+// These declarations are the shape, not the contract. Index validity, stack balance, spatial-tree
+// acyclicity, ranges, and counts are invisible to NX's type system and stay in the validator; §11
+// lists them. Comments marked "NX gap" record where NX cannot yet spell the model.
+
+
+
+// ---------------------------------------------------------------------------
+// Resource and slot identifiers (§5)
+// ---------------------------------------------------------------------------
+
+// Indices into the correspondingly named sequence, counting from 0. Tables are append-only, so an
+// index stays valid for the life of a document and a rebuilt sub-list never renumbers its peers.
+//
+// NX gap: these are transparent aliases, not distinct types, so nothing prevents a PathId being
+// passed where a BrushId is expected. Rust's `struct PathId(u32)` does prevent it. A nominal
+// newtype over a primitive is the single most valuable language addition for this model; see §14.
+export type DisplayListId = int32
+export type SpatialId = int32
+export type BrushId = int32
+export type StrokeStyleId = int32
+export type PathId = int32
+export type ImageId = int32
+export type FontId = int32
+export type TextRunId = int32
+
+// Slot identifiers are indices into the correspondingly typed sequence of SlotTable.
+export type FloatSlotId = int32
+export type ColorSlotId = int32
+export type TransformSlotId = int32
+
+
+// ---------------------------------------------------------------------------
+// Document (§3)
+// ---------------------------------------------------------------------------
+
+// The unit of transport, caching, and replay. Resources, the spatial tree, and slots live here
+// rather than on individual lists so that a sub-list can be regenerated without renumbering
+// anything its siblings reference (§10), and so one animation slot can drive values used by
+// several lists.
+export type DisplayListDocument = {
+  format: string = "nx-display-list"
+  schemaVersion: string = "0.1.0"
+  root: DisplayListId
+  lists: DisplayList[]
+  spatial: SpatialNode[]
+  slots: SlotTable
+  resources: ResourceTable
+  metadata: DocumentMetadata?
+}
+
+// `bounds` is a conservative device-space bound of everything the list paints, used for culling,
+// damage tracking, and layer sizing; null means "unknown, assume everything." `generation`
+// increments whenever the list's ops change, which is what lets a backend keep a cached
+// rasterization keyed by list id (§10). Updating a slot never changes a generation — that is the
+// whole point of slots.
+//
+// NX gap: `ops: Op[]?` rather than `= []`, because NX has no empty-sequence literal in any
+// position. An empty list is legal and paints nothing.
+export type DisplayList = {
+  ops: Op[]?
+  bounds: Rect?
+  generation: int64 = 0
+}
+
+export type DocumentMetadata = {
+  title: string?
+  generator: string?
+}
+
+export type ResourceTable = {
+  brushes: Brush[]?
+  strokeStyles: StrokeStyle[]?
+  paths: Path[]?
+  images: Image[]?
+  fonts: Font[]?
+  textRuns: TextRun[]?
+}
+
+
+// ---------------------------------------------------------------------------
+// Geometry and color (§6)
+// ---------------------------------------------------------------------------
+
+// Coordinates are logical pixels in the local space of the op's spatial node, y-down, x-right.
+export type Point = {
+  x: float64
+  y: float64
+}
+
+export type Rect = {
+  x: float64
+  y: float64
+  width: float64
+  height: float64
+}
+
+// A resolved 2D affine matrix in the column-major order SVG, Skia, Canvas2D, and kurbo all use:
+//
+//     | a  c  e |        x' = a*x + c*y + e
+//     | b  d  f |        y' = b*x + d*y + f
+//     | 0  0  1 |
+//
+// The defaults spell the identity matrix. Unlike core's `Transform`, this is not a list of named
+// operations — translate/rotate/scale/skew have already been composed by the display-list compiler,
+// because a backend that has to interpret a transform list is doing work the producer already did.
+export type Transform2D = {
+  a: float64 = 1.0
+  b: float64 = 0.0
+  c: float64 = 0.0
+  d: float64 = 1.0
+  e: float64 = 0.0
+  f: float64 = 0.0
+}
+
+// Non-premultiplied sRGB with an unpremultiplied alpha, each component 0..1.
+//
+// Differs from core's `Color`, which is a CSS color string. At the authoring layer a string is the
+// right call: it is what a model generates and what a human reads. At this layer it is the wrong
+// one — every backend wants floats, and a color slot has to *interpolate*, which is not defined on
+// strings. Parsing happens once, in the display-list compiler. Matches Skia's SkColor4f,
+// WebRender's ColorF, and Vello's AlphaColor<Srgb>.
+export type Color = {
+  r: float64 = 0.0
+  g: float64 = 0.0
+  b: float64 = 0.0
+  a: float64 = 1.0
+}
+
+
+// ---------------------------------------------------------------------------
+// Spatial tree (§4)
+// ---------------------------------------------------------------------------
+
+// Every drawing op names the spatial node whose space its coordinates are in. Nodes form a tree by
+// `parent`, and a node's effective transform is the concatenation of its ancestors' transforms with
+// its own. This replaces the save/restore CTM stack of Canvas2D, Skia, and Flutter's DisplayList,
+// and follows WebRender's spatial tree and Vello's per-draw transforms. §4 argues the trade in
+// full; the short version is that a CTM stack forces strictly sequential interpretation, while a
+// spatial tree lets a backend resolve every transform in one pass up front and then batch, reorder,
+// or parallelize the draws — which is what a GPU compute rasterizer needs and what a
+// save/restore stream cannot give it.
+//
+// It also makes animation work properly. Binding a slot to one interior node moves everything below
+// it, including ops in other display lists, with no display list edited and no wrapper push/pop.
+//
+// `parent` is null on the root node and must otherwise be a strictly smaller index, so the tree is
+// acyclic by construction and one forward pass resolves every effective transform.
+export type SpatialNode = {
+  parent: SpatialId?
+  transform: AnimatedTransform
+}
+
+
+// ---------------------------------------------------------------------------
+// Dynamic values (§8)
+// ---------------------------------------------------------------------------
+
+// A value that an animation may change between frames without the display list changing.
+//
+// `value` is the constant, and is also the value a renderer uses before the slot is first written;
+// a non-null `slot` says to read the current value from the slot table instead. This is WebRender's
+// `PropertyBinding::Binding(key, fallback)` with the fallback kept in the same record rather than
+// a union case, which avoids a `$type` tag on every animatable value.
+//
+// Bindings exist at exactly three places — a spatial node's transform, a layer's alpha, and a solid
+// brush's color — which is the same set WebRender allows and is not a coincidence: these are the
+// properties a compositor can change without re-rasterizing anything. Geometry is deliberately not
+// bindable in this version; §8.3 explains why animating a width would re-rasterize regardless, so
+// the indirection would buy nothing and cost a branch on every field of every op.
+export type AnimatedTransform = {
+  value: Transform2D
+  slot: TransformSlotId?
+}
+
+export type AnimatedFloat = {
+  value: float64
+  slot: FloatSlotId?
+}
+
+export type AnimatedColor = {
+  value: Color
+  slot: ColorSlotId?
+}
+
+// The mutable half of the model, and the only part of a document a renderer ever writes. Sequence
+// lengths declare how many slots of each type exist; the entries are their initial values. The
+// animation engine writes slots between frames (§9); the display list itself is immutable.
+export type SlotTable = {
+  floats: float64[]?
+  colors: Color[]?
+  transforms: Transform2D[]?
+}
+
+
+// ---------------------------------------------------------------------------
+// Brushes and strokes (§6.3)
+// ---------------------------------------------------------------------------
+
+export type Extend = pad | repeat | reflect
+
+export type GradientStop = {
+  offset: float64                   // 0..1
+  color: Color
+}
+
+// How a region is filled. Gradient coordinates are in the *user space of the op that references the
+// brush* — that is, the space of that op's spatial node — never in object-bounding-box units.
+// core's `Paint` defaults to objectBoundingBox because an author should not have to know a shape's
+// bounds; a display list has already measured them, so resolving to user space here removes the
+// only part of gradient handling that needs bounds knowledge at draw time.
+//
+// A brush describes a fill only. Stroking is a separate op carrying a StrokeStyle, so a shape with
+// both a fill and a stroke lowers to two ops. That is what a renderer does internally anyway, and
+// it keeps every op exactly one draw.
+export type Brush =
+  | solid { color: AnimatedColor }
+  | linearGradient {
+      x1: float64
+      y1: float64
+      x2: float64
+      y2: float64
+      stops: GradientStop[]
+      extend: Extend = pad
+    }
+  | radialGradient {
+      cx: float64
+      cy: float64
+      r: float64
+      fx: float64?                  // null means "same as cx"
+      fy: float64?                  // null means "same as cy"
+      stops: GradientStop[]
+      extend: Extend = pad
+    }
+  | image {
+      image: ImageId
+      transform: Transform2D        // image pixel space to user space
+      extend: Extend = pad
+      sampling: Sampling = linear
+    }
+
+export type LineCap = butt | round | square
+export type LineJoin = miter | round | bevel
+
+// Stroke geometry is scaled by the effective transform, as in SVG and Skia; there is no equivalent
+// of `vector-effect: non-scaling-stroke`.
+export type StrokeStyle = {
+  width: float64 = 1.0
+  cap: LineCap = butt
+  join: LineJoin = miter
+  miterLimit: float64 = 4.0
+  dashArray: float64[]?
+  dashOffset: float64 = 0.0
+}
+
+
+// ---------------------------------------------------------------------------
+// Paths (§6.4)
+// ---------------------------------------------------------------------------
+
+export type FillRule = nonzero | evenodd
+
+export type PathVerb = moveTo | lineTo | quadTo | cubicTo | close
+
+// A structured path, not SVG path-data text. `points` is a flat coordinate stream consumed by the
+// verbs in order: moveTo and lineTo take one point, quadTo two, cubicTo three, close none. This is
+// the representation Skia's raw iterator, Vello's path encoding, and Chromium's path ops all use
+// internally, and it means a backend never parses in its draw loop.
+//
+// Elliptical arcs are absent by design: SVG's `A` is converted to cubics by the display-list
+// compiler, which is what every rasterizer does anyway, and it keeps the verb set to the five a GPU
+// path encoder can process without special cases.
+//
+// The fill rule is on the fill op rather than here, because the same path may be filled either way.
+export type Path = {
+  verbs: PathVerb[]
+  points: float64[]
+}
+
+
+// ---------------------------------------------------------------------------
+// Images (§6.6)
+// ---------------------------------------------------------------------------
+
+export type Sampling = nearest | linear
+
+// The host, not the document, controls permitted schemes, domains, authentication, fetch limits,
+// caching, and decoding. Inline base64 is deliberately omitted.
+export type ImageSource =
+  | uri { uri: string }
+  | resource { name: string }
+
+// `width` and `height` are the intrinsic pixel dimensions the producer laid out against. A renderer
+// that has not finished decoding the image paints nothing for ops referencing it and repaints when
+// it resolves; §6.6 covers the consequences.
+export type Image = {
+  source: ImageSource
+  width: int32
+  height: int32
+}
+
+
+// ---------------------------------------------------------------------------
+// Text (§6.5)
+// ---------------------------------------------------------------------------
+
+export type FontStyle = normal | italic
+
+export type Font = {
+  family: string?                   // null means the host default
+  weight: float64 = 400.0           // 1..1000
+  style: FontStyle = normal
+}
+
+export type TextAnchor = start | middle | end
+export type TextBaseline = alphabetic | top | middle | bottom | hanging
+
+// A run of text the *backend* shapes. This is the one place the display list is not fully
+// resolved, and it is a deliberate, documented cost: a run carries characters rather than
+// positioned glyphs, so identical documents may measure differently on two backends. Resolving it
+// properly needs the producer to own the font file and a shaper, which the lightweight JavaScript
+// runtime cannot afford. §6.5 records the consequences and reserves a positioned-glyph `GlyphRun`
+// as the second case for a runtime that can pay for it — the same split Chromium makes between
+// kDrawTextBlob and kDrawSlug.
+//
+// Because the backend shapes, the backend must also apply `anchor` and `baseline`: both need
+// measurements the producer does not have.
+export type TextRun = {
+  text: string                      // no line breaking; `\n` is invalid, emit one run per line
+  font: FontId
+  size: float64 = 16.0
+  letterSpacing: float64 = 0.0
+  anchor: TextAnchor = start
+  baseline: TextBaseline = alphabetic
+}
+
+
+// ---------------------------------------------------------------------------
+// Layers (§7)
+// ---------------------------------------------------------------------------
+
+// The separable and non-separable modes shared by Canvas2D's globalCompositeOperation, Skia's
+// SkBlendMode, and CSS mix-blend-mode. The Porter-Duff compositing operators beyond source-over
+// are deferred: they interact with layer bounds in ways that differ across backends.
+export type BlendMode =
+  | srcOver
+  | multiply
+  | screen
+  | overlay
+  | darken
+  | lighten
+  | colorDodge
+  | colorBurn
+  | hardLight
+  | softLight
+  | difference
+  | exclusion
+  | hue
+  | saturation
+  | color
+  | luminosity
+
+// Applied to a layer's composited contents, not to individual ops. A shape's drop shadow therefore
+// lowers to a layer around that shape rather than to a property on its fill; that costs an
+// offscreen in the general case, but it is the only lowering that composites correctly when the
+// shape is a group, and Canvas2D may still take its native shadow path for the single-shape case.
+export type LayerFilter =
+  | blur {
+      stdDeviationX: float64
+      stdDeviationY: float64
+    }
+  | dropShadow {
+      dx: float64
+      dy: float64
+      stdDeviation: float64
+      color: Color
+    }
+
+
+// ---------------------------------------------------------------------------
+// Commands (§7)
+// ---------------------------------------------------------------------------
+
+// The rendering program. Ops execute in order and later ops paint over earlier ones.
+//
+// The push ops open a nested scope on a single stack that `pop` closes; the stack must be balanced
+// within each display list, and within each nested one. Nothing else is stateful: there is no CTM
+// stack, no current paint, and no attribute stream, so any op can be read in isolation given the
+// spatial tree and the resource tables. That is what makes reordering and batching legal later, and
+// it is the main departure from Flutter's DisplayList and Canvas2D, which both thread attribute
+// state through the command sequence.
+//
+// Geometry is inlined on each op rather than referencing a Rect record, so that the common ops
+// carry six numbers instead of six numbers plus a nested `$type` tag.
+//
+// Every op that paints or clips names a `spatial` node; its coordinates are in that node's space.
+export type Op =
+  // --- scopes -------------------------------------------------------------
+  | pushLayer {
+      spatial: SpatialId
+      bounds: Rect?                 // null means "renderer computes from contents"
+      alpha: AnimatedFloat
+      blend: BlendMode = srcOver
+      filter: LayerFilter?
+    }
+  | pushClipRect {
+      spatial: SpatialId
+      x: float64
+      y: float64
+      width: float64
+      height: float64
+    }
+  | pushClipRoundRect {
+      spatial: SpatialId
+      x: float64
+      y: float64
+      width: float64
+      height: float64
+      rx: float64
+      ry: float64
+    }
+  | pushClipPath {
+      spatial: SpatialId
+      path: PathId
+      fillRule: FillRule = nonzero
+    }
+  | pop
+
+  // --- fills --------------------------------------------------------------
+  | fillRect {
+      spatial: SpatialId
+      brush: BrushId
+      x: float64
+      y: float64
+      width: float64
+      height: float64
+    }
+  | fillRoundRect {
+      spatial: SpatialId
+      brush: BrushId
+      x: float64
+      y: float64
+      width: float64
+      height: float64
+      rx: float64
+      ry: float64
+    }
+  | fillOval {
+      spatial: SpatialId
+      brush: BrushId
+      cx: float64
+      cy: float64
+      rx: float64
+      ry: float64
+    }
+  | fillPath {
+      spatial: SpatialId
+      brush: BrushId
+      path: PathId
+      fillRule: FillRule = nonzero
+    }
+
+  // --- strokes ------------------------------------------------------------
+  | strokeLine {
+      spatial: SpatialId
+      brush: BrushId
+      style: StrokeStyleId
+      x1: float64
+      y1: float64
+      x2: float64
+      y2: float64
+    }
+  | strokeRect {
+      spatial: SpatialId
+      brush: BrushId
+      style: StrokeStyleId
+      x: float64
+      y: float64
+      width: float64
+      height: float64
+    }
+  | strokeRoundRect {
+      spatial: SpatialId
+      brush: BrushId
+      style: StrokeStyleId
+      x: float64
+      y: float64
+      width: float64
+      height: float64
+      rx: float64
+      ry: float64
+    }
+  | strokeOval {
+      spatial: SpatialId
+      brush: BrushId
+      style: StrokeStyleId
+      cx: float64
+      cy: float64
+      rx: float64
+      ry: float64
+    }
+  | strokePath {
+      spatial: SpatialId
+      brush: BrushId
+      style: StrokeStyleId
+      path: PathId
+    }
+
+  // --- content ------------------------------------------------------------
+  // `src` is the sub-rectangle of the image in image pixels; null means the whole image. Any
+  // object-fit resolution has already happened — the compiler produced the src and dst rects.
+  // `alpha` is here, and on no other draw op, because an image has no brush to carry it; fading an
+  // image would otherwise need a layer and an offscreen.
+  | drawImage {
+      spatial: SpatialId
+      image: ImageId
+      x: float64
+      y: float64
+      width: float64
+      height: float64
+      src: Rect?
+      sampling: Sampling = linear
+      alpha: AnimatedFloat
+    }
+  | drawText {
+      spatial: SpatialId
+      brush: BrushId
+      run: TextRunId
+      x: float64                    // anchor origin
+      y: float64                    // baseline origin
+    }
+
+  // --- composition --------------------------------------------------------
+  // Replays another list in this document, sharing its spatial tree, resources, and slots. It takes
+  // no spatial node: the sub-list's own ops name theirs. This exists for caching and selective
+  // regeneration (§10), not for instancing — drawing one list at two positions would need a spatial
+  // rebase, which §10.1 defers. Reference must be acyclic.
+  | drawDisplayList {
+      list: DisplayListId
+    }

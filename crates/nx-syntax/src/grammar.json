@@ -3352,8 +3352,16 @@
                           "type": "FIELD",
                           "name": "content",
                           "content": {
-                            "type": "SYMBOL",
-                            "name": "mixed_content"
+                            "type": "CHOICE",
+                            "members": [
+                              {
+                                "type": "SYMBOL",
+                                "name": "mixed_content"
+                              },
+                              {
+                                "type": "BLANK"
+                              }
+                            ]
                           }
                         },
                         {

@@ -915,24 +915,24 @@ import "../core"
 import { Card as ui.Card, VStack as ui.VStack, Text as ui.Text } from "../ui"
 import "../graphics" as gfx
 
-<ui.Card width={<Length.px value={360.0} />}
-         padding={<Insets top={20.0} right={20.0} bottom={20.0} left={20.0} />}>
-  <ui.VStack gap={12.0}>
+<ui.Card width=<Length.px value=360.0 />
+         padding=<Insets top=20.0 right=20.0 bottom=20.0 left=20.0 /> >
+  <ui.VStack gap=12.0>
     <ui.Text: variant=h2>NX UI</ui.Text>
     <gfx.Drawing
-      height={<Length.px value={140.0} />}
-      viewBox={<ViewBox x={0.0} y={0.0} width={320.0} height={140.0} />}>
+      height=<Length.px value=140.0 />
+      viewBox=<ViewBox x=0.0 y=0.0 width=320.0 height=140.0 /> >
       <gfx.Rect
-        width={320.0} height={140.0} rx={12.0}
-        fill={<Paint.linearGradient
-                x1={0.0} y1={0.0} x2={1.0} y2={1.0}
-                stops={ <GradientStop offset={0.0} color={"#5B5BD6"} />
-                        <GradientStop offset={1.0} color={"#14B8A6"} /> } />} />
+        width=320.0 height=140.0 rx=12.0
+        fill=<Paint.linearGradient
+                x1=0.0 y1=0.0 x2=1.0 y2=1.0
+                stops={ <GradientStop offset=0.0 color="#5B5BD6" />
+                        <GradientStop offset=1.0 color="#14B8A6" /> } /> />
       <gfx.Path
-        data={"M20 105 C90 15 210 125 300 35"}
+        data="M20 105 C90 15 210 125 300 35"
         fill=none
-        stroke={<Stroke paint={<Paint.solid color={"white"} />} width={5.0} lineCap=round />} />
-      <gfx.Circle cx={300.0} cy={35.0} r={7.0} fill={<Paint.solid color={"white"} />} />
+        stroke=<Stroke paint=<Paint.solid color="white" /> width=5.0 lineCap=round /> />
+      <gfx.Circle cx=300.0 cy=35.0 r=7.0 fill=<Paint.solid color="white" /> />
     </gfx.Drawing>
     <ui.Text: variant=caption>Portable layout above; portable drawing below.</ui.Text>
   </ui.VStack>
@@ -945,7 +945,7 @@ The IDs are gone. NX nests, so structure is expressed by containment rather than
 
 The prefixes are one segment deep. `ui.` and `gfx.` are import aliases, and NX allows exactly one qualifying segment, so `nx.ui.` and `nx.graphics.` are not spellable as prefixes — the alias is the local abbreviation for a catalog whose real ID lives in `catalogs`. Both catalogs can now use the same import style: contextual literal binding means `variant=h2` resolves against the property's declared type, so `TextVariant` never has to be named at the use site and no longer has to be imported unqualified to work around wildcard-alias member access. Appendix B has the detail.
 
-Sizes and insets got longer. `"width": 360` becomes `<Length.px value={360.0} />` and `"padding": 20` becomes a four-sided `Insets`, both because NX cannot union a scalar with a structured alternative.
+Sizes and insets got longer. `"width": 360` becomes `<Length.px value=360.0 />` and `"padding": 20` becomes a four-sided `Insets`, both because NX cannot union a scalar with a structured alternative.
 
 Text reads better. `<ui.Text: ...>NX UI</ui.Text>` uses NX's text-element form, which binds the body to the component's `content` property — the one place where NX authoring is more compact than the JSON, not less.
 

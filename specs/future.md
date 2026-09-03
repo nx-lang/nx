@@ -314,3 +314,51 @@ If this is revisited in the future:
 - Fix the 19 invalid lines in the two sample files to the colon form, or accept that
   invalid source renders as expressions. Sample files are the grammar's fixtures, so
   they are worth making valid either way.
+
+## Nominal Value Identity: `$type` Is A Name, Not An Identity
+
+A record value carries its type as a bare name — `$type: "User"`, or `"Shape.circle"` for a union
+case — and the NX IR now carries each record's and union's base chain so a runtime can accept a
+derived value where its base is expected (`crates/nx-codegen/src/ir.rs`, and `resolveSubtype` at
+`runtime/typescript/src/index.ts:1073`). Fields reach the IR already flattened, so the chain answers
+only what flattening cannot: whether a value stamped with one name is acceptable where another type
+was asked for.
+
+That resolution is by name, and a name is not an identity. Two modules may each declare
+`type User extends Base`, and a value carrying `$type: "User"` at a `Base`-typed site does not say
+which one it is. The runtime reports that ambiguity rather than choosing, because picking one would
+normalize against the wrong field list and hand back a quietly wrong value. Note that the ambiguity
+predates the base chain: two same-named records already serialize identically, so canonical output
+has never distinguished them.
+
+The obvious fix — qualify `$type` with the declaring module — is larger than it looks, because
+`$type` is not an IR-runtime wire detail. It is the language's public value contract:
+
+- `crates/nx-value/src/lib.rs:131` serializes every value's `type_name` as `$type`, so this is the
+  canonical JSON form for the whole language, not just the IR path.
+- `crates/nx-cli/src/typegen/languages/csharp.rs:348` emits
+  `[JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]` with `[JsonDerivedType(..., "U.case")]`
+  attributes whose discriminator strings are bare names baked into generated C#.
+- `crates/nx-codegen/src/runtime.rs:148` stamps the same thing in the generated JavaScript runtime.
+
+109 files in the repository reference `$type`. Qualifying it changes the serialization contract of
+every NX value in every target at once, including generated C# attributes. It is also the design
+that ecosystem experience argues against for a discriminator specifically: `System.Text.Json` uses
+short author-chosen discriminators, and the fully-qualified alternative is JSON.NET's
+assembly-qualified `$type`, which welds internal structure into the wire format and moves whenever
+code moves. `$type` here is read by hand — hosts branch on it and the fiddle prints it.
+
+If this is revisited in the future:
+- Put identity *alongside* `$type`, never inside it. A separate field is ignorable by a host that
+  does not care; a mangled `$type` is not.
+- Start with an in-runtime tag rather than a wire field: a symbol key survives object spread, is
+  invisible to `JSON.stringify`, and needs no IR or format change. It covers every value the program
+  itself constructs, which is the case that matters, and degrades to name resolution when a host
+  round-trips a value through JSON.
+- Only add a wire field (`$decl` or similar) if host round-trips turn out to matter in practice —
+  that is, if the ambiguity is actually reached by values that left the runtime and came back.
+- Do not qualify only on collision. A discriminator whose shape depends on what else is in the
+  program means adding an unrelated module silently rewrites the wire format of existing values.
+- Whatever is chosen has to land in the interpreter too. Parity between the interpreter and the IR
+  runtimes is asserted value-for-value by `runtime/typescript/test/emitted-ir.test.mjs`, so a change
+  to the stamped form in one is a change in both.

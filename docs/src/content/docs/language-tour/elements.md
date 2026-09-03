@@ -36,6 +36,8 @@ let isLoading = true
 
 - Use `{}` to embed any expression (including `if`).
 - Use inline markup for attribute values when richer structure is needed.
+- A single element is a value like any other, so it needs no braces: `padding=<Thickness Left=4.0/>`.
+  Braces are what turn several of them into a sequence.
 
 ## Attributes can be conditional groups
 

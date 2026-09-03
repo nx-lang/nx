@@ -1,0 +1,117 @@
+// Ported from the DrawnUI React demo's Carousel & Drawer page.
+//
+// Both controls still work: SkiaCarousel swipes and SkiaDrawer drags, because snapping is the
+// control's own gesture handling rather than authored NX. What is missing is everything driven from
+// outside them — the Prev/Next/ScrollTo buttons, the "SelectedIndex=N" readouts, the dot that marks
+// the current slide, and the drawer's open/close button — all of which need event handlers and
+// component state.
+//
+// Each control is authored to rest where the original starts: the first carousel on slide 1, the
+// peek carousel on slide 2 so its neighbours show on both sides, and the drawer closed with its
+// header at the bottom edge. Nothing is drawn mid-transition.
+
+type Slide = {
+  Title: string
+  Color: string
+}
+
+component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = {
+  <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8.0 />
+    BackgroundColor="#2B3035" HorizontalOptions=Fill>
+    <SkiaStack Padding=<Thickness Left=16.0 Top=12.0 Right=16.0 Bottom=12.0 /> Spacing=10.0>
+      <SkiaLabel Text={Title} FontSize=12.0 TextColor="#6EA8FE" FontAttributes=Bold
+        TextTransform=Uppercase />
+      {Children}
+    </SkiaStack>
+  </SkiaShape>
+}
+
+component <SlideFace extends DrawnNode Item:Slide Size:float64 /> = {
+  <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=12.0 />
+    BackgroundColor={Item.Color}>
+    <SkiaLabel Text={Item.Title} FontSize={Size} FontFamily="FontTextBold" TextColor="#FFFFFF"
+      HorizontalOptions=Center VerticalOptions=Center />
+  </SkiaShape>
+}
+
+let slides = {
+  <Slide Title="Slide 1" Color="#0D6EFD" />
+  <Slide Title="Slide 2" Color="#6610F2" />
+  <Slide Title="Slide 3" Color="#D63384" />
+  <Slide Title="Slide 4" Color="#20C997" />
+}
+
+<SkiaLayer VerticalOptions=Fill>
+  <SkiaScroll Orientation=Vertical>
+    <SkiaStack Spacing=16.0 Padding=<Thickness Left=16.0 Top=16.0 Right=16.0 Bottom=260.0 />
+      HorizontalOptions=Center MaximumWidthRequest=720.0>
+      <SkiaLabel Text="Carousel & Drawer" FontSize=24.0 TextColor="#FFFFFF" HorizontalOptions=Center />
+
+      <Card Title="SkiaCarousel — swipe horizontally · SelectedIndex=0">
+        <SkiaCarousel HeightRequest=160.0 SelectedIndex=0.0 Bounces=true>
+          for slide in slides {
+            <SlideFace Item={slide} Size=24.0 />
+          }
+        </SkiaCarousel>
+        // The original drives the carousel from these buttons and marks the current slide in the
+        // dot row; both need event handlers, so the buttons are inert and the first dot is lit.
+        <SkiaRow Spacing=8.0>
+          <SkiaButton Text="Prev" BackgroundColor="#0D6EFD" />
+          <SkiaButton Text="Next" BackgroundColor="#0D6EFD" />
+          <SkiaButton Text="ScrollTo(3)" BackgroundColor="#20C997" />
+          <SkiaRow Margin=<Thickness Left=8.0 /> Spacing=6.0 VerticalOptions=Center>
+            <SkiaShape Type=Circle WidthRequest=10.0 LockRatio=1.0 BackgroundColor="#FFFFFF" />
+            <SkiaShape Type=Circle WidthRequest=10.0 LockRatio=1.0 BackgroundColor="#6C757D" />
+            <SkiaShape Type=Circle WidthRequest=10.0 LockRatio=1.0 BackgroundColor="#6C757D" />
+            <SkiaShape Type=Circle WidthRequest=10.0 LockRatio=1.0 BackgroundColor="#6C757D" />
+          </SkiaRow>
+        </SkiaRow>
+      </Card>
+
+      <Card Title="SidesOffset={40} Spacing={12} — neighbours peek in · SelectedIndex=1">
+        <SkiaCarousel HeightRequest=140.0 SidesOffset=40.0 Spacing=12.0 SelectedIndex=1.0>
+          for slide in slides {
+            <SlideFace Item={slide} Size=20.0 />
+          }
+        </SkiaCarousel>
+      </Card>
+
+      <Card Title="SkiaDrawer — drag the header below">
+        // The original toggles the drawer from this button and shows its IsOpen state beside it.
+        <SkiaRow Spacing=8.0>
+          <SkiaButton Text="Open drawer" BackgroundColor="#6610F2" />
+          <SkiaLabel Text="IsOpen: false" FontSize=14.0 TextColor="#DEE2E6" VerticalOptions=Center />
+        </SkiaRow>
+        <SkiaLabel FontSize=12.0 TextColor="#ADB5BD" HorizontalOptions=Fill
+          Text="Direction=FromBottom HeaderSize=56, sits in a SkiaLayer with VerticalOptions=End; snaps by velocity, Bounces enabled." />
+      </Card>
+    </SkiaStack>
+  </SkiaScroll>
+
+  // The drawer lives in its own full-size layer over the page, anchored to the bottom edge, and
+  // rests closed with only its header showing.
+  <SkiaLayer VerticalOptions=Fill>
+    <SkiaDrawer Direction=FromBottom HeaderSize=56.0 HeightRequest=320.0 VerticalOptions=End
+      HorizontalOptions=Fill Bounces=true>
+      <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=20.0 /> BackgroundColor="#F5F5F5"
+        HorizontalOptions=Fill VerticalOptions=Fill
+        Shadows={ <SkiaShadow X=0.0 Y=-2.0 Blur=8.0 Opacity=0.4 Color="#000000" /> }>
+        <SkiaStack Spacing=0.0 HorizontalOptions=Fill>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=20.0 /> BackgroundColor="#0D6EFD"
+            HeightRequest=56.0 HorizontalOptions=Fill>
+            <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=3.0 /> BackgroundColor="#FFFFFF"
+              WidthRequest=44.0 HeightRequest=5.0 HorizontalOptions=Center Margin=<Thickness Top=8.0 /> />
+            <SkiaLabel Text="Drag me" FontSize=16.0 FontFamily="FontTextBold" TextColor="#FFFFFF"
+              HorizontalOptions=Center VerticalOptions=Center Margin=<Thickness Top=10.0 /> />
+          </SkiaShape>
+          <SkiaStack Padding=<Thickness Left=20.0 Top=20.0 Right=20.0 Bottom=20.0 /> Spacing=12.0>
+            <SkiaLabel Text="Drawer content" FontSize=20.0 FontFamily="FontTextBold" TextColor="#111827" />
+            <SkiaLabel FontSize=14.0 TextColor="#374151" HorizontalOptions=Fill
+              Text="Everything inside is a normal drawn tree: the drawer only takes vertical drags. Release with a flick to snap open or closed." />
+            <SkiaButton Text="Close" ControlStyle=Material />
+          </SkiaStack>
+        </SkiaStack>
+      </SkiaShape>
+    </SkiaDrawer>
+  </SkiaLayer>
+</SkiaLayer>

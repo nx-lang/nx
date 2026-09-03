@@ -1,0 +1,175 @@
+:root {
+  color-scheme: dark;
+  --ink: #e9ecef;
+  --ink-dim: #868e96;
+  --edge: #2b3138;
+  --panel: #1b1f24;
+  --ground: #16191d;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--edge);
+  background: var(--panel);
+  flex: none;
+}
+
+.bar h1 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.spacer { flex: 1; }
+
+.link {
+  color: var(--ink-dim);
+  text-decoration: none;
+  font-size: 13px;
+  border: 1px solid var(--edge);
+  border-radius: 6px;
+  padding: 4px 10px;
+}
+
+.link:hover { color: var(--ink); border-color: #3d454e; }
+
+.note {
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.panes {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.pane-source {
+  display: flex;
+  flex-direction: column;
+  width: 46%;
+  min-width: 320px;
+  border-right: 1px solid var(--edge);
+}
+
+.editor { flex: 1; min-height: 0; }
+
+.pane-canvas { flex: 1; min-width: 0; position: relative; }
+.pane-canvas > div { height: 100%; }
+
+.diagnostics {
+  flex: none;
+  max-height: 30%;
+  overflow: auto;
+  border-top: 1px solid var(--edge);
+  background: var(--panel);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.diagnostic {
+  display: flex;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #23282e;
+}
+
+.diagnostic .where { color: var(--ink-dim); white-space: nowrap; }
+.diagnostic.error .what { color: #ff8787; }
+.diagnostic.app .what { color: #ffd43b; }
+.quiet { padding: 6px 12px; color: var(--ink-dim); }
+
+.chip {
+  display: inline-block;
+  font-size: 11px;
+  line-height: 1.5;
+  border-radius: 10px;
+  padding: 3px 10px;
+  border: 1px solid var(--edge);
+  color: var(--ink-dim);
+}
+
+.card .chip { margin: 0 16px 12px; }
+
+/* In the fiddle bar the note shares one row with the title and the interaction notice. */
+.bar .chip { max-width: 46ch; flex: 0 1 auto; }
+
+.chip.reduced { border-color: #4a3d22; color: #ffd43b; background: #2a2313; }
+.chip.static { background: #21262c; }
+
+.gallery {
+  height: 100vh;
+  overflow: auto;
+}
+
+.gallery-head {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 40px 20px 8px;
+}
+
+.gallery-head h1 { font-size: 28px; margin: 0 0 8px; }
+.gallery-head p { color: var(--ink-dim); font-size: 14px; margin: 0; max-width: 62ch; line-height: 1.5; }
+
+.cards {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 24px 20px 60px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.card {
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px 0;
+}
+
+.card-head h2 { font-size: 17px; margin: 0; }
+.blurb { color: var(--ink-dim); font-size: 13px; margin: 6px 16px 12px; }
+
+.preview {
+  position: relative;
+  height: 260px;
+  border-top: 1px solid var(--edge);
+  background: #212529;
+}
+
+.preview > div { height: 100%; }
+
+.preview-status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-dim);
+  font-size: 13px;
+}
+
+button.link { background: none; cursor: pointer; font: inherit; }

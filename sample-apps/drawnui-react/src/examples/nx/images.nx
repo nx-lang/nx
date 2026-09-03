@@ -1,0 +1,117 @@
+// Ported from the DrawnUI React demo's Images page.
+//
+// SkiaImage: one source in every TransformAspect, then the effects, then alignment inside the box.
+// The aspect row is written as a loop over a list of records — the original maps over an array.
+
+type AspectDemo = {
+  Aspect: TransformAspect
+  Title: string
+}
+
+component <AspectTile extends DrawnNode Demo:AspectDemo /> = {
+  <SkiaStack Spacing=4.0 WidthRequest=220.0>
+    <SkiaImage Source="images/baboon.jpg" WidthRequest=220.0 HeightRequest=120.0
+      Aspect={Demo.Aspect} BackgroundColor="#000000" />
+    <SkiaLabel Text={Demo.Title} FontSize=15.0 TextColor="#FFFFFF" />
+  </SkiaStack>
+}
+
+// A captioned tile for the effect grid, where each image sets different properties.
+component <Tile extends DrawnNode Title:string content Children:DrawnNode[] /> = {
+  <SkiaStack Spacing=4.0 WidthRequest=160.0>
+    {Children}
+    <SkiaLabel Text={Title} FontSize=12.0 TextColor="#94A3B8" />
+  </SkiaStack>
+}
+
+component <Heading extends DrawnNode Text:string /> = {
+  <SkiaLabel Text={Text} FontSize=20.0 TextColor="#FFFFFF"
+    HorizontalOptions=Center Margin=<Thickness Top=12.0 /> />
+}
+
+let aspects = {
+  <AspectDemo Aspect=AspectCover Title="AspectCover" />
+  <AspectDemo Aspect=AspectFit Title="AspectFit" />
+  <AspectDemo Aspect=AspectFill Title="AspectFill" />
+  <AspectDemo Aspect=AspectFitFill Title="AspectFitFill" />
+  <AspectDemo Aspect=Fill Title="Fill" />
+  <AspectDemo Aspect=Fit Title="Fit" />
+  <AspectDemo Aspect=FitFill Title="FitFill" />
+  <AspectDemo Aspect=Cover Title="Cover" />
+  <AspectDemo Aspect=None Title="None" />
+}
+
+<SkiaScroll Orientation=Vertical>
+  <SkiaStack Padding=<Thickness Left=16.0 Top=16.0 Right=16.0 Bottom=16.0 /> Spacing=16.0>
+    <SkiaLabel Text="SkiaImage · Aspect" FontSize=24.0 TextColor="#FFFFFF" HorizontalOptions=Center />
+    <SkiaLabel Text="Same 512x512 photo in a 220x120 box. Overflow is clipped to the box."
+      FontSize=13.0 TextColor="#D3D3D3" HorizontalOptions=Center />
+    <SkiaWrap Spacing=16.0 HorizontalOptions=Center MaximumWidthRequest=720.0>
+      for demo in aspects {
+        <AspectTile Demo={demo} />
+      }
+    </SkiaWrap>
+
+    <Heading Text="Effects · AddEffect, Blur, Zoom, offsets" />
+    <SkiaWrap Spacing=16.0 HorizontalOptions=Center MaximumWidthRequest=720.0>
+      <Tile Title="BlackAndWhite">
+        <SkiaImage Source="images/baboon.jpg" WidthRequest=160.0 HeightRequest=100.0
+          BackgroundColor="#000000" AddEffect=BlackAndWhite />
+      </Tile>
+      <Tile Title="Sepia">
+        <SkiaImage Source="images/baboon.jpg" WidthRequest=160.0 HeightRequest=100.0
+          BackgroundColor="#000000" AddEffect=Sepia />
+      </Tile>
+      <Tile Title="Pastel">
+        <SkiaImage Source="images/baboon.jpg" WidthRequest=160.0 HeightRequest=100.0
+          BackgroundColor="#000000" AddEffect=Pastel />
+      </Tile>
+      <Tile Title="InvertColors">
+        <SkiaImage Source="images/baboon.jpg" WidthRequest=160.0 HeightRequest=100.0
+          BackgroundColor="#000000" AddEffect=InvertColors />
+      </Tile>
+      <Tile Title="Tint #0D6EFD Multiply">
+        <SkiaImage Source="images/baboon.jpg" WidthRequest=160.0 HeightRequest=100.0
+          BackgroundColor="#000000" AddEffect=Tint ColorTint="#0D6EFD" EffectBlendMode=Multiply />
+      </Tile>
+      <Tile Title="Darken={80}">
+        <SkiaImage Source="images/baboon.jpg" WidthRequest=160.0 HeightRequest=100.0
+          BackgroundColor="#000000" AddEffect=Darken Darken=80.0 />
+      </Tile>
+      <Tile Title="Lighten={80}">
+        <SkiaImage Source="images/baboon.jpg" WidthRequest=160.0 HeightRequest=100.0
+          BackgroundColor="#000000" AddEffect=Lighten Lighten=80.0 />
+      </Tile>
+      <Tile Title="Contrast={1.5}">
+        <SkiaImage Source="images/baboon.jpg" WidthRequest=160.0 HeightRequest=100.0
+          BackgroundColor="#000000" AddEffect=Contrast Contrast=1.5 />
+      </Tile>
+      <Tile Title="Saturation={2}">
+        <SkiaImage Source="images/baboon.jpg" WidthRequest=160.0 HeightRequest=100.0
+          BackgroundColor="#000000" AddEffect=Saturation Saturation=2.0 />
+      </Tile>
+      <Tile Title="Blur={3}">
+        <SkiaImage Source="images/baboon.jpg" WidthRequest=160.0 HeightRequest=100.0
+          BackgroundColor="#000000" Blur=3.0 />
+      </Tile>
+      <Tile Title="ZoomX/Y={1.8}">
+        <SkiaImage Source="images/baboon.jpg" WidthRequest=160.0 HeightRequest=100.0
+          BackgroundColor="#000000" ZoomX=1.8 ZoomY=1.8 />
+      </Tile>
+      <Tile Title="HorizontalOffset={-40}">
+        <SkiaImage Source="images/baboon.jpg" WidthRequest=160.0 HeightRequest=100.0
+          BackgroundColor="#000000" HorizontalOffset=-40.0 Aspect=AspectFit />
+      </Tile>
+    </SkiaWrap>
+
+    <Heading Text="Alignment inside the box" />
+    <SkiaWrap Spacing=16.0 HorizontalOptions=Center MaximumWidthRequest=720.0>
+      <SkiaImage Source="images/baboon.jpg" WidthRequest=120.0 HeightRequest=120.0 Aspect=AspectFit
+        HorizontalAlignment=Start VerticalAlignment=Start BackgroundColor="#000000" />
+      <SkiaImage Source="images/baboon.jpg" WidthRequest=120.0 HeightRequest=120.0 Aspect=Fit
+        HorizontalAlignment=Center VerticalAlignment=Center BackgroundColor="#000000" />
+      <SkiaImage Source="images/baboon.jpg" WidthRequest=120.0 HeightRequest=120.0 Aspect=Fit
+        HorizontalAlignment=End VerticalAlignment=End BackgroundColor="#000000" />
+    </SkiaWrap>
+  </SkiaStack>
+</SkiaScroll>
