@@ -90,16 +90,19 @@
 //!
 //! ## Primitive Types
 //!
-//! - `int` - 64-bit integers
-//! - `float` - 64-bit floating point
+//! - `int` - the default integer, exact over ±(2^53−1) on every backend
+//! - `int32` - 32-bit integers
+//! - `int64` - 64-bit integers
+//! - `float32` - 32-bit floating point
+//! - `float64` - 64-bit floating point
 //! - `string` - UTF-8 strings
-//! - `bool` - Booleans
+//! - `boolean` - Booleans
 //! - `void` - Unit type (no value)
 //!
 //! ## Compound Types
 //!
 //! - **Arrays**: `int[]`, `string[][]`, `string[]?`, `string?[]`
-//! - **Functions**: `(int, string) => bool`
+//! - **Functions**: `(int, string) => boolean`
 //! - **Nullable**: `int?`, `string?`
 //! - **Named types**: User-defined types and element names
 //!
@@ -108,6 +111,7 @@
 //! The type system uses structural compatibility with these rules:
 //!
 //! - Exact types are compatible: `int` ≅ `int`
+//! - Any integer width is compatible with any other: `int32` ≅ `int` ≅ `int64`
 //! - Non-nullable types are compatible with nullable: `int` ≅ `int?`
 //! - Arrays are covariant: `int[]` ≅ `int[]`
 //! - Functions are contravariant in parameters, covariant in return
@@ -139,9 +143,11 @@ pub use check::{
     SourceAnalysisResult, TypeCheckResult, TypeCheckSession,
 };
 pub use env::{TypeBinding, TypeEnvironment};
-pub use infer::{InferenceContext, TypeInference};
+pub use infer::{ContextualResolution, InferenceContext, TypeInference};
 pub use semantics::{
     common_supertype, is_object_type, resolve_type_ref_with, resolve_type_ref_with_seen,
     type_satisfies_expected, type_satisfies_expected_with_coercion,
 };
-pub use ty::{Primitive, Type, TypeId};
+pub use ty::{
+    display_type_pair, DeclaringOrigin, Primitive, Type, TypeId, UnionCaseType, UnionType,
+};

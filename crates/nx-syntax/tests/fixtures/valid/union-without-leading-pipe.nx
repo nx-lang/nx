@@ -1,0 +1,9 @@
+// The leading `|` is optional for two or more cases, so migrating an `enum` is a keyword swap.
+type LoadState = idle | loading
+
+type Shape = point | circle { radius: float64 }
+
+// One case still requires the pipe: `type Alias = Other` is a type alias.
+type Only = | solo
+
+type Alias = string

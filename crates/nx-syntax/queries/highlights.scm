@@ -13,7 +13,6 @@
   "type"
   "abstract"
   "extends"
-  "enum"
   "import"
   "from"
   "as"
@@ -32,8 +31,15 @@
   (qualified_name
     (identifier) @type))
 
-(enum_definition
+(union_definition
   name: (identifier) @type)
+
+(union_definition
+  base: (qualified_name
+    (identifier) @type))
+
+(union_case
+  name: (identifier) @constant)
 
 (record_definition
   name: (identifier) @type)

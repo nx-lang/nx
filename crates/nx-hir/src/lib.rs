@@ -37,19 +37,21 @@ use smol_str::SmolStr;
 // Re-export lowering function
 pub use lower::lower;
 pub use prepared::{
-    binding_specs_for_item, interface_component, interface_enum, interface_function_signature,
-    interface_record, interface_type_alias, interface_union, local_definition_id,
-    prepared_item_kind, ImportedRawRef, InterfaceField, InterfaceItem, InterfaceItemKind,
-    InterfaceParam, InterfaceUnionCase, LocalDefinitionId, PreparedBinding, PreparedBindingOrigin,
+    binding_specs_for_item, interface_component, interface_function_signature, interface_record,
+    interface_type_alias, interface_union, local_definition_id, module_namespace_from_bindings,
+    prepared_item_kind, same_declaration, DeclarationKey, DeclaringOrigin, ImportedRawRef,
+    InterfaceField, InterfaceItem, InterfaceItemKind, InterfaceParam, InterfaceUnionCase,
+    LocalDefinitionId, ModuleNamespace, PreparedBinding, PreparedBindingOrigin,
     PreparedBindingTarget, PreparedItemKind, PreparedModule, PreparedNamespace,
     ResolvedPreparedItem,
 };
 
 pub use components::{
-    effective_component_contract, effective_component_contract_for_name,
+    apply_contextual_name_resolutions, component_declaration_origin, effective_component_contract,
+    effective_component_contract_at, effective_component_contract_for_name, is_component_subtype,
     promote_component_handler_bindings, resolve_component_definition,
-    validate_component_definitions, ComponentResolutionError, EffectiveComponentContract,
-    InvalidComponentBaseReason,
+    validate_component_definitions, ComponentAncestor, ComponentResolutionError, ContextualRewrite,
+    EffectiveComponentContract, InvalidComponentBaseReason,
 };
 
 // Re-export database types
@@ -57,9 +59,10 @@ pub use db::{DatabaseImpl, NxDatabase};
 
 // Re-export scope and symbol types
 pub use records::{
-    effective_record_shape, effective_record_shape_for_name, is_record_subtype,
-    resolve_record_definition, validate_record_definitions, EffectiveRecordShape,
-    InvalidBaseReason, RecordResolutionError,
+    effective_record_shape, effective_record_shape_at, effective_record_shape_for_name,
+    effective_record_shape_for_name_in, is_record_subtype, record_declaration_origin,
+    resolve_record_definition, resolve_record_definition_with_module, validate_record_definitions,
+    EffectiveRecordShape, InvalidBaseReason, RecordAncestor, RecordResolutionError,
 };
 pub use scope::{
     build_scopes, check_undefined_identifiers, Scope, ScopeId, ScopeManager, Symbol, SymbolKind,
@@ -272,28 +275,6 @@ pub struct TypeAlias {
     pub span: TextSpan,
 }
 
-/// Enum member.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EnumMember {
-    /// Member name
-    pub name: Name,
-    /// Source span
-    pub span: TextSpan,
-}
-
-/// Enum definition.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EnumDef {
-    /// Enum name
-    pub name: Name,
-    /// Declaration visibility
-    pub visibility: Visibility,
-    /// Members for the enum
-    pub members: Vec<EnumMember>,
-    /// Source span
-    pub span: TextSpan,
-}
-
 /// Field declared on one discriminated union case.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnionCaseField {
@@ -354,6 +335,22 @@ impl UnionCaseDef {
     /// Returns true when this case has no payload fields.
     pub fn is_fieldless(&self) -> bool {
         self.fields.is_empty()
+    }
+}
+
+impl UnionDef {
+    /// Returns true when `case` is a constant case: it declares no fields and this union declares
+    /// no base, so the case carries nothing beyond its own name.
+    ///
+    /// <para>A fieldless case of a union that extends an abstract base is not constant. It inherits
+    /// the base's fields, so it still needs the record representation.</para>
+    pub fn is_constant_case(&self, case: &UnionCaseDef) -> bool {
+        self.base.is_none() && case.is_fieldless()
+    }
+
+    /// Returns true when every case is constant. This is what an `enum` declared.
+    pub fn is_constant_union(&self) -> bool {
+        self.base.is_none() && self.cases.iter().all(UnionCaseDef::is_fieldless)
     }
 }
 
@@ -478,6 +475,20 @@ impl EffectiveField {
             span: field.span,
         }
     }
+}
+
+/// One emitted action on a resolved component contract, with the module that declared the emit.
+///
+/// <para>An emit's action record is named in the module that wrote the `emits` clause, which need
+/// not be the module binding a handler to it. Carrying the declaring identity here is what lets a
+/// handler binding resolve the action where it was written — the same rule
+/// [`EffectiveField::module_identity`] applies to a field's declared type.</para>
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectiveEmit {
+    /// The emit as it was declared.
+    pub emit: ComponentEmit,
+    /// Stable identity of the module that declared the emit.
+    pub module_identity: String,
 }
 
 /// Distinguishes ordinary records from action records.
@@ -700,8 +711,6 @@ pub enum Item {
     Component(Component),
     /// Type alias declaration
     TypeAlias(TypeAlias),
-    /// Enum declaration
-    Enum(EnumDef),
     /// Discriminated union declaration
     Union(UnionDef),
     /// Record declaration
@@ -716,7 +725,6 @@ impl Item {
             Item::Value(value) => &value.name,
             Item::Component(component) => &component.name,
             Item::TypeAlias(alias) => &alias.name,
-            Item::Enum(enum_def) => &enum_def.name,
             Item::Union(union_def) => &union_def.name,
             Item::Record(record_def) => &record_def.name,
         }
@@ -729,7 +737,6 @@ impl Item {
             Item::Value(value) => value.visibility,
             Item::Component(component) => component.visibility,
             Item::TypeAlias(alias) => alias.visibility,
-            Item::Enum(enum_def) => enum_def.visibility,
             Item::Union(union_def) => union_def.visibility,
             Item::Record(record_def) => record_def.visibility,
         }
@@ -782,7 +789,7 @@ pub type ElementId = Idx<Element>;
 /// High-level intermediate representation of a module.
 ///
 /// A module corresponds to a single .nx source file and contains all top-level
-/// items (functions, type aliases, enums, records) along with the expression
+/// items (functions, type aliases, unions, records) along with the expression
 /// and element arenas. Top-level elements are represented as implicit 'root'
 /// functions rather than as separate items.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -840,6 +847,15 @@ impl LoweredModule {
     /// Find an item by name.
     pub fn find_item(&self, name: &str) -> Option<&Item> {
         self.items.iter().find(|item| item.name().as_str() == name)
+    }
+
+    /// Find an item by name, together with its stable local definition identity.
+    pub fn find_item_with_definition(&self, name: &str) -> Option<(LocalDefinitionId, &Item)> {
+        self.items
+            .iter()
+            .enumerate()
+            .find(|(_, item)| item.name().as_str() == name)
+            .map(|(index, item)| (LocalDefinitionId::new(index as u32), item))
     }
 
     /// Returns the stable local definition identity for one raw item index, if present.

@@ -1,49 +1,7 @@
 // Minimal TextMate grammar tokenization tests for NX (TypeScript)
-import * as fs from 'fs';
-import * as path from 'path';
-import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
 import { expect } from 'chai';
-import type { IGrammar, IToken, StateStack } from 'vscode-textmate';
-// Use CommonJS require via createRequire to avoid ESM interop issues
-
-const cjsRequire = createRequire(import.meta.url);
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const onig: any = cjsRequire('vscode-oniguruma');
-const vsctm: any = cjsRequire('vscode-textmate');
-
-async function loadGrammar(): Promise<IGrammar> {
-  const wasmPath = cjsRequire.resolve('vscode-oniguruma/release/onig.wasm');
-  const wasmBin = fs.readFileSync(wasmPath).buffer;
-  await onig.loadWASM(wasmBin);
-
-  const registry = new vsctm.Registry({
-    onigLib: Promise.resolve({
-      createOnigScanner: (patterns: string[]) => new onig.OnigScanner(patterns),
-      createOnigString: (s: string) => new onig.OnigString(s)
-    }),
-    loadGrammar: async (scopeName: string) => {
-      if (scopeName !== 'source.nx') return null as any;
-      const grammarPath = path.join(__dirname, '..', '..', 'syntaxes', 'nx.tmLanguage.json');
-      const content = fs.readFileSync(grammarPath, 'utf8');
-      return vsctm.parseRawGrammar(content, grammarPath);
-    }
-  });
-
-  const grammar = await registry.loadGrammar('source.nx');
-  if (!grammar) throw new Error('Failed to load NX grammar');
-  return grammar;
-}
-
-function scopesForSubstring(line: string, tokens: IToken[], substring: string): string[] {
-  const idx = line.indexOf(substring);
-  if (idx === -1) return [];
-  const pos = idx + Math.floor(substring.length / 2);
-  const token = tokens.find(t => t.startIndex <= pos && pos < t.endIndex);
-  return token ? token.scopes : [];
-}
+import type { IGrammar, StateStack } from 'vscode-textmate';
+import { expectScopes, loadGrammar, scopesAt, scopesAtLine, scopesForSubstring, tokenTextAt, tokenizeLines } from './helpers.js';
 
 describe('NX TextMate grammar', function () {
   let grammar: IGrammar;
@@ -78,7 +36,7 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(line, tokens, 'let')).to.include('keyword.declaration.let.nx');
     expect(scopesForSubstring(line, tokens, 'totalCount')).to.include('entity.name.variable.nx');
     expect(scopesForSubstring(line, tokens, ':')).to.include('punctuation.separator.type.annotation.nx');
-    expect(scopesForSubstring(line, tokens, 'int')).to.include('storage.type.primitive.nx');
+    expect(scopesForSubstring(line, tokens, 'int')).to.include('support.type.primitive.nx');
     expect(scopesForSubstring(line, tokens, '=')).to.include('keyword.operator.assignment.nx');
   });
 
@@ -113,25 +71,40 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(line, tokens, 'SearchBox')).to.include('entity.name.type.nx');
   });
 
-  it('highlights enum definitions with leading pipe', function () {
-    const line = 'enum Status = | active | pending_review | disabled';
+  it('highlights a constant union with a leading pipe', function () {
+    const line = 'type Status = | active | pending_review | disabled';
     const { tokens } = grammar.tokenizeLine(line, null);
-    expect(scopesForSubstring(line, tokens, 'enum')).to.include('keyword.declaration.type.nx');
-    expect(scopesForSubstring(line, tokens, '|')).to.include('punctuation.separator.enum.nx');
+    expect(scopesForSubstring(line, tokens, 'type')).to.include('keyword.declaration.type.nx');
+    expect(scopesForSubstring(line, tokens, '|')).to.include('punctuation.separator.union-case.nx');
+    expect(scopesForSubstring(line, tokens, 'active')).to.include('entity.name.type.union.case.nx');
   });
 
-  it('highlights enum definitions without leading pipe', function () {
+  it('highlights a constant union without a leading pipe', function () {
+    const line = 'type Color = red | green | blue';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    expect(scopesForSubstring(line, tokens, 'type')).to.include('keyword.declaration.type.nx');
+    expect(scopesForSubstring(line, tokens, 'red')).to.include('entity.name.type.union.case.nx');
+    expect(scopesForSubstring(line, tokens, 'green')).to.include('entity.name.type.union.case.nx');
+    expect(scopesForSubstring(line, tokens, '|')).to.include('punctuation.separator.union-case.nx');
+  });
+
+  it('still highlights a type alias as an alias, not a union', function () {
+    const line = 'type Alias = Other';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    expect(scopesForSubstring(line, tokens, 'Other')).to.not.include('entity.name.type.union.case.nx');
+  });
+
+  it('does not highlight the removed enum keyword as a declaration', function () {
     const line = 'enum Color = red | green | blue';
     const { tokens } = grammar.tokenizeLine(line, null);
-    expect(scopesForSubstring(line, tokens, 'enum')).to.include('keyword.declaration.type.nx');
-    expect(scopesForSubstring(line, tokens, '|')).to.include('punctuation.separator.enum.nx');
+    expect(scopesForSubstring(line, tokens, 'enum')).to.not.include('keyword.declaration.type.nx');
   });
 
   it('highlights discriminated union definitions and case fields', function () {
     const lines = [
       'export type LoadState =',
       '  | idle',
-      '  | failed { message:string retryable:bool = true }'
+      '  | failed { message:string retryable:boolean = true }'
     ];
 
     let ruleStack: StateStack | null = null;
@@ -152,7 +125,7 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(lines[2], failed.tokens, '|')).to.include('punctuation.separator.union-case.nx');
     expect(scopesForSubstring(lines[2], failed.tokens, 'failed')).to.include('entity.name.type.union.case.nx');
     expect(scopesForSubstring(lines[2], failed.tokens, 'message')).to.include('variable.other.property.nx');
-    expect(scopesForSubstring(lines[2], failed.tokens, 'string')).to.include('storage.type.primitive.nx');
+    expect(scopesForSubstring(lines[2], failed.tokens, 'string')).to.include('support.type.primitive.nx');
     expect(scopesForSubstring(lines[2], failed.tokens, '=')).to.include('keyword.operator.assignment.nx');
   });
 
@@ -331,13 +304,23 @@ describe('NX TextMate grammar', function () {
     expect(scopesForSubstring(line, tokens, '(')).to.include('source.nx');
   });
 
+  it('highlights every numeric primitive, including int alongside the widths', function () {
+    const line = 'let f(a:int, b:int32, c:int64, d:float32, e:float64): boolean = true';
+    const { tokens } = grammar.tokenizeLine(line, null);
+    for (const name of ['int', 'int32', 'int64', 'float32', 'float64']) {
+      expect(scopesForSubstring(line, tokens, name), name).to.include(
+        'support.type.primitive.nx',
+      );
+    }
+  });
+
   it('highlights paren-style function definitions', function () {
-    const line = 'let render(title:string, count:int): bool = title == ""';
+    const line = 'let render(title:string, count:int): boolean = title == ""';
     const { tokens } = grammar.tokenizeLine(line, null);
     expect(scopesForSubstring(line, tokens, 'render')).to.include('entity.name.variable.nx');
-    expect(scopesForSubstring(line, tokens, 'string')).to.include('storage.type.primitive.nx');
-    expect(scopesForSubstring(line, tokens, 'int')).to.include('storage.type.primitive.nx');
-    expect(scopesForSubstring(line, tokens, 'bool')).to.include('storage.type.primitive.nx');
+    expect(scopesForSubstring(line, tokens, 'string')).to.include('support.type.primitive.nx');
+    expect(scopesForSubstring(line, tokens, 'int')).to.include('support.type.primitive.nx');
+    expect(scopesForSubstring(line, tokens, 'boolean')).to.include('support.type.primitive.nx');
   });
 
   it('highlights tags and attributes', function () {
@@ -434,6 +417,111 @@ describe('NX TextMate grammar', function () {
     const line = 'let numbers: int[] = [1, 2]';
     const { tokens } = grammar.tokenizeLine(line, null);
     expect(scopesForSubstring(line, tokens, '[]')).to.include('keyword.operator.type-modifier.nx');
+  });
+
+  it('scopes an attribute named after a keyword as an attribute', function () {
+    // `#keywords-core` and the attribute rule both match at the attribute's name, so list order
+    // decides. With the keyword first it consumed the name, and the attribute rule's `(?=name =)`
+    // lookahead then missed, leaving the `= value` unscoped as well.
+    for (const name of ['type', 'component', 'let', 'state', 'external']) {
+      const result = tokenizeLines(grammar, [`<Question ${name} = "multiple" />`]);
+      expectScopes(scopesAt(result, '<Question', name), `attribute named \`${name}\``)
+        .toInclude('entity.other.attribute-name.nx');
+      expectScopes(scopesAt(result, '<Question', '='), `\`=\` after \`${name}\``)
+        .toInclude('keyword.operator.assignment.nx');
+      expectScopes(scopesAt(result, '<Question', 'multiple'), `value of \`${name}\``)
+        .toInclude('string.quoted.double.nx');
+    }
+
+    // The same inside a property-list `if` (`samples/survey.nx:15`).
+    const inIf = tokenizeLines(grammar, ['<Question', '  if true {', '    type="singleChoice"', '  } >']);
+    expectScopes(scopesAtLine(inIf, 2, 'type'), 'attribute named `type` inside a property-list if')
+      .toInclude('entity.other.attribute-name.nx')
+      .toNotInclude('keyword.declaration.type.nx');
+
+    // A keyword in a non-attribute position keeps its keyword scope.
+    const declaration = tokenizeLines(grammar, ['export type Mode = light | dark']);
+    expectScopes(scopesAt(declaration, 'Mode', 'type'), '`type` as a declaration keyword')
+      .toInclude('keyword.declaration.type.nx');
+  });
+
+  it('scopes a parenthesized parameter by the property-definition rule', function () {
+    // A paren parameter is a PropertyDefinition, the same production as a signature property, so
+    // its name, type, and default are scoped by the same rule rather than falling through to the
+    // module-qualifier catch-all.
+    const result = tokenizeLines(grammar, [
+      'let f(alpha: int, beta: Color? = red, gamma: string = "hi") = alpha'
+    ]);
+
+    for (const name of ['alpha', 'beta', 'gamma']) {
+      expectScopes(scopesAt(result, 'let f(', name), `parameter ${name}`)
+        .toInclude('variable.other.property.nx')
+        .toNotInclude('entity.name.qualifier.nx');
+    }
+    expectScopes(scopesAt(result, 'let f(', 'int'), 'parameter type int')
+      .toInclude('support.type.primitive.nx');
+    expectScopes(scopesAt(result, 'let f(', 'Color'), 'parameter type Color')
+      .toInclude('entity.name.type.nx');
+    expectScopes(scopesAt(result, 'let f(', 'red'), 'parameter default red')
+      .toInclude('variable.other.enummember.nx')
+      .toNotInclude('entity.name.qualifier.nx');
+    expectScopes(scopesAt(result, 'let f(', '"hi"'), 'parameter default "hi"')
+      .toInclude('string.quoted.double.nx');
+  });
+
+  it('scopes the ? and [] type suffixes alike in every annotation position', function () {
+    const record = tokenizeLines(grammar, [
+      'type Doc = {',
+      '  catalogs: CatalogUse[]',
+      '  metadata: DocumentMetadata?',
+      '  title: string?',
+      '  items: string[]?',
+      '}'
+    ]);
+
+    for (const [property, suffix] of [['catalogs', '[]'], ['metadata', '?'], ['title', '?']]) {
+      expectScopes(scopesAt(record, property, suffix), `${suffix} on ${property}`)
+        .toInclude('keyword.operator.type-modifier.nx')
+        .toNotInclude('keyword.operator.conditional.nx');
+    }
+    expectScopes(scopesAt(record, 'items', '[]'), '[] on items').toInclude('keyword.operator.type-modifier.nx');
+    expectScopes(scopesAt(record, 'items', '?'), '? on items').toInclude('keyword.operator.type-modifier.nx');
+
+    // The same suffix in a declaration signature.
+    const signature = tokenizeLines(grammar, ['component <Box', '  size: float64?', '/>']);
+    expectScopes(scopesAt(signature, 'size', '?'), '? in a signature')
+      .toInclude('keyword.operator.type-modifier.nx');
+
+    // ...and in a value definition, a parameter list, and a function return type.
+    const value = tokenizeLines(grammar, [
+      'let catalogs: CatalogUse[]? = items',
+      'let render(scale: float64?) = scale',
+      'let <Row item: string /> : Element? = <HStack />'
+    ]);
+    for (const [line, suffix] of [['catalogs', '[]?'], ['scale: float64', '?'], ['Element?', '?']]) {
+      expectScopes(scopesAt(value, line, suffix), `${suffix} in \`${line}\``)
+        .toInclude('keyword.operator.type-modifier.nx')
+        .toNotInclude('keyword.operator.conditional.nx');
+    }
+
+    // `TypeSuffix*` is a source-ordered repetition, so `?` may precede `[]`.
+    const reordered = tokenizeLines(grammar, [
+      'component <Box',
+      '  tags: string?[]',
+      '  swatches: Color[]?[]',
+      '/>'
+    ]);
+    for (const [property, suffix] of [['tags', '?[]'], ['swatches', '[]?[]']]) {
+      expectScopes(scopesAt(reordered, property, suffix), `${suffix} on ${property}`)
+        .toInclude('keyword.operator.type-modifier.nx');
+      expect(tokenTextAt(reordered, property, suffix), `${suffix} on ${property} span`).to.equal(suffix);
+    }
+
+    // ...but a ternary is still a ternary.
+    const ternary = tokenizeLines(grammar, ['let ratio = ready ? 1 : 2']);
+    expectScopes(scopesAt(ternary, 'ratio', '?'), '? in a ternary')
+      .toInclude('keyword.operator.conditional.nx')
+      .toNotInclude('keyword.operator.type-modifier.nx');
   });
 
   it('highlights match and for blocks inside braced value expressions', function () {

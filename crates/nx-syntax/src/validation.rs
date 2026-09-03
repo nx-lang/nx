@@ -7,8 +7,8 @@
 //! - Enhanced error messages with suggestions
 
 use crate::{AstNode, ComponentDef, SyntaxKind, SyntaxNode, SyntaxTree, UnionDef};
-use nx_diagnostics::{Diagnostic, Label};
-use text_size::TextRange;
+use nx_diagnostics::{Diagnostic, Label, TextSpan};
+use text_size::{TextRange, TextSize};
 
 const COMPONENT_SIGNATURE_SYNTAX: &str =
     "Expected: <Name [extends BaseComponent] prop:type emits { ActionName { prop:type } \
@@ -23,7 +23,8 @@ const DUPLICATE_NULLABLE_SUFFIX_NOTE: &str =
     "A nullable suffix can only be applied once per type layer. `string?[]?` is valid because \
      `[]` creates a new outer list layer.";
 const UNION_DEFINITION_SYNTAX: &str =
-    "Expected: type UnionName [extends AbstractRecord] = | caseName | payloadCase { prop:type }";
+    "Expected: type UnionName [extends AbstractRecord] = caseName | payloadCase { prop:type } \
+     (a single-case union keeps its leading `|`)";
 
 /// Validates a syntax tree and returns any semantic errors found.
 ///
@@ -61,7 +62,181 @@ pub fn validate(tree: &SyntaxTree, file_name: &str) -> Vec<Diagnostic> {
     // Validate union declarations that depend on complete case metadata.
     validate_union_definitions(&root, file_name, &mut diagnostics);
 
+    // Report the removed `enum` keyword by name.
+    validate_reserved_enum_keyword(tree, file_name, &mut diagnostics);
+
     diagnostics
+}
+
+/// Reports the removed `enum` keyword in declaration position, naming the `type` form to write.
+///
+/// `enum` is no longer in the grammar, so the parse fails at or after the keyword and reports
+/// something unrelated — nothing in the parse tree names the keyword, and where the parse gives up
+/// is not fixed. This is a source-level scan for that reason: it has to fire regardless.
+///
+/// The scan cannot find the keyword in the tree, but it can ask the tree where the keyword would
+/// not be a declaration. Comments, string literals, and element text content hold prose and data,
+/// so a line reading like a declaration there is one only by coincidence and is skipped.
+///
+/// The note carries the concrete replacement, built from the declaration's own remaining text, so
+/// the author can read the line to write rather than a template to fill in.
+fn validate_reserved_enum_keyword(
+    tree: &SyntaxTree,
+    file_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let source = tree.source();
+    let prose_spans = prose_spans(&tree.root());
+    let mut offset = 0usize;
+
+    for line in source.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        let indent = line.len() - trimmed.len();
+
+        // Only declaration position: optionally a visibility modifier, then `enum`.
+        let (keyword_offset, rest) = match trimmed
+            .strip_prefix("export ")
+            .map(|rest| (indent + 7, rest.trim_start()))
+            .or_else(|| {
+                trimmed
+                    .strip_prefix("private ")
+                    .map(|rest| (indent + 8, rest.trim_start()))
+            }) {
+            Some((consumed, rest)) => (offset + consumed, rest),
+            None => (offset + indent, trimmed),
+        };
+
+        if let Some(after) = rest.strip_prefix("enum") {
+            if after.starts_with(char::is_whitespace) && !is_within(&prose_spans, keyword_offset) {
+                let start = TextSize::try_from(keyword_offset).unwrap_or_default();
+                let end = TextSize::try_from(keyword_offset + 4).unwrap_or_default();
+
+                diagnostics.push(
+                    Diagnostic::error("removed-enum-keyword")
+                        .with_message(
+                            "`enum` is not an NX declaration. A closed set of constants is a union \
+                             whose cases carry no payload."
+                                .to_string(),
+                        )
+                        .with_label(Label::primary(
+                            file_name.to_string(),
+                            TextSpan::new(start, end),
+                        ))
+                        .with_note(format!(
+                            "Write `{}` instead; the case list is unchanged.",
+                            enum_replacement_form(after)
+                        ))
+                        .build(),
+                );
+            }
+        }
+
+        offset += line.len();
+    }
+}
+
+/// Collects the source ranges that hold prose or data rather than code.
+///
+/// A source-level keyword scan has no other way to tell a declaration from the same words quoted
+/// in a comment, a string, or the text content of an element. Whole regions are collected rather
+/// than individual lines, so a multi-line comment or a raw text body is excluded in one piece.
+fn prose_spans(root: &SyntaxNode) -> Vec<TextRange> {
+    let mut spans = Vec::new();
+    let mut pending = vec![*root];
+
+    while let Some(node) = pending.pop() {
+        if is_prose(node.kind()) {
+            spans.push(node.span());
+            continue;
+        }
+
+        pending.extend(node.children_with_tokens());
+    }
+
+    spans
+}
+
+/// Returns true for the kinds whose text is prose or data rather than NX code.
+fn is_prose(kind: SyntaxKind) -> bool {
+    kind.is_comment()
+        || matches!(
+            kind,
+            SyntaxKind::STRING_LITERAL
+                | SyntaxKind::TEXT_CONTENT
+                | SyntaxKind::EMBED_TEXT_CONTENT
+                | SyntaxKind::TEXT_RUN
+                | SyntaxKind::EMBED_TEXT_RUN
+                | SyntaxKind::RAW_TEXT_RUN
+                | SyntaxKind::TEXT_CHUNK
+                | SyntaxKind::EMBED_TEXT_CHUNK
+                | SyntaxKind::RAW_TEXT_CHUNK
+        )
+}
+
+/// Returns true when a byte offset falls inside any of the given ranges.
+fn is_within(spans: &[TextRange], offset: usize) -> bool {
+    let Ok(offset) = TextSize::try_from(offset) else {
+        return false;
+    };
+
+    spans.iter().any(|span| span.contains(offset))
+}
+
+/// Builds the `type` declaration that replaces an `enum` one, from the text following the keyword.
+///
+/// The case list after `=` is already the form a union case list takes, so the replacement is the
+/// same line with one word swapped. When the declaration continues past this line — the `=` is
+/// there but the cases are not — the case list is elided rather than guessed at.
+fn enum_replacement_form(after_keyword: &str) -> String {
+    let rest = after_keyword.trim_start();
+    let name: String = rest
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect();
+    let display_name = if name.is_empty() { "Name" } else { &name };
+
+    let tail = rest[name.len()..].trim();
+    match tail.strip_prefix('=') {
+        Some(cases) if !cases.trim().is_empty() => {
+            format!("type {display_name} = {}", cases.trim())
+        }
+        _ => format!("type {display_name} = ..."),
+    }
+}
+
+/// Drops the parse errors that a removed declaration form already explains.
+///
+/// A recognized removed declaration reports itself by name. The parser also fails on it, and that
+/// generic "unexpected syntax here" says nothing the targeted diagnostic has not already said
+/// better — so it is removed when it covers the same keyword.
+pub(crate) fn suppress_parse_errors_for_removed_declarations(diagnostics: &mut Vec<Diagnostic>) {
+    let removed_spans: Vec<TextSpan> = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code() == Some("removed-enum-keyword"))
+        .flat_map(|diagnostic| diagnostic.labels())
+        .filter(|label| label.primary)
+        .map(|label| label.range)
+        .collect();
+
+    if removed_spans.is_empty() {
+        return;
+    }
+
+    diagnostics.retain(|diagnostic| {
+        if diagnostic.code() != Some("syntax-error") {
+            return true;
+        }
+
+        !diagnostic
+            .labels()
+            .iter()
+            .filter(|label| label.primary)
+            .any(|label| {
+                removed_spans.iter().any(|removed| {
+                    label.range.start() <= removed.start() && removed.end() <= label.range.end()
+                })
+            })
+    });
 }
 
 fn validate_type_suffixes(node: &SyntaxNode, file_name: &str, diagnostics: &mut Vec<Diagnostic>) {
@@ -680,6 +855,20 @@ fn analyze_error_context(
         );
     }
 
+    // An unbraced property value is always a literal, so a dotted name there is a common first
+    // mistake: authors reach for the qualified form they would write inside braces.
+    if let Some((property, qualified)) = unbraced_qualified_property(error_text) {
+        let member = qualified.rsplit('.').next().unwrap_or(qualified);
+        return (
+            "Qualified name in unbraced property value".to_string(),
+            Some(format!(
+                "An unbraced property value must be a literal. If `{qualified}` names an enum \
+                 member or union case, write `{property}={member}` and it resolves against the \
+                 property's type; otherwise wrap the expression: `{property}={{{qualified}}}`."
+            )),
+        );
+    }
+
     // Common error patterns
     if error_text.contains('{') && !error_text.contains('}') {
         return (
@@ -719,6 +908,126 @@ fn looks_like_type_definition_prefix(node: &tree_sitter::Node, source: &str) -> 
         || line_prefix.starts_with("private type ");
 
     starts_with_type && line_prefix.contains('=')
+}
+
+#[cfg(test)]
+mod enum_keyword_tests {
+    use crate::parse_str;
+
+    /// The removed keyword is reported by name, in declaration position, with the form to write.
+    #[test]
+    fn reports_the_removed_enum_keyword_by_name() {
+        for source in [
+            "enum Fit = fill | cover\n",
+            "export enum Fit = fill | cover\n",
+            "  private enum Fit = fill | cover\n",
+        ] {
+            let result = parse_str(source, "t.nx");
+            let codes: Vec<_> = result.errors.iter().filter_map(|e| e.code()).collect();
+            assert!(
+                codes.contains(&"removed-enum-keyword"),
+                "source `{source}` produced codes {codes:?}"
+            );
+            assert_eq!(
+                codes,
+                vec!["removed-enum-keyword"],
+                "the targeted diagnostic must be the only one; source `{source}`"
+            );
+            let notes: Vec<_> = result.errors.iter().filter_map(|e| e.note()).collect();
+            assert!(
+                notes
+                    .iter()
+                    .any(|note| note.contains("type Fit = fill | cover")),
+                "expected the concrete replacement form, got {notes:?}"
+            );
+        }
+    }
+
+    /// The replacement is built from the declaration's own text, not from a fixed template.
+    #[test]
+    fn names_the_replacement_with_the_declared_case_list() {
+        let result = parse_str("enum Fit = fill | contain | cover\n", "t.nx");
+        let notes: Vec<_> = result.errors.iter().filter_map(|e| e.note()).collect();
+        assert!(
+            notes
+                .iter()
+                .any(|note| note.contains("Write `type Fit = fill | contain | cover` instead")),
+            "expected the declared case list in the replacement, got {notes:?}"
+        );
+    }
+
+    /// With the case list on later lines there is nothing to quote, so it is elided, not guessed.
+    #[test]
+    fn elides_the_case_list_when_the_declaration_continues_past_the_keyword_line() {
+        let result = parse_str("enum Fit =\n  | fill\n  | cover\n", "t.nx");
+        let notes: Vec<_> = result.errors.iter().filter_map(|e| e.note()).collect();
+        assert!(
+            notes
+                .iter()
+                .any(|note| note.contains("Write `type Fit = ...` instead")),
+            "expected the elided form, got {notes:?}"
+        );
+    }
+
+    /// A union case merely named `enum` is not a declaration and must not be reported.
+    #[test]
+    fn does_not_report_the_word_enum_outside_declaration_position() {
+        let result = parse_str("type Mode = enumerate | manual\n", "t.nx");
+        let codes: Vec<_> = result.errors.iter().filter_map(|e| e.code()).collect();
+        assert!(!codes.contains(&"removed-enum-keyword"), "codes: {codes:?}");
+    }
+
+    /// A line that reads exactly like the removed declaration is still prose inside text content,
+    /// a comment, or a string, and reporting it there would edit the author's data.
+    #[test]
+    fn does_not_report_a_declaration_shaped_line_that_is_prose() {
+        for (position, source) in [
+            (
+                "raw text content",
+                "<Root>\n  <code:text raw>\n    enum Fit = fill | contain | cover\n  </code>\n</Root>\n",
+            ),
+            (
+                "typed text content",
+                "<Root>\n  <markdown:text>\n    enum Fit = fill | cover\n  </markdown>\n</Root>\n",
+            ),
+            (
+                "plain text content",
+                "<Root>\n  <message:>\n    enum Fit = fill | cover\n  </message>\n</Root>\n",
+            ),
+            ("line comment", "// enum Fit = fill | cover\ntype Mode = a | b\n"),
+            (
+                "block comment",
+                "/*\nenum Fit = fill | cover\n*/\ntype Mode = a | b\n",
+            ),
+            ("string literal", "let quoted = \"enum Fit = fill | cover\"\n"),
+        ] {
+            let result = parse_str(source, "t.nx");
+            let codes: Vec<_> = result.errors.iter().filter_map(|e| e.code()).collect();
+            assert!(
+                !codes.contains(&"removed-enum-keyword"),
+                "`enum` in {position} was reported as a declaration; codes: {codes:?}"
+            );
+        }
+    }
+
+    /// Skipping prose must not cost the report for a real declaration that follows it.
+    #[test]
+    fn still_reports_a_declaration_that_follows_prose() {
+        let result = parse_str(
+            "/*\nenum Ignored = a | b\n*/\nenum Fit = fill | cover\n",
+            "t.nx",
+        );
+        let codes: Vec<_> = result.errors.iter().filter_map(|e| e.code()).collect();
+        assert_eq!(codes, vec!["removed-enum-keyword"], "codes: {codes:?}");
+
+        let notes: Vec<_> = result.errors.iter().filter_map(|e| e.note()).collect();
+        assert!(
+            notes
+                .iter()
+                .any(|note| note.contains("type Fit = fill | cover")),
+            "expected the declaration's own case list, got {notes:?}"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1354,4 +1663,44 @@ mod tests {
             "Expected state-only concrete component diagnostic, got: {messages}"
         );
     }
+}
+
+/// Finds an unbraced property value that is a dotted name, as in `fit=Fit.cover`.
+///
+/// Returns the property name and the qualified value it was given.
+fn unbraced_qualified_property(text: &str) -> Option<(&str, &str)> {
+    let bytes = text.as_bytes();
+    let is_name_byte = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'-';
+
+    for (index, byte) in bytes.iter().enumerate() {
+        if *byte != b'=' {
+            continue;
+        }
+        // The property name immediately before the `=`.
+        let mut start = index;
+        while start > 0 && is_name_byte(bytes[start - 1]) {
+            start -= 1;
+        }
+        if start == index {
+            continue;
+        }
+        let property = &text[start..index];
+        if !property.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
+            continue;
+        }
+
+        // The value, which must be an unquoted, unbraced dotted name.
+        let mut end = index + 1;
+        if end >= bytes.len() || !(bytes[end].is_ascii_alphabetic() || bytes[end] == b'_') {
+            continue;
+        }
+        while end < bytes.len() && (is_name_byte(bytes[end]) || bytes[end] == b'.') {
+            end += 1;
+        }
+        let value = &text[index + 1..end];
+        if value.contains('.') && !value.ends_with('.') {
+            return Some((property, value));
+        }
+    }
+    None
 }

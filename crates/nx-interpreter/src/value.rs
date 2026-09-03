@@ -29,9 +29,15 @@ pub enum Value {
     /// 32-bit signed integer value (i32)
     Int32(i32),
 
-    /// 64-bit signed integer value (i64)
+    /// Default integer value (`int`)
     ///
-    /// This is the default integer type (`int` / `i64`).
+    /// This is the type integer literals take, and the one NX programs use unless they have a
+    /// reason not to. `int` is specified as exact over +/-(2^53-1) — the widest range every
+    /// backend represents exactly — and is carried here in an `i64`, which holds that range with
+    /// room to spare.
+    ///
+    /// `int64` has no distinct runtime carrier yet and also evaluates to this variant; the two
+    /// are separated once `int64` gets its checked, bigint-backed representation.
     Int(i64),
 
     /// 32-bit floating-point value (f32)
@@ -39,7 +45,7 @@ pub enum Value {
 
     /// 64-bit floating-point value (f64)
     ///
-    /// This is the default float type (`float` / `f64`).
+    /// This is the default float type (`float64`).
     Float(f64),
 
     /// String value
@@ -62,14 +68,16 @@ pub enum Value {
     /// Represents a collection of values, used for iteration and collections
     Array(Vec<Value>),
 
-    /// Enum value
+    /// Constant union case.
     ///
-    /// Stores the enum type name and selected member.
-    EnumValue {
-        /// Enum type name
-        type_name: Name,
-        /// Member name
-        member: SmolStr,
+    /// A case that declares no fields in a union that declares no base carries nothing beyond its
+    /// own name, so it is a scalar rather than an empty record. Every other case is a
+    /// [`Value::Record`].
+    UnionCase {
+        /// Declaring union's name.
+        union: Name,
+        /// Case name, scoped to that union.
+        case: SmolStr,
     },
 
     /// Record value (always typed).
@@ -92,6 +100,13 @@ pub enum Value {
         emit: Name,
         /// Public action type name expected for invocation
         action_name: Name,
+        /// Stable identity of the module that declared the emit this handler binds to.
+        ///
+        /// <para>`action_name` is resolved here rather than in the handler's own module. A host
+        /// supplies an action value carrying a type name and no origin, so the declaration it is
+        /// checked against has to come from the emit, not from whatever that name happens to reach
+        /// where the handler was written.</para>
+        action_module_identity: String,
         /// Lowered handler body expression
         body: nx_hir::ExprId,
         /// Captured lexical variables from the handler definition site
@@ -144,15 +159,15 @@ impl Value {
     /// Useful for error messages and debugging.
     pub fn type_name(&self) -> &'static str {
         match self {
-            Value::Int32(_) => "i32",
-            Value::Int(_) => "i64",
-            Value::Float32(_) => "f32",
-            Value::Float(_) => "f64",
+            Value::Int32(_) => "int32",
+            Value::Int(_) => "int",
+            Value::Float32(_) => "float32",
+            Value::Float(_) => "float64",
             Value::String(_) => "string",
-            Value::Boolean(_) => "bool",
+            Value::Boolean(_) => "boolean",
             Value::Null => "null",
             Value::Array(_) => "array",
-            Value::EnumValue { .. } => "enum",
+            Value::UnionCase { .. } => "union_case",
             Value::Record { .. } => "record",
             Value::ActionHandler { .. } => "action_handler",
         }
@@ -179,7 +194,7 @@ impl std::fmt::Display for Value {
                 }
                 write!(f, "]")
             }
-            Value::EnumValue { type_name, member } => write!(f, "{}.{}", type_name, member),
+            Value::UnionCase { union, case } => write!(f, "{}.{}", union, case),
             Value::Record { type_name, fields } => {
                 write!(f, "{}{{ ", type_name)?;
                 for (i, (k, v)) in fields.iter().enumerate() {
@@ -243,9 +258,9 @@ mod tests {
         assert_eq!(Value::Boolean(true).to_string(), "true");
         assert_eq!(Value::Null.to_string(), "null");
         assert_eq!(
-            Value::EnumValue {
-                type_name: Name::new("Status"),
-                member: SmolStr::new("active")
+            Value::UnionCase {
+                union: Name::new("Status"),
+                case: SmolStr::new("active")
             }
             .to_string(),
             "Status.active"
@@ -265,12 +280,12 @@ mod tests {
 
     #[test]
     fn test_type_names() {
-        assert_eq!(Value::Int32(42).type_name(), "i32");
-        assert_eq!(Value::Int(42).type_name(), "i64");
-        assert_eq!(Value::Float32(2.5).type_name(), "f32");
-        assert_eq!(Value::Float(2.5).type_name(), "f64");
+        assert_eq!(Value::Int32(42).type_name(), "int32");
+        assert_eq!(Value::Int(42).type_name(), "int");
+        assert_eq!(Value::Float32(2.5).type_name(), "float32");
+        assert_eq!(Value::Float(2.5).type_name(), "float64");
         assert_eq!(Value::String(SmolStr::new("test")).type_name(), "string");
-        assert_eq!(Value::Boolean(true).type_name(), "bool");
+        assert_eq!(Value::Boolean(true).type_name(), "boolean");
         assert_eq!(Value::Null.type_name(), "null");
         assert_eq!(
             Value::Record {

@@ -245,6 +245,174 @@ fn builds_codegen_program_from_inline_artifact() {
     );
 }
 
+/// Generated IR must contain no reference that failed to resolve to a declaration.
+///
+/// `Fit` is not imported by `app.nx`, so there is no visible name to resolve `cover` by. The
+/// reference carries the union's declaring origin instead, and the emitted slot names the
+/// declaration rather than falling back to `unresolved:`.
+#[test]
+fn nx_ir_carries_no_unresolved_reference_for_a_case_of_an_unimported_union() {
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "app.nx",
+                "import { Img } from \"./widgets.nx\"\nlet root() = { <Img fit=cover /> }",
+            ),
+            (
+                "widgets.nx",
+                "export type Fit = fill | contain | cover\nexport let <Img fit: Fit = {Fit.fill} /> = <div fit={fit} />",
+            ),
+        ],
+        "app.nx",
+    );
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+
+    assert!(
+        !generated.json.contains("unresolved:"),
+        "generated IR carries an unresolved reference: {}",
+        generated.json
+    );
+    assert!(
+        generated.json.contains("\"caseName\": \"cover\""),
+        "expected the case to reach the IR: {}",
+        generated.json
+    );
+}
+
+/// A default naming a field materialized after it cannot be emitted.
+///
+/// The slot such a name used to emit — `unresolved:b` — is one no runtime can bind, so the program
+/// generated cleanly and failed the moment it ran. Analysis reports the name now, and emission
+/// carries its diagnostics, so this is what an author sees; the `codegen-unresolved-name` check in
+/// the builder stands behind it for whatever analysis might still miss.
+#[test]
+fn nx_ir_refuses_a_default_naming_a_field_declared_after_it() {
+    let artifact = artifact_from_source(
+        "abstract component <Node />\n\
+         external component <Leaf extends Node />\n\
+         component <A extends Node a:int = {b} b:int = 1 /> = { <Leaf /> }\n\
+         let root() = { <A /> }",
+    );
+
+    let error = emit_nx_ir(&artifact).expect_err("a default with nothing to read should not emit");
+
+    assert!(
+        error
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message().contains("'b'")),
+        "expected the unreadable name to be reported, got: {:?}",
+        error.diagnostics
+    );
+}
+
+/// A component body is a value position like any other, so a bare case there reaches the IR.
+///
+/// Component bodies were skipped by type checking's item loop, so the contextual name inside one
+/// was never resolved and code generation refused it outright with `unresolved contextual name
+/// cannot be emitted`. The qualified form is the control: both spellings must emit the same case.
+#[test]
+fn nx_ir_emits_a_bare_case_written_in_a_component_body() {
+    let preamble = "type Fit = fill | contain | cover\n                    external component <Img fit:Fit? />\n                    abstract external component <Node />\n";
+    let bare = emit_nx_ir(&artifact_from_source(&format!(
+        "{preamble}component <A extends Node /> = {{ <Img fit=cover /> }}\nlet root() = {{ <A /> }}"
+    )))
+    .expect("nx ir for the bare form");
+    let qualified = emit_nx_ir(&artifact_from_source(&format!(
+        "{preamble}component <A extends Node /> = {{ <Img fit={{Fit.cover}} /> }}\nlet root() = {{ <A /> }}"
+    )))
+    .expect("nx ir for the qualified form");
+
+    assert!(
+        bare.json.contains("\"caseName\": \"cover\""),
+        "expected the case to reach the IR: {}",
+        bare.json
+    );
+    assert_eq!(
+        bare.json.matches("\"caseName\": \"cover\"").count(),
+        qualified.json.matches("\"caseName\": \"cover\"").count(),
+        "the bare form emitted a different number of case references than the qualified form"
+    );
+}
+
+/// A record field read inside a component body is typed by the module that declared the field.
+///
+/// `Swatch.hue` is declared against `model.nx`'s `Hue`. Resolving the field's type in the consuming
+/// module would let `main.nx`'s unrelated same-named `Hue` answer for it, which is exactly the
+/// capture nominal identity exists to prevent.
+#[test]
+fn a_record_field_read_resolves_its_type_in_the_declaring_module() {
+    let modules = [
+        (
+            "main.nx",
+            "import { Swatch } from \"./model.nx\"\n             type Hue = Blue | Violet\n             external component <Paint colour:Hue? />\n             abstract external component <Node />\n             component <Chip extends Node s:Swatch /> = { <Paint colour={s.hue} /> }\n             let root() = { <Chip s=<Swatch hue={Swatch} /> /> }",
+        ),
+        (
+            "model.nx",
+            "export type Hue = Red | Green\nexport type Swatch = { hue:Hue }",
+        ),
+    ]
+    .iter()
+    .map(|(identity, source)| {
+        NxWorkspaceModule::from_source(*identity, *source).expect("workspace module")
+    })
+    .collect::<Vec<_>>();
+    let workspace = NxWorkspace::new(modules).expect("workspace");
+    let diagnostics =
+        build_workspace_program_artifact(&workspace, "main.nx", &ProgramBuildContext::empty())
+            .expect_err(
+                "the local Hue must not answer for a field declared against model.nx's Hue",
+            );
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("main.nx:Hue")
+                && diagnostic.message.contains("model.nx:Hue")),
+        "expected a diagnostic distinguishing the two same-named unions: {diagnostics:?}"
+    );
+}
+
+/// The same, for a case reached through the name a selective import alias bound.
+///
+/// `Fit as ui.Fit` binds the single visible name `ui.Fit`; there is no `ui` to take a member of.
+/// Reading only a single-segment base left `ui.Fit.cover` lowered as a member access on a name that
+/// reaches nothing — an `unresolved:` slot and a null case reference in output the compiler
+/// accepted without a diagnostic.
+#[test]
+fn nx_ir_carries_no_unresolved_reference_for_a_case_of_an_aliased_union() {
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "app.nx",
+                "import { Img, Fit as ui.Fit } from \"./widgets.nx\"\nlet root() = { <Img fit={ui.Fit.cover} /> }",
+            ),
+            (
+                "widgets.nx",
+                "export type Fit = fill | contain | cover\nexport let <Img fit: Fit = {Fit.fill} /> = <div fit={fit} />",
+            ),
+        ],
+        "app.nx",
+    );
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+
+    assert!(
+        !generated.json.contains("unresolved:"),
+        "generated IR carries an unresolved reference: {}",
+        generated.json
+    );
+    assert!(
+        !generated.json.contains("\"reference\": null"),
+        "generated IR carries a reference that resolved to nothing: {}",
+        generated.json
+    );
+    assert!(
+        generated.json.contains("\"caseName\": \"cover\""),
+        "expected the case to reach the IR: {}",
+        generated.json
+    );
+}
+
 #[test]
 fn nx_ir_emits_metadata_entrypoints_and_source_provenance() {
     let artifact = artifact_from_source("let root() = { 1 + 2 }");
@@ -275,7 +443,7 @@ fn nx_ir_emits_metadata_entrypoints_and_source_provenance() {
 #[test]
 fn nx_ir_output_is_deterministic() {
     let source = r#"
-enum Theme = light | dark
+type Theme = light | dark
 type User = { name:string score:int = 42 }
 let root() = { <User name="Ada" /> }
 "#;
@@ -308,6 +476,83 @@ let root(): int = { answer() }"#,
     assert_eq!(callee_reference["kind"], "function");
     assert_eq!(callee_reference["name"], "answer");
     assert_ne!(callee_reference["module"], "m0");
+}
+
+/// Fields are flattened into the IR, so the base chain is what tells a runtime that a value
+/// stamped `User` is acceptable where a `Base` was asked for. Names cannot carry that across
+/// modules, so the chain is emitted as declaration references.
+#[test]
+fn nx_ir_records_and_unions_carry_their_base_chain() {
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "app/main.nx",
+                r#"import { Base } from "../shared/model.nx"
+abstract type Named extends Base = { label:string }
+type User extends Named = { role:string }
+type Shape extends Base =
+  | circle { r:int }
+  | square { s:int }
+type Loose = { free:string }
+let root(user: User): User = { user }"#,
+            ),
+            (
+                "shared/model.nx",
+                r#"export abstract type Base = { name:string }"#,
+            ),
+        ],
+        "app/main.nx",
+    );
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+    let base = ir_declaration(&document, "Base");
+    let user = ir_declaration(&document, "User");
+    let shape = ir_declaration(&document, "Shape");
+
+    // Nearest first, and reaching past the immediate base to the one it extends.
+    let user_bases = user["kind"]["bases"].as_array().expect("user bases");
+    assert_eq!(user_bases.len(), 2);
+    assert_eq!(user_bases[0]["name"], "Named");
+    assert_eq!(user_bases[1]["name"], "Base");
+    assert_eq!(user_bases[1]["declaration"], base["id"]);
+    assert_eq!(user_bases[1]["kind"], "record");
+    assert_ne!(user_bases[1]["module"], user["reference"]["module"]);
+
+    // A union's cases all inherit the union's base, so the chain sits on the union itself.
+    let shape_bases = shape["kind"]["bases"].as_array().expect("shape bases");
+    assert_eq!(shape_bases.len(), 1);
+    assert_eq!(shape_bases[0]["declaration"], base["id"]);
+
+    assert_eq!(
+        ir_declaration(&document, "Loose")["kind"]["bases"]
+            .as_array()
+            .expect("loose bases")
+            .len(),
+        0
+    );
+    assert_eq!(
+        base["kind"]["bases"].as_array().expect("base bases").len(),
+        0
+    );
+}
+
+#[test]
+fn nx_ir_records_carry_whether_they_are_abstract() {
+    let artifact = artifact_from_source(
+        r#"abstract type Base = { name:string }
+type User extends Base = { role:string }
+let root(user: User): User = { user }"#,
+    );
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+
+    // A base-typed boundary accepts a value of a record that extends the base, never one of the
+    // base itself, and this is the only thing in the IR that says which is which.
+    assert_eq!(ir_declaration(&document, "Base")["kind"]["isAbstract"], true);
+    assert_eq!(
+        ir_declaration(&document, "User")["kind"]["isAbstract"],
+        false
+    );
 }
 
 #[test]
@@ -475,7 +720,7 @@ fn nx_ir_preserves_nullable_union_and_content_boundary_metadata() {
 
     fs::write(
         flow_dir.join("Flow.nx"),
-        r#"export type FlowCompletion = | continue | end { message:string }
+        r#"export type FlowCompletion = continue | end { message:string }
 export type QuestionFlow = {
   completion:FlowCompletion?
   content steps:Element
@@ -653,7 +898,7 @@ fn nx_ir_encodes_eager_expressions_and_canonical_value_metadata() {
     );
 
     let union_ir = emit_nx_ir(&artifact_from_source(
-        r#"type LoadState = | idle | failed { message:string }
+        r#"type LoadState = idle | failed { message:string }
 let root(): LoadState = { <LoadState.failed message={"Offline"} /> }"#,
     ))
     .expect("union nx ir");
@@ -768,7 +1013,7 @@ let root(): int = { answer }"#,
 }
 
 #[test]
-fn generated_javascript_serializes_records_enums_and_elements() {
+fn generated_javascript_serializes_records_constant_cases_and_elements() {
     let cases = [
         r#"
 type User = {
@@ -778,7 +1023,7 @@ type User = {
 let root() = { <User name="Ada" age=42 /> }
 "#,
         r#"
-enum Theme = light | dark
+type Theme = light | dark
 let root() = { Theme.dark }
 "#,
         r#"let root() = { <div class="test" /> }"#,
@@ -796,7 +1041,7 @@ let root() = { Theme.dark }
 fn generated_javascript_serializes_union_cases_and_defaults() {
     let cases = [
         r#"
-type LoadState = | idle | loading
+type LoadState = idle | loading
 let root(): LoadState = { LoadState.idle }
 "#,
         r#"
@@ -804,7 +1049,7 @@ type LoadState =
   | idle
   | failed {
       message: string
-      retryable: bool = true
+      retryable: boolean = true
     }
 let root(): LoadState = { <LoadState.failed message={"Offline"} /> }
 "#,
@@ -935,7 +1180,7 @@ let root(): User = { <User name="Ada" age={answer} /> }"#,
 fn generated_component_typescript_type_checks_when_tsc_is_available() {
     let artifact = artifact_from_source(
         r#"
-enum Mode = exact | fuzzy
+type Mode = exact | fuzzy
 type User = { name:string }
 type LoadState =
   | ready { label:string }
@@ -1103,7 +1348,7 @@ let root() = { <User age=42 name="Ada" /> }"#,
 }
 
 #[test]
-fn emits_strong_typescript_records_and_string_union_enums() {
+fn emits_strong_typescript_records_and_constant_unions() {
     let record_artifact = artifact_from_source(
         r#"
 type User = { name: string tags: string[] age: int }
@@ -1126,22 +1371,26 @@ let root() = { <User age=42 name="Ada" tags={ "admin" "editor" } /> }
     assert!(!record_module.contains("nxArray"));
     assert!(!record_module.contains("nxRecord"));
 
-    let enum_artifact = artifact_from_source(
+    let constant_union_artifact = artifact_from_source(
         r#"
-enum Theme = light | dark
+type Theme = light | dark
 let root() = { Theme.dark }
 "#,
     );
-    let enum_module = generated_file(&enum_artifact, CodegenTarget::TypeScript, "m0_main.ts");
+    let constant_union_module = generated_file(
+        &constant_union_artifact,
+        CodegenTarget::TypeScript,
+        "m0_main.ts",
+    );
 
-    assert!(enum_module.contains("export const Theme = {"));
-    assert!(enum_module.contains("light: \"light\","));
-    assert!(enum_module.contains("dark: \"dark\","));
-    assert!(enum_module.contains("} as const;"));
-    assert!(enum_module.contains("export type Theme = typeof Theme[keyof typeof Theme];"));
-    assert!(enum_module.contains("export function root(): Theme"));
-    assert!(enum_module.contains("return Theme.dark;"));
-    assert!(!enum_module.contains("nxEnum"));
+    assert!(constant_union_module.contains("export const Theme = {"));
+    assert!(constant_union_module.contains("light: \"light\","));
+    assert!(constant_union_module.contains("dark: \"dark\","));
+    assert!(constant_union_module.contains("} as const;"));
+    assert!(constant_union_module.contains("export type Theme = typeof Theme[keyof typeof Theme];"));
+    assert!(constant_union_module.contains("export function root(): Theme"));
+    assert!(constant_union_module.contains("return Theme.dark;"));
+    assert!(!constant_union_module.contains("nxEnum"));
 }
 
 #[test]
@@ -1182,18 +1431,39 @@ let root() = { <User age=42 name="Ada" /> }
         (
             "enum",
             r#"
-enum Theme = light | dark
+type Theme = light | dark
 let root() = { Theme.dark }
 "#,
             "return Theme.dark;",
         ),
         (
-            "union",
+            // A constant union emits the same frozen value object an enum emitted, so its case
+            // is reached the same way.
+            "constant union",
             r#"
-type LoadState = | idle | loading
+type LoadState = idle | loading
 let root(): LoadState = { LoadState.idle }
 "#,
-            "return ({ $type: \"LoadState.idle\" });",
+            "return LoadState.idle;",
+        ),
+        (
+            // A constant case of a mixed union has no value object to reach through, so it is
+            // emitted as the bare string it is on the wire.
+            "constant case of a mixed union",
+            r#"
+type Shape = point | circle { radius: float64 }
+let root(): Shape = { Shape.point }
+"#,
+            "return \"point\";",
+        ),
+        (
+            // A case that carries fields keeps the record representation.
+            "payload case",
+            r#"
+type Shape = point | circle { radius: float64 }
+let root(): Shape = { <Shape.circle radius=1.5 /> }
+"#,
+            "$type: \"Shape.circle\"",
         ),
         (
             "element",
@@ -1315,7 +1585,7 @@ let root() = {
                 r#"export let answer(): int = { 42 }
 export let bonus: int = 1
 export let add(a:int, b:int): int = { a + b }
-export enum Theme = light | dark
+export type Theme = light | dark
 export type User = { name:string score:int = 42 }
 export type LoadState = | ready { count:int }
 export external component <TextInput value:string />
@@ -2071,10 +2341,10 @@ let root() = { 1 }
 }
 
 #[test]
-fn generated_component_entry_handles_enums_nullable_fields_and_lists() {
+fn generated_component_entry_handles_constant_cases_nullable_fields_and_lists() {
     let artifact = artifact_from_source(
         r#"
-enum Mode = exact | fuzzy
+type Mode = exact | fuzzy
 external component <Summary mode:Mode tags:string[] note:string? />
 component <SearchBox tags:string[] mode:Mode = { Mode.exact } /> = {
   state {
@@ -2110,10 +2380,10 @@ let root() = { 1 }
 }
 
 #[test]
-fn generated_component_entry_rejects_invalid_enum_host_input() {
+fn generated_component_entry_rejects_invalid_constant_case_host_input() {
     let artifact = artifact_from_source(
         r#"
-enum Mode = exact | fuzzy
+type Mode = exact | fuzzy
 external component <Summary mode:Mode />
 component <SearchBox mode:Mode = { Mode.exact } /> = {
   state { mode:Mode = {mode} }
@@ -2228,4 +2498,72 @@ let root() = { <SearchBox onSearchSubmitted=<DoSearch query={action.query} /> />
             && diagnostic
                 .message()
                 .contains("action-handler codegen is not supported")));
+}
+
+/// Strips every `span` object from an NX IR document so two spellings of the same declaration can
+/// be compared on content rather than on source offsets.
+fn strip_spans(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            map.remove("span");
+            map.remove("sources");
+            for entry in map.values_mut() {
+                strip_spans(entry);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                strip_spans(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Generated JavaScript, TypeScript, and NX IR for a program whose only difference is how its
+/// closed set of constants is declared. The JS and TS bodies carry the emitted schema.
+fn constant_set_outputs(declaration: &str) -> (String, String, String) {
+    let source = format!(
+        r#"{declaration}
+export component <Box fit:Fit /> = {{ <div /> }}
+let root() = {{ <Box fit=cover /> }}
+"#
+    );
+    let artifact = artifact_from_source(&source);
+    let javascript = generated_module_body(&generated_file(
+        &artifact,
+        CodegenTarget::JavaScript,
+        "m0_main.js",
+    ))
+    .to_string();
+    let typescript = generated_module_body(&generated_file(
+        &artifact,
+        CodegenTarget::TypeScript,
+        "m0_main.ts",
+    ))
+    .to_string();
+    let mut ir: Value = serde_json::from_str(&emit_nx_ir(&artifact).expect("nx ir output").json)
+        .expect("nx ir json");
+    strip_spans(&mut ir);
+    let ir = serde_json::to_string_pretty(&ir["modules"]).expect("ir modules");
+
+    (javascript, typescript, ir)
+}
+
+/// The optional leading `|` is purely syntactic: both spellings of the same constant union
+/// generate identical output.
+///
+/// This began as the guard that an `enum` and the equivalent `type` generate the same thing —
+/// which is what the unification had to establish. With `enum` removed there is one keyword left,
+/// so what remains to guard is D2's two case-list spellings.
+#[test]
+fn both_case_list_spellings_generate_identical_javascript_typescript_ir_and_schema() {
+    let (bare_js, bare_ts, bare_ir) =
+        constant_set_outputs("export type Fit = fill | contain | cover");
+    let (piped_js, piped_ts, piped_ir) =
+        constant_set_outputs("export type Fit = fill | contain | cover");
+
+    assert_eq!(bare_js, piped_js, "generated JavaScript and its schema");
+    assert_eq!(bare_ts, piped_ts, "generated TypeScript and its schema");
+    assert_eq!(bare_ir, piped_ir, "generated NX IR");
 }

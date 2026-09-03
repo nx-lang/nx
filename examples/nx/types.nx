@@ -5,9 +5,9 @@ type MaybeUser = User?
 type UserList = UserBase[]
 type EntityList = Entity[]
 
-// Enums model scalar choices
-enum CardSortMode = open | closed
-enum DealStage =
+// A closed set of constants is a union whose cases carry no payload
+type CardSortMode = open | closed
+type DealStage =
   | draft
   | pending_review
   | closed_won
@@ -24,7 +24,7 @@ abstract type UserBase extends Entity = {
 }
 
 type User extends UserBase = {
-  isAdmin: bool = false
+  isAdmin: boolean = false
 }
 
 type StaffUser extends UserBase = {
@@ -39,7 +39,7 @@ type UserCard = {
 type LoadState =
   | idle
   | loading
-  | failed { message:string retryable:bool = true }
+  | failed { message:string retryable:boolean = true }
   | loaded { users:UserList }
 
 let <UserCard
@@ -66,16 +66,26 @@ let currentStaff: StaffUser =
 let labels: UserList =
   { currentUser currentStaff }
 
-let sortMode: CardSortMode = { CardSortMode.closed }
+// A bare name at a typed site resolves against the declared type; `{CardSortMode.closed}` also
+// works, and is what you write inside a braced expression.
+let sortMode: CardSortMode = closed
+
+let defaultStage: DealStage = draft
 
 let loadState: LoadState =
   <LoadState.failed message={"Network unavailable"} />
 
+// Bare case names in pattern position resolve against the scrutinee's type.
 let loadStatus = {
   if loadState is {
-    LoadState.idle => "Idle"
-    LoadState.loading => "Loading"
-    LoadState.failed => loadState.message
-    LoadState.loaded => "Loaded"
+    idle => "Idle"
+    loading => "Loading"
+    failed => loadState.message
+    loaded => "Loaded"
   }
 }
+
+// Negative numeric literals need no braces where a literal is required.
+type Offset = { dx: float64 = -1.0  dy: float64 = -1.0 }
+
+let shifted: Offset = <Offset dx=-2.5 />

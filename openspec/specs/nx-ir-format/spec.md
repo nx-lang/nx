@@ -44,11 +44,11 @@ the native fingerprint without JavaScript `number` precision loss.
 ### Requirement: NX IR preserves resolved module-qualified references
 NX IR SHALL represent executable references using module-qualified identifiers assigned by the
 resolved program rather than relying on visible string-name lookup at runtime. Function calls,
-value references, component descriptors, record construction, enum members, union cases, default
-expressions, selected entrypoints, and nominal type references SHALL identify the owning module
-and declaration or expression slot needed for execution. Primitive type references SHALL be encoded
-separately from nominal type references so runtimes do not resolve records, unions, enums, or type
-aliases through global bare declaration-name lookup.
+value references, component descriptors, record construction, union cases, default expressions,
+selected entrypoints, and nominal type references SHALL identify the owning module and declaration
+or expression slot needed for execution. Primitive type references SHALL be encoded separately from
+nominal type references so runtimes do not resolve records, unions, or type aliases through global
+bare declaration-name lookup.
 
 #### Scenario: Imported function reference is module-qualified
 - **WHEN** a root module imports function `answer()` from a resolved library module
@@ -65,8 +65,8 @@ aliases through global bare declaration-name lookup.
   by module-qualified reference
 
 #### Scenario: Imported nominal type reference is module-qualified
-- **WHEN** a root module declares a function parameter or component prop using record, union, enum,
-  or type-alias `User` imported from another module
+- **WHEN** a root module declares a function parameter or component prop using record, union, or
+  type-alias `User` imported from another module
 - **AND** another module in the same IR program also declares an item named `User`
 - **THEN** the emitted type reference SHALL be nominal and SHALL include the imported declaration's
   module-qualified reference
@@ -123,8 +123,10 @@ nullable union fields and content-derived required fields.
 NX IR SHALL encode the supported non-reactive expression forms needed for eager evaluation,
 including literals, local slot references, top-level references, unary and binary operations,
 function calls, `if`, match-style `if is` forms, `let`, blocks, arrays, loops, index access,
-member access, record literals, enum members, union cases, intrinsic elements, and component
-descriptors. Unsupported executable constructs SHALL be reported as IR build diagnostics.
+member access, record literals, union cases, intrinsic elements, and component descriptors. There
+SHALL be one union-case construct covering both constant and payload cases rather than separate
+constructs for enum members and union cases. Unsupported executable constructs SHALL be reported as
+IR build diagnostics.
 
 #### Scenario: Match expressions are preserved
 - **WHEN** NX source contains a match-style `if value is { ... }` expression accepted by static
@@ -144,6 +146,13 @@ descriptors. Unsupported executable constructs SHALL be reported as IR build dia
 - **THEN** supported runtimes SHALL require an integer index
 - **AND** an index outside the array bounds SHALL fail with a runtime diagnostic rather than
   evaluating to `null`
+
+#### Scenario: Constant and payload cases use one IR construct
+- **WHEN** NX source contains `type Shape = circle | square { n:int }` and constructs both cases
+- **AND** NX IR is emitted for the program
+- **THEN** both constructions SHALL be encoded by the same union-case construct
+- **AND** the construct SHALL carry enough information for a runtime to produce the bare string for
+  `circle` and the `$type` map for `square`
 
 #### Scenario: Unsupported action handler is rejected in v1
 - **WHEN** NX source requires an action-handler value that cannot be represented by the v1 IR
@@ -173,16 +182,16 @@ deep-rendering the referenced component body.
 
 ### Requirement: NX IR preserves canonical NX value encoding rules
 NX IR SHALL preserve enough type and value metadata for runtimes to produce canonical raw NX values.
-Array values SHALL evaluate as arrays, enum values SHALL evaluate as authored member strings,
-records and union cases SHALL evaluate as object/map payloads with `$type` discriminators when
-their type requires one, and numeric values that cannot safely round-trip through JavaScript
+Array values SHALL evaluate as arrays, constant union cases SHALL evaluate as authored case strings,
+records and payload union cases SHALL evaluate as object/map payloads with `$type` discriminators
+when their type requires one, and numeric values that cannot safely round-trip through JavaScript
 numbers SHALL use a lossless tagged representation.
 
 #### Scenario: Enum output remains a bare string
-- **WHEN** NX source evaluates `Theme.dark`
+- **WHEN** NX source evaluates `Theme.dark` where `Theme` is a constant union
 - **AND** the value is produced through an NX IR runtime
 - **THEN** the canonical output value SHALL be the bare string `"dark"`
-- **AND** the output SHALL NOT wrap the enum value in an enum object
+- **AND** the output SHALL NOT wrap the value in an object
 
 #### Scenario: Union case output includes discriminator
 - **WHEN** NX source evaluates `LoadState.failed { message: "offline" }`

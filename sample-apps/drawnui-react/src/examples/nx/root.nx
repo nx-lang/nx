@@ -1,0 +1,58 @@
+// Ported from the DrawnUI React demo's root menu.
+//
+// The demo site's landing page: logo, title, and a card per sample. Its cards navigate when tapped
+// — that needs event handlers, so here they are drawn but inert. DrawnUI's own ripple still plays,
+// because the ripple is the control's behavior rather than authored NX.
+
+type Sample = {
+  Title: string
+  Text: string
+}
+
+component <SampleCard extends DrawnNode Item:Sample /> = {
+  // The original passes Tapped={() => shell.GoToAsync(route)} here; the card is otherwise identical.
+  <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=12.0 />
+    BackgroundColor="#2B3035" StrokeColor="#373B3E" StrokeWidth=1.0
+    AnimationTapped=Ripple
+    AccessibilityRole="button" AccessibilityLabel={Item.Title} AccessibilityHint={Item.Text}>
+    <SkiaStack Padding=<Thickness Left=24.0 Top=20.0 Right=56.0 Bottom=20.0 /> Spacing=6.0>
+      <SkiaLabel Text={Item.Title} FontSize=24.0 FontFamily="FontTextBold" TextColor="#FFFFFF" />
+      <SkiaLabel Text={Item.Text} FontSize=14.0 TextColor="#ADB5BD" />
+    </SkiaStack>
+    <SkiaLabel Text="›" FontSize=28.0 TextColor="#6EA8FE" HorizontalOptions=End
+      VerticalOptions=Center Margin=<Thickness Right=24.0 /> />
+  </SkiaShape>
+}
+
+let samples = {
+  <Sample Title="Recycled cells" Text="100 000 items in a SkiaScroll, RecyclingTemplate + MeasureFirst, UseCache=Image" />
+  <Sample Title="Uneven cells" Text="Rows of different heights — MeasureVisible, LoadMore at both ends, ImageDoubleBuffered cells" />
+  <Sample Title="Images" Text="SkiaImage — every TransformAspect, alignment, clipping" />
+  <Sample Title="SVG" Text="SkiaSvg — file and inline sources, TintColor, LockRatio" />
+  <Sample Title="Shapes" Text="SkiaShape — rectangle, circle, ellipse, arc, polygon, line, path; stroke, corner radii, clipping" />
+  <Sample Title="Text" Text="SkiaLabel — word wrap, MaxLines, alignment, spans, weights, glyph fallback" />
+  <Sample Title="Layouts" Text="Every SkiaLayout type — Absolute, Column, Row, Wrap, Grid (tracks, spans, spacing)" />
+  <Sample Title="Platform Looks" Text="SkiaSwitch, SkiaCheckbox, SkiaRadioButton, SkiaProgress, SkiaSlider, SkiaButton — Default, Windows, Cupertino, Material, Material3" />
+  <Sample Title="Carousel & Drawer" Text="SkiaCarousel (swipe, SidesOffset peek, SelectedIndex) and SkiaDrawer (drag from an edge, snap by velocity)" />
+  <Sample Title="Transforms" Text="Rotation, Scale, Skew, Translation, Opacity — hit-testing through them, *ToAsync animations" />
+  <Sample Title="Accessibility" Text="ARIA overlay over the canvas — roles, labels, hints, toggles, live regions, keyboard" />
+}
+
+<SkiaScroll Orientation=Vertical>
+  <SkiaStack Spacing=24.0 Padding=<Thickness Left=24.0 Top=24.0 Right=24.0 Bottom=40.0 />
+    HorizontalOptions=Center MaximumWidthRequest=820.0>
+    <SkiaSvg Source="images/drawnui.svg" WidthRequest=120.0 LockRatio=1.0 HorizontalOptions=Center
+      Margin=<Thickness Top=16.0 /> AccessibilityRole="img" AccessibilityLabel="DrawnUI logo" />
+    <SkiaLabel Text="DrawnUI for React" FontSize=48.0 FontFamily="FontTextBold" TextColor="#FFFFFF"
+      HorizontalOptions=Center AccessibilityRole="heading" />
+
+    <SkiaLabel Text="Snippets" FontSize=32.0 TextColor="#DEE2E6" Margin=<Thickness Top=8.0 />
+      AccessibilityRole="heading" />
+    for sample in samples {
+      <SampleCard Item={sample} />
+    }
+
+    <SkiaLabel Text="helloreact.drawnui.net · github.com/DrawnUi/DrawnUi.React · MIT" FontSize=12.0
+      TextColor="#6C757D" HorizontalOptions=Center Margin=<Thickness Top=16.0 /> />
+  </SkiaStack>
+</SkiaScroll>

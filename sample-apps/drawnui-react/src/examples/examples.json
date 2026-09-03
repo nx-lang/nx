@@ -1,0 +1,121 @@
+[
+  {
+    "id": "cells",
+    "name": "Recycled cells",
+    "blurb": "100 000 items in a SkiaScroll, RecyclingTemplate + MeasureFirst, UseCache=Image",
+    "file": "cells.nx",
+    "coverage": "reduced",
+    "capabilities": [
+      "list-virtualization"
+    ],
+    "demonstrates": "recycling 100 000 cells through ItemsSource and an ItemTemplate"
+  },
+  {
+    "id": "uneven-cells",
+    "name": "Uneven cells",
+    "blurb": "Rows of different heights \u2014 MeasureVisible, LoadMore at both ends, ImageDoubleBuffered cells",
+    "file": "uneven-cells.nx",
+    "coverage": "reduced",
+    "capabilities": [
+      "list-virtualization"
+    ],
+    "demonstrates": "measuring visible rows out of a paging feed, with LoadMore at both ends"
+  },
+  {
+    "id": "images",
+    "name": "Images",
+    "blurb": "SkiaImage \u2014 every TransformAspect, alignment, clipping",
+    "file": "images.nx",
+    "coverage": "complete",
+    "capabilities": []
+  },
+  {
+    "id": "svg",
+    "name": "SVG",
+    "blurb": "SkiaSvg \u2014 file and inline sources, TintColor, LockRatio",
+    "file": "svg.nx",
+    "coverage": "complete",
+    "capabilities": []
+  },
+  {
+    "id": "shapes",
+    "name": "Shapes",
+    "blurb": "SkiaShape \u2014 rectangle, circle, ellipse, arc, polygon, line, path; stroke, corner radii, clipping",
+    "file": "shapes.nx",
+    "coverage": "complete",
+    "capabilities": []
+  },
+  {
+    "id": "text",
+    "name": "Text",
+    "blurb": "SkiaLabel \u2014 word wrap, MaxLines, alignment, spans, weights, glyph fallback",
+    "file": "text.nx",
+    "coverage": "static",
+    "capabilities": [
+      "event-handlers"
+    ]
+  },
+  {
+    "id": "layouts",
+    "name": "Layouts",
+    "blurb": "Every SkiaLayout type \u2014 Absolute, Column, Row, Wrap, Grid (tracks, spans, spacing)",
+    "file": "layouts.nx",
+    "coverage": "complete",
+    "capabilities": []
+  },
+  {
+    "id": "looks",
+    "name": "Platform Looks",
+    "blurb": "SkiaSwitch, SkiaCheckbox, SkiaRadioButton, SkiaProgress, SkiaSlider, SkiaButton \u2014 five styles",
+    "file": "looks.nx",
+    "coverage": "static",
+    "capabilities": [
+      "event-handlers",
+      "component-state"
+    ]
+  },
+  {
+    "id": "snapping",
+    "name": "Carousel & Drawer",
+    "blurb": "SkiaCarousel (swipe, SidesOffset peek, SelectedIndex) and SkiaDrawer (drag from an edge, snap by velocity)",
+    "file": "snapping.nx",
+    "coverage": "static",
+    "capabilities": [
+      "event-handlers",
+      "component-state"
+    ]
+  },
+  {
+    "id": "transforms",
+    "name": "Transforms",
+    "blurb": "Rotation, Scale, Skew, Translation, Opacity \u2014 hit-testing through them, *ToAsync animations",
+    "file": "transforms.nx",
+    "coverage": "static",
+    "capabilities": [
+      "event-handlers",
+      "animation",
+      "component-state"
+    ]
+  },
+  {
+    "id": "accessibility",
+    "name": "Accessibility",
+    "blurb": "ARIA overlay over the canvas \u2014 roles, labels, hints, toggles, live regions, keyboard",
+    "file": "accessibility.nx",
+    "coverage": "static",
+    "capabilities": [
+      "event-handlers",
+      "component-state"
+    ]
+  },
+  {
+    "id": "root",
+    "name": "Root menu",
+    "blurb": "The demo site's own landing page \u2014 logo, title and a card per sample",
+    "file": "root.nx",
+    "coverage": "static",
+    "capabilities": [
+      "event-handlers"
+    ]
+  }
+]

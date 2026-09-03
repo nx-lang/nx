@@ -216,7 +216,6 @@ fn build_resolved_program(
             entry_functions,
             entry_components,
             entry_records,
-            FxHashMap::default(),
             imports,
         ),
         root_module,

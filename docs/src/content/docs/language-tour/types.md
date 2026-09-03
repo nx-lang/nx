@@ -1,6 +1,6 @@
 ---
 title: 'Types'
-description: 'Declare primitives, records, enums, and aliases to keep data and components aligned.'
+description: 'Declare primitives, records, unions, and aliases to keep data and components aligned.'
 ---
 
 Types live beside your components so props and data stay consistent.
@@ -27,7 +27,7 @@ abstract type UserBase extends Entity = {
 }
 
 type User extends UserBase = {
-  isAdmin: bool = false
+  isAdmin: boolean = false
 }
 ```
 
@@ -35,15 +35,19 @@ type User extends UserBase = {
 - `extends` reuses fields and defaults from an abstract base record.
 - Concrete derived records remain constructible, so `<User id={1} name={"Ada"} />` is valid while `<UserBase ... />` is not.
 
-## Enums
+## Constant unions
+
+NX has no `enum` keyword. A union whose cases all carry no payload is how NX represents what other
+languages call an enum, the same convention F#, OCaml, and other functional languages follow:
 
 ```nx
-enum DealStage = draft | pending_review | closed_won
+type DealStage = draft | pending_review | closed_won
 ```
 
-Use enums when values must come from a fixed set.
+Use this form when values must come from a fixed set. Such a union is a *constant union*, and each
+of its cases is a *constant case*.
 
-Enum members conventionally use `snake_case`. NX serializes enum values using the member name as
+Case names conventionally use `snake_case`. NX serializes a constant case using the case name as
 written, so `snake_case` keeps the source aligned with JSON or database values such as
 `"pending_review"`.
 
@@ -56,18 +60,21 @@ payload fields.
 type LoadState =
   | idle
   | loading
-  | failed { message:string retryable:bool = true }
+  | failed { message:string retryable:boolean = true }
   | loaded { count:int }
 
 let state: LoadState =
   <LoadState.failed message={"Network unavailable"} />
 ```
 
-- A union declaration uses `type Name =` followed by one or more leading-pipe cases.
+- A union declaration uses `type Name =` followed by cases separated by `|`. A leading `|` before
+  the first case is optional; NX code omits it on one line and writes a `|` on every case when the
+  list spans several lines.
 - Fieldless cases can be referenced with `LoadState.idle`.
 - Payload cases are constructed with element syntax such as
   `<LoadState.failed message={"Network unavailable"} />`.
-- Simple scalar choices should stay as `enum`; even fieldless unions serialize as `$type` records.
+- A case that carries no payload serializes as its bare name, exactly like a scalar choice; only a
+  case with fields serializes as a `$type` record. One declaration form covers both.
 
 ## Type aliases for collections
 

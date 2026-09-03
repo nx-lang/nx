@@ -1,0 +1,29 @@
+// Every numeric primitive, including the default `int` alongside the explicit widths.
+type Measurements = {
+  count: int
+  narrow: int32
+  wide: int64
+  ratio: float32
+  precise: float64
+}
+
+type Defaults = {
+  count: int = 1
+  narrow: int32 = 2
+  wide: int64 = 3
+  ratio: float32 = 4.5
+  precise: float64 = 6.5
+}
+
+let widen(a: int32, b: int): int = { a + b }
+let widest(a: int, b: int64): int64 = { a + b }
+
+let <Gauge
+  value:int
+  minimum:int32
+  maximum:int64
+  scale:float64
+/> =
+  <div class="gauge">
+    <span:>{value}</span>
+  </div>

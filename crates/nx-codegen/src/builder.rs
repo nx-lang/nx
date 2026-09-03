@@ -286,45 +286,67 @@ fn build_declaration(
                 ty: type_env.get_expr_type(value.value).cloned(),
             }
         }
-        Item::Enum(enum_def) => CodegenDeclarationKind::Enum {
-            members: enum_def
-                .members
-                .iter()
-                .map(|member| member.name.as_str().to_string())
-                .collect(),
-        },
-        Item::Record(record) => CodegenDeclarationKind::Record {
-            fields: build_record_fields(
+        Item::Record(record) => {
+            let shape = effective_record_shape_of(
                 artifact,
                 resolved_module,
                 prepared_cache,
-                lowered_module,
-                type_env,
-                &record.properties,
+                record,
                 diagnostics,
-            )?,
-        },
-        Item::Union(union_def) => CodegenDeclarationKind::Union {
-            cases: union_def
-                .cases
-                .iter()
-                .map(|case| {
-                    Some(CodegenUnionCase {
-                        name: case.name.as_str().to_string(),
-                        fields: build_union_case_fields(
-                            artifact,
-                            resolved_module,
-                            prepared_cache,
-                            lowered_module,
-                            type_env,
-                            &case.fields,
-                            diagnostics,
-                        )?,
-                        span: case.span,
-                    })
-                })
-                .collect::<Option<Vec<_>>>()?,
-        },
+            )?;
+            CodegenDeclarationKind::Record {
+                fields: build_effective_record_fields(
+                    artifact,
+                    resolved_module,
+                    prepared_cache,
+                    &shape.fields,
+                    diagnostics,
+                )?,
+                bases: record_ancestor_references(
+                    artifact,
+                    resolved_module,
+                    &shape.ancestors,
+                    record.span,
+                    diagnostics,
+                )?,
+                is_abstract: record.is_abstract,
+            }
+        }
+        Item::Union(union_def) => {
+            let mut cases = Vec::with_capacity(union_def.cases.len());
+            for case in &union_def.cases {
+                let fields = effective_union_case_fields(
+                    artifact,
+                    resolved_module,
+                    prepared_cache,
+                    union_def,
+                    case,
+                    diagnostics,
+                )?;
+                cases.push(CodegenUnionCase {
+                    name: case.name.as_str().to_string(),
+                    fields: build_effective_record_fields(
+                        artifact,
+                        resolved_module,
+                        prepared_cache,
+                        &fields,
+                        diagnostics,
+                    )?,
+                    is_constant: union_def.is_constant_case(case),
+                    span: case.span,
+                });
+            }
+            CodegenDeclarationKind::Union {
+                cases,
+                bases: union_base_references(
+                    artifact,
+                    resolved_module,
+                    prepared_cache,
+                    union_def,
+                    diagnostics,
+                )?,
+            }
+        }
         Item::TypeAlias(_) => CodegenDeclarationKind::TypeAlias,
         Item::Component(component) => CodegenDeclarationKind::Component(build_component(
             artifact,
@@ -594,71 +616,187 @@ fn build_expression_for_module_identity(
     )
 }
 
-fn build_record_fields(
+/// The fields a record carries, its base's included.
+///
+/// <para>An inherited field is a field of the record: the interpreter materializes it, and a value
+/// constructed from this declaration carries it. Emitting only the declared ones is what left the IR
+/// runtime rejecting `name` on a `User` that extends a base declaring it.</para>
+fn effective_record_shape_of(
     artifact: &ProgramArtifact,
     resolved_module: &ResolvedModule,
     prepared_cache: &mut PreparedModuleCache,
-    lowered_module: &LoweredModule,
-    type_env: &TypeEnvironment,
-    fields: &[nx_hir::RecordField],
+    record: &nx_hir::RecordDef,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Option<Vec<CodegenRecordField>> {
-    let mut scope = LexicalScope::new();
-    let mut mapped = Vec::with_capacity(fields.len());
-    for field in fields {
-        let default = match field.default {
-            Some(default) => Some(build_expression(
-                artifact,
-                resolved_module,
-                prepared_cache,
-                lowered_module,
-                type_env,
-                default,
-                &mut scope,
-                diagnostics,
-            )?),
-            None => None,
+) -> Option<nx_hir::EffectiveRecordShape> {
+    let prepared = prepared_cache.get(artifact, resolved_module);
+    match nx_hir::effective_record_shape(prepared, record) {
+        Ok(shape) => Some(shape),
+        Err(error) => {
+            diagnostics.push(record_resolution_diagnostic(resolved_module, &error));
+            None
+        }
+    }
+}
+
+/// Maps a record's inheritance chain onto references a runtime can compare.
+///
+/// Fields are flattened before they reach the IR, so this chain answers only the question
+/// flattening cannot: whether a value stamped with one record's name is acceptable where another
+/// record is expected. Without it a runtime cannot tell a subtype from a foreign type, and has to
+/// reject both.
+fn record_ancestor_references(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    ancestors: &[nx_hir::RecordAncestor],
+    span: TextSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<Vec<CodegenReference>> {
+    let mut mapped = Vec::with_capacity(ancestors.len());
+    for ancestor in ancestors {
+        // A base whose spelling reached no declaration is analysis's diagnostic to report, not
+        // this pass's. Leaving it out keeps the chain to the bases a runtime can actually name.
+        let Some(origin) = ancestor.origin.as_ref() else {
+            continue;
         };
-        mapped.push(CodegenRecordField {
-            name: field.name.as_str().to_string(),
-            ty: field.ty.clone(),
-            resolved_ty: build_type_ref(
-                artifact,
+        let Some(base_module) = artifact
+            .resolved_program
+            .module_by_prepared_identity(origin.module_identity())
+        else {
+            diagnostics.push(missing_semantic_data_diagnostic(
                 resolved_module,
-                prepared_cache,
-                &field.ty,
-                diagnostics,
-            )?,
-            is_content: field.is_content,
-            is_required: field.default.is_none() && !matches!(field.ty, ast::TypeRef::Nullable(_)),
-            default,
-            span: field.span,
+                &format!("record base module '{}'", origin.module_identity()),
+                span,
+            ));
+            return None;
+        };
+        mapped.push(CodegenReference {
+            module_id: base_module.id,
+            definition_id: origin.definition_id(),
+            name: ancestor.name.as_str().to_string(),
+            kind: ResolvedItemKind::Record,
         });
-        scope.insert(field.name.as_str());
     }
     Some(mapped)
 }
 
-fn build_union_case_fields(
+/// The fields one union case carries: its union's abstract base's first, then its own.
+///
+/// This is the order the interpreter materializes them in, and a base field a case overrides must
+/// therefore come first here too.
+fn effective_union_case_fields(
     artifact: &ProgramArtifact,
     resolved_module: &ResolvedModule,
     prepared_cache: &mut PreparedModuleCache,
-    lowered_module: &LoweredModule,
-    type_env: &TypeEnvironment,
-    fields: &[nx_hir::UnionCaseField],
+    union_def: &nx_hir::UnionDef,
+    case: &nx_hir::UnionCaseDef,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<Vec<EffectiveField>> {
+    let module_identity = resolved_module.prepared_module_identity();
+    let mut fields = Vec::new();
+
+    if let Some(base) = union_def.base.as_ref() {
+        let prepared = prepared_cache.get(artifact, resolved_module);
+        match nx_hir::effective_record_shape_for_name(prepared, base) {
+            Ok(Some(shape)) => fields.extend(shape.fields),
+            // A base that names nothing resolvable is analysis's diagnostic to report, not this
+            // pass's; the case still emits the fields it declares itself.
+            Ok(None) => {}
+            Err(error) => {
+                diagnostics.push(record_resolution_diagnostic(resolved_module, &error));
+                return None;
+            }
+        }
+    }
+
+    fields.extend(case.fields.iter().map(|field| {
+        EffectiveField::from_record_field(
+            nx_hir::RecordField {
+                name: field.name.clone(),
+                ty: field.ty.clone(),
+                is_content: field.is_content,
+                default: field.default,
+                span: field.span,
+            },
+            module_identity.clone(),
+        )
+    }));
+
+    Some(fields)
+}
+
+/// The bases every case of a union inherits, nearest first.
+///
+/// A union extends at most one abstract record, so the chain is that base followed by the base's
+/// own. Cases carry no separate chain: a case is acceptable wherever the union's base is.
+fn union_base_references(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    prepared_cache: &mut PreparedModuleCache,
+    union_def: &nx_hir::UnionDef,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<Vec<CodegenReference>> {
+    let Some(base) = union_def.base.as_ref() else {
+        return Some(Vec::new());
+    };
+
+    let prepared = prepared_cache.get(artifact, resolved_module);
+    let shape = match nx_hir::effective_record_shape_for_name(prepared, base) {
+        Ok(Some(shape)) => shape,
+        // A base that names nothing resolvable is analysis's diagnostic to report, the same way
+        // `effective_union_case_fields` leaves it alone.
+        Ok(None) => return Some(Vec::new()),
+        Err(error) => {
+            diagnostics.push(record_resolution_diagnostic(resolved_module, &error));
+            return None;
+        }
+    };
+
+    let mut ancestors = vec![nx_hir::RecordAncestor {
+        name: base.clone(),
+        origin: shape.origin.clone(),
+    }];
+    ancestors.extend(shape.ancestors.iter().cloned());
+    record_ancestor_references(
+        artifact,
+        resolved_module,
+        &ancestors,
+        union_def.span,
+        diagnostics,
+    )
+}
+
+/// Builds IR fields from a record's effective ones, each default built in the module that wrote it.
+///
+/// A default may name a field declared before it, so the scope grows as the fields are walked —
+/// the same order the interpreter materializes them in.
+fn build_effective_record_fields(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    prepared_cache: &mut PreparedModuleCache,
+    fields: &[EffectiveField],
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Vec<CodegenRecordField>> {
     let mut scope = LexicalScope::new();
     let mut mapped = Vec::with_capacity(fields.len());
     for field in fields {
-        let default = match field.default {
-            Some(default) => Some(build_expression(
+        let Some(owner_module) = artifact
+            .resolved_program
+            .module_by_prepared_identity(&field.module_identity)
+        else {
+            diagnostics.push(missing_semantic_data_diagnostic(
+                resolved_module,
+                &format!("record field owner module '{}'", field.module_identity),
+                field.span,
+            ));
+            return None;
+        };
+        let default = match field.default.as_ref() {
+            Some(default) => Some(build_expression_for_module_identity(
                 artifact,
                 resolved_module,
                 prepared_cache,
-                lowered_module,
-                type_env,
-                default,
+                &default.module_identity,
+                default.expr_id,
                 &mut scope,
                 diagnostics,
             )?),
@@ -669,13 +807,13 @@ fn build_union_case_fields(
             ty: field.ty.clone(),
             resolved_ty: build_type_ref(
                 artifact,
-                resolved_module,
+                owner_module,
                 prepared_cache,
                 &field.ty,
                 diagnostics,
             )?,
             is_content: field.is_content,
-            is_required: field.default.is_none() && !matches!(field.ty, ast::TypeRef::Nullable(_)),
+            is_required: field.is_required,
             default,
             span: field.span,
         });
@@ -699,14 +837,89 @@ fn build_expression(
     let ty = type_env.get_expr_type(expr_id).cloned();
     let kind = match expr {
         ast::Expr::Literal(literal) => CodegenExpressionKind::Literal(literal.clone()),
-        ast::Expr::Ident(name) => CodegenExpressionKind::Identifier {
-            name: name.as_str().to_string(),
-            reference: if scope.contains(name.as_str()) {
+        // A case already resolved during analysis. The declaration is reached by the origin the
+        // node carries, not by looking its union's name back up in the module using it — that name
+        // need not be visible here at all.
+        ast::Expr::ResolvedUnionCase {
+            union,
+            case,
+            module_identity,
+            definition_id,
+            ..
+        } => {
+            match build_union_case_from_origin(
+                artifact,
+                prepared_cache,
+                module_identity,
+                *definition_id,
+                union.as_str(),
+                case.as_str(),
+                diagnostics,
+            ) {
+                UnionCaseLookup::Found {
+                    union_reference,
+                    case,
+                    union_is_constant,
+                } => CodegenExpressionKind::UnionCase {
+                    union_reference,
+                    case_name: case.name,
+                    is_constant: case.is_constant,
+                    union_is_constant,
+                    fields: case.fields,
+                    properties: Vec::new(),
+                    content_field: None,
+                    content: Vec::new(),
+                },
+                UnionCaseLookup::Failed | UnionCaseLookup::Missing => {
+                    diagnostics.push(
+                        Diagnostic::error("unresolved-union-case-origin")
+                            .with_message(format!(
+                                "Union case '{}.{}' resolved during analysis but its declaration \
+                                 in '{}' could not be reached during code generation",
+                                union, case, module_identity
+                            ))
+                            .with_label(Label::primary(
+                                resolved_module.prepared_module_identity(),
+                                span,
+                            ))
+                            .build(),
+                    );
+                    return None;
+                }
+            }
+        }
+        ast::Expr::Ident(name) => {
+            let in_scope = scope.contains(name.as_str());
+            let reference = if in_scope {
                 None
             } else {
                 resolve_visible_reference(artifact, resolved_module.id, name.as_str())
-            },
-        },
+            };
+            if !in_scope && reference.is_none() {
+                // A name that is neither a local nor a declaration used to emit a slot spelled
+                // `unresolved:<name>`, which no runtime can bind — the program built, and failed
+                // when it ran. Analysis reports such a name, so reaching here means analysis missed
+                // it, and saying so beats emitting IR that cannot run.
+                diagnostics.push(
+                    Diagnostic::error("codegen-unresolved-name")
+                        .with_message(format!(
+                            "Name '{}' reaches no binding and no declaration, so it cannot be \
+                             emitted",
+                            name.as_str()
+                        ))
+                        .with_label(Label::primary(
+                            resolved_module.prepared_module_identity(),
+                            span,
+                        ))
+                        .build(),
+                );
+                return None;
+            }
+            CodegenExpressionKind::Identifier {
+                name: name.as_str().to_string(),
+                reference,
+            }
+        }
         ast::Expr::BinaryOp { lhs, op, rhs, .. } => {
             let lhs = build_expression(
                 artifact,
@@ -1080,6 +1293,7 @@ fn build_expression(
                 UnionCaseLookup::Found {
                     union_reference,
                     case,
+                    union_is_constant,
                 } => {
                     return Some(CodegenExpression {
                         expr_id: expr_id_u32(expr_id),
@@ -1088,6 +1302,8 @@ fn build_expression(
                         kind: CodegenExpressionKind::UnionCase {
                             union_reference,
                             case_name: case.name,
+                            is_constant: case.is_constant,
+                            union_is_constant,
                             fields: case.fields,
                             properties: Vec::new(),
                             content_field: None,
@@ -1100,29 +1316,44 @@ fn build_expression(
                 }
                 UnionCaseLookup::Missing => {}
             }
-            if let Some(enum_reference) =
-                enum_member_reference(artifact, resolved_module.id, lowered_module, *base, scope)
-            {
-                CodegenExpressionKind::EnumMember {
-                    enum_reference,
-                    member: member.as_str().to_string(),
+            let mut base_diagnostics = Vec::new();
+            let built = build_expression(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                lowered_module,
+                type_env,
+                *base,
+                scope,
+                &mut base_diagnostics,
+            );
+            let base = match built {
+                Some(base) => {
+                    diagnostics.append(&mut base_diagnostics);
+                    base
                 }
-            } else {
-                let base = build_expression(
-                    artifact,
-                    resolved_module,
-                    prepared_cache,
-                    lowered_module,
-                    type_env,
-                    *base,
-                    scope,
-                    diagnostics,
-                )?;
-                CodegenExpressionKind::Member {
-                    base: Box::new(base),
-                    member: member.as_str().to_string(),
-                    reference: combined_reference,
+                // An import alias binds one visible name, dots and all: `value as One.value` binds
+                // `One.value`, and there is no `One` to take a member of. The whole name resolved
+                // above, so the base here is a spelling rather than a value, and it is emitted as
+                // the name it is.
+                None if combined_reference.is_some() => {
+                    match unbound_name_expression(lowered_module, *base) {
+                        Some(base) => base,
+                        None => {
+                            diagnostics.append(&mut base_diagnostics);
+                            return None;
+                        }
+                    }
                 }
+                None => {
+                    diagnostics.append(&mut base_diagnostics);
+                    return None;
+                }
+            };
+            CodegenExpressionKind::Member {
+                base: Box::new(base),
+                member: member.as_str().to_string(),
+                reference: combined_reference,
             }
         }
         ast::Expr::RecordLiteral {
@@ -1188,6 +1419,16 @@ fn build_expression(
                 resolved_module,
                 *span,
                 "malformed expressions cannot be emitted",
+            ));
+            return None;
+        }
+        // Type analysis resolves every contextual name before codegen runs, so one reaching here
+        // means analysis was skipped rather than that the source is ambiguous.
+        ast::Expr::ContextualName { span, .. } => {
+            diagnostics.push(unsupported_diagnostic(
+                resolved_module,
+                *span,
+                "unresolved contextual name cannot be emitted",
             ));
             return None;
         }
@@ -1266,6 +1507,7 @@ fn build_element_expression(
         UnionCaseLookup::Found {
             union_reference,
             case,
+            union_is_constant,
         } => {
             let content_field = case
                 .fields
@@ -1275,6 +1517,8 @@ fn build_element_expression(
             Some(CodegenExpressionKind::UnionCase {
                 union_reference,
                 case_name: case.name,
+                is_constant: case.is_constant,
+                union_is_constant,
                 fields: case.fields,
                 properties: mapped.properties,
                 content_field,
@@ -1550,6 +1794,8 @@ enum UnionCaseLookup {
     Found {
         union_reference: CodegenReference,
         case: CodegenUnionCase,
+        /// Whether every case of the declaring union is constant.
+        union_is_constant: bool,
     },
 }
 
@@ -1563,19 +1809,75 @@ fn build_union_case_for_member(
     scope: &LexicalScope,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> UnionCaseLookup {
-    let ast::Expr::Ident(base_name) = lowered_module.expr(base) else {
+    let Some(base_name) = flattened_visible_name(lowered_module, base, scope) else {
         return UnionCaseLookup::Missing;
     };
-    if scope.contains(base_name.as_str()) {
-        return UnionCaseLookup::Missing;
-    }
-    let Some(reference) = resolve_visible_reference(artifact, module_id, base_name.as_str()) else {
+    let Some(reference) = resolve_visible_reference(artifact, module_id, &base_name) else {
         return UnionCaseLookup::Missing;
     };
     if reference.kind != nx_interpreter::ResolvedItemKind::Union {
         return UnionCaseLookup::Missing;
     }
     build_union_case_from_reference(artifact, prepared_cache, reference, member, diagnostics)
+}
+
+/// Builds the name segments of a member chain as an expression, without resolving them.
+///
+/// This is for a base that is part of a name rather than a value of its own — the `One` of a
+/// `One.value` import alias. Only plain names are spelled this way; anything else is a real
+/// expression and is built as one.
+fn unbound_name_expression(
+    lowered_module: &LoweredModule,
+    expr: ExprId,
+) -> Option<CodegenExpression> {
+    match lowered_module.expr(expr) {
+        ast::Expr::Ident(name) => Some(CodegenExpression {
+            expr_id: expr_id_u32(expr),
+            span: lowered_module.expr(expr).span(),
+            ty: None,
+            kind: CodegenExpressionKind::Identifier {
+                name: name.as_str().to_string(),
+                reference: None,
+            },
+        }),
+        ast::Expr::Member { base, member, .. } => Some(CodegenExpression {
+            expr_id: expr_id_u32(expr),
+            span: lowered_module.expr(expr).span(),
+            ty: None,
+            kind: CodegenExpressionKind::Member {
+                base: Box::new(unbound_name_expression(lowered_module, *base)?),
+                member: member.as_str().to_string(),
+                reference: None,
+            },
+        }),
+        _ => None,
+    }
+}
+
+/// The whole name a member chain spells, when every segment is a plain name.
+///
+/// <para>An import alias binds one visible name, dots and all: `Fit as ui.Fit` binds `ui.Fit`, and
+/// there is no `ui` to take a member of. Reading only a single-segment base leaves `ui.Fit.cover`
+/// lowered as a member access on a name that reaches nothing, which is what put an `unresolved:`
+/// slot and a null case reference into otherwise clean output.</para>
+fn flattened_visible_name(
+    lowered_module: &LoweredModule,
+    expr: ExprId,
+    scope: &LexicalScope,
+) -> Option<String> {
+    match lowered_module.expr(expr) {
+        ast::Expr::Ident(name) => {
+            if scope.contains(name.as_str()) {
+                return None;
+            }
+            Some(name.as_str().to_string())
+        }
+        ast::Expr::Member { base, member, .. } => {
+            let base = flattened_visible_name(lowered_module, *base, scope)?;
+            Some(format!("{}.{}", base, member.as_str()))
+        }
+        _ => None,
+    }
 }
 
 fn build_union_case_for_tag(
@@ -1594,6 +1896,32 @@ fn build_union_case_for_tag(
     if reference.kind != nx_interpreter::ResolvedItemKind::Union {
         return UnionCaseLookup::Missing;
     }
+    build_union_case_from_reference(artifact, prepared_cache, reference, case_name, diagnostics)
+}
+
+/// Builds a union case from the declaring origin an analysis-resolved reference carries.
+fn build_union_case_from_origin(
+    artifact: &ProgramArtifact,
+    prepared_cache: &mut PreparedModuleCache,
+    module_identity: &str,
+    definition_id: LocalDefinitionId,
+    union_name: &str,
+    case_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> UnionCaseLookup {
+    let Some(target_module) = artifact
+        .resolved_program
+        .module_by_prepared_identity(module_identity)
+    else {
+        return UnionCaseLookup::Missing;
+    };
+    let reference = reference_from_resolved_module(
+        artifact,
+        target_module.id,
+        definition_id,
+        union_name,
+        nx_interpreter::ResolvedItemKind::Union,
+    );
     build_union_case_from_reference(artifact, prepared_cache, reference, case_name, diagnostics)
 }
 
@@ -1635,13 +1963,21 @@ fn build_union_case_from_reference(
     else {
         return UnionCaseLookup::Missing;
     };
-    let Some(fields) = build_union_case_fields(
+    let Some(effective) = effective_union_case_fields(
         artifact,
         target_module,
         prepared_cache,
-        lowered_module.as_ref(),
-        &module_artifact.type_env,
-        &case_def.fields,
+        &union_def,
+        case_def,
+        diagnostics,
+    ) else {
+        return UnionCaseLookup::Failed;
+    };
+    let Some(fields) = build_effective_record_fields(
+        artifact,
+        target_module,
+        prepared_cache,
+        &effective,
         diagnostics,
     ) else {
         return UnionCaseLookup::Failed;
@@ -1651,8 +1987,10 @@ fn build_union_case_from_reference(
         case: CodegenUnionCase {
             name: case_def.name.as_str().to_string(),
             fields,
+            is_constant: union_def.is_constant_case(case_def),
             span: case_def.span,
         },
+        union_is_constant: union_def.is_constant_union(),
     }
 }
 
@@ -1693,13 +2031,18 @@ fn record_literal_shape(
     else {
         return Some((record_name.to_string(), Vec::new()));
     };
-    let fields = build_record_fields(
+    let shape = effective_record_shape_of(
         artifact,
         target_module,
         prepared_cache,
-        lowered_module.as_ref(),
-        &module_artifact.type_env,
-        &record_def.properties,
+        &record_def,
+        diagnostics,
+    )?;
+    let fields = build_effective_record_fields(
+        artifact,
+        target_module,
+        prepared_cache,
+        &shape.fields,
         diagnostics,
     )?;
     Some((record_def.name.as_str().to_string(), fields))
@@ -1712,15 +2055,34 @@ fn build_type_ref(
     ty: &ast::TypeRef,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<CodegenTypeRef> {
-    let prepared = prepared_cache.get(artifact, resolved_module);
-    build_type_ref_with_prepared(artifact, resolved_module, &prepared, ty, diagnostics)
+    let mut aliases = Vec::new();
+    build_type_ref_resolving_aliases(
+        artifact,
+        resolved_module,
+        prepared_cache,
+        ty,
+        &mut aliases,
+        diagnostics,
+    )
 }
 
-fn build_type_ref_with_prepared(
+/// Builds one IR type reference, resolving any type alias it names down to what the alias stands
+/// for.
+///
+/// <para>A type alias is transparent in NX — `type Ints = int[]` *is* a list — and the runtime that
+/// reads this IR decides how to normalize a value from the shape of its type. An alias emitted as a
+/// nominal reference hides that shape, so `xs:Ints` given one value stayed one value where `xs:int[]`
+/// became a list of one. Resolving here keeps the two spellings the same program.</para>
+///
+/// <para>`aliases` carries the aliases already being resolved on this path, so a cyclic alias stops
+/// at the repeat rather than recursing forever. The cycle itself is a diagnostic analysis already
+/// reports; this only declines to follow it.</para>
+fn build_type_ref_resolving_aliases(
     artifact: &ProgramArtifact,
     resolved_module: &ResolvedModule,
-    prepared: &PreparedModule,
+    prepared_cache: &mut PreparedModuleCache,
     ty: &ast::TypeRef,
+    aliases: &mut Vec<(String, LocalDefinitionId)>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<CodegenTypeRef> {
     match ty {
@@ -1731,10 +2093,21 @@ fn build_type_ref_with_prepared(
                 });
             }
 
-            let binding = prepared
-                .resolve_binding(PreparedNamespace::Type, name)
-                .or_else(|| prepared.resolve_binding(PreparedNamespace::Element, name));
-            let Some(binding) = binding else {
+            let current_module_identity = resolved_module.prepared_module_identity();
+            let resolved = {
+                let prepared = prepared_cache.get(artifact, resolved_module);
+                let binding = prepared
+                    .resolve_binding(PreparedNamespace::Type, name)
+                    .or_else(|| prepared.resolve_binding(PreparedNamespace::Element, name));
+                binding.map(|binding| {
+                    (
+                        binding.module_identity(&current_module_identity).to_string(),
+                        binding.definition_id(),
+                        binding.kind,
+                    )
+                })
+            };
+            let Some((target_module_identity, definition_id, kind)) = resolved else {
                 if name.as_str() == "Element" {
                     return Some(CodegenTypeRef::Primitive {
                         name: "object".to_string(),
@@ -1748,11 +2121,9 @@ fn build_type_ref_with_prepared(
                 ));
                 return None;
             };
-            let current_module_identity = resolved_module.prepared_module_identity();
-            let target_module_identity = binding.module_identity(&current_module_identity);
             let Some(target_module) = artifact
                 .resolved_program
-                .module_by_prepared_identity(target_module_identity)
+                .module_by_prepared_identity(&target_module_identity)
             else {
                 diagnostics.push(missing_semantic_data_diagnostic(
                     resolved_module,
@@ -1761,12 +2132,34 @@ fn build_type_ref_with_prepared(
                 ));
                 return None;
             };
+
+            if kind == PreparedItemKind::TypeAlias {
+                let alias = (target_module_identity.clone(), definition_id);
+                if !aliases.contains(&alias) {
+                    // An alias declared by a module compiled to an interface alone has no target to
+                    // read here, and stays the nominal reference it was before.
+                    if let Some(target) = type_alias_target(artifact, target_module, definition_id) {
+                        aliases.push(alias);
+                        let resolved = build_type_ref_resolving_aliases(
+                            artifact,
+                            target_module,
+                            prepared_cache,
+                            &target,
+                            aliases,
+                            diagnostics,
+                        );
+                        aliases.pop();
+                        return resolved;
+                    }
+                }
+            }
+
             let reference = reference_from_resolved_module(
                 artifact,
                 target_module.id,
-                binding.definition_id(),
+                definition_id,
                 name.as_str(),
-                resolved_item_kind_from_prepared(binding.kind),
+                resolved_item_kind_from_prepared(kind),
             );
 
             Some(CodegenTypeRef::Nominal {
@@ -1775,20 +2168,22 @@ fn build_type_ref_with_prepared(
             })
         }
         ast::TypeRef::Array(element) => Some(CodegenTypeRef::Array {
-            element: Box::new(build_type_ref_with_prepared(
+            element: Box::new(build_type_ref_resolving_aliases(
                 artifact,
                 resolved_module,
-                prepared,
+                prepared_cache,
                 element,
+                aliases,
                 diagnostics,
             )?),
         }),
         ast::TypeRef::Nullable(inner) => Some(CodegenTypeRef::Nullable {
-            inner: Box::new(build_type_ref_with_prepared(
+            inner: Box::new(build_type_ref_resolving_aliases(
                 artifact,
                 resolved_module,
-                prepared,
+                prepared_cache,
                 inner,
+                aliases,
                 diagnostics,
             )?),
         }),
@@ -1796,33 +2191,59 @@ fn build_type_ref_with_prepared(
             params,
             return_type,
         } => Some(CodegenTypeRef::Function {
-            params: params
-                .iter()
-                .map(|param| {
-                    build_type_ref_with_prepared(
+            params: {
+                let mut mapped = Vec::with_capacity(params.len());
+                for param in params {
+                    mapped.push(build_type_ref_resolving_aliases(
                         artifact,
                         resolved_module,
-                        prepared,
+                        prepared_cache,
                         param,
+                        aliases,
                         diagnostics,
-                    )
-                })
-                .collect::<Option<Vec<_>>>()?,
-            return_type: Box::new(build_type_ref_with_prepared(
+                    )?);
+                }
+                mapped
+            },
+            return_type: Box::new(build_type_ref_resolving_aliases(
                 artifact,
                 resolved_module,
-                prepared,
+                prepared_cache,
                 return_type,
+                aliases,
                 diagnostics,
             )?),
         }),
     }
 }
 
+/// Returns what a type alias declaration stands for, where the declaring module was compiled from
+/// source rather than reached as an interface.
+fn type_alias_target(
+    artifact: &ProgramArtifact,
+    module: &ResolvedModule,
+    definition_id: LocalDefinitionId,
+) -> Option<ast::TypeRef> {
+    let module_artifact = module_artifact_for(artifact, module)?;
+    let lowered_module = module_artifact.lowered_module.as_ref()?;
+    match lowered_module.item_by_definition(definition_id) {
+        Some(Item::TypeAlias(alias)) => Some(alias.ty.clone()),
+        _ => None,
+    }
+}
+
 fn is_builtin_type_name(name: &str) -> bool {
     matches!(
         name,
-        "i32" | "i64" | "int" | "f32" | "f64" | "float" | "string" | "bool" | "void" | "object"
+        "int"
+            | "int32"
+            | "int64"
+            | "float32"
+            | "float64"
+            | "string"
+            | "boolean"
+            | "void"
+            | "object"
     )
 }
 
@@ -1832,7 +2253,6 @@ fn resolved_item_kind_from_prepared(kind: PreparedItemKind) -> ResolvedItemKind 
         PreparedItemKind::Value => ResolvedItemKind::Value,
         PreparedItemKind::Component => ResolvedItemKind::Component,
         PreparedItemKind::TypeAlias => ResolvedItemKind::TypeAlias,
-        PreparedItemKind::Enum => ResolvedItemKind::Enum,
         PreparedItemKind::Union => ResolvedItemKind::Union,
         PreparedItemKind::Record => ResolvedItemKind::Record,
     }
@@ -1928,7 +2348,6 @@ fn prepared_item_kind(kind: ResolvedItemKind) -> PreparedItemKind {
         ResolvedItemKind::Value => PreparedItemKind::Value,
         ResolvedItemKind::Component => PreparedItemKind::Component,
         ResolvedItemKind::TypeAlias => PreparedItemKind::TypeAlias,
-        ResolvedItemKind::Enum => PreparedItemKind::Enum,
         ResolvedItemKind::Union => PreparedItemKind::Union,
         ResolvedItemKind::Record => PreparedItemKind::Record,
     }
@@ -1983,31 +2402,9 @@ fn qualified_member_reference(
     member: &str,
     scope: &LexicalScope,
 ) -> Option<CodegenReference> {
-    let ast::Expr::Ident(base_name) = lowered_module.expr(base) else {
-        return None;
-    };
-    if scope.contains(base_name.as_str()) {
-        return None;
-    }
-    let visible_name = format!("{}.{}", base_name.as_str(), member);
+    let base_name = flattened_visible_name(lowered_module, base, scope)?;
+    let visible_name = format!("{}.{}", base_name, member);
     resolve_visible_reference(artifact, module_id, &visible_name)
-}
-
-fn enum_member_reference(
-    artifact: &ProgramArtifact,
-    module_id: RuntimeModuleId,
-    lowered_module: &LoweredModule,
-    base: ExprId,
-    scope: &LexicalScope,
-) -> Option<CodegenReference> {
-    let ast::Expr::Ident(base_name) = lowered_module.expr(base) else {
-        return None;
-    };
-    if scope.contains(base_name.as_str()) {
-        return None;
-    }
-    let reference = resolve_visible_reference(artifact, module_id, base_name.as_str())?;
-    (reference.kind == nx_interpreter::ResolvedItemKind::Enum).then_some(reference)
 }
 
 fn reference_from_item(
@@ -2050,7 +2447,6 @@ fn item_span(item: &Item) -> TextSpan {
         Item::Value(item) => item.span,
         Item::Component(item) => item.span,
         Item::TypeAlias(item) => item.span,
-        Item::Enum(item) => item.span,
         Item::Union(item) => item.span,
         Item::Record(item) => item.span,
     }
@@ -2086,6 +2482,22 @@ fn missing_semantic_data_diagnostic(
         .build()
 }
 
+fn record_resolution_diagnostic(
+    module: &ResolvedModule,
+    error: &nx_hir::RecordResolutionError,
+) -> Diagnostic {
+    Diagnostic::error("codegen-missing-semantic-data")
+        .with_message(format!(
+            "Cannot build record codegen metadata: {}",
+            error.message()
+        ))
+        .with_label(Label::primary(
+            module.prepared_module_identity(),
+            error.span(),
+        ))
+        .build()
+}
+
 fn component_resolution_diagnostic(
     module: &ResolvedModule,
     error: &nx_hir::ComponentResolutionError,
@@ -2108,7 +2520,6 @@ fn resolved_item_kind(item: &Item) -> nx_interpreter::ResolvedItemKind {
         Item::Value(_) => nx_interpreter::ResolvedItemKind::Value,
         Item::Component(_) => nx_interpreter::ResolvedItemKind::Component,
         Item::TypeAlias(_) => nx_interpreter::ResolvedItemKind::TypeAlias,
-        Item::Enum(_) => nx_interpreter::ResolvedItemKind::Enum,
         Item::Union(_) => nx_interpreter::ResolvedItemKind::Union,
         Item::Record(_) => nx_interpreter::ResolvedItemKind::Record,
     }

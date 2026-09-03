@@ -1,0 +1,142 @@
+[
+  {
+    "owner": "SkiaButton",
+    "property": "Down",
+    "reason": "(sender: SkiaButton, args: SkiaGesturesParameters) => void"
+  },
+  {
+    "owner": "SkiaButton",
+    "property": "Up",
+    "reason": "(sender: SkiaButton, args: SkiaGesturesParameters) => void"
+  },
+  {
+    "owner": "SkiaCarousel",
+    "property": "SelectedIndexChanged",
+    "reason": "(sender: SkiaCarousel, index: number) => void"
+  },
+  {
+    "owner": "SkiaControl",
+    "property": "BindingContext",
+    "reason": "unknown"
+  },
+  {
+    "owner": "SkiaControl",
+    "property": "ChildTapped",
+    "reason": "(sender: SkiaControl, e: ControlTappedEventArgs) => void"
+  },
+  {
+    "owner": "SkiaControl",
+    "property": "ConsumeGestures",
+    "reason": "(sender: SkiaControl, e: SkiaGesturesInfo) => void"
+  },
+  {
+    "owner": "SkiaControl",
+    "property": "Tapped",
+    "reason": "(sender: SkiaControl, e: ControlTappedEventArgs) => void"
+  },
+  {
+    "owner": "SkiaDrawer",
+    "property": "IsOpenChanged",
+    "reason": "(sender: SkiaDrawer, isOpen: boolean) => void"
+  },
+  {
+    "owner": "SkiaDrawer",
+    "property": "StateTransitionComplete",
+    "reason": "(sender: SkiaDrawer, isOpen: boolean) => void"
+  },
+  {
+    "owner": "SkiaHotspot",
+    "property": "Down",
+    "reason": "(sender: SkiaHotspot, args: SkiaGesturesParameters) => void"
+  },
+  {
+    "owner": "SkiaHotspot",
+    "property": "Up",
+    "reason": "(sender: SkiaHotspot, args: SkiaGesturesParameters) => void"
+  },
+  {
+    "owner": "SkiaImage",
+    "property": "Error",
+    "reason": "(sender: SkiaImage, error: Error) => void"
+  },
+  {
+    "owner": "SkiaImage",
+    "property": "Success",
+    "reason": "(sender: SkiaImage, source: string) => void"
+  },
+  {
+    "owner": "SkiaLayout",
+    "property": "ItemsSource",
+    "reason": "readonly unknown[]"
+  },
+  {
+    "owner": "SkiaLayout",
+    "property": "ItemTemplate",
+    "reason": "() => SkiaControl"
+  },
+  {
+    "owner": "SkiaRichLabel",
+    "property": "LinkTapped",
+    "reason": "(sender: SkiaRichLabel, url: string) => void"
+  },
+  {
+    "owner": "SkiaScroll",
+    "property": "LoadMoreCommand",
+    "reason": "(sender: SkiaScroll) => void"
+  },
+  {
+    "owner": "SkiaScroll",
+    "property": "LoadMoreTopCommand",
+    "reason": "(sender: SkiaScroll) => void"
+  },
+  {
+    "owner": "SkiaScroll",
+    "property": "Scrolled",
+    "reason": "(sender: SkiaScroll, e: ScaledPoint) => void"
+  },
+  {
+    "owner": "SkiaSlider",
+    "property": "EndChanged",
+    "reason": "(sender: SkiaSlider, value: number) => void"
+  },
+  {
+    "owner": "SkiaSlider",
+    "property": "StartChanged",
+    "reason": "(sender: SkiaSlider, value: number) => void"
+  },
+  {
+    "owner": "SkiaSvg",
+    "property": "Error",
+    "reason": "(sender: SkiaSvg, error: Error) => void"
+  },
+  {
+    "owner": "SkiaSvg",
+    "property": "Success",
+    "reason": "(sender: SkiaSvg, source: string) => void"
+  },
+  {
+    "owner": "SkiaToggle",
+    "property": "Toggled",
+    "reason": "(sender: SkiaToggle, value: boolean) => void"
+  },
+  {
+    "owner": "SnappingLayout",
+    "property": "Scrolled",
+    "reason": "(sender: SnappingLayout, position: SKPoint) => void"
+  },
+  {
+    "owner": "SnappingLayout",
+    "property": "Stopped",
+    "reason": "(sender: SnappingLayout, position: SKPoint) => void"
+  },
+  {
+    "owner": "SnappingLayout",
+    "property": "TransitionChanged",
+    "reason": "(sender: SnappingLayout, inTransition: boolean) => void"
+  },
+  {
+    "owner": "TextSpan",
+    "property": "Tapped",
+    "reason": "(span: TextSpan, e: ControlTappedEventArgs) => void"
+  }
+]

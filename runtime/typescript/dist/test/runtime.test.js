@@ -50,11 +50,11 @@ function nominal(reference, display = reference.name) {
 }
 const stringType = primitive("string");
 const intType = primitive("int");
-const themeType = nominal(ref("Theme", "m0:d3", "enum"));
+const themeType = nominal(ref("Theme", "m0:d3", "union"));
 const loadStateType = nominal(ref("LoadState", "m0:d5", "union"));
 const nullableLoadStateType = { kind: "nullable", inner: loadStateType };
 const intSemantic = { display: "int", shape: { kind: "primitive", name: "int" } };
-const floatSemantic = { display: "float", shape: { kind: "primitive", name: "float" } };
+const floatSemantic = { display: "float64", shape: { kind: "primitive", name: "float64" } };
 function expr(op, ty) {
     expressionCounter += 1;
     const base = {
@@ -109,7 +109,7 @@ const userRecordFields = [
 ];
 const program = {
     format: "nx-ir-json",
-    schemaVersion: 1,
+    schemaVersion: 2,
     runtimeAbi: "nx-ir-runtime-v1",
     programFingerprint: "42",
     requiredFeatures: ["eager-v1"],
@@ -184,9 +184,15 @@ const program = {
                 },
                 {
                     id: "m0:d3",
-                    reference: ref("Theme", "m0:d3", "enum"),
+                    reference: ref("Theme", "m0:d3", "union"),
                     span: sourceSpan,
-                    kind: { tag: "enum", members: ["light", "dark"] },
+                    kind: {
+                        tag: "union",
+                        cases: [
+                            { name: "light", fields: [], isConstant: true, span: sourceSpan },
+                            { name: "dark", fields: [], isConstant: true, span: sourceSpan },
+                        ],
+                    },
                 },
                 {
                     id: "m0:d4",
@@ -204,7 +210,7 @@ const program = {
                     kind: {
                         tag: "union",
                         cases: [
-                            { name: "idle", fields: [], span: sourceSpan },
+                            { name: "idle", fields: [], isConstant: true, span: sourceSpan },
                             {
                                 name: "failed",
                                 fields: [
@@ -217,6 +223,7 @@ const program = {
                                         span: sourceSpan,
                                     },
                                 ],
+                                isConstant: false,
                                 span: sourceSpan,
                             },
                         ],
@@ -383,9 +390,14 @@ const program = {
                         tag: "function",
                         params: [],
                         body: expr({
-                            tag: "enumMember",
-                            enum: ref("Theme", "m0:d3", "enum"),
-                            member: "dark",
+                            tag: "unionCase",
+                            union: ref("Theme", "m0:d3", "union"),
+                            caseName: "dark",
+                            fields: [],
+                            properties: [],
+                            contentField: null,
+                            content: [],
+                            isConstant: true,
                         }),
                     },
                 },
@@ -597,7 +609,7 @@ test("uses module-qualified nominal type references and entrypoint-only lookup",
     ];
     const collisionProgram = {
         format: "nx-ir-json",
-        schemaVersion: 1,
+        schemaVersion: 2,
         runtimeAbi: "nx-ir-runtime-v1",
         programFingerprint: "43",
         requiredFeatures: ["eager-v1"],
@@ -663,7 +675,7 @@ test("uses module-qualified nominal type references and entrypoint-only lookup",
     assertEqual(evaluateFunction(prepared, "acceptUser", [{ name: "Ada" }]), { $type: "User", name: "Ada" });
     assertThrows(() => evaluateFunction(prepared, "helper"), "Function entrypoint 'helper' was not found");
 });
-test("evaluates function calls, records, union cases, enums, loops, and match expressions", () => {
+test("evaluates function calls, records, union cases, loops, and match expressions", () => {
     const prepared = prepareNxIrProgram(program);
     assertEqual(evaluateFunction(prepared, "root"), 42);
     assertEqual(evaluateFunction(prepared, "values"), { $type: "User", name: "Ada", score: 42 });
@@ -672,14 +684,14 @@ test("evaluates function calls, records, union cases, enums, loops, and match ex
         message: "offline",
     });
     assertEqual(evaluateFunction(prepared, "describe", [{ $type: "LoadState.failed", message: "x" }]), "failed");
-    assertEqual(evaluateFunction(prepared, "describe", [{ $type: "LoadState.idle" }]), "ok");
+    assertEqual(evaluateFunction(prepared, "describe", ["idle"]), "ok");
     assertEqual(evaluateFunction(prepared, "describeOffline", [{ $type: "LoadState.failed", message: "online" }]), "failed-type");
     assertEqual(evaluateFunction(prepared, "echoTheme", ["dark"]), "dark");
     assertEqual(evaluateFunction(prepared, "themeValue"), "dark");
     assertEqual(evaluateFunction(prepared, "mappedValues"), [10, 21]);
     assertEqual(evaluateFunction(prepared, "flow"), 42);
     assertEqual(evaluateFunction(prepared, "letValue"), -12);
-    assertThrows(() => evaluateFunction(prepared, "echoTheme", ["blue"]), "Invalid enum member");
+    assertThrows(() => evaluateFunction(prepared, "echoTheme", ["blue"]), "Invalid constant union case");
 });
 test("matches native numeric division and modulo semantics", () => {
     const module = program.modules[0];
@@ -917,6 +929,532 @@ test("constructs descriptors and evaluates components with host-owned state", ()
     });
     assertThrows(() => applyComponentStatePatch(prepared, "SearchBox", { query: "docs" }, { query: 123 }), "Expected SearchBox state.query to be a string");
     assertThrows(() => constructComponentDescriptor(prepared, "TextInput"), "Missing required");
+});
+test("coerces a single value at a list-typed field into a list of one", () => {
+    const module = program.modules[0];
+    const listField = {
+        name: "sizes",
+        slot: "Sizes:prop:0",
+        ty: { kind: "nullable", inner: { kind: "array", element: intType } },
+        isContent: false,
+        isRequired: false,
+        span: sourceSpan,
+    };
+    const coercionProgram = {
+        ...program,
+        functionEntrypoints: [
+            ...program.functionEntrypoints,
+            { name: "oneSize", reference: ref("oneSize", "m0:d32", "function") },
+        ],
+        componentEntrypoints: [
+            ...program.componentEntrypoints,
+            { name: "Sizes", reference: ref("Sizes", "m0:d31", "component") },
+        ],
+        modules: [
+            {
+                ...module,
+                declarations: [
+                    ...module.declarations,
+                    {
+                        id: "m0:d31",
+                        reference: ref("Sizes", "m0:d31", "component"),
+                        span: sourceSpan,
+                        kind: {
+                            tag: "component",
+                            isAbstract: false,
+                            isExternal: true,
+                            props: [{ ...listField, ownerModule: "m0" }],
+                            state: [],
+                        },
+                    },
+                    {
+                        id: "m0:d32",
+                        reference: ref("oneSize", "m0:d32", "function"),
+                        span: sourceSpan,
+                        kind: {
+                            tag: "function",
+                            params: [],
+                            body: expr({
+                                tag: "componentDescriptor",
+                                component: ref("Sizes", "m0:d31", "component"),
+                                targetKind: "external",
+                                properties: [{ name: "sizes", value: lit(3), span: sourceSpan }],
+                                contentField: null,
+                                content: [],
+                            }),
+                        },
+                    },
+                ],
+            },
+        ],
+    };
+    const prepared = prepareNxIrProgram(coercionProgram);
+    assertEqual(evaluateFunction(prepared, "oneSize"), { $type: "Sizes", sizes: [3] });
+    assertEqual(constructComponentDescriptor(prepared, "Sizes", { sizes: 3 }), { $type: "Sizes", sizes: [3] });
+    assertEqual(constructComponentDescriptor(prepared, "Sizes", { sizes: [3, 4] }), {
+        $type: "Sizes",
+        sizes: [3, 4],
+    });
+    assertEqual(constructComponentDescriptor(prepared, "Sizes", {}), { $type: "Sizes", sizes: null });
+});
+test("normalizes a constructed record into a record-typed field", () => {
+    const module = program.modules[0];
+    const userType = nominal(ref("User", "m0:d4", "record"));
+    const ownerField = {
+        name: "owner",
+        slot: "Card:prop:0",
+        ty: userType,
+        isContent: false,
+        isRequired: true,
+        span: sourceSpan,
+    };
+    const constructUser = expr({
+        tag: "record",
+        name: "User",
+        fields: userRecordFields,
+        properties: [{ name: "name", value: lit("Ada"), span: sourceSpan }],
+    });
+    const recordProgram = {
+        ...program,
+        functionEntrypoints: [
+            ...program.functionEntrypoints,
+            { name: "cardWithOwner", reference: ref("cardWithOwner", "m0:d29", "function") },
+            { name: "nestedOwner", reference: ref("nestedOwner", "m0:d30", "function") },
+        ],
+        componentEntrypoints: [
+            ...program.componentEntrypoints,
+            { name: "Card", reference: ref("Card", "m0:d28", "component") },
+        ],
+        modules: [
+            {
+                ...module,
+                declarations: [
+                    ...module.declarations,
+                    {
+                        id: "m0:d28",
+                        reference: ref("Card", "m0:d28", "component"),
+                        span: sourceSpan,
+                        kind: {
+                            tag: "component",
+                            isAbstract: false,
+                            isExternal: true,
+                            props: [{ ...ownerField, ownerModule: "m0" }],
+                            state: [],
+                        },
+                    },
+                    {
+                        id: "m0:d29",
+                        reference: ref("cardWithOwner", "m0:d29", "function"),
+                        span: sourceSpan,
+                        kind: {
+                            tag: "function",
+                            params: [],
+                            body: expr({
+                                tag: "componentDescriptor",
+                                component: ref("Card", "m0:d28", "component"),
+                                targetKind: "external",
+                                properties: [{ name: "owner", value: constructUser, span: sourceSpan }],
+                                contentField: null,
+                                content: [],
+                            }),
+                        },
+                    },
+                    {
+                        id: "m0:d30",
+                        reference: ref("nestedOwner", "m0:d30", "function"),
+                        span: sourceSpan,
+                        kind: {
+                            tag: "function",
+                            params: [],
+                            body: expr({
+                                tag: "record",
+                                name: "Wrapper",
+                                fields: [{ ...ownerField, name: "owner", slot: "Wrapper:field:0" }],
+                                properties: [{ name: "owner", value: constructUser, span: sourceSpan }],
+                            }),
+                        },
+                    },
+                ],
+            },
+        ],
+    };
+    const prepared = prepareNxIrProgram(recordProgram);
+    const owner = { $type: "User", name: "Ada", score: 42 };
+    assertEqual(evaluateFunction(prepared, "cardWithOwner"), { $type: "Card", owner });
+    assertEqual(evaluateFunction(prepared, "nestedOwner"), { $type: "Wrapper", owner });
+    assertEqual(constructComponentDescriptor(prepared, "Card", { owner }), { $type: "Card", owner });
+    // A host writing a plain object has no discriminator to give, which is not an error.
+    assertEqual(constructComponentDescriptor(prepared, "Card", { owner: { name: "Ada", score: 42 } }), {
+        $type: "Card",
+        owner,
+    });
+    // But one it does give has to be its own. Restamping a foreign discriminator with the declared
+    // name would hand the program back a value reported as the type it is not.
+    assertThrows(() => constructComponentDescriptor(prepared, "Card", {
+        owner: { $type: "Ghost", name: "Ada", score: 42 },
+    }), "Expected Card props.owner to be a User, got 'Ghost'");
+});
+test("accepts a derived record at a base-typed field and rejects an unrelated one", () => {
+    const module = program.modules[0];
+    const baseField = {
+        name: "name",
+        slot: "Base:field:0",
+        ty: stringType,
+        isContent: false,
+        isRequired: true,
+        span: sourceSpan,
+    };
+    // A derived record's fields arrive flattened, base's first, the way the builder emits them.
+    const derivedFields = [
+        { ...baseField, slot: "Derived:field:0" },
+        {
+            name: "role",
+            slot: "Derived:field:1",
+            ty: stringType,
+            isContent: false,
+            isRequired: true,
+            span: sourceSpan,
+        },
+    ];
+    const recordDeclaration = (id, name, fields, bases) => ({
+        id,
+        reference: ref(name, id, "record"),
+        span: sourceSpan,
+        kind: { tag: "record", fields, bases },
+    });
+    const subtypeProgram = {
+        ...program,
+        componentEntrypoints: [
+            ...program.componentEntrypoints,
+            { name: "Holder", reference: ref("Holder", "m0:d43", "component") },
+        ],
+        modules: [
+            {
+                ...module,
+                declarations: [
+                    ...module.declarations,
+                    recordDeclaration("m0:d40", "Base", [baseField], []),
+                    recordDeclaration("m0:d41", "Derived", derivedFields, [ref("Base", "m0:d40", "record")]),
+                    recordDeclaration("m0:d42", "Unrelated", [baseField], []),
+                    {
+                        id: "m0:d43",
+                        reference: ref("Holder", "m0:d43", "component"),
+                        span: sourceSpan,
+                        kind: {
+                            tag: "component",
+                            isAbstract: false,
+                            isExternal: true,
+                            props: [
+                                {
+                                    name: "held",
+                                    slot: "Holder:prop:0",
+                                    ty: nominal(ref("Base", "m0:d40", "record")),
+                                    isContent: false,
+                                    isRequired: true,
+                                    ownerModule: "m0",
+                                    span: sourceSpan,
+                                },
+                            ],
+                            state: [],
+                        },
+                    },
+                ],
+            },
+        ],
+    };
+    const prepared = prepareNxIrProgram(subtypeProgram);
+    // A derived value is not the wrong type. It keeps its own discriminator and its own fields,
+    // which the base's field list does not have room for.
+    const derived = { $type: "Derived", name: "Ada", role: "admin" };
+    assertEqual(constructComponentDescriptor(prepared, "Holder", { held: derived }), {
+        $type: "Holder",
+        held: derived,
+    });
+    // A record that does not extend the base is still the wrong type, even where its fields happen
+    // to fit.
+    assertThrows(() => constructComponentDescriptor(prepared, "Holder", {
+        held: { $type: "Unrelated", name: "Ada" },
+    }), "Expected Holder props.held to be a Base, got 'Unrelated'");
+});
+test("reports a subtype whose name two declarations share rather than guessing", () => {
+    const module = program.modules[0];
+    const nameField = {
+        name: "name",
+        slot: "Base:field:0",
+        ty: stringType,
+        isContent: false,
+        isRequired: true,
+        span: sourceSpan,
+    };
+    const base = ref("Base", "m0:d50", "record");
+    // Two modules may each declare a `Derived` extending the same base. A value carries only its
+    // name, so nothing in it says which declaration to normalize against.
+    const twinProgram = {
+        ...program,
+        componentEntrypoints: [
+            ...program.componentEntrypoints,
+            { name: "Twin", reference: ref("Twin", "m0:d53", "component") },
+        ],
+        modules: [
+            {
+                ...module,
+                declarations: [
+                    ...module.declarations,
+                    {
+                        id: "m0:d50",
+                        reference: base,
+                        span: sourceSpan,
+                        kind: { tag: "record", fields: [nameField], bases: [] },
+                    },
+                    {
+                        id: "m0:d51",
+                        reference: ref("Derived", "m0:d51", "record"),
+                        span: sourceSpan,
+                        kind: { tag: "record", fields: [nameField], bases: [base] },
+                    },
+                    {
+                        id: "m0:d52",
+                        reference: ref("Derived", "m0:d52", "record"),
+                        span: sourceSpan,
+                        kind: { tag: "record", fields: [nameField], bases: [base] },
+                    },
+                    {
+                        id: "m0:d53",
+                        reference: ref("Twin", "m0:d53", "component"),
+                        span: sourceSpan,
+                        kind: {
+                            tag: "component",
+                            isAbstract: false,
+                            isExternal: true,
+                            props: [
+                                {
+                                    name: "held",
+                                    slot: "Twin:prop:0",
+                                    ty: nominal(base),
+                                    isContent: false,
+                                    isRequired: true,
+                                    ownerModule: "m0",
+                                    span: sourceSpan,
+                                },
+                            ],
+                            state: [],
+                        },
+                    },
+                ],
+            },
+        ],
+    };
+    const prepared = prepareNxIrProgram(twinProgram);
+    assertThrows(() => constructComponentDescriptor(prepared, "Twin", {
+        held: { $type: "Derived", name: "Ada" },
+    }), "Ambiguous subtype at Twin props.held: 2 declarations named 'Derived' extend Base");
+});
+test("rejects an abstract record at a base-typed field and accepts one extending it", () => {
+    const module = program.modules[0];
+    const nameField = {
+        name: "name",
+        slot: "Base:field:0",
+        ty: stringType,
+        isContent: false,
+        isRequired: true,
+        span: sourceSpan,
+    };
+    const base = ref("Base", "m0:d60", "record");
+    const middle = ref("Middle", "m0:d61", "record");
+    const abstractProgram = {
+        ...program,
+        componentEntrypoints: [
+            ...program.componentEntrypoints,
+            { name: "Slot", reference: ref("Slot", "m0:d63", "component") },
+        ],
+        modules: [
+            {
+                ...module,
+                declarations: [
+                    ...module.declarations,
+                    {
+                        id: "m0:d60",
+                        reference: base,
+                        span: sourceSpan,
+                        kind: { tag: "record", fields: [nameField], bases: [], isAbstract: true },
+                    },
+                    {
+                        id: "m0:d61",
+                        reference: middle,
+                        span: sourceSpan,
+                        kind: { tag: "record", fields: [nameField], bases: [base], isAbstract: true },
+                    },
+                    {
+                        id: "m0:d62",
+                        reference: ref("Derived", "m0:d62", "record"),
+                        span: sourceSpan,
+                        kind: {
+                            tag: "record",
+                            fields: [nameField],
+                            bases: [middle, base],
+                            isAbstract: false,
+                        },
+                    },
+                    {
+                        id: "m0:d63",
+                        reference: ref("Slot", "m0:d63", "component"),
+                        span: sourceSpan,
+                        kind: {
+                            tag: "component",
+                            isAbstract: false,
+                            isExternal: true,
+                            props: [
+                                {
+                                    name: "held",
+                                    slot: "Slot:prop:0",
+                                    ty: nominal(base),
+                                    isContent: false,
+                                    isRequired: true,
+                                    ownerModule: "m0",
+                                    span: sourceSpan,
+                                },
+                            ],
+                            state: [],
+                        },
+                    },
+                ],
+            },
+        ],
+    };
+    const prepared = prepareNxIrProgram(abstractProgram);
+    // A plain host object would otherwise be stamped with the abstract type's own name, producing a
+    // value NX itself refuses to construct.
+    assertThrows(() => constructComponentDescriptor(prepared, "Slot", { held: { name: "Ada" } }), "Expected Slot props.held to be a concrete type extending Base, got an object with no '$type' discriminator naming one.");
+    assertThrows(() => constructComponentDescriptor(prepared, "Slot", { held: { $type: "Base", name: "Ada" } }), "Expected Slot props.held to be a concrete type extending Base, got abstract 'Base'.");
+    // An intermediate abstract record passes the base check and is still a type with no values.
+    assertThrows(() => constructComponentDescriptor(prepared, "Slot", { held: { $type: "Middle", name: "Ada" } }), "Expected Slot props.held to be a concrete type extending Base, got abstract 'Middle'.");
+    const derived = { $type: "Derived", name: "Ada" };
+    assertEqual(constructComponentDescriptor(prepared, "Slot", { held: derived }), {
+        $type: "Slot",
+        held: derived,
+    });
+});
+test("binds list-typed content as a list whatever the child count", () => {
+    const module = program.modules[0];
+    const listType = { kind: "array", element: stringType };
+    const listBody = {
+        name: "body",
+        slot: "Stack:prop:0",
+        ty: listType,
+        isContent: true,
+        isRequired: true,
+        span: sourceSpan,
+    };
+    const optionalListBody = {
+        name: "body",
+        slot: "OptionalStack:prop:0",
+        ty: { kind: "nullable", inner: listType },
+        isContent: true,
+        isRequired: false,
+        span: sourceSpan,
+    };
+    const scalarBody = {
+        name: "body",
+        slot: "Caption:prop:0",
+        ty: stringType,
+        isContent: true,
+        isRequired: true,
+        span: sourceSpan,
+    };
+    function externalComponent(id, name, field) {
+        return {
+            id,
+            reference: ref(name, id, "component"),
+            span: sourceSpan,
+            kind: {
+                tag: "component",
+                isAbstract: false,
+                isExternal: true,
+                props: [{ ...field, ownerModule: "m0" }],
+                state: [],
+            },
+        };
+    }
+    function descriptorFunction(id, name, component, componentId, children) {
+        return {
+            id,
+            reference: ref(name, id, "function"),
+            span: sourceSpan,
+            kind: {
+                tag: "function",
+                params: [],
+                body: expr({
+                    tag: "componentDescriptor",
+                    component: ref(component, componentId, "component"),
+                    targetKind: "external",
+                    properties: [],
+                    contentField: "body",
+                    content: children.map((child) => lit(child)),
+                }),
+            },
+        };
+    }
+    const listProgram = {
+        ...program,
+        functionEntrypoints: [
+            ...program.functionEntrypoints,
+            { name: "oneChild", reference: ref("oneChild", "m0:d23", "function") },
+            { name: "manyChildren", reference: ref("manyChildren", "m0:d24", "function") },
+            { name: "optionalOneChild", reference: ref("optionalOneChild", "m0:d25", "function") },
+            { name: "scalarOneChild", reference: ref("scalarOneChild", "m0:d26", "function") },
+            { name: "recordOneChild", reference: ref("recordOneChild", "m0:d27", "function") },
+        ],
+        componentEntrypoints: [
+            ...program.componentEntrypoints,
+            { name: "Stack", reference: ref("Stack", "m0:d20", "component") },
+        ],
+        modules: [
+            {
+                ...module,
+                declarations: [
+                    ...module.declarations,
+                    externalComponent("m0:d20", "Stack", listBody),
+                    externalComponent("m0:d21", "OptionalStack", optionalListBody),
+                    externalComponent("m0:d22", "Caption", scalarBody),
+                    descriptorFunction("m0:d23", "oneChild", "Stack", "m0:d20", ["only"]),
+                    descriptorFunction("m0:d24", "manyChildren", "Stack", "m0:d20", ["first", "second"]),
+                    descriptorFunction("m0:d25", "optionalOneChild", "OptionalStack", "m0:d21", ["only"]),
+                    descriptorFunction("m0:d26", "scalarOneChild", "Caption", "m0:d22", ["only"]),
+                    {
+                        id: "m0:d27",
+                        reference: ref("recordOneChild", "m0:d27", "function"),
+                        span: sourceSpan,
+                        kind: {
+                            tag: "function",
+                            params: [],
+                            body: expr({
+                                tag: "record",
+                                name: "StackRecord",
+                                fields: [{ ...listBody, slot: "StackRecord:field:0" }],
+                                properties: [],
+                                contentField: "body",
+                                content: [lit("only")],
+                            }),
+                        },
+                    },
+                ],
+            },
+        ],
+    };
+    const prepared = prepareNxIrProgram(listProgram);
+    assertEqual(evaluateFunction(prepared, "oneChild"), { $type: "Stack", body: ["only"] });
+    assertEqual(evaluateFunction(prepared, "manyChildren"), { $type: "Stack", body: ["first", "second"] });
+    assertEqual(evaluateFunction(prepared, "optionalOneChild"), { $type: "OptionalStack", body: ["only"] });
+    assertEqual(evaluateFunction(prepared, "scalarOneChild"), { $type: "Caption", body: "only" });
+    assertEqual(evaluateFunction(prepared, "recordOneChild"), { $type: "StackRecord", body: ["only"] });
+    assertEqual(constructComponentDescriptor(prepared, "Stack", {}, ["only"]), {
+        $type: "Stack",
+        body: ["only"],
+    });
+    assertEqual(constructComponentDescriptor(prepared, "Stack", {}, ["first", "second"]), {
+        $type: "Stack",
+        body: ["first", "second"],
+    });
 });
 for (const [name, run] of tests) {
     run();

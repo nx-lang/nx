@@ -7,11 +7,10 @@ use crate::ast::{
     BinOp, Expr, Literal, MatchArm, OrderedFloat, RecordLiteralProperty, Stmt, TypeRef, UnOp,
 };
 use crate::{
-    Component, ComponentEmit, ComponentEmitKind, Element, EnumDef, EnumMember, ExprId, Function,
-    Import, ImportKind, Item, LoweredModule, LoweringDiagnostic, Name, Param, Property,
-    PropertyConditionArm, PropertyEntry, PropertyMatchArm, RecordDef, RecordField, RecordKind,
-    SelectiveImport, SourceId, TypeAlias, UnionCaseDef, UnionCaseField, UnionDef, ValueDef,
-    Visibility,
+    Component, ComponentEmit, ComponentEmitKind, Element, ExprId, Function, Import, ImportKind,
+    Item, LoweredModule, LoweringDiagnostic, Name, Param, Property, PropertyConditionArm,
+    PropertyEntry, PropertyMatchArm, RecordDef, RecordField, RecordKind, SelectiveImport, SourceId,
+    TypeAlias, UnionCaseDef, UnionCaseField, UnionDef, ValueDef, Visibility,
 };
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_syntax::{SyntaxKind, SyntaxNode};
@@ -24,10 +23,11 @@ use smol_str::SmolStr;
 /// allocating expressions and handling errors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TypeTag {
-    I32,
     Int,
-    F32,
-    Float,
+    Int32,
+    Int64,
+    Float32,
+    Float64,
     Boolean,
     String,
     Null,
@@ -37,18 +37,16 @@ enum TypeTag {
 impl TypeTag {
     fn from_type_ref(ty: &TypeRef) -> Self {
         match ty {
-            TypeRef::Name(name) => {
-                let lower = name.as_str().to_ascii_lowercase();
-                match lower.as_str() {
-                    "string" => TypeTag::String,
-                    "i32" => TypeTag::I32,
-                    "i64" | "int" => TypeTag::Int,
-                    "f32" => TypeTag::F32,
-                    "f64" | "float" => TypeTag::Float,
-                    "bool" => TypeTag::Boolean,
-                    _ => TypeTag::Unknown,
-                }
-            }
+            TypeRef::Name(name) => match name.as_str() {
+                "string" => TypeTag::String,
+                "int" => TypeTag::Int,
+                "int32" => TypeTag::Int32,
+                "int64" => TypeTag::Int64,
+                "float32" => TypeTag::Float32,
+                "float64" => TypeTag::Float64,
+                "boolean" => TypeTag::Boolean,
+                _ => TypeTag::Unknown,
+            },
             TypeRef::Nullable(inner) => TypeTag::from_type_ref(inner),
             _ => TypeTag::Unknown,
         }
@@ -56,14 +54,19 @@ impl TypeTag {
 
     fn combine_numeric(lhs: TypeTag, rhs: TypeTag) -> TypeTag {
         match (lhs, rhs) {
-            // Same-category integer promotion
-            (TypeTag::I32, TypeTag::I32) => TypeTag::I32,
-            (TypeTag::I32, TypeTag::Int) | (TypeTag::Int, TypeTag::I32) => TypeTag::Int,
-            (TypeTag::Int, TypeTag::Int) => TypeTag::Int,
+            // Same-category integer promotion, by the rank order int32 < int < int64
+            (TypeTag::Int64, TypeTag::Int32 | TypeTag::Int | TypeTag::Int64)
+            | (TypeTag::Int32 | TypeTag::Int, TypeTag::Int64) => TypeTag::Int64,
+            (TypeTag::Int, TypeTag::Int32 | TypeTag::Int) | (TypeTag::Int32, TypeTag::Int) => {
+                TypeTag::Int
+            }
+            (TypeTag::Int32, TypeTag::Int32) => TypeTag::Int32,
             // Same-category float promotion
-            (TypeTag::F32, TypeTag::F32) => TypeTag::F32,
-            (TypeTag::F32, TypeTag::Float) | (TypeTag::Float, TypeTag::F32) => TypeTag::Float,
-            (TypeTag::Float, TypeTag::Float) => TypeTag::Float,
+            (TypeTag::Float32, TypeTag::Float32) => TypeTag::Float32,
+            (TypeTag::Float32, TypeTag::Float64) | (TypeTag::Float64, TypeTag::Float32) => {
+                TypeTag::Float64
+            }
+            (TypeTag::Float64, TypeTag::Float64) => TypeTag::Float64,
             _ => TypeTag::Unknown,
         }
     }
@@ -169,6 +172,19 @@ impl LoweringContext {
     fn lower_pattern_expr(&mut self, node: SyntaxNode) -> ExprId {
         let pattern_node = node.children().next().unwrap_or(node);
         if pattern_node.kind() == SyntaxKind::QUALIFIED_NAME {
+            // A single-segment pattern is a contextual name resolved against the scrutinee's type,
+            // not a lexical identifier. Qualified patterns (`LoadState.idle`) keep their existing
+            // member-access lowering.
+            let text = pattern_node.text();
+            if !text.contains('.') {
+                let name = Name::new(text.trim());
+                if !name.as_str().is_empty() {
+                    return self.alloc_expr(Expr::ContextualName {
+                        name,
+                        span: pattern_node.span(),
+                    });
+                }
+            }
             self.lower_qualified_name_expr(pattern_node)
         } else {
             self.lower_expr(pattern_node)
@@ -203,6 +219,23 @@ impl LoweringContext {
             }
         }
         TypeTag::Unknown
+    }
+
+    /// Folds `-` applied directly to a numeric literal into a negative literal.
+    ///
+    /// Returns `None` for any other operand, so negation of a non-literal stays a unary operation.
+    /// Folding everywhere — unbraced, braced, and inside a larger expression — keeps a single
+    /// lowered representation for `-1.0`, `{-1.0}`, and the `-90` in `{-90 + rotation}`.
+    fn fold_negated_literal(&mut self, operand: ExprId) -> Option<ExprId> {
+        let folded = match self.module.expr(operand) {
+            Expr::Literal(Literal::Int(value)) => Literal::Int(value.wrapping_neg()),
+            Expr::Literal(Literal::Float(value)) => Literal::Float(OrderedFloat(-value.0)),
+            _ => return None,
+        };
+        let ty = self.expr_type(operand);
+        let expr = self.alloc_expr(Expr::Literal(folded));
+        self.set_expr_type(expr, ty);
+        Some(expr)
     }
 
     fn set_expr_type(&mut self, expr: ExprId, ty: TypeTag) {
@@ -854,7 +887,7 @@ impl LoweringContext {
                     expr
                 } else if let Ok(value) = text.parse::<f64>() {
                     let expr = self.alloc_expr(Expr::Literal(Literal::Float(OrderedFloat(value))));
-                    self.set_expr_type(expr, TypeTag::Float);
+                    self.set_expr_type(expr, TypeTag::Float64);
                     expr
                 } else {
                     self.error_expr(node.span())
@@ -1006,6 +1039,12 @@ impl LoweringContext {
                         }
                     });
 
+                if op == UnOp::Neg {
+                    if let Some(folded) = self.fold_negated_literal(expr) {
+                        return folded;
+                    }
+                }
+
                 let expr_id = self.alloc_expr(Expr::UnaryOp {
                     op,
                     expr,
@@ -1016,7 +1055,11 @@ impl LoweringContext {
                 let result_ty = match op {
                     UnOp::Not => TypeTag::Boolean,
                     UnOp::Neg => match operand_ty {
-                        TypeTag::I32 | TypeTag::Int | TypeTag::F32 | TypeTag::Float => operand_ty,
+                        TypeTag::Int
+                        | TypeTag::Int32
+                        | TypeTag::Int64
+                        | TypeTag::Float32
+                        | TypeTag::Float64 => operand_ty,
                         _ => TypeTag::Unknown,
                     },
                 };
@@ -1145,6 +1188,27 @@ impl LoweringContext {
                 .children()
                 .next()
                 .map(|n| self.lower_expr(n))
+                .unwrap_or_else(|| self.error_expr(node.span())),
+
+            // A bare name written where a literal is required. Deliberately not `Expr::Ident`:
+            // it resolves against the expected type at its binding site, not against lexical scope.
+            SyntaxKind::CONTEXTUAL_NAME => {
+                let name = Name::new(node.text().trim());
+                self.alloc_expr(Expr::ContextualName {
+                    name,
+                    span: node.span(),
+                })
+            }
+
+            // `-` directly before a numeric literal, folded to a negative literal.
+            SyntaxKind::SIGNED_NUMERIC_LITERAL => node
+                .children()
+                .find(|n| !matches!(n.kind(), SyntaxKind::MINUS))
+                .map(|n| {
+                    let operand = self.lower_expr(n);
+                    self.fold_negated_literal(operand)
+                        .unwrap_or_else(|| self.error_expr(node.span()))
+                })
                 .unwrap_or_else(|| self.error_expr(node.span())),
 
             SyntaxKind::VALUE_EXPRESSION | SyntaxKind::VALUE_EXPR | SyntaxKind::RHS_EXPRESSION => {
@@ -1477,34 +1541,6 @@ impl LoweringContext {
         }
     }
 
-    /// Lowers an enum definition node.
-    pub fn lower_enum_definition(&self, node: SyntaxNode) -> EnumDef {
-        let name = node
-            .child_by_field("name")
-            .map(|n| Name::new(n.text()))
-            .unwrap_or_else(|| Name::new("unknown"));
-
-        let members = node
-            .child_by_field("members")
-            .map(|list| {
-                list.children()
-                    .filter(|child| child.kind() == SyntaxKind::ENUM_MEMBER)
-                    .map(|child| EnumMember {
-                        name: Name::new(child.text()),
-                        span: child.span(),
-                    })
-                    .collect()
-            })
-            .unwrap_or_else(Vec::new);
-
-        EnumDef {
-            name,
-            visibility: Self::lower_visibility(node),
-            members,
-            span: node.span(),
-        }
-    }
-
     /// Lowers a discriminated union definition node.
     pub fn lower_union_definition(&mut self, node: SyntaxNode) -> UnionDef {
         let name = node
@@ -1706,6 +1742,9 @@ impl LoweringContext {
                         component: component.name.clone(),
                         emit: emit.name.clone(),
                         action_name: emit.action_name.clone(),
+                        // A binding lowered from source reaches a component declared in this same
+                        // module, so the emit it names is declared here too.
+                        action_module_identity: None,
                         body,
                         span: child.span(),
                     })
@@ -1966,10 +2005,6 @@ impl LoweringContext {
                     let action = self.lower_action_definition(child);
                     self.module.add_item(Item::Record(action));
                 }
-                SyntaxKind::ENUM_DEFINITION => {
-                    let enum_def = self.lower_enum_definition(child);
-                    self.module.add_item(Item::Enum(enum_def));
-                }
                 SyntaxKind::UNION_DEFINITION => {
                     let union_def = self.lower_union_definition(child);
                     self.module.add_item(Item::Union(union_def));
@@ -2159,7 +2194,7 @@ private action SaveRequested = {}
 export component <SearchBox /> = { <input /> }
 type Theme = string
 private let <Render /> = <div />
-enum Mode = light | dark"#;
+type Mode = light | dark"#;
         let parse_result = parse_str(source, "visibility.nx");
 
         let tree = parse_result.tree.expect("Visibility source should parse");
@@ -2268,7 +2303,7 @@ enum Mode = light | dark"#;
 
     #[test]
     fn test_lower_function_with_multiple_params() {
-        let source = "let <Button text:string disabled:bool /> = <button />";
+        let source = "let <Button text:string disabled:boolean /> = <button />";
         let parse_result = parse_str(source, "test.nx");
 
         let tree = parse_result.tree.unwrap();
@@ -2457,10 +2492,10 @@ enum Mode = light | dark"#;
     }
 
     #[test]
-    fn test_lower_type_alias_and_enum() {
+    fn test_lower_type_alias_and_union() {
         let source = r#"
             type UserId = string
-            enum Direction = | north | south | east | west
+            type Direction = north | south | east | west
         "#;
         let parse_result = parse_str(source, "types.nx");
         let tree = parse_result.tree.expect("Should parse enum/type defs");
@@ -2477,17 +2512,21 @@ enum Mode = light | dark"#;
         }
 
         match &module.items()[1] {
-            Item::Enum(enum_def) => {
-                assert_eq!(enum_def.name.as_str(), "Direction");
-                let names: Vec<_> = enum_def
-                    .members
+            Item::Union(union_def) => {
+                assert_eq!(union_def.name.as_str(), "Direction");
+                assert!(
+                    union_def.is_constant_union(),
+                    "an enum lowers to a constant union"
+                );
+                let names: Vec<_> = union_def
+                    .cases
                     .iter()
-                    .map(|member| member.name.as_str())
+                    .map(|case| case.name.as_str())
                     .collect();
                 assert!(names.contains(&"north"));
                 assert!(names.contains(&"west"));
             }
-            other => panic!("Expected enum definition, got {:?}", other),
+            other => panic!("Expected union definition, got {:?}", other),
         }
     }
 
@@ -2499,7 +2538,7 @@ enum Mode = light | dark"#;
               | clicked {
                   x:int
                   y:int
-                  retryable:bool = true
+                  retryable:boolean = true
                 }
               | closed
         "#;
@@ -2541,7 +2580,7 @@ enum Mode = light | dark"#;
 
     #[test]
     fn test_prepared_union_binds_only_union_name_in_type_namespace() {
-        let source = "export type LoadState = | idle | failed { message:string }";
+        let source = "export type LoadState = idle | failed { message:string }";
         let parse_result = parse_str(source, "union-binding.nx");
         assert!(parse_result.is_ok(), "Union source should parse");
         let tree = parse_result.tree.expect("Should parse union source");
@@ -2854,7 +2893,11 @@ enum Mode = light | dark"#;
             .expect("Should lower SearchSubmitted action");
 
         let shape = effective_record_shape(&prepared, action).expect("Action shape should resolve");
-        let ancestors: Vec<_> = shape.ancestors.iter().map(|name| name.as_str()).collect();
+        let ancestors: Vec<_> = shape
+            .ancestors
+            .iter()
+            .map(|ancestor| ancestor.name.as_str())
+            .collect();
         assert_eq!(ancestors, vec!["SearchAction", "InputAction"]);
     }
 
@@ -3398,29 +3441,30 @@ enum Mode = light | dark"#;
     }
 
     #[test]
-    fn test_lower_enum_with_leading_pipe() {
+    fn test_lower_union_with_leading_pipe() {
         let source = r#"
-            enum Orientation = | horizontal | vertical
+            type Orientation = horizontal | vertical
         "#;
         let parse_result = parse_str(source, "enum-lead.nx");
         let tree = parse_result.tree.expect("Should parse enum");
         let root = tree.root();
         let module = lower(root, SourceId::new(0));
 
-        let enums: Vec<_> = module
+        let unions: Vec<_> = module
             .items()
             .iter()
             .filter_map(|item| match item {
-                Item::Enum(def) => Some(def),
+                Item::Union(def) => Some(def),
                 _ => None,
             })
             .collect();
-        assert_eq!(enums.len(), 1);
-        let enum_def = enums[0];
-        assert_eq!(enum_def.name.as_str(), "Orientation");
-        assert_eq!(enum_def.members.len(), 2);
-        assert_eq!(enum_def.members[0].name.as_str(), "horizontal");
-        assert_eq!(enum_def.members[1].name.as_str(), "vertical");
+        assert_eq!(unions.len(), 1);
+        let union_def = unions[0];
+        assert_eq!(union_def.name.as_str(), "Orientation");
+        assert!(union_def.is_constant_union());
+        assert_eq!(union_def.cases.len(), 2);
+        assert_eq!(union_def.cases[0].name.as_str(), "horizontal");
+        assert_eq!(union_def.cases[1].name.as_str(), "vertical");
     }
 
     #[test]
@@ -3762,7 +3806,7 @@ enum Mode = light | dark"#;
     #[test]
     fn test_lower_dynamic_element_content_is_preserved() {
         let source = r#"
-            let <Panel flag:bool items:object /> = <div>
+            let <Panel flag:boolean items:object /> = <div>
               {<A /> <B />}
               if flag { <Shown /> } else { <Hidden /> }
               for item in items { <Row /> }
@@ -4064,7 +4108,7 @@ enum Mode = light | dark"#;
     #[test]
     fn test_lower_ternary_expression() {
         // Ternary: condition ? consequent : alternative
-        let source = "let choose(cond:bool): int = { cond ? 1 : 0 }";
+        let source = "let choose(cond:boolean): int = { cond ? 1 : 0 }";
         let parse_result = parse_str(source, "test.nx");
 
         assert!(
@@ -4556,7 +4600,7 @@ enum Mode = light | dark"#;
     fn test_lower_component_preserves_modifier_base_and_optional_body_metadata() {
         let source = r#"
             abstract component <SearchBase placeholder:string emits { ValueChanged { value:string } } />
-            external component <SearchBox extends SearchBase showSearchIcon:bool = true />
+            external component <SearchBox extends SearchBase showSearchIcon:boolean = true />
             abstract external component <RemoteSearchBase />
         "#;
 

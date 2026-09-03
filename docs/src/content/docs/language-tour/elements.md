@@ -36,18 +36,20 @@ let isLoading = true
 
 - Use `{}` to embed any expression (including `if`).
 - Use inline markup for attribute values when richer structure is needed.
+- A single element is a value like any other, so it needs no braces: `padding=<Thickness Left=4.0/>`.
+  Braces are what turn several of them into a sequence.
 
 ## Attributes can be conditional groups
 
 Conditional property fragments choose a set of attributes without repeating the element call.
 
 ```nx
-type LoadState = | idle | failed { message:string }
+type LoadState = idle | failed { message:string }
 
 let <Notice message:string tone:string density:string /> =
   <aside tone={tone}>{message}</aside>
 
-let view(state:LoadState, compact:bool) =
+let view(state:LoadState, compact:boolean) =
   <Notice
     if state is {
       LoadState.failed => message={state.message} tone="danger"

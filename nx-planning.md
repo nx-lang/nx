@@ -44,7 +44,7 @@ High-level product vision, syntax overviews, and core language concepts now live
 - Create meaningful type error messages
 
 **Type System:**
-- Primitive types: string, int, float, bool, void, object
+- Primitive types: string, int, int32, int64, float32, float64, boolean, void, object
 - Sequence types: T[] (sequences are the primary collection type)
 - Function types: (T1, T2) => T3
 - Nullable types: T?

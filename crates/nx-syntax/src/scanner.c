@@ -54,33 +54,6 @@ void tree_sitter_nx_external_scanner_deserialize(void *payload, const char *buff
 }
 
 /**
- * Check if we're at the start of an HTML/XML entity.
- * Entities: &name; or &#digits; or &#xhex;
- */
-static bool is_entity_start(TSLexer *lexer) {
-  if (lexer->lookahead != '&') return false;
-
-  // Peek ahead to see if it looks like an entity
-  lexer->advance(lexer, false);
-
-  if (lexer->lookahead == '#') {
-    lexer->advance(lexer, false);
-    // Numeric entity: &#10; or &#x0A;
-    if (lexer->lookahead == 'x' || lexer->lookahead == 'X') {
-      lexer->advance(lexer, false);
-      return (lexer->lookahead >= '0' && lexer->lookahead <= '9') ||
-             (lexer->lookahead >= 'a' && lexer->lookahead <= 'f') ||
-             (lexer->lookahead >= 'A' && lexer->lookahead <= 'F');
-    }
-    return lexer->lookahead >= '0' && lexer->lookahead <= '9';
-  }
-
-  // Named entity: &amp; &lt; etc.
-  return (lexer->lookahead >= 'a' && lexer->lookahead <= 'z') ||
-         (lexer->lookahead >= 'A' && lexer->lookahead <= 'Z');
-}
-
-/**
  * Scan an HTML/XML entity.
  * Returns true if a complete entity was scanned.
  */
@@ -216,22 +189,27 @@ bool tree_sitter_nx_external_scanner_scan(void *payload, TSLexer *lexer, const b
     }
   }
 
+  // Scan text chunk
+  bool has_content = false;
+
   // Check for entities
   if (lexer->lookahead == '&' && allow_entity) {
-    // Save position in case entity scan fails
     if (scan_entity(lexer)) {
       lexer->result_symbol = ENTITY;
       return true;
     }
-    // If entity scan failed, fall through to text chunk
+    if (!allow_any_chunk) {
+      return false;
+    }
+    // The '&' opened no entity. A scan cannot hand characters back, so whatever scan_entity
+    // consumed is ordinary text and the chunk carries on from where it stopped.
+    has_content = true;
+    lexer->mark_end(lexer);
   }
 
   if (!allow_any_chunk) {
     return false;
   }
-
-  // Scan text chunk
-  bool has_content = false;
 
   // Consume characters until we hit a delimiter
   while (lexer->lookahead != 0) {
@@ -242,18 +220,22 @@ bool tree_sitter_nx_external_scanner_scan(void *payload, TSLexer *lexer, const b
     }
 
     if (embed_mode && lexer->lookahead == '@') {
-      // Check for typed text braced-value opener "@{"
-      TSLexer saved = *lexer;
+      // "@{" opens a braced value, so the chunk stops short of the '@'; a lone '@' is text.
+      // Marking the end before consuming is what leaves the '@' out, since the position a scan
+      // has advanced past cannot be recovered.
+      lexer->mark_end(lexer);
       lexer->advance(lexer, false);
       if (lexer->lookahead == '{') {
-        *lexer = saved;
         if (has_content) {
           lexer->result_symbol = chunk_kind;
           return true;
         }
         return false;
       }
-      *lexer = saved;
+
+      has_content = true;
+      lexer->mark_end(lexer);
+      continue;
     }
 
     // Stop at braced-value delimiters
@@ -278,21 +260,12 @@ bool tree_sitter_nx_external_scanner_scan(void *payload, TSLexer *lexer, const b
       continue;
     }
 
-    // Stop at entity start (let entity scanner handle it)
-    if (lexer->lookahead == '&' && allow_entity) {
-      // Check if it looks like an entity
-      TSLexer saved = *lexer;
-      if (is_entity_start(lexer)) {
-        // Restore lexer position
-        *lexer = saved;
-        if (has_content) {
-          lexer->result_symbol = chunk_kind;
-          return true;
-        }
-        return false;
-      }
-      // Not an entity, restore and include in text
-      *lexer = saved;
+    // Stop at entity start. Whether this '&' opens an entity takes more lookahead than a scan can
+    // take back, so the chunk ends here and the next scan starts on the '&' and decides.
+    if (lexer->lookahead == '&' && allow_entity && has_content) {
+      lexer->mark_end(lexer);
+      lexer->result_symbol = chunk_kind;
+      return true;
     }
 
     // Include this character in text chunk

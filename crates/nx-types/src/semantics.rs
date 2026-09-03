@@ -33,7 +33,7 @@ pub fn common_supertype(lhs: &Type, rhs: &Type) -> Type {
 }
 
 pub fn is_object_type(ty: &Type) -> bool {
-    matches!(ty, Type::Named(name) if name.as_str().eq_ignore_ascii_case("object"))
+    matches!(ty, Type::Named(named) if named.name.as_str() == "object")
 }
 
 pub fn type_satisfies_expected(actual: &Type, expected: &Type) -> bool {
@@ -97,15 +97,14 @@ where
 }
 
 fn builtin_type(name: &Name) -> Option<Type> {
-    match name.as_str().to_ascii_lowercase().as_str() {
+    match name.as_str() {
         "string" => Some(Type::string()),
-        "i32" => Some(Type::i32()),
-        "i64" => Some(Type::i64()),
         "int" => Some(Type::int()),
-        "f32" => Some(Type::f32()),
-        "f64" => Some(Type::f64()),
-        "float" => Some(Type::float()),
-        "bool" => Some(Type::bool()),
+        "int32" => Some(Type::int32()),
+        "int64" => Some(Type::int64()),
+        "float32" => Some(Type::float32()),
+        "float64" => Some(Type::float64()),
+        "boolean" => Some(Type::boolean()),
         "void" => Some(Type::void()),
         _ => None,
     }
@@ -117,22 +116,25 @@ mod tests {
 
     #[test]
     fn test_common_supertype_promotes_integer_widths() {
-        assert_eq!(common_supertype(&Type::i32(), &Type::int()), Type::int());
         assert_eq!(
-            common_supertype(&Type::f32(), &Type::float()),
-            Type::float()
+            common_supertype(&Type::int32(), &Type::int64()),
+            Type::int64()
+        );
+        assert_eq!(
+            common_supertype(&Type::float32(), &Type::float64()),
+            Type::float64()
         );
     }
 
     #[test]
     fn test_common_supertype_promotes_nested_array_items() {
         assert_eq!(
-            common_supertype(&Type::array(Type::i32()), &Type::array(Type::int())),
-            Type::array(Type::int())
+            common_supertype(&Type::array(Type::int32()), &Type::array(Type::int64())),
+            Type::array(Type::int64())
         );
         assert_eq!(
-            common_supertype(&Type::array(Type::f32()), &Type::array(Type::float())),
-            Type::array(Type::float())
+            common_supertype(&Type::array(Type::float32()), &Type::array(Type::float64())),
+            Type::array(Type::float64())
         );
     }
 
@@ -185,20 +187,76 @@ mod tests {
     }
 
     #[test]
-    fn test_builtin_type_is_case_insensitive() {
-        assert_eq!(builtin_type(&Name::new("String")), Some(Type::string()));
-        assert_eq!(builtin_type(&Name::new("INT")), Some(Type::int()));
-        assert_eq!(builtin_type(&Name::new("Bool")), Some(Type::bool()));
+    fn test_common_supertype_follows_the_integer_rank_order() {
+        assert_eq!(common_supertype(&Type::int32(), &Type::int()), Type::int());
+        assert_eq!(common_supertype(&Type::int(), &Type::int32()), Type::int());
+        assert_eq!(
+            common_supertype(&Type::int(), &Type::int64()),
+            Type::int64()
+        );
+        assert_eq!(
+            common_supertype(&Type::int64(), &Type::int()),
+            Type::int64()
+        );
+        assert_eq!(
+            common_supertype(&Type::array(Type::int32()), &Type::array(Type::int())),
+            Type::array(Type::int())
+        );
+    }
+
+    #[test]
+    fn test_former_spellings_are_not_builtin_types() {
+        for name in ["i32", "i64", "f32", "f64", "float", "bool"] {
+            assert_eq!(
+                builtin_type(&Name::new(name)),
+                None,
+                "'{}' must no longer resolve to a primitive type",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn test_canonical_names_are_builtin_types() {
+        assert_eq!(builtin_type(&Name::new("int")), Some(Type::int()));
+        assert_eq!(builtin_type(&Name::new("int32")), Some(Type::int32()));
+        assert_eq!(builtin_type(&Name::new("int64")), Some(Type::int64()));
+        assert_eq!(builtin_type(&Name::new("float32")), Some(Type::float32()));
+        assert_eq!(builtin_type(&Name::new("float64")), Some(Type::float64()));
+        assert_eq!(builtin_type(&Name::new("boolean")), Some(Type::boolean()));
+        assert_eq!(builtin_type(&Name::new("string")), Some(Type::string()));
+        assert_eq!(builtin_type(&Name::new("void")), Some(Type::void()));
+    }
+
+    #[test]
+    fn test_capitalized_spellings_are_not_builtin_types() {
+        for name in [
+            "String", "Int", "INT", "INT64", "Int64", "Boolean", "Float64", "Void",
+        ] {
+            assert_eq!(
+                builtin_type(&Name::new(name)),
+                None,
+                "'{}' must not resolve to a primitive type; primitive names are case-sensitive",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn test_object_is_matched_case_sensitively() {
+        assert!(is_object_type(&Type::named("object")));
+        assert!(!is_object_type(&Type::named("Object")));
+        assert!(!is_object_type(&Type::named("OBJECT")));
     }
 
     #[test]
     fn test_resolve_type_ref_with_uses_builtin_and_callback_resolution() {
         let type_ref = ast::TypeRef::function(
             vec![
-                ast::TypeRef::name("String"),
+                ast::TypeRef::name("string"),
                 ast::TypeRef::array(ast::TypeRef::name("Custom")),
             ],
-            ast::TypeRef::nullable(ast::TypeRef::name("BOOL")),
+            ast::TypeRef::nullable(ast::TypeRef::name("boolean")),
         );
 
         let resolved =
@@ -208,7 +266,7 @@ mod tests {
             resolved,
             Type::function(
                 vec![Type::string(), Type::array(Type::named("Custom"))],
-                Type::nullable(Type::bool())
+                Type::nullable(Type::boolean())
             )
         );
     }

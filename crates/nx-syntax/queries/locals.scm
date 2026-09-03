@@ -39,7 +39,7 @@
 (action_definition
   name: (identifier) @local.definition)
 
-(enum_definition
+(union_definition
   name: (identifier) @local.definition)
 
 (record_definition

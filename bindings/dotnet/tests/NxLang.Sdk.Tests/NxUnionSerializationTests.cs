@@ -44,17 +44,22 @@ internal sealed class CardSortModeWireFormat : INxEnumWireFormat<CardSortMode>
     }
 }
 
-[JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
-[JsonDerivedType(typeof(LoadStateIdle), "LoadState.idle")]
-[JsonDerivedType(typeof(LoadStateFailed), "LoadState.failed")]
+// A mixed union: `idle` declares no fields and the union declares no base, so it is a constant
+// case and its wire form is the bare string "idle". `failed` carries a payload and keeps the
+// `$type` map. The converter is what admits both shapes.
+[JsonConverter(typeof(NxPolymorphicJsonConverter<LoadState>))]
+[NxUnionCase(typeof(LoadStateIdle), "LoadState.idle")]
+[NxUnionCase(typeof(LoadStateFailed), "LoadState.failed")]
 [MessagePackFormatter(typeof(NxPolymorphicMessagePackFormatter<LoadState>))]
 internal abstract class LoadState
 {
 }
 
+[NxConstantCase("idle")]
 [MessagePackFormatter(typeof(NxPolymorphicConcreteMessagePackFormatter<LoadState, LoadStateIdle>))]
 internal sealed class LoadStateIdle : LoadState
 {
+    public static readonly LoadStateIdle Instance = new();
 }
 
 [MessagePackFormatter(typeof(NxPolymorphicConcreteMessagePackFormatter<LoadState, LoadStateFailed>))]
@@ -199,37 +204,105 @@ public class NxUnionSerializationTests
         Assert.Equal("Offline", failed.Message);
     }
 
+    /// <summary>
+    /// A constant case carries the bare authored string on the wire, and it does so whether its
+    /// union is wholly constant or mixes constant cases with payload ones. Those two declarations
+    /// are the same value shape, which is why one declaration form suffices for both.
+    /// </summary>
     [Fact]
-    public void RawEnumAndFieldlessUnionResults_UseDifferentWireShapes()
+    public void RawConstantCaseResults_UseTheBareStringWireShape()
     {
-        JsonElement enumJson = NxRuntime.EvaluateJson(EnumSource);
-        JsonElement unionJson = NxRuntime.EvaluateJson(FieldlessUnionSource);
-        byte[] enumBytes = NxRuntime.EvaluateBytes(EnumSource);
-        byte[] unionBytes = NxRuntime.EvaluateBytes(FieldlessUnionSource);
-        MessagePackReader unionReader = new(new ReadOnlySequence<byte>(unionBytes));
+        JsonElement constantUnionJson = NxRuntime.EvaluateJson(ConstantUnionSource);
+        JsonElement mixedUnionJson = NxRuntime.EvaluateJson(FieldlessUnionSource);
+        byte[] constantUnionBytes = NxRuntime.EvaluateBytes(ConstantUnionSource);
+        byte[] mixedUnionBytes = NxRuntime.EvaluateBytes(FieldlessUnionSource);
 
-        Assert.Equal(JsonValueKind.String, enumJson.ValueKind);
-        Assert.Equal("closed", enumJson.GetString());
-        Assert.Equal(JsonValueKind.Object, unionJson.ValueKind);
-        Assert.Equal("LoadState.idle", unionJson.GetProperty("$type").GetString());
+        Assert.Equal(JsonValueKind.String, constantUnionJson.ValueKind);
+        Assert.Equal("closed", constantUnionJson.GetString());
+        Assert.Equal(JsonValueKind.String, mixedUnionJson.ValueKind);
+        Assert.Equal("idle", mixedUnionJson.GetString());
+
         Assert.Equal(
             "closed",
             MessagePackSerializer.Deserialize<string>(
-                enumBytes,
+                constantUnionBytes,
                 cancellationToken: TestContext.Current.CancellationToken));
-        Assert.Equal(MessagePackType.Map, unionReader.NextMessagePackType);
+        Assert.Equal(
+            "idle",
+            MessagePackSerializer.Deserialize<string>(
+                mixedUnionBytes,
+                cancellationToken: TestContext.Current.CancellationToken));
+    }
 
-        Dictionary<string, object?> payload =
-            MessagePackSerializer.Deserialize<Dictionary<string, object?>>(
-                unionBytes,
-                cancellationToken: TestContext.Current.CancellationToken);
+    /// <summary>A mixed union round-trips through JSON in both of its shapes.</summary>
+    [Fact]
+    public void TypedJsonMixedUnion_RoundTripsBothShapes()
+    {
+        string constantJson = JsonSerializer.Serialize<LoadState>(LoadStateIdle.Instance);
+        Assert.Equal("\"idle\"", constantJson);
 
-        Assert.Single(payload);
-        Assert.Equal("LoadState.idle", Assert.IsType<string>(payload["$type"]));
+        string payloadJson = JsonSerializer.Serialize<LoadState>(new LoadStateFailed { Message = "Offline" });
+        using (JsonDocument document = JsonDocument.Parse(payloadJson))
+        {
+            Assert.Equal("LoadState.failed", document.RootElement.GetProperty("$type").GetString());
+        }
+
+        Assert.IsType<LoadStateIdle>(JsonSerializer.Deserialize<LoadState>(constantJson));
+        LoadStateFailed failed = Assert.IsType<LoadStateFailed>(
+            JsonSerializer.Deserialize<LoadState>(payloadJson));
+        Assert.Equal("Offline", failed.Message);
+    }
+
+    /// <summary>A mixed union round-trips through MessagePack in both of its shapes.</summary>
+    [Fact]
+    public void TypedMessagePackMixedUnion_RoundTripsBothShapes()
+    {
+        byte[] constantBytes = MessagePackSerializer.Serialize<LoadState>(
+            LoadStateIdle.Instance,
+            cancellationToken: TestContext.Current.CancellationToken);
+        MessagePackReader constantReader = new(new ReadOnlySequence<byte>(constantBytes));
+        Assert.Equal(MessagePackType.String, constantReader.NextMessagePackType);
+        Assert.Equal(
+            "idle",
+            MessagePackSerializer.Deserialize<string>(
+                constantBytes,
+                cancellationToken: TestContext.Current.CancellationToken));
+
+        byte[] payloadBytes = MessagePackSerializer.Serialize<LoadState>(
+            new LoadStateFailed { Message = "Offline" },
+            cancellationToken: TestContext.Current.CancellationToken);
+        MessagePackReader payloadReader = new(new ReadOnlySequence<byte>(payloadBytes));
+        Assert.Equal(MessagePackType.Map, payloadReader.NextMessagePackType);
+
+        Assert.IsType<LoadStateIdle>(
+            MessagePackSerializer.Deserialize<LoadState>(
+                constantBytes,
+                cancellationToken: TestContext.Current.CancellationToken));
+        LoadStateFailed failed = Assert.IsType<LoadStateFailed>(
+            MessagePackSerializer.Deserialize<LoadState>(
+                payloadBytes,
+                cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal("Offline", failed.Message);
+    }
+
+    /// <summary>An unknown bare case name is rejected rather than silently accepted.</summary>
+    [Fact]
+    public void UnknownConstantCaseName_IsRejected()
+    {
+        Assert.Throws<JsonException>(
+            () => JsonSerializer.Deserialize<LoadState>("\"sparkly\""));
+
+        byte[] unknown = MessagePackSerializer.Serialize(
+            "sparkly",
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Throws<MessagePackSerializationException>(
+            () => MessagePackSerializer.Deserialize<LoadState>(
+                unknown,
+                cancellationToken: TestContext.Current.CancellationToken));
     }
 
     [Fact]
-    public void TypedEnumWorkflow_RemainsBareStringBased()
+    public void TypedConstantUnionWorkflow_RemainsBareStringBased()
     {
         string json = JsonSerializer.Serialize(CardSortMode.Closed);
         byte[] bytes = MessagePackSerializer.Serialize(
@@ -266,8 +339,8 @@ public class NxUnionSerializationTests
         let root(): LoadState = { LoadState.idle }
         """;
 
-    private const string EnumSource = """
-        enum CardSortMode = | open | closed
+    private const string ConstantUnionSource = """
+        type CardSortMode = open | closed
 
         let root() = { CardSortMode.closed }
         """;

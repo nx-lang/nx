@@ -26,8 +26,6 @@ pub enum SymbolKind {
     Parameter,
     /// A type definition
     Type,
-    /// An enum member
-    EnumMember,
 }
 
 impl SymbolKind {
@@ -39,7 +37,6 @@ impl SymbolKind {
             SymbolKind::Variable => "variable",
             SymbolKind::Parameter => "parameter",
             SymbolKind::Type => "type",
-            SymbolKind::EnumMember => "enum member",
         }
     }
 }
@@ -272,10 +269,9 @@ fn symbol_kind_from_prepared_kind(kind: PreparedItemKind) -> SymbolKind {
         PreparedItemKind::Function => SymbolKind::Function,
         PreparedItemKind::Value => SymbolKind::Variable,
         PreparedItemKind::Component => SymbolKind::Component,
-        PreparedItemKind::TypeAlias
-        | PreparedItemKind::Enum
-        | PreparedItemKind::Union
-        | PreparedItemKind::Record => SymbolKind::Type,
+        PreparedItemKind::TypeAlias | PreparedItemKind::Union | PreparedItemKind::Record => {
+            SymbolKind::Type
+        }
     }
 }
 
@@ -286,7 +282,6 @@ fn resolved_item_span(item: &crate::ResolvedPreparedItem) -> Option<TextSpan> {
             Item::Value(value) => value.span,
             Item::Component(component) => component.span,
             Item::TypeAlias(alias) => alias.span,
-            Item::Enum(enum_def) => enum_def.span,
             Item::Union(union_def) => union_def.span,
             Item::Record(record) => record.span,
         }),
@@ -295,7 +290,6 @@ fn resolved_item_span(item: &crate::ResolvedPreparedItem) -> Option<TextSpan> {
             | crate::InterfaceItemKind::Value { span, .. }
             | crate::InterfaceItemKind::Component { span, .. }
             | crate::InterfaceItemKind::TypeAlias { span, .. }
-            | crate::InterfaceItemKind::Enum { span, .. }
             | crate::InterfaceItemKind::Union { span, .. }
             | crate::InterfaceItemKind::Record { span, .. } => *span,
         }),
@@ -334,40 +328,59 @@ impl<'a> UndefinedIdentifierChecker<'a> {
                 }
                 Item::Component(component) => {
                     let scope = self.scope_manager.create_child(self.scope_manager.root());
-                    let mut symbols =
-                        crate::effective_component_contract_for_name(self.module, &component.name)
-                            .ok()
-                            .flatten()
-                            .map(|contract| {
-                                contract
-                                    .props
-                                    .into_iter()
-                                    .map(|field| (field.name, SymbolKind::Parameter, field.span))
-                                    .collect::<Vec<_>>()
-                            })
-                            .unwrap_or_else(|| {
-                                component
-                                    .props
-                                    .iter()
-                                    .map(|field| {
-                                        (field.name.clone(), SymbolKind::Parameter, field.span)
-                                    })
-                                    .collect::<Vec<_>>()
-                            });
-                    symbols.extend(
+                    let props = crate::effective_component_contract_for_name(
+                        self.module,
+                        &component.name,
+                    )
+                    .ok()
+                    .flatten()
+                    .map(|contract| {
+                        contract
+                            .props
+                            .into_iter()
+                            .map(|field| (field.name, field.span))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_else(|| {
                         component
-                            .state
+                            .props
                             .iter()
-                            .map(|field| (field.name.clone(), SymbolKind::Variable, field.span)),
-                    );
-                    for (name, kind, span) in symbols {
-                        self.scope_manager_define(scope, name, kind, span);
+                            .map(|field| (field.name.clone(), field.span))
+                            .collect::<Vec<_>>()
+                    });
+
+                    // A default is built where the field it defaults is materialized: the props in
+                    // order, then the state. So a default sees the fields before it and nothing
+                    // else — naming a later one has no value to read at the moment it runs, which
+                    // is why the name is reported here rather than left to fail at run time.
+                    for (name, span) in props {
+                        if let Some(default) = component
+                            .props
+                            .iter()
+                            .find(|field| field.name == name)
+                            .and_then(|field| field.default)
+                        {
+                            self.check_expr(default, scope);
+                        }
+                        self.scope_manager_define(scope, name, SymbolKind::Parameter, span);
                     }
+                    for field in &component.state {
+                        if let Some(default) = field.default {
+                            self.check_expr(default, scope);
+                        }
+                        self.scope_manager_define(
+                            scope,
+                            field.name.clone(),
+                            SymbolKind::Variable,
+                            field.span,
+                        );
+                    }
+
                     if let Some(body) = component.body {
                         self.check_expr(body, scope);
                     }
                 }
-                Item::TypeAlias(_) | Item::Enum(_) | Item::Union(_) | Item::Record(_) => {}
+                Item::TypeAlias(_) | Item::Union(_) | Item::Record(_) => {}
             }
         }
     }
@@ -414,7 +427,14 @@ impl<'a> UndefinedIdentifierChecker<'a> {
 
     fn check_expr(&mut self, expr_id: ExprId, scope: ScopeId) {
         match self.module.raw_module().expr(expr_id) {
-            ast::Expr::Literal(_) | ast::Expr::Error(_) => {}
+            // A contextual name resolves against the expected type at its binding site, never
+            // against lexical scope, so it is deliberately not checked for an undefined name here.
+            // Nor is the resolved case it becomes: it carries its declaring origin instead of a
+            // name that has to be visible.
+            ast::Expr::Literal(_)
+            | ast::Expr::ContextualName { .. }
+            | ast::Expr::ResolvedUnionCase { .. }
+            | ast::Expr::Error(_) => {}
             ast::Expr::Ident(name) => {
                 if self.scope_manager.resolve(name, scope).is_none() {
                     self.report_undefined(name, self.module.raw_module().expr_span(expr_id));
@@ -915,7 +935,7 @@ mod tests {
     #[test]
     fn property_fragment_condition_branch_identifiers_are_checked() {
         let source = r#"
-            let render(showLabel:bool, label:string) = {
+            let render(showLabel:boolean, label:string) = {
                 <Button if showLabel { text={label} } />
             }
         "#;
@@ -939,7 +959,7 @@ mod tests {
     #[test]
     fn property_fragment_match_branch_reports_undefined_identifier() {
         let source = r#"
-            type LoadState = | idle | failed { message:string }
+            type LoadState = idle | failed { message:string }
             let render(state:LoadState) = {
                 <Notice if state is {
                     LoadState.failed => message={missing}

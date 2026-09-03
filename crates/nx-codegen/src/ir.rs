@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 pub const NX_IR_FORMAT_ID: &str = "nx-ir-json";
-pub const NX_IR_SCHEMA_VERSION: u32 = 1;
+pub const NX_IR_SCHEMA_VERSION: u32 = 2;
 pub const NX_IR_RUNTIME_ABI: &str = "nx-ir-runtime-v1";
 pub const NX_IR_REQUIRED_FEATURE_EAGER_V1: &str = "eager-v1";
 
@@ -137,15 +137,25 @@ pub enum NxIrDeclarationKind {
         value: NxIrExpression,
         ty: Option<NxIrSemanticType>,
     },
-    Enum {
-        members: Vec<String>,
-    },
     Record {
         fields: Vec<NxIrRecordField>,
+        /// The record's abstract bases, nearest first.
+        ///
+        /// Fields arrive already flattened, so this answers only what flattening cannot: a value
+        /// stamped with this record's name is acceptable wherever any of these is expected.
+        bases: Vec<NxIrReference>,
+        /// Whether the record was declared `abstract`, and so has no values of its own.
+        ///
+        /// A base-typed site accepts a value of a record that extends this one, never one of this
+        /// one. Analysis holds that line for NX source; this is how a runtime holds it for host
+        /// input.
+        is_abstract: bool,
     },
     Component(NxIrComponent),
     Union {
         cases: Vec<NxIrUnionCase>,
+        /// The union's abstract bases, nearest first, inherited by every case.
+        bases: Vec<NxIrReference>,
     },
     TypeAlias,
 }
@@ -203,6 +213,11 @@ pub struct NxIrComponentField {
 pub struct NxIrUnionCase {
     pub name: String,
     pub fields: Vec<NxIrRecordField>,
+    /// Whether this case declares no fields in a union that declares no base.
+    ///
+    /// This is what decides the wire shape: a constant case is a bare string, every other case
+    /// is a `$type` object.
+    pub is_constant: bool,
     pub span: NxIrSourceSpan,
 }
 
@@ -295,10 +310,6 @@ pub enum NxIrExpressionOp {
         properties: Vec<NxIrProperty>,
         content_field: Option<String>,
         content: Vec<NxIrExpression>,
-    },
-    EnumMember {
-        enumeration: NxIrReference,
-        member: String,
     },
     IntrinsicElement {
         element_id: String,
@@ -409,10 +420,6 @@ pub enum NxIrSemanticTypeShape {
     },
     Named {
         name: String,
-    },
-    Enum {
-        name: String,
-        members: Vec<String>,
     },
     Union {
         name: String,
@@ -623,7 +630,7 @@ fn collect_ir_unsupported_diagnostics(
         CodegenDeclarationKind::Value { value, .. } => {
             collect_ir_expression_unsupported_diagnostics(module, value, diagnostics);
         }
-        CodegenDeclarationKind::Record { fields } => {
+        CodegenDeclarationKind::Record { fields, .. } => {
             collect_ir_record_field_unsupported_diagnostics(module, fields, diagnostics);
         }
         CodegenDeclarationKind::Component(component) => {
@@ -641,12 +648,12 @@ fn collect_ir_unsupported_diagnostics(
                 collect_ir_expression_unsupported_diagnostics(module, body, diagnostics);
             }
         }
-        CodegenDeclarationKind::Union { cases } => {
+        CodegenDeclarationKind::Union { cases, .. } => {
             for case in cases {
                 collect_ir_record_field_unsupported_diagnostics(module, &case.fields, diagnostics);
             }
         }
-        CodegenDeclarationKind::Enum { .. } | CodegenDeclarationKind::TypeAlias => {}
+        CodegenDeclarationKind::TypeAlias => {}
     }
 }
 
@@ -809,9 +816,7 @@ fn collect_ir_expression_unsupported_diagnostics(
                 collect_ir_expression_unsupported_diagnostics(module, content, diagnostics);
             }
         }
-        CodegenExpressionKind::Literal(_)
-        | CodegenExpressionKind::Identifier { .. }
-        | CodegenExpressionKind::EnumMember { .. } => {}
+        CodegenExpressionKind::Literal(_) | CodegenExpressionKind::Identifier { .. } => {}
     }
 }
 
@@ -884,10 +889,11 @@ fn ir_declaration(
                 ty: ty.as_ref().map(ir_semantic_type),
             }
         }
-        CodegenDeclarationKind::Enum { members } => NxIrDeclarationKind::Enum {
-            members: members.clone(),
-        },
-        CodegenDeclarationKind::Record { fields } => {
+        CodegenDeclarationKind::Record {
+            fields,
+            bases,
+            is_abstract,
+        } => {
             let scope = SlotScope::new();
             NxIrDeclarationKind::Record {
                 fields: ir_record_fields(
@@ -898,6 +904,8 @@ fn ir_declaration(
                     fields,
                     &scope,
                 ),
+                bases: bases.iter().map(ir_reference).collect(),
+                is_abstract: *is_abstract,
             }
         }
         CodegenDeclarationKind::Component(component) => {
@@ -909,7 +917,7 @@ fn ir_declaration(
                 context,
             ))
         }
-        CodegenDeclarationKind::Union { cases } => NxIrDeclarationKind::Union {
+        CodegenDeclarationKind::Union { cases, bases } => NxIrDeclarationKind::Union {
             cases: cases
                 .iter()
                 .enumerate()
@@ -923,6 +931,7 @@ fn ir_declaration(
                     )
                 })
                 .collect(),
+            bases: bases.iter().map(ir_reference).collect(),
         },
         CodegenDeclarationKind::TypeAlias | CodegenDeclarationKind::Unsupported(_) => {
             NxIrDeclarationKind::TypeAlias
@@ -1098,6 +1107,7 @@ fn ir_union_case(
             &case.fields,
             &SlotScope::new(),
         ),
+        is_constant: case.is_constant,
         span: ir_span(source, case.span),
     }
 }
@@ -1386,13 +1396,6 @@ fn ir_expression(
             member: member.clone(),
             reference: reference.as_ref().map(ir_reference),
         },
-        CodegenExpressionKind::EnumMember {
-            enum_reference,
-            member,
-        } => NxIrExpressionOp::EnumMember {
-            enumeration: ir_reference(enum_reference),
-            member: member.clone(),
-        },
         CodegenExpressionKind::UnionCase {
             union_reference,
             case_name,
@@ -1400,6 +1403,7 @@ fn ir_expression(
             properties,
             content_field,
             content,
+            ..
         } => NxIrExpressionOp::UnionCase {
             union: ir_reference(union_reference),
             case_name: case_name.clone(),
@@ -1736,16 +1740,8 @@ fn ir_semantic_type_shape(ty: &Type) -> NxIrSemanticTypeShape {
             params: params.iter().map(ir_semantic_type).collect(),
             return_type: Box::new(ir_semantic_type(ret)),
         },
-        Type::Named(name) => NxIrSemanticTypeShape::Named {
-            name: name.as_str().to_string(),
-        },
-        Type::Enum(enum_ty) => NxIrSemanticTypeShape::Enum {
-            name: enum_ty.name.as_str().to_string(),
-            members: enum_ty
-                .members
-                .iter()
-                .map(|member| member.as_str().to_string())
-                .collect(),
+        Type::Named(named) => NxIrSemanticTypeShape::Named {
+            name: named.name.as_str().to_string(),
         },
         Type::Union(union_ty) => NxIrSemanticTypeShape::Union {
             name: union_ty.name.as_str().to_string(),
@@ -1761,7 +1757,8 @@ fn ir_semantic_type_shape(ty: &Type) -> NxIrSemanticTypeShape {
             case_name: case_ty.case.as_str().to_string(),
         },
         Type::Variable(id) => NxIrSemanticTypeShape::Variable { id: *id },
-        Type::Unknown => NxIrSemanticTypeShape::Unknown,
+        // Never survives type analysis; treated as unknown if it somehow reaches IR.
+        Type::ContextualName(_) | Type::Unknown => NxIrSemanticTypeShape::Unknown,
         Type::Error => NxIrSemanticTypeShape::Error,
     }
 }
@@ -1813,7 +1810,6 @@ fn resolved_item_kind_name(kind: ResolvedItemKind) -> &'static str {
         ResolvedItemKind::Value => "value",
         ResolvedItemKind::Component => "component",
         ResolvedItemKind::TypeAlias => "typeAlias",
-        ResolvedItemKind::Enum => "enum",
         ResolvedItemKind::Union => "union",
         ResolvedItemKind::Record => "record",
     }
@@ -1821,14 +1817,13 @@ fn resolved_item_kind_name(kind: ResolvedItemKind) -> &'static str {
 
 fn primitive_name(primitive: Primitive) -> &'static str {
     match primitive {
-        Primitive::I32 => "i32",
-        Primitive::I64 => "i64",
         Primitive::Int => "int",
-        Primitive::F32 => "f32",
-        Primitive::F64 => "f64",
-        Primitive::Float => "float",
+        Primitive::Int32 => "int32",
+        Primitive::Int64 => "int64",
+        Primitive::Float32 => "float32",
+        Primitive::Float64 => "float64",
         Primitive::String => "string",
-        Primitive::Bool => "bool",
+        Primitive::Boolean => "boolean",
         Primitive::Void => "void",
     }
 }

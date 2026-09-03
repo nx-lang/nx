@@ -1,0 +1,221 @@
+// NX UI MVP — document model and shared value types (library `core`)
+//
+// Part of docs/drawnui-proposal: a consolidated, NX-only view of the object model proposed in
+// ../../NX-Drawn-UI-MVP-Object-Model-Proposal.md, for reading the model as NX without the prose
+// interleaved. Section numbers in comments refer to that proposal, which remains normative for
+// meaning, defaults a renderer resolves, containment rules, and validation.
+//
+// Three libraries, the layout of the proposal's Appendix A:
+//
+//   core/core.nx           the document model (§4) and the shared value types (§5) — this file
+//   ui/ui.nx               the Level 2 output/layout catalog, `nx.ui@0.1.0` (§7)
+//   graphics/graphics.nx   the Level 1 graphics catalog, `nx.graphics@0.1.0` (§6)
+//
+// Three libraries rather than three files in one library, because a library has a flat name space
+// and `Text` and `Image` deliberately exist in both catalogs (§7). `graphics` imports `UiCommon`
+// from `ui` because `Drawing` is the element that carries a graphics scene into a laid-out box;
+// nothing flows the other way. Each library checks with `nxlang typegen`. What does not work yet is
+// *using* an imported external component at a call site — Appendix B's NXE12 and NXE13 — so a
+// document written against both catalogs cannot be type-checked today; declaring them, as here,
+// is fine.
+//
+// These declarations are the shape, not the contract. Ranges, patterns, and counts — `ElementId`'s
+// regex, `opacity` in 0..1, `fontWeight` in 1..1000, "at least two gradient stops" — are invisible
+// to NX's type system and stay in the JSON Schema. Comments marked "NX gap" record where NX cannot
+// yet spell the model; the proposal's Appendix B has the detail.
+
+
+
+// ---------------------------------------------------------------------------
+// Document model (§4)
+// ---------------------------------------------------------------------------
+
+export type ElementId = string      // ^[A-Za-z_][A-Za-z0-9_.-]{0,63}$
+
+// NX gap: `elements` is a map from ElementId to Element on the wire. NX has no map type, so the
+// listing uses a sequence, which loses key uniqueness and O(1) lookup. It costs little in practice:
+// this is the model's only map-typed site, and NX authors the nested form rather than the flat map.
+export type NxUiDocument = {
+  format: string = "nx-ui-json"
+  schemaVersion: string = "0.1.0"
+  catalogs: CatalogUse[]
+  root: ElementId
+  elements: Element[]
+  metadata: DocumentMetadata?
+}
+
+export type CatalogUse = {
+  id: string                        // reverse-DNS catalog ID: `nx.ui`, `nx.graphics`
+  version: string                   // exact semantic version; MVP core version is 0.1.0
+}
+
+export type DocumentMetadata = {
+  title: string?
+  description: string?
+  generator: string?
+}
+
+// `Element` has no NX declaration (§4.4): an element *is* a component invocation, and the
+// type/props/children envelope is what a compiler emits from it. It appears in the two catalogs as
+// the type of every `content` property, standing for "any element this component accepts."
+
+
+// ---------------------------------------------------------------------------
+// Geometry and sizing (§5.1)
+// ---------------------------------------------------------------------------
+
+// `start`/`end` rather than `left`/`right` so layout can adapt to writing direction; `Insets` keeps
+// physical `left`/`right` because the MVP has no bidirectional text policy.
+export type Alignment = start | center | end | stretch
+export type AlignSelf = auto | start | center | end | stretch
+export type Anchor = start | center | end
+export type Axis = horizontal | vertical
+export type Distribution = start | center | end | spaceBetween | spaceAround | spaceEvenly
+export type ObjectFit = contain | cover | fill | none | scaleDown
+export type FontStyle = normal | italic
+
+// `auto` is intrinsic sizing; percentages resolve against the containing content box, and a
+// percentage against an intrinsically sized parent resolves as `auto`, so layout never depends on a
+// circular constraint. No calc(), no viewport units, no arbitrary strings.
+//
+// NX gap: the wire form also allows a bare scalar (`120`) and a string (`"auto"`, `"50%"`).
+// NX union cases are named, so a union cannot mix a numeric scalar with an alternative shape.
+export type Length =
+  | auto
+  | px { value: float64 }
+  | percent { value: float64 }
+
+export type Point = {
+  x: float64
+  y: float64
+}
+
+export type ViewBox = {
+  x: float64
+  y: float64
+  width: float64                    // must be positive
+  height: float64                   // must be positive
+}
+
+// NX gap: the wire form also allows one scalar meaning all four sides, so `padding: 20` here has to
+// name every side. That shorthand is most of the token cost of a generated layout.
+export type Insets = {
+  top: float64 = 0.0
+  right: float64 = 0.0
+  bottom: float64 = 0.0
+  left: float64 = 0.0
+}
+
+export type CornerRadii = {
+  topLeft: float64 = 0.0
+  topRight: float64 = 0.0
+  bottomRight: float64 = 0.0
+  bottomLeft: float64 = 0.0
+}
+
+
+// ---------------------------------------------------------------------------
+// Color and paint (§5.2)
+// ---------------------------------------------------------------------------
+
+// The portable subset of CSS Color 4: named colors, `transparent`, hex, rgb()/rgba(), hsl()/hsla().
+// Renderers normalize; CSS-wide keywords and environment-dependent values are invalid.
+export type Color = string
+
+export type GradientUnits = objectBoundingBox | userSpaceOnUse
+
+export type GradientStop = {
+  offset: float64                   // 0..1
+  color: Color
+  opacity: float64 = 1.0            // 0..1
+}
+
+// At least two stops, in non-decreasing offset order; renderers clamp offsets but must not reorder.
+// Terms and coordinate modes follow SVG gradients.
+export type Paint =
+  | none
+  | solid { color: Color }
+  | linearGradient {
+      x1: float64
+      y1: float64
+      x2: float64
+      y2: float64
+      units: GradientUnits = objectBoundingBox
+      stops: GradientStop[]
+    }
+  | radialGradient {
+      cx: float64
+      cy: float64
+      r: float64
+      fx: float64?
+      fy: float64?
+      units: GradientUnits = objectBoundingBox
+      stops: GradientStop[]
+    }
+
+
+// ---------------------------------------------------------------------------
+// Stroke, shadow, transform, border (§5.3)
+// ---------------------------------------------------------------------------
+
+export type LineCap = butt | round | square
+export type LineJoin = miter | round | bevel
+
+// A stroke is scaled by the transforms in effect, as in SVG; there is no MVP equivalent of
+// `vector-effect: non-scaling-stroke`.
+//
+// NX gap: `T[]?` rather than `T[] = []` here and throughout — NX has no empty-sequence literal, in
+// any position, so "defaults to empty" is spelled nullable.
+export type Stroke = {
+  paint: Paint
+  width: float64 = 1.0
+  lineCap: LineCap = butt
+  lineJoin: LineJoin = miter
+  miterLimit: float64 = 4.0
+  dashArray: float64[]?
+  dashOffset: float64 = 0.0
+}
+
+export type Shadow = {
+  color: Color
+  offsetX: float64 = 0.0
+  offsetY: float64 = 0.0
+  blur: float64 = 0.0               // >= 0
+}
+
+// Equivalent to an SVG transform list read left to right: matrices concatenate in array order, so
+// the *last* entry is the one applied first to the node's own geometry. `rotate` is positive
+// clockwise in NX's y-down space, matching SVG.
+//
+// NX gap: a default cannot reference a sibling property, so `scale.y` cannot default to `scale.x`.
+export type Transform =
+  | translate { x: float64 y: float64 }
+  | scale { x: float64 y: float64? }        // null y means uniform scale
+  | rotate { degrees: float64 cx: float64 = 0.0 cy: float64 = 0.0 }
+  | skewX { degrees: float64 }
+  | skewY { degrees: float64 }
+  | matrix { a: float64 b: float64 c: float64 d: float64 e: float64 f: float64 }
+
+export type Border = {
+  paint: Paint
+  width: float64 = 1.0
+}
+
+
+// ---------------------------------------------------------------------------
+// Image source and accessibility (§5.4)
+// ---------------------------------------------------------------------------
+
+// The host, not the generated document, controls permitted schemes, domains, authentication, fetch
+// limits, caching, and decoding. Inline base64 is deliberately omitted, to hold down both token
+// volume and denial-of-service risk.
+export type ImageSource =
+  | uri { uri: string }
+  | resource { name: string }       // trusted host resource registry
+
+// Renderers derive semantic roles from component types; the MVP allows no arbitrary ARIA roles.
+export type Accessibility = {
+  label: string?
+  description: string?
+  hidden: boolean = false           // true means decorative / ignored by accessibility APIs
+}

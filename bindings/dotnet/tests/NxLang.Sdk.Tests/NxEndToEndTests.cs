@@ -225,7 +225,7 @@ public class NxEndToEndTests
         NxGeneratedNxIr ir = artifact.GenerateNxIr();
 
         Assert.Contains("\"format\": \"nx-ir-json\"", ir.Json, StringComparison.Ordinal);
-        Assert.Equal(1, ir.Metadata.SchemaVersion);
+        Assert.Equal(2, ir.Metadata.SchemaVersion);
         Assert.Equal("nx-ir-runtime-v1", ir.Metadata.RuntimeAbi);
         Assert.True(ir.Metadata.ProgramFingerprint > 0);
         NxIrEntrypointMetadata entrypoint = Assert.Single(ir.Metadata.FunctionEntrypoints);

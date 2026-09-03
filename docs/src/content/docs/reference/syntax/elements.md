@@ -12,7 +12,12 @@ This page describes element syntax and attribute rules. For full grammar, see [n
 <Input value={user.name} disabled={isLocked}/>
 ```
 
-- Attributes accept any expression inside `{}`; string literals may be provided without braces.
+- A property value needs no braces when it is a literal, a negated numeric literal, a union case
+  name, or a single element: `variant="primary"`, `count=3`, `tone=primary`,
+  `padding=<Thickness Left=4.0/>`.
+- Braces hold any other expression, and they hold sequences: `value={user.name}`,
+  `points={ <Point x=0 y=0/> <Point x=1 y=1/> }`. A sequence keeps its braces even when it holds a
+  single item, which is also how a sequence-valued property formats.
 - Attribute names are case-sensitive and must match the component signature.
 
 ## Nested Markup in Attributes
@@ -128,10 +133,11 @@ property during invocation.
 
 ```nx
 <UserCard user=<User id="456" name="Jane" email="jane@example.com"/> />
-<DrawingCanvas points=<><Point x=10 y=20/> <Point x=30 y=40/></> />
+<DrawingCanvas points={ <Point x=10 y=20/> <Point x=30 y=40/> } />
 ```
 
-Attributes may receive typed objects or sequences when the signature permits.
+Attributes may receive typed objects or sequences when the signature permits. A single object
+stands on its own; a sequence goes in braces.
 
 ## See also
 - Language Tour: [Elements](/language-tour/elements)

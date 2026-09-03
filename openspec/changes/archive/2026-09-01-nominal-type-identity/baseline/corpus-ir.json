@@ -1,0 +1,2150 @@
+{
+  "examples/nx/complex.nx": {
+    "diagnostics": [
+      {
+        "message": "Expected identifier here",
+        "severity": "error"
+      },
+      {
+        "message": "Expected identifier here",
+        "severity": "error"
+      },
+      {
+        "message": "Invalid element syntax",
+        "severity": "error"
+      },
+      {
+        "message": "Invalid element syntax",
+        "severity": "error"
+      },
+      {
+        "message": "Syntax error",
+        "severity": "error"
+      },
+      {
+        "message": "Element closing tag 'button' does not match opening tag 'div'",
+        "severity": "error"
+      },
+      {
+        "message": "Missing workspace module or loaded library 'home/bret/src/nx/examples/nx/ui' in the supplied build context",
+        "severity": "error"
+      },
+      {
+        "message": "Missing workspace module or loaded library 'home/bret/src/nx/examples/nx/utils' in the supplied build context",
+        "severity": "error"
+      },
+      {
+        "message": "Undefined identifier 'UtilsFormatting'",
+        "severity": "error"
+      },
+      {
+        "message": "Undefined identifier 'filter'",
+        "severity": "error"
+      },
+      {
+        "message": "Undefined identifier 'filter'",
+        "severity": "error"
+      }
+    ],
+    "ir": {}
+  },
+  "examples/nx/component.nx": {
+    "diagnostics": [
+      {
+        "message": "conditional element property fragments are not supported by executable codegen yet",
+        "severity": "error"
+      },
+      {
+        "message": "action-handler codegen is not supported by this non-reactive executable target",
+        "severity": "error"
+      }
+    ],
+    "ir": {}
+  },
+  "examples/nx/conditionals.nx": {
+    "diagnostics": [],
+    "ir": {
+      "conditionals.nxir.json": {
+        "componentEntrypoints": [],
+        "format": "nx-ir-json",
+        "functionEntrypoints": [
+          {
+            "name": "StatusBadge",
+            "reference": {
+              "declaration": "m0:d0",
+              "kind": "function",
+              "module": "m0",
+              "name": "StatusBadge"
+            }
+          }
+        ],
+        "modules": [
+          {
+            "declarations": [
+              {
+                "kind": {
+                  "body": {
+                    "op": {
+                      "content": [
+                        {
+                          "op": {
+                            "condition": {
+                              "op": {
+                                "lhs": {
+                                  "op": {
+                                    "name": "count",
+                                    "tag": "slot"
+                                  },
+                                  "span": {},
+                                  "ty": null
+                                },
+                                "operator": "gt",
+                                "rhs": {
+                                  "op": {
+                                    "tag": "literal",
+                                    "value": {
+                                      "kind": "int",
+                                      "number": 0,
+                                      "value": "0"
+                                    }
+                                  },
+                                  "span": {},
+                                  "ty": null
+                                },
+                                "tag": "binary"
+                              },
+                              "span": {},
+                              "ty": null
+                            },
+                            "elseBranch": {
+                              "op": {
+                                "content": [
+                                  {
+                                    "op": {
+                                      "tag": "literal",
+                                      "value": {
+                                        "kind": "string",
+                                        "value": "-"
+                                      }
+                                    },
+                                    "span": {},
+                                    "ty": null
+                                  }
+                                ],
+                                "elementId": "m0:element:1",
+                                "properties": [
+                                  {
+                                    "name": "class",
+                                    "span": {},
+                                    "value": {
+                                      "op": {
+                                        "tag": "literal",
+                                        "value": {
+                                          "kind": "string",
+                                          "value": "empty"
+                                        }
+                                      },
+                                      "span": {},
+                                      "ty": null
+                                    }
+                                  }
+                                ],
+                                "tag": "intrinsicElement",
+                                "tagName": "span"
+                              },
+                              "span": {},
+                              "ty": null
+                            },
+                            "tag": "if",
+                            "thenBranch": {
+                              "op": {
+                                "content": [
+                                  {
+                                    "op": {
+                                      "name": "count",
+                                      "tag": "slot"
+                                    },
+                                    "span": {},
+                                    "ty": null
+                                  }
+                                ],
+                                "elementId": "m0:element:0",
+                                "properties": [
+                                  {
+                                    "name": "class",
+                                    "span": {},
+                                    "value": {
+                                      "op": {
+                                        "tag": "literal",
+                                        "value": {
+                                          "kind": "string",
+                                          "value": "count"
+                                        }
+                                      },
+                                      "span": {},
+                                      "ty": null
+                                    }
+                                  }
+                                ],
+                                "tag": "intrinsicElement",
+                                "tagName": "span"
+                              },
+                              "span": {},
+                              "ty": null
+                            }
+                          },
+                          "span": {},
+                          "ty": null
+                        },
+                        {
+                          "op": {
+                            "arms": [
+                              {
+                                "body": {
+                                  "op": {
+                                    "content": [
+                                      {
+                                        "op": {
+                                          "tag": "literal",
+                                          "value": {
+                                            "kind": "string",
+                                            "value": "Active"
+                                          }
+                                        },
+                                        "span": {},
+                                        "ty": null
+                                      }
+                                    ],
+                                    "elementId": "m0:element:2",
+                                    "properties": [
+                                      {
+                                        "name": "class",
+                                        "span": {},
+                                        "value": {
+                                          "op": {
+                                            "tag": "literal",
+                                            "value": {
+                                              "kind": "string",
+                                              "value": "active"
+                                            }
+                                          },
+                                          "span": {},
+                                          "ty": null
+                                        }
+                                      }
+                                    ],
+                                    "tag": "intrinsicElement",
+                                    "tagName": "span"
+                                  },
+                                  "span": {},
+                                  "ty": null
+                                },
+                                "patterns": [
+                                  {
+                                    "op": {
+                                      "tag": "literal",
+                                      "value": {
+                                        "kind": "string",
+                                        "value": "active"
+                                      }
+                                    },
+                                    "span": {},
+                                    "ty": null
+                                  }
+                                ]
+                              },
+                              {
+                                "body": {
+                                  "op": {
+                                    "content": [
+                                      {
+                                        "op": {
+                                          "tag": "literal",
+                                          "value": {
+                                            "kind": "string",
+                                            "value": "Pending"
+                                          }
+                                        },
+                                        "span": {},
+                                        "ty": null
+                                      }
+                                    ],
+                                    "elementId": "m0:element:3",
+                                    "properties": [
+                                      {
+                                        "name": "class",
+                                        "span": {},
+                                        "value": {
+                                          "op": {
+                                            "tag": "literal",
+                                            "value": {
+                                              "kind": "string",
+                                              "value": "pending"
+                                            }
+                                          },
+                                          "span": {},
+                                          "ty": null
+                                        }
+                                      }
+                                    ],
+                                    "tag": "intrinsicElement",
+                                    "tagName": "span"
+                                  },
+                                  "span": {},
+                                  "ty": null
+                                },
+                                "patterns": [
+                                  {
+                                    "op": {
+                                      "tag": "literal",
+                                      "value": {
+                                        "kind": "string",
+                                        "value": "pending"
+                                      }
+                                    },
+                                    "span": {},
+                                    "ty": null
+                                  }
+                                ]
+                              },
+                              {
+                                "body": {
+                                  "op": {
+                                    "content": [
+                                      {
+                                        "op": {
+                                          "tag": "literal",
+                                          "value": {
+                                            "kind": "string",
+                                            "value": "Error"
+                                          }
+                                        },
+                                        "span": {},
+                                        "ty": null
+                                      }
+                                    ],
+                                    "elementId": "m0:element:4",
+                                    "properties": [
+                                      {
+                                        "name": "class",
+                                        "span": {},
+                                        "value": {
+                                          "op": {
+                                            "tag": "literal",
+                                            "value": {
+                                              "kind": "string",
+                                              "value": "error"
+                                            }
+                                          },
+                                          "span": {},
+                                          "ty": null
+                                        }
+                                      }
+                                    ],
+                                    "tag": "intrinsicElement",
+                                    "tagName": "span"
+                                  },
+                                  "span": {},
+                                  "ty": null
+                                },
+                                "patterns": [
+                                  {
+                                    "op": {
+                                      "tag": "literal",
+                                      "value": {
+                                        "kind": "string",
+                                        "value": "error"
+                                      }
+                                    },
+                                    "span": {},
+                                    "ty": null
+                                  }
+                                ]
+                              }
+                            ],
+                            "elseBranch": {
+                              "op": {
+                                "content": [
+                                  {
+                                    "op": {
+                                      "tag": "literal",
+                                      "value": {
+                                        "kind": "string",
+                                        "value": "Unknown"
+                                      }
+                                    },
+                                    "span": {},
+                                    "ty": null
+                                  }
+                                ],
+                                "elementId": "m0:element:5",
+                                "properties": [
+                                  {
+                                    "name": "class",
+                                    "span": {},
+                                    "value": {
+                                      "op": {
+                                        "tag": "literal",
+                                        "value": {
+                                          "kind": "string",
+                                          "value": "unknown"
+                                        }
+                                      },
+                                      "span": {},
+                                      "ty": null
+                                    }
+                                  }
+                                ],
+                                "tag": "intrinsicElement",
+                                "tagName": "span"
+                              },
+                              "span": {},
+                              "ty": null
+                            },
+                            "scrutinee": {
+                              "op": {
+                                "name": "status",
+                                "tag": "slot"
+                              },
+                              "span": {},
+                              "ty": null
+                            },
+                            "tag": "ifIs"
+                          },
+                          "span": {},
+                          "ty": null
+                        },
+                        {
+                          "op": {
+                            "condition": {
+                              "op": {
+                                "lhs": {
+                                  "op": {
+                                    "name": "count",
+                                    "tag": "slot"
+                                  },
+                                  "span": {},
+                                  "ty": null
+                                },
+                                "operator": "eq",
+                                "rhs": {
+                                  "op": {
+                                    "tag": "literal",
+                                    "value": {
+                                      "kind": "int",
+                                      "number": 0,
+                                      "value": "0"
+                                    }
+                                  },
+                                  "span": {},
+                                  "ty": null
+                                },
+                                "tag": "binary"
+                              },
+                              "span": {},
+                              "ty": null
+                            },
+                            "elseBranch": {
+                              "op": {
+                                "condition": {
+                                  "op": {
+                                    "lhs": {
+                                      "op": {
+                                        "name": "count",
+                                        "tag": "slot"
+                                      },
+                                      "span": {},
+                                      "ty": null
+                                    },
+                                    "operator": "lt",
+                                    "rhs": {
+                                      "op": {
+                                        "tag": "literal",
+                                        "value": {
+                                          "kind": "int",
+                                          "number": 10,
+                                          "value": "10"
+                                        }
+                                      },
+                                      "span": {},
+                                      "ty": null
+                                    },
+                                    "tag": "binary"
+                                  },
+                                  "span": {},
+                                  "ty": null
+                                },
+                                "elseBranch": {
+                                  "op": {
+                                    "condition": {
+                                      "op": {
+                                        "lhs": {
+                                          "op": {
+                                            "name": "count",
+                                            "tag": "slot"
+                                          },
+                                          "span": {},
+                                          "ty": null
+                                        },
+                                        "operator": "lt",
+                                        "rhs": {
+                                          "op": {
+                                            "tag": "literal",
+                                            "value": {
+                                              "kind": "int",
+                                              "number": 100,
+                                              "value": "100"
+                                            }
+                                          },
+                                          "span": {},
+                                          "ty": null
+                                        },
+                                        "tag": "binary"
+                                      },
+                                      "span": {},
+                                      "ty": null
+                                    },
+                                    "elseBranch": {
+                                      "op": {
+                                        "content": [
+                                          {
+                                            "op": {
+                                              "tag": "literal",
+                                              "value": {
+                                                "kind": "string",
+                                                "value": "High"
+                                              }
+                                            },
+                                            "span": {},
+                                            "ty": null
+                                          }
+                                        ],
+                                        "elementId": "m0:element:9",
+                                        "properties": [],
+                                        "tag": "intrinsicElement",
+                                        "tagName": "span"
+                                      },
+                                      "span": {},
+                                      "ty": null
+                                    },
+                                    "tag": "if",
+                                    "thenBranch": {
+                                      "op": {
+                                        "content": [
+                                          {
+                                            "op": {
+                                              "tag": "literal",
+                                              "value": {
+                                                "kind": "string",
+                                                "value": "Medium"
+                                              }
+                                            },
+                                            "span": {},
+                                            "ty": null
+                                          }
+                                        ],
+                                        "elementId": "m0:element:8",
+                                        "properties": [],
+                                        "tag": "intrinsicElement",
+                                        "tagName": "span"
+                                      },
+                                      "span": {},
+                                      "ty": null
+                                    }
+                                  },
+                                  "span": {},
+                                  "ty": null
+                                },
+                                "tag": "if",
+                                "thenBranch": {
+                                  "op": {
+                                    "content": [
+                                      {
+                                        "op": {
+                                          "tag": "literal",
+                                          "value": {
+                                            "kind": "string",
+                                            "value": "Low"
+                                          }
+                                        },
+                                        "span": {},
+                                        "ty": null
+                                      }
+                                    ],
+                                    "elementId": "m0:element:7",
+                                    "properties": [],
+                                    "tag": "intrinsicElement",
+                                    "tagName": "span"
+                                  },
+                                  "span": {},
+                                  "ty": null
+                                }
+                              },
+                              "span": {},
+                              "ty": null
+                            },
+                            "tag": "if",
+                            "thenBranch": {
+                              "op": {
+                                "content": [
+                                  {
+                                    "op": {
+                                      "tag": "literal",
+                                      "value": {
+                                        "kind": "string",
+                                        "value": "Empty"
+                                      }
+                                    },
+                                    "span": {},
+                                    "ty": null
+                                  }
+                                ],
+                                "elementId": "m0:element:6",
+                                "properties": [],
+                                "tag": "intrinsicElement",
+                                "tagName": "span"
+                              },
+                              "span": {},
+                              "ty": null
+                            }
+                          },
+                          "span": {},
+                          "ty": null
+                        }
+                      ],
+                      "elementId": "m0:element:10",
+                      "properties": [
+                        {
+                          "name": "class",
+                          "span": {},
+                          "value": {
+                            "op": {
+                              "tag": "literal",
+                              "value": {
+                                "kind": "string",
+                                "value": "badge"
+                              }
+                            },
+                            "span": {},
+                            "ty": null
+                          }
+                        }
+                      ],
+                      "tag": "intrinsicElement",
+                      "tagName": "div"
+                    },
+                    "span": {},
+                    "ty": {
+                      "display": "div",
+                      "shape": {
+                        "kind": "named",
+                        "name": "div"
+                      }
+                    }
+                  },
+                  "params": [
+                    {
+                      "isContent": false,
+                      "name": "status",
+                      "span": {},
+                      "ty": {
+                        "kind": "primitive",
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "isContent": false,
+                      "name": "count",
+                      "span": {},
+                      "ty": {
+                        "kind": "primitive",
+                        "name": "int"
+                      }
+                    }
+                  ],
+                  "returnType": {
+                    "display": "div",
+                    "shape": {
+                      "kind": "named",
+                      "name": "div"
+                    }
+                  },
+                  "tag": "function"
+                },
+                "reference": {
+                  "declaration": "m0:d0",
+                  "kind": "function",
+                  "module": "m0",
+                  "name": "StatusBadge"
+                },
+                "span": {}
+              }
+            ],
+            "imports": [],
+            "provenance": {
+              "kind": "sourceProvider"
+            },
+            "runtimeId": 0
+          }
+        ],
+        "requiredFeatures": [
+          "eager-v1"
+        ],
+        "runtimeAbi": "nx-ir-runtime-v1",
+        "schemaVersion": 2,
+        "sources": [
+          {}
+        ]
+      }
+    }
+  },
+  "examples/nx/core/html.nx": {
+    "diagnostics": [],
+    "ir": {
+      "html.nxir.json": {
+        "componentEntrypoints": [],
+        "format": "nx-ir-json",
+        "functionEntrypoints": [
+          {
+            "name": "ButtonShell",
+            "reference": {
+              "declaration": "m0:d0",
+              "kind": "function",
+              "module": "m0",
+              "name": "ButtonShell"
+            }
+          }
+        ],
+        "modules": [
+          {
+            "declarations": [
+              {
+                "kind": {
+                  "body": {
+                    "op": {
+                      "content": [
+                        {
+                          "op": {
+                            "name": "content",
+                            "tag": "slot"
+                          },
+                          "span": {},
+                          "ty": null
+                        }
+                      ],
+                      "elementId": "m0:element:0",
+                      "properties": [
+                        {
+                          "name": "disabled",
+                          "span": {},
+                          "value": {
+                            "op": {
+                              "name": "disabled",
+                              "tag": "slot"
+                            },
+                            "span": {},
+                            "ty": null
+                          }
+                        }
+                      ],
+                      "tag": "intrinsicElement",
+                      "tagName": "button"
+                    },
+                    "span": {},
+                    "ty": {
+                      "display": "button",
+                      "shape": {
+                        "kind": "named",
+                        "name": "button"
+                      }
+                    }
+                  },
+                  "params": [
+                    {
+                      "isContent": false,
+                      "name": "disabled",
+                      "span": {},
+                      "ty": {
+                        "kind": "primitive",
+                        "name": "boolean"
+                      }
+                    },
+                    {
+                      "isContent": false,
+                      "name": "content",
+                      "span": {},
+                      "ty": {
+                        "element": {
+                          "kind": "primitive",
+                          "name": "object"
+                        },
+                        "kind": "array"
+                      }
+                    }
+                  ],
+                  "returnType": {
+                    "display": "button",
+                    "shape": {
+                      "kind": "named",
+                      "name": "button"
+                    }
+                  },
+                  "tag": "function"
+                },
+                "reference": {
+                  "declaration": "m0:d0",
+                  "kind": "function",
+                  "module": "m0",
+                  "name": "ButtonShell"
+                },
+                "span": {}
+              }
+            ],
+            "imports": [],
+            "provenance": {
+              "kind": "sourceProvider"
+            },
+            "runtimeId": 0
+          }
+        ],
+        "requiredFeatures": [
+          "eager-v1"
+        ],
+        "runtimeAbi": "nx-ir-runtime-v1",
+        "schemaVersion": 2,
+        "sources": [
+          {}
+        ]
+      }
+    }
+  },
+  "examples/nx/embed.nx": {
+    "diagnostics": [],
+    "ir": {
+      "embed.nxir.json": {
+        "componentEntrypoints": [],
+        "format": "nx-ir-json",
+        "functionEntrypoints": [
+          {
+            "name": "CodeBlock",
+            "reference": {
+              "declaration": "m0:d0",
+              "kind": "function",
+              "module": "m0",
+              "name": "CodeBlock"
+            }
+          },
+          {
+            "name": "StyleBlock",
+            "reference": {
+              "declaration": "m0:d1",
+              "kind": "function",
+              "module": "m0",
+              "name": "StyleBlock"
+            }
+          }
+        ],
+        "modules": [
+          {
+            "declarations": [
+              {
+                "kind": {
+                  "body": {
+                    "op": {
+                      "content": [
+                        {
+                          "op": {
+                            "content": [
+                              {
+                                "op": {
+                                  "name": "code",
+                                  "tag": "slot"
+                                },
+                                "span": {},
+                                "ty": null
+                              }
+                            ],
+                            "elementId": "m0:element:0",
+                            "properties": [
+                              {
+                                "name": "class",
+                                "span": {},
+                                "value": {
+                                  "op": {
+                                    "tag": "literal",
+                                    "value": {
+                                      "kind": "string",
+                                      "value": "language-{language}"
+                                    }
+                                  },
+                                  "span": {},
+                                  "ty": null
+                                }
+                              }
+                            ],
+                            "tag": "intrinsicElement",
+                            "tagName": "code"
+                          },
+                          "span": {},
+                          "ty": null
+                        }
+                      ],
+                      "elementId": "m0:element:1",
+                      "properties": [
+                        {
+                          "name": "class",
+                          "span": {},
+                          "value": {
+                            "op": {
+                              "tag": "literal",
+                              "value": {
+                                "kind": "string",
+                                "value": "code-block"
+                              }
+                            },
+                            "span": {},
+                            "ty": null
+                          }
+                        }
+                      ],
+                      "tag": "intrinsicElement",
+                      "tagName": "pre"
+                    },
+                    "span": {},
+                    "ty": {
+                      "display": "pre",
+                      "shape": {
+                        "kind": "named",
+                        "name": "pre"
+                      }
+                    }
+                  },
+                  "params": [
+                    {
+                      "isContent": false,
+                      "name": "language",
+                      "span": {},
+                      "ty": {
+                        "kind": "primitive",
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "isContent": false,
+                      "name": "code",
+                      "span": {},
+                      "ty": {
+                        "kind": "primitive",
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "returnType": {
+                    "display": "pre",
+                    "shape": {
+                      "kind": "named",
+                      "name": "pre"
+                    }
+                  },
+                  "tag": "function"
+                },
+                "reference": {
+                  "declaration": "m0:d0",
+                  "kind": "function",
+                  "module": "m0",
+                  "name": "CodeBlock"
+                },
+                "span": {}
+              },
+              {
+                "kind": {
+                  "body": {
+                    "op": {
+                      "content": [
+                        {
+                          "op": {
+                            "name": "css",
+                            "tag": "slot"
+                          },
+                          "span": {},
+                          "ty": null
+                        }
+                      ],
+                      "elementId": "m0:element:2",
+                      "properties": [],
+                      "tag": "intrinsicElement",
+                      "tagName": "style"
+                    },
+                    "span": {},
+                    "ty": {
+                      "display": "style",
+                      "shape": {
+                        "kind": "named",
+                        "name": "style"
+                      }
+                    }
+                  },
+                  "params": [
+                    {
+                      "isContent": false,
+                      "name": "css",
+                      "span": {},
+                      "ty": {
+                        "kind": "primitive",
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "returnType": {
+                    "display": "style",
+                    "shape": {
+                      "kind": "named",
+                      "name": "style"
+                    }
+                  },
+                  "tag": "function"
+                },
+                "reference": {
+                  "declaration": "m0:d1",
+                  "kind": "function",
+                  "module": "m0",
+                  "name": "StyleBlock"
+                },
+                "span": {}
+              }
+            ],
+            "imports": [],
+            "provenance": {
+              "kind": "sourceProvider"
+            },
+            "runtimeId": 0
+          }
+        ],
+        "requiredFeatures": [
+          "eager-v1"
+        ],
+        "runtimeAbi": "nx-ir-runtime-v1",
+        "schemaVersion": 2,
+        "sources": [
+          {}
+        ]
+      }
+    }
+  },
+  "examples/nx/expressions.nx": {
+    "diagnostics": [],
+    "ir": {
+      "expressions.nxir.json": {
+        "componentEntrypoints": [],
+        "format": "nx-ir-json",
+        "functionEntrypoints": [
+          {
+            "name": "MathDemo",
+            "reference": {
+              "declaration": "m0:d0",
+              "kind": "function",
+              "module": "m0",
+              "name": "MathDemo"
+            }
+          }
+        ],
+        "modules": [
+          {
+            "declarations": [
+              {
+                "kind": {
+                  "body": {
+                    "op": {
+                      "content": [
+                        {
+                          "op": {
+                            "content": [
+                              {
+                                "op": {
+                                  "tag": "literal",
+                                  "value": {
+                                    "kind": "string",
+                                    "value": "Sum: "
+                                  }
+                                },
+                                "span": {},
+                                "ty": null
+                              },
+                              {
+                                "op": {
+                                  "lhs": {
+                                    "op": {
+                                      "name": "x",
+                                      "tag": "slot"
+                                    },
+                                    "span": {},
+                                    "ty": null
+                                  },
+                                  "operator": "add",
+                                  "rhs": {
+                                    "op": {
+                                      "name": "y",
+                                      "tag": "slot"
+                                    },
+                                    "span": {},
+                                    "ty": null
+                                  },
+                                  "tag": "binary"
+                                },
+                                "span": {},
+                                "ty": null
+                              }
+                            ],
+                            "elementId": "m0:element:0",
+                            "properties": [],
+                            "tag": "intrinsicElement",
+                            "tagName": "p"
+                          },
+                          "span": {},
+                          "ty": null
+                        },
+                        {
+                          "op": {
+                            "content": [
+                              {
+                                "op": {
+                                  "tag": "literal",
+                                  "value": {
+                                    "kind": "string",
+                                    "value": "Product: "
+                                  }
+                                },
+                                "span": {},
+                                "ty": null
+                              },
+                              {
+                                "op": {
+                                  "lhs": {
+                                    "op": {
+                                      "name": "x",
+                                      "tag": "slot"
+                                    },
+                                    "span": {},
+                                    "ty": null
+                                  },
+                                  "operator": "mul",
+                                  "rhs": {
+                                    "op": {
+                                      "name": "y",
+                                      "tag": "slot"
+                                    },
+                                    "span": {},
+                                    "ty": null
+                                  },
+                                  "tag": "binary"
+                                },
+                                "span": {},
+                                "ty": null
+                              }
+                            ],
+                            "elementId": "m0:element:1",
+                            "properties": [],
+                            "tag": "intrinsicElement",
+                            "tagName": "p"
+                          },
+                          "span": {},
+                          "ty": null
+                        },
+                        {
+                          "op": {
+                            "content": [
+                              {
+                                "op": {
+                                  "tag": "literal",
+                                  "value": {
+                                    "kind": "string",
+                                    "value": "Comparison: "
+                                  }
+                                },
+                                "span": {},
+                                "ty": null
+                              },
+                              {
+                                "op": {
+                                  "condition": {
+                                    "op": {
+                                      "lhs": {
+                                        "op": {
+                                          "name": "x",
+                                          "tag": "slot"
+                                        },
+                                        "span": {},
+                                        "ty": null
+                                      },
+                                      "operator": "lt",
+                                      "rhs": {
+                                        "op": {
+                                          "name": "y",
+                                          "tag": "slot"
+                                        },
+                                        "span": {},
+                                        "ty": null
+                                      },
+                                      "tag": "binary"
+                                    },
+                                    "span": {},
+                                    "ty": null
+                                  },
+                                  "elseBranch": {
+                                    "op": {
+                                      "tag": "literal",
+                                      "value": {
+                                        "kind": "string",
+                                        "value": "x is greater or equal"
+                                      }
+                                    },
+                                    "span": {},
+                                    "ty": null
+                                  },
+                                  "tag": "if",
+                                  "thenBranch": {
+                                    "op": {
+                                      "tag": "literal",
+                                      "value": {
+                                        "kind": "string",
+                                        "value": "x is less"
+                                      }
+                                    },
+                                    "span": {},
+                                    "ty": null
+                                  }
+                                },
+                                "span": {},
+                                "ty": null
+                              }
+                            ],
+                            "elementId": "m0:element:2",
+                            "properties": [],
+                            "tag": "intrinsicElement",
+                            "tagName": "p"
+                          },
+                          "span": {},
+                          "ty": null
+                        },
+                        {
+                          "op": {
+                            "content": [
+                              {
+                                "op": {
+                                  "tag": "literal",
+                                  "value": {
+                                    "kind": "string",
+                                    "value": "Logical: "
+                                  }
+                                },
+                                "span": {},
+                                "ty": null
+                              },
+                              {
+                                "op": {
+                                  "lhs": {
+                                    "op": {
+                                      "lhs": {
+                                        "op": {
+                                          "name": "x",
+                                          "tag": "slot"
+                                        },
+                                        "span": {},
+                                        "ty": null
+                                      },
+                                      "operator": "gt",
+                                      "rhs": {
+                                        "op": {
+                                          "tag": "literal",
+                                          "value": {
+                                            "kind": "int",
+                                            "number": 0,
+                                            "value": "0"
+                                          }
+                                        },
+                                        "span": {},
+                                        "ty": null
+                                      },
+                                      "tag": "binary"
+                                    },
+                                    "span": {},
+                                    "ty": null
+                                  },
+                                  "operator": "and",
+                                  "rhs": {
+                                    "op": {
+                                      "lhs": {
+                                        "op": {
+                                          "name": "y",
+                                          "tag": "slot"
+                                        },
+                                        "span": {},
+                                        "ty": null
+                                      },
+                                      "operator": "gt",
+                                      "rhs": {
+                                        "op": {
+                                          "tag": "literal",
+                                          "value": {
+                                            "kind": "int",
+                                            "number": 0,
+                                            "value": "0"
+                                          }
+                                        },
+                                        "span": {},
+                                        "ty": null
+                                      },
+                                      "tag": "binary"
+                                    },
+                                    "span": {},
+                                    "ty": null
+                                  },
+                                  "tag": "binary"
+                                },
+                                "span": {},
+                                "ty": null
+                              }
+                            ],
+                            "elementId": "m0:element:3",
+                            "properties": [],
+                            "tag": "intrinsicElement",
+                            "tagName": "p"
+                          },
+                          "span": {},
+                          "ty": null
+                        }
+                      ],
+                      "elementId": "m0:element:4",
+                      "properties": [],
+                      "tag": "intrinsicElement",
+                      "tagName": "div"
+                    },
+                    "span": {},
+                    "ty": {
+                      "display": "div",
+                      "shape": {
+                        "kind": "named",
+                        "name": "div"
+                      }
+                    }
+                  },
+                  "params": [
+                    {
+                      "isContent": false,
+                      "name": "x",
+                      "span": {},
+                      "ty": {
+                        "kind": "primitive",
+                        "name": "int"
+                      }
+                    },
+                    {
+                      "isContent": false,
+                      "name": "y",
+                      "span": {},
+                      "ty": {
+                        "kind": "primitive",
+                        "name": "int"
+                      }
+                    }
+                  ],
+                  "returnType": {
+                    "display": "div",
+                    "shape": {
+                      "kind": "named",
+                      "name": "div"
+                    }
+                  },
+                  "tag": "function"
+                },
+                "reference": {
+                  "declaration": "m0:d0",
+                  "kind": "function",
+                  "module": "m0",
+                  "name": "MathDemo"
+                },
+                "span": {}
+              }
+            ],
+            "imports": [],
+            "provenance": {
+              "kind": "sourceProvider"
+            },
+            "runtimeId": 0
+          }
+        ],
+        "requiredFeatures": [
+          "eager-v1"
+        ],
+        "runtimeAbi": "nx-ir-runtime-v1",
+        "schemaVersion": 2,
+        "sources": [
+          {}
+        ]
+      }
+    }
+  },
+  "examples/nx/function.nx": {
+    "diagnostics": [
+      {
+        "message": "Missing workspace module or loaded library 'home/bret/src/nx/examples/nx/core' in the supplied build context",
+        "severity": "error"
+      }
+    ],
+    "ir": {}
+  },
+  "examples/nx/hello.nx": {
+    "diagnostics": [],
+    "ir": {
+      "hello.nxir.json": {
+        "componentEntrypoints": [],
+        "format": "nx-ir-json",
+        "functionEntrypoints": [
+          {
+            "name": "root",
+            "reference": {
+              "declaration": "m0:d0",
+              "kind": "function",
+              "module": "m0",
+              "name": "root"
+            }
+          }
+        ],
+        "modules": [
+          {
+            "declarations": [
+              {
+                "kind": {
+                  "body": {
+                    "op": {
+                      "content": [
+                        {
+                          "op": {
+                            "tag": "literal",
+                            "value": {
+                              "kind": "string",
+                              "value": "Hello, World!\n"
+                            }
+                          },
+                          "span": {},
+                          "ty": null
+                        }
+                      ],
+                      "elementId": "m0:element:0",
+                      "properties": [
+                        {
+                          "name": "class",
+                          "span": {},
+                          "value": {
+                            "op": {
+                              "tag": "literal",
+                              "value": {
+                                "kind": "string",
+                                "value": "greeting"
+                              }
+                            },
+                            "span": {},
+                            "ty": null
+                          }
+                        }
+                      ],
+                      "tag": "intrinsicElement",
+                      "tagName": "div"
+                    },
+                    "span": {},
+                    "ty": {
+                      "display": "div",
+                      "shape": {
+                        "kind": "named",
+                        "name": "div"
+                      }
+                    }
+                  },
+                  "params": [],
+                  "returnType": {
+                    "display": "div",
+                    "shape": {
+                      "kind": "named",
+                      "name": "div"
+                    }
+                  },
+                  "tag": "function"
+                },
+                "reference": {
+                  "declaration": "m0:d0",
+                  "kind": "function",
+                  "module": "m0",
+                  "name": "root"
+                },
+                "span": {}
+              }
+            ],
+            "imports": [],
+            "provenance": {
+              "kind": "sourceProvider"
+            },
+            "runtimeId": 0
+          }
+        ],
+        "requiredFeatures": [
+          "eager-v1"
+        ],
+        "runtimeAbi": "nx-ir-runtime-v1",
+        "schemaVersion": 2,
+        "sources": [
+          {}
+        ]
+      }
+    }
+  },
+  "examples/nx/loops.nx": {
+    "diagnostics": [],
+    "ir": {
+      "loops.nxir.json": {
+        "componentEntrypoints": [],
+        "format": "nx-ir-json",
+        "functionEntrypoints": [
+          {
+            "name": "IndexedList",
+            "reference": {
+              "declaration": "m0:d1",
+              "kind": "function",
+              "module": "m0",
+              "name": "IndexedList"
+            }
+          },
+          {
+            "name": "ItemList",
+            "reference": {
+              "declaration": "m0:d0",
+              "kind": "function",
+              "module": "m0",
+              "name": "ItemList"
+            }
+          }
+        ],
+        "modules": [
+          {
+            "declarations": [
+              {
+                "kind": {
+                  "body": {
+                    "op": {
+                      "content": [
+                        {
+                          "op": {
+                            "body": {
+                              "op": {
+                                "content": [
+                                  {
+                                    "op": {
+                                      "name": "item",
+                                      "tag": "slot"
+                                    },
+                                    "span": {},
+                                    "ty": null
+                                  }
+                                ],
+                                "elementId": "m0:element:0",
+                                "properties": [],
+                                "tag": "intrinsicElement",
+                                "tagName": "li"
+                              },
+                              "span": {},
+                              "ty": null
+                            },
+                            "index": null,
+                            "indexSlot": null,
+                            "item": "item",
+                            "itemSlot": "m0:e4:m0:d0:body:content:0:for:item",
+                            "iterable": {
+                              "op": {
+                                "name": "items",
+                                "tag": "slot"
+                              },
+                              "span": {},
+                              "ty": null
+                            },
+                            "tag": "for"
+                          },
+                          "span": {},
+                          "ty": null
+                        }
+                      ],
+                      "elementId": "m0:element:1",
+                      "properties": [
+                        {
+                          "name": "class",
+                          "span": {},
+                          "value": {
+                            "op": {
+                              "tag": "literal",
+                              "value": {
+                                "kind": "string",
+                                "value": "list"
+                              }
+                            },
+                            "span": {},
+                            "ty": null
+                          }
+                        }
+                      ],
+                      "tag": "intrinsicElement",
+                      "tagName": "ul"
+                    },
+                    "span": {},
+                    "ty": {
+                      "display": "ul",
+                      "shape": {
+                        "kind": "named",
+                        "name": "ul"
+                      }
+                    }
+                  },
+                  "params": [
+                    {
+                      "isContent": false,
+                      "name": "items",
+                      "span": {},
+                      "ty": {
+                        "element": {
+                          "kind": "primitive",
+                          "name": "string"
+                        },
+                        "kind": "array"
+                      }
+                    }
+                  ],
+                  "returnType": {
+                    "display": "ul",
+                    "shape": {
+                      "kind": "named",
+                      "name": "ul"
+                    }
+                  },
+                  "tag": "function"
+                },
+                "reference": {
+                  "declaration": "m0:d0",
+                  "kind": "function",
+                  "module": "m0",
+                  "name": "ItemList"
+                },
+                "span": {}
+              },
+              {
+                "kind": {
+                  "body": {
+                    "op": {
+                      "content": [
+                        {
+                          "op": {
+                            "body": {
+                              "op": {
+                                "content": [
+                                  {
+                                    "op": {
+                                      "content": [
+                                        {
+                                          "op": {
+                                            "lhs": {
+                                              "op": {
+                                                "name": "index",
+                                                "tag": "slot"
+                                              },
+                                              "span": {},
+                                              "ty": null
+                                            },
+                                            "operator": "add",
+                                            "rhs": {
+                                              "op": {
+                                                "tag": "literal",
+                                                "value": {
+                                                  "kind": "int",
+                                                  "number": 1,
+                                                  "value": "1"
+                                                }
+                                              },
+                                              "span": {},
+                                              "ty": null
+                                            },
+                                            "tag": "binary"
+                                          },
+                                          "span": {},
+                                          "ty": null
+                                        },
+                                        {
+                                          "op": {
+                                            "tag": "literal",
+                                            "value": {
+                                              "kind": "string",
+                                              "value": "."
+                                            }
+                                          },
+                                          "span": {},
+                                          "ty": null
+                                        }
+                                      ],
+                                      "elementId": "m0:element:2",
+                                      "properties": [
+                                        {
+                                          "name": "class",
+                                          "span": {},
+                                          "value": {
+                                            "op": {
+                                              "tag": "literal",
+                                              "value": {
+                                                "kind": "string",
+                                                "value": "index"
+                                              }
+                                            },
+                                            "span": {},
+                                            "ty": null
+                                          }
+                                        }
+                                      ],
+                                      "tag": "intrinsicElement",
+                                      "tagName": "span"
+                                    },
+                                    "span": {},
+                                    "ty": null
+                                  },
+                                  {
+                                    "op": {
+                                      "content": [
+                                        {
+                                          "op": {
+                                            "name": "item",
+                                            "tag": "slot"
+                                          },
+                                          "span": {},
+                                          "ty": null
+                                        }
+                                      ],
+                                      "elementId": "m0:element:3",
+                                      "properties": [
+                                        {
+                                          "name": "class",
+                                          "span": {},
+                                          "value": {
+                                            "op": {
+                                              "tag": "literal",
+                                              "value": {
+                                                "kind": "string",
+                                                "value": "text"
+                                              }
+                                            },
+                                            "span": {},
+                                            "ty": null
+                                          }
+                                        }
+                                      ],
+                                      "tag": "intrinsicElement",
+                                      "tagName": "span"
+                                    },
+                                    "span": {},
+                                    "ty": null
+                                  }
+                                ],
+                                "elementId": "m0:element:4",
+                                "properties": [],
+                                "tag": "intrinsicElement",
+                                "tagName": "li"
+                              },
+                              "span": {},
+                              "ty": null
+                            },
+                            "index": "index",
+                            "indexSlot": "m0:e17:m0:d1:body:content:0:for:index",
+                            "item": "item",
+                            "itemSlot": "m0:e17:m0:d1:body:content:0:for:item",
+                            "iterable": {
+                              "op": {
+                                "name": "items",
+                                "tag": "slot"
+                              },
+                              "span": {},
+                              "ty": null
+                            },
+                            "tag": "for"
+                          },
+                          "span": {},
+                          "ty": null
+                        }
+                      ],
+                      "elementId": "m0:element:5",
+                      "properties": [],
+                      "tag": "intrinsicElement",
+                      "tagName": "ol"
+                    },
+                    "span": {},
+                    "ty": {
+                      "display": "ol",
+                      "shape": {
+                        "kind": "named",
+                        "name": "ol"
+                      }
+                    }
+                  },
+                  "params": [
+                    {
+                      "isContent": false,
+                      "name": "items",
+                      "span": {},
+                      "ty": {
+                        "element": {
+                          "kind": "primitive",
+                          "name": "string"
+                        },
+                        "kind": "array"
+                      }
+                    }
+                  ],
+                  "returnType": {
+                    "display": "ol",
+                    "shape": {
+                      "kind": "named",
+                      "name": "ol"
+                    }
+                  },
+                  "tag": "function"
+                },
+                "reference": {
+                  "declaration": "m0:d1",
+                  "kind": "function",
+                  "module": "m0",
+                  "name": "IndexedList"
+                },
+                "span": {}
+              }
+            ],
+            "imports": [],
+            "provenance": {
+              "kind": "sourceProvider"
+            },
+            "runtimeId": 0
+          }
+        ],
+        "requiredFeatures": [
+          "eager-v1"
+        ],
+        "runtimeAbi": "nx-ir-runtime-v1",
+        "schemaVersion": 2,
+        "sources": [
+          {}
+        ]
+      }
+    }
+  },
+  "examples/nx/simple.nx": {
+    "diagnostics": [],
+    "ir": {
+      "simple.nxir.json": {
+        "componentEntrypoints": [],
+        "format": "nx-ir-json",
+        "functionEntrypoints": [
+          {
+            "name": "Button",
+            "reference": {
+              "declaration": "m0:d0",
+              "kind": "function",
+              "module": "m0",
+              "name": "Button"
+            }
+          }
+        ],
+        "modules": [
+          {
+            "declarations": [
+              {
+                "kind": {
+                  "body": {
+                    "op": {
+                      "content": [
+                        {
+                          "op": {
+                            "name": "text",
+                            "tag": "slot"
+                          },
+                          "span": {},
+                          "ty": null
+                        }
+                      ],
+                      "elementId": "m0:element:0",
+                      "properties": [],
+                      "tag": "intrinsicElement",
+                      "tagName": "button"
+                    },
+                    "span": {},
+                    "ty": {
+                      "display": "button",
+                      "shape": {
+                        "kind": "named",
+                        "name": "button"
+                      }
+                    }
+                  },
+                  "params": [
+                    {
+                      "isContent": false,
+                      "name": "text",
+                      "span": {},
+                      "ty": {
+                        "kind": "primitive",
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "returnType": {
+                    "display": "button",
+                    "shape": {
+                      "kind": "named",
+                      "name": "button"
+                    }
+                  },
+                  "tag": "function"
+                },
+                "reference": {
+                  "declaration": "m0:d0",
+                  "kind": "function",
+                  "module": "m0",
+                  "name": "Button"
+                },
+                "span": {}
+              }
+            ],
+            "imports": [],
+            "provenance": {
+              "kind": "sourceProvider"
+            },
+            "runtimeId": 0
+          }
+        ],
+        "requiredFeatures": [
+          "eager-v1"
+        ],
+        "runtimeAbi": "nx-ir-runtime-v1",
+        "schemaVersion": 2,
+        "sources": [
+          {}
+        ]
+      }
+    }
+  },
+  "examples/nx/types.nx": {
+    "diagnostics": [
+      {
+        "message": "Member access not yet implemented: .name",
+        "severity": "error"
+      }
+    ],
+    "ir": {}
+  },
+  "examples/nx/ui/components.nx": {
+    "diagnostics": [],
+    "ir": {
+      "components.nxir.json": {
+        "componentEntrypoints": [],
+        "format": "nx-ir-json",
+        "functionEntrypoints": [
+          {
+            "name": "AppShell",
+            "reference": {
+              "declaration": "m0:d0",
+              "kind": "function",
+              "module": "m0",
+              "name": "AppShell"
+            }
+          },
+          {
+            "name": "Spinner",
+            "reference": {
+              "declaration": "m0:d1",
+              "kind": "function",
+              "module": "m0",
+              "name": "Spinner"
+            }
+          }
+        ],
+        "modules": [
+          {
+            "declarations": [
+              {
+                "kind": {
+                  "body": {
+                    "op": {
+                      "content": [
+                        {
+                          "op": {
+                            "name": "content",
+                            "tag": "slot"
+                          },
+                          "span": {},
+                          "ty": null
+                        }
+                      ],
+                      "elementId": "m0:element:0",
+                      "properties": [
+                        {
+                          "name": "class",
+                          "span": {},
+                          "value": {
+                            "op": {
+                              "name": "class",
+                              "tag": "slot"
+                            },
+                            "span": {},
+                            "ty": null
+                          }
+                        }
+                      ],
+                      "tag": "intrinsicElement",
+                      "tagName": "div"
+                    },
+                    "span": {},
+                    "ty": {
+                      "display": "div",
+                      "shape": {
+                        "kind": "named",
+                        "name": "div"
+                      }
+                    }
+                  },
+                  "params": [
+                    {
+                      "isContent": false,
+                      "name": "class",
+                      "span": {},
+                      "ty": {
+                        "kind": "primitive",
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "isContent": false,
+                      "name": "content",
+                      "span": {},
+                      "ty": {
+                        "element": {
+                          "kind": "primitive",
+                          "name": "object"
+                        },
+                        "kind": "array"
+                      }
+                    }
+                  ],
+                  "returnType": {
+                    "display": "div",
+                    "shape": {
+                      "kind": "named",
+                      "name": "div"
+                    }
+                  },
+                  "tag": "function"
+                },
+                "reference": {
+                  "declaration": "m0:d0",
+                  "kind": "function",
+                  "module": "m0",
+                  "name": "AppShell"
+                },
+                "span": {}
+              },
+              {
+                "kind": {
+                  "body": {
+                    "op": {
+                      "content": [
+                        {
+                          "op": {
+                            "tag": "literal",
+                            "value": {
+                              "kind": "string",
+                              "value": "Loading...\n  "
+                            }
+                          },
+                          "span": {},
+                          "ty": null
+                        }
+                      ],
+                      "elementId": "m0:element:1",
+                      "properties": [
+                        {
+                          "name": "class",
+                          "span": {},
+                          "value": {
+                            "op": {
+                              "tag": "literal",
+                              "value": {
+                                "kind": "string",
+                                "value": "spinner"
+                              }
+                            },
+                            "span": {},
+                            "ty": null
+                          }
+                        }
+                      ],
+                      "tag": "intrinsicElement",
+                      "tagName": "div"
+                    },
+                    "span": {},
+                    "ty": {
+                      "display": "div",
+                      "shape": {
+                        "kind": "named",
+                        "name": "div"
+                      }
+                    }
+                  },
+                  "params": [],
+                  "returnType": {
+                    "display": "div",
+                    "shape": {
+                      "kind": "named",
+                      "name": "div"
+                    }
+                  },
+                  "tag": "function"
+                },
+                "reference": {
+                  "declaration": "m0:d1",
+                  "kind": "function",
+                  "module": "m0",
+                  "name": "Spinner"
+                },
+                "span": {}
+              }
+            ],
+            "imports": [],
+            "provenance": {
+              "kind": "sourceProvider"
+            },
+            "runtimeId": 0
+          }
+        ],
+        "requiredFeatures": [
+          "eager-v1"
+        ],
+        "runtimeAbi": "nx-ir-runtime-v1",
+        "schemaVersion": 2,
+        "sources": [
+          {}
+        ]
+      }
+    }
+  },
+  "examples/nx/utils/formatting.nx": {
+    "diagnostics": [
+      {
+        "message": "Syntax error",
+        "severity": "error"
+      },
+      {
+        "message": "Return value for function 'todoLabel': a bare name is only allowed where the declared type is known;                          write the qualified form in braces instead",
+        "severity": "error"
+      }
+    ],
+    "ir": {}
+  }
+}

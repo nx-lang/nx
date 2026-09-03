@@ -1,8 +1,7 @@
 use crate::typegen::model::{
-    ExportedEnum, ExportedExternalState, ExportedFieldDefault, ExportedLiteralDefault,
-    ExportedModule, ExportedPolymorphicDescendant, ExportedRecord, ExportedRecordField,
-    ExportedType, ExportedTypeGraph, ExportedUnion, ExportedUnionCase, ImportedType,
-    ImportedTypeKind,
+    ExportedExternalState, ExportedFieldDefault, ExportedLiteralDefault, ExportedModule,
+    ExportedPolymorphicDescendant, ExportedRecord, ExportedRecordField, ExportedType,
+    ExportedTypeGraph, ExportedUnion, ExportedUnionCase, ImportedType, ImportedTypeKind,
 };
 use crate::typegen::writer::CodeWriter;
 use crate::typegen::{GenerateTypesOptions, GeneratedFile};
@@ -162,9 +161,11 @@ fn render_module(
     let needs_enum_serialization_helpers = module
         .declarations
         .iter()
-        .any(|declaration| matches!(declaration.item, ExportedType::Enum(_)));
+        .any(|declaration| {
+            matches!(&declaration.item, ExportedType::Union(union_def) if union_def.is_constant())
+        });
     let needs_polymorphic_serialization_helpers = module.declarations.iter().any(|declaration| {
-        matches!(declaration.item, ExportedType::Union(_))
+        matches!(&declaration.item, ExportedType::Union(union_def) if !union_def.is_constant())
             || match &declaration.item {
                 ExportedType::Record(record) => {
                     polymorphic_message_pack_root_name(record, &namespace_context).is_some()
@@ -219,15 +220,15 @@ fn emit_declaration(
 ) {
     match declaration {
         ExportedType::Alias(_) => {}
-        ExportedType::Enum(enum_def) => emit_enum(writer, enum_def),
         ExportedType::Union(union_def) => emit_union(writer, union_def, context),
         ExportedType::Record(record) => emit_record(writer, record, context),
         ExportedType::ExternalState(state) => emit_external_state(writer, state, context),
     }
 }
 
-fn emit_enum(writer: &mut CodeWriter, enum_def: &ExportedEnum) {
-    let enum_name = sanitize_csharp_identifier(&enum_def.name);
+/// Emits a constant union as a CLR `enum` with its authored-string wire format (design D4).
+fn emit_constant_union(writer: &mut CodeWriter, union: &ExportedUnion) {
+    let enum_name = sanitize_csharp_identifier(&union.name);
     writer.line(&format!(
         "[JsonConverter(typeof(NxEnumJsonConverter<{enum_name}, {enum_name}WireFormat>))]"
     ));
@@ -235,18 +236,22 @@ fn emit_enum(writer: &mut CodeWriter, enum_def: &ExportedEnum) {
         "[MessagePackFormatter(typeof(NxEnumMessagePackFormatter<{enum_name}, {enum_name}WireFormat>))]"
     ));
     writer.block(&format!("public enum {enum_name}"), |writer| {
-        for (index, member) in enum_def.members.iter().enumerate() {
-            let comma = if index + 1 == enum_def.members.len() {
+        for (index, case) in union.cases.iter().enumerate() {
+            let comma = if index + 1 == union.cases.len() {
                 ""
             } else {
                 ","
             };
-            writer.line(&format!("{}{}", sanitize_csharp_member_name(member), comma));
+            writer.line(&format!(
+                "{}{}",
+                sanitize_csharp_member_name(&case.name),
+                comma
+            ));
         }
     });
 
     writer.blank_line();
-    emit_enum_wire_format(writer, enum_def);
+    emit_constant_union_wire_format(writer, union);
 }
 
 fn emit_record(
@@ -311,16 +316,44 @@ fn emit_union(
     union_def: &ExportedUnion,
     context: &CSharpRenderContext<'_>,
 ) {
+    if union_def.is_constant() {
+        emit_constant_union(writer, union_def);
+        return;
+    }
+
     let union_name = sanitize_csharp_identifier(&union_def.name);
 
-    writer.line("[JsonPolymorphic(TypeDiscriminatorPropertyName = \"$type\")]");
-    for case in &union_def.cases {
+    // A union with a constant case beside a payload case has two wire shapes, so it needs a
+    // converter (design D4). System.Text.Json will not accept a converter alongside
+    // `[JsonPolymorphic]` metadata on the same type, so such a union registers its cases with
+    // `[NxUnionCase]`, which both serializers read, instead of `[JsonDerivedType]`.
+    let has_constant_case = union_def
+        .cases
+        .iter()
+        .any(|case| union_def.is_constant_case(case));
+
+    if has_constant_case {
         writer.line(&format!(
-            "[JsonDerivedType(typeof({}), \"{}.{}\")]",
-            csharp_union_case_type_name(&union_def.name, &case.name),
-            escape_csharp_string_literal(&union_def.name),
-            escape_csharp_string_literal(&case.name)
+            "[JsonConverter(typeof(NxPolymorphicJsonConverter<{union_name}>))]"
         ));
+        for case in &union_def.cases {
+            writer.line(&format!(
+                "[NxUnionCase(typeof({}), \"{}.{}\")]",
+                csharp_union_case_type_name(&union_def.name, &case.name),
+                escape_csharp_string_literal(&union_def.name),
+                escape_csharp_string_literal(&case.name)
+            ));
+        }
+    } else {
+        writer.line("[JsonPolymorphic(TypeDiscriminatorPropertyName = \"$type\")]");
+        for case in &union_def.cases {
+            writer.line(&format!(
+                "[JsonDerivedType(typeof({}), \"{}.{}\")]",
+                csharp_union_case_type_name(&union_def.name, &case.name),
+                escape_csharp_string_literal(&union_def.name),
+                escape_csharp_string_literal(&case.name)
+            ));
+        }
     }
     writer.line(&format!(
         "[MessagePackFormatter(typeof(NxPolymorphicMessagePackFormatter<{union_name}>))]"
@@ -351,13 +384,28 @@ fn emit_union_case(
 ) {
     let union_name = sanitize_csharp_identifier(&union_def.name);
     let case_type_name = csharp_union_case_type_name(&union_def.name, &case.name);
+    let is_constant = union_def.is_constant_case(case);
 
+    if is_constant {
+        writer.line(&format!(
+            "[NxConstantCase(\"{}\")]",
+            escape_csharp_string_literal(&case.name)
+        ));
+    }
     writer.line(&format!(
         "[MessagePackFormatter(typeof(NxPolymorphicConcreteMessagePackFormatter<{union_name}, {case_type_name}>))]"
     ));
     writer.block(
         &format!("public sealed class {case_type_name} : {union_name}"),
         |writer| {
+            if is_constant {
+                // A constant case carries nothing, so every occurrence is the same value
+                // (design D4).
+                writer.line("/// <summary>The single instance of this constant case.</summary>");
+                writer.line(&format!(
+                    "public static readonly {case_type_name} Instance = new();"
+                ));
+            }
             emit_record_fields(writer, &case.fields, context);
         },
     );
@@ -556,8 +604,8 @@ fn emit_dual_annotated_auto_property(
     writer.line(declaration);
 }
 
-fn emit_enum_wire_format(writer: &mut CodeWriter, enum_def: &ExportedEnum) {
-    let enum_name = sanitize_csharp_identifier(&enum_def.name);
+fn emit_constant_union_wire_format(writer: &mut CodeWriter, union: &ExportedUnion) {
+    let enum_name = sanitize_csharp_identifier(&union.name);
     writer.block(
         &format!("internal sealed class {enum_name}WireFormat : INxEnumWireFormat<{enum_name}>"),
         |writer| {
@@ -568,9 +616,9 @@ fn emit_enum_wire_format(writer: &mut CodeWriter, enum_def: &ExportedEnum) {
             writer.line("value switch");
             writer.line("{");
             writer.indent();
-            for member in &enum_def.members {
-                let member_literal = escape_csharp_string_literal(member);
-                let member_ident = sanitize_csharp_member_name(member);
+            for case in &union.cases {
+                let member_literal = escape_csharp_string_literal(&case.name);
+                let member_ident = sanitize_csharp_member_name(&case.name);
                 writer.line(&format!(
                     "{enum_name}.{member_ident} => \"{member_literal}\","
                 ));
@@ -587,9 +635,9 @@ fn emit_enum_wire_format(writer: &mut CodeWriter, enum_def: &ExportedEnum) {
             writer.line("value switch");
             writer.line("{");
             writer.indent();
-            for member in &enum_def.members {
-                let member_literal = escape_csharp_string_literal(member);
-                let member_ident = sanitize_csharp_member_name(member);
+            for case in &union.cases {
+                let member_literal = escape_csharp_string_literal(&case.name);
+                let member_ident = sanitize_csharp_member_name(&case.name);
                 writer.line(&format!(
                     "\"{member_literal}\" => {enum_name}.{member_ident},"
                 ));
@@ -670,27 +718,34 @@ fn csharp_type_name_inner(
             is_reference: true,
             is_nullable: false,
         },
-        "i32" => CSharpType {
-            text: "int".to_string(),
-            is_reference: false,
-            is_nullable: false,
-        },
-        "i64" | "int" => CSharpType {
+        // NX `int` is exact over +/-(2^53-1), which does not fit a C# `int`; `long` is the
+        // narrowest C# type that holds the whole range.
+        "int" => CSharpType {
             text: "long".to_string(),
             is_reference: false,
             is_nullable: false,
         },
-        "f32" => CSharpType {
+        "int32" => CSharpType {
+            text: "int".to_string(),
+            is_reference: false,
+            is_nullable: false,
+        },
+        "int64" => CSharpType {
+            text: "long".to_string(),
+            is_reference: false,
+            is_nullable: false,
+        },
+        "float32" => CSharpType {
             text: "float".to_string(),
             is_reference: false,
             is_nullable: false,
         },
-        "f64" | "float" => CSharpType {
+        "float64" => CSharpType {
             text: "double".to_string(),
             is_reference: false,
             is_nullable: false,
         },
-        "bool" => CSharpType {
+        "boolean" => CSharpType {
             text: "bool".to_string(),
             is_reference: false,
             is_nullable: false,
@@ -721,7 +776,7 @@ fn csharp_type_name_inner(
                         seen_aliases.remove(other);
                         alias_type
                     }
-                    ExportedType::Enum(_) => CSharpType {
+                    ExportedType::Union(union_def) if union_def.is_constant() => CSharpType {
                         text: generated_type_name(
                             other,
                             context.namespace,
@@ -837,27 +892,34 @@ fn csharp_imported_alias_target_name(
             is_reference: true,
             is_nullable: false,
         },
-        "i32" => CSharpType {
-            text: "int".to_string(),
-            is_reference: false,
-            is_nullable: false,
-        },
-        "i64" | "int" => CSharpType {
+        // NX `int` is exact over +/-(2^53-1), which does not fit a C# `int`; `long` is the
+        // narrowest C# type that holds the whole range.
+        "int" => CSharpType {
             text: "long".to_string(),
             is_reference: false,
             is_nullable: false,
         },
-        "f32" => CSharpType {
+        "int32" => CSharpType {
+            text: "int".to_string(),
+            is_reference: false,
+            is_nullable: false,
+        },
+        "int64" => CSharpType {
+            text: "long".to_string(),
+            is_reference: false,
+            is_nullable: false,
+        },
+        "float32" => CSharpType {
             text: "float".to_string(),
             is_reference: false,
             is_nullable: false,
         },
-        "f64" | "float" => CSharpType {
+        "float64" => CSharpType {
             text: "double".to_string(),
             is_reference: false,
             is_nullable: false,
         },
-        "bool" => CSharpType {
+        "boolean" => CSharpType {
             text: "bool".to_string(),
             is_reference: false,
             is_nullable: false,
@@ -950,13 +1012,12 @@ fn imported_alias_target_uses_dependency_namespace(ty: &TypeRef) -> bool {
         TypeRef::Name(name) => !matches!(
             name.as_str(),
             "string"
-                | "i32"
-                | "i64"
                 | "int"
-                | "f32"
-                | "f64"
-                | "float"
-                | "bool"
+                | "int32"
+                | "int64"
+                | "float32"
+                | "float64"
+                | "boolean"
                 | "void"
                 | "object"
                 | "unknown"

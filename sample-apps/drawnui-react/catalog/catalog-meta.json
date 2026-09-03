@@ -1,0 +1,341 @@
+{
+  "contentProperty": "Children",
+  "nodeRoot": "DrawnNode",
+  "unions": {
+    "BlendMode": [
+      "Darken",
+      "Lighten",
+      "Saturation",
+      "Clear",
+      "Src",
+      "Dst",
+      "SrcOver",
+      "DstOver",
+      "SrcIn",
+      "DstIn",
+      "SrcOut",
+      "DstOut",
+      "SrcATop",
+      "DstATop",
+      "Xor",
+      "Plus",
+      "Modulate",
+      "Screen",
+      "Overlay",
+      "ColorDodge",
+      "ColorBurn",
+      "HardLight",
+      "SoftLight",
+      "Difference",
+      "Exclusion",
+      "Multiply",
+      "Hue",
+      "Color",
+      "Luminosity"
+    ],
+    "DrawImageAlignment": [
+      "Start",
+      "Center",
+      "End"
+    ],
+    "DrawTextAlignment": [
+      "Start",
+      "Center",
+      "End",
+      "FillWords",
+      "FillWordsFull",
+      "FillCharacters",
+      "FillCharactersFull"
+    ],
+    "DrawerDirection": [
+      "FromBottom",
+      "FromTop",
+      "FromLeft",
+      "FromRight"
+    ],
+    "FontAttributes": [
+      "None",
+      "Bold",
+      "Italic",
+      "BoldItalic"
+    ],
+    "LayoutOptions": [
+      "Start",
+      "Center",
+      "End",
+      "Fill"
+    ],
+    "LineBreakMode": [
+      "NoWrap",
+      "WordWrap",
+      "CharacterWrap",
+      "HeadTruncation",
+      "MiddleTruncation",
+      "TailTruncation"
+    ],
+    "LockTouch": [
+      "Enabled",
+      "Disabled",
+      "PassNone",
+      "PassTap",
+      "PassTapAndLongPress"
+    ],
+    "MeasuringStrategy": [
+      "MeasureAll",
+      "MeasureFirst",
+      "MeasureVisible"
+    ],
+    "PrebuiltControlStyle": [
+      "Unset",
+      "Platform",
+      "Cupertino",
+      "Material",
+      "Material3",
+      "Windows"
+    ],
+    "RecyclingTemplate": [
+      "Enabled",
+      "Disabled"
+    ],
+    "ScrollOrientation": [
+      "Horizontal",
+      "Vertical",
+      "Both",
+      "Neither"
+    ],
+    "ShapeType": [
+      "Rectangle",
+      "Circle",
+      "Ellipse",
+      "Arc",
+      "Squricle",
+      "Path",
+      "Polygon",
+      "Line",
+      "Custom"
+    ],
+    "SkiaCacheType": [
+      "None",
+      "Operations",
+      "OperationsFull",
+      "Image",
+      "ImageDoubleBuffered",
+      "ImageComposite",
+      "ImageCompositeGPU",
+      "GPU"
+    ],
+    "SkiaGradientType": [
+      "Linear"
+    ],
+    "SkiaImageEffect": [
+      "Custom",
+      "None",
+      "Darken",
+      "Lighten",
+      "Contrast",
+      "Brightness",
+      "Gamma",
+      "Saturation",
+      "BlackAndWhite",
+      "Pastel",
+      "Tint",
+      "Grayscale",
+      "Sepia",
+      "InvertColors",
+      "TSL",
+      "HSL"
+    ],
+    "SkiaLayoutType": [
+      "Column",
+      "Row",
+      "Absolute",
+      "Wrap",
+      "Grid",
+      "Rectangle",
+      "Circle",
+      "Ellipse",
+      "Arc",
+      "Squricle",
+      "Path",
+      "Polygon",
+      "Line",
+      "Custom"
+    ],
+    "SkiaTouchAnimation": [
+      "None",
+      "Ripple",
+      "Shimmer"
+    ],
+    "StrokeCap": [
+      "Butt",
+      "Round",
+      "Square"
+    ],
+    "TextAlignment": [
+      "Start",
+      "Center",
+      "End"
+    ],
+    "TextTransform": [
+      "None",
+      "Lowercase",
+      "Uppercase",
+      "Titlecase"
+    ],
+    "TransformAspect": [
+      "Fill",
+      "None",
+      "Fit",
+      "AspectFit",
+      "AspectFill",
+      "AspectFitFill",
+      "FitFill",
+      "Cover",
+      "AspectCover",
+      "Tile"
+    ]
+  },
+  "records": {
+    "CornerRadius": {
+      "construct": "CornerRadius",
+      "fields": [
+        "TopLeft",
+        "TopRight",
+        "BottomLeft",
+        "BottomRight"
+      ]
+    },
+    "SkiaGradient": {
+      "construct": null,
+      "fields": [
+        "Type",
+        "Colors",
+        "StartXRatio",
+        "StartYRatio",
+        "EndXRatio",
+        "EndYRatio"
+      ]
+    },
+    "SkiaPoint": {
+      "construct": "SkiaPoint",
+      "fields": [
+        "X",
+        "Y"
+      ]
+    },
+    "SkiaShadow": {
+      "construct": "SkiaShadow",
+      "fields": [
+        "X",
+        "Y",
+        "Blur",
+        "Opacity",
+        "Color",
+        "ShadowOnly"
+      ]
+    },
+    "Thickness": {
+      "construct": "Thickness",
+      "fields": [
+        "Left",
+        "Top",
+        "Right",
+        "Bottom"
+      ]
+    }
+  },
+  "components": {
+    "SkiaLayout": {
+      "class": "SkiaLayout",
+      "content": "Children"
+    },
+    "SkiaStack": {
+      "class": "SkiaStack",
+      "content": "Children"
+    },
+    "SkiaRow": {
+      "class": "SkiaRow",
+      "content": "Children"
+    },
+    "SkiaLayer": {
+      "class": "SkiaLayer",
+      "content": "Children"
+    },
+    "SkiaWrap": {
+      "class": "SkiaWrap",
+      "content": "Children"
+    },
+    "SkiaGrid": {
+      "class": "SkiaGrid",
+      "content": "Children"
+    },
+    "SkiaLabel": {
+      "class": "SkiaLabel",
+      "content": "Children"
+    },
+    "SkiaRichLabel": {
+      "class": "SkiaRichLabel",
+      "content": null
+    },
+    "TextSpan": {
+      "class": "TextSpan",
+      "content": null
+    },
+    "SkiaHotspot": {
+      "class": "SkiaHotspot",
+      "content": null
+    },
+    "SkiaButton": {
+      "class": "SkiaButton",
+      "content": null
+    },
+    "SkiaImage": {
+      "class": "SkiaImage",
+      "content": null
+    },
+    "SkiaSvg": {
+      "class": "SkiaSvg",
+      "content": null
+    },
+    "SkiaScroll": {
+      "class": "SkiaScroll",
+      "content": "Children"
+    },
+    "SkiaShape": {
+      "class": "SkiaShape",
+      "content": "Children"
+    },
+    "SkiaFrame": {
+      "class": "SkiaFrame",
+      "content": "Children"
+    },
+    "SkiaSwitch": {
+      "class": "SkiaSwitch",
+      "content": null
+    },
+    "SkiaCheckbox": {
+      "class": "SkiaCheckbox",
+      "content": null
+    },
+    "SkiaRadioButton": {
+      "class": "SkiaRadioButton",
+      "content": null
+    },
+    "SkiaProgress": {
+      "class": "SkiaProgress",
+      "content": null
+    },
+    "SkiaSlider": {
+      "class": "SkiaSlider",
+      "content": null
+    },
+    "SkiaCarousel": {
+      "class": "SkiaCarousel",
+      "content": "Children"
+    },
+    "SkiaDrawer": {
+      "class": "SkiaDrawer",
+      "content": "Children"
+    }
+  }
+}

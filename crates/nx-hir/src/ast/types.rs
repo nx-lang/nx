@@ -29,7 +29,7 @@ pub enum TypeRef {
 
     /// Function type.
     ///
-    /// Example: `(int, string) => bool`
+    /// Example: `(int, string) => boolean`
     Function {
         /// Parameter types
         params: Vec<TypeRef>,
@@ -104,7 +104,7 @@ mod tests {
     fn test_function_type() {
         let ty = TypeRef::function(
             vec![TypeRef::name("int"), TypeRef::name("string")],
-            TypeRef::name("bool"),
+            TypeRef::name("boolean"),
         );
         match ty {
             TypeRef::Function {
@@ -113,7 +113,7 @@ mod tests {
             } => {
                 assert_eq!(params.len(), 2);
                 match &return_type.as_ref() {
-                    TypeRef::Name(name) => assert_eq!(name.as_str(), "bool"),
+                    TypeRef::Name(name) => assert_eq!(name.as_str(), "boolean"),
                     _ => panic!("Expected Name variant"),
                 }
             }

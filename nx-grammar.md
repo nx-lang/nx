@@ -66,17 +66,19 @@ non-library program builds, default visibility remains visible throughout the sa
 TypeDefinition ::=
     RecordDefinition
     | UnionDefinition
-    | EnumDefinition
     | TypeAliasDefinition
-
-EnumDefinition ::=
-    [VisibilityModifier] "enum" Identifier "=" ["|"] Identifier { "|" Identifier }
 
 UnionDefinition ::=
     [VisibilityModifier] "type" Identifier ["extends" QualifiedName] "=" UnionCaseList
 
+(* The leading "|" is optional for a list of two or more cases and required for a single case: one
+   bare name would be ambiguous with TypeAliasDefinition. *)
 UnionCaseList ::=
     UnionCase+
+    | BareUnionCase UnionCase+
+
+BareUnionCase ::=
+    Identifier ["{" {PropertyDefinition} "}"]
 
 UnionCase ::=
     "|" Identifier ["{" {PropertyDefinition} "}"]
@@ -108,8 +110,8 @@ TypeSuffix ::=
 
 PrimitiveType ::=
     "string"
-    | "i32" | "i64" | "int" | "f32" | "f64" | "float"
-    | "bool"
+    | "int" | "int32" | "int64" | "float32" | "float64"
+    | "boolean"
     | "void"
     | "object"
 
@@ -123,10 +125,12 @@ A nullable suffix may only be applied once per outer type layer. `string?[]?` is
 `[]` introduces a new list layer before the final `?`, while `string?[]??` is rejected during
 post-parse validation as a redundant nullable suffix.
 
-Simple scalar choices should use `enum`. Discriminated unions use `type Name =` followed by
-required leading-pipe cases. A union may contain fieldless cases and payload cases with the same
-`PropertyDefinition` shape used by records. The leading `|` is required so `type Result = Success |
-Failure` remains invalid today and available for a future alias-oriented feature.
+A closed set of scalar choices is a union whose cases all carry no payload — a *constant union*.
+Discriminated unions use `type Name =` followed by the case list. A union may contain fieldless
+cases and payload cases with the same `PropertyDefinition` shape used by records. The leading `|` is
+optional for a list of two or more cases and required for a single case, so
+`type Result = Success | Failure` declares a union while `type Result = Success` stays a type alias:
+one bare name would otherwise be ambiguous between the two.
 
 Record and action declarations reserve the `abstract` and `extends` keywords. `abstract type Name = { ... }`
 declares a non-instantiable record root, `abstract type Name extends Base = { ... }` declares an
@@ -234,7 +238,21 @@ receives element body content during markup-style invocation.
 RhsExpression ::=
     Element
     | Literal
+    | SignedNumericLiteral
+    | ContextualName
     | ValuesBracedExpression
+
+(* An unbraced value is always a literal, never an expression. A ContextualName is a single
+   Identifier and deliberately never a QualifiedName: admitting `fit=Fit.cover` would also admit
+   `fit=obj.field`, and that invariant would be gone. It resolves against the declared type of the
+   binding site — a case of the union that types it — rather than against lexical scope. *)
+ContextualName ::=
+    Identifier
+
+(* A `-` directly before a numeric literal, accepted only where a literal is required. Tokenization
+   is unchanged and `-` remains a prefix operator in expressions, so `a-1` is still subtraction. *)
+SignedNumericLiteral ::=
+    "-" ( IntegerLiteral | RealLiteral | HexLiteral )
 
 (* A braced expression can be a single value or muliple, space delimited *)
 ValuesBracedExpression ::=
@@ -299,12 +317,14 @@ PrefixUnaryExpression ::=
 BinaryExpression ::=
     ValueExpression ( "+" | "-" | "*" | "/" | "%" | ">" | "<" | ">=" | "<=" | "==" | "!=" | "&&" | "||" ) ValueExpression
 MemberAccess ::=
-    ValueExpression "." Identifier  (* includes property/field access, enum member access, and fieldless union case shorthand; semantic analysis distinguishes *)
+    ValueExpression "." Identifier  (* includes property/field access and union case shorthand; semantic analysis distinguishes *)
 ParenFunctionCall ::=
     ValueExpression "(" [ ValueExpression { "," ValueExpression } ] ")"
 
 Pattern ::=
-    Literal | QualifiedName
+    Literal | SignedNumericLiteral | QualifiedName
+    (* A single-segment name in pattern position is a ContextualName resolved against the
+       scrutinee's type, in preference to any lexically visible binding of that name. *)
 
 Unit ::=
     "()"

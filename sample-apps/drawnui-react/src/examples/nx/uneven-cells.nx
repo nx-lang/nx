@@ -1,0 +1,57 @@
+// Ported from the DrawnUI React demo's Uneven cells page — reduced.
+//
+// The original is a virtualized feed of rows with different heights: MeasureItemsStrategy is
+// MeasureVisible, so visible cells are measured on demand and the rest estimated and refined in
+// idle time, with LoadMoreCommand at both ends paging in more. NX has no expression for ItemsSource
+// or ItemTemplate, so none of that machinery survives; what remains is the cell itself, over a short
+// fixed list whose bodies still wrap to different heights.
+
+type Post = {
+  Title: string
+  Body: string
+  Footer: string
+  Color: string
+}
+
+// The cell the original builds imperatively in FeedCell: a colored stripe beside a column whose
+// body text wraps to as many lines as it needs, so no two rows are the same height.
+component <FeedCell extends DrawnNode Item:Post /> = {
+  <SkiaLayout Type=Absolute Padding=<Thickness Left=16.0 Top=12.0 Right=16.0 Bottom=12.0 />
+    BackgroundColor="#111827" UseCache=ImageDoubleBuffered
+    HorizontalOptions=Fill>
+    <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=3.0 /> WidthRequest=6.0
+      VerticalOptions=Fill BackgroundColor={Item.Color} />
+    <SkiaStack Margin=<Thickness Left=18.0 /> Spacing=6.0>
+      <SkiaLabel Text={Item.Title} FontSize=15.0 FontFamily="FontTextBold" TextColor="#FFFFFF" />
+      <SkiaLabel Text={Item.Body} FontSize=13.0 TextColor="#CBD5E1" HorizontalOptions=Fill />
+      <SkiaLabel Text={Item.Footer} FontSize=11.0 TextColor="#64748B" />
+    </SkiaStack>
+  </SkiaLayout>
+}
+
+let posts = {
+  <Post Title="Post 1" Color="#0D6EFD" Footer="#1 · uneven row"
+    Body="Drawn ui renders every pixel itself." />
+  <Post Title="Post 2" Color="#6610F2" Footer="#2 · uneven row"
+    Body="Skia canvas recycled cells measure visible estimates the rest and refines in idle time, so a row can be as tall as its text needs without costing a measure pass over the whole list." />
+  <Post Title="Post 3" Color="#D63384" Footer="#3 · uneven row"
+    Body="Uneven rows news feed social timeline product catalog." />
+  <Post Title="Post 4" Color="#FD7E14" Footer="#4 · uneven row"
+    Body="Drawn ui renders every pixel itself skia canvas recycled cells measure visible estimates the rest and refines in idle time uneven rows news feed social timeline product catalog drawn ui renders every pixel itself skia canvas recycled cells." />
+  <Post Title="Post 5" Color="#20C997" Footer="#5 · uneven row"
+    Body="Measure visible estimates the rest." />
+  <Post Title="Post 6" Color="#0DCAF0" Footer="#6 · uneven row"
+    Body="Recycled cells measure visible estimates the rest and refines in idle time uneven rows news feed." />
+}
+
+<SkiaLayer VerticalOptions=Fill>
+  <SkiaScroll Orientation=Vertical>
+    <SkiaStack Padding=<Thickness Left=16.0 Top=10.0 Right=16.0 Bottom=8.0 /> Spacing=8.0>
+      <SkiaLabel FontSize=13.0 TextColor="#D3D3D3" HorizontalOptions=Center
+        Text="6 rows written out — the original measures visible rows out of a paging feed" />
+      for post in posts {
+        <FeedCell Item={post} />
+      }
+    </SkiaStack>
+  </SkiaScroll>
+</SkiaLayer>

@@ -326,7 +326,7 @@ let root() = { "ready" }`
     mkdirSync(uiDir, { recursive: true });
     writeFileSync(
       join(flowDir, "Flow.nx"),
-      `export type FlowCompletion = | continue | end { message:string }
+      `export type FlowCompletion = continue | end { message:string }
 export type QuestionFlow = {
   completion:FlowCompletion?
   content steps:object

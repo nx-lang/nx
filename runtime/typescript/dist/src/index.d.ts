@@ -1,5 +1,5 @@
 export declare const NX_IR_FORMAT_ID = "nx-ir-json";
-export declare const NX_IR_SCHEMA_VERSION = 1;
+export declare const NX_IR_SCHEMA_VERSION = 2;
 export declare const NX_IR_RUNTIME_ABI = "nx-ir-runtime-v1";
 export type NxDiagnosticSeverity = "error" | "warning" | "info" | "hint";
 export interface NxIrDiagnostic {
@@ -56,7 +56,7 @@ export interface NxIrDeclaration {
     readonly span: NxIrSourceSpan;
     readonly kind: NxIrDeclarationKind;
 }
-export type NxIrDeclarationKind = NxIrFunctionDeclaration | NxIrValueDeclaration | NxIrEnumDeclaration | NxIrRecordDeclaration | NxIrComponentDeclaration | NxIrUnionDeclaration | NxIrTypeAliasDeclaration;
+export type NxIrDeclarationKind = NxIrFunctionDeclaration | NxIrValueDeclaration | NxIrRecordDeclaration | NxIrComponentDeclaration | NxIrUnionDeclaration | NxIrTypeAliasDeclaration;
 export interface NxIrFunctionDeclaration {
     readonly tag: "function";
     readonly params: readonly NxIrParam[];
@@ -68,13 +68,22 @@ export interface NxIrValueDeclaration {
     readonly value: NxIrExpression;
     readonly ty?: NxIrSemanticType;
 }
-export interface NxIrEnumDeclaration {
-    readonly tag: "enum";
-    readonly members: readonly string[];
-}
 export interface NxIrRecordDeclaration {
     readonly tag: "record";
     readonly fields: readonly NxIrRecordField[];
+    /**
+     * The record's abstract bases, nearest first.
+     *
+     * Fields arrive already flattened, so this answers only what flattening cannot: a value stamped
+     * with this record's name is acceptable wherever any of these is expected.
+     */
+    readonly bases?: readonly NxIrReference[];
+    /**
+     * Whether the record was declared `abstract`, and so has no values of its own.
+     *
+     * A base-typed site accepts a value of a record that extends this one, never one of this one.
+     */
+    readonly isAbstract?: boolean;
 }
 export interface NxIrComponentDeclaration {
     readonly tag: "component";
@@ -87,6 +96,8 @@ export interface NxIrComponentDeclaration {
 export interface NxIrUnionDeclaration {
     readonly tag: "union";
     readonly cases: readonly NxIrUnionCase[];
+    /** The union's abstract bases, nearest first, inherited by every case. */
+    readonly bases?: readonly NxIrReference[];
 }
 export interface NxIrTypeAliasDeclaration {
     readonly tag: "typeAlias";
@@ -113,6 +124,13 @@ export interface NxIrComponentField extends NxIrRecordField {
 export interface NxIrUnionCase {
     readonly name: string;
     readonly fields: readonly NxIrRecordField[];
+    /**
+     * Whether this case declares no fields in a union that declares no base.
+     *
+     * A constant case carries nothing beyond its own name, so its wire form is that bare string
+     * rather than a `$type` object.
+     */
+    readonly isConstant: boolean;
     readonly span: NxIrSourceSpan;
 }
 export interface NxIrExpression {
@@ -157,6 +175,30 @@ export interface NxPreparedProgram {
     readonly functionEntrypoints: ReadonlyMap<string, PreparedDeclaration>;
     readonly componentEntrypoints: ReadonlyMap<string, PreparedDeclaration>;
     readonly sourcesByIdentity: ReadonlyMap<string, string>;
+    /**
+     * Every constructible nominal shape, keyed by the `$type` a value of it carries.
+     *
+     * A value arriving at a base-typed boundary names its own type and nothing more, so this is how
+     * that name is turned back into the schema to normalize it with. One key can hold several shapes:
+     * two modules may each declare a record of the same name.
+     */
+    readonly nominalShapesByDiscriminator: ReadonlyMap<string, readonly NominalShape[]>;
+}
+/**
+ * One record or union case as it appears on the wire.
+ *
+ * <para>`bases` holds declaration ids rather than names because that is the only identity that
+ * survives separate modules: two records named `Card` are two types, and only the id says which
+ * one a base-typed site meant.</para>
+ */
+export interface NominalShape {
+    /** The `$type` a value of this shape carries: a record's name, or `Union.case`. */
+    readonly discriminator: string;
+    readonly declaration: string;
+    readonly fields: readonly NxIrRecordField[];
+    readonly bases: readonly string[];
+    /** Whether this shape is an abstract record, which no value may be an instance of. */
+    readonly isAbstract: boolean;
 }
 export interface PreparedDeclaration {
     readonly module: NxIrModule;

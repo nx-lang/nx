@@ -2,90 +2,67 @@
 //!
 //! Defines the core `Type` enum and related types.
 
-use nx_hir::Name;
+use nx_hir::{same_declaration, Name};
 use std::fmt;
 use std::hash::{Hash, Hasher};
+
+pub use nx_hir::DeclaringOrigin;
 
 /// Arena index for types (for future interning/arena allocation).
 pub type TypeId = u32;
 
-/// Canonical discriminant for numeric primitive equality.
-///
-/// `Int` and `I64` map to the same canonical value, as do `Float` and `F64`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum CanonicalPrimitive {
-    I32,
-    I64,
-    F32,
-    F64,
-    String,
-    Bool,
-    Void,
-}
-
 /// Primitive type kinds.
 ///
-/// `Int` is a display-preserving synonym for `I64`, and `Float` for `F64`.
-/// They compare equal and hash identically via custom impls.
-#[derive(Debug, Clone, Copy)]
+/// Each primitive has exactly one spelling; there are no aliases or synonyms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Primitive {
-    /// 32-bit signed integer
-    I32,
-    /// 64-bit signed integer
-    I64,
-    /// Synonym for I64 (displays as "int")
+    /// Default signed integer, exact over ±(2^53−1)
+    ///
+    /// `int` is the integer type NX programs use unless they have a specific reason not to. Its
+    /// range is the widest that every NX backend represents exactly and cheaply: it fits in a C#
+    /// `long`, a Rust `i64`, and — critically — a JavaScript `number`, which is exact only to
+    /// 2^53−1. Backends are free to store it in whatever 64-bit-or-wider slot is natural, because
+    /// the specified range makes that choice unobservable.
     Int,
+    /// 32-bit signed integer
+    Int32,
+    /// 64-bit signed integer
+    Int64,
     /// 32-bit floating-point
-    F32,
+    Float32,
     /// 64-bit floating-point
-    F64,
-    /// Synonym for F64 (displays as "float")
-    Float,
+    Float64,
     /// String type
     String,
     /// Boolean type
-    Bool,
+    Boolean,
     /// Void/unit type (functions with no return value)
     Void,
 }
 
 impl Primitive {
-    /// Returns the canonical discriminant for equality and hashing.
-    fn canonical(&self) -> CanonicalPrimitive {
-        match self {
-            Primitive::I32 => CanonicalPrimitive::I32,
-            Primitive::I64 | Primitive::Int => CanonicalPrimitive::I64,
-            Primitive::F32 => CanonicalPrimitive::F32,
-            Primitive::F64 | Primitive::Float => CanonicalPrimitive::F64,
-            Primitive::String => CanonicalPrimitive::String,
-            Primitive::Bool => CanonicalPrimitive::Bool,
-            Primitive::Void => CanonicalPrimitive::Void,
-        }
-    }
-
     /// Returns the name of this primitive type.
     pub fn as_str(&self) -> &'static str {
         match self {
-            Primitive::I32 => "i32",
-            Primitive::I64 => "i64",
             Primitive::Int => "int",
-            Primitive::F32 => "f32",
-            Primitive::F64 => "f64",
-            Primitive::Float => "float",
+            Primitive::Int32 => "int32",
+            Primitive::Int64 => "int64",
+            Primitive::Float32 => "float32",
+            Primitive::Float64 => "float64",
             Primitive::String => "string",
-            Primitive::Bool => "bool",
+            Primitive::Boolean => "boolean",
             Primitive::Void => "void",
         }
     }
 
-    /// Returns true if this is any integer type (i32, i64, int).
+    /// Returns true if this is any integer type (int, int32, int64).
     pub fn is_integer(&self) -> bool {
-        matches!(self, Primitive::I32 | Primitive::I64 | Primitive::Int)
+        matches!(self, Primitive::Int | Primitive::Int32 | Primitive::Int64)
     }
 
-    /// Returns true if this is any float type (f32, f64, float).
+    /// Returns true if this is any float type (float32, float64).
     pub fn is_float(&self) -> bool {
-        matches!(self, Primitive::F32 | Primitive::F64 | Primitive::Float)
+        matches!(self, Primitive::Float32 | Primitive::Float64)
     }
 
     /// Returns true if this is any numeric type.
@@ -95,47 +72,34 @@ impl Primitive {
 
     /// Returns the promoted type when combining two numeric primitives of the
     /// same category (both integer or both float). Returns `None` for
-    /// cross-category combinations (e.g. i32 + f64).
+    /// cross-category combinations (e.g. int32 + float64).
     ///
-    /// Promotion rules:
-    /// - i32 + i32 → i32
-    /// - i32 + i64/int → i64/int (preserves the wider operand's display)
-    /// - f32 + f32 → f32
-    /// - f32 + f64/float → f64/float (preserves the wider operand's display)
+    /// Promotion rules follow the integer rank order int32 < int < int64, so the wider operand
+    /// wins:
+    /// - int32 + int32 → int32
+    /// - int32 + int → int
+    /// - int + int → int
+    /// - int64 with any integer → int64
+    /// - float32 + float32 → float32
+    /// - float32 + float64 → float64 (the wider operand wins)
     pub fn numeric_promotion(a: Primitive, b: Primitive) -> Option<Primitive> {
         if a.is_integer() && b.is_integer() {
-            if matches!(a, Primitive::I32) && matches!(b, Primitive::I32) {
-                Some(Primitive::I32)
-            } else if matches!(a, Primitive::I32) {
-                Some(b)
+            if matches!(a, Primitive::Int64) || matches!(b, Primitive::Int64) {
+                Some(Primitive::Int64)
+            } else if matches!(a, Primitive::Int) || matches!(b, Primitive::Int) {
+                Some(Primitive::Int)
             } else {
-                Some(a)
+                Some(Primitive::Int32)
             }
         } else if a.is_float() && b.is_float() {
-            if matches!(a, Primitive::F32) && matches!(b, Primitive::F32) {
-                Some(Primitive::F32)
-            } else if matches!(a, Primitive::F32) {
-                Some(b)
+            if matches!(a, Primitive::Float32) && matches!(b, Primitive::Float32) {
+                Some(Primitive::Float32)
             } else {
-                Some(a)
+                Some(Primitive::Float64)
             }
         } else {
             None
         }
-    }
-}
-
-impl PartialEq for Primitive {
-    fn eq(&self, other: &Self) -> bool {
-        self.canonical() == other.canonical()
-    }
-}
-
-impl Eq for Primitive {}
-
-impl Hash for Primitive {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.canonical().hash(state);
     }
 }
 
@@ -150,7 +114,7 @@ impl fmt::Display for Primitive {
 /// Types are immutable and can be shared via `Arc` for efficiency.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
-    /// Primitive type (i32, i64, int, f32, f64, float, string, bool, void)
+    /// Primitive type (int, int32, int64, float32, float64, string, boolean, void)
     Primitive(Primitive),
 
     /// Array type: T[]
@@ -165,7 +129,7 @@ pub enum Type {
 
     /// Function type: (T1, T2, ...) => R
     ///
-    /// Example: `(int, string) => bool`
+    /// Example: `(int, string) => boolean`
     Function {
         /// Parameter types
         params: Vec<Type>,
@@ -173,13 +137,15 @@ pub enum Type {
         ret: Box<Type>,
     },
 
-    /// User-defined type (nominal type by name)
+    /// A nominal type reached by name: a record, a component, a built-in like `Element`, or a
+    /// name resolution reached no declaration for.
+    ///
+    /// A record carries the declaration it resolved to, so two same-named records in different
+    /// modules are two types. A `Named` with no origin is one resolution reached nothing for, or
+    /// one of the built-in names that has no declaration to point at.
     ///
     /// Example: `MyType`, `Person`
-    Named(Name),
-
-    /// Enum type (nominal with fixed set of members)
-    Enum(EnumType),
+    Named(NamedType),
 
     /// Discriminated union type (nominal with fixed set of cases)
     Union(UnionType),
@@ -191,6 +157,13 @@ pub enum Type {
     ///
     /// Used during type inference before the concrete type is known.
     Variable(TypeId),
+
+    /// A bare name awaiting resolution against the expected type of its binding site.
+    ///
+    /// Produced by inference for `Expr::ContextualName`, which has no context-free type. It is
+    /// replaced by the resolved union case type at the binding site, and reaching a
+    /// site that supplies no expected type is a diagnostic rather than a silent success.
+    ContextualName(Name),
 
     /// Unknown type (inference failed or error)
     ///
@@ -204,34 +177,29 @@ pub enum Type {
 }
 
 impl Type {
-    /// Creates a primitive i32 type.
-    pub fn i32() -> Self {
-        Type::Primitive(Primitive::I32)
-    }
-
-    /// Creates a primitive i64 type.
-    pub fn i64() -> Self {
-        Type::Primitive(Primitive::I64)
-    }
-
-    /// Creates a primitive int type (synonym for i64, displays as "int").
+    /// Creates a primitive int type, the default integer type.
     pub fn int() -> Self {
         Type::Primitive(Primitive::Int)
     }
 
-    /// Creates a primitive f32 type.
-    pub fn f32() -> Self {
-        Type::Primitive(Primitive::F32)
+    /// Creates a primitive int32 type.
+    pub fn int32() -> Self {
+        Type::Primitive(Primitive::Int32)
     }
 
-    /// Creates a primitive f64 type.
-    pub fn f64() -> Self {
-        Type::Primitive(Primitive::F64)
+    /// Creates a primitive int64 type.
+    pub fn int64() -> Self {
+        Type::Primitive(Primitive::Int64)
     }
 
-    /// Creates a primitive float type (synonym for f64, displays as "float").
-    pub fn float() -> Self {
-        Type::Primitive(Primitive::Float)
+    /// Creates a primitive float32 type.
+    pub fn float32() -> Self {
+        Type::Primitive(Primitive::Float32)
+    }
+
+    /// Creates a primitive float64 type.
+    pub fn float64() -> Self {
+        Type::Primitive(Primitive::Float64)
     }
 
     /// Creates a primitive string type.
@@ -239,9 +207,9 @@ impl Type {
         Type::Primitive(Primitive::String)
     }
 
-    /// Creates a primitive bool type.
-    pub fn bool() -> Self {
-        Type::Primitive(Primitive::Bool)
+    /// Creates a primitive boolean type.
+    pub fn boolean() -> Self {
+        Type::Primitive(Primitive::Boolean)
     }
 
     /// Creates a primitive void type.
@@ -267,24 +235,33 @@ impl Type {
         }
     }
 
-    /// Creates a named type.
+    /// Creates a named type that resolution reached no declaration for.
     pub fn named(name: impl Into<Name>) -> Self {
-        Type::Named(name.into())
+        Type::Named(NamedType::new(name.into(), None))
     }
 
-    /// Creates an enum type.
-    pub fn enum_type(name: impl Into<Name>, members: Vec<Name>) -> Self {
-        Type::Enum(EnumType::new(name.into(), members))
+    /// Creates a named type for the declaration at `origin`.
+    pub fn named_at(name: impl Into<Name>, origin: Option<DeclaringOrigin>) -> Self {
+        Type::Named(NamedType::new(name.into(), origin))
     }
 
-    /// Creates a discriminated union type.
-    pub fn union_type(name: impl Into<Name>, cases: Vec<Name>, base: Option<Name>) -> Self {
-        Type::Union(UnionType::new(name.into(), cases, base))
+    /// Creates a discriminated union type declared at `origin`.
+    pub fn union_type(
+        name: impl Into<Name>,
+        cases: Vec<Name>,
+        base: Option<Name>,
+        origin: Option<DeclaringOrigin>,
+    ) -> Self {
+        Type::Union(UnionType::new(name.into(), cases, base, origin))
     }
 
-    /// Creates a discriminated union case type.
-    pub fn union_case_type(union: impl Into<Name>, case: impl Into<Name>) -> Self {
-        Type::UnionCase(UnionCaseType::new(union.into(), case.into()))
+    /// Creates a discriminated union case type whose owning union is declared at `origin`.
+    pub fn union_case_type(
+        union: impl Into<Name>,
+        case: impl Into<Name>,
+        origin: Option<DeclaringOrigin>,
+    ) -> Self {
+        Type::UnionCase(UnionCaseType::new(union.into(), case.into(), origin))
     }
 
     /// Creates a type variable.
@@ -329,7 +306,7 @@ impl Type {
     ///
     /// Compatibility includes:
     /// - Exact equality
-    /// - Numeric width promotion within the same category (i32 ↔ i64, f32 ↔ f64)
+    /// - Numeric width promotion within the same category (int32 ↔ int64, float32 ↔ float64)
     /// - Subtyping (e.g., T is compatible with T?)
     /// - Error types are compatible with everything (for error recovery)
     pub fn is_compatible_with(&self, other: &Type) -> bool {
@@ -365,8 +342,12 @@ impl Type {
             }
         }
 
+        // A case satisfies a union only when it is a case of *that* union — the one declared at
+        // the same origin. Comparing names alone would let a same-named local declaration's case
+        // stand in for a foreign union's, and comparing case lists as well still would where the
+        // two declarations happen to agree on them.
         if let (Type::UnionCase(case), Type::Union(union)) = (self, other) {
-            return case.union == union.name;
+            return case.is_case_of(union);
         }
 
         // Arrays: T[] is compatible with U[] if T is compatible with U
@@ -423,14 +404,100 @@ impl fmt::Display for Type {
                 }
                 write!(f, ") => {}", ret)
             }
-            Type::Named(name) => write!(f, "{}", name),
-            Type::Enum(enum_ty) => write!(f, "{}", enum_ty.name),
+            Type::Named(named) => write!(f, "{}", named.name),
             Type::Union(union_ty) => write!(f, "{}", union_ty.name),
             Type::UnionCase(case_ty) => write!(f, "{}.{}", case_ty.union, case_ty.case),
             Type::Variable(id) => write!(f, "T{}", id),
+            Type::ContextualName(name) => write!(f, "{}", name),
             Type::Unknown => write!(f, "?"),
             Type::Error => write!(f, "<error>"),
         }
+    }
+}
+
+/// Renders two types for one diagnostic, qualifying them by declaring module only when needed.
+///
+/// <para>`expects Fit, found Fit` says nothing about why the two do not match. Qualifying every
+/// nominal type in every message would be noise, so the declaring module is added exactly where the
+/// display name alone cannot tell two different declarations apart.</para>
+///
+/// <para>Whether it can is decided on the nominal parts, not on the rendered strings. `expects Fit,
+/// found Fit.cover` renders as two different strings and is exactly as ambiguous as the identical
+/// pair: one `Fit` is the expectation and the other is the author's, and nothing on the line says
+/// so.</para>
+pub fn display_type_pair(lhs: &Type, rhs: &Type) -> (String, String) {
+    if nominal_parts_collide(lhs, rhs) {
+        return (qualified_display(lhs), qualified_display(rhs));
+    }
+    (lhs.to_string(), rhs.to_string())
+}
+
+/// Returns true when the two types spell one display name for two different declarations.
+fn nominal_parts_collide(lhs: &Type, rhs: &Type) -> bool {
+    let (mut lhs_parts, mut rhs_parts) = (Vec::new(), Vec::new());
+    collect_nominal_parts(lhs, &mut lhs_parts);
+    collect_nominal_parts(rhs, &mut rhs_parts);
+    lhs_parts.iter().any(|(lhs_name, lhs_origin)| {
+        rhs_parts.iter().any(|(rhs_name, rhs_origin)| {
+            lhs_name == rhs_name && !same_declaration(*lhs_origin, lhs_name, *rhs_origin, rhs_name)
+        })
+    })
+}
+
+/// Collects every nominal declaration a type names, as `(display name, declaration)`.
+///
+/// A union case contributes its *union's* name, because that is the name the reader has to tell
+/// apart — `Fit.cover` and `Fit` collide on `Fit`.
+fn collect_nominal_parts<'ty>(
+    ty: &'ty Type,
+    parts: &mut Vec<(&'ty Name, Option<&'ty DeclaringOrigin>)>,
+) {
+    match ty {
+        Type::Named(named) => parts.push((&named.name, named.origin())),
+        Type::Union(union_ty) => parts.push((&union_ty.name, union_ty.origin())),
+        Type::UnionCase(case_ty) => parts.push((&case_ty.union, case_ty.origin())),
+        Type::Array(inner) | Type::Nullable(inner) => collect_nominal_parts(inner, parts),
+        Type::Function { params, ret } => {
+            for param in params {
+                collect_nominal_parts(param, parts);
+            }
+            collect_nominal_parts(ret, parts);
+        }
+        _ => {}
+    }
+}
+
+/// Renders a type with each nominal part prefixed by the module that declares it.
+fn qualified_display(ty: &Type) -> String {
+    match ty {
+        Type::Union(union_ty) => match union_ty.origin() {
+            Some(origin) => format!("{}:{}", origin.module_identity(), union_ty.name),
+            None => union_ty.name.to_string(),
+        },
+        Type::UnionCase(case_ty) => match case_ty.origin() {
+            Some(origin) => format!(
+                "{}:{}.{}",
+                origin.module_identity(),
+                case_ty.union,
+                case_ty.case
+            ),
+            None => format!("{}.{}", case_ty.union, case_ty.case),
+        },
+        Type::Named(named) => match named.origin() {
+            Some(origin) => format!("{}:{}", origin.module_identity(), named.name),
+            None => named.name.to_string(),
+        },
+        Type::Array(inner) => format!("{}[]", qualified_display(inner)),
+        Type::Nullable(inner) => format!("{}?", qualified_display(inner)),
+        Type::Function { params, ret } => {
+            let params = params
+                .iter()
+                .map(qualified_display)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("({}) => {}", params, qualified_display(ret))
+        }
+        _ => ty.to_string(),
     }
 }
 
@@ -441,53 +508,182 @@ fn write_postfix_type(f: &mut fmt::Formatter<'_>, inner: &Type, suffix: &str) ->
     }
 }
 
-/// Describes an enum type with its members.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct EnumType {
-    /// Enum name
+/// Hashes a nominal type consistently with [`same_declaration`].
+fn hash_declaration<H: Hasher>(origin: Option<&DeclaringOrigin>, name: &Name, state: &mut H) {
+    match origin {
+        Some(origin) => origin.hash(state),
+        None => name.hash(state),
+    }
+}
+
+/// A nominal type reached by name, with the declaration that name reached.
+#[derive(Debug, Clone)]
+pub struct NamedType {
+    /// The name, as displayed. Two declarations sharing one are still two types.
     pub name: Name,
-    /// Ordered member names
-    pub members: Vec<Name>,
+    /// The declaration this name reached, where the resolving context reached one.
+    origin: Option<DeclaringOrigin>,
+}
+
+impl NamedType {
+    /// Creates a named type for the declaration at `origin`.
+    pub fn new(name: Name, origin: Option<DeclaringOrigin>) -> Self {
+        Self { name, origin }
+    }
+
+    /// Returns the declaration this name reached, if the building context reached one.
+    pub fn origin(&self) -> Option<&DeclaringOrigin> {
+        self.origin.as_ref()
+    }
+
+    /// Returns true when both names reached the same declaration.
+    pub fn is_same_declaration_as(&self, other: &NamedType) -> bool {
+        same_declaration(
+            self.origin.as_ref(),
+            &self.name,
+            other.origin.as_ref(),
+            &other.name,
+        )
+    }
+}
+
+impl PartialEq for NamedType {
+    fn eq(&self, other: &Self) -> bool {
+        self.is_same_declaration_as(other)
+    }
+}
+
+impl Eq for NamedType {}
+
+impl Hash for NamedType {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        hash_declaration(self.origin.as_ref(), &self.name, state);
+    }
 }
 
 /// Describes a discriminated union type with its cases.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct UnionType {
-    /// Union name
+    /// Union name, as displayed. Two unions sharing one are still two types.
     pub name: Name,
     /// Ordered case names
     pub cases: Vec<Name>,
     /// Optional abstract record base.
     pub base: Option<Name>,
+    /// The declaration this union comes from, where the building context could name one.
+    origin: Option<DeclaringOrigin>,
 }
 
 impl UnionType {
-    /// Creates a new discriminated union type definition.
-    pub fn new(name: Name, cases: Vec<Name>, base: Option<Name>) -> Self {
-        Self { name, cases, base }
+    /// Creates a new discriminated union type definition declared at `origin`.
+    pub fn new(
+        name: Name,
+        cases: Vec<Name>,
+        base: Option<Name>,
+        origin: Option<DeclaringOrigin>,
+    ) -> Self {
+        Self {
+            name,
+            cases,
+            base,
+            origin,
+        }
+    }
+
+    /// Returns the declaration this union comes from.
+    pub fn origin(&self) -> Option<&DeclaringOrigin> {
+        self.origin.as_ref()
+    }
+
+    /// Returns true when both denote the same declared union.
+    pub fn is_same_union_as(&self, other: &UnionType) -> bool {
+        same_declaration(
+            self.origin.as_ref(),
+            &self.name,
+            other.origin.as_ref(),
+            &other.name,
+        )
+    }
+}
+
+impl PartialEq for UnionType {
+    fn eq(&self, other: &Self) -> bool {
+        self.is_same_union_as(other)
+    }
+}
+
+impl Eq for UnionType {}
+
+impl Hash for UnionType {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        hash_declaration(self.origin.as_ref(), &self.name, state);
     }
 }
 
 /// Describes a discriminated union case type.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct UnionCaseType {
-    /// Owning union name.
+    /// Owning union name, as displayed.
     pub union: Name,
     /// Case name scoped under the owning union.
     pub case: Name,
+    /// The declaration the owning union comes from.
+    origin: Option<DeclaringOrigin>,
 }
 
 impl UnionCaseType {
-    /// Creates a new union case type.
-    pub fn new(union: Name, case: Name) -> Self {
-        Self { union, case }
+    /// Creates a new union case type whose owning union is declared at `origin`.
+    pub fn new(union: Name, case: Name, origin: Option<DeclaringOrigin>) -> Self {
+        Self {
+            union,
+            case,
+            origin,
+        }
+    }
+
+    /// Returns the declaration the owning union comes from.
+    pub fn origin(&self) -> Option<&DeclaringOrigin> {
+        self.origin.as_ref()
+    }
+
+    /// Returns true when this case's owning union is the union `other` denotes.
+    pub fn is_same_union_as(&self, other: &UnionType) -> bool {
+        same_declaration(
+            self.origin.as_ref(),
+            &self.union,
+            other.origin.as_ref(),
+            &other.name,
+        )
+    }
+
+    /// Returns true when both cases are scoped under the same declared union.
+    pub fn shares_union_with(&self, other: &UnionCaseType) -> bool {
+        same_declaration(
+            self.origin.as_ref(),
+            &self.union,
+            other.origin.as_ref(),
+            &other.union,
+        )
+    }
+
+    /// Returns true when `union` is this case's owning union and declares it.
+    pub fn is_case_of(&self, union: &UnionType) -> bool {
+        self.is_same_union_as(union) && union.cases.contains(&self.case)
     }
 }
 
-impl EnumType {
-    /// Creates a new enum type definition.
-    pub fn new(name: Name, members: Vec<Name>) -> Self {
-        Self { name, members }
+impl PartialEq for UnionCaseType {
+    fn eq(&self, other: &Self) -> bool {
+        self.case == other.case && self.shares_union_with(other)
+    }
+}
+
+impl Eq for UnionCaseType {}
+
+impl Hash for UnionCaseType {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        hash_declaration(self.origin.as_ref(), &self.union, state);
+        self.case.hash(state);
     }
 }
 
@@ -498,137 +694,156 @@ mod tests {
     #[test]
     fn test_primitive_types() {
         assert_eq!(Type::int(), Type::Primitive(Primitive::Int));
-        assert_eq!(Type::float(), Type::Primitive(Primitive::Float));
+        assert_eq!(Type::int32(), Type::Primitive(Primitive::Int32));
+        assert_eq!(Type::int64(), Type::Primitive(Primitive::Int64));
+        assert_eq!(Type::float32(), Type::Primitive(Primitive::Float32));
+        assert_eq!(Type::float64(), Type::Primitive(Primitive::Float64));
         assert_eq!(Type::string(), Type::Primitive(Primitive::String));
-        assert_eq!(Type::bool(), Type::Primitive(Primitive::Bool));
+        assert_eq!(Type::boolean(), Type::Primitive(Primitive::Boolean));
         assert_eq!(Type::void(), Type::Primitive(Primitive::Void));
     }
 
     #[test]
-    fn test_new_numeric_types() {
-        assert_eq!(Type::i32(), Type::Primitive(Primitive::I32));
-        assert_eq!(Type::i64(), Type::Primitive(Primitive::I64));
-        assert_eq!(Type::f32(), Type::Primitive(Primitive::F32));
-        assert_eq!(Type::f64(), Type::Primitive(Primitive::F64));
-    }
-
-    #[test]
-    fn test_synonym_equality() {
-        // int == i64 semantically
-        assert_eq!(Type::int(), Type::i64());
-        assert_eq!(Primitive::Int, Primitive::I64);
-
-        // float == f64 semantically
-        assert_eq!(Type::float(), Type::f64());
-        assert_eq!(Primitive::Float, Primitive::F64);
-    }
-
-    #[test]
-    fn test_synonym_display_preserving() {
-        // Even though int == i64, they display differently
+    fn test_each_primitive_has_one_name() {
         assert_eq!(Type::int().to_string(), "int");
-        assert_eq!(Type::i64().to_string(), "i64");
-        assert_eq!(Type::float().to_string(), "float");
-        assert_eq!(Type::f64().to_string(), "f64");
+        assert_eq!(Type::int32().to_string(), "int32");
+        assert_eq!(Type::int64().to_string(), "int64");
+        assert_eq!(Type::float32().to_string(), "float32");
+        assert_eq!(Type::float64().to_string(), "float64");
+        assert_eq!(Type::string().to_string(), "string");
+        assert_eq!(Type::boolean().to_string(), "boolean");
+        assert_eq!(Type::void().to_string(), "void");
     }
 
     #[test]
     fn test_width_inequality() {
-        // i32 != i64
-        assert_ne!(Type::i32(), Type::i64());
-        assert_ne!(Type::i32(), Type::int());
-        // f32 != f64
-        assert_ne!(Type::f32(), Type::f64());
-        assert_ne!(Type::f32(), Type::float());
+        assert_ne!(Type::int32(), Type::int64());
+        assert_ne!(Type::float32(), Type::float64());
     }
 
     #[test]
     fn test_cross_category_inequality() {
-        assert_ne!(Type::i32(), Type::f32());
-        assert_ne!(Type::i64(), Type::f64());
-        assert_ne!(Type::int(), Type::float());
+        assert_ne!(Type::int32(), Type::float32());
+        assert_ne!(Type::int64(), Type::float64());
     }
 
     #[test]
     fn test_primitive_is_integer() {
-        assert!(Primitive::I32.is_integer());
-        assert!(Primitive::I64.is_integer());
         assert!(Primitive::Int.is_integer());
-        assert!(!Primitive::F32.is_integer());
-        assert!(!Primitive::F64.is_integer());
-        assert!(!Primitive::Float.is_integer());
+        assert!(Primitive::Int32.is_integer());
+        assert!(Primitive::Int64.is_integer());
+        assert!(!Primitive::Float32.is_integer());
+        assert!(!Primitive::Float64.is_integer());
         assert!(!Primitive::String.is_integer());
     }
 
     #[test]
     fn test_primitive_is_float() {
-        assert!(Primitive::F32.is_float());
-        assert!(Primitive::F64.is_float());
-        assert!(Primitive::Float.is_float());
-        assert!(!Primitive::I32.is_float());
-        assert!(!Primitive::I64.is_float());
+        assert!(Primitive::Float32.is_float());
+        assert!(Primitive::Float64.is_float());
         assert!(!Primitive::Int.is_float());
+        assert!(!Primitive::Int32.is_float());
+        assert!(!Primitive::Int64.is_float());
+    }
+
+    #[test]
+    fn test_int_is_a_distinct_integer_primitive() {
+        assert!(Primitive::Int.is_integer());
+        assert!(Primitive::Int.is_numeric());
+        assert_eq!(Primitive::Int.as_str(), "int");
+        assert_eq!(Type::int(), Type::Primitive(Primitive::Int));
+
+        // `int` is its own type, not a spelling of `int64`.
+        assert_ne!(Primitive::Int, Primitive::Int64);
+        assert_ne!(Type::int(), Type::int64());
+    }
+
+    #[test]
+    fn test_numeric_promotion_integer_rank_order() {
+        // int32 < int < int64, in both operand orders.
+        for (a, b) in [
+            (Primitive::Int32, Primitive::Int),
+            (Primitive::Int, Primitive::Int32),
+            (Primitive::Int, Primitive::Int),
+        ] {
+            assert_eq!(Primitive::numeric_promotion(a, b), Some(Primitive::Int));
+        }
+        for (a, b) in [
+            (Primitive::Int, Primitive::Int64),
+            (Primitive::Int64, Primitive::Int),
+        ] {
+            assert_eq!(Primitive::numeric_promotion(a, b), Some(Primitive::Int64));
+        }
+
+        // `int` stays in its own category.
+        assert_eq!(
+            Primitive::numeric_promotion(Primitive::Int, Primitive::Float64),
+            None
+        );
+    }
+
+    #[test]
+    fn test_int_is_compatible_with_the_other_integer_widths() {
+        assert!(Type::int().is_compatible_with(&Type::int32()));
+        assert!(Type::int32().is_compatible_with(&Type::int()));
+        assert!(Type::int().is_compatible_with(&Type::int64()));
+        assert!(Type::int64().is_compatible_with(&Type::int()));
+        assert!(!Type::int().is_compatible_with(&Type::float64()));
     }
 
     #[test]
     fn test_numeric_promotion() {
         // Same width
         assert_eq!(
-            Primitive::numeric_promotion(Primitive::I32, Primitive::I32),
-            Some(Primitive::I32)
+            Primitive::numeric_promotion(Primitive::Int32, Primitive::Int32),
+            Some(Primitive::Int32)
         );
         assert_eq!(
-            Primitive::numeric_promotion(Primitive::F32, Primitive::F32),
-            Some(Primitive::F32)
+            Primitive::numeric_promotion(Primitive::Float32, Primitive::Float32),
+            Some(Primitive::Float32)
         );
 
-        // Cross width, same category
-        let result = Primitive::numeric_promotion(Primitive::I32, Primitive::I64);
-        assert!(result.is_some());
-        assert_eq!(result.unwrap(), Primitive::I64); // wider wins
-
-        let result = Primitive::numeric_promotion(Primitive::I32, Primitive::Int);
-        assert!(result.is_some());
-        assert_eq!(result.unwrap(), Primitive::Int); // preserves display
-
-        let result = Primitive::numeric_promotion(Primitive::F32, Primitive::F64);
-        assert!(result.is_some());
-        assert_eq!(result.unwrap(), Primitive::F64);
+        // Cross width, same category: the wider operand wins in both orders
+        assert_eq!(
+            Primitive::numeric_promotion(Primitive::Int32, Primitive::Int64),
+            Some(Primitive::Int64)
+        );
+        assert_eq!(
+            Primitive::numeric_promotion(Primitive::Int64, Primitive::Int32),
+            Some(Primitive::Int64)
+        );
+        assert_eq!(
+            Primitive::numeric_promotion(Primitive::Float32, Primitive::Float64),
+            Some(Primitive::Float64)
+        );
 
         // Cross category: error
         assert_eq!(
-            Primitive::numeric_promotion(Primitive::I32, Primitive::F32),
+            Primitive::numeric_promotion(Primitive::Int32, Primitive::Float32),
             None
         );
         assert_eq!(
-            Primitive::numeric_promotion(Primitive::I64, Primitive::F64),
-            None
-        );
-        assert_eq!(
-            Primitive::numeric_promotion(Primitive::Int, Primitive::Float),
+            Primitive::numeric_promotion(Primitive::Int64, Primitive::Float64),
             None
         );
     }
 
     #[test]
     fn test_is_compatible_same_category_widths() {
-        // i32 compatible with i64 (same category, different width)
-        assert!(Type::i32().is_compatible_with(&Type::i64()));
-        assert!(Type::i64().is_compatible_with(&Type::i32()));
-        assert!(Type::i32().is_compatible_with(&Type::int()));
+        // int32 compatible with int64 (same category, different width)
+        assert!(Type::int32().is_compatible_with(&Type::int64()));
+        assert!(Type::int64().is_compatible_with(&Type::int32()));
 
-        // f32 compatible with f64
-        assert!(Type::f32().is_compatible_with(&Type::f64()));
-        assert!(Type::f64().is_compatible_with(&Type::f32()));
-        assert!(Type::f32().is_compatible_with(&Type::float()));
+        // float32 compatible with float64
+        assert!(Type::float32().is_compatible_with(&Type::float64()));
+        assert!(Type::float64().is_compatible_with(&Type::float32()));
     }
 
     #[test]
     fn test_is_not_compatible_cross_category() {
-        // i32 not compatible with f32
-        assert!(!Type::i32().is_compatible_with(&Type::f32()));
-        assert!(!Type::i64().is_compatible_with(&Type::f64()));
-        assert!(!Type::int().is_compatible_with(&Type::float()));
+        // int32 not compatible with float32
+        assert!(!Type::int32().is_compatible_with(&Type::float32()));
+        assert!(!Type::int64().is_compatible_with(&Type::float64()));
     }
 
     #[test]
@@ -647,14 +862,14 @@ mod tests {
 
     #[test]
     fn test_function_type() {
-        let func = Type::function(vec![Type::int(), Type::string()], Type::bool());
-        assert_eq!(func.to_string(), "(int, string) => bool");
+        let func = Type::function(vec![Type::int(), Type::string()], Type::boolean());
+        assert_eq!(func.to_string(), "(int, string) => boolean");
     }
 
     #[test]
     fn test_type_equality() {
         assert_eq!(Type::int(), Type::int());
-        assert_ne!(Type::int(), Type::float());
+        assert_ne!(Type::int(), Type::float64());
         assert_ne!(Type::int(), Type::nullable(Type::int()));
     }
 
@@ -679,8 +894,8 @@ mod tests {
 
     #[test]
     fn test_is_compatible_nullable_with_width_promotion() {
-        // i32 should be compatible with i64? (via promotion + nullable)
-        assert!(Type::i32().is_compatible_with(&Type::nullable(Type::i64())));
+        // int32 should be compatible with int64? (via promotion + nullable)
+        assert!(Type::int32().is_compatible_with(&Type::nullable(Type::int64())));
     }
 
     #[test]
@@ -724,20 +939,15 @@ mod tests {
 
     #[test]
     fn test_type_display() {
-        assert_eq!(Type::int().to_string(), "int");
-        assert_eq!(Type::i32().to_string(), "i32");
-        assert_eq!(Type::i64().to_string(), "i64");
-        assert_eq!(Type::f32().to_string(), "f32");
-        assert_eq!(Type::f64().to_string(), "f64");
-        assert_eq!(Type::float().to_string(), "float");
         assert_eq!(Type::array(Type::string()).to_string(), "string[]");
-        assert_eq!(Type::nullable(Type::bool()).to_string(), "bool?");
+        assert_eq!(Type::nullable(Type::boolean()).to_string(), "boolean?");
         assert_eq!(
             Type::function(vec![Type::int(), Type::int()], Type::int()).to_string(),
             "(int, int) => int"
         );
         assert_eq!(
-            Type::enum_type(Name::new("Direction"), vec![Name::new("north")]).to_string(),
+            Type::union_type(Name::new("Direction"), vec![Name::new("north")], None, None)
+                .to_string(),
             "Direction"
         );
     }

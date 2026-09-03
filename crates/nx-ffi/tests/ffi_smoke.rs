@@ -518,10 +518,10 @@ fn ffi_json_success_round_trip() {
 }
 
 #[test]
-fn ffi_msgpack_enum_value_emits_bare_authored_member_string() {
+fn ffi_msgpack_constant_case_emits_bare_authored_case_string() {
     let (status, bytes) = eval_msgpack(
         r#"
-            enum Status = | active | disabled
+            type Status = active | disabled
             let root() = { Status.active }
         "#,
     );
@@ -533,10 +533,10 @@ fn ffi_msgpack_enum_value_emits_bare_authored_member_string() {
 }
 
 #[test]
-fn ffi_json_enum_value_emits_bare_authored_member_string() {
+fn ffi_json_constant_case_emits_bare_authored_case_string() {
     let (status, json) = eval_json(
         r#"
-            enum Status = | active | disabled
+            type Status = active | disabled
             let root() = { Status.active }
         "#,
     );
@@ -679,7 +679,7 @@ fn ffi_codegen_nx_ir_returns_json_and_metadata() {
     let document: serde_json::Value = serde_json::from_str(&payload.json).unwrap();
 
     assert_eq!(document["format"], "nx-ir-json");
-    assert_eq!(payload.metadata.schema_version, 1);
+    assert_eq!(payload.metadata.schema_version, 2);
     assert_eq!(payload.metadata.runtime_abi, "nx-ir-runtime-v1");
     assert!(payload.metadata.program_fingerprint > 0);
     assert_eq!(payload.metadata.function_entrypoints[0].name, "root");
@@ -1493,9 +1493,9 @@ fn ffi_component_dispatch_round_trips_effect_payloads_in_msgpack_and_json() {
 }
 
 #[test]
-fn ffi_component_init_round_trips_enum_props_in_msgpack_and_json() {
+fn ffi_component_init_round_trips_constant_case_props_in_msgpack_and_json() {
     let source = r#"
-        enum ThemeMode = | light | dark
+        type ThemeMode = light | dark
 
         external component <SearchBox theme:ThemeMode />
     "#;
@@ -1566,9 +1566,9 @@ fn ffi_component_init_round_trips_enum_props_in_msgpack_and_json() {
 }
 
 #[test]
-fn ffi_component_dispatch_round_trips_enum_effect_payloads_in_msgpack_and_json() {
+fn ffi_component_dispatch_round_trips_constant_case_effect_payloads_in_msgpack_and_json() {
     let source = r#"
-        enum ThemeMode = | light | dark
+        type ThemeMode = light | dark
 
         action SearchSubmitted = { theme:ThemeMode }
         action DoSearch = { theme:ThemeMode }

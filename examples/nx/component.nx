@@ -28,13 +28,13 @@ component <SearchBox
   <TextInput value={query} placeholder={placeholder} />
 }
 
-type LoadState = | idle | failed { message:string }
+type LoadState = idle | failed { message:string }
 
 component <Notice message:string tone:string density:string /> = {
   <aside tone={tone} density={density}>{message}</aside>
 }
 
-let renderNotice(state:LoadState, compact:bool) = {
+let renderNotice(state:LoadState, compact:boolean) = {
   <Notice
     if state is {
       LoadState.failed => message={state.message} tone="danger"

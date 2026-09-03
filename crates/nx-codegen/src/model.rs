@@ -101,15 +101,26 @@ pub enum CodegenDeclarationKind {
         value: CodegenExpression,
         ty: Option<Type>,
     },
-    Enum {
-        members: Vec<String>,
-    },
     Record {
         fields: Vec<CodegenRecordField>,
+        /// The record's abstract bases, nearest first.
+        ///
+        /// A value of this record is acceptable wherever any of them is expected. The fields are
+        /// already flattened, so this exists only to answer that question — a runtime holding a
+        /// value stamped with this record's name needs it to tell a subtype from a foreign type.
+        bases: Vec<CodegenReference>,
+        /// Whether the record was declared `abstract`, and so has no values of its own.
+        ///
+        /// A base-typed site accepts a value of a record that extends it, never one of the base
+        /// itself. A runtime taking host input needs this to hold that line, the way analysis holds
+        /// it for NX source.
+        is_abstract: bool,
     },
     Component(CodegenComponent),
     Union {
         cases: Vec<CodegenUnionCase>,
+        /// The union's abstract bases, nearest first, inherited by every case.
+        bases: Vec<CodegenReference>,
     },
     TypeAlias,
     Unsupported(CodegenUnsupportedConstruct),
@@ -187,6 +198,12 @@ pub struct CodegenComponentField {
 pub struct CodegenUnionCase {
     pub name: String,
     pub fields: Vec<CodegenRecordField>,
+    /// Whether this case declares no fields in a union that declares no base.
+    ///
+    /// A constant case carries nothing beyond its own name, so it is emitted as a bare string
+    /// rather than a `$type` object, and a union whose cases are all constant generates what an
+    /// `enum` generated.
+    pub is_constant: bool,
     pub span: TextSpan,
 }
 
@@ -255,10 +272,6 @@ pub enum CodegenExpressionKind {
         member: String,
         reference: Option<CodegenReference>,
     },
-    EnumMember {
-        enum_reference: CodegenReference,
-        member: String,
-    },
     UnionCase {
         union_reference: CodegenReference,
         case_name: String,
@@ -266,6 +279,13 @@ pub enum CodegenExpressionKind {
         properties: Vec<CodegenProperty>,
         content_field: Option<String>,
         content: Vec<CodegenExpression>,
+        /// Whether this case declares no fields in a union that declares no base.
+        is_constant: bool,
+        /// Whether every case of the declaring union is constant.
+        ///
+        /// A constant union emits a frozen value object, so its cases are reached through it; a
+        /// constant case of a mixed union has no such object and is emitted as a bare string.
+        union_is_constant: bool,
     },
     Record {
         name: String,

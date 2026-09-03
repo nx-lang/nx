@@ -56,9 +56,9 @@ fn test_infer_array_types() {
 }
 
 #[test]
-fn test_enum_definition_type_checks() {
+fn test_constant_union_definition_type_checks() {
     let source = r#"
-        enum Direction = | north | south | east | west
+        type Direction = north | south | east | west
         let current: Direction = { Direction.north }
     "#;
 
@@ -67,9 +67,9 @@ fn test_enum_definition_type_checks() {
 }
 
 #[test]
-fn test_unknown_enum_member_diagnostic() {
+fn test_unknown_union_case_diagnostic() {
     let source = r#"
-        enum Direction = | north | south
+        type Direction = north | south
         let useDirection(): Direction = { Direction.nort }
     "#;
 
@@ -78,8 +78,13 @@ fn test_unknown_enum_member_diagnostic() {
         result
             .errors()
             .iter()
-            .any(|diag| diag.code() == Some("undefined-enum-member")),
-        "Expected undefined-enum-member diagnostic"
+            .any(|diag| diag.code() == Some("undefined-union-case")),
+        "Expected undefined-union-case diagnostic, got {:?}",
+        result
+            .errors()
+            .iter()
+            .map(|diag| diag.code())
+            .collect::<Vec<_>>()
     );
 }
 
@@ -113,7 +118,7 @@ fn test_union_case_default_type_mismatch_diagnostic() {
           | idle
           | failed {
               message: string = 123
-              retryable: bool = true
+              retryable: boolean = true
             }
     "#;
 
@@ -138,7 +143,7 @@ fn test_union_payload_case_construction_type_checks() {
           | idle
           | failed {
               message: string
-              retryable: bool = true
+              retryable: boolean = true
               code: int?
             }
 
@@ -156,7 +161,7 @@ fn test_union_payload_case_construction_type_checks() {
 #[test]
 fn test_union_fieldless_case_shorthand_type_checks() {
     let source = r#"
-        type LoadState = | idle | loading
+        type LoadState = idle | loading
         let state: LoadState = { LoadState.idle }
     "#;
 
@@ -190,7 +195,7 @@ fn test_payload_union_case_shorthand_is_rejected() {
 fn test_union_case_construction_rejects_missing_and_unknown_fields() {
     let missing = check_str(
         r#"
-            type LoadState = | failed { message:string retryable:bool = true }
+            type LoadState = | failed { message:string retryable:boolean = true }
             let state: LoadState = <LoadState.failed />
         "#,
         "union-missing-field.nx",
@@ -330,9 +335,9 @@ fn test_union_cases_satisfy_extended_abstract_record() {
 fn test_union_cases_compare_with_extended_abstract_record() {
     let source = r#"
         abstract type EventBase = { source:string = "ui" }
-        type UiEvent extends EventBase = | clicked { x:int } | closed
-        let compareUnion(event: UiEvent, base: EventBase): bool = { event == base }
-        let compareCase(base: EventBase): bool = { <UiEvent.clicked x={1} /> != base }
+        type UiEvent extends EventBase = clicked { x:int } | closed
+        let compareUnion(event: UiEvent, base: EventBase): boolean = { event == base }
+        let compareCase(base: EventBase): boolean = { <UiEvent.clicked x={1} /> != base }
     "#;
 
     let result = check_str(source, "union-base-comparison.nx");
@@ -345,7 +350,7 @@ fn test_union_cases_compare_with_extended_abstract_record() {
 
 #[test]
 fn test_duplicate_union_case_syntax_diagnostic_suppresses_hir_duplicate() {
-    let source = "type LoadState = | idle | idle";
+    let source = "type LoadState = idle | idle";
 
     let result = check_str(source, "union-duplicate-case.nx");
     let duplicate_diagnostics = result
@@ -378,7 +383,7 @@ fn test_duplicate_union_case_syntax_diagnostic_suppresses_hir_duplicate() {
 #[test]
 fn test_union_sibling_cases_infer_owning_union_in_sequences() {
     let source = r#"
-        type LoadState = | idle | failed { message:string }
+        type LoadState = idle | failed { message:string }
         let states: LoadState[] = { LoadState.idle <LoadState.failed message={"Offline"} /> }
     "#;
 
@@ -394,7 +399,7 @@ fn test_union_sibling_cases_infer_owning_union_in_sequences() {
 fn test_union_shared_inherited_field_is_accessible() {
     let source = r#"
         abstract type EventBase = { source:string }
-        type UiEvent extends EventBase = | clicked { x:int } | closed
+        type UiEvent extends EventBase = clicked { x:int } | closed
         let read(event: UiEvent): string = { event.source }
     "#;
 
@@ -409,7 +414,7 @@ fn test_union_shared_inherited_field_is_accessible() {
 #[test]
 fn test_union_case_field_requires_narrowing() {
     let source = r#"
-        type LoadState = | failed { message:string } | loaded { count:int }
+        type LoadState = failed { message:string } | loaded { count:int }
         let read(state: LoadState): string = { state.message }
     "#;
 
@@ -427,7 +432,7 @@ fn test_union_case_field_requires_narrowing() {
 #[test]
 fn test_exhaustive_union_match_narrows_identifier() {
     let source = r#"
-        type LoadState = | idle | failed { message:string }
+        type LoadState = idle | failed { message:string }
         let view(state: LoadState): string = {
             if state is {
                 LoadState.idle => ""
@@ -447,7 +452,7 @@ fn test_exhaustive_union_match_narrows_identifier() {
 #[test]
 fn test_non_exhaustive_union_match_without_else_is_rejected() {
     let source = r#"
-        type LoadState = | idle | failed { message:string }
+        type LoadState = idle | failed { message:string }
         let view(state: LoadState): string = {
             if state is {
                 LoadState.idle => ""
@@ -469,7 +474,7 @@ fn test_non_exhaustive_union_match_without_else_is_rejected() {
 #[test]
 fn test_union_match_else_allows_partial_coverage() {
     let source = r#"
-        type LoadState = | idle | failed { message:string }
+        type LoadState = idle | failed { message:string }
         let view(state: LoadState): string = {
             if state is {
                 LoadState.idle => ""
@@ -515,7 +520,7 @@ fn test_property_fragment_required_property_must_be_on_every_path() {
     let accepted = check_str(
         r#"
             let <Button label:string /> = <button>{label}</button>
-            let <Main primary:bool /> = <Button if primary { label="Save" } else { label="Cancel" } />
+            let <Main primary:boolean /> = <Button if primary { label="Save" } else { label="Cancel" } />
         "#,
         "property-fragment-required-accepted.nx",
     );
@@ -528,7 +533,7 @@ fn test_property_fragment_required_property_must_be_on_every_path() {
     let rejected = check_str(
         r#"
             let <Button label:string /> = <button>{label}</button>
-            let <Main primary:bool /> = <Button if primary { label="Save" } />
+            let <Main primary:boolean /> = <Button if primary { label="Save" } />
         "#,
         "property-fragment-required-rejected.nx",
     );
@@ -547,7 +552,7 @@ fn test_property_fragment_condition_list_without_else_has_empty_required_path() 
     let rejected = check_str(
         r#"
             let <Badge tone:string /> = <span>{tone}</span>
-            let <Main isError:bool /> = <Badge if { isError => tone="danger" } />
+            let <Main isError:boolean /> = <Badge if { isError => tone="danger" } />
         "#,
         "property-fragment-condition-list-required-rejected.nx",
     );
@@ -563,7 +568,7 @@ fn test_property_fragment_condition_list_without_else_has_empty_required_path() 
     let accepted = check_str(
         r#"
             let <Badge tone:string /> = <span>{tone}</span>
-            let <Main isError:bool /> = <Badge if { isError => tone="danger" else => tone="neutral" } />
+            let <Main isError:boolean /> = <Badge if { isError => tone="danger" else => tone="neutral" } />
         "#,
         "property-fragment-condition-list-required-accepted.nx",
     );
@@ -579,7 +584,7 @@ fn test_property_fragment_duplicates_are_path_sensitive() {
     let accepted = check_str(
         r#"
             let <Badge tone:string /> = <span>{tone}</span>
-            let <Main isError:bool /> = <Badge if isError { tone="danger" } else { tone="neutral" } />
+            let <Main isError:boolean /> = <Badge if isError { tone="danger" } else { tone="neutral" } />
         "#,
         "property-fragment-mutually-exclusive-duplicates.nx",
     );
@@ -592,7 +597,7 @@ fn test_property_fragment_duplicates_are_path_sensitive() {
     let rejected = check_str(
         r#"
             let <Badge tone:string /> = <span>{tone}</span>
-            let <Main isError:bool /> = <Badge tone="neutral" if isError { tone="danger" } />
+            let <Main isError:boolean /> = <Badge tone="neutral" if isError { tone="danger" } />
         "#,
         "property-fragment-static-duplicate.nx",
     );
@@ -613,7 +618,7 @@ fn test_property_fragment_content_property_rules_are_path_sensitive() {
             component <Panel content body:Element /> = {
                 <section>{body}</section>
             }
-            let <Main compact:bool /> = {
+            let <Main compact:boolean /> = {
                 <Panel if compact { body=<span /> } else { body=<section /> } />
             }
         "#,
@@ -630,7 +635,7 @@ fn test_property_fragment_content_property_rules_are_path_sensitive() {
             component <Panel content body:Element /> = {
                 <section>{body}</section>
             }
-            let <Main compact:bool /> = {
+            let <Main compact:boolean /> = {
                 <Panel if compact { body=<span /> }><Badge /></Panel>
             }
         "#,
@@ -649,7 +654,7 @@ fn test_property_fragment_content_property_rules_are_path_sensitive() {
 #[test]
 fn test_property_fragment_match_uses_union_narrowing() {
     let source = r#"
-        type LoadState = | idle | failed { message:string }
+        type LoadState = idle | failed { message:string }
         let <Notice message:string /> = <div>{message}</div>
         let view(state: LoadState) = {
             <Notice if state is {
@@ -670,7 +675,7 @@ fn test_property_fragment_match_uses_union_narrowing() {
 #[test]
 fn test_property_fragment_match_rejects_non_exhaustive_union() {
     let source = r#"
-        type LoadState = | idle | failed { message:string }
+        type LoadState = idle | failed { message:string }
         let <Notice message:string /> = <div>{message}</div>
         let view(state: LoadState) = {
             <Notice if state is {
@@ -693,7 +698,7 @@ fn test_property_fragment_match_rejects_non_exhaustive_union() {
 #[test]
 fn test_property_fragment_match_rejects_wrong_union_pattern() {
     let source = r#"
-        type LoadState = | idle | failed { message:string }
+        type LoadState = idle | failed { message:string }
         type SaveState = | failed
         let <Notice message:string /> = <div>{message}</div>
         let view(state: LoadState) = {
@@ -785,7 +790,7 @@ fn test_record_inheritance_accepts_concrete_leaf_for_abstract_ancestor() {
         }
 
         type User extends UserBase = {
-          isAdmin: bool = false
+          isAdmin: boolean = false
         }
 
         let consume(entity: Entity): int = { 1 }
@@ -816,7 +821,7 @@ fn test_record_inheritance_accepts_concrete_leaf_for_abstract_return_type() {
         }
 
         type User extends UserBase = {
-          isAdmin: bool = false
+          isAdmin: boolean = false
         }
 
         let make(): UserBase = { <User id={1} name={"Ada"} /> }
@@ -899,7 +904,7 @@ fn test_record_literal_unknown_record_fields_use_value_spans() {
 #[test]
 fn test_record_literal_field_type_mismatches_use_value_spans() {
     let source = r##"
-        type ChatLinkConfig = { count:int enabled:bool }
+        type ChatLinkConfig = { count:int enabled:boolean }
         let config: ChatLinkConfig = {
           <ChatLinkConfig count={"many"} enabled={"yes"} />
         }
@@ -1031,14 +1036,14 @@ fn test_record_inheritance_uses_shared_abstract_supertype_for_branches() {
         }
 
         type User extends UserBase = {
-          isAdmin: bool = false
+          isAdmin: boolean = false
         }
 
         type StaffUser extends UserBase = {
           department: string
         }
 
-        let choose(flag: bool): UserBase = {
+        let choose(flag: boolean): UserBase = {
           if flag {
             <User id={1} name={"Ada"} />
           } else {
@@ -1479,9 +1484,9 @@ fn test_multi_level_component_inheritance_accumulates_props_and_emits() {
 
         abstract component <SearchBase placeholder:string emits { SearchSubmitted } />
 
-        abstract component <SearchChrome extends SearchBase showSearchIcon:bool = true />
+        abstract component <SearchChrome extends SearchBase showSearchIcon:boolean = true />
 
-        component <SearchBox extends SearchChrome highlight:bool = false /> = {
+        component <SearchBox extends SearchChrome highlight:boolean = false /> = {
           <TextInput placeholder={placeholder} />
         }
 
@@ -1682,7 +1687,7 @@ fn test_undefined_function() {
 #[test]
 fn test_function_with_parameters() {
     let source = r#"
-        let <Button text:string disabled:bool /> =
+        let <Button text:string disabled:boolean /> =
             <button>{text}</button>
     "#;
 
@@ -1772,7 +1777,7 @@ fn test_nested_function_calls() {
 #[test]
 fn test_conditional_expressions() {
     let source = r#"
-        let <Test flag:bool /> = if flag then <div>Yes</div> else <div>No</div>
+        let <Test flag:boolean /> = if flag then <div>Yes</div> else <div>No</div>
     "#;
 
     let _result = check_str(source, "conditional.nx");
@@ -2044,4 +2049,156 @@ fn test_readme_example() {
 
     let result = check_str(source, "readme.nx");
     assert!(result.lowered_module.is_some());
+}
+
+// ============================================================================
+// Former primitive spellings
+// ============================================================================
+
+fn messages_for(source: &str, file_name: &str) -> Vec<String> {
+    check_str(source, file_name)
+        .diagnostics
+        .iter()
+        .map(|diag| diag.message().to_string())
+        .collect()
+}
+
+#[test]
+fn test_boolean_diagnostics_name_the_canonical_type() {
+    let if_condition = messages_for(
+        r#"let <A s:string /> = { if s { 1 } else { 2 } }"#,
+        "if-condition.nx",
+    );
+    assert!(
+        if_condition.contains(&"If condition must be boolean, found string".to_string()),
+        "got {:?}",
+        if_condition
+    );
+
+    let logical_operator = messages_for(r#"let <A s:string /> = { s && s }"#, "logical-and.nx");
+    assert!(
+        logical_operator.contains(
+            &"Logical operator And requires boolean operands, found string and string".to_string()
+        ),
+        "got {:?}",
+        logical_operator
+    );
+
+    let logical_not = messages_for(r#"let <A s:string /> = { !s }"#, "logical-not.nx");
+    assert!(
+        logical_not.contains(&"Logical NOT requires boolean, found string".to_string()),
+        "got {:?}",
+        logical_not
+    );
+
+    let property_condition = messages_for(
+        r#"
+            external component <Notice density:string />
+            let <A s:string /> = <Notice if s { density="tight" } else { density="wide" } />
+        "#,
+        "property-condition.nx",
+    );
+    assert!(
+        property_condition
+            .contains(&"property-list if condition expects boolean, found string".to_string()),
+        "got {:?}",
+        property_condition
+    );
+}
+
+#[test]
+fn test_no_diagnostic_names_a_former_primitive_spelling() {
+    let sources: &[(&str, &str)] = &[
+        (r#"let <A s:string /> = { if s { 1 } else { 2 } }"#, "a.nx"),
+        (r#"let <A s:string /> = { s && s }"#, "b.nx"),
+        (r#"let <A s:string /> = { !s }"#, "c.nx"),
+        (
+            r#"
+                external component <B v:float64 />
+                let <A /> = <B v=1 />
+            "#,
+            "d.nx",
+        ),
+    ];
+
+    for (source, file_name) in sources {
+        for message in messages_for(source, file_name) {
+            for stale in ["bool", "i32", "i64", "f32", "f64"] {
+                assert!(
+                    !message
+                        .split(|c: char| !c.is_alphanumeric())
+                        .any(|word| word == stale),
+                    "diagnostic names the removed spelling '{}': {}",
+                    stale,
+                    message
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_capitalized_primitive_spellings_are_not_primitives() {
+    let source = r#"
+        external component <B v:INT64 />
+        let <Host /> = <B v=1 />
+    "#;
+
+    let result = check_str(source, "capitalized-primitive.nx");
+    assert!(
+        !result.errors().is_empty(),
+        "Expected 'INT64' to be an ordinary named type, not the int64 primitive"
+    );
+
+    let canonical = r#"
+        external component <B v:int64 />
+        let <Host /> = <B v=1 />
+    "#;
+    let ok = check_str(canonical, "canonical-primitive.nx");
+    assert!(
+        ok.errors().is_empty(),
+        "Expected the canonical spelling to type check, got {:?}",
+        ok.diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_user_defined_type_may_take_a_former_primitive_name() {
+    // `i64` was a primitive spelling before the rename and is an ordinary name now, so a user
+    // may declare a type with it.
+    let source = r#"
+        type i64 = { value:int }
+        type Holder = { n:i64 }
+    "#;
+
+    let result = check_str(source, "user-defined-i64.nx");
+    assert!(
+        result.errors().is_empty(),
+        "Expected a user-defined type named 'i64' to resolve, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_int_is_a_primitive_and_is_not_displaced_by_a_user_declaration() {
+    // `int` is a primitive, so a same-named declaration does not capture uses of the name —
+    // exactly as for `string` or `boolean`. Binding a string to `n:int` must still be rejected.
+    let source = r#"
+        type int = { value:string }
+        external component <B n:int />
+        let <Host /> = <B n="hello" />
+    "#;
+
+    let result = check_str(source, "user-defined-int.nx");
+    assert!(
+        !result.errors().is_empty(),
+        "Expected `n:int` to resolve to the primitive and reject a string binding"
+    );
 }

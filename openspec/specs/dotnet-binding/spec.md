@@ -211,33 +211,33 @@ by converting previously returned MessagePack bytes through public helper APIs.
   `ComponentDispatchResultBytesToJson` methods
 
 ### Requirement: Managed raw-value and typed-model enum workflows share a single bare-string wire shape
-The managed NX binding SHALL represent enum values as the bare authored NX member string across
-both raw `NxValue` runtime-result workflows and schema-aware typed-model workflows. JSON and
-MessagePack output from raw runtime calls, typed DTO serialization, and the shared
+The managed NX binding SHALL represent constant union case values as the bare authored NX case
+string across both raw `NxValue` runtime-result workflows and schema-aware typed-model workflows.
+JSON and MessagePack output from raw runtime calls, typed DTO serialization, and the shared
 `NxEnumJsonConverter` / `NxEnumMessagePackFormatter` helpers SHALL produce and consume the same
-string representation for a given enum member. The binding SHALL document and test that the raw
-and typed layers share this wire shape rather than presenting it as two distinct enum contracts.
+string representation for a given case. The binding SHALL document and test that the raw and typed
+layers share this wire shape rather than presenting it as two distinct contracts.
 
 #### Scenario: Managed JSON raw-value workflow emits a bare authored member string
-- **WHEN** a C# caller evaluates NX source to `JsonElement` and the result is an enum value such as
-  `ThemeMode.dark`
+- **WHEN** a C# caller evaluates NX source to `JsonElement` and the result is a constant case value
+  such as `ThemeMode.dark`
 - **THEN** the returned JSON SHALL be the bare string `"dark"` in the slot typed as `ThemeMode`
 - **AND** the binding SHALL NOT wrap that raw JSON result in a `"$enum"` / `"$member"` object
 
 #### Scenario: Managed typed MessagePack workflow matches the raw-value wire shape
 - **WHEN** a C# caller serializes or deserializes a generated typed DTO that contains
   `ThemeMode.Dark`
-- **THEN** the managed typed workflow SHALL use the plain member string `"dark"` for MessagePack
+- **THEN** the managed typed workflow SHALL use the plain case string `"dark"` for MessagePack
   and JSON
 - **AND** the typed DTO wire output SHALL be bit-equivalent to the raw-value wire output for the
-  same enum member at the same slot
+  same case at the same slot
 
 #### Scenario: Managed consumer of a raw enum string resolves it through the target type
 - **WHEN** a C# caller receives a raw JSON or MessagePack result that contains the bare string
   `"dark"` at a slot whose target typed DTO property is `ThemeMode`
 - **THEN** the binding SHALL map that string to `ThemeMode.Dark` through the shared
   `NxEnumJsonConverter<ThemeMode, ThemeModeWireFormat>` / `NxEnumMessagePackFormatter<...>` helpers
-- **AND** SHALL reject unknown member strings with the helpers' existing
+- **AND** SHALL reject unknown case strings with the helpers' existing
   `JsonException` / `MessagePackSerializationException` error path
 
 ### Requirement: Managed raw-value and typed-model polymorphic record workflows share a single `$type` wire shape
@@ -246,6 +246,12 @@ map contract across both raw `NxValue` runtime-result workflows and schema-aware
 MessagePack workflows. Generated typed DTO serialization and deserialization for polymorphic NX
 record families SHALL align with the canonical raw runtime shape rather than a separate
 MessagePack-specific union envelope.
+
+A polymorphic family that is a discriminated union MAY contain constant cases, whose wire form is a
+bare string rather than a `$type` map. The managed polymorphic reader SHALL accept a bare string at
+a slot whose target type is such a union and SHALL resolve it to that union's constant case, and the
+managed polymorphic writer SHALL emit a bare string for that case. This SHALL NOT change the wire
+shape of any payload case.
 
 #### Scenario: Typed MessagePack polymorphic record serialization matches raw runtime shape
 - **WHEN** a C# caller serializes a generated typed DTO value for `SearchRequested` through
@@ -259,6 +265,13 @@ MessagePack-specific union envelope.
   a polymorphic record family
 - **THEN** the managed typed workflow SHALL resolve the concrete CLR type from the `$type` field
 - **AND** SHALL populate declared fields using their authored NX wire names
+
+#### Scenario: Polymorphic reader accepts a bare string for a constant case
+- **WHEN** a C# caller deserializes JSON or MessagePack containing the bare string `"idle"` at a
+  slot whose target type is a union with cases `idle` and `failed { message:string }`
+- **THEN** the managed typed workflow SHALL resolve the value to that union's `idle` case
+- **AND** serializing that value again SHALL produce the bare string `"idle"`
+- **AND** an unknown bare string SHALL be rejected through the existing error path
 
 #### Scenario: Raw-to-typed round-trip preserves polymorphic record identity
 - **WHEN** a C# caller receives a polymorphic record from raw runtime output and then maps it
@@ -368,12 +381,11 @@ names.
 - **AND** the payload SHALL include the declared case fields using their authored NX wire names
 - **AND** the payload SHALL NOT use a MessagePack union envelope
 
-#### Scenario: Managed enum workflow remains separate
-- **WHEN** a C# caller receives raw output for `CardSortMode.closed` and raw output for
-  `LoadState.idle`
-- **THEN** the managed enum workflow SHALL expose the enum value as the bare string `"closed"`
-- **AND** the managed union workflow SHALL expose the union case as a map containing `$type:
-  "LoadState.idle"`
+#### Scenario: Constant and payload cases keep distinct managed shapes
+- **WHEN** a C# caller receives raw output for `CardSortMode.closed`, a case of the constant union
+  `CardSortMode`, and raw output for the payload case `LoadState.failed`
+- **THEN** the managed workflow SHALL expose the constant case as the bare string `"closed"`
+- **AND** it SHALL expose the payload case as a map containing `$type: "LoadState.failed"`
 
 ### Requirement: Managed binding evaluates components with explicit state
 The managed NX binding SHALL expose `EvaluateComponent` APIs that evaluate a named component with

@@ -125,7 +125,7 @@ fn test_payload_union_case_construction_applies_defaults() {
           | idle
           | failed {
               message: string
-              retryable: bool = true
+              retryable: boolean = true
               code: int?
             }
 
@@ -148,20 +148,22 @@ fn test_payload_union_case_construction_applies_defaults() {
 }
 
 #[test]
-fn test_fieldless_union_case_shorthand_constructs_record_value() {
+fn test_constant_union_case_shorthand_constructs_a_scalar_value() {
     let source = r#"
-        type LoadState = | idle | loading
+        type LoadState = idle | loading
         let make(): LoadState = { LoadState.idle }
     "#;
 
     let result = execute_function(source, "make", vec![])
         .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
 
-    let Value::Record { type_name, fields } = result else {
-        panic!("Expected fieldless union case record value");
+    // The case declares no fields and its union declares no base, so it carries nothing beyond
+    // its own name and is a scalar rather than an empty record.
+    let Value::UnionCase { union, case } = result else {
+        panic!("Expected a constant union case scalar, got {result:?}");
     };
-    assert_eq!(type_name.as_str(), "LoadState.idle");
-    assert!(fields.is_empty());
+    assert_eq!(union.as_str(), "LoadState");
+    assert_eq!(case.as_str(), "idle");
 }
 
 #[test]
@@ -194,7 +196,7 @@ fn test_union_case_inherits_abstract_base_defaults() {
 #[test]
 fn test_omitted_nullable_union_field_materializes_null() {
     let source = r#"
-        type FlowCompletion = | continue | end { message:string }
+        type FlowCompletion = continue | end { message:string }
         type QuestionFlow = { completion:FlowCompletion? }
         let make(): QuestionFlow = { <QuestionFlow /> }
     "#;
@@ -212,7 +214,7 @@ fn test_omitted_nullable_union_field_materializes_null() {
 #[test]
 fn test_explicit_null_nullable_union_field_materializes_null() {
     let source = r#"
-        type FlowCompletion = | continue | end { message:string }
+        type FlowCompletion = continue | end { message:string }
         type QuestionFlow = { completion:FlowCompletion? }
         let make(): QuestionFlow = { <QuestionFlow completion={null} /> }
     "#;
@@ -227,27 +229,55 @@ fn test_explicit_null_nullable_union_field_materializes_null() {
     assert_eq!(fields.get("completion"), Some(&Value::Null));
 }
 
+/// A fieldless case of a union that declares a base is **not** constant: it carries the base's
+/// fields at runtime, so it keeps the record representation (design D3).
 #[test]
-fn test_fieldless_union_case_remains_distinct_from_null() {
+fn test_fieldless_case_of_a_based_union_keeps_the_record_shape() {
     let source = r#"
-        type FlowCompletion = | continue | end { message:string }
-        let make(): FlowCompletion = { FlowCompletion.continue }
+        abstract type EventBase = {
+          source: string = "ui"
+        }
+        type UiEvent extends EventBase = clicked { x:int } | closed
+        let make(): UiEvent = { UiEvent.closed }
     "#;
 
     let result = execute_function(source, "make", vec![])
         .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
 
     let Value::Record { type_name, fields } = result else {
-        panic!("Expected fieldless union case record value");
+        panic!("Expected a record, got {result:?}");
     };
-    assert_eq!(type_name.as_str(), "FlowCompletion.continue");
-    assert!(fields.is_empty());
+    assert_eq!(type_name.as_str(), "UiEvent.closed");
+    assert_eq!(
+        fields.get("source"),
+        Some(&Value::String(SmolStr::new("ui"))),
+        "the case carries the base's fields and their defaults"
+    );
+}
+
+#[test]
+fn test_constant_union_case_remains_distinct_from_null() {
+    let source = r#"
+        type FlowCompletion = continue | end { message:string }
+        let make(): FlowCompletion = { FlowCompletion.continue }
+    "#;
+
+    let result = execute_function(source, "make", vec![])
+        .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+
+    // A constant case in a mixed union is still a scalar; only a case that carries fields keeps
+    // the record representation.
+    let Value::UnionCase { union, case } = result else {
+        panic!("Expected a constant union case scalar, got {result:?}");
+    };
+    assert_eq!(union.as_str(), "FlowCompletion");
+    assert_eq!(case.as_str(), "continue");
 }
 
 #[test]
 fn test_union_match_compares_case_discriminator() {
     let source = r#"
-        type LoadState = | idle | failed { message:string }
+        type LoadState = idle | failed { message:string }
         let view(state: LoadState): string = {
             if state is {
                 LoadState.idle => "idle"
@@ -349,39 +379,39 @@ fn test_paren_function_without_return_annotation() {
 }
 
 // ============================================================================
-// Enum Support Tests
+// Constant Union Tests
 // ============================================================================
 
 #[test]
-fn test_enum_member_return() {
+fn test_constant_case_return() {
     let source = r#"
-        enum Direction = | north | south | east | west
+        type Direction = north | south | east | west
         let <north /> = { Direction.north }
     "#;
 
     let result = execute_function(source, "north", vec![]).unwrap_or_else(|err| panic!("{}", err));
     assert_eq!(
         result,
-        Value::EnumValue {
-            type_name: nx_hir::Name::new("Direction"),
-            member: SmolStr::new("north")
+        Value::UnionCase {
+            union: nx_hir::Name::new("Direction"),
+            case: SmolStr::new("north")
         }
     );
 }
 
 #[test]
-fn test_enum_comparison() {
+fn test_constant_case_comparison() {
     let source = r#"
-        enum Direction = | north | south | east | west
-        let isNorth(value:Direction): bool = { value == Direction.north }
+        type Direction = north | south | east | west
+        let isNorth(value:Direction): boolean = { value == Direction.north }
     "#;
 
     let result = execute_function(
         source,
         "isNorth",
-        vec![Value::EnumValue {
-            type_name: nx_hir::Name::new("Direction"),
-            member: SmolStr::new("north"),
+        vec![Value::UnionCase {
+            union: nx_hir::Name::new("Direction"),
+            case: SmolStr::new("north"),
         }],
     )
     .unwrap_or_else(|err| panic!("{}", err));
@@ -430,7 +460,7 @@ fn test_derived_record_argument_satisfies_abstract_ancestor_parameter() {
         }
 
         type User extends UserBase = {
-          isAdmin: bool = false
+          isAdmin: boolean = false
         }
 
         let consume(entity:Entity): int = { 1 }
@@ -465,7 +495,7 @@ fn test_derived_record_return_satisfies_abstract_ancestor_return_type() {
         }
 
         type User extends UserBase = {
-          isAdmin: bool = false
+          isAdmin: boolean = false
         }
 
         let make(): UserBase = { <User id={1} name={"Ada"} /> }
@@ -626,7 +656,7 @@ fn test_record_inheritance_applies_inherited_defaults() {
         }
 
         type User extends UserBase = {
-          isAdmin: bool = false
+          isAdmin: boolean = false
         }
     "#;
 
@@ -1202,7 +1232,7 @@ fn test_element_call_braced_child_list_flattens_content_array() {
 fn test_element_call_conditional_content_expression_preserves_selected_element() {
     let source = r#"
         let <collect content items: object[] />: object[] = { items }
-        let root(flag: bool): object[] = { <collect>if flag { <A /> } else { <B /> }</collect> }
+        let root(flag: boolean): object[] = { <collect>if flag { <A /> } else { <B /> }</collect> }
     "#;
 
     let true_result = execute_function(source, "root", vec![Value::Boolean(true)])

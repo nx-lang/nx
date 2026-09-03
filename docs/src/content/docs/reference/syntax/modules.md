@@ -9,7 +9,7 @@ files contribute declarations recursively. For the full grammar, see
 
 ## File Layout
 - Imports appear at the top of the file and pull in declarations from library directories.
-- Local declarations use `let`, `type`, `enum`, `action`, or `component`.
+- Local declarations use `let`, `type`, `action`, or `component`.
 - A module may export a root element directly or expose named bindings.
 
 ```nx

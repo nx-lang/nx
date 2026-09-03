@@ -7,8 +7,10 @@ use nx_syntax::{parse_file, parse_str, SyntaxKind};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 use tree_helpers::{contains_kind, count_kind, find_first_kind};
 
 /// Helper to resolve test fixture paths (works from both crate and workspace root)
@@ -1952,39 +1954,39 @@ fn test_parse_invalid_component_emits_reference_is_error() {
 }
 
 #[test]
-fn test_parse_enum_definition() {
-    let path = fixture_path("valid/enum-definition.nx");
+fn test_parse_constant_union_definition() {
+    let path = fixture_path("valid/constant-union-definition.nx");
     let result = parse_file(&path).unwrap();
 
-    assert!(result.is_ok(), "Enum definition file should parse");
+    assert!(result.is_ok(), "Constant union file should parse");
     let root = result.root().expect("Should produce root node");
 
-    let enums: Vec<_> = root
+    let unions: Vec<_> = root
         .children()
-        .filter(|child| child.kind() == SyntaxKind::ENUM_DEFINITION)
+        .filter(|child| child.kind() == SyntaxKind::UNION_DEFINITION)
         .collect();
-    assert_eq!(enums.len(), 2, "Expected two enum definitions");
+    assert_eq!(unions.len(), 2, "Expected two union definitions");
 
-    let status = enums.first().expect("First enum definition should exist");
+    let status = unions.first().expect("First union definition should exist");
     let name_node = status
         .child_by_field("name")
-        .expect("Enum definition should expose name field");
+        .expect("Union definition should expose name field");
     assert_eq!(name_node.text(), "Status");
 
-    let members_node = status
-        .child_by_field("members")
-        .expect("Enum definition should contain members list");
-    let member_names: Vec<_> = members_node
+    let cases_node = status
+        .child_by_field("cases")
+        .expect("Union definition should contain a case list");
+    let case_names: Vec<_> = cases_node
         .children()
-        .filter(|child| child.kind() == SyntaxKind::ENUM_MEMBER)
-        .map(|member| member.text().to_string())
+        .filter(|child| child.kind() == SyntaxKind::UNION_CASE)
+        .map(|case| {
+            case.child_by_field("name")
+                .expect("Union case should expose name")
+                .text()
+                .to_string()
+        })
         .collect();
-    assert!(
-        member_names.contains(&"pending_review".to_string())
-            && member_names.contains(&"active".to_string())
-            && member_names.contains(&"disabled".to_string()),
-        "All enum members should be captured"
-    );
+    assert_eq!(case_names, vec!["pending_review", "active", "disabled"]);
 }
 
 #[test]
@@ -2003,9 +2005,17 @@ fn test_parse_union_definition() {
         .children()
         .filter(|child| child.kind() == SyntaxKind::UNION_DEFINITION)
         .collect();
-    assert_eq!(unions.len(), 2, "Expected two union definitions");
+    // `CardSortMode` is a constant union: the fixture's former `enum` declaration.
+    assert_eq!(unions.len(), 3, "Expected three union definitions");
+    assert_eq!(
+        unions[0]
+            .child_by_field("name")
+            .expect("Union should expose name field")
+            .text(),
+        "CardSortMode"
+    );
 
-    let load_state = unions.first().expect("First union should exist");
+    let load_state = unions.get(1).expect("LoadState union should exist");
     assert_eq!(
         load_state
             .child_by_field("name")
@@ -2046,7 +2056,7 @@ fn test_parse_union_definition() {
         "Case field default should be preserved"
     );
 
-    let ui_event = unions.get(1).expect("Second union should exist");
+    let ui_event = unions.get(2).expect("UiEvent union should exist");
     assert_eq!(
         ui_event
             .child_by_field("base")
@@ -2057,24 +2067,85 @@ fn test_parse_union_definition() {
 }
 
 #[test]
-fn test_parse_union_definition_requires_leading_pipe() {
-    let path = fixture_path("invalid/union-missing-leading-pipe.nx");
+fn test_parse_union_definition_leading_pipe_is_optional_for_multiple_cases() {
+    let path = fixture_path("valid/union-without-leading-pipe.nx");
     let result = parse_file(&path).unwrap();
 
     assert!(
-        !result.is_ok(),
-        "Union-looking type declaration without leading pipe should fail"
+        result.is_ok(),
+        "A union of two or more cases needs no leading pipe. Errors: {:?}",
+        result.errors
+    );
+    let root = result.root().expect("Should produce root node");
+
+    let unions: Vec<_> = root
+        .children()
+        .filter(|child| child.kind() == SyntaxKind::UNION_DEFINITION)
+        .collect();
+    assert_eq!(unions.len(), 3, "Expected three union definitions");
+
+    let case_names = |union: &nx_syntax::SyntaxNode| -> Vec<String> {
+        union
+            .child_by_field("cases")
+            .expect("Union should expose case list")
+            .children()
+            .filter(|child| child.kind() == SyntaxKind::UNION_CASE)
+            .map(|case| {
+                case.child_by_field("name")
+                    .expect("Union case should expose name")
+                    .text()
+                    .to_string()
+            })
+            .collect()
+    };
+
+    assert_eq!(case_names(&unions[0]), vec!["idle", "loading"]);
+    assert_eq!(case_names(&unions[1]), vec!["point", "circle"]);
+    assert_eq!(case_names(&unions[2]), vec!["solo"]);
+}
+
+/// A single bare case would be ambiguous with the alias form, so `type A = B` stays an alias.
+#[test]
+fn test_parse_single_bare_name_is_a_type_alias_not_a_union() {
+    let result = parse_str("type Alias = Other", "alias.nx");
+
+    assert!(
+        result.is_ok(),
+        "Expected a clean parse. Errors: {:?}",
+        result.errors
+    );
+    let root = result.root().expect("Should produce root node");
+    let kinds: Vec<_> = root.children().map(|child| child.kind()).collect();
+
+    assert!(
+        kinds.contains(&SyntaxKind::TYPE_DEFINITION),
+        "Expected a type_definition, got {kinds:?}"
     );
     assert!(
-        !result.errors.is_empty(),
-        "Missing leading pipe should produce diagnostics"
+        !kinds.contains(&SyntaxKind::UNION_DEFINITION),
+        "A single bare name must not parse as a union, got {kinds:?}"
     );
-    let messages = result
+}
+
+/// The removed `enum` keyword is reported by name rather than as an unhelpful parse error.
+#[test]
+fn test_parse_removed_enum_keyword_names_the_replacement() {
+    let path = fixture_path("invalid/removed-enum-keyword.nx");
+    let result = parse_file(&path).unwrap();
+
+    assert!(!result.is_ok(), "`enum` is no longer an NX declaration");
+
+    let codes: Vec<_> = result
         .errors
         .iter()
-        .map(|diagnostic| diagnostic.message())
-        .collect::<Vec<_>>()
-        .join(" ");
+        .filter_map(|diagnostic| diagnostic.code())
+        .collect();
+    assert_eq!(
+        codes,
+        vec!["removed-enum-keyword"],
+        "the targeted diagnostic replaces the generic parse error rather than joining it"
+    );
+
     let notes = result
         .errors
         .iter()
@@ -2082,12 +2153,8 @@ fn test_parse_union_definition_requires_leading_pipe() {
         .collect::<Vec<_>>()
         .join(" ");
     assert!(
-        messages.contains("Invalid discriminated union definition"),
-        "Missing leading pipe should produce a union-specific diagnostic, got: {messages}"
-    );
-    assert!(
-        notes.contains("Expected: type UnionName"),
-        "Missing leading pipe should include the union syntax hint, got: {notes}"
+        notes.contains("Write `type Fit = fill | contain | cover` instead"),
+        "expected the concrete replacement form, got: {notes}"
     );
 }
 
@@ -2441,7 +2508,7 @@ fn test_snapshot_error_diagnostics() {
 #[test]
 fn test_snapshot_union_definition() {
     let result = parse_str(
-        "type LoadState = | idle | failed { message:string retryable:bool = true }",
+        "type LoadState = idle | failed { message:string retryable:boolean = true }",
         "test.nx",
     );
     let root = result.root().expect("Should have root");
@@ -2625,16 +2692,16 @@ fn test_binary_expressions_comparison() {
 #[test]
 fn test_binary_expressions_logical() {
     // Logical AND
-    let result = parse_str("let <Test x: bool y: bool /> = {x && y}", "test.nx");
+    let result = parse_str("let <Test x: boolean y: boolean /> = {x && y}", "test.nx");
     assert!(result.is_ok());
 
     // Logical OR
-    let result = parse_str("let <Test x: bool y: bool /> = {x || y}", "test.nx");
+    let result = parse_str("let <Test x: boolean y: boolean /> = {x || y}", "test.nx");
     assert!(result.is_ok());
 
     // Complex: precedence (AND before OR)
     let result = parse_str(
-        "let <Test x: bool y: bool z: bool /> = {x && y || z}",
+        "let <Test x: boolean y: boolean z: boolean /> = {x && y || z}",
         "test.nx",
     );
     assert!(result.is_ok());
@@ -2651,7 +2718,7 @@ fn test_unary_expressions() {
     assert!(result.is_ok());
 
     // Logical not
-    let result = parse_str("let <Test flag: bool /> = {!flag}", "test.nx");
+    let result = parse_str("let <Test flag: boolean /> = {!flag}", "test.nx");
     assert!(result.is_ok());
 }
 
@@ -2844,8 +2911,8 @@ fn test_property_defaults_with_expressions() {
     let source = r#"let <Test
   sum: int = {1 + 2 + 3}
   product: int = {4 * 5}
-  comparison: bool = {10 > 5}
-  logical: bool = {true && false}
+  comparison: boolean = {10 > 5}
+  logical: boolean = {true && false}
   ternary: int = {5 > 3 ? 100 : 200}
   nested: int = {(1 + 2) * (3 + 4)}
 /> = {sum + product}"#;
@@ -2930,4 +2997,123 @@ fn test_value_definition_vs_function_definition() {
         .children()
         .any(|c| c.kind() == SyntaxKind::FUNCTION_DEFINITION);
     assert!(has_func_def, "Should have function_definition node");
+}
+
+#[test]
+fn test_parse_element_with_empty_body() {
+    // An element whose open and close tags have nothing between them is well-formed, and carries
+    // no content field — the same shape a self-closing tag produces.
+    let source = "<App></App>";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "Element with an empty body should parse: {}",
+        render_diagnostics_cli(&result.errors, &HashMap::new())
+    );
+
+    let element = find_first_kind(&result.root().expect("Should have root node"), SyntaxKind::ELEMENT)
+        .expect("Expected element");
+    assert!(
+        element.child_by_field("content").is_none(),
+        "An empty body should expose no content field"
+    );
+    assert_eq!(
+        element
+            .child_by_field("close_name")
+            .expect("Element should expose closing tag name")
+            .text(),
+        "App"
+    );
+}
+
+#[test]
+fn test_parse_element_with_empty_body_across_lines() {
+    // The whitespace-and-comment-only body is the shape authors actually write.
+    let source = "let root() = {\n  <App VerticalOptions=Fill>\n    // nothing yet\n  </App>\n}";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "Element with a whitespace-only body should parse: {}",
+        render_diagnostics_cli(&result.errors, &HashMap::new())
+    );
+
+    let element = find_first_kind(&result.root().expect("Should have root node"), SyntaxKind::ELEMENT)
+        .expect("Expected element");
+    assert!(
+        element.child_by_field("content").is_none(),
+        "A whitespace-only body should expose no content field"
+    );
+    assert!(
+        element.child_by_field("properties").is_some(),
+        "Properties should still be parsed alongside an empty body"
+    );
+}
+
+#[test]
+fn test_parse_top_level_element_with_empty_body() {
+    // A source file may end in a single element expression, and that element may be empty.
+    let source = "external component <App content Children:Element[]? />\n\n<App>\n</App>";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "A top-level element with an empty body should parse: {}",
+        render_diagnostics_cli(&result.errors, &HashMap::new())
+    );
+    assert!(
+        contains_kind(&result.root().expect("Should have root node"), SyntaxKind::ELEMENT),
+        "Expected a top-level element"
+    );
+}
+
+// ============================================================================
+// External scanner termination
+// ============================================================================
+
+/// Parses on a worker thread, so a scanner that fails to terminate fails this test rather than
+/// hanging the whole suite. Returns whether the parse was clean, or `None` if it never finished.
+fn parse_within(source: &'static str, limit: Duration) -> Option<bool> {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let result = parse_str(source, "test.nx");
+        let _ = sender.send(result.is_ok());
+    });
+    receiver.recv_timeout(limit).ok()
+}
+
+#[test]
+fn test_scan_delimiter_at_end_of_file_terminates() {
+    // The external scanner used to decide these cases by copying `TSLexer` and restoring it, which
+    // rewinds the lookahead character but not the position. At end of input, where `advance` has
+    // nothing left to consume, the restored character came back forever and the parse never
+    // returned. Each of these is a syntax error; the point is that saying so takes finite time.
+    for source in ["@", "let x = @", "<Doc:string>text@", "<Doc:string>text&", "<Doc>text&"] {
+        let outcome = parse_within(source, Duration::from_secs(10));
+        assert_eq!(
+            outcome,
+            Some(false),
+            "Parsing {source:?} should report a syntax error rather than run forever"
+        );
+    }
+}
+
+#[test]
+fn test_scan_lone_at_in_embedded_text_is_literal() {
+    // Only "@{" opens a braced value inside typed text content; a bare '@' is ordinary text, and
+    // the character after it must not be swallowed along with it.
+    let source = "<Doc:string>a@b</Doc>";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "A lone '@' in embedded text should parse: {}",
+        render_diagnostics_cli(&result.errors, &HashMap::new())
+    );
+
+    let element = find_first_kind(&result.root().expect("Should have root node"), SyntaxKind::ELEMENT)
+        .expect("Expected element");
+    let content = element.child_by_field("content").expect("Expected embedded text content");
+    assert_eq!(content.text(), "a@b", "The '@' and the character after it are both text");
 }

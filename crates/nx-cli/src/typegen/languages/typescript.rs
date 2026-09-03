@@ -1,7 +1,7 @@
 use crate::typegen::model::{
-    ExportedAlias, ExportedEnum, ExportedExternalState, ExportedModule,
-    ExportedPolymorphicDescendant, ExportedRecord, ExportedType, ExportedTypeGraph, ExportedUnion,
-    ExportedUnionCase, ImportedType,
+    ExportedAlias, ExportedExternalState, ExportedModule, ExportedPolymorphicDescendant,
+    ExportedRecord, ExportedType, ExportedTypeGraph, ExportedUnion, ExportedUnionCase,
+    ImportedType,
 };
 use crate::typegen::writer::CodeWriter;
 use crate::typegen::{GenerateTypesOptions, GeneratedFile};
@@ -266,7 +266,6 @@ fn emit_declaration(
 ) {
     match declaration {
         ExportedType::Alias(alias) => emit_alias(writer, alias),
-        ExportedType::Enum(enum_def) => emit_enum(writer, enum_def),
         ExportedType::Union(union_def) => emit_union(writer, union_def, graph),
         ExportedType::Record(record) => emit_record(writer, record, graph),
         ExportedType::ExternalState(state) => emit_external_state(writer, state),
@@ -278,25 +277,6 @@ fn emit_alias(writer: &mut CodeWriter, alias: &ExportedAlias) {
         "export type {} = {};",
         sanitize_ts_type_name(&alias.name),
         ts_type(&alias.target)
-    ));
-}
-
-fn emit_enum(writer: &mut CodeWriter, enum_def: &ExportedEnum) {
-    let rhs = if enum_def.members.is_empty() {
-        "never".to_string()
-    } else {
-        enum_def
-            .members
-            .iter()
-            .map(|member| format!("\"{}\"", escape_ts_string(member)))
-            .collect::<Vec<_>>()
-            .join(" | ")
-    };
-
-    writer.line(&format!(
-        "export type {} = {};",
-        sanitize_ts_type_name(&enum_def.name),
-        rhs
     ));
 }
 
@@ -379,14 +359,36 @@ fn emit_concrete_record(
 }
 
 fn emit_union(writer: &mut CodeWriter, union_def: &ExportedUnion, graph: &ExportedTypeGraph) {
-    for (index, case) in union_def.cases.iter().enumerate() {
+    // A constant union is a closed set of authored strings, which TypeScript expresses natively
+    // as a union of string literals — what an `enum` generated (design D4).
+    if union_def.is_constant() {
+        let rhs = union_def
+            .cases
+            .iter()
+            .map(|case| format!("\"{}\"", escape_ts_string(&case.name)))
+            .collect::<Vec<_>>()
+            .join(" | ");
+        writer.line(&format!(
+            "export type {} = {};",
+            sanitize_ts_type_name(&union_def.name),
+            rhs
+        ));
+        return;
+    }
+
+    let payload_cases = union_def
+        .cases
+        .iter()
+        .filter(|case| !union_def.is_constant_case(case))
+        .collect::<Vec<_>>();
+    for (index, case) in payload_cases.iter().enumerate() {
         emit_union_case(writer, union_def, case, graph);
-        if index + 1 != union_def.cases.len() {
+        if index + 1 != payload_cases.len() {
             writer.blank_line();
         }
     }
 
-    if !union_def.cases.is_empty() {
+    if !payload_cases.is_empty() {
         writer.blank_line();
     }
 
@@ -396,7 +398,14 @@ fn emit_union(writer: &mut CodeWriter, union_def: &ExportedUnion, graph: &Export
         union_def
             .cases
             .iter()
-            .map(|case| ts_union_case_type_name(&union_def.name, &case.name))
+            .map(|case| {
+                // A constant case is a bare string on the wire.
+                if union_def.is_constant_case(case) {
+                    format!("\"{}\"", escape_ts_string(&case.name))
+                } else {
+                    ts_union_case_type_name(&union_def.name, &case.name)
+                }
+            })
             .collect::<Vec<_>>()
             .join(" | ")
     };
@@ -461,7 +470,8 @@ fn module_needs_nx_record(module: &ExportedModule) -> bool {
         .declarations
         .iter()
         .any(|declaration| match &declaration.item {
-            ExportedType::Union(_) => true,
+            // A constant union emits only string literals, so it needs no discriminator type.
+            ExportedType::Union(union_def) => !union_def.is_constant(),
             ExportedType::Record(record) => !record.is_abstract,
             _ => false,
         })
@@ -478,7 +488,6 @@ fn collect_module_imports(
             ExportedType::Alias(alias) => {
                 add_type_ref_imports(module, context, &alias.target, &mut imports);
             }
-            ExportedType::Enum(_) => {}
             ExportedType::Union(union_def) => {
                 if let Some(base_name) = union_def.base.as_deref() {
                     if let Some(base_record) = context.graph.resolve_record(base_name) {
@@ -698,8 +707,8 @@ fn ts_type(ty: &TypeRef) -> String {
 fn ts_type_name(name: &str) -> String {
     match name {
         "string" => "string".to_string(),
-        "i32" | "i64" | "int" | "f32" | "f64" | "float" => "number".to_string(),
-        "bool" => "boolean".to_string(),
+        "int" | "int32" | "int64" | "float32" | "float64" => "number".to_string(),
+        "boolean" => "boolean".to_string(),
         "void" => "void".to_string(),
         "object" => "unknown".to_string(),
         other => sanitize_ts_type_name(other),

@@ -364,10 +364,15 @@ fn lookup_contains_component(lookup: ComponentLookup<'_>, type_name: &str) -> bo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::artifacts::{build_program_artifact_from_source, LibraryRegistry};
-    use nx_hir::{ast::Expr, Item};
+    use crate::artifacts::{
+        build_program_artifact_from_source, build_workspace_program_artifact, LibraryRegistry,
+        ProgramBuildContext,
+    };
+    use crate::{NxWorkspace, NxWorkspaceModule};
+    use nx_hir::{ast::Expr, Item, LoweredModule};
     use std::collections::BTreeMap;
     use std::fs;
+    use std::sync::Arc;
     use tempfile::TempDir;
 
     fn empty_record() -> NxValue {
@@ -576,9 +581,9 @@ let root() = { 0 }"#;
     }
 
     #[test]
-    fn evaluate_component_source_returns_json_compatible_enum_output() {
+    fn evaluate_component_source_returns_json_compatible_constant_case_output() {
         let source = r#"
-            enum ThemeMode = | light | dark
+            type ThemeMode = light | dark
 
             component <ThemeView /> = {
               state { theme:ThemeMode }
@@ -681,7 +686,7 @@ let root() = { 0 }"#;
     #[test]
     fn initialize_component_source_supports_external_component_entrypoint() {
         let source = r#"
-            external component <SearchBox placeholder:string = "Find docs" showSearchIcon:bool = true />
+            external component <SearchBox placeholder:string = "Find docs" showSearchIcon:boolean = true />
         "#;
 
         let result = initialize_component_source(
@@ -880,9 +885,9 @@ let root() = { 0 }"#;
     }
 
     #[test]
-    fn initialize_component_source_round_trips_enum_props_in_rendered_output() {
+    fn initialize_component_source_round_trips_constant_case_props_in_rendered_output() {
         let source = r#"
-            enum ThemeMode = | light | dark
+            type ThemeMode = light | dark
 
             external component <SearchBox theme:ThemeMode />
         "#;
@@ -920,9 +925,9 @@ let root() = { 0 }"#;
     }
 
     #[test]
-    fn initialize_component_source_rejects_unknown_enum_member_in_prop() {
+    fn initialize_component_source_rejects_unknown_union_case_in_prop() {
         let source = r#"
-            enum ThemeMode = | light | dark
+            type ThemeMode = light | dark
 
             external component <SearchBox theme:ThemeMode />
         "#;
@@ -943,14 +948,14 @@ let root() = { 0 }"#;
             &props,
         );
         let ComponentInitEvalResult::Err(diagnostics) = result else {
-            panic!("Expected unknown enum member to be rejected");
+            panic!("Expected an unknown union case to be rejected");
         };
 
         assert!(
             diagnostics
                 .iter()
-                .any(|diagnostic| diagnostic.message.contains("unknown enum member 'sparkly'")),
-            "Expected unknown-enum-member diagnostic, got {:?}",
+                .any(|diagnostic| diagnostic.message.contains("unknown union case 'sparkly'")),
+            "Expected unknown-union-case diagnostic, got {:?}",
             diagnostics
                 .iter()
                 .map(|diagnostic| diagnostic.message.as_str())
@@ -959,9 +964,9 @@ let root() = { 0 }"#;
     }
 
     #[test]
-    fn dispatch_component_actions_source_round_trips_enum_effects_and_snapshot() {
+    fn dispatch_component_actions_source_round_trips_constant_case_effects_and_snapshot() {
         let source = r#"
-            enum ThemeMode = | light | dark
+            type ThemeMode = light | dark
 
             action SearchSubmitted = { theme:ThemeMode }
             action DoSearch = { theme:ThemeMode }
@@ -1602,5 +1607,421 @@ let root() = { 0 }"#;
             panic!("Expected dispatch to keep using the loaded snapshot");
         };
         assert!(!result.state_snapshot.is_empty());
+    }
+
+    /// Builds a workspace whose library declares an action the app also declares under the same
+    /// name, with a handler bound in the app for the library's emit.
+    fn handler_collision_workspace(
+        temp: &TempDir,
+        library_action: &str,
+        app_source: &str,
+    ) -> (ProgramArtifact, Arc<LoweredModule>) {
+        let app_dir = temp.path().join("app");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("base.nx"),
+            format!(
+                r#"
+                {library_action}
+
+                export abstract component <SearchBase emits {{ SearchSubmitted }} />
+            "#
+            ),
+        )
+        .expect("base file");
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("Expected ui registry load");
+        let build_context = registry.build_context();
+
+        let main_path = app_dir.join("main.nx");
+        fs::write(&main_path, app_source).expect("main file");
+
+        let program = build_program_artifact_from_source(
+            app_source,
+            &main_path.display().to_string(),
+            &build_context,
+        )
+        .expect("Expected program artifact");
+        let root_module = program
+            .root_modules
+            .first()
+            .and_then(|artifact| artifact.lowered_module.clone())
+            .expect("Expected preserved root module");
+        (program, root_module)
+    }
+
+    fn dispatch_host_action(
+        program: &ProgramArtifact,
+        root_module: &LoweredModule,
+        action: NxValue,
+    ) -> ComponentDispatchEvalResult {
+        let interpreter = Interpreter::from_resolved_program(program.resolved_program.clone());
+        let props = interpreter
+            .execute_resolved_program_function("withHandler", vec![])
+            .expect("Expected props function to succeed");
+        let init = interpreter
+            .initialize_component(root_module, "SearchBox", props)
+            .expect("Expected component initialization to succeed");
+        dispatch_component_actions_program_artifact(program, &init.state_snapshot, &[action])
+    }
+
+    const HANDLER_APP_SOURCE: &str = r#"
+            import "../ui"
+
+            action SearchSubmitted = { query:int }
+            action DoSearch = { query:string }
+
+            component <SearchBox extends SearchBase /> = {
+              <TextInput />
+            }
+
+            let withHandler() = <SearchBox onSearchSubmitted=<DoSearch query={action.query} /> />
+        "#;
+
+    #[test]
+    fn a_host_action_is_validated_against_the_declaration_the_component_emits() {
+        let temp = TempDir::new().expect("temp dir");
+        let (program, root_module) = handler_collision_workspace(
+            &temp,
+            "action SearchSubmitted = { query:string }",
+            HANDLER_APP_SOURCE,
+        );
+
+        // The app declares its own `SearchSubmitted` with an `int` field. Host input must be
+        // checked against the library's declaration — the one `SearchBase` actually emits — so an
+        // `int` reaching a field the library typed `string` is rejected.
+        let action = NxValue::Record {
+            type_name: Some("SearchSubmitted".to_string()),
+            properties: BTreeMap::from([("query".to_string(), NxValue::Int(7))]),
+        };
+        let ComponentDispatchEvalResult::Err(diagnostics) =
+            dispatch_host_action(&program, root_module.as_ref(), action)
+        else {
+            panic!("Expected host input to be rejected against the emitted action declaration");
+        };
+
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("expected string, got int")),
+            "Expected a field type mismatch against the library declaration, got {:?}",
+            diagnostics
+                .iter()
+                .map(|diagnostic| (&diagnostic.code, &diagnostic.message))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn a_host_action_matching_the_emitted_declaration_is_still_accepted() {
+        let temp = TempDir::new().expect("temp dir");
+        let (program, root_module) = handler_collision_workspace(
+            &temp,
+            "action SearchSubmitted = { query:string }",
+            HANDLER_APP_SOURCE,
+        );
+
+        // The same collision, with host input that matches the library's declaration. Resolving the
+        // expectation in the declaring module must not reject what that declaration accepts.
+        let action = NxValue::Record {
+            type_name: Some("SearchSubmitted".to_string()),
+            properties: BTreeMap::from([(
+                "query".to_string(),
+                NxValue::String("docs".to_string()),
+            )]),
+        };
+        let result = dispatch_host_action(&program, root_module.as_ref(), action);
+        let ComponentDispatchEvalResult::Ok(result) = result else {
+            let ComponentDispatchEvalResult::Err(diagnostics) = result else {
+                unreachable!()
+            };
+            panic!(
+                "Expected host input matching the emitted declaration to be accepted, got {:?}",
+                diagnostics
+                    .iter()
+                    .map(|diagnostic| (&diagnostic.code, &diagnostic.message))
+                    .collect::<Vec<_>>()
+            );
+        };
+
+        assert_eq!(result.effects.len(), 1);
+    }
+
+    /// Builds a workspace whose `widgets.nx` declares a component prop typed by an abstract base
+    /// that a third module extends.
+    ///
+    /// `shapes` decides whether `Circle` extends the base `Draw` expects or a same-named local one,
+    /// which is the only difference between the two lineage cases below.
+    fn prop_lineage_workspace(shapes: &str) -> ProgramArtifact {
+        let workspace = NxWorkspace::new(vec![
+            NxWorkspaceModule::from_utf8("shapes.nx", shapes.as_bytes().to_vec())
+                .expect("shapes module"),
+            NxWorkspaceModule::from_utf8(
+                "widgets.nx",
+                br#"import { Circle } from "./shapes.nx"
+
+export abstract type Shape = { label: string? }
+
+export component <Draw s: Shape /> = { <div /> }"#
+                    .to_vec(),
+            )
+            .expect("widgets module"),
+            NxWorkspaceModule::from_utf8(
+                "app.nx",
+                br#"import { Draw } from "./widgets.nx"
+
+let root() = { 0 }"#
+                    .to_vec(),
+            )
+            .expect("app module"),
+        ])
+        .expect("workspace");
+
+        build_workspace_program_artifact(&workspace, "app.nx", &ProgramBuildContext::empty())
+            .expect("Expected workspace program artifact")
+    }
+
+    fn circle_props() -> NxValue {
+        NxValue::Record {
+            type_name: None,
+            properties: BTreeMap::from([(
+                "s".to_string(),
+                NxValue::Record {
+                    type_name: Some("Circle".to_string()),
+                    properties: BTreeMap::from([("r".to_string(), NxValue::Int(1))]),
+                },
+            )]),
+        }
+    }
+
+    /// A host-supplied type name is a label, and the declaration it reaches decides the match.
+    ///
+    /// `shapes.nx` declares its own `Shape` and extends that. The lineage therefore reaches a
+    /// `Shape` sharing nothing but a spelling with the one `Draw` expects — the defect the static
+    /// half of this change closes, at the one boundary analysis cannot see. Both bases declare the
+    /// same field, so only declaring origin distinguishes them.
+    #[test]
+    fn a_host_record_whose_lineage_only_shares_a_name_with_the_expected_base_is_rejected() {
+        let program = prop_lineage_workspace(
+            r#"abstract type Shape = { label: string? }
+
+export type Circle extends Shape = { r: int }"#,
+        );
+
+        let ComponentInitEvalResult::Err(diagnostics) =
+            initialize_component_program_artifact(&program, "Draw", &circle_props())
+        else {
+            panic!(
+                "Expected a lineage that only shares a name with the expected base to be rejected"
+            );
+        };
+
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("Type mismatch")),
+            "Expected a type mismatch for the same-named ancestor, got {:?}",
+            diagnostics
+                .iter()
+                .map(|diagnostic| (&diagnostic.code, &diagnostic.message))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// The positive half: walking the chain by declaration must still cross a module boundary.
+    #[test]
+    fn a_host_record_extending_the_expected_base_in_another_module_is_accepted() {
+        let program = prop_lineage_workspace(
+            r#"import { Shape } from "./widgets.nx"
+
+export type Circle extends Shape = { r: int }"#,
+        );
+
+        let result = initialize_component_program_artifact(&program, "Draw", &circle_props());
+        let ComponentInitEvalResult::Ok(_) = result else {
+            let ComponentInitEvalResult::Err(diagnostics) = result else {
+                unreachable!()
+            };
+            panic!(
+                "Expected a descendant of the expected base to be accepted, got {:?}",
+                diagnostics
+                    .iter()
+                    .map(|diagnostic| (&diagnostic.code, &diagnostic.message))
+                    .collect::<Vec<_>>()
+            );
+        };
+    }
+
+    /// The same rule where the component is imported outright rather than extended locally.
+    ///
+    /// This is the ordinary embedding shape: an app binds a handler on a library component it did
+    /// not declare. The emit's declaring module reaches the handler through the imported contract
+    /// rather than through a locally written `extends`, so it is a distinct path to the same rule.
+    #[test]
+    fn a_host_action_for_a_fully_imported_component_is_checked_against_the_library_declaration() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("base.nx"),
+            r#"
+                action SearchSubmitted = { query:string }
+
+                export component <SearchBox emits { SearchSubmitted } /> = {
+                  <TextInput />
+                }
+            "#,
+        )
+        .expect("base file");
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("Expected ui registry load");
+        let build_context = registry.build_context();
+
+        let main_path = app_dir.join("main.nx");
+        // The app declares its own `SearchSubmitted` typing `query` as an int.
+        let source = r#"
+            import "../ui"
+
+            action SearchSubmitted = { query:int }
+            action DoSearch = { query:string }
+
+            let withHandler() = <SearchBox onSearchSubmitted=<DoSearch query={action.query} /> />
+        "#;
+        fs::write(&main_path, source).expect("main file");
+
+        let program = build_program_artifact_from_source(
+            source,
+            &main_path.display().to_string(),
+            &build_context,
+        )
+        .expect("Expected program artifact");
+        let root_module = program
+            .root_modules
+            .first()
+            .and_then(|artifact| artifact.lowered_module.clone())
+            .expect("Expected preserved root module");
+
+        let int_action = NxValue::Record {
+            type_name: Some("SearchSubmitted".to_string()),
+            properties: BTreeMap::from([("query".to_string(), NxValue::Int(7))]),
+        };
+        let ComponentDispatchEvalResult::Err(diagnostics) =
+            dispatch_host_action(&program, root_module.as_ref(), int_action)
+        else {
+            panic!("Expected host input to be checked against the library's declaration");
+        };
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("expected string, got int")),
+            "Expected a mismatch against the library declaration, got {:?}",
+            diagnostics
+                .iter()
+                .map(|diagnostic| (&diagnostic.code, &diagnostic.message))
+                .collect::<Vec<_>>()
+        );
+
+        let string_action = NxValue::Record {
+            type_name: Some("SearchSubmitted".to_string()),
+            properties: BTreeMap::from([(
+                "query".to_string(),
+                NxValue::String("docs".to_string()),
+            )]),
+        };
+        let result = dispatch_host_action(&program, root_module.as_ref(), string_action);
+        let ComponentDispatchEvalResult::Ok(result) = result else {
+            let ComponentDispatchEvalResult::Err(diagnostics) = result else {
+                unreachable!()
+            };
+            panic!(
+                "Expected input matching the library declaration to be accepted, got {:?}",
+                diagnostics
+                    .iter()
+                    .map(|diagnostic| (&diagnostic.code, &diagnostic.message))
+                    .collect::<Vec<_>>()
+            );
+        };
+        assert_eq!(result.effects.len(), 1);
+    }
+
+    /// A component is evaluated in the module that declares it, not the one that named it.
+    ///
+    /// `Component::body` is an `ExprId` into its own module's arena, so evaluating it against the
+    /// importing module reads a different expression at the same index. The program-entrypoint API
+    /// resolves the declaring module already; the module-taking API did not.
+    #[test]
+    fn an_imported_component_is_evaluated_in_the_module_that_declares_it() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        let ui_dir = temp.path().join("ui");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&ui_dir).expect("ui dir");
+
+        fs::write(
+            ui_dir.join("card.nx"),
+            r#"
+                export component <Card title:string = "Untitled" /> = {
+                  <TextInput value={title} />
+                }
+            "#,
+        )
+        .expect("ui file");
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("Expected ui registry load");
+        let build_context = registry.build_context();
+
+        // The app's own arena holds unrelated expressions at the indices the library body uses.
+        let main_path = app_dir.join("main.nx");
+        let source = r#"import "../ui"
+let root() = { 1 + 2 + 3 }"#;
+        fs::write(&main_path, source).expect("main file");
+
+        let program = build_program_artifact_from_source(
+            source,
+            &main_path.display().to_string(),
+            &build_context,
+        )
+        .expect("Expected program artifact");
+        let root_module = program
+            .root_modules
+            .first()
+            .and_then(|artifact| artifact.lowered_module.clone())
+            .expect("Expected preserved root module");
+
+        let interpreter = Interpreter::from_resolved_program(program.resolved_program.clone());
+        let result = interpreter
+            .initialize_component(
+                root_module.as_ref(),
+                "Card",
+                from_nx_value(&empty_record()).expect("props"),
+            )
+            .expect("Expected imported component initialization to succeed");
+
+        let nx_interpreter::Value::Record { type_name, fields } = &result.rendered else {
+            panic!(
+                "Expected the library's body to render, got {:?}",
+                result.rendered
+            );
+        };
+        assert_eq!(type_name.as_str(), "TextInput");
+        assert_eq!(
+            fields.get("value"),
+            Some(&nx_interpreter::Value::String("Untitled".into()))
+        );
     }
 }

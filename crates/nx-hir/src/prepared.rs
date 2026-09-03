@@ -1,6 +1,6 @@
 use crate::{
-    ast, Component, ComponentEmit, EnumMember, Item, LoweredModule, LoweringDiagnostic, Name,
-    Param, RecordField, RecordKind, SourceId, TypeAlias, UnionCaseDef, UnionCaseField, UnionDef,
+    ast, Component, ComponentEmit, Item, LoweredModule, LoweringDiagnostic, Name, Param,
+    RecordField, RecordKind, SourceId, TypeAlias, UnionCaseDef, UnionCaseField, UnionDef,
     Visibility,
 };
 use nx_diagnostics::TextSpan;
@@ -44,7 +44,6 @@ pub enum PreparedItemKind {
     Value,
     Component,
     TypeAlias,
-    Enum,
     Union,
     Record,
 }
@@ -57,7 +56,6 @@ impl PreparedItemKind {
             PreparedItemKind::Value => &[PreparedNamespace::Value],
             PreparedItemKind::Component => &[PreparedNamespace::Element],
             PreparedItemKind::TypeAlias => &[PreparedNamespace::Type],
-            PreparedItemKind::Enum => &[PreparedNamespace::Type],
             PreparedItemKind::Union => &[PreparedNamespace::Type],
             PreparedItemKind::Record => &[PreparedNamespace::Type, PreparedNamespace::Element],
         }
@@ -123,10 +121,6 @@ pub enum InterfaceItemKind {
         ty: ast::TypeRef,
         span: TextSpan,
     },
-    Enum {
-        members: Vec<EnumMember>,
-        span: TextSpan,
-    },
     Union {
         base: Option<Name>,
         cases: Vec<InterfaceUnionCase>,
@@ -149,7 +143,6 @@ impl InterfaceItemKind {
             Self::Value { .. } => PreparedItemKind::Value,
             Self::Component { .. } => PreparedItemKind::Component,
             Self::TypeAlias { .. } => PreparedItemKind::TypeAlias,
-            Self::Enum { .. } => PreparedItemKind::Enum,
             Self::Union { .. } => PreparedItemKind::Union,
             Self::Record { .. } => PreparedItemKind::Record,
         }
@@ -264,6 +257,11 @@ impl ResolvedPreparedItem {
             ResolvedPreparedItem::Imported { item, .. } => item.definition_id,
         }
     }
+
+    /// Returns the declaration this resolved item addresses.
+    pub fn declaring_origin(&self) -> DeclaringOrigin {
+        DeclaringOrigin::new(self.module_identity(), self.definition_id())
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -291,6 +289,144 @@ impl PreparedBindings {
     }
 }
 
+/// The declaration a nominal type comes from.
+///
+/// `(module identity, definition id)` is the address a resolved program already uses to reach an
+/// item, so a type built during analysis and a reference resolved during code generation name the
+/// same declaration by the same key. A `Name` carried alongside this is display information: it is
+/// whatever spelling the observer happened to reach the declaration under.
+///
+/// <para>This is also what a module's own namespace resolves a type name to. A declaration's type
+/// references are written in the namespace of the module that wrote them, which includes what that
+/// module imported. Resolving such a reference among the declaring module's own top-level items
+/// alone finds nothing when the type came from a third module, and falling back to the consumer's
+/// namespace is what lets an unrelated same-named local declaration stand in for it.</para>
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DeclaringOrigin {
+    module_identity: Arc<str>,
+    definition_id: LocalDefinitionId,
+}
+
+impl DeclaringOrigin {
+    /// Creates an origin addressing one definition in one module.
+    pub fn new(module_identity: impl AsRef<str>, definition_id: LocalDefinitionId) -> Self {
+        Self {
+            module_identity: Arc::from(module_identity.as_ref()),
+            definition_id,
+        }
+    }
+
+    /// Returns the stable identity of the declaring module.
+    pub fn module_identity(&self) -> &str {
+        &self.module_identity
+    }
+
+    /// Returns the declaration's stable identity within its module.
+    pub fn definition_id(&self) -> LocalDefinitionId {
+        self.definition_id
+    }
+}
+
+/// Decides whether two nominal references denote the same declaration.
+///
+/// <para>Two origins are the same declaration or they are not; what each side spells the type is
+/// display information and never decides. A name decides only where neither side could be given an
+/// origin at all, which is what a context holding no resolved program has. A reference that knows
+/// its origin is never the same as one that does not, so a path that forgets to carry origin fails
+/// loudly rather than quietly matching on spelling again.</para>
+///
+/// <para>This is the one rule, for records, components, unions, and union cases alike. Written
+/// once per kind it drifts, and a kind whose copy drifts is a kind where a same-named foreign
+/// declaration is accepted again.</para>
+pub fn same_declaration(
+    lhs_origin: Option<&DeclaringOrigin>,
+    lhs_name: &Name,
+    rhs_origin: Option<&DeclaringOrigin>,
+    rhs_name: &Name,
+) -> bool {
+    match (lhs_origin, rhs_origin) {
+        (Some(lhs), Some(rhs)) => lhs == rhs,
+        (None, None) => lhs_name == rhs_name,
+        _ => false,
+    }
+}
+
+/// The identity an inheritance walk is keyed by.
+///
+/// <para>A walk that crosses module boundaries cannot key itself by spelling: `Shape extends
+/// ui.Shape` is two declarations, and a name-keyed stack reads the second visit as a cycle. Where a
+/// context reached no declaration at all — one holding no resolved program — the spelling is all
+/// there is, and two of those are the same only when they spell the same name, which mirrors
+/// `same_declaration`.</para>
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum DeclarationKey {
+    /// The declaration a reference reached.
+    Declared(DeclaringOrigin),
+    /// The spelling a reference used, where it reached no declaration.
+    Spelled(Name),
+}
+
+impl DeclarationKey {
+    /// Keys a reference by the declaration it reached, falling back to its spelling.
+    pub fn new(origin: Option<DeclaringOrigin>, name: &Name) -> Self {
+        match origin {
+            Some(origin) => Self::Declared(origin),
+            None => Self::Spelled(name.clone()),
+        }
+    }
+}
+
+/// Every name one module resolves in the namespaces that can name a type, and the declaration
+/// each resolves to.
+///
+/// Records and unions are reached through the type namespace, components through the element
+/// namespace. Both can type a property, so both are needed to resolve a contract where it was
+/// written.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ModuleNamespace {
+    types: FxHashMap<Name, DeclaringOrigin>,
+    elements: FxHashMap<Name, DeclaringOrigin>,
+}
+
+impl ModuleNamespace {
+    /// Returns the declaration one name reaches in the given namespace.
+    pub fn entry(&self, namespace: PreparedNamespace, name: &Name) -> Option<&DeclaringOrigin> {
+        match namespace {
+            PreparedNamespace::Type => self.types.get(name),
+            PreparedNamespace::Element => self.elements.get(name),
+            PreparedNamespace::Value => None,
+        }
+    }
+
+    /// Returns every type name this namespace resolves, with the declaration each reaches.
+    pub fn types(&self) -> impl Iterator<Item = (&Name, &DeclaringOrigin)> {
+        self.types.iter()
+    }
+}
+
+/// Collects the namespace described by one module's prepared bindings.
+pub fn module_namespace_from_bindings<'a>(
+    module_identity: &str,
+    bindings: impl IntoIterator<Item = &'a PreparedBinding>,
+) -> ModuleNamespace {
+    let mut namespace = ModuleNamespace::default();
+    for binding in bindings {
+        let target = match binding.namespace {
+            PreparedNamespace::Type => &mut namespace.types,
+            PreparedNamespace::Element => &mut namespace.elements,
+            PreparedNamespace::Value => continue,
+        };
+        target.insert(
+            binding.visible_name.clone(),
+            DeclaringOrigin::new(
+                binding.module_identity(module_identity),
+                binding.definition_id(),
+            ),
+        );
+    }
+    namespace
+}
+
 /// Prepared analysis surface for one source file.
 ///
 /// This preserves the raw file-local module while exposing explicit visible bindings for the
@@ -301,6 +437,7 @@ pub struct PreparedModule {
     raw_module: LoweredModule,
     bindings: PreparedBindings,
     peer_modules: FxHashMap<String, Arc<LoweredModule>>,
+    peer_namespaces: FxHashMap<String, Arc<ModuleNamespace>>,
     diagnostics: Vec<LoweringDiagnostic>,
 }
 
@@ -313,6 +450,7 @@ impl PreparedModule {
             raw_module,
             bindings: PreparedBindings::default(),
             peer_modules: FxHashMap::default(),
+            peer_namespaces: FxHashMap::default(),
             diagnostics: Vec::new(),
         };
         prepared.add_local_bindings();
@@ -366,6 +504,86 @@ impl PreparedModule {
         module: Arc<LoweredModule>,
     ) {
         self.peer_modules.insert(module_identity.into(), module);
+    }
+
+    /// Registers the namespace one peer module resolves in, so a type reference that peer wrote
+    /// is resolved where it was written rather than re-resolved here.
+    pub fn add_peer_namespace(
+        &mut self,
+        module_identity: impl Into<String>,
+        namespace: Arc<ModuleNamespace>,
+    ) {
+        self.peer_namespaces
+            .insert(module_identity.into(), namespace);
+    }
+
+    /// Resolves one name in a peer module's own namespace.
+    pub fn peer_entry(
+        &self,
+        namespace: PreparedNamespace,
+        module_identity: &str,
+        name: &Name,
+    ) -> Option<&DeclaringOrigin> {
+        self.peer_namespaces
+            .get(module_identity)?
+            .entry(namespace, name)
+    }
+
+    /// Resolves one name in the namespace of `module_identity`, wherever that module is.
+    ///
+    /// The local module resolves through its own prepared bindings; any other module resolves
+    /// through the namespace registered for it, falling back to its own top-level items when no
+    /// namespace was registered — which is what a module analyzed outside a graph has.
+    pub fn resolve_in_module(
+        &self,
+        namespace: PreparedNamespace,
+        module_identity: &str,
+        name: &Name,
+    ) -> Option<ResolvedPreparedItem> {
+        if module_identity == self.module_identity {
+            return self
+                .resolve_binding(namespace, name)
+                .and_then(|binding| self.resolve_prepared_item(binding));
+        }
+
+        if let Some(origin) = self.peer_entry(namespace, module_identity, name) {
+            if let Some(item) = self.item_at(origin.module_identity(), origin.definition_id()) {
+                return Some(ResolvedPreparedItem::Raw {
+                    module_identity: origin.module_identity().to_string(),
+                    definition_id: origin.definition_id(),
+                    item: item.clone(),
+                    origin: PreparedBindingOrigin::Peer {
+                        module_identity: origin.module_identity().to_string(),
+                    },
+                });
+            }
+        }
+
+        let peer = self.peer_modules.get(module_identity)?;
+        let (definition_id, item) = peer.find_item_with_definition(name.as_str())?;
+        Some(ResolvedPreparedItem::Raw {
+            module_identity: module_identity.to_string(),
+            definition_id,
+            item: item.clone(),
+            origin: PreparedBindingOrigin::Peer {
+                module_identity: module_identity.to_string(),
+            },
+        })
+    }
+
+    /// Returns one item by its declaring address, wherever that module is.
+    ///
+    /// <para>A peer's namespace can name a declaration back in *this* module — a peer that imports
+    /// something this module exports — so the local raw module is a candidate address like any
+    /// peer, not just the starting point.</para>
+    fn item_at(&self, module_identity: &str, definition_id: LocalDefinitionId) -> Option<&Item> {
+        if module_identity == self.module_identity {
+            return self.raw_module.item_by_definition(definition_id);
+        }
+
+        self.peer_modules
+            .get(module_identity)
+            .and_then(|module| module.item_by_definition(definition_id))
     }
 
     /// Inserts one prepared visible binding.
@@ -428,6 +646,16 @@ impl PreparedModule {
         }
     }
 
+    /// Returns a peer module's lowered form by its stable module identity.
+    ///
+    /// A declaration's own module is the right context in which to resolve the type references it
+    /// writes: `fit: Fit` in a library means *that library's* `Fit`, whatever the consumer can see.
+    pub fn peer_module(&self, module_identity: &str) -> Option<&LoweredModule> {
+        self.peer_modules
+            .get(module_identity)
+            .map(|module| module.as_ref())
+    }
+
     /// Resolves an imported raw item reference back to a lowered item when available.
     pub fn resolve_imported_raw_item(&self, raw: &ImportedRawRef) -> Option<Item> {
         self.peer_modules
@@ -475,7 +703,6 @@ pub fn prepared_item_kind(item: &Item) -> PreparedItemKind {
         Item::Value(_) => PreparedItemKind::Value,
         Item::Component(_) => PreparedItemKind::Component,
         Item::TypeAlias(_) => PreparedItemKind::TypeAlias,
-        Item::Enum(_) => PreparedItemKind::Enum,
         Item::Union(_) => PreparedItemKind::Union,
         Item::Record(_) => PreparedItemKind::Record,
     }
@@ -574,19 +801,6 @@ pub fn interface_component(item: &InterfaceItem) -> Option<Component> {
                 })
                 .collect(),
             body: None,
-            span: *span,
-        }),
-        _ => None,
-    }
-}
-
-/// Converts imported interface metadata into enum-like view when possible.
-pub fn interface_enum(item: &InterfaceItem) -> Option<crate::EnumDef> {
-    match &item.item {
-        InterfaceItemKind::Enum { members, span } => Some(crate::EnumDef {
-            name: Name::new(item.item_name.as_str()),
-            visibility: item.visibility,
-            members: members.clone(),
             span: *span,
         }),
         _ => None,

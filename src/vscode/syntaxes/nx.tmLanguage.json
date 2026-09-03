@@ -2,27 +2,73 @@
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "NX",
   "scopeName": "source.nx",
-  "fileTypes": ["nx"],
+  "fileTypes": [
+    "nx"
+  ],
   "patterns": [
-    { "include": "#comments" },
-    { "include": "#value-definition" },
-    { "include": "#type-definition" },
-    { "include": "#module-root-element" },
-    { "include": "#text-raw-block" },
-    { "include": "#text-typed-block" },
-    { "include": "#text-plain-block" },
-    { "include": "#elements-if" },
-    { "include": "#elements-for" },
-    { "include": "#value-if" },
-    { "include": "#value-for" },
-    { "include": "#tags" },
-    { "include": "#strings" },
-    { "include": "#numbers" },
-    { "include": "#keywords-core" },
-    { "include": "#types" },
-    { "include": "#operators" },
-    { "include": "#values-braced-expression" },
-    { "include": "#entities" }
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#function-definition"
+    },
+    {
+      "include": "#value-definition"
+    },
+    {
+      "include": "#type-definition"
+    },
+    {
+      "include": "#state-group"
+    },
+    {
+      "include": "#module-root-element"
+    },
+    {
+      "include": "#text-raw-block"
+    },
+    {
+      "include": "#text-typed-block"
+    },
+    {
+      "include": "#text-plain-block"
+    },
+    {
+      "include": "#elements-if"
+    },
+    {
+      "include": "#elements-for"
+    },
+    {
+      "include": "#value-if"
+    },
+    {
+      "include": "#value-for"
+    },
+    {
+      "include": "#tags"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#keywords-core"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#values-braced-expression"
+    },
+    {
+      "include": "#entities"
+    }
   ],
   "repository": {
     "comments": {
@@ -31,13 +77,21 @@
           "name": "comment.block.html.nx",
           "begin": "<!--",
           "end": "-->",
-          "patterns": [ { "include": "#comments" } ]
+          "patterns": [
+            {
+              "include": "#comments"
+            }
+          ]
         },
         {
           "name": "comment.block.nx",
           "begin": "/\\*",
           "end": "\\*/",
-          "patterns": [ { "include": "#comments" } ]
+          "patterns": [
+            {
+              "include": "#comments"
+            }
+          ]
         },
         {
           "name": "comment.line.double-slash.nx",
@@ -60,9 +114,16 @@
           "begin": "\"",
           "end": "\"",
           "patterns": [
-            { "include": "#entities" },
-            { "include": "#values-braced-expression" },
-            { "name": "constant.character.escape.nx", "match": "\\\\[\\\\\"nrt]" }
+            {
+              "include": "#entities"
+            },
+            {
+              "include": "#values-braced-expression"
+            },
+            {
+              "name": "constant.character.escape.nx",
+              "match": "\\\\[\\\\\"nrt]"
+            }
           ]
         },
         {
@@ -70,47 +131,125 @@
           "begin": "'",
           "end": "'",
           "patterns": [
-            { "include": "#entities" },
-            { "include": "#values-braced-expression" },
-            { "name": "constant.character.escape.nx", "match": "\\\\[\\\\'nrt]" }
+            {
+              "include": "#entities"
+            },
+            {
+              "include": "#values-braced-expression"
+            },
+            {
+              "name": "constant.character.escape.nx",
+              "match": "\\\\[\\\\'nrt]"
+            }
           ]
         }
       ]
     },
     "numbers": {
       "patterns": [
-        { "name": "constant.numeric.hex.nx", "match": "(?:0x|0X)[0-9A-Fa-f](?:_?[0-9A-Fa-f])*" },
-        { "name": "constant.numeric.float.nx", "match": "(?:[0-9](?:_?[0-9])*)(?:\\.(?:[0-9](?:_?[0-9])*)?)(?:[eE][+-]?(?:[0-9](?:_?[0-9])*))?" },
-        { "name": "constant.numeric.float.nx", "match": "(?:[0-9](?:_?[0-9])*)(?:[eE][+-]?(?:[0-9](?:_?[0-9])*))" },
-        { "name": "constant.numeric.integer.nx", "match": "[0-9](?:_?[0-9])*" }
+        {
+          "name": "constant.numeric.hex.nx",
+          "match": "(?:0x|0X)[0-9A-Fa-f](?:_?[0-9A-Fa-f])*"
+        },
+        {
+          "name": "constant.numeric.float.nx",
+          "match": "(?:[0-9](?:_?[0-9])*)(?:\\.(?:[0-9](?:_?[0-9])*)?)(?:[eE][+-]?(?:[0-9](?:_?[0-9])*))?"
+        },
+        {
+          "name": "constant.numeric.float.nx",
+          "match": "(?:[0-9](?:_?[0-9])*)(?:[eE][+-]?(?:[0-9](?:_?[0-9])*))"
+        },
+        {
+          "name": "constant.numeric.integer.nx",
+          "match": "[0-9](?:_?[0-9])*"
+        }
       ]
     },
     "keywords-core": {
       "patterns": [
-        { "name": "keyword.control.import.nx", "match": "\\b(?:import|from|as)\\b" },
-        { "name": "keyword.declaration.type.nx", "match": "\\b(?:type|enum|action)\\b" },
-        { "name": "keyword.declaration.component.nx", "match": "\\bcomponent\\b" },
-        { "name": "storage.modifier.visibility.nx", "match": "\\b(?:private|export)\\b" },
-        { "name": "storage.modifier.abstract.nx", "match": "\\babstract\\b" },
-        { "name": "keyword.declaration.extends.nx", "match": "\\bextends\\b" },
-        { "name": "keyword.declaration.let.nx", "match": "\\blet\\b" },
-        { "name": "keyword.other.raw.nx", "match": "\\braw\\b" },
-        { "name": "constant.language.boolean.nx", "match": "\\b(?:true|false)\\b" },
-        { "name": "constant.language.null.nx", "match": "\\bnull\\b" }
+        {
+          "name": "keyword.control.import.nx",
+          "match": "\\b(?:import|from|as)\\b"
+        },
+        {
+          "name": "keyword.declaration.type.nx",
+          "match": "\\b(?:type|action)\\b"
+        },
+        {
+          "name": "keyword.declaration.component.nx",
+          "match": "\\bcomponent\\b"
+        },
+        {
+          "name": "storage.modifier.visibility.nx",
+          "match": "\\b(?:private|export)\\b"
+        },
+        {
+          "name": "storage.modifier.abstract.nx",
+          "match": "\\babstract\\b"
+        },
+        {
+          "name": "storage.modifier.external.nx",
+          "match": "\\bexternal\\b"
+        },
+        {
+          "name": "keyword.declaration.extends.nx",
+          "match": "\\bextends\\b"
+        },
+        {
+          "name": "keyword.declaration.emits.nx",
+          "match": "\\bemits\\b"
+        },
+        {
+          "name": "keyword.declaration.state.nx",
+          "match": "\\bstate\\b"
+        },
+        {
+          "name": "keyword.declaration.let.nx",
+          "match": "\\blet\\b"
+        },
+        {
+          "name": "keyword.other.raw.nx",
+          "match": "\\braw\\b"
+        },
+        {
+          "include": "#literals"
+        }
+      ]
+    },
+    "literals": {
+      "comment": "The reserved value literals. Split out of `keywords-core` so a context can recognise them without also claiming the declaration keywords, which are legal identifiers and attribute names.",
+      "patterns": [
+        {
+          "name": "constant.language.boolean.nx",
+          "match": "\\b(?:true|false)\\b"
+        },
+        {
+          "name": "constant.language.null.nx",
+          "match": "\\bnull\\b"
+        }
       ]
     },
     "keywords-control": {
       "patterns": [
-        { "name": "keyword.control.conditional.nx", "match": "\\bif\\b|\\belse\\b" },
-        { "name": "keyword.control.match.nx", "match": "\\bis\\b" },
-        { "name": "keyword.control.loop.nx", "match": "\\bfor\\b|\\bin\\b" }
+        {
+          "name": "keyword.control.conditional.nx",
+          "match": "\\bif\\b|\\belse\\b"
+        },
+        {
+          "name": "keyword.control.match.nx",
+          "match": "\\bis\\b"
+        },
+        {
+          "name": "keyword.control.loop.nx",
+          "match": "\\bfor\\b|\\bin\\b"
+        }
       ]
     },
     "types": {
       "patterns": [
         {
-          "name": "storage.type.primitive.nx",
-          "match": "\\b(?:string|i32|i64|int|f32|f64|float|bool|void|object)\\b"
+          "name": "support.type.primitive.nx",
+          "match": "\\b(?:string|int|int32|int64|float32|float64|boolean|void|object)\\b"
         },
         {
           "name": "keyword.operator.type-modifier.nx",
@@ -120,41 +259,163 @@
     },
     "operators": {
       "patterns": [
-        { "name": "keyword.operator.arrow.nx", "match": "=>" },
-        { "name": "keyword.operator.arithmetic.nx", "match": "\\+|-|\\*|/|%" },
-        { "name": "keyword.operator.comparison.nx", "match": "<=|>=|==|!=|<|>" },
-        { "name": "keyword.operator.logical.nx", "match": "&&|\\|\\|" },
-        { "name": "keyword.operator.logical.nx", "match": "!(?![=])" },
-        { "name": "punctuation.separator.enum.nx", "match": "\\|" },
-        { "name": "keyword.operator.conditional.nx", "match": "\\?" },
-        { "name": "punctuation.separator.conditional.nx", "match": ":" },
-        { "name": "punctuation.separator.dot.nx", "match": "\\." },
-        { "name": "keyword.operator.assignment.nx", "match": "=" }
+        {
+          "name": "keyword.operator.arrow.nx",
+          "match": "=>"
+        },
+        {
+          "name": "keyword.operator.arithmetic.nx",
+          "match": "\\+|-|\\*|/|%"
+        },
+        {
+          "name": "keyword.operator.comparison.nx",
+          "match": "<=|>=|==|!=|<|>"
+        },
+        {
+          "name": "keyword.operator.logical.nx",
+          "match": "&&|\\|\\|"
+        },
+        {
+          "name": "keyword.operator.logical.nx",
+          "match": "!(?![=])"
+        },
+        {
+          "name": "punctuation.separator.union.nx",
+          "match": "\\|"
+        },
+        {
+          "name": "keyword.operator.conditional.nx",
+          "match": "\\?"
+        },
+        {
+          "name": "punctuation.separator.conditional.nx",
+          "match": ":"
+        },
+        {
+          "name": "punctuation.separator.dot.nx",
+          "match": "\\."
+        },
+        {
+          "name": "keyword.operator.assignment.nx",
+          "match": "="
+        }
       ]
     },
     "value-definition": {
       "begin": "^(\\s*)((private|export)\\s+)?(let)\\s+(?!<)([A-Za-z_][A-Za-z0-9_]*)",
       "beginCaptures": {
-        "3": { "name": "storage.modifier.visibility.nx" },
-        "4": { "name": "keyword.declaration.let.nx" },
-        "5": { "name": "entity.name.variable.nx" }
+        "3": {
+          "name": "storage.modifier.visibility.nx"
+        },
+        "4": {
+          "name": "keyword.declaration.let.nx"
+        },
+        "5": {
+          "name": "entity.name.variable.nx"
+        }
       },
-      "end": "(?==)",
+      "end": "$|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
       "name": "meta.definition.value.nx",
       "patterns": [
-        { "name": "punctuation.separator.type.annotation.nx", "match": ":" },
         {
-          "name": "entity.name.type.nx",
-          "match": "(?<=:)\\s*(?!string\\b|i32\\b|i64\\b|int\\b|f32\\b|f64\\b|float\\b|bool\\b|void\\b|object\\b)[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*"
+          "include": "#comments"
         },
-        { "include": "#types" },
-        { "include": "#qualifiers" },
-        { "include": "#operators" },
-        { "include": "#keywords-core" },
-        { "include": "#keywords-control" },
-        { "include": "#numbers" },
-        { "include": "#strings" },
-        { "include": "#comments" }
+        {
+          "begin": "\\(",
+          "end": "\\)",
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#declaration-property"
+            },
+            {
+              "include": "#qualifiers"
+            },
+            {
+              "include": "#operators"
+            },
+            {
+              "include": "#keywords-core"
+            },
+            {
+              "include": "#keywords-control"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#strings"
+            }
+          ]
+        },
+        {
+          "comment": "The `= RhsExpression` of a definition. The control forms are accepted unbraced for continuity with existing files, though the spec requires braces around an expression.",
+          "begin": "(=)(?!>)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.operator.assignment.nx"
+            }
+          },
+          "end": "(?=$)|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#value-if"
+            },
+            {
+              "include": "#value-for"
+            },
+            {
+              "include": "#elements-if"
+            },
+            {
+              "include": "#elements-for"
+            },
+            {
+              "include": "#rhs-expression"
+            }
+          ]
+        },
+        {
+          "comment": "The declared type of a value definition. Anchored on the colon so the `?` and `[]` suffixes are scoped as type modifiers rather than as a ternary.",
+          "begin": "(:)",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.separator.type.annotation.nx"
+            }
+          },
+          "end": "(?=\\s*=|$)",
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#type-annotation"
+            }
+          ]
+        },
+        {
+          "include": "#qualifiers"
+        },
+        {
+          "include": "#operators"
+        },
+        {
+          "include": "#keywords-core"
+        },
+        {
+          "include": "#keywords-control"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#strings"
+        }
       ]
     },
     "type-definition": {
@@ -163,90 +424,248 @@
           "name": "meta.definition.type.union.nx",
           "begin": "^(\\s*)((private|export)\\s+)?(type)\\s+([A-Za-z_][A-Za-z0-9_]*)(?:\\s+(extends)\\s+([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*))?\\s*(=)\\s*(?=\\||$)",
           "beginCaptures": {
-            "3": { "name": "storage.modifier.visibility.nx" },
-            "4": { "name": "keyword.declaration.type.nx" },
-            "5": { "name": "entity.name.type.nx" },
-            "6": { "name": "keyword.declaration.extends.nx" },
-            "7": { "name": "entity.name.type.nx" },
-            "8": { "name": "keyword.operator.assignment.nx" }
+            "3": {
+              "name": "storage.modifier.visibility.nx"
+            },
+            "4": {
+              "name": "keyword.declaration.type.nx"
+            },
+            "5": {
+              "name": "entity.name.type.nx"
+            },
+            "6": {
+              "name": "keyword.declaration.extends.nx"
+            },
+            "7": {
+              "name": "entity.name.type.nx"
+            },
+            "8": {
+              "name": "keyword.operator.assignment.nx"
+            }
           },
-          "end": "(?=^\\s*(?:(?:private|export)\\s+)?(?:(?:abstract)\\s+)?(?:type|enum|action|component|let)\\b)",
+          "end": "(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
           "patterns": [
-            { "include": "#union-case" },
-            { "include": "#comments" },
-            { "include": "#strings" },
-            { "include": "#numbers" },
-            { "include": "#keywords-core" },
-            { "include": "#keywords-control" },
-            { "include": "#types" },
-            { "include": "#operators" },
-            { "include": "#qualifiers" }
+            {
+              "include": "#union-case"
+            },
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#keywords-core"
+            },
+            {
+              "include": "#keywords-control"
+            },
+            {
+              "include": "#types"
+            },
+            {
+              "include": "#operators"
+            },
+            {
+              "include": "#qualifiers"
+            }
+          ]
+        },
+        {
+          "name": "meta.definition.type.union.nx",
+          "begin": "^(\\s*)((private|export)\\s+)?(type)\\s+([A-Za-z_][A-Za-z0-9_]*)(?:\\s+(extends)\\s+([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*))?\\s*(=)\\s*([A-Za-z_][A-Za-z0-9_]*)(?=\\s*(?:\\{|\\|))",
+          "beginCaptures": {
+            "3": {
+              "name": "storage.modifier.visibility.nx"
+            },
+            "4": {
+              "name": "keyword.declaration.type.nx"
+            },
+            "5": {
+              "name": "entity.name.type.nx"
+            },
+            "6": {
+              "name": "keyword.declaration.extends.nx"
+            },
+            "7": {
+              "name": "entity.name.type.nx"
+            },
+            "8": {
+              "name": "keyword.operator.assignment.nx"
+            },
+            "9": {
+              "name": "entity.name.type.union.case.nx"
+            }
+          },
+          "end": "(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
+          "patterns": [
+            {
+              "begin": "\\{",
+              "beginCaptures": {
+                "0": {
+                  "name": "punctuation.section.block.begin.nx"
+                }
+              },
+              "end": "\\}|(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
+              "endCaptures": {
+                "0": {
+                  "name": "punctuation.section.block.end.nx"
+                }
+              },
+              "patterns": [
+                {
+                  "include": "#record-body"
+                }
+              ]
+            },
+            {
+              "include": "#union-case"
+            },
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#keywords-core"
+            },
+            {
+              "include": "#keywords-control"
+            },
+            {
+              "include": "#types"
+            },
+            {
+              "include": "#operators"
+            },
+            {
+              "include": "#qualifiers"
+            }
           ]
         },
         {
           "name": "meta.definition.type.record.nx",
           "begin": "^(\\s*)((private|export)\\s+)?((abstract)\\s+)?(type)\\s+([A-Za-z_][A-Za-z0-9_]*)(?:\\s+(extends)\\s+([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*))?\\s*(=)\\s*(\\{)",
           "beginCaptures": {
-            "3": { "name": "storage.modifier.visibility.nx" },
-            "5": { "name": "storage.modifier.abstract.nx" },
-            "6": { "name": "keyword.declaration.type.nx" },
-            "7": { "name": "entity.name.type.nx" },
-            "8": { "name": "keyword.declaration.extends.nx" },
-            "9": { "name": "entity.name.type.nx" },
-            "10": { "name": "keyword.operator.assignment.nx" },
-            "11": { "name": "punctuation.section.block.begin.nx" }
+            "3": {
+              "name": "storage.modifier.visibility.nx"
+            },
+            "5": {
+              "name": "storage.modifier.abstract.nx"
+            },
+            "6": {
+              "name": "keyword.declaration.type.nx"
+            },
+            "7": {
+              "name": "entity.name.type.nx"
+            },
+            "8": {
+              "name": "keyword.declaration.extends.nx"
+            },
+            "9": {
+              "name": "entity.name.type.nx"
+            },
+            "10": {
+              "name": "keyword.operator.assignment.nx"
+            },
+            "11": {
+              "name": "punctuation.section.block.begin.nx"
+            }
           },
-          "end": "\\}",
-          "endCaptures": { "0": { "name": "punctuation.section.block.end.nx" } },
+          "end": "\\}|(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.nx"
+            }
+          },
           "patterns": [
-            { "include": "#record-body" }
+            {
+              "include": "#record-body"
+            }
           ]
         },
         {
           "name": "meta.definition.action.nx",
           "begin": "^(\\s*)((private|export)\\s+)?(action)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(=)\\s*(\\{)",
           "beginCaptures": {
-            "3": { "name": "storage.modifier.visibility.nx" },
-            "4": { "name": "keyword.declaration.type.nx" },
-            "5": { "name": "entity.name.type.nx" },
-            "6": { "name": "keyword.operator.assignment.nx" },
-            "7": { "name": "punctuation.section.block.begin.nx" }
+            "3": {
+              "name": "storage.modifier.visibility.nx"
+            },
+            "4": {
+              "name": "keyword.declaration.type.nx"
+            },
+            "5": {
+              "name": "entity.name.type.nx"
+            },
+            "6": {
+              "name": "keyword.operator.assignment.nx"
+            },
+            "7": {
+              "name": "punctuation.section.block.begin.nx"
+            }
           },
-          "end": "\\}",
-          "endCaptures": { "0": { "name": "punctuation.section.block.end.nx" } },
+          "end": "\\}|(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.nx"
+            }
+          },
           "patterns": [
-            { "include": "#record-body" }
+            {
+              "include": "#record-body"
+            }
           ]
         },
         {
           "name": "meta.definition.component.nx",
-          "begin": "^(\\s*)((private|export)\\s+)?(component)\\s+(<)([A-Za-z_][A-Za-z0-9_]*)(?=[\\s/>])",
+          "begin": "^(\\s*)((private|export)\\s+)?((abstract)\\s+)?((external)\\s+)?(component)\\b",
           "beginCaptures": {
-            "3": { "name": "storage.modifier.visibility.nx" },
-            "4": { "name": "keyword.declaration.component.nx" },
-            "5": { "name": "punctuation.definition.tag.begin.nx" },
-            "6": { "name": "entity.name.type.nx" }
+            "3": {
+              "name": "storage.modifier.visibility.nx"
+            },
+            "5": {
+              "name": "storage.modifier.abstract.nx"
+            },
+            "7": {
+              "name": "storage.modifier.external.nx"
+            },
+            "8": {
+              "name": "keyword.declaration.component.nx"
+            }
           },
-          "end": "(?==)",
+          "end": "(?<=/\\s*>)|(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
           "patterns": [
-            { "include": "#keywords-core" },
-            { "include": "#keywords-control" },
-            { "include": "#types" },
-            { "include": "#operators" },
-            { "include": "#qualifiers" },
-            { "include": "#numbers" },
-            { "include": "#strings" },
-            { "include": "#comments" }
+            {
+              "include": "#declaration-signature"
+            },
+            {
+              "include": "#comments"
+            }
           ]
         },
         {
           "name": "meta.definition.type.alias.nx",
           "match": "^(\\s*)((private|export)\\s+)?(type)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(=)(?!\\s*\\{)",
           "captures": {
-            "3": { "name": "storage.modifier.visibility.nx" },
-            "4": { "name": "keyword.declaration.type.nx" },
-            "5": { "name": "entity.name.type.nx" },
-            "6": { "name": "keyword.operator.assignment.nx" }
+            "3": {
+              "name": "storage.modifier.visibility.nx"
+            },
+            "4": {
+              "name": "keyword.declaration.type.nx"
+            },
+            "5": {
+              "name": "entity.name.type.nx"
+            },
+            "6": {
+              "name": "keyword.operator.assignment.nx"
+            }
           }
         }
       ]
@@ -257,62 +676,144 @@
           "name": "meta.definition.type.union.case.nx",
           "begin": "(\\|)\\s*([A-Za-z_][A-Za-z0-9_]*)",
           "beginCaptures": {
-            "1": { "name": "punctuation.separator.union-case.nx" },
-            "2": { "name": "entity.name.type.union.case.nx" }
+            "1": {
+              "name": "punctuation.separator.union-case.nx"
+            },
+            "2": {
+              "name": "entity.name.type.union.case.nx"
+            }
           },
-          "end": "(?=\\||^\\s*(?:(?:private|export)\\s+)?(?:(?:abstract)\\s+)?(?:type|enum|action|component|let)\\b)",
+          "end": "(?=\\||^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
           "patterns": [
             {
               "begin": "\\{",
-              "beginCaptures": { "0": { "name": "punctuation.section.block.begin.nx" } },
-              "end": "\\}",
-              "endCaptures": { "0": { "name": "punctuation.section.block.end.nx" } },
+              "beginCaptures": {
+                "0": {
+                  "name": "punctuation.section.block.begin.nx"
+                }
+              },
+              "end": "\\}|(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
+              "endCaptures": {
+                "0": {
+                  "name": "punctuation.section.block.end.nx"
+                }
+              },
               "patterns": [
-                { "include": "#record-body" }
+                {
+                  "include": "#record-body"
+                }
               ]
             },
-            { "include": "#comments" },
-            { "include": "#strings" },
-            { "include": "#numbers" },
-            { "include": "#value-if" },
-            { "include": "#value-for" },
-            { "include": "#elements-if" },
-            { "include": "#elements-for" },
-            { "include": "#tags" },
-            { "include": "#values-braced-expression" },
-            { "include": "#keywords-core" },
-            { "include": "#keywords-control" },
-            { "include": "#types" },
-            { "include": "#operators" },
-            { "include": "#qualifiers" }
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#value-if"
+            },
+            {
+              "include": "#value-for"
+            },
+            {
+              "include": "#elements-if"
+            },
+            {
+              "include": "#elements-for"
+            },
+            {
+              "include": "#tags"
+            },
+            {
+              "include": "#values-braced-expression"
+            },
+            {
+              "include": "#keywords-core"
+            },
+            {
+              "include": "#keywords-control"
+            },
+            {
+              "include": "#types"
+            },
+            {
+              "include": "#operators"
+            },
+            {
+              "include": "#qualifiers"
+            }
           ]
         }
       ]
     },
     "record-body": {
       "patterns": [
-        { "include": "#record-property" },
-        { "include": "#comments" },
-        { "include": "#strings" },
-        { "include": "#numbers" },
-        { "include": "#value-if" },
-        { "include": "#value-for" },
-        { "include": "#elements-if" },
-        { "include": "#elements-for" },
-        { "include": "#tags" },
-        { "include": "#values-braced-expression" },
-        { "include": "#keywords-core" },
-        { "include": "#keywords-control" },
-        { "include": "#types" },
-        { "include": "#operators" },
-        { "include": "#qualifiers" },
+        {
+          "include": "#record-property"
+        },
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#value-if"
+        },
+        {
+          "include": "#value-for"
+        },
+        {
+          "include": "#elements-if"
+        },
+        {
+          "include": "#elements-for"
+        },
+        {
+          "include": "#tags"
+        },
+        {
+          "include": "#values-braced-expression"
+        },
+        {
+          "include": "#keywords-core"
+        },
+        {
+          "include": "#keywords-control"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "include": "#operators"
+        },
+        {
+          "include": "#qualifiers"
+        },
         {
           "begin": "\\{",
-          "beginCaptures": { "0": { "name": "punctuation.section.block.begin.nx" } },
-          "end": "\\}",
-          "endCaptures": { "0": { "name": "punctuation.section.block.end.nx" } },
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.block.begin.nx"
+            }
+          },
+          "end": "\\}|(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.nx"
+            }
+          },
           "patterns": [
-            { "include": "#record-body" }
+            {
+              "include": "#record-body"
+            }
           ]
         }
       ]
@@ -322,29 +823,63 @@
         {
           "begin": "\\b([A-Za-z_][A-Za-z0-9_-]*)\\s*(:)",
           "beginCaptures": {
-            "1": { "name": "variable.other.property.nx" },
-            "2": { "name": "punctuation.separator.type.annotation.nx" }
+            "1": {
+              "name": "variable.other.property.nx"
+            },
+            "2": {
+              "name": "punctuation.separator.type.annotation.nx"
+            }
           },
-          "end": "(?=\\s*[A-Za-z_][A-Za-z0-9_-]*\\s*:|\\s*\\})",
+          "end": "(?=\\s*[A-Za-z_][A-Za-z0-9_-]*\\s*:|\\s*\\}|^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
           "patterns": [
             {
-              "name": "entity.name.type.nx",
-              "match": "\\G\\s*(?!string\\b|i32\\b|i64\\b|int\\b|f32\\b|f64\\b|float\\b|bool\\b|void\\b|object\\b)[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*"
+              "include": "#comments"
             },
-            { "include": "#strings" },
-            { "include": "#numbers" },
-            { "include": "#value-if" },
-            { "include": "#value-for" },
-            { "include": "#elements-if" },
-            { "include": "#elements-for" },
-            { "include": "#tags" },
-            { "include": "#values-braced-expression" },
-            { "include": "#keywords-core" },
-            { "include": "#keywords-control" },
-            { "include": "#types" },
-            { "include": "#operators" },
-            { "include": "#qualifiers" },
-            { "include": "#comments" }
+            {
+              "include": "#type-annotation"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#value-if"
+            },
+            {
+              "include": "#value-for"
+            },
+            {
+              "include": "#elements-if"
+            },
+            {
+              "include": "#elements-for"
+            },
+            {
+              "include": "#tags"
+            },
+            {
+              "include": "#values-braced-expression"
+            },
+            {
+              "include": "#keywords-core"
+            },
+            {
+              "include": "#keywords-control"
+            },
+            {
+              "include": "#types"
+            },
+            {
+              "include": "#operators"
+            },
+            {
+              "include": "#rhs-expression"
+            },
+            {
+              "include": "#qualifiers"
+            }
           ]
         }
       ]
@@ -354,9 +889,15 @@
         {
           "match": "\\b([A-Z][A-Za-z0-9_]*)(\\.)([a-z_][A-Za-z0-9_-]*)\\b",
           "captures": {
-            "1": { "name": "entity.name.type.union.nx" },
-            "2": { "name": "punctuation.separator.dot.nx" },
-            "3": { "name": "entity.name.type.union.case.nx" }
+            "1": {
+              "name": "entity.name.type.union.nx"
+            },
+            "2": {
+              "name": "punctuation.separator.dot.nx"
+            },
+            "3": {
+              "name": "entity.name.type.union.case.nx"
+            }
           }
         },
         {
@@ -367,201 +908,446 @@
     },
     "values-braced-expression": {
       "begin": "(?<!\\\\)\\{",
-      "beginCaptures": { "0": { "name": "punctuation.section.values-braced-expression.begin.nx" } },
-      "end": "\\}",
-      "endCaptures": { "0": { "name": "punctuation.section.values-braced-expression.end.nx" } },
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.values-braced-expression.begin.nx"
+        }
+      },
+      "end": "\\}|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.values-braced-expression.end.nx"
+        }
+      },
       "name": "meta.values-braced-expression.nx",
       "patterns": [
-        { "include": "#tags" },
-        { "include": "#value-if" },
-        { "include": "#value-for" },
-        { "include": "#comments" },
-        { "include": "#strings" },
-        { "include": "#numbers" },
-        { "include": "#keywords-core" },
-        { "include": "#keywords-control" },
-        { "include": "#types" },
-        { "include": "#operators" },
-        { "include": "#qualifiers" }
+        {
+          "include": "#tags"
+        },
+        {
+          "include": "#value-if"
+        },
+        {
+          "include": "#value-for"
+        },
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#state-group"
+        },
+        {
+          "include": "#keywords-core"
+        },
+        {
+          "include": "#keywords-control"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "include": "#operators"
+        },
+        {
+          "include": "#qualifiers"
+        }
       ]
     },
     "embed-braced-expression": {
       "begin": "(?<!\\\\)@\\{",
-      "beginCaptures": { "0": { "name": "punctuation.section.embed-braced-expression.begin.nx" } },
-      "end": "\\}",
-      "endCaptures": { "0": { "name": "punctuation.section.embed-braced-expression.end.nx" } },
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.embed-braced-expression.begin.nx"
+        }
+      },
+      "end": "\\}|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.embed-braced-expression.end.nx"
+        }
+      },
       "name": "meta.embed-braced-expression.nx",
       "patterns": [
-        { "include": "#tags" },
-        { "include": "#value-if" },
-        { "include": "#value-for" },
-        { "include": "#comments" },
-        { "include": "#strings" },
-        { "include": "#numbers" },
-        { "include": "#keywords-core" },
-        { "include": "#keywords-control" },
-        { "include": "#types" },
-        { "include": "#operators" },
-        { "include": "#qualifiers" }
+        {
+          "include": "#tags"
+        },
+        {
+          "include": "#value-if"
+        },
+        {
+          "include": "#value-for"
+        },
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#keywords-core"
+        },
+        {
+          "include": "#keywords-control"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "include": "#operators"
+        },
+        {
+          "include": "#qualifiers"
+        }
       ]
     },
     "attr-value": {
       "patterns": [
-        { "include": "#strings" },
-        { "include": "#values-braced-expression" },
-        { "include": "#tags" },
-        { "include": "#numbers" },
-        { "include": "#keywords-core" },
-        { "include": "#keywords-control" },
-        { "include": "#operators" }
+        {
+          "include": "#rhs-expression"
+        }
       ]
     },
+    "signed-number": {
+      "name": "constant.numeric.nx",
+      "match": "-(?=[0-9])"
+    },
+    "contextual-name": {
+      "comment": "A bare value in an unbraced property position: a union case, resolved against the property's declared type. Keeps the conventional `enummember` scope, which themes style; a bespoke union-case scope would go unstyled in most of them.",
+      "name": "variable.other.enummember.nx",
+      "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+    },
     "attr-name": {
+      "comment": "Requires the following '=' so a bare property value is not mistaken for a name.",
       "name": "entity.other.attribute-name.nx",
-      "match": "[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*"
+      "match": "[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*(?=\\s*=(?!>))"
     },
     "module-root-element": {
       "begin": "^(?=<[A-Za-z_])",
       "end": "(?=\\s*$)",
       "name": "meta.module.root-element.nx",
       "patterns": [
-        { "include": "#tags" },
-        { "include": "#elements-if" },
-        { "include": "#elements-for" },
-        { "include": "#values-braced-expression" },
-        { "include": "#strings" },
-        { "include": "#entities" },
-        { "include": "#comments" }
+        {
+          "include": "#tags"
+        },
+        {
+          "include": "#elements-if"
+        },
+        {
+          "include": "#elements-for"
+        },
+        {
+          "include": "#values-braced-expression"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#entities"
+        },
+        {
+          "include": "#comments"
+        }
       ]
     },
     "tags": {
       "patterns": [
-        { "include": "#text-raw-block" },
-        { "include": "#text-typed-block" },
-        { "include": "#text-plain-block" },
-        { "include": "#fragment" },
-        { "include": "#end-tag" },
-        { "include": "#start-tag" }
+        {
+          "include": "#text-raw-block"
+        },
+        {
+          "include": "#text-typed-block"
+        },
+        {
+          "include": "#text-plain-block"
+        },
+        {
+          "include": "#fragment"
+        },
+        {
+          "include": "#end-tag"
+        },
+        {
+          "include": "#start-tag"
+        }
       ]
     },
     "text-raw-block": {
       "begin": "<([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*)\\s*(:)\\s*(?:([A-Za-z_][A-Za-z0-9_-]*))?\\s*(raw)\\b",
       "beginCaptures": {
-        "0": { "name": "meta.tag.start.nx" },
-        "1": { "name": "entity.name.tag.nx" },
-        "2": { "name": "support.type.text.nx" },
-        "3": { "name": "support.type.text.nx" },
-        "4": { "name": "keyword.other.raw.nx" }
+        "0": {
+          "name": "meta.tag.start.nx"
+        },
+        "1": {
+          "name": "entity.name.tag.nx"
+        },
+        "2": {
+          "name": "support.type.text.nx"
+        },
+        "3": {
+          "name": "support.type.text.nx"
+        },
+        "4": {
+          "name": "keyword.other.raw.nx"
+        }
       },
       "end": "</([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*)>",
       "endCaptures": {
-        "0": { "name": "meta.tag.end.nx" },
-        "1": { "name": "entity.name.tag.nx" }
+        "0": {
+          "name": "meta.tag.end.nx"
+        },
+        "1": {
+          "name": "entity.name.tag.nx"
+        }
       },
       "name": "meta.text.raw.nx",
       "patterns": [
-        { "name": "meta.tag.start.nx", "match": "\\s+" },
-        { "include": "#attributes" },
-        { "include": "#keywords-core" },
-        { "include": "#keywords-control" },
-        { "include": "#types" },
-        { "include": "#numbers" },
-        { "include": "#strings" },
-        { "include": "#comments" },
-        { "name": "punctuation.definition.tag.end.nx", "match": ">" },
-        { "name": "meta.text.raw.content.nx", "match": "[^<]+" }
+        {
+          "name": "meta.tag.start.nx",
+          "match": "\\s+"
+        },
+        {
+          "include": "#attributes"
+        },
+        {
+          "include": "#keywords-core"
+        },
+        {
+          "include": "#keywords-control"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#comments"
+        },
+        {
+          "name": "punctuation.definition.tag.end.nx",
+          "match": ">"
+        },
+        {
+          "name": "meta.text.raw.content.nx",
+          "match": "[^<]+"
+        }
       ]
     },
     "text-typed-block": {
       "begin": "<([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*)\\s*(:)\\s*([A-Za-z_][A-Za-z0-9_-]*)\\b(?!\\s*=)(?!\\s*raw\\b)",
       "beginCaptures": {
-        "0": { "name": "meta.tag.start.nx" },
-        "1": { "name": "entity.name.tag.nx" },
-        "2": { "name": "support.type.text.nx" },
-        "3": { "name": "support.type.text.nx" }
+        "0": {
+          "name": "meta.tag.start.nx"
+        },
+        "1": {
+          "name": "entity.name.tag.nx"
+        },
+        "2": {
+          "name": "support.type.text.nx"
+        },
+        "3": {
+          "name": "support.type.text.nx"
+        }
       },
       "end": "</([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*)>",
       "endCaptures": {
-        "0": { "name": "meta.tag.end.nx" },
-        "1": { "name": "entity.name.tag.nx" }
+        "0": {
+          "name": "meta.tag.end.nx"
+        },
+        "1": {
+          "name": "entity.name.tag.nx"
+        }
       },
       "name": "meta.text.typed.nx",
       "patterns": [
-        { "name": "meta.tag.start.nx", "match": "\\s+" },
-        { "include": "#attributes" },
-        { "include": "#keywords-core" },
-        { "include": "#keywords-control" },
-        { "include": "#types" },
-        { "include": "#numbers" },
-        { "include": "#strings" },
-        { "include": "#comments" },
-        { "name": "punctuation.definition.tag.end.nx", "match": ">" },
-        { "include": "#embed-braced-expression" },
-        { "name": "constant.character.escape.nx", "match": "\\\\[@{}]" },
-        { "include": "#entities" },
-        { "name": "meta.text.typed.content.nx", "match": "[^@<\\\\{}]+" },
-        { "name": "meta.text.typed.content.nx", "match": "@(?!(\\{))" },
-        { "name": "meta.text.typed.content.nx", "match": "\\\\" }
+        {
+          "name": "meta.tag.start.nx",
+          "match": "\\s+"
+        },
+        {
+          "include": "#attributes"
+        },
+        {
+          "include": "#keywords-core"
+        },
+        {
+          "include": "#keywords-control"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#comments"
+        },
+        {
+          "name": "punctuation.definition.tag.end.nx",
+          "match": ">"
+        },
+        {
+          "include": "#embed-braced-expression"
+        },
+        {
+          "name": "constant.character.escape.nx",
+          "match": "\\\\[@{}]"
+        },
+        {
+          "include": "#entities"
+        },
+        {
+          "name": "meta.text.typed.content.nx",
+          "match": "[^@<\\\\{}]+"
+        },
+        {
+          "name": "meta.text.typed.content.nx",
+          "match": "@(?!(\\{))"
+        },
+        {
+          "name": "meta.text.typed.content.nx",
+          "match": "\\\\"
+        }
       ]
     },
     "text-plain-block": {
       "begin": "<([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*)\\s*(:)(?!\\s*raw\\b)(?!\\s*[A-Za-z_][A-Za-z0-9_-]*\\b(?!\\s*=))",
       "beginCaptures": {
-        "0": { "name": "meta.tag.start.nx" },
-        "1": { "name": "entity.name.tag.nx" },
-        "2": { "name": "support.type.text.nx" }
+        "0": {
+          "name": "meta.tag.start.nx"
+        },
+        "1": {
+          "name": "entity.name.tag.nx"
+        },
+        "2": {
+          "name": "support.type.text.nx"
+        }
       },
       "end": "</([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*)>",
       "endCaptures": {
-        "0": { "name": "meta.tag.end.nx" },
-        "1": { "name": "entity.name.tag.nx" }
+        "0": {
+          "name": "meta.tag.end.nx"
+        },
+        "1": {
+          "name": "entity.name.tag.nx"
+        }
       },
       "name": "meta.text.plain.nx",
       "patterns": [
-        { "name": "meta.tag.start.nx", "match": "\\s+" },
-        { "include": "#attributes" },
-        { "include": "#keywords-core" },
-        { "include": "#keywords-control" },
-        { "include": "#types" },
-        { "include": "#numbers" },
-        { "include": "#strings" },
-        { "include": "#comments" },
-        { "name": "punctuation.definition.tag.end.nx", "match": ">" },
-        { "include": "#text-child-element" },
-        { "include": "#values-braced-expression" },
-        { "name": "constant.character.escape.nx", "match": "\\\\[{}]" },
-        { "include": "#entities" },
-        { "name": "meta.text.plain.content.nx", "match": "[^<&{\\\\]+" },
-        { "name": "meta.text.plain.content.nx", "match": "\\\\" }
+        {
+          "name": "meta.tag.start.nx",
+          "match": "\\s+"
+        },
+        {
+          "include": "#attributes"
+        },
+        {
+          "include": "#keywords-core"
+        },
+        {
+          "include": "#keywords-control"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#comments"
+        },
+        {
+          "name": "punctuation.definition.tag.end.nx",
+          "match": ">"
+        },
+        {
+          "include": "#text-child-element"
+        },
+        {
+          "include": "#values-braced-expression"
+        },
+        {
+          "name": "constant.character.escape.nx",
+          "match": "\\\\[{}]"
+        },
+        {
+          "include": "#entities"
+        },
+        {
+          "name": "meta.text.plain.content.nx",
+          "match": "[^<&{\\\\]+"
+        },
+        {
+          "name": "meta.text.plain.content.nx",
+          "match": "\\\\"
+        }
       ]
     },
     "fragment": {
       "begin": "<>",
       "beginCaptures": {
-        "0": { "name": "punctuation.definition.tag.begin.nx" }
+        "0": {
+          "name": "punctuation.definition.tag.begin.nx"
+        }
       },
       "end": "</>",
       "endCaptures": {
-        "0": { "name": "punctuation.definition.tag.end.nx" }
+        "0": {
+          "name": "punctuation.definition.tag.end.nx"
+        }
       },
       "name": "meta.tag.fragment.nx",
       "patterns": [
-        { "include": "#elements-if" },
-        { "include": "#elements-for" },
-        { "include": "#tags" },
-        { "include": "#values-braced-expression" },
-        { "include": "#strings" },
-        { "include": "#entities" }
+        {
+          "include": "#elements-if"
+        },
+        {
+          "include": "#elements-for"
+        },
+        {
+          "include": "#tags"
+        },
+        {
+          "include": "#values-braced-expression"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#entities"
+        }
       ]
     },
     "end-tag": {
       "begin": "</",
       "beginCaptures": {
-        "0": { "name": "punctuation.definition.tag.begin.nx" }
+        "0": {
+          "name": "punctuation.definition.tag.begin.nx"
+        }
       },
       "end": ">",
       "endCaptures": {
-        "0": { "name": "punctuation.definition.tag.end.nx" }
+        "0": {
+          "name": "punctuation.definition.tag.end.nx"
+        }
       },
       "name": "meta.tag.end.nx",
       "patterns": [
@@ -574,20 +1360,30 @@
     "start-tag": {
       "begin": "<(?=[A-Za-z_:])",
       "beginCaptures": {
-        "0": { "name": "punctuation.definition.tag.begin.nx" }
+        "0": {
+          "name": "punctuation.definition.tag.begin.nx"
+        }
       },
-      "end": ">",
+      "end": ">|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
       "endCaptures": {
-        "0": { "name": "punctuation.definition.tag.end.nx" }
+        "0": {
+          "name": "punctuation.definition.tag.end.nx"
+        }
       },
       "name": "meta.tag.start.nx",
       "patterns": [
         {
           "match": "\\G([A-Z][A-Za-z0-9_]*)(\\.)([a-z_][A-Za-z0-9_-]*)",
           "captures": {
-            "1": { "name": "entity.name.type.union.nx" },
-            "2": { "name": "punctuation.separator.dot.nx" },
-            "3": { "name": "entity.name.type.union.case.nx" }
+            "1": {
+              "name": "entity.name.type.union.nx"
+            },
+            "2": {
+              "name": "punctuation.separator.dot.nx"
+            },
+            "3": {
+              "name": "entity.name.type.union.case.nx"
+            }
           }
         },
         {
@@ -596,13 +1392,15 @@
         },
         {
           "name": "support.type.text.nx",
-          "match": ":\\s*(?:(?!(?:raw|if)\\b)(?:[A-Za-z_][A-Za-z0-9_-]*)(?!\\s*=))?"
+          "match": ":\\s*(?:(?!(?:raw|if)\\b)(?:[A-Za-z_][A-Za-z0-9_-]*)(?![A-Za-z0-9_-])(?!\\s*=))?"
         },
         {
           "name": "keyword.other.raw.nx",
           "match": "\\braw\\b"
         },
-        { "include": "#attributes" },
+        {
+          "include": "#attributes"
+        },
         {
           "name": "punctuation.definition.tag.self-closing.nx",
           "match": "/(?=\\s*>)"
@@ -611,197 +1409,450 @@
     },
     "attributes": {
       "patterns": [
-        { "include": "#property-list-if" },
         {
-          "name": "meta.attribute.nx",
-          "match": "\\.\\.\\.[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*"
+          "include": "#property-list-if"
         },
-        { "include": "#keywords-core" },
         {
-          "begin": "(?=[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*\\s*=(?!>))",
-          "end": "(?=\n|[/>])",
-          "patterns": [
-            { "include": "#keywords-control" },
-            { "include": "#attr-name" },
-            { "name": "keyword.operator.assignment.nx", "match": "=(?!>)" },
-            { "include": "#attr-value" }
-          ]
+          "include": "#attribute-spread"
+        },
+        {
+          "include": "#attribute-assignment"
+        },
+        {
+          "include": "#keywords-core"
         }
-      ]
+      ],
+      "comment": "`#keywords-core` comes after the attribute rule: an attribute may be named after a keyword (`type = \"multiple\"`), and at equal match positions the earlier pattern wins."
     },
-
     "elements-if": {
       "begin": "(?:(?<=^|\\n|\\}|>)[ \\t]*|(?<=\\belse\\s+))(if)\\b",
-      "beginCaptures": { "1": { "name": "keyword.control.conditional.nx" } },
-      "end": "(?<=\\})(?!\\s*else\\b)",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.conditional.nx"
+        }
+      },
+      "end": "(?<=\\})(?!\\s*else\\b)|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
       "name": "meta.control.if.elements.nx",
       "patterns": [
-        { "include": "#comments" },
-        { "include": "#strings" },
-        { "include": "#numbers" },
-        { "include": "#elements-if" },
-        { "include": "#elements-for" },
-        { "include": "#tags" },
-        { "include": "#value-if" },
-        { "include": "#value-for" },
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#elements-if"
+        },
+        {
+          "include": "#elements-for"
+        },
+        {
+          "include": "#tags"
+        },
+        {
+          "include": "#value-if"
+        },
+        {
+          "include": "#value-for"
+        },
         {
           "begin": "\\{",
-          "beginCaptures": { "0": { "name": "punctuation.section.block.begin.nx" } },
-          "end": "\\}",
-          "endCaptures": { "0": { "name": "punctuation.section.block.end.nx" } },
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.block.begin.nx"
+            }
+          },
+          "end": "\\}|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.nx"
+            }
+          },
           "patterns": [
-            { "include": "#comments" },
-            { "include": "#strings" },
-            { "include": "#numbers" },
-            { "include": "#elements-if" },
-            { "include": "#elements-for" },
-            { "include": "#tags" },
-            { "include": "#value-if" },
-            { "include": "#value-for" },
-            { "include": "#values-braced-expression" },
-            { "include": "#keywords-control" },
-            { "include": "#types" },
-            { "include": "#operators" },
-            { "include": "#qualifiers" }
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#elements-if"
+            },
+            {
+              "include": "#elements-for"
+            },
+            {
+              "include": "#tags"
+            },
+            {
+              "include": "#value-if"
+            },
+            {
+              "include": "#value-for"
+            },
+            {
+              "include": "#values-braced-expression"
+            },
+            {
+              "include": "#keywords-control"
+            },
+            {
+              "include": "#types"
+            },
+            {
+              "include": "#operators"
+            },
+            {
+              "include": "#qualifiers"
+            }
           ]
         },
-        { "include": "#values-braced-expression" },
-        { "include": "#keywords-control" },
-        { "include": "#types" },
-        { "include": "#operators" },
-        { "include": "#qualifiers" }
+        {
+          "include": "#values-braced-expression"
+        },
+        {
+          "include": "#keywords-control"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "include": "#operators"
+        },
+        {
+          "include": "#qualifiers"
+        }
       ]
     },
     "value-if": {
       "begin": "(?<![A-Za-z0-9_])(if)\\b",
-      "beginCaptures": { "1": { "name": "keyword.control.conditional.nx" } },
-      "end": "(?<=\\})(?!\\s*else\\b)",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.conditional.nx"
+        }
+      },
+      "end": "(?<=\\})(?!\\s*else\\b)|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
       "name": "meta.control.if.value.nx",
       "patterns": [
-        { "include": "#comments" },
-        { "include": "#strings" },
-        { "include": "#numbers" },
-        { "include": "#value-if" },
-        { "include": "#value-for" },
-        { "include": "#elements-if" },
-        { "include": "#elements-for" },
-        { "include": "#tags" },
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#value-if"
+        },
+        {
+          "include": "#value-for"
+        },
+        {
+          "include": "#elements-if"
+        },
+        {
+          "include": "#elements-for"
+        },
+        {
+          "include": "#tags"
+        },
         {
           "begin": "\\{",
-          "beginCaptures": { "0": { "name": "punctuation.section.block.begin.nx" } },
-          "end": "\\}",
-          "endCaptures": { "0": { "name": "punctuation.section.block.end.nx" } },
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.block.begin.nx"
+            }
+          },
+          "end": "\\}|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.nx"
+            }
+          },
           "patterns": [
-            { "include": "#comments" },
-            { "include": "#strings" },
-            { "include": "#numbers" },
-            { "include": "#value-if" },
-            { "include": "#value-for" },
-            { "include": "#elements-if" },
-            { "include": "#elements-for" },
-            { "include": "#tags" },
-            { "include": "#values-braced-expression" },
-            { "include": "#keywords-control" },
-            { "include": "#types" },
-            { "include": "#operators" },
-            { "include": "#qualifiers" }
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#value-if"
+            },
+            {
+              "include": "#value-for"
+            },
+            {
+              "include": "#elements-if"
+            },
+            {
+              "include": "#elements-for"
+            },
+            {
+              "include": "#tags"
+            },
+            {
+              "include": "#values-braced-expression"
+            },
+            {
+              "include": "#keywords-control"
+            },
+            {
+              "include": "#types"
+            },
+            {
+              "include": "#operators"
+            },
+            {
+              "include": "#qualifiers"
+            }
           ]
         },
-        { "include": "#values-braced-expression" },
-        { "include": "#keywords-control" },
-        { "include": "#types" },
-        { "include": "#operators" },
-        { "include": "#qualifiers" }
+        {
+          "include": "#values-braced-expression"
+        },
+        {
+          "include": "#keywords-control"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "include": "#operators"
+        },
+        {
+          "include": "#qualifiers"
+        }
       ]
     },
     "elements-for": {
       "begin": "(?<=^|\\n|\\}|>)[ \\t]*(for)\\b",
-      "beginCaptures": { "1": { "name": "keyword.control.loop.nx" } },
-      "end": "\\}",
-      "endCaptures": { "0": { "name": "punctuation.section.block.end.nx" } },
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.loop.nx"
+        }
+      },
+      "end": "\\}|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.block.end.nx"
+        }
+      },
       "name": "meta.control.loop.elements.nx",
       "patterns": [
-        { "include": "#comments" },
-        { "include": "#strings" },
-        { "include": "#numbers" },
-        { "include": "#elements-if" },
-        { "include": "#elements-for" },
-        { "include": "#tags" },
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#loop-header"
+        },
+        {
+          "include": "#loop-header-split-binder"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#elements-if"
+        },
+        {
+          "include": "#elements-for"
+        },
+        {
+          "include": "#tags"
+        },
         {
           "begin": "\\{",
-          "beginCaptures": { "0": { "name": "punctuation.section.block.begin.nx" } },
-          "end": "(?=\\})",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.block.begin.nx"
+            }
+          },
+          "end": "(?=\\})|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
           "patterns": [
-            { "include": "#comments" },
-            { "include": "#strings" },
-            { "include": "#numbers" },
-            { "include": "#elements-if" },
-            { "include": "#elements-for" },
-            { "include": "#tags" },
-            { "include": "#values-braced-expression" },
-            { "include": "#types" },
-            { "include": "#operators" }
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#elements-if"
+            },
+            {
+              "include": "#elements-for"
+            },
+            {
+              "include": "#tags"
+            },
+            {
+              "include": "#values-braced-expression"
+            },
+            {
+              "include": "#types"
+            },
+            {
+              "include": "#operators"
+            }
           ]
         },
-        { "include": "#values-braced-expression" },
-        { "include": "#types" },
-        { "include": "#operators" },
-        { "name": "keyword.control.loop.nx", "match": "\\bin\\b" }
+        {
+          "include": "#values-braced-expression"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "include": "#operators"
+        },
+        {
+          "name": "keyword.control.loop.nx",
+          "match": "\\bin\\b"
+        }
       ]
     },
     "value-for": {
       "begin": "(?<![A-Za-z0-9_])(for)\\b",
-      "beginCaptures": { "1": { "name": "keyword.control.loop.nx" } },
-      "end": "\\}",
-      "endCaptures": { "0": { "name": "punctuation.section.block.end.nx" } },
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.loop.nx"
+        }
+      },
+      "end": "\\}|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.block.end.nx"
+        }
+      },
       "name": "meta.control.loop.value.nx",
       "patterns": [
-        { "include": "#comments" },
-        { "include": "#strings" },
-        { "include": "#numbers" },
-        { "include": "#value-if" },
-        { "include": "#value-for" },
-        { "include": "#elements-if" },
-        { "include": "#elements-for" },
-        { "include": "#tags" },
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#loop-header"
+        },
+        {
+          "include": "#loop-header-split-binder"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#value-if"
+        },
+        {
+          "include": "#value-for"
+        },
+        {
+          "include": "#elements-if"
+        },
+        {
+          "include": "#elements-for"
+        },
+        {
+          "include": "#tags"
+        },
         {
           "begin": "\\{",
-          "beginCaptures": { "0": { "name": "punctuation.section.block.begin.nx" } },
-          "end": "(?=\\})",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.block.begin.nx"
+            }
+          },
+          "end": "(?=\\})|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
           "patterns": [
-            { "include": "#comments" },
-            { "include": "#strings" },
-            { "include": "#numbers" },
-            { "include": "#value-if" },
-            { "include": "#value-for" },
-            { "include": "#elements-if" },
-            { "include": "#elements-for" },
-            { "include": "#tags" },
-            { "include": "#values-braced-expression" },
-            { "include": "#types" },
-            { "include": "#operators" }
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#value-if"
+            },
+            {
+              "include": "#value-for"
+            },
+            {
+              "include": "#elements-if"
+            },
+            {
+              "include": "#elements-for"
+            },
+            {
+              "include": "#tags"
+            },
+            {
+              "include": "#values-braced-expression"
+            },
+            {
+              "include": "#types"
+            },
+            {
+              "include": "#operators"
+            }
           ]
         },
-        { "include": "#values-braced-expression" },
-        { "include": "#types" },
-        { "include": "#operators" },
-        { "name": "keyword.control.loop.nx", "match": "\\bin\\b" }
+        {
+          "include": "#values-braced-expression"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "include": "#operators"
+        },
+        {
+          "name": "keyword.control.loop.nx",
+          "match": "\\bin\\b"
+        }
       ]
     },
-
     "text-child-element": {
       "patterns": [
         {
           "comment": "Self-closing child element inside text content with optional attributes",
           "begin": "(<)([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*)\\b(?=[^>]*/>)",
           "beginCaptures": {
-            "1": { "name": "punctuation.definition.tag.begin.nx" },
-            "2": { "name": "entity.name.tag.nx" }
+            "1": {
+              "name": "punctuation.definition.tag.begin.nx"
+            },
+            "2": {
+              "name": "entity.name.tag.nx"
+            }
           },
           "end": "(/)(>)",
           "endCaptures": {
-            "1": { "name": "punctuation.definition.tag.self-closing.nx" },
-            "2": { "name": "punctuation.definition.tag.end.nx" }
+            "1": {
+              "name": "punctuation.definition.tag.self-closing.nx"
+            },
+            "2": {
+              "name": "punctuation.definition.tag.end.nx"
+            }
           },
           "name": "meta.text.child-element.self-closing.nx",
           "patterns": [
@@ -809,23 +1860,40 @@
               "name": "entity.other.attribute-name.nx",
               "match": "[A-Za-z_][A-Za-z0-9_-]*(?=\\s*=)"
             },
-            { "name": "keyword.operator.assignment.nx", "match": "=" },
-            { "include": "#strings" },
-            { "include": "#values-braced-expression" }
+            {
+              "name": "keyword.operator.assignment.nx",
+              "match": "="
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#values-braced-expression"
+            }
           ]
         },
         {
           "comment": "Paired child element inside text content with content",
           "begin": "(<)([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*)\\b",
           "beginCaptures": {
-            "1": { "name": "punctuation.definition.tag.begin.nx" },
-            "2": { "name": "entity.name.tag.nx" }
+            "1": {
+              "name": "punctuation.definition.tag.begin.nx"
+            },
+            "2": {
+              "name": "entity.name.tag.nx"
+            }
           },
           "end": "(</)(\\2)(>)",
           "endCaptures": {
-            "1": { "name": "punctuation.definition.tag.begin.nx" },
-            "2": { "name": "entity.name.tag.nx" },
-            "3": { "name": "punctuation.definition.tag.end.nx" }
+            "1": {
+              "name": "punctuation.definition.tag.begin.nx"
+            },
+            "2": {
+              "name": "entity.name.tag.nx"
+            },
+            "3": {
+              "name": "punctuation.definition.tag.end.nx"
+            }
           },
           "name": "meta.text.child-element.nx",
           "patterns": [
@@ -834,70 +1902,569 @@
               "begin": "\\G(?!>)",
               "end": ">",
               "endCaptures": {
-                "0": { "name": "punctuation.definition.tag.end.nx" }
+                "0": {
+                  "name": "punctuation.definition.tag.end.nx"
+                }
               },
               "patterns": [
                 {
                   "name": "entity.other.attribute-name.nx",
                   "match": "[A-Za-z_][A-Za-z0-9_-]*(?=\\s*=)"
                 },
-                { "name": "keyword.operator.assignment.nx", "match": "=" },
-                { "include": "#strings" },
-                { "include": "#values-braced-expression" }
+                {
+                  "name": "keyword.operator.assignment.nx",
+                  "match": "="
+                },
+                {
+                  "include": "#strings"
+                },
+                {
+                  "include": "#values-braced-expression"
+                }
               ]
             },
-            { "include": "#text-child-element" },
-            { "include": "#values-braced-expression" },
-            { "name": "constant.character.escape.nx", "match": "\\\\[{}]" },
-            { "include": "#entities" },
-            { "name": "meta.text.plain.content.nx", "match": "[^<&{\\\\]+" },
-            { "name": "meta.text.plain.content.nx", "match": "\\\\" }
+            {
+              "include": "#text-child-element"
+            },
+            {
+              "include": "#values-braced-expression"
+            },
+            {
+              "name": "constant.character.escape.nx",
+              "match": "\\\\[{}]"
+            },
+            {
+              "include": "#entities"
+            },
+            {
+              "name": "meta.text.plain.content.nx",
+              "match": "[^<&{\\\\]+"
+            },
+            {
+              "name": "meta.text.plain.content.nx",
+              "match": "\\\\"
+            }
           ]
         }
       ]
     },
-
     "property-list-if": {
       "begin": "(?<![A-Za-z0-9_])(if)\\b",
-      "beginCaptures": { "1": { "name": "keyword.control.conditional.nx" } },
-      "end": "(?<=\\})(?!\\s*else\\b)",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.conditional.nx"
+        }
+      },
+      "end": "(?<=\\})(?!\\s*else\\b)|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
       "name": "meta.control.if.properties.nx",
       "patterns": [
-        { "include": "#comments" },
-        { "include": "#strings" },
-        { "include": "#numbers" },
-        { "include": "#value-if" },
-        { "include": "#value-for" },
-        { "include": "#elements-if" },
-        { "include": "#elements-for" },
-        { "include": "#tags" },
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#value-if"
+        },
+        {
+          "include": "#value-for"
+        },
+        {
+          "include": "#elements-if"
+        },
+        {
+          "include": "#elements-for"
+        },
+        {
+          "include": "#tags"
+        },
         {
           "begin": "\\{",
-          "beginCaptures": { "0": { "name": "punctuation.section.block.begin.nx" } },
-          "end": "\\}",
-          "endCaptures": { "0": { "name": "punctuation.section.block.end.nx" } },
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.block.begin.nx"
+            }
+          },
+          "end": "\\}|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.nx"
+            }
+          },
           "patterns": [
-            { "include": "#comments" },
-            { "include": "#strings" },
-            { "include": "#numbers" },
-            { "include": "#value-if" },
-            { "include": "#value-for" },
-            { "include": "#elements-if" },
-            { "include": "#elements-for" },
-            { "include": "#tags" },
-            { "include": "#attributes" },
-            { "include": "#values-braced-expression" },
-            { "include": "#keywords-control" },
-            { "include": "#types" },
-            { "include": "#qualifiers" },
-            { "include": "#operators" }
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#strings"
+            },
+            {
+              "include": "#numbers"
+            },
+            {
+              "include": "#value-if"
+            },
+            {
+              "include": "#value-for"
+            },
+            {
+              "include": "#elements-if"
+            },
+            {
+              "include": "#elements-for"
+            },
+            {
+              "include": "#tags"
+            },
+            {
+              "include": "#attributes-condition"
+            },
+            {
+              "include": "#values-braced-expression"
+            },
+            {
+              "include": "#keywords-control"
+            },
+            {
+              "include": "#types"
+            },
+            {
+              "include": "#qualifiers"
+            },
+            {
+              "include": "#operators"
+            }
           ]
         },
-        { "include": "#values-braced-expression" },
-        { "include": "#keywords-control" },
-        { "include": "#types" },
-        { "include": "#qualifiers" },
-        { "include": "#operators" }
+        {
+          "include": "#values-braced-expression"
+        },
+        {
+          "include": "#keywords-control"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "include": "#literals"
+        },
+        {
+          "include": "#qualifiers"
+        },
+        {
+          "include": "#operators"
+        }
+      ]
+    },
+    "declaration-property": {
+      "patterns": [
+        {
+          "comment": "A property definition inside an element-shaped declaration signature: `[content] name: Type[[]][?] [= default]`. Unlike an element attribute, the name is a definition and what follows the colon is a type.",
+          "begin": "\\b(?:(content)\\s+)?([A-Za-z_][A-Za-z0-9_-]*)\\s*(:)",
+          "beginCaptures": {
+            "1": {
+              "name": "storage.modifier.content.nx"
+            },
+            "2": {
+              "name": "variable.other.property.nx"
+            },
+            "3": {
+              "name": "punctuation.separator.type.annotation.nx"
+            }
+          },
+          "end": "(?=\\s*(?:content\\s+)?[A-Za-z_][A-Za-z0-9_-]*\\s*:|\\s*/\\s*>|\\s*\\bemits\\b|\\s*[},)]|^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#type-annotation"
+            },
+            {
+              "include": "#attr-value"
+            }
+          ]
+        }
+      ]
+    },
+    "emits-group": {
+      "name": "meta.declaration.emits.nx",
+      "begin": "\\b(emits)\\s*(\\{)",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.declaration.emits.nx"
+        },
+        "2": {
+          "name": "punctuation.section.block.begin.nx"
+        }
+      },
+      "end": "\\}|(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.block.end.nx"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "comment": "An emitted action declared inline, with an optional base action.",
+          "match": "\\b([A-Za-z_][A-Za-z0-9_]*)(?:\\s+(extends)\\s+([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*))?\\s*(?=\\{)",
+          "captures": {
+            "1": {
+              "name": "entity.name.type.nx"
+            },
+            "2": {
+              "name": "keyword.declaration.extends.nx"
+            },
+            "3": {
+              "name": "entity.name.type.nx"
+            }
+          }
+        },
+        {
+          "begin": "\\{",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.block.begin.nx"
+            }
+          },
+          "end": "\\}|(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.block.end.nx"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#declaration-property"
+            },
+            {
+              "include": "#record-body"
+            }
+          ]
+        },
+        {
+          "comment": "A reference to an action declared elsewhere.",
+          "name": "entity.name.type.nx",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*"
+        }
+      ]
+    },
+    "state-group": {
+      "name": "meta.declaration.state.nx",
+      "begin": "\\b(state)\\s*(\\{)",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.declaration.state.nx"
+        },
+        "2": {
+          "name": "punctuation.section.block.begin.nx"
+        }
+      },
+      "end": "\\}|(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.block.end.nx"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#declaration-property"
+        },
+        {
+          "include": "#record-body"
+        }
+      ]
+    },
+    "declaration-signature": {
+      "comment": "The element-shaped signature of a component or `let` function definition. Shaped like a start tag but scoped as a declaration: the name is defined here rather than referenced, and `name: Type` is a property definition rather than an attribute.",
+      "name": "meta.declaration.signature.nx",
+      "begin": "(<)([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*)(?=[\\s/>])",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.definition.tag.begin.nx"
+        },
+        "2": {
+          "name": "entity.name.type.nx"
+        }
+      },
+      "end": "(/)\\s*(>)|(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.tag.self-closing.nx"
+        },
+        "2": {
+          "name": "punctuation.definition.tag.end.nx"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "match": "\\b(extends)\\s+([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.extends.nx"
+            },
+            "2": {
+              "name": "entity.name.type.nx"
+            }
+          }
+        },
+        {
+          "include": "#emits-group"
+        },
+        {
+          "include": "#declaration-property"
+        },
+        {
+          "include": "#keywords-core"
+        },
+        {
+          "include": "#types"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#numbers"
+        }
+      ]
+    },
+    "function-definition": {
+      "comment": "A `let` function whose parameters are written in element form.",
+      "name": "meta.definition.function.nx",
+      "begin": "^(\\s*)((private|export)\\s+)?(let)\\s+(?=<)",
+      "beginCaptures": {
+        "3": {
+          "name": "storage.modifier.visibility.nx"
+        },
+        "4": {
+          "name": "keyword.declaration.let.nx"
+        }
+      },
+      "end": "(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))|$",
+      "patterns": [
+        {
+          "include": "#declaration-signature"
+        },
+        {
+          "include": "#comments"
+        },
+        {
+          "comment": "The `= RhsExpression` of a definition. The control forms are accepted unbraced for continuity with existing files, though the spec requires braces around an expression.",
+          "begin": "(=)(?!>)",
+          "beginCaptures": {
+            "1": {
+              "name": "keyword.operator.assignment.nx"
+            }
+          },
+          "end": "(?=$)|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#value-if"
+            },
+            {
+              "include": "#value-for"
+            },
+            {
+              "include": "#elements-if"
+            },
+            {
+              "include": "#elements-for"
+            },
+            {
+              "include": "#rhs-expression"
+            }
+          ]
+        },
+        {
+          "comment": "The return type of an element-shaped function definition, scoped by the same rule as every other annotation position.",
+          "begin": "(:)",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.separator.type.annotation.nx"
+            }
+          },
+          "end": "(?=\\s*=|$)",
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#type-annotation"
+            }
+          ]
+        }
+      ]
+    },
+    "type-annotation": {
+      "comment": "The type after an annotation colon, with its sequence and optional suffixes. Anchored with \\G so it only matches immediately after the colon.",
+      "patterns": [
+        {
+          "match": "\\G\\s*(string|int32|int64|int|float32|float64|boolean|void|object)(?![A-Za-z0-9_-])((?:\\[\\]|\\?)*)",
+          "captures": {
+            "1": {
+              "name": "support.type.primitive.nx"
+            },
+            "2": {
+              "name": "keyword.operator.type-modifier.nx"
+            }
+          }
+        },
+        {
+          "match": "\\G\\s*([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*)(?![A-Za-z0-9_-])((?:\\[\\]|\\?)*)",
+          "captures": {
+            "1": {
+              "name": "entity.name.type.nx"
+            },
+            "2": {
+              "name": "keyword.operator.type-modifier.nx"
+            }
+          }
+        }
+      ]
+    },
+    "rhs-expression": {
+      "comment": "RhsExpression: what may follow `=` at a property default, an attribute value, or a value/function definition. An unbraced value is always a literal, never an expression, and a bare name is a ContextualName — a case of the union that types the binding site, never a qualified name.",
+      "patterns": [
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#values-braced-expression"
+        },
+        {
+          "include": "#tags"
+        },
+        {
+          "include": "#signed-number"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#keywords-core"
+        },
+        {
+          "include": "#keywords-control"
+        },
+        {
+          "include": "#contextual-name"
+        },
+        {
+          "include": "#operators"
+        }
+      ]
+    },
+    "attribute-spread": {
+      "comment": "A spread attribute: `...rest`.",
+      "name": "meta.attribute.nx",
+      "match": "\\.\\.\\.[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*"
+    },
+    "attribute-assignment": {
+      "comment": "A `name = value` attribute. Split out of `#attributes` so a property-list condition arm can reuse it without also inheriting the `#keywords-core` fallback. Its end includes `}` so an attribute inside a property-list condition arm releases the arm's closing brace; a braced or quoted value consumes its own `}` in a child context before this end is tried.",
+      "begin": "(?=[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*\\s*=(?!>))",
+      "end": "(?=\n|[/>}])",
+      "patterns": [
+        {
+          "include": "#keywords-control"
+        },
+        {
+          "include": "#attr-name"
+        },
+        {
+          "name": "keyword.operator.assignment.nx",
+          "match": "=(?!>)"
+        },
+        {
+          "include": "#attr-value"
+        }
+      ]
+    },
+    "attributes-condition": {
+      "comment": "The attribute patterns admissible inside a property-list condition arm. Identical to `#attributes` except that the trailing `#keywords-core` fallback is replaced by `#literals`: inside a condition a bare `state` or `type` is an expression name, not a declaration keyword, and only `true`, `false`, and `null` are reserved.",
+      "patterns": [
+        {
+          "include": "#property-list-if"
+        },
+        {
+          "include": "#attribute-spread"
+        },
+        {
+          "include": "#attribute-assignment"
+        },
+        {
+          "include": "#literals"
+        }
+      ]
+    },
+    "loop-header": {
+      "comment": "A loop's header when the binders and `in` are recognisable on one line: `name in`, `name, name in`, `name,` at a line break, or a comment after the first binder. A context rather than a single match, so the scopes survive a line break or an interrupting comment. The begin is guarded rather than a bare `\\G` because `for` also occurs in prose — `an easier way for neighbors to share tools` (`src/vscode/samples/tally-survey.nx:327`) reaches `#value-for` mid-sentence — and an unguarded header scopes every following word as a binding variable. The guard also guarantees the begin consumes the whitespace after `for`, so it always advances. `#loop-header-split-binder` covers the one layout this shape cannot see.",
+      "begin": "\\G[ \\t]*(?=[A-Za-z_][A-Za-z0-9_]*[ \\t]*(?:in(?![A-Za-z0-9_-])|,[ \\t]*(?:[A-Za-z_][A-Za-z0-9_]*[ \\t]*in(?![A-Za-z0-9_-])|$)|/[/*]))",
+      "end": "(?=[{}])|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
+      "patterns": [
+        {
+          "include": "#loop-header-parts"
+        }
+      ]
+    },
+    "loop-header-parts": {
+      "comment": "The pieces of a loop header, shared by the two entries that can open one. Binders and iterable names carry one scope, so the region needs no state beyond `in` itself. The iterable is a full `ValueExpression`, so its control forms are delegated to `#value-if` and `#value-for` ahead of the name rule: their braces belong to the iterable, and a child context has to consume them before an enclosing header's end can mistake one for the body brace.",
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "name": "keyword.control.loop.nx",
+          "match": "(?<![A-Za-z0-9_-])in(?![A-Za-z0-9_-])"
+        },
+        {
+          "name": "punctuation.separator.comma.nx",
+          "match": ","
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#literals"
+        },
+        {
+          "include": "#value-if"
+        },
+        {
+          "include": "#value-for"
+        },
+        {
+          "name": "variable.other.readwrite.nx",
+          "match": "[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*(?![A-Za-z0-9_.-])"
+        },
+        {
+          "include": "#operators"
+        }
+      ]
+    },
+    "loop-header-split-binder": {
+      "comment": "A loop header whose sole binder is separated from its `in` by a line break. A `begin` sees one line, so `for item` at a line end cannot be told apart from prose that wraps after `for item`; this entry opens anyway and bounds the cost in its `end` instead. It pops at the start of the first line that does not continue the header — a line that is not blank, not a comment, and does not begin with `in` — so a false open in prose mis-scopes the one word after `for` and stops there. Blank and comment lines are allowed through because NX treats them as trivia inside a header; a block comment spanning lines needs no alternative of its own, since its own context is on the stack and this end is never tested while it is. The negative lookahead must sit immediately after `^`, with the whitespace run inside it: `(?=^[ \\t]*(?!in…))` lets `[ \\t]*` backtrack to zero width, tests against the leading space, and pops before the iterable is scoped. The residual ambiguity is prose that wraps as `… for neighbors` / `in towns and cities`, which is a header in every visible respect; that line is scoped as one, and the pop still ends it there.",
+      "begin": "\\G[ \\t]*(?=[A-Za-z_][A-Za-z0-9_]*[ \\t]*$)",
+      "end": "(?=[{}])|(?=^(?![ \\t]*(?:in(?![A-Za-z0-9_-])|//|/\\*|$)))|(?=^(?:\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component)\\b|\\s*(?:private|export|abstract|external)\\s+(?:(?:abstract|external)\\s+)*let\\b|let\\b)(?!\\s*[:=]))",
+      "patterns": [
+        {
+          "include": "#loop-header-parts"
+        }
       ]
     }
   }

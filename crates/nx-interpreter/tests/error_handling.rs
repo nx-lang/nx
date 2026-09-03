@@ -167,7 +167,7 @@ fn test_paren_function_invalid_return_type_usage() {
 }
 
 #[test]
-fn test_enum_not_found_runtime_error() {
+fn test_undeclared_union_runtime_error() {
     let mut module = LoweredModule::new(SourceId::new(0));
     let span = span(0, 5);
 
@@ -191,12 +191,17 @@ fn test_enum_not_found_runtime_error() {
 
     let err = interpreter
         .execute_function(&module, "getDirection", vec![])
-        .expect_err("Missing enum should fail at runtime");
+        .expect_err("Missing union should fail at runtime");
 
+    // With one nominal kind, a name that reaches no declaration at all is simply undefined —
+    // there is no separate "union not found" state to be in.
     match err.kind() {
-        RuntimeErrorKind::EnumNotFound { name } => {
+        RuntimeErrorKind::UndefinedVariable { name } => {
             assert_eq!(name.as_str(), "Direction");
         }
-        other => panic!("Expected EnumNotFound, got {:?}", other),
+        other => panic!(
+            "Expected the undeclared name to be reported, got {:?}",
+            other
+        ),
     }
 }

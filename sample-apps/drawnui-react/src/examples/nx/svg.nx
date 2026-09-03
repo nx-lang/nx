@@ -1,0 +1,38 @@
+// Ported from the DrawnUI React demo's SVG page.
+//
+// SkiaSvg: file source, inline SvgString, TintColor, LockRatio sizing.
+
+component <Heading extends DrawnNode Text:string /> = {
+  <SkiaLabel Text={Text} FontSize=20.0 TextColor="#FFFFFF"
+    HorizontalOptions=Center Margin=<Thickness Top=12.0 /> />
+}
+
+// Single-quoted XML attributes: NX keeps a backslash in a string literal, so escaping the double
+// quotes would leave them in the markup.
+let star = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='#FFD700' d='M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.77 5.82 21 7 14.14l-5-4.87 6.91-1.01z'/></svg>"
+
+<SkiaScroll Orientation=Vertical>
+  <SkiaStack Padding=<Thickness Left=16.0 Top=16.0 Right=16.0 Bottom=16.0 /> Spacing=16.0>
+    <SkiaLabel Text="SkiaSvg" FontSize=24.0 TextColor="#FFFFFF" HorizontalOptions=Center />
+    <SkiaSvg Source="images/drawnui.svg" WidthRequest=200.0 LockRatio=1.0 HorizontalOptions=Center />
+    <SkiaLabel Text="Source=images/drawnui.svg WidthRequest={200} LockRatio={1}"
+      FontSize=12.0 TextColor="#94A3B8" HorizontalOptions=Center />
+
+    <Heading Text="TintColor" />
+    <SkiaRow Spacing=24.0 HorizontalOptions=Center>
+      <SkiaSvg Source="images/drawnui.svg" WidthRequest=72.0 LockRatio=1.0 TintColor="#FFFFFF" />
+      <SkiaSvg Source="images/drawnui.svg" WidthRequest=72.0 LockRatio=1.0 TintColor="#FF6B6B" />
+      <SkiaSvg Source="images/drawnui.svg" WidthRequest=72.0 LockRatio=1.0 TintColor="#4ECDC4" />
+      <SkiaSvg Source="images/drawnui.svg" WidthRequest=72.0 LockRatio=1.0 TintColor="#FFD93D" />
+    </SkiaRow>
+
+    <Heading Text="SvgString (inline markup) at three sizes" />
+    <SkiaRow Spacing=24.0 HorizontalOptions=Center VerticalOptions=Center>
+      <SkiaSvg SvgString={star} WidthRequest=32.0 LockRatio=1.0 VerticalOptions=Center />
+      <SkiaSvg SvgString={star} WidthRequest=64.0 LockRatio=1.0 VerticalOptions=Center />
+      <SkiaSvg SvgString={star} WidthRequest=128.0 LockRatio=1.0 VerticalOptions=Center />
+    </SkiaRow>
+    <SkiaLabel Text="Rasterized by the browser at the displayed pixel size, re-rasterized only when that size changes."
+      FontSize=12.0 TextColor="#94A3B8" HorizontalOptions=Center />
+  </SkiaStack>
+</SkiaScroll>

@@ -84,7 +84,7 @@ fn test_if_without_else() {
 #[test]
 fn test_property_fragment_simple_conditional_selects_then_and_else() {
     let source = r#"
-        let view(enabled:bool) = {
+        let view(enabled:boolean) = {
             <button if enabled { label="Save" } else { label="Disabled" } />
         }
     "#;
@@ -113,7 +113,7 @@ fn test_property_fragment_simple_conditional_selects_then_and_else() {
 #[test]
 fn test_property_fragment_condition_list_selects_first_matching_arm_and_else() {
     let source = r#"
-        let view(isError:bool, isWarning:bool) = {
+        let view(isError:boolean, isWarning:boolean) = {
             <badge if {
                 isError => tone="danger"
                 isWarning => tone="warning"
@@ -144,7 +144,7 @@ fn test_property_fragment_condition_list_selects_first_matching_arm_and_else() {
 #[test]
 fn test_property_fragment_match_selects_matching_arm() {
     let source = r#"
-        type LoadState = | idle | failed { message:string }
+        type LoadState = idle | failed { message:string }
         let view(state:LoadState) = {
             <notice if state is {
                 LoadState.failed => message={state.message}
@@ -180,7 +180,7 @@ fn test_property_fragment_match_selects_matching_arm() {
 #[test]
 fn test_property_fragment_runtime_rejects_duplicate_active_property() {
     let source = r#"
-        let view(enabled:bool) = {
+        let view(enabled:boolean) = {
             <button tone="neutral" if enabled { tone="danger" } />
         }
     "#;
@@ -201,15 +201,15 @@ fn test_property_fragment_runtime_rejects_duplicate_active_property() {
 #[test]
 fn test_nested_conditionals() {
     let source = r#"
-        let classify(x:int): int = { 
-            if x > 10 { 3 } 
+        let classify(x:int): int = {
+            if x > 10 { 3 }
             else {
-                if x > 0 { 2 } 
+                if x > 0 { 2 }
                 else {
-                    if x == 0 { 1 } 
+                    if x == 0 { 1 }
                     else { 0 }
                 }
-            } 
+            }
         }
     "#;
 
@@ -238,12 +238,12 @@ fn test_nested_conditionals() {
 #[test]
 fn test_chained_else_if() {
     let source = r#"
-        let grade(x:int): int = { 
-            if x > 10 { 3 } 
+        let grade(x:int): int = {
+            if x > 10 { 3 }
             else {
-                if x > 5 { 2 } 
+                if x > 5 { 2 }
                 else {
-                    if x > 0 { 1 } 
+                    if x > 0 { 1 }
                     else { 0 }
                 }
             }
@@ -279,16 +279,16 @@ fn test_chained_else_if() {
 #[test]
 fn test_deeply_nested_conditionals() {
     let source = r#"
-        let deep(flag:bool): int = { 
-            if flag { 
-                if flag { 
-                    if flag { 
-                        if flag { 
-                            if flag { 42 } else { 0 } 
-                        } else { 0 } 
-                    } else { 0 } 
-                } else { 0 } 
-            } else { 0 } 
+        let deep(flag:boolean): int = {
+            if flag {
+                if flag {
+                    if flag {
+                        if flag {
+                            if flag { 42 } else { 0 }
+                        } else { 0 }
+                    } else { 0 }
+                } else { 0 }
+            } else { 0 }
         }
     "#;
 
@@ -440,7 +440,7 @@ fn test_boolean_literal_condition() {
 #[test]
 fn test_boolean_parameter_condition() {
     let source = r#"
-        let choose(flag:bool): string = { if flag { "yes" } else { "no" } }
+        let choose(flag:boolean): string = { if flag { "yes" } else { "no" } }
     "#;
 
     let result = execute_nx_function(source, "choose", vec![Value::Boolean(true)])
@@ -631,7 +631,7 @@ fn test_expression_in_else_branch() {
 #[test]
 fn test_function_call_in_condition() {
     let source = r#"
-        let is_even(x:int): bool = { x == (x / 2) * 2 }
+        let is_even(x:int): boolean = { x == (x / 2) * 2 }
         let even_or_odd(x:int): string = { if is_even(x) { "even" } else { "odd" } }
     "#;
 
@@ -697,7 +697,7 @@ fn test_ternary_nested() {
 fn test_ternary_as_argument() {
     let source = r#"
         let double(x:int): int = { x * 2 }
-        let cond_double(cond:bool, x:int): int = { double(cond ? x : 0) }
+        let cond_double(cond:boolean, x:int): int = { double(cond ? x : 0) }
     "#;
 
     assert_eq!(
@@ -743,7 +743,7 @@ fn test_ternary_with_arithmetic() {
 #[test]
 fn test_ternary_boolean_result() {
     let source = r#"
-        let is_big(x:int): bool = { x > 100 ? true : false }
+        let is_big(x:int): boolean = { x > 100 ? true : false }
     "#;
 
     assert_eq!(
@@ -761,7 +761,7 @@ fn test_ternary_boolean_result() {
 #[test]
 fn test_ternary_string_result() {
     let source = r#"
-        let grade(passed:bool): string = { passed ? "pass" : "fail" }
+        let grade(passed:boolean): string = { passed ? "pass" : "fail" }
     "#;
 
     assert_eq!(
@@ -783,12 +783,12 @@ fn test_ternary_string_result() {
 #[test]
 fn test_if_else_containing_ternary() {
     let source = r#"
-        let complex(a:int, b:int): int = { 
-            if a > 0 { 
-                b > 0 ? a + b : a 
-            } else { 
-                0 
-            } 
+        let complex(a:int, b:int): int = {
+            if a > 0 {
+                b > 0 ? a + b : a
+            } else {
+                0
+            }
         }
     "#;
 
@@ -820,8 +820,8 @@ fn test_if_else_containing_ternary() {
 #[test]
 fn test_condition_list_basic() {
     let source = r#"
-        let classify(x:int): string = { 
-            if { 
+        let classify(x:int): string = {
+            if {
                 x > 100 => "big"
                 x > 10 => "medium"
                 x > 0 => "small"
@@ -1024,8 +1024,8 @@ fn test_match_expression_without_else() {
 #[test]
 fn test_match_expression_multiple_patterns() {
     let source = r#"
-        let weekend(day:int): bool = { 
-            if day is { 
+        let weekend(day:int): boolean = {
+            if day is {
                 6, 7 => true
                 else => false
             }
@@ -1055,8 +1055,8 @@ fn test_match_expression_multiple_patterns() {
 #[test]
 fn test_match_expression_booleans() {
     let source = r#"
-        let toggle(b:bool): string = { 
-            if b is { 
+        let toggle(b:boolean): string = {
+            if b is {
                 true => "yes"
                 false => "no"
             }
@@ -1078,8 +1078,8 @@ fn test_match_expression_booleans() {
 #[test]
 fn test_match_expression_computed_scrutinee() {
     let source = r#"
-        let parity(x:int): string = { 
-            if x == (x / 2) * 2 is { 
+        let parity(x:int): string = {
+            if x == (x / 2) * 2 is {
                 true => "even"
                 false => "odd"
             }
@@ -1105,8 +1105,8 @@ fn test_match_expression_evaluates_scrutinee_once() {
     // denom = 0 would cause division by zero error. By using a non-zero denom,
     // if scrutinee is only evaluated once, it works correctly.
     let source = r#"
-        let single_eval(denom:int): string = { 
-            if 10 / denom is { 
+        let single_eval(denom:int): string = {
+            if 10 / denom is {
                 5 => "five"
                 10 => "ten"
                 else => "other"
@@ -1137,8 +1137,8 @@ fn test_match_expression_evaluates_scrutinee_once() {
 #[test]
 fn test_match_multiple_patterns_evaluates_scrutinee_once() {
     let source = r#"
-        let multi_pattern(denom:int): string = { 
-            if 100 / denom is { 
+        let multi_pattern(denom:int): string = {
+            if 100 / denom is {
                 1, 2 => "small"
                 10, 20 => "medium"
                 50, 100 => "large"

@@ -1,0 +1,186 @@
+## ADDED Requirements
+
+### Requirement: NX defines exactly one spelling for each primitive type
+The set of NX primitive type names SHALL be exactly `string`, `int`, `int32`, `int64`, `float32`,
+`float64`, `boolean`, `void`, and `object`. The system SHALL NOT provide an alias, synonym, or
+alternate spelling for any primitive type, and primitive names SHALL be matched case-sensitively:
+a name that differs only in letter case SHALL be resolved as an ordinary named type, not as a
+primitive. Each primitive SHALL have a single canonical name that the parser accepts and that every
+diagnostic, formatter, and code generator renders.
+
+This requirement governs source spellings only. How each primitive is represented internally is
+unchanged: `object` continues to be carried as a named type rather than as a variant of the
+`Primitive` model, a pre-existing mismatch that design.md lists as a non-goal.
+
+#### Scenario: Canonical numeric names are accepted in type position
+- **WHEN** a file contains `type Sizes = { n:int a:int32 b:int64 c:float32 d:float64 }`
+- **THEN** parsing and type analysis SHALL accept all five field types
+- **AND** SHALL preserve each as the corresponding primitive type
+
+#### Scenario: `int` is a distinct type, not a spelling of `int64`
+- **WHEN** analysis compares the primitive named `int` with the primitive named `int64`
+- **THEN** they SHALL NOT be equal
+- **AND** each SHALL render under its own name in diagnostics
+
+#### Scenario: Non-numeric primitive names are accepted in type position
+- **WHEN** a file contains `type Misc = { s:string b:boolean o:object }`
+- **THEN** parsing and type analysis SHALL accept all three field types
+
+#### Scenario: A capitalized spelling is not a primitive
+- **WHEN** a file contains `type Weird = { n:INT a:INT64 b:Boolean c:String o:Object }` and no type
+  of any of those names is declared
+- **THEN** analysis SHALL NOT treat any of the five fields as a primitive type
+- **AND** code generation SHALL NOT map any of them to a host primitive type
+
+### Requirement: The former spellings are no longer type names
+The names `i32`, `i64`, `f32`, `f64`, `float`, and `bool` SHALL NOT resolve to primitive types. The system SHALL treat each of them as an ordinary named type reference, resolved by exactly
+the same rules as any other name that is not a primitive.
+
+#### Scenario: Width-suffixed shorthand no longer resolves
+- **WHEN** a file contains `type Point = { x:f64 y:f64 }` and no type named `f64` is declared
+- **THEN** analysis SHALL NOT treat the field as a floating-point primitive
+- **AND** code generation SHALL NOT map the field to a host floating-point type
+
+#### Scenario: The former float alias no longer resolves
+- **WHEN** a file contains `type Ratio = { n:float }` and no type named `float` is declared
+- **THEN** analysis SHALL NOT treat the field as a floating-point primitive
+
+#### Scenario: The former boolean spelling no longer resolves
+- **WHEN** a file contains `type Flags = { on:bool }` and no type named `bool` is declared
+- **THEN** analysis SHALL NOT treat the field as a boolean primitive
+
+#### Scenario: A user-defined type may take a former primitive name
+- **WHEN** a file contains `type i64 = { value:int }` and a field declared `n:i64`
+- **THEN** analysis SHALL resolve `n` to the user-defined record type
+- **AND** SHALL NOT treat `i64` as a primitive
+
+#### Scenario: A user declaration does not displace a primitive name
+- **WHEN** a file contains `type int = { value:string }` and a property declared `n:int`
+- **THEN** analysis SHALL resolve `n` to the `int` primitive rather than to the declared record
+- **AND** SHALL reject a string value supplied for `n`
+
+### Requirement: Diagnostics render one name per type on both sides of a message
+When the system reports a type mismatch, it SHALL render both the expected and the found type using
+canonical primitive names. The system SHALL NOT render two different names for the same primitive
+type, and SHALL NOT vary the rendered name according to how the type was spelled at its declaration.
+
+#### Scenario: Mismatch message uses canonical names throughout
+- **WHEN** a file declares `external component <B v:float64 />` and binds `<B v=1 />`
+- **THEN** the diagnostic SHALL name the expected type `float64`
+- **AND** SHALL name the found type `int`
+
+#### Scenario: Two declarations of the same type produce the same message
+- **WHEN** two files each declare a property of the same primitive type and each receives an
+  incompatible value
+- **THEN** both diagnostics SHALL render that primitive's name identically
+
+### Requirement: Integer literals infer `int` and floating-point literals infer `float64`
+The system SHALL infer `int` for an integer literal and `float64` for a floating-point literal.
+`int` is the default integer type: it is what an unannotated integer takes, and what NX sources use
+unless a declaration has a specific reason to name a width.
+
+#### Scenario: Integer literal infers int
+- **WHEN** a file contains `let n = 42`
+- **THEN** analysis SHALL infer the type of `n` as `int`
+
+#### Scenario: Float literal infers float64
+- **WHEN** a file contains `let x = 1.5`
+- **THEN** analysis SHALL infer the type of `x` as `float64`
+
+### Requirement: Numeric compatibility is unchanged by the renaming
+The system SHALL continue to treat any integer type as compatible with any other integer type, and
+any floating-point type as compatible with any other floating-point type, in both directions. The
+system SHALL continue to reject an integer value at a floating-point binding site. `int`
+participates in integer compatibility exactly as `int32` and `int64` do.
+
+When the system promotes two integer operands to a common type, it SHALL follow the rank order
+`int32` < `int` < `int64` and select the higher-ranked operand's type.
+
+#### Scenario: Integer literal binds to any integer width
+- **WHEN** a file declares `external component <B v:int32 />` and binds `<B v=1 />`
+- **THEN** type checking SHALL accept the binding
+
+#### Scenario: Integer promotion follows the rank order
+- **WHEN** the system promotes `int32` with `int`
+- **THEN** the common type SHALL be `int`
+- **AND** promoting `int` with `int64` SHALL give `int64`
+
+#### Scenario: Float literal binds to any float width
+- **WHEN** a file declares `external component <B v:float32 />` and binds `<B v=1.5 />`
+- **THEN** type checking SHALL accept the binding
+
+#### Scenario: Integer literal is still rejected at a float site
+- **WHEN** a file declares `external component <B v:float64 />` and binds `<B v=1 />`
+- **THEN** type checking SHALL reject the binding
+
+### Requirement: Host language type mappings are preserved under the new names
+Code generation SHALL map each canonical primitive to the same host type it produced before the
+renaming. `int32` SHALL map to C# `int`, `int64` to C# `long`, `float32` to C# `float`, and
+`float64` to C# `double`. `int` SHALL map to C# `long`, because its specified range does not fit a
+C# `int`. All five SHALL map to TypeScript `number`. `boolean` SHALL map to C#
+`bool` and to TypeScript `boolean`.
+
+#### Scenario: C# generation preserves widths
+- **WHEN** source contains `export type Sizes = { n:int a:int32 b:int64 c:float32 d:float64 }`
+- **AND** C# types are generated for it
+- **THEN** the generated members SHALL be typed `long`, `int`, `long`, `float`, and `double`
+  respectively
+
+#### Scenario: TypeScript generation maps every numeric primitive to number
+- **WHEN** source contains `export type Sizes = { n:int a:int32 b:int64 c:float32 d:float64 }`
+- **AND** TypeScript types are generated for it
+- **THEN** all five generated members SHALL be typed `number`
+
+#### Scenario: Boolean generation is unaffected by the rename
+- **WHEN** source contains `export type Toggle = { enabled:boolean = true }`
+- **AND** C# and TypeScript types are generated for it
+- **THEN** the generated C# member SHALL be typed `bool`
+- **AND** the generated TypeScript member SHALL be typed `boolean`
+
+### Requirement: `int` has one specified range on every backend
+`int` SHALL be exact over ±(2^53−1) on every backend. That range SHALL NOT vary by target,
+by host word size, or by which NX implementation evaluates the program: `int` SHALL NOT be an
+implementation-defined width. Backends MAY store an `int` in any slot that holds the whole
+specified range — a C# `long`, a Rust `i64`, a JavaScript `number` — because a backend's choice
+among those is unobservable to an NX program.
+
+Arithmetic on `int` SHALL be defined as checked rather than wrapping: a result outside the
+specified range is an error, not a silently truncated value.
+
+Enforcement of both the range and the checked-arithmetic rule is deliberately deferred to a later
+change, which also covers user-declared ranges (`1..10`) so that one bounds-check mechanism serves
+both. Until that change lands, the range is a specified guarantee that the runtime does not yet
+police, and integer arithmetic continues to wrap.
+
+#### Scenario: `int` is specified independently of the evaluating backend
+- **WHEN** the same NX program is evaluated by the Rust interpreter, by generated C#, and by
+  generated TypeScript
+- **THEN** the specified range of `int` SHALL be identical in all three
+
+#### Scenario: A backend may choose any storage that covers the range
+- **WHEN** a backend stores `int` in a C# `long`, a Rust `i64`, or a JavaScript `number`
+- **THEN** the choice SHALL NOT change the specified range
+
+### Requirement: `int64` remains a JavaScript `number` for now
+`int64` SHALL continue to generate TypeScript `number`, as it does today, even though `number` is
+exact only to 2^53−1 and therefore cannot represent the whole of `int64`. Carrying `int64` as a
+JavaScript `bigint` is the intended direction and is deferred to its own change.
+
+This is a known and deliberate gap, and it is the reason `int` rather than `int64` is the default
+integer type: `int`'s specified range is exactly the range every backend — JavaScript included —
+represents without loss.
+
+#### Scenario: int64 generates a TypeScript number
+- **WHEN** source contains `export type Wide = { v:int64 }`
+- **AND** TypeScript types are generated for it
+- **THEN** the generated member SHALL be typed `number`
+
+### Requirement: Primitive type completions offer exactly the canonical names
+Editor tooling SHALL offer the canonical primitive type names as completions in type position, and
+SHALL NOT offer any name that is not an NX primitive type.
+
+#### Scenario: Completion list matches the primitive set
+- **WHEN** an editor requests primitive type completions
+- **THEN** the offered names SHALL be `string`, `int`, `int32`, `int64`, `float32`, `float64`,
+  `boolean`, `void`, and `object`
+- **AND** SHALL NOT include `long`, `double`, `bool`, or any former alias

@@ -202,7 +202,7 @@ mod tests {
         let mut env = TypeEnvironment::new();
         let name = Name::new("temp");
 
-        env.bind(name.clone(), Type::bool());
+        env.bind(name.clone(), Type::boolean());
         let removed = env.remove(&name);
         assert!(removed.is_some());
         assert!(env.lookup(&name).is_none());

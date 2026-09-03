@@ -11,12 +11,12 @@ invocation checking, and declared external state SHALL NOT become part of the co
 invocation surface.
 
 #### Scenario: Concrete external component is usable from NX call sites
-- **WHEN** a file contains `external component <SearchBox placeholder:string = "Find docs" showSearchIcon:bool = true /> let render() = <SearchBox />`
+- **WHEN** a file contains `external component <SearchBox placeholder:string = "Find docs" showSearchIcon:boolean = true /> let render() = <SearchBox />`
 - **THEN** analysis SHALL accept the invocation of `SearchBox`
 - **AND** SHALL treat `placeholder` and `showSearchIcon` as the external component's public props
 
 #### Scenario: Abstract external contract can be extended by another external component
-- **WHEN** a file contains `abstract external component <SearchBase placeholder:string emits { SearchRequested } /> external component <SearchBox extends SearchBase showSearchIcon:bool = true />`
+- **WHEN** a file contains `abstract external component <SearchBase placeholder:string emits { SearchRequested } /> external component <SearchBox extends SearchBase showSearchIcon:boolean = true />`
 - **THEN** analysis SHALL accept `SearchBox extends SearchBase`
 - **AND** SHALL treat `SearchBox` as inheriting `placeholder`, `SearchRequested`, and `showSearchIcon`
 
@@ -34,11 +34,11 @@ emitted-action handlers. Declared external state SHALL remain host-managed metad
 introduce an NX render body or NX-evaluated state fields on that component value.
 
 #### Scenario: Function returns an external component record with normalized defaults
-- **WHEN** a file contains `external component <SearchBox placeholder:string = "Find docs" showSearchIcon:bool = true /> let render() = <SearchBox />`
+- **WHEN** a file contains `external component <SearchBox placeholder:string = "Find docs" showSearchIcon:boolean = true /> let render() = <SearchBox />`
 - **THEN** interpreting `render()` SHALL return a `SearchBox` value with `placeholder="Find docs"` and `showSearchIcon=true`
 
 #### Scenario: Derived external component record includes inherited and local props
-- **WHEN** a file contains `abstract external component <SearchBase placeholder:string = "Find docs" /> external component <SearchBox extends SearchBase showSearchIcon:bool = true /> let render() = <SearchBox />`
+- **WHEN** a file contains `abstract external component <SearchBase placeholder:string = "Find docs" /> external component <SearchBox extends SearchBase showSearchIcon:boolean = true /> let render() = <SearchBox />`
 - **THEN** interpreting `render()` SHALL return a `SearchBox` value that includes inherited prop `placeholder="Find docs"` and local prop `showSearchIcon=true`
 
 #### Scenario: Bound emitted-action handlers are preserved on external component values
@@ -73,7 +73,7 @@ the result of evaluating a concrete external component value to JSON or another 
 a client can instantiate the corresponding UI component.
 
 #### Scenario: JSON serialization preserves external component identity and props
-- **WHEN** a host serializes the result of evaluating source containing `external component <SearchBox placeholder:string showSearchIcon:bool /> let render() = <SearchBox placeholder="Docs" showSearchIcon=true />` to JSON
+- **WHEN** a host serializes the result of evaluating source containing `external component <SearchBox placeholder:string showSearchIcon:boolean /> let render() = <SearchBox placeholder="Docs" showSearchIcon=true />` to JSON
 - **THEN** the serialized payload SHALL preserve component identity `SearchBox`
 - **AND** SHALL preserve normalized prop fields `placeholder="Docs"` and `showSearchIcon=true`
 

@@ -1,0 +1,208 @@
+// Ported from the DrawnUI React demo's Layouts page.
+//
+// Every SkiaLayout type: Absolute (SkiaLayer), Column (SkiaStack), Row (SkiaRow), Wrap (SkiaWrap),
+// Grid (SkiaGrid).
+
+component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = {
+  <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8.0 />
+    BackgroundColor="#2B3035" HorizontalOptions=Fill>
+    <SkiaStack Padding=<Thickness Left=16.0 Top=12.0 Right=16.0 Bottom=12.0 /> Spacing=10.0>
+      <SkiaLabel Text={Title} FontSize=12.0 TextColor="#6EA8FE"
+        FontAttributes=Bold TextTransform=Uppercase />
+      {Children}
+    </SkiaStack>
+  </SkiaShape>
+}
+
+// A colored cell with a centered caption, sized by its grid cell.
+component <Cell
+  extends DrawnNode
+  Text: string
+  Color: string
+  Column: float64?
+  Row: float64?
+  ColumnSpan: float64?
+  RowSpan: float64?
+/> = {
+  <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6.0 /> BackgroundColor={Color}
+    HorizontalOptions=Fill VerticalOptions=Fill
+    Column={Column} Row={Row} ColumnSpan={ColumnSpan} RowSpan={RowSpan}>
+    <SkiaLabel Text={Text} FontSize=13.0 TextColor="#FFFFFF"
+      HorizontalOptions=Center VerticalOptions=Center
+      Padding=<Thickness Left=8.0 Top=6.0 Right=8.0 Bottom=6.0 /> />
+  </SkiaShape>
+}
+
+// A small labelled box used by the stack, row and layer demos.
+component <Box
+  extends DrawnNode
+  Text: string
+  Color: string
+  Width: float64?
+  Height: float64?
+  Horizontal: LayoutOptions?
+  Vertical: LayoutOptions?
+  BoxMargin: Thickness?
+/> = {
+  <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6.0 /> BackgroundColor={Color}
+    WidthRequest={Width} HeightRequest={Height}
+    HorizontalOptions={Horizontal} VerticalOptions={Vertical} Margin={BoxMargin}>
+    <SkiaLabel Text={Text} FontSize=12.0 TextColor="#FFFFFF"
+      HorizontalOptions=Center VerticalOptions=Center
+      Padding=<Thickness Left=10.0 Top=6.0 Right=10.0 Bottom=6.0 /> />
+  </SkiaShape>
+}
+
+component <Heading extends DrawnNode Text:string /> = {
+  <SkiaLabel Text={Text} FontSize=20.0 TextColor="#FFFFFF"
+    HorizontalOptions=Center Margin=<Thickness Top=8.0 /> />
+}
+
+component <Chip extends DrawnNode Text:string /> = {
+  <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=14.0 /> BackgroundColor="#373B3E">
+    <SkiaLabel Text={Text} FontSize=13.0 TextColor="#DEE2E6"
+      Padding=<Thickness Left=12.0 Top=6.0 Right=12.0 Bottom=6.0 /> />
+  </SkiaShape>
+}
+
+// The list is bound first because a bracketed list literal in a `for` header is not accepted in
+// content position, only a name.
+let chipLabels = {
+  "Absolute" "Column" "Row" "Wrap" "Grid"
+  "SkiaStack" "SkiaRow" "SkiaLayer" "SkiaWrap" "SkiaGrid"
+  "Spacing" "Padding" "Margin"
+}
+
+<SkiaScroll Orientation=Vertical>
+  <SkiaStack Spacing=16.0 Padding=<Thickness Left=16.0 Top=16.0 Right=16.0 Bottom=16.0 />
+    HorizontalOptions=Center MaximumWidthRequest=720.0>
+    <SkiaLabel Text="SkiaLayout types" FontSize=24.0 TextColor="#FFFFFF" HorizontalOptions=Center />
+    <SkiaLabel FontSize=13.0 TextColor="#D3D3D3" HorizontalOptions=Fill HorizontalTextAlignment=Center
+      Text="One class, five Type values; the aliases preset Type (+ HorizontalOptions=Fill for SkiaStack / SkiaLayer / SkiaWrap / SkiaGrid). Children position themselves with HorizontalOptions / VerticalOptions / Margin, the container adds Spacing and Padding." />
+
+    <Heading Text="Absolute · SkiaLayer" />
+    <Card Title="Children overlap in one cell; alignment + Margin place them (WPF-style, no X/Y)">
+      <SkiaLayer HeightRequest=150.0 BackgroundColor="#1F2937">
+        <Box Text="Start/Start" Color="#0D6EFD" />
+        <Box Text="Center/Start" Color="#6610F2" Horizontal=Center />
+        <Box Text="End/Start" Color="#D63384" Horizontal=End />
+        <Box Text="Start/Center" Color="#FD7E14" Vertical=Center />
+        <Box Text="Center/Center" Color="#20C997" Horizontal=Center Vertical=Center />
+        <Box Text="End/Center" Color="#0DCAF0" Horizontal=End Vertical=Center />
+        <Box Text="Start/End" Color="#6EA8FE" Vertical=End />
+        <Box Text="Margin(0,0,0,12)" Color="#FFC107" Horizontal=Center Vertical=End
+          BoxMargin=<Thickness Bottom=12.0 /> />
+        <Box Text="End/End" Color="#DC3545" Horizontal=End Vertical=End />
+      </SkiaLayer>
+    </Card>
+    <Card Title="Icon + text with an Absolute layer instead of a grid (cheaper): label gets the icon's width as Margin">
+      <SkiaLayer>
+        <SkiaShape Type=Circle BackgroundColor="#6EA8FE" WidthRequest=36.0 LockRatio=1.0 />
+        <SkiaLabel FontSize=14.0 TextColor="#DEE2E6" Margin=<Thickness Left=48.0 />
+          VerticalOptions=Center HorizontalOptions=Fill
+          Text="Margin={new Thickness(48, 0, 0, 0)} VerticalOptions=Center — no second column to measure." />
+      </SkiaLayer>
+    </Card>
+
+    <Card Title="IsClippedToBounds — a child larger than its parent">
+      <SkiaRow Spacing=24.0>
+        <SkiaLayer WidthRequest=140.0 HeightRequest=70.0 BackgroundColor="#1F2937">
+          <SkiaShape Type=Circle BackgroundColor="#D63384" WidthRequest=110.0 LockRatio=1.0
+            HorizontalOptions=End VerticalOptions=End Margin=<Thickness Right=-30.0 Bottom=-30.0 /> />
+          <SkiaLabel Text="overflows (default)" FontSize=11.0 TextColor="#FFFFFF"
+            Padding=<Thickness Left=6.0 Top=6.0 Right=6.0 Bottom=6.0 /> />
+        </SkiaLayer>
+        <SkiaLayer WidthRequest=140.0 HeightRequest=70.0 BackgroundColor="#1F2937" IsClippedToBounds=true>
+          <SkiaShape Type=Circle BackgroundColor="#D63384" WidthRequest=110.0 LockRatio=1.0
+            HorizontalOptions=End VerticalOptions=End Margin=<Thickness Right=-30.0 Bottom=-30.0 /> />
+          <SkiaLabel Text="IsClippedToBounds" FontSize=11.0 TextColor="#FFFFFF"
+            Padding=<Thickness Left=6.0 Top=6.0 Right=6.0 Bottom=6.0 /> />
+        </SkiaLayer>
+        <SkiaLayer WidthRequest=140.0 HeightRequest=70.0 BackgroundColor="#1F2937"
+          IsClippedToBounds=true ClipEffects=false>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8.0 /> BackgroundColor="#20C997"
+            WidthRequest=100.0 HeightRequest=40.0 HorizontalOptions=Center VerticalOptions=Center
+            Shadows={ <SkiaShadow X=0.0 Y=0.0 Blur=12.0 Opacity=1.0 Color="#20C997" /> } />
+          <SkiaLabel Text="ClipEffects={false}" FontSize=11.0 TextColor="#FFFFFF"
+            Padding=<Thickness Left=6.0 Top=6.0 Right=6.0 Bottom=6.0 /> />
+        </SkiaLayer>
+      </SkiaRow>
+    </Card>
+
+    <Heading Text="Column · SkiaStack" />
+    <Card Title="Vertical stack, Spacing between children, each child aligns horizontally on its own">
+      <SkiaStack Padding=<Thickness Left=8.0 Top=8.0 Right=8.0 Bottom=8.0 /> Spacing=6.0 BackgroundColor="#1F2937">
+        <Box Text="Start (default)" Color="#0D6EFD" />
+        <Box Text="HorizontalOptions=Center" Color="#6610F2" Horizontal=Center />
+        <Box Text="HorizontalOptions=End" Color="#D63384" Horizontal=End />
+        <Box Text="HorizontalOptions=Fill" Color="#20C997" Horizontal=Fill />
+        <Box Text="WidthRequest={200}" Color="#FD7E14" Width=200.0 />
+      </SkiaStack>
+    </Card>
+
+    <Heading Text="Row · SkiaRow" />
+    <Card Title="Horizontal stack; the row is as tall as its tallest child, children align vertically">
+      <SkiaRow Spacing=8.0 BackgroundColor="#1F2937" Padding=<Thickness Left=8.0 Top=8.0 Right=8.0 Bottom=8.0 />
+        HorizontalOptions=Fill>
+        <Box Text="Start" Color="#0D6EFD" Height=70.0 />
+        <Box Text="Center" Color="#6610F2" Vertical=Center />
+        <Box Text="End" Color="#D63384" Vertical=End />
+        <Box Text="Fill" Color="#20C997" Vertical=Fill />
+        <Box Text="Margin(16,0,0,0)" Color="#FD7E14" Vertical=Center BoxMargin=<Thickness Left=16.0 /> />
+      </SkiaRow>
+      <SkiaLabel FontSize=12.0 TextColor="#ADB5BD" HorizontalOptions=Fill
+        Text="A Row gives children an infinite width: Fill on the main axis auto-sizes (MAUI stack semantics). Use SkiaGrid with a * column when something must take the remaining width." />
+    </Card>
+
+    <Heading Text="Grid · SkiaGrid" />
+    <Card Title="ColumnDefinitions='*, 2*, Auto' RowDefinitions='Auto, 60' · ColumnSpacing/RowSpacing 8">
+      <SkiaGrid ColumnDefinitions="*, 2*, Auto" RowDefinitions="Auto, 60" ColumnSpacing=8.0 RowSpacing=8.0>
+        <Cell Text="*" Color="#0D6EFD" Column=0.0 Row=0.0 />
+        <Cell Text="2*" Color="#6610F2" Column=1.0 Row=0.0 />
+        <Cell Text="Auto (this label)" Color="#D63384" Column=2.0 Row=0.0 />
+        <Cell Text="Row 1 = 60pt" Color="#20C997" Column=0.0 Row=1.0 />
+        <Cell Text="Column 1" Color="#FD7E14" Column=1.0 Row=1.0 />
+        <Cell Text="Auto" Color="#DC3545" Column=2.0 Row=1.0 />
+      </SkiaGrid>
+    </Card>
+
+    <Card Title="ColumnSpan / RowSpan">
+      <SkiaGrid ColumnDefinitions="*, *, *" RowDefinitions="48, 48, 48" ColumnSpacing=6.0 RowSpacing=6.0>
+        <Cell Text="ColumnSpan=2" Color="#0D6EFD" Column=0.0 Row=0.0 ColumnSpan=2.0 />
+        <Cell Text="RowSpan=2" Color="#6610F2" Column=2.0 Row=0.0 RowSpan=2.0 />
+        <Cell Text="0,1" Color="#20C997" Column=0.0 Row=1.0 />
+        <Cell Text="1,1" Color="#FD7E14" Column=1.0 Row=1.0 />
+        <Cell Text="ColumnSpan=3" Color="#D63384" Column=0.0 Row=2.0 ColumnSpan=3.0 />
+      </SkiaGrid>
+    </Card>
+
+    <Card Title="Implicit tracks: no definitions, children reference Column/Row (DefaultColumnDefinition = Auto)">
+      <SkiaGrid ColumnSpacing=12.0 RowSpacing=4.0 HorizontalOptions=Start>
+        <SkiaLabel Text="Name" FontSize=14.0 TextColor="#ADB5BD" Column=0.0 Row=0.0 />
+        <SkiaLabel Text="DrawnUI for React" FontSize=14.0 TextColor="#FFFFFF" Column=1.0 Row=0.0 />
+        <SkiaLabel Text="Renderer" FontSize=14.0 TextColor="#ADB5BD" Column=0.0 Row=1.0 />
+        <SkiaLabel Text="CanvasKit (Skia WASM) + react-reconciler" FontSize=14.0 TextColor="#FFFFFF" Column=1.0 Row=1.0 />
+        <SkiaLabel Text="License" FontSize=14.0 TextColor="#ADB5BD" Column=0.0 Row=2.0 />
+        <SkiaLabel Text="MIT" FontSize=14.0 TextColor="#FFFFFF" Column=1.0 Row=2.0 />
+      </SkiaGrid>
+    </Card>
+
+    <Card Title="Icon + text pattern: Auto column for the icon, * for wrapping text">
+      <SkiaGrid ColumnDefinitions="Auto, *" ColumnSpacing=12.0>
+        <SkiaShape Type=Circle BackgroundColor="#6EA8FE" WidthRequest=40.0 LockRatio=1.0
+          VerticalOptions=Start Column=0.0 />
+        <SkiaLabel Column=1.0 FontSize=14.0 TextColor="#DEE2E6" HorizontalOptions=Fill
+          Text="The star column takes whatever the Auto column leaves, and this label wraps inside it. The row is Auto, so it grows with the text — the same layout a MAUI Grid would produce." />
+      </SkiaGrid>
+    </Card>
+
+    <Heading Text="Wrap · SkiaWrap" />
+    <Card Title="Type=Wrap · Spacing 8 · resize the window">
+      <SkiaWrap Spacing=8.0>
+        for label in chipLabels {
+          <Chip Text={label} />
+        }
+      </SkiaWrap>
+    </Card>
+  </SkiaStack>
+</SkiaScroll>

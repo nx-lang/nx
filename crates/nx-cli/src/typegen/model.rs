@@ -1,9 +1,9 @@
 use nx_api::{build_library_artifact_from_directory, LibraryArtifact};
 use nx_hir::{
     ast::{Expr, Literal, OrderedFloat, TypeRef},
-    Component, EnumDef, ImportKind, InterfaceItemKind, Item, LoweredModule, PreparedItemKind,
-    RecordDef, RecordField, RecordKind, SelectiveImport, TypeAlias, UnionCaseDef, UnionCaseField,
-    UnionDef, Visibility,
+    Component, ImportKind, InterfaceItemKind, Item, LoweredModule, PreparedItemKind, RecordDef,
+    RecordField, RecordKind, SelectiveImport, TypeAlias, UnionCaseDef, UnionCaseField, UnionDef,
+    Visibility,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeSet;
@@ -14,12 +14,6 @@ use std::path::{Path, PathBuf};
 pub struct ExportedAlias {
     pub name: String,
     pub target: TypeRef,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ExportedEnum {
-    pub name: String,
-    pub members: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -66,6 +60,22 @@ pub struct ExportedUnion {
     pub cases: Vec<ExportedUnionCase>,
 }
 
+impl ExportedUnion {
+    /// Whether `case` declares no fields in a union that declares no base, so it carries nothing
+    /// beyond its own name.
+    pub fn is_constant_case(&self, case: &ExportedUnionCase) -> bool {
+        self.base.is_none() && case.fields.is_empty()
+    }
+
+    /// Whether every case is constant. This is what an `enum` declared, and it generates a CLR
+    /// `enum` in C# and an `as const` object in TypeScript.
+    pub fn is_constant(&self) -> bool {
+        !self.cases.is_empty()
+            && self.base.is_none()
+            && self.cases.iter().all(|case| case.fields.is_empty())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ExportedPolymorphicDescendant {
     Record {
@@ -90,8 +100,10 @@ pub enum ImportedTypeKind {
         target: TypeRef,
         target_is_reference: bool,
     },
-    Enum,
-    Union,
+    Union {
+        /// Whether every case of this union is constant, which decides its host mapping.
+        is_constant: bool,
+    },
     Record,
     Component,
 }
@@ -103,8 +115,8 @@ impl ImportedTypeKind {
                 target_is_reference,
                 ..
             } => *target_is_reference,
-            Self::Enum => false,
-            Self::Union | Self::Record | Self::Component => true,
+            Self::Union { is_constant } => !is_constant,
+            Self::Record | Self::Component => true,
         }
     }
 }
@@ -120,7 +132,6 @@ pub struct ImportedType {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExportedType {
     Alias(ExportedAlias),
-    Enum(ExportedEnum),
     Union(ExportedUnion),
     Record(ExportedRecord),
     ExternalState(ExportedExternalState),
@@ -130,7 +141,6 @@ impl ExportedType {
     pub fn name(&self) -> &str {
         match self {
             Self::Alias(alias) => &alias.name,
-            Self::Enum(enum_def) => &enum_def.name,
             Self::Union(union_def) => &union_def.name,
             Self::Record(record) => &record.name,
             Self::ExternalState(state) => &state.name,
@@ -183,6 +193,8 @@ struct ImportedTypesBuild {
 struct CachedImportedLibrary {
     library_name: String,
     export_kinds: FxHashMap<String, PreparedItemKind>,
+    /// Exported names whose union declares no base and no case fields.
+    constant_unions: FxHashSet<String>,
     alias_targets: FxHashMap<String, TypeRef>,
     wildcard_importable_export_names: Vec<String>,
 }
@@ -571,10 +583,6 @@ fn collect_exported_declarations(module: &LoweredModule) -> Vec<ExportedTypeDecl
                 visibility: alias.visibility,
                 item: ExportedType::Alias(export_alias(alias)),
             }),
-            Item::Enum(enum_def) => declarations.push(ExportedTypeDecl {
-                visibility: enum_def.visibility,
-                item: ExportedType::Enum(export_enum(enum_def)),
-            }),
             Item::Union(union_def) => declarations.push(ExportedTypeDecl {
                 visibility: union_def.visibility,
                 item: ExportedType::Union(export_union(module, union_def)),
@@ -777,8 +785,9 @@ impl CachedImportedLibrary {
                     target_is_reference,
                 }
             }
-            PreparedItemKind::Enum => ImportedTypeKind::Enum,
-            PreparedItemKind::Union => ImportedTypeKind::Union,
+            PreparedItemKind::Union => ImportedTypeKind::Union {
+                is_constant: self.constant_unions.contains(exported_name),
+            },
             PreparedItemKind::Record => ImportedTypeKind::Record,
             PreparedItemKind::Component => ImportedTypeKind::Component,
             _ => return None,
@@ -828,9 +837,9 @@ impl CachedImportedLibrary {
     fn type_name_is_reference(&self, name: &str, seen_aliases: &mut BTreeSet<String>) -> bool {
         match name {
             "string" | "object" | "unknown" | "error" => true,
-            "i32" | "i64" | "int" | "f32" | "f64" | "float" | "bool" | "void" => false,
+            "int" | "int32" | "int64" | "float32" | "float64" | "boolean" | "void" => false,
             other => match self.export_kinds.get(other) {
-                Some(PreparedItemKind::Enum) => false,
+                Some(PreparedItemKind::Union) if self.constant_unions.contains(other) => false,
                 Some(
                     PreparedItemKind::Union
                     | PreparedItemKind::Record
@@ -896,6 +905,7 @@ fn build_cached_imported_library(dependency_root: &Path) -> Result<CachedImporte
         })?
         .to_string();
     let mut export_kinds = FxHashMap::default();
+    let mut constant_unions = FxHashSet::default();
     let mut alias_targets = FxHashMap::default();
     let mut wildcard_importable_export_names = Vec::new();
 
@@ -914,7 +924,6 @@ fn build_cached_imported_library(dependency_root: &Path) -> Result<CachedImporte
         if matches!(
             kind,
             PreparedItemKind::TypeAlias
-                | PreparedItemKind::Enum
                 | PreparedItemKind::Union
                 | PreparedItemKind::Record
                 | PreparedItemKind::Component
@@ -924,6 +933,14 @@ fn build_cached_imported_library(dependency_root: &Path) -> Result<CachedImporte
         if let InterfaceItemKind::TypeAlias { ty, .. } = &interface_item.item {
             alias_targets.insert(exported_name.clone(), ty.clone());
         }
+        if let InterfaceItemKind::Union { base, cases, .. } = &interface_item.item {
+            if base.is_none()
+                && !cases.is_empty()
+                && cases.iter().all(|case| case.fields.is_empty())
+            {
+                constant_unions.insert(exported_name.clone());
+            }
+        }
         export_kinds.insert(exported_name.clone(), kind);
     }
 
@@ -932,6 +949,7 @@ fn build_cached_imported_library(dependency_root: &Path) -> Result<CachedImporte
     Ok(CachedImportedLibrary {
         library_name,
         export_kinds,
+        constant_unions,
         alias_targets,
         wildcard_importable_export_names,
     })
@@ -941,17 +959,6 @@ fn export_alias(def: &TypeAlias) -> ExportedAlias {
     ExportedAlias {
         name: def.name.as_str().to_string(),
         target: def.ty.clone(),
-    }
-}
-
-fn export_enum(def: &EnumDef) -> ExportedEnum {
-    ExportedEnum {
-        name: def.name.as_str().to_string(),
-        members: def
-            .members
-            .iter()
-            .map(|member| member.name.as_str().to_string())
-            .collect(),
     }
 }
 

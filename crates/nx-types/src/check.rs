@@ -185,16 +185,57 @@ pub fn analyze_prepared_module(
                 ctx.infer_function(func);
             }
             nx_hir::Item::Value(_) => {}
-            nx_hir::Item::Component(_) => {}
+            nx_hir::Item::Component(component) => {
+                ctx.infer_component(component);
+            }
             nx_hir::Item::TypeAlias(_) => {}
             nx_hir::Item::Record(_) => {}
-            nx_hir::Item::Enum(_) => {}
             nx_hir::Item::Union(_) => {}
         }
     }
 
+    // Apply contextual name resolutions before the module is snapshotted, so every consumer after
+    // type checking sees the qualified member access rather than the bare source spelling.
+    let contextual_resolutions = ctx.resolved_contextual_names().clone();
     let (type_env, type_diagnostics) = ctx.finish();
     diagnostics.extend(normalize_diagnostics_file_name(type_diagnostics, file_name));
+    // A resolution reached a union declaration, so it has an origin. One without cannot be
+    // rewritten, and an unrewritten contextual name is not an error anywhere below type checking:
+    // the interpreter evaluates it to null. Reporting it here is what keeps that impossible rather
+    // than merely unlikely.
+    for (expr_id, resolution) in &contextual_resolutions {
+        if resolution.origin.is_some() {
+            continue;
+        }
+        diagnostics.push(
+            Diagnostic::error("contextual-name-origin-missing")
+                .with_message(format!(
+                    "Internal error: '{}' resolved to '{}.{}', but the resolution carries no declaring module",
+                    resolution.member, resolution.type_name, resolution.member
+                ))
+                .with_label(Label::primary(
+                    file_name,
+                    prepared_module.raw_module().expr_span(*expr_id),
+                ))
+                .build(),
+        );
+    }
+
+    nx_hir::apply_contextual_name_resolutions(
+        &mut prepared_module,
+        &contextual_resolutions,
+        |resolution| {
+            resolution
+                .origin
+                .as_ref()
+                .map(|origin| nx_hir::ContextualRewrite {
+                    union: resolution.type_name.clone(),
+                    case: resolution.member.clone(),
+                    module_identity: origin.module_identity().to_string(),
+                    definition_id: origin.definition_id(),
+                })
+        },
+    );
 
     let prepared_bindings = collect_prepared_bindings(&prepared_module);
     let preserved_module = prepared_module.raw_module().clone();

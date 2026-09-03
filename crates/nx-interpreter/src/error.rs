@@ -66,11 +66,11 @@ pub enum RuntimeErrorKind {
     /// Triggered when recursion depth exceeds the configured limit
     StackOverflow { depth: usize },
 
-    /// Enum type referenced at runtime could not be found
-    EnumNotFound { name: SmolStr },
+    /// Union type referenced at runtime could not be found
+    UnionNotFound { name: SmolStr },
 
-    /// Enum member not defined on the referenced enum type
-    EnumMemberNotFound { enum_name: SmolStr, member: SmolStr },
+    /// Case not declared on the referenced union type
+    UnionCaseNotFound { union: SmolStr, case: SmolStr },
 
     /// Record field not found on the given record value
     RecordFieldNotFound { record: SmolStr, field: SmolStr },
@@ -167,11 +167,11 @@ impl fmt::Display for RuntimeErrorKind {
             RuntimeErrorKind::StackOverflow { depth } => {
                 write!(f, "Stack overflow: recursion depth {} exceeded", depth)
             }
-            RuntimeErrorKind::EnumNotFound { name } => {
-                write!(f, "Enum not found: {}", name)
+            RuntimeErrorKind::UnionNotFound { name } => {
+                write!(f, "Union not found: {}", name)
             }
-            RuntimeErrorKind::EnumMemberNotFound { enum_name, member } => {
-                write!(f, "Enum '{}' has no member named '{}'", enum_name, member)
+            RuntimeErrorKind::UnionCaseNotFound { union, case } => {
+                write!(f, "Union '{}' has no case named '{}'", union, case)
             }
             RuntimeErrorKind::RecordFieldNotFound { record, field } => {
                 write!(f, "Record '{}' has no field named '{}'", record, field)

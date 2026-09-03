@@ -3,22 +3,75 @@
 use crate::{
     common_supertype as generic_common_supertype, is_object_type, resolve_type_ref_with,
     resolve_type_ref_with_seen,
-    ty::{EnumType, UnionCaseType, UnionType},
+    ty::{DeclaringOrigin, NamedType, UnionCaseType, UnionType},
     type_satisfies_expected as generic_type_satisfies_expected, Type, TypeEnvironment,
 };
 use nx_diagnostics::{Diagnostic, Label, TextSpan};
 use nx_hir::{
     ast, effective_component_contract_for_name, effective_record_shape_for_name,
-    interface_component, interface_enum, interface_function_signature, interface_type_alias,
-    interface_union, is_record_subtype, ExprId, InterfaceItemKind, Item, Name,
-    PreparedBindingOrigin, PreparedModule, PreparedNamespace, PropertyEntry, ResolvedPreparedItem,
+    interface_component, interface_function_signature, interface_type_alias, interface_union,
+    is_record_subtype, ExprId, InterfaceItemKind, Item, Name, PreparedBindingOrigin,
+    PreparedItemKind, PreparedModule, PreparedNamespace, PropertyEntry, ResolvedPreparedItem,
     UnionCaseDef, UnionDef,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
+/// One component's lineage, nearest first: the component itself, then each ancestor.
+fn component_lineage(
+    contract: &nx_hir::EffectiveComponentContract,
+) -> Vec<nx_hir::ComponentAncestor> {
+    let mut lineage = vec![nx_hir::ComponentAncestor {
+        name: contract.component.name.clone(),
+        origin: contract.origin.clone(),
+    }];
+    lineage.extend(contract.ancestors.iter().cloned());
+    lineage
+}
+
+/// One record's lineage, nearest first: the record itself, then each ancestor.
+fn record_lineage(shape: &nx_hir::EffectiveRecordShape) -> Vec<nx_hir::RecordAncestor> {
+    let mut lineage = vec![nx_hir::RecordAncestor {
+        name: shape.record.name.clone(),
+        origin: shape.origin.clone(),
+    }];
+    lineage.extend(shape.ancestors.iter().cloned());
+    lineage
+}
+
 struct TypeAliasInfo {
     target: ast::TypeRef,
     span: TextSpan,
+}
+
+/// One discriminated union definition together with the declaration it came from.
+///
+/// A union is registered under whatever name this module reaches it by, which is not necessarily
+/// the name it was declared with. The origin is what says which declaration that name reached.
+#[derive(Clone)]
+struct UnionEntry {
+    def: UnionDef,
+    origin: Option<DeclaringOrigin>,
+}
+
+impl UnionEntry {
+    /// The `UnionType` shape of this definition, carrying its declaring origin.
+    fn shape(&self) -> UnionType {
+        UnionType::new(
+            self.def.name.clone(),
+            self.def
+                .cases
+                .iter()
+                .map(|case| case.name.clone())
+                .collect(),
+            self.def.base.clone(),
+            self.origin.clone(),
+        )
+    }
+
+    /// The case type for one of this union's cases, carrying the union's declaring origin.
+    fn case_type(&self, case: Name) -> Type {
+        Type::union_case_type(self.def.name.clone(), case, self.origin.clone())
+    }
 }
 
 struct ElementBindingSpec {
@@ -32,6 +85,20 @@ struct ElementPropertySpec {
     is_required: bool,
 }
 
+/// One resolved contextual name, and everything needed to rewrite it to a reference.
+#[derive(Clone, Debug)]
+pub struct ContextualResolution {
+    /// The union that the bare name resolved against, as the declaring module displays it.
+    pub type_name: Name,
+    /// The case it named.
+    pub member: Name,
+    /// Where that union is declared.
+    ///
+    /// This is what the rewrite carries in place of a name, so the case reaches code generation and
+    /// evaluation without the union being nameable at the use site.
+    pub origin: Option<DeclaringOrigin>,
+}
+
 #[derive(Clone)]
 struct PropertyPath {
     properties: Vec<PropertyPathBinding>,
@@ -42,6 +109,9 @@ struct PropertyPathBinding {
     key: Name,
     ty: Type,
     span: TextSpan,
+    /// The expression the type was inferred from, so a contextual name can be recorded once it
+    /// resolves against this binding's expected type.
+    value: ExprId,
 }
 
 fn handler_prop_name(emit_name: &str) -> String {
@@ -67,10 +137,37 @@ pub struct InferenceContext<'a> {
     function_return_placeholders: FxHashMap<Name, Type>,
     /// Registered type aliases
     type_aliases: FxHashMap<Name, TypeAliasInfo>,
-    /// Registered enum definitions
-    enum_defs: FxHashMap<Name, EnumType>,
     /// Registered discriminated union definitions.
-    union_defs: FxHashMap<Name, UnionDef>,
+    union_defs: FxHashMap<Name, UnionEntry>,
+    /// The declaration each visible record name reaches.
+    ///
+    /// A record type is a `Type::Named`, so without this the type carries only a spelling and an
+    /// unrelated same-named record in another module satisfies it.
+    record_origins: FxHashMap<Name, DeclaringOrigin>,
+    /// The declaration each visible component name reaches, for the same reason.
+    ///
+    /// Components live in the element namespace rather than the type namespace, but a property may
+    /// still be typed by one, so they are reached the same way.
+    component_origins: FxHashMap<Name, DeclaringOrigin>,
+    /// Union definitions reached through a foreign declaration's own signature.
+    ///
+    /// <para>Keyed by the declaration each entry is, not by the name it was reached under. Two
+    /// foreign unions a module receives under one spelling are two declarations, and a map keyed
+    /// by that spelling would keep only whichever arrived last — dropping the other exactly where
+    /// a post-resolution lookup needs it. Consulted only for a type that came from another module,
+    /// so it can neither shadow a local union nor make a foreign name spellable in source.</para>
+    foreign_union_defs: FxHashMap<DeclaringOrigin, UnionEntry>,
+    /// Foreign type aliases currently being followed, so a cycle among them terminates.
+    ///
+    /// <para>A foreign alias is resolved by resolving what it names, which may be another alias in
+    /// the same module. The declaring module reports its own cycle; this only stops the consumer
+    /// from following one forever.</para>
+    foreign_alias_stack: FxHashSet<DeclaringOrigin>,
+    /// Contextual names resolved at binding sites, as `expr → (declaring type, member)`.
+    ///
+    /// Consumed after analysis to rewrite each `Expr::ContextualName` into the qualified member
+    /// access it resolved to, so nothing downstream of type checking can observe the bare spelling.
+    resolved_contextual_names: FxHashMap<ExprId, ContextualResolution>,
 }
 
 impl<'a> InferenceContext<'a> {
@@ -89,8 +186,12 @@ impl<'a> InferenceContext<'a> {
             next_var_id: 0,
             function_return_placeholders: FxHashMap::default(),
             type_aliases: FxHashMap::default(),
-            enum_defs: FxHashMap::default(),
+            foreign_union_defs: FxHashMap::default(),
+            foreign_alias_stack: FxHashSet::default(),
             union_defs: FxHashMap::default(),
+            record_origins: FxHashMap::default(),
+            component_origins: FxHashMap::default(),
+            resolved_contextual_names: FxHashMap::default(),
         };
         ctx.register_type_definitions();
         ctx.register_function_signatures();
@@ -127,6 +228,25 @@ impl<'a> InferenceContext<'a> {
         let ty = match expr {
             // Literals have known types
             ast::Expr::Literal(lit) => self.infer_literal(lit),
+
+            // A bare name has no context-free type. It carries its own name forward as a pending
+            // marker and is resolved at the binding site, which is the only place that knows the
+            // expected type.
+            ast::Expr::ContextualName { name, .. } => Type::ContextualName(name.clone()),
+
+            // Already resolved, and typed by the union it names rather than by anything visible
+            // here. Re-inference reaches this only when a caller types an expression twice.
+            ast::Expr::ResolvedUnionCase {
+                union,
+                case,
+                module_identity,
+                definition_id,
+                ..
+            } => Type::union_case_type(
+                union.clone(),
+                case.clone(),
+                Some(DeclaringOrigin::new(module_identity, *definition_id)),
+            ),
 
             // Identifiers look up in environment
             ast::Expr::Ident(name) => {
@@ -170,11 +290,11 @@ impl<'a> InferenceContext<'a> {
             } => {
                 let cond_ty = self.infer_expr(*condition);
 
-                // Condition must be bool
-                if !cond_ty.is_compatible_with(&Type::bool()) && !cond_ty.is_error() {
+                // Condition must be boolean
+                if !cond_ty.is_compatible_with(&Type::boolean()) && !cond_ty.is_error() {
                     self.error(
                         "type-mismatch",
-                        format!("If condition must be bool, found {}", cond_ty),
+                        format!("If condition must be boolean, found {}", cond_ty),
                         *span,
                     );
                 }
@@ -215,11 +335,11 @@ impl<'a> InferenceContext<'a> {
                 let base_ty = self.infer_expr(*base);
                 let index_ty = self.infer_expr(*index);
 
-                // Index must be int
+                // Index must be an integer of any width
                 if !index_ty.is_compatible_with(&Type::int()) && !index_ty.is_error() {
                     self.error(
                         "type-mismatch",
-                        format!("Array index must be int, found {}", index_ty),
+                        format!("Array index must be an integer, found {}", index_ty),
                         *span,
                     );
                 }
@@ -244,14 +364,13 @@ impl<'a> InferenceContext<'a> {
                 if let Some(name) = self.flattened_expr_name(expr_id) {
                     if let Some(ty) = self.env.lookup(&name) {
                         ty.clone()
-                    } else if let Some((union_def, case)) =
-                        self.union_case_from_qualified_name(&name)
-                    {
-                        let union_name = union_def.name.clone();
+                    } else if let Some((entry, case)) = self.union_case_from_qualified_name(&name) {
+                        let union_name = entry.def.name.clone();
                         let case_name = case.name.clone();
                         let is_fieldless = case.fields.is_empty();
+                        let case_ty = entry.case_type(case_name.clone());
                         if is_fieldless {
-                            Type::union_case_type(union_name, case_name)
+                            case_ty
                         } else {
                             self.error(
                                 "payload-union-case-requires-constructor",
@@ -263,39 +382,14 @@ impl<'a> InferenceContext<'a> {
                             );
                             Type::Error
                         }
-                    } else if let Some(enum_info) =
-                        self.enum_info_from_name(&name, &mut FxHashSet::default())
-                    {
-                        Type::Enum(enum_info.clone())
-                    } else if let Some(enum_info) = self.enum_info_for_expr(*base) {
-                        if enum_info.members.iter().any(|m| m == member) {
-                            Type::Enum(enum_info.clone())
-                        } else {
-                            self.error(
-                                "undefined-enum-member",
-                                format!(
-                                    "Enum '{}' has no member named '{}'",
-                                    enum_info.name, member
-                                ),
-                                *span,
-                            );
-                            Type::Error
-                        }
+                    } else if let Some(union_info) = self.union_info_for_expr(*base) {
+                        self.union_case_by_member(&union_info, member, *span)
                     } else {
                         let base_ty = self.infer_expr(*base);
                         self.infer_member_access(&base_ty, member, *span)
                     }
-                } else if let Some(enum_info) = self.enum_info_for_expr(*base) {
-                    if enum_info.members.iter().any(|m| m == member) {
-                        Type::Enum(enum_info.clone())
-                    } else {
-                        self.error(
-                            "undefined-enum-member",
-                            format!("Enum '{}' has no member named '{}'", enum_info.name, member),
-                            *span,
-                        );
-                        Type::Error
-                    }
+                } else if let Some(union_info) = self.union_info_for_expr(*base) {
+                    self.union_case_by_member(&union_info, member, *span)
                 } else {
                     let base_ty = self.infer_expr(*base);
                     self.infer_member_access(&base_ty, member, *span)
@@ -427,13 +521,114 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
+    /// Infers a component's prop and state defaults and its body.
+    ///
+    /// <para>A component body is markup written against the same binding sites an element in a
+    /// function body has, so it is inferred the same way. Props and state are bound by name, because
+    /// the body reads them, and they are bound in a pushed scope so a prop cannot outlive the
+    /// component that declared it.</para>
+    ///
+    /// <para>The props bound are the component's *effective* ones, so a prop reached through the
+    /// base chain reads at its declared type the way a directly declared one does. Scope building
+    /// already resolves an inherited name, so leaving it unbound would not fail the read — it would
+    /// make it infer vacuously, which is the one outcome worse than either. Each inherited type is
+    /// resolved in the module that declared the field, since that is the module whose names it was
+    /// written against.</para>
+    ///
+    /// <para>Fields are bound in the order both runtimes materialize them — the effective props,
+    /// then the state — and each default is checked *before* its own field is bound. That is what
+    /// makes a default's environment here the same one it will have when it runs: it sees the
+    /// fields materialized before it and nothing else. A name from later in the declaration is
+    /// reported as undefined by scope checking, so nothing is silently accepted; it simply is not
+    /// this pass's diagnostic to give.</para>
+    ///
+    /// <para>A defaulted prop is checked against its own declared type, which is also what lets a
+    /// contextual literal be written as a default: the default's binding site is the declaration
+    /// itself.</para>
+    pub fn infer_component(&mut self, component: &nx_hir::Component) {
+        self.env.push_scope();
+
+        let effective_props = self
+            .effective_component_contract(&component.name)
+            .ok()
+            .flatten()
+            .map(|contract| contract.props);
+
+        match effective_props {
+            Some(props) => {
+                for field in &props {
+                    let field_ty =
+                        self.type_from_type_ref_in(Some(&field.module_identity), &field.ty);
+                    self.check_component_field_default(component, &field.name, &field_ty);
+                    self.env.bind(field.name.clone(), field_ty);
+                }
+            }
+            // Without a contract there is no base chain to read, and the component's own props are
+            // the whole of what its body and its defaults can see.
+            None => {
+                for field in &component.props {
+                    let field_ty = self.type_from_type_ref(&field.ty);
+                    self.check_component_field_default(component, &field.name, &field_ty);
+                    self.env.bind(field.name.clone(), field_ty);
+                }
+            }
+        }
+
+        for field in &component.state {
+            let field_ty = self.type_from_type_ref(&field.ty);
+            self.check_component_field_default(component, &field.name, &field_ty);
+            self.env.bind(field.name.clone(), field_ty);
+        }
+
+        // A body is absent exactly when the component is abstract or external, and there is then
+        // nothing below the declaration to infer.
+        if let Some(body) = component.body {
+            self.infer_expr(body);
+        }
+
+        self.env.pop_scope();
+    }
+
+    /// Checks the default this component declares for one of its fields, where it declares one.
+    ///
+    /// An inherited field's default belongs to the module that declared it and is checked there;
+    /// what is checked here is only what this declaration wrote.
+    fn check_component_field_default(
+        &mut self,
+        component: &nx_hir::Component,
+        name: &Name,
+        field_ty: &Type,
+    ) {
+        let declared = component
+            .props
+            .iter()
+            .chain(component.state.iter())
+            .find(|field| &field.name == name);
+        let Some(field) = declared else {
+            return;
+        };
+        let Some(default) = field.default else {
+            return;
+        };
+
+        let actual = self.infer_expr(default);
+        self.check_typed_binding_for(
+            Some(default),
+            &actual,
+            field_ty,
+            field.span,
+            "component-default-type-mismatch",
+            format!("Default value for '{}.{}'", component.name, field.name),
+        );
+    }
+
     /// Infers the type of a literal.
     fn infer_literal(&mut self, lit: &ast::Literal) -> Type {
         match lit {
             ast::Literal::String(_) => Type::string(),
             ast::Literal::Int(_) => Type::int(),
-            ast::Literal::Float(_) => Type::float(),
-            ast::Literal::Boolean(_) => Type::bool(),
+            ast::Literal::Float(_) => Type::float64(),
+            ast::Literal::Boolean(_) => Type::boolean(),
             ast::Literal::Null => Type::nullable(self.fresh_var()),
         }
     }
@@ -463,7 +658,7 @@ impl<'a> InferenceContext<'a> {
                 .patterns
                 .iter()
                 .map(|pattern| {
-                    let pattern_ty = self.infer_match_pattern(*pattern);
+                    let pattern_ty = self.infer_match_pattern(*pattern, &scrutinee_ty);
                     self.check_match_pattern(
                         &scrutinee_ty,
                         union_ty.as_ref(),
@@ -525,10 +720,35 @@ impl<'a> InferenceContext<'a> {
         self.common_result_type(&result_tys)
     }
 
-    fn infer_match_pattern(&mut self, pattern: ExprId) -> Type {
+    fn infer_match_pattern(&mut self, pattern: ExprId, scrutinee_ty: &Type) -> Type {
+        // A bare pattern resolves against the scrutinee's type in preference to any lexically
+        // visible binding of the same name. The preference is reported so a pattern that used to
+        // compare against a variable never changes meaning silently.
+        if let ast::Expr::ContextualName { name, span } = self.module.raw_module().expr(pattern) {
+            let name = name.clone();
+            let span = *span;
+            if self.env.lookup(&name).is_some() {
+                self.error(
+                    "contextual-name-displaces-binding",
+                    format!(
+                        "Pattern '{}' resolves as a case of '{}', not as the binding named '{}' \
+                         that is in scope here",
+                        name, scrutinee_ty, name
+                    ),
+                    span,
+                );
+            }
+            let context = format!("Pattern '{}'", name);
+            let resolved =
+                self.resolve_contextual_name_in(pattern, &name, scrutinee_ty, span, &context, true);
+            let ty = resolved.unwrap_or(Type::Error);
+            self.env.set_expr_type(pattern, ty.clone());
+            return ty;
+        }
+
         if let Some(name) = self.flattened_expr_name(pattern) {
-            if let Some((union_def, case)) = self.union_case_from_qualified_name(&name) {
-                let ty = Type::union_case_type(union_def.name.clone(), case.name.clone());
+            if let Some((entry, case)) = self.union_case_from_qualified_name(&name) {
+                let ty = entry.case_type(case.name.clone());
                 self.env.set_expr_type(pattern, ty.clone());
                 return ty;
             }
@@ -551,7 +771,7 @@ impl<'a> InferenceContext<'a> {
 
         if let Some(union_ty) = union_ty {
             match pattern_ty {
-                Type::UnionCase(case_ty) if case_ty.union == union_ty.name => {
+                Type::UnionCase(case_ty) if case_ty.is_same_union_as(union_ty) => {
                     covered_cases.insert(case_ty.case.clone());
                 }
                 Type::UnionCase(case_ty) => {
@@ -600,7 +820,7 @@ impl<'a> InferenceContext<'a> {
 
         let union_ty = union_ty?;
         match &pattern_tys[0] {
-            Type::UnionCase(case_ty) if case_ty.union == union_ty.name => Some(case_ty.clone()),
+            Type::UnionCase(case_ty) if case_ty.is_same_union_as(union_ty) => Some(case_ty.clone()),
             _ => None,
         }
     }
@@ -666,7 +886,7 @@ impl<'a> InferenceContext<'a> {
             Eq | Ne | Lt | Le | Gt | Ge => {
                 if self.type_satisfies_expected(lhs, rhs) || self.type_satisfies_expected(rhs, lhs)
                 {
-                    Type::bool()
+                    Type::boolean()
                 } else {
                     self.error(
                         "type-mismatch",
@@ -677,15 +897,15 @@ impl<'a> InferenceContext<'a> {
                 }
             }
 
-            // Logical: bool × bool → bool
+            // Logical: boolean × boolean → boolean
             And | Or => {
-                if lhs == &Type::bool() && rhs == &Type::bool() {
-                    Type::bool()
+                if lhs == &Type::boolean() && rhs == &Type::boolean() {
+                    Type::boolean()
                 } else {
                     self.error(
                         "type-mismatch",
                         format!(
-                            "Logical operator {:?} requires bool operands, found {} and {}",
+                            "Logical operator {:?} requires boolean operands, found {} and {}",
                             op, lhs, rhs
                         ),
                         span,
@@ -739,12 +959,12 @@ impl<'a> InferenceContext<'a> {
                 Type::Error
             }
             ast::UnOp::Not => {
-                if operand == &Type::bool() {
-                    Type::bool()
+                if operand == &Type::boolean() {
+                    Type::boolean()
                 } else {
                     self.error(
                         "type-mismatch",
-                        format!("Logical NOT requires bool, found {}", operand),
+                        format!("Logical NOT requires boolean, found {}", operand),
                         span,
                     );
                     Type::Error
@@ -805,13 +1025,20 @@ impl<'a> InferenceContext<'a> {
     }
 
     fn infer_member_access(&mut self, base_ty: &Type, member: &Name, span: TextSpan) -> Type {
-        match base_ty {
+        // A nullable base reads its field like a non-nullable one. NX has no narrowing construct to
+        // discharge the null with, and the catalogs that drive most markup declare every property
+        // optional, so requiring one would make a nullable record or union prop unreadable rather
+        // than safer. The field's own declared type is returned, not a nullable of it, for the same
+        // reason: a `string?` here would fail at every `string` site downstream.
+        match base_ty.strip_nullable() {
             Type::Union(union_ty) => {
-                if let Some(ty) = self.union_shared_field_type(&union_ty.name, member) {
+                if let Some(ty) =
+                    self.union_shared_field_type(&union_ty.name, union_ty.origin(), member)
+                {
                     return ty;
                 }
 
-                if self.union_has_case_field(&union_ty.name, member) {
+                if self.union_has_case_field(&union_ty.name, union_ty.origin(), member) {
                     self.error(
                         "union-case-field-requires-narrowing",
                         format!(
@@ -831,7 +1058,7 @@ impl<'a> InferenceContext<'a> {
                 }
             }
             Type::UnionCase(case_ty) => self
-                .union_case_field_type(&case_ty.union, &case_ty.case, member)
+                .union_case_field_type(&case_ty.union, case_ty.origin(), &case_ty.case, member)
                 .unwrap_or_else(|| {
                     self.error(
                         "unknown-union-case-field",
@@ -843,32 +1070,124 @@ impl<'a> InferenceContext<'a> {
                     );
                     Type::Error
                 }),
-            Type::Error => Type::Error,
-            _ => {
-                self.error(
-                    "not-implemented",
-                    format!("Member access not yet implemented: .{}", member),
-                    span,
-                );
-                Type::Error
+            // A record's field, reached through the effective shape so an inherited field is
+            // found as readily as a declared one. Each field's type is resolved in the module that
+            // declared *that field*, which is not always the module the record itself came from.
+            Type::Named(named) => {
+                let Ok(Some(shape)) = self.record_shape_of(named) else {
+                    return self.member_access_unsupported(member, span);
+                };
+                let Some(field) = shape.fields.iter().find(|field| field.name == *member) else {
+                    let known = shape
+                        .fields
+                        .iter()
+                        .map(|field| field.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    self.error(
+                        "unknown-record-field",
+                        format!(
+                            "Record '{}' has no field '{}'; it has: {}",
+                            named.name, member, known
+                        ),
+                        span,
+                    );
+                    return Type::Error;
+                };
+                let declaring_module = field.module_identity.clone();
+                let field_ty = field.ty.clone();
+                self.type_from_type_ref_in(Some(&declaring_module), &field_ty)
             }
+            Type::Error => Type::Error,
+            _ => self.member_access_unsupported(member, span),
         }
     }
 
-    fn union_shared_field_type(&mut self, union_name: &Name, member: &Name) -> Option<Type> {
-        let base_name = self.union_defs.get(union_name)?.base.clone()?;
-        let shape = effective_record_shape_for_name(self.module, &base_name)
-            .ok()
-            .flatten()?;
-        let field = shape.fields.iter().find(|field| field.name == *member)?;
-        Some(self.type_from_type_ref(&field.ty))
+    /// Reports a member access on a base that has no fields to reach.
+    fn member_access_unsupported(&mut self, member: &Name, span: TextSpan) -> Type {
+        self.error(
+            "not-implemented",
+            format!("Member access not yet implemented: .{}", member),
+            span,
+        );
+        Type::Error
     }
 
-    fn union_has_case_field(&self, union_name: &Name, member: &Name) -> bool {
+    /// Returns the union declaration a resolved union type denotes.
+    ///
+    /// <para>A resolved `Type::Union` or `Type::UnionCase` already names one declaration, so the
+    /// entry is selected by that declaration. Looking it up by spelling alone would let a
+    /// same-named union visible here answer for a foreign one — the capture that carrying an
+    /// origin exists to prevent. A foreign entry is addressed by its origin outright. The local
+    /// map is keyed by the name this module reaches a union under, so there the name is tried
+    /// first, because it is the common case and reaches the same entry, and a scan covers a
+    /// collision.</para>
+    fn union_entry_for(
+        &self,
+        union_name: &Name,
+        union_origin: Option<&DeclaringOrigin>,
+    ) -> Option<&UnionEntry> {
+        let denotes = |entry: &&UnionEntry| {
+            nx_hir::same_declaration(
+                entry.origin.as_ref(),
+                &entry.def.name,
+                union_origin,
+                union_name,
+            )
+        };
+
         self.union_defs
             .get(union_name)
-            .map(|union_def| {
-                union_def
+            .filter(denotes)
+            .or_else(|| {
+                union_origin
+                    .and_then(|origin| self.foreign_union_defs.get(origin))
+                    .filter(denotes)
+            })
+            .or_else(|| self.union_defs.values().find(denotes))
+    }
+
+    /// The type of a field every case of a union shares, through the union's abstract base.
+    ///
+    /// <para>The base is a name the union's own module wrote, so it is resolved there, and each
+    /// inherited field's type is resolved in the module that declared that field. Resolving either
+    /// here would let an unrelated local record supply the fields of a foreign union.</para>
+    fn union_shared_field_type(
+        &mut self,
+        union_name: &Name,
+        union_origin: Option<&DeclaringOrigin>,
+        member: &Name,
+    ) -> Option<Type> {
+        let entry = self.union_entry_for(union_name, union_origin)?;
+        let base_name = entry.def.base.clone()?;
+        let base_origin = entry
+            .origin
+            .as_ref()
+            .and_then(|origin| self.record_origin_in(origin.module_identity(), &base_name));
+
+        let shape = match base_origin.as_ref() {
+            Some(origin) => nx_hir::effective_record_shape_at(self.module, origin),
+            None => effective_record_shape_for_name(self.module, &base_name),
+        }
+        .ok()
+        .flatten()?;
+
+        let field = shape.fields.iter().find(|field| field.name == *member)?;
+        let field_module = field.module_identity.clone();
+        let field_ty = field.ty.clone();
+        Some(self.type_from_type_ref_in(Some(&field_module), &field_ty))
+    }
+
+    fn union_has_case_field(
+        &self,
+        union_name: &Name,
+        union_origin: Option<&DeclaringOrigin>,
+        member: &Name,
+    ) -> bool {
+        self.union_entry_for(union_name, union_origin)
+            .map(|entry| {
+                entry
+                    .def
                     .cases
                     .iter()
                     .any(|case| case.fields.iter().any(|field| field.name == *member))
@@ -876,23 +1195,34 @@ impl<'a> InferenceContext<'a> {
             .unwrap_or(false)
     }
 
+    /// The type of a field on one case of a union, shared fields included.
+    ///
+    /// <para>A case's own field types are written in the union's module, so they are resolved
+    /// there rather than here.</para>
     fn union_case_field_type(
         &mut self,
         union_name: &Name,
+        union_origin: Option<&DeclaringOrigin>,
         case_name: &Name,
         member: &Name,
     ) -> Option<Type> {
-        if let Some(ty) = self.union_shared_field_type(union_name, member) {
+        if let Some(ty) = self.union_shared_field_type(union_name, union_origin, member) {
             return Some(ty);
         }
 
-        let union_def = self.union_defs.get(union_name)?.clone();
+        let entry = self.union_entry_for(union_name, union_origin)?;
+        let declaring_module = entry
+            .origin
+            .as_ref()
+            .map(|origin| origin.module_identity().to_string());
+        let union_def = entry.def.clone();
         let case = union_def
             .cases
             .iter()
             .find(|case| case.name == *case_name)?;
         let field = case.fields.iter().find(|field| field.name == *member)?;
-        Some(self.type_from_type_ref(&field.ty))
+        let field_ty = field.ty.clone();
+        Some(self.type_from_type_ref_in(declaring_module.as_deref(), &field_ty))
     }
 
     fn infer_record_literal(
@@ -920,7 +1250,8 @@ impl<'a> InferenceContext<'a> {
                     Some(field_ty) => {
                         let actual = self.infer_expr(property.value);
                         let expected = self.type_from_type_ref(&field_ty);
-                        self.check_typed_binding(
+                        self.check_typed_binding_for(
+                            Some(property.value),
                             &actual,
                             &expected,
                             property.span,
@@ -938,9 +1269,9 @@ impl<'a> InferenceContext<'a> {
                 }
             }
 
-            Type::named(record_def.name)
+            self.nominal_named_type(record)
         } else {
-            Type::named(record.clone())
+            self.nominal_named_type(record)
         }
     }
 
@@ -967,12 +1298,18 @@ impl<'a> InferenceContext<'a> {
 
     fn infer_element_expression(&mut self, element: &nx_hir::Element, span: TextSpan) -> Type {
         if let Some(function) = self.resolve_function_definition(&element.tag) {
+            let declaring_module = function.module_identity().to_string();
             match function {
                 ResolvedPreparedItem::Raw {
                     item: Item::Function(function),
                     ..
                 } => {
-                    self.check_element_bindings_against_function(element, &function, span);
+                    self.check_element_bindings_against_function(
+                        element,
+                        &function,
+                        span,
+                        Some(declaring_module.as_str()),
+                    );
                     if let Some(func_ty) = self.env.lookup(&element.tag) {
                         if let Type::Function { ret, .. } = func_ty {
                             return (**ret).clone();
@@ -982,13 +1319,15 @@ impl<'a> InferenceContext<'a> {
                         .return_type
                         .as_ref()
                         .map(|ty| self.type_from_type_ref(ty))
-                        .unwrap_or_else(|| Type::named(element.tag.clone()));
+                        .unwrap_or_else(|| self.nominal_named_type(&element.tag));
                 }
                 ResolvedPreparedItem::Imported { item, .. } => {
                     if let Some((_name, _visibility, params, return_type, _span)) =
                         interface_function_signature(&item)
                     {
-                        let spec = self.build_element_binding_spec(
+                        let declaring_module = item.module_identity.clone();
+                        let spec = self.build_element_binding_spec_in(
+                            Some(declaring_module.as_str()),
                             params
                                 .iter()
                                 .map(|param| (&param.name, &param.ty, param.is_content, true)),
@@ -1002,6 +1341,7 @@ impl<'a> InferenceContext<'a> {
         }
 
         if let Some(component) = self.resolve_component_definition(&element.tag) {
+            let declaring_module = component.module_identity().to_string();
             match component {
                 ResolvedPreparedItem::Raw {
                     item: Item::Component(component),
@@ -1014,8 +1354,13 @@ impl<'a> InferenceContext<'a> {
                             span,
                         );
                     }
-                    self.check_element_bindings_against_component(element, &component, span);
-                    return Type::named(element.tag.clone());
+                    self.check_element_bindings_against_component(
+                        element,
+                        &component,
+                        span,
+                        Some(declaring_module.as_str()),
+                    );
+                    return self.nominal_named_type(&element.tag);
                 }
                 ResolvedPreparedItem::Imported { item, .. } => {
                     if let Some(component) = interface_component(&item) {
@@ -1029,15 +1374,22 @@ impl<'a> InferenceContext<'a> {
                                 span,
                             );
                         }
-                        self.check_element_bindings_against_component(element, &component, span);
-                        return Type::named(element.tag.clone());
+                        self.check_element_bindings_against_component(
+                            element,
+                            &component,
+                            span,
+                            Some(declaring_module.as_str()),
+                        );
+                        return self.nominal_named_type(&element.tag);
                     }
                 }
                 _ => {}
             }
         }
 
-        if let Some(record_def) = self.resolve_record_definition(&element.tag) {
+        if let Some((declaring_module, record_def)) =
+            self.resolve_record_definition_with_origin(&element.tag)
+        {
             if record_def.is_abstract {
                 self.error(
                     "abstract-record-instantiation",
@@ -1045,18 +1397,33 @@ impl<'a> InferenceContext<'a> {
                     span,
                 );
             }
-            self.check_element_bindings_against_record(element, &record_def, span);
-            return Type::named(element.tag.clone());
+            self.check_element_bindings_against_record(
+                element,
+                &record_def,
+                span,
+                Some(declaring_module.as_str()),
+            );
+            return self.nominal_named_type(&element.tag);
         }
 
-        if let Some((union_def, case)) = self.union_case_from_qualified_name(&element.tag) {
-            let union_def = union_def.clone();
+        if let Some((entry, case)) = self.union_case_from_qualified_name(&element.tag) {
+            let entry = entry.clone();
             let case = case.clone();
-            self.check_element_bindings_against_union_case(element, &union_def, &case, span);
-            return Type::union_case_type(union_def.name, case.name);
+            let declaring_module = entry
+                .origin
+                .as_ref()
+                .map(|origin| origin.module_identity().to_string());
+            self.check_element_bindings_against_union_case(
+                element,
+                &entry.def,
+                &case,
+                span,
+                declaring_module.as_deref(),
+            );
+            return entry.case_type(case.name);
         }
 
-        Type::named(element.tag.clone())
+        self.nominal_named_type(&element.tag)
     }
 
     fn check_element_bindings_against_function(
@@ -1064,8 +1431,10 @@ impl<'a> InferenceContext<'a> {
         element: &nx_hir::Element,
         function: &nx_hir::Function,
         span: TextSpan,
+        declaring_module: Option<&str>,
     ) {
-        let spec = self.build_element_binding_spec(
+        let spec = self.build_element_binding_spec_in(
+            declaring_module,
             function
                 .params
                 .iter()
@@ -1079,36 +1448,41 @@ impl<'a> InferenceContext<'a> {
         element: &nx_hir::Element,
         component: &nx_hir::Component,
         span: TextSpan,
+        declaring_module: Option<&str>,
     ) {
         let effective_contract = self
             .effective_component_contract(&component.name)
             .ok()
             .flatten();
         let mut spec = if let Some(contract) = effective_contract.as_ref() {
-            self.build_element_binding_spec(
+            self.build_element_binding_spec_in(
+                declaring_module,
                 contract
                     .props
                     .iter()
                     .map(|field| (&field.name, &field.ty, field.is_content, field.is_required)),
             )
         } else {
-            self.build_element_binding_spec(component.props.iter().map(|field| {
-                (
-                    &field.name,
-                    &field.ty,
-                    field.is_content,
-                    field.default.is_none() && !matches!(field.ty, ast::TypeRef::Nullable(_)),
-                )
-            }))
+            self.build_element_binding_spec_in(
+                declaring_module,
+                component.props.iter().map(|field| {
+                    (
+                        &field.name,
+                        &field.ty,
+                        field.is_content,
+                        field.default.is_none() && !matches!(field.ty, ast::TypeRef::Nullable(_)),
+                    )
+                }),
+            )
         };
-        let emits = effective_contract
-            .as_ref()
-            .map(|contract| contract.emits.as_slice())
-            .unwrap_or(component.emits.as_slice());
+        let emit_names: Vec<&Name> = match effective_contract.as_ref() {
+            Some(contract) => contract.emits.iter().map(|emit| &emit.emit.name).collect(),
+            None => component.emits.iter().map(|emit| &emit.name).collect(),
+        };
         spec.handler_properties.extend(
-            emits
-                .iter()
-                .map(|emit| Name::new(&handler_prop_name(emit.name.as_str()))),
+            emit_names
+                .into_iter()
+                .map(|name| Name::new(&handler_prop_name(name.as_str()))),
         );
         self.check_element_bindings(element, span, &spec);
     }
@@ -1118,24 +1492,29 @@ impl<'a> InferenceContext<'a> {
         element: &nx_hir::Element,
         record_def: &nx_hir::RecordDef,
         span: TextSpan,
+        declaring_module: Option<&str>,
     ) {
         let effective_shape = self.effective_record_shape(&record_def.name).ok().flatten();
         let spec = if let Some(shape) = effective_shape.as_ref() {
-            self.build_element_binding_spec(
+            self.build_element_binding_spec_in(
+                declaring_module,
                 shape
                     .fields
                     .iter()
                     .map(|field| (&field.name, &field.ty, field.is_content, field.is_required)),
             )
         } else {
-            self.build_element_binding_spec(record_def.properties.iter().map(|field| {
-                (
-                    &field.name,
-                    &field.ty,
-                    field.is_content,
-                    field.default.is_none() && !matches!(field.ty, ast::TypeRef::Nullable(_)),
-                )
-            }))
+            self.build_element_binding_spec_in(
+                declaring_module,
+                record_def.properties.iter().map(|field| {
+                    (
+                        &field.name,
+                        &field.ty,
+                        field.is_content,
+                        field.default.is_none() && !matches!(field.ty, ast::TypeRef::Nullable(_)),
+                    )
+                }),
+            )
         };
         self.check_record_element_bindings(element, span, &spec);
     }
@@ -1205,20 +1584,32 @@ impl<'a> InferenceContext<'a> {
         );
     }
 
+    /// Checks `<Union.case ... />` against the case's declared fields.
+    ///
+    /// <para>`declaring_module` is the module that wrote the union. Its base and its field types
+    /// are names that module wrote, so both are resolved there — an imported union's `n:Size` means
+    /// its module's `Size`, not a same-named record visible here.</para>
     fn check_element_bindings_against_union_case(
         &mut self,
         element: &nx_hir::Element,
         union_def: &UnionDef,
         case: &UnionCaseDef,
         span: TextSpan,
+        declaring_module: Option<&str>,
     ) {
         let mut content_property: Option<Name> = None;
         let mut properties = FxHashMap::<Name, ElementPropertySpec>::default();
 
         if let Some(base_name) = union_def.base.as_ref() {
-            if let Ok(Some(shape)) = effective_record_shape_for_name(self.module, base_name) {
+            let base_origin = declaring_module
+                .and_then(|module_identity| self.record_origin_in(module_identity, base_name));
+            let shape = match base_origin.as_ref() {
+                Some(origin) => nx_hir::effective_record_shape_at(self.module, origin),
+                None => effective_record_shape_for_name(self.module, base_name),
+            };
+            if let Ok(Some(shape)) = shape {
                 for field in shape.fields {
-                    let ty = self.type_from_type_ref(&field.ty);
+                    let ty = self.type_from_type_ref_in(Some(&field.module_identity), &field.ty);
                     if field.is_content {
                         content_property = Some(field.name.clone());
                     }
@@ -1234,7 +1625,7 @@ impl<'a> InferenceContext<'a> {
         }
 
         for field in &case.fields {
-            let ty = self.type_from_type_ref(&field.ty);
+            let ty = self.type_from_type_ref_in(declaring_module, &field.ty);
             let is_required =
                 field.default.is_none() && !matches!(field.ty, ast::TypeRef::Nullable(_));
             if field.is_content {
@@ -1309,7 +1700,127 @@ impl<'a> InferenceContext<'a> {
         );
     }
 
-    fn build_element_binding_spec<'b, I>(&mut self, bindings: I) -> ElementBindingSpec
+    /// Resolves a nominal name written by a declaration in `module_identity`.
+    ///
+    /// A declaration's type references are written in its own namespace: `fit: Fit` in a library
+    /// means that library's `Fit`. Resolving it in the consumer's scope is what leaves the type as
+    /// an unresolved `Type::Named`, and what lets an unrelated local `Fit` stand in for it.
+    fn nominal_type_in_module(&mut self, module_identity: &str, name: &Name) -> Option<Type> {
+        if module_identity == self.module.module_identity() {
+            return None;
+        }
+
+        // The declaring module's own namespace, which includes what it imported. A type it named
+        // but did not declare is reached here and nowhere else. Records and unions live in the
+        // type namespace, components in the element namespace, and a property may be typed by any
+        // of the three.
+        let peer_entry = self
+            .module
+            .peer_entry(PreparedNamespace::Type, module_identity, name)
+            .or_else(|| {
+                self.module
+                    .peer_entry(PreparedNamespace::Element, module_identity, name)
+            });
+        if let Some(entry) = peer_entry {
+            let origin = entry.clone();
+            if let Some(item) = self
+                .module
+                .peer_module(origin.module_identity())
+                .and_then(|module| module.item_by_definition(origin.definition_id()))
+                .cloned()
+            {
+                if let Some(ty) = self.foreign_nominal_type(name, &item, origin) {
+                    return Some(ty);
+                }
+            }
+        }
+
+        // A workspace peer keeps its whole lowered module, so its own definitions are readable
+        // directly, whether or not the consumer imported them. This is what a module analyzed
+        // outside a graph has, where no peer namespace was registered.
+        if let Some((definition_id, item)) = self
+            .module
+            .peer_module(module_identity)
+            .and_then(|peer| peer.find_item_with_definition(name.as_str()))
+            .map(|(definition_id, item)| (definition_id, item.clone()))
+        {
+            let origin = DeclaringOrigin::new(module_identity, definition_id);
+            if let Some(ty) = self.foreign_nominal_type(name, &item, origin) {
+                return Some(ty);
+            }
+        }
+
+        None
+    }
+
+    /// Builds the nominal type one foreign declaration denotes, under the name the reference used.
+    ///
+    /// The name is the contract's spelling and need not be the name the declaration was given —
+    /// the declaring module may have imported it under an alias — so it is display information
+    /// only. The origin decides what type this is.
+    fn foreign_nominal_type(
+        &mut self,
+        name: &Name,
+        item: &Item,
+        origin: DeclaringOrigin,
+    ) -> Option<Type> {
+        match item {
+            Item::Union(union_def) => {
+                let mut union_def = union_def.clone();
+                union_def.name = name.clone();
+                let entry = UnionEntry {
+                    def: union_def,
+                    origin: Some(origin.clone()),
+                };
+                let ty = Type::Union(entry.shape());
+                self.foreign_union_defs.insert(origin, entry);
+                Some(ty)
+            }
+            Item::Record(_) | Item::Component(_) => {
+                Some(Type::named_at(name.clone(), Some(origin)))
+            }
+            // An alias is a type reference the declaring module wrote, so what it names is
+            // resolved there too. Stopping at the alias would hand the reference back to the
+            // consumer's namespace, where an unrelated same-named declaration answers for it.
+            Item::TypeAlias(alias) => {
+                if !self.foreign_alias_stack.insert(origin.clone()) {
+                    return Some(Type::Error);
+                }
+                let target = alias.ty.clone();
+                let ty = self.type_from_type_ref_in(Some(origin.module_identity()), &target);
+                self.foreign_alias_stack.remove(&origin);
+                Some(ty)
+            }
+            _ => None,
+        }
+    }
+
+    /// Converts a type reference written by a declaration owned by `declaring_module`.
+    ///
+    /// The declaring module is tried first, so an unrelated local type that merely shares the
+    /// spelling cannot stand in for the one the declaration actually named.
+    fn type_from_type_ref_in(
+        &mut self,
+        declaring_module: Option<&str>,
+        type_ref: &ast::TypeRef,
+    ) -> Type {
+        let Some(module_identity) = declaring_module else {
+            return self.type_from_type_ref(type_ref);
+        };
+        let module_identity = module_identity.to_string();
+        resolve_type_ref_with(type_ref, &mut |name, seen| {
+            if let Some(ty) = self.nominal_type_in_module(&module_identity, name) {
+                return ty;
+            }
+            self.resolve_named_type(name, seen)
+        })
+    }
+
+    fn build_element_binding_spec_in<'b, I>(
+        &mut self,
+        declaring_module: Option<&str>,
+        bindings: I,
+    ) -> ElementBindingSpec
     where
         I: IntoIterator<Item = (&'b Name, &'b ast::TypeRef, bool, bool)>,
     {
@@ -1317,7 +1828,7 @@ impl<'a> InferenceContext<'a> {
         let mut properties = FxHashMap::default();
 
         for (name, ty_ref, is_content, is_required) in bindings {
-            let ty = self.type_from_type_ref(ty_ref);
+            let ty = self.type_from_type_ref_in(declaring_module, ty_ref);
             if is_content {
                 content_property = Some(name.clone());
             }
@@ -1424,6 +1935,7 @@ impl<'a> InferenceContext<'a> {
                     key: property.key.clone(),
                     ty: self.infer_expr(property.value),
                     span: property.span,
+                    value: property.value,
                 }],
             }],
             PropertyEntry::If {
@@ -1486,7 +1998,7 @@ impl<'a> InferenceContext<'a> {
                 .patterns
                 .iter()
                 .map(|pattern| {
-                    let pattern_ty = self.infer_match_pattern(*pattern);
+                    let pattern_ty = self.infer_match_pattern(*pattern, &scrutinee_ty);
                     self.check_match_pattern(
                         &scrutinee_ty,
                         union_ty.as_ref(),
@@ -1550,10 +2062,12 @@ impl<'a> InferenceContext<'a> {
 
     fn check_boolean_condition(&mut self, condition: ExprId, span: TextSpan, context: &str) {
         let condition_ty = self.infer_expr(condition);
-        if !condition_ty.is_error() && !self.type_satisfies_expected(&condition_ty, &Type::bool()) {
+        if !condition_ty.is_error()
+            && !self.type_satisfies_expected(&condition_ty, &Type::boolean())
+        {
             self.error(
                 "type-mismatch",
-                format!("{} expects bool, found {}", context, condition_ty),
+                format!("{} expects boolean, found {}", context, condition_ty),
                 span,
             );
         }
@@ -1598,7 +2112,8 @@ impl<'a> InferenceContext<'a> {
         for path in paths {
             for property in &path.properties {
                 if let Some(expected) = spec.properties.get(&property.key) {
-                    self.check_typed_binding(
+                    self.check_typed_binding_for(
+                        Some(property.value),
                         &property.ty,
                         &expected.ty,
                         property.span,
@@ -1684,6 +2199,221 @@ impl<'a> InferenceContext<'a> {
         current
     }
 
+    /// Strips the wrappers a contextual name is allowed to resolve through.
+    ///
+    /// Nullability first, then one list level, so `Fit?` and `Fit[]` both resolve against `Fit` and
+    /// the existing scalar-to-list coercion applies to the resolved value.
+    fn contextual_target<'ty>(expected: &'ty Type) -> &'ty Type {
+        let expected = match expected {
+            Type::Nullable(inner) => inner.as_ref(),
+            other => other,
+        };
+        match expected {
+            Type::Array(inner) => match inner.as_ref() {
+                Type::Nullable(inner) => inner.as_ref(),
+                other => other,
+            },
+            other => other,
+        }
+    }
+
+    /// Suggests the closest candidate to `name`, for a did-you-mean on an unresolved bare name.
+    fn closest_candidate(name: &Name, candidates: &[Name]) -> Option<Name> {
+        candidates
+            .iter()
+            .map(|candidate| {
+                (
+                    Self::edit_distance(name.as_str(), candidate.as_str()),
+                    candidate,
+                )
+            })
+            .filter(|(distance, candidate)| *distance <= 2.max(candidate.as_str().len() / 3))
+            .min_by_key(|(distance, _)| *distance)
+            .map(|(_, candidate)| candidate.clone())
+    }
+
+    fn edit_distance(a: &str, b: &str) -> usize {
+        let b_chars: Vec<char> = b.chars().collect();
+        let mut prev: Vec<usize> = (0..=b_chars.len()).collect();
+        let mut current = vec![0usize; b_chars.len() + 1];
+        for (i, a_char) in a.chars().enumerate() {
+            current[0] = i + 1;
+            for (j, b_char) in b_chars.iter().enumerate() {
+                let cost = usize::from(a_char != *b_char);
+                current[j + 1] = (prev[j] + cost).min(prev[j + 1] + 1).min(current[j] + 1);
+            }
+            std::mem::swap(&mut prev, &mut current);
+        }
+        prev[b_chars.len()]
+    }
+
+    fn candidate_list(candidates: &[Name]) -> String {
+        candidates
+            .iter()
+            .map(|c| c.as_str().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// Resolves a bare name against the expected type of its binding site.
+    ///
+    /// The single entry point for contextual literal resolution, shared by every binding site so
+    /// the rule cannot drift between them. Resolves only against the closed nominal set — the
+    /// constant cases of a union — and never falls back to treating the name as a string.
+    fn resolve_contextual_name(
+        &mut self,
+        expr: ExprId,
+        name: &Name,
+        expected: &Type,
+        span: TextSpan,
+        context: &str,
+    ) -> Option<Type> {
+        self.resolve_contextual_name_in(expr, name, expected, span, context, false)
+    }
+
+    /// Resolves a bare name, optionally admitting union cases that carry a payload.
+    ///
+    /// A pattern matches on the discriminator, so `failed` is a valid pattern for a payload case
+    /// even though it is not a valid way to construct one.
+    fn resolve_contextual_name_in(
+        &mut self,
+        expr: ExprId,
+        name: &Name,
+        expected: &Type,
+        span: TextSpan,
+        context: &str,
+        allow_payload_cases: bool,
+    ) -> Option<Type> {
+        let target = Self::contextual_target(expected).clone();
+
+        // One nominal kind. What `enum` declared is a union whose cases are all constant, so a
+        // bare name resolves against one closed set rather than two.
+        //
+        // Only a resolved `Type::Union` counts. A `Type::Named` reaching here is a name resolution
+        // did not find a declaration for, and looking it up again in *this* module's namespace is
+        // what let a same-named local declaration stand in for a foreign one.
+        let union_info = match &target {
+            Type::Union(info) => Some(info.clone()),
+            _ => None,
+        };
+        if let Some(info) = union_info {
+            let union_name = info.name.clone();
+
+            // The resolved type's own cases are authoritative. Looking the name up again here
+            // would find whatever declaration *this* module binds to that spelling, which need
+            // not be the same type — that is how a same-named local declaration used to stand in
+            // for a foreign one.
+            if !info.cases.iter().any(|case| case == name) {
+                let suggestion = Self::closest_candidate(name, &info.cases)
+                    .map(|s| format!("; did you mean `{}`?", s))
+                    .unwrap_or_default();
+                self.error(
+                    "unresolved-contextual-name",
+                    format!(
+                        "'{}' is not a case of union '{}'{} Cases: {}",
+                        name,
+                        self.display_union_name(&info),
+                        suggestion,
+                        Self::candidate_list(&info.cases)
+                    ),
+                    span,
+                );
+                return Some(Type::Error);
+            }
+
+            // The declaration reached under that name, and only when it really is that type.
+            // Whether this module can *name* the union does not matter: the case it resolved to
+            // carries the union's declaring origin from here on, so nothing below type checking
+            // has to find the declaration again by a spelling that is visible here.
+            let entry = self.union_entry_for(&union_name, info.origin()).cloned();
+
+            let Some(entry) = entry else {
+                // The expected type resolved to this union, so its definition was reached to build
+                // it. Not finding it again is an internal inconsistency, not an authoring error.
+                self.error(
+                    "unresolved-contextual-name",
+                    format!(
+                        "'{}' resolves to '{}.{}', but the definition of '{}' could not be reached",
+                        name, union_name, name, union_name
+                    ),
+                    span,
+                );
+                return Some(Type::Error);
+            };
+            let case = entry
+                .def
+                .cases
+                .iter()
+                .find(|case| case.name == *name)
+                .expect("the resolved type lists this case");
+            let case_name = case.name.clone();
+            // A fieldless case of a union with an abstract base still constructs — it takes the
+            // base's fields and their defaults — so nameability, not constant-ness, is what the
+            // bare form needs here.
+            let is_fieldless = case.fields.is_empty();
+
+            if is_fieldless || allow_payload_cases {
+                self.resolved_contextual_names.insert(
+                    expr,
+                    ContextualResolution {
+                        type_name: union_name.clone(),
+                        member: case_name.clone(),
+                        origin: entry.origin.clone(),
+                    },
+                );
+                let resolved = entry.case_type(case_name);
+                self.env.set_expr_type(expr, resolved.clone());
+                return Some(resolved);
+            }
+
+            self.error(
+                "payload-union-case-requires-constructor",
+                format!(
+                    "Union case '{}.{}' requires element-style payload construction; write \
+                     `<{}.{} ... />`",
+                    union_name, case_name, union_name, case_name
+                ),
+                span,
+            );
+            return Some(Type::Error);
+        }
+
+        // Not a nominal type: a bare name never falls back to being a string.
+        self.error(
+            "contextual-name-requires-nominal-type",
+            format!(
+                "{} expects {}, and a bare name resolves only against a union's cases; \
+                 for a string value write \"{}\"",
+                context, expected, name
+            ),
+            span,
+        );
+        Some(Type::Error)
+    }
+
+    /// Suggests the bare form when a string was written at a site that wants a nominal value.
+    ///
+    /// A quoted string never resolves to a union case, so the fix is the bare
+    /// spelling rather than a different string.
+    fn bare_form_hint(&self, actual: &Type, expected: &Type) -> String {
+        if !matches!(actual, Type::Primitive(crate::ty::Primitive::String)) {
+            return String::new();
+        }
+        let target = Self::contextual_target(expected);
+        let candidates: Vec<Name> = match target {
+            Type::Union(info) => info.cases.clone(),
+            _ => Vec::new(),
+        };
+        if candidates.is_empty() {
+            return String::new();
+        }
+        format!(
+            "; a quoted string is never a member of {}, so write the bare form, one of: {}",
+            expected,
+            Self::candidate_list(&candidates)
+        )
+    }
+
     fn check_typed_binding(
         &mut self,
         actual: &Type,
@@ -1692,22 +2422,68 @@ impl<'a> InferenceContext<'a> {
         code: &str,
         context: String,
     ) -> bool {
+        self.check_typed_binding_for(None, actual, expected, span, code, context)
+    }
+
+    /// Checks a binding, recording the resolution when `expr` is a contextual name.
+    ///
+    /// Sites that know which expression they are checking pass it, so a resolved contextual name
+    /// can be rewritten to its qualified form after analysis. Sites that do not pass `None`, and a
+    /// contextual name reaching one of those is reported rather than silently accepted.
+    fn check_typed_binding_for(
+        &mut self,
+        expr: Option<ExprId>,
+        actual: &Type,
+        expected: &Type,
+        span: TextSpan,
+        code: &str,
+        context: String,
+    ) -> bool {
+        // A pending contextual name resolves here, where the expected type is finally known.
+        if let Type::ContextualName(name) = actual {
+            let name = name.clone();
+            let Some(expr) = expr else {
+                self.error(
+                    "contextual-name-without-expected-type",
+                    format!(
+                        "{}: a bare name is only allowed where the declared type is known;                          write the qualified form in braces instead",
+                        context
+                    ),
+                    span,
+                );
+                return false;
+            };
+            let resolved = self.resolve_contextual_name(expr, &name, expected, span, &context);
+            return match resolved {
+                Some(Type::Error) => false,
+                Some(resolved) => {
+                    self.check_typed_binding_for(None, &resolved, expected, span, code, context)
+                }
+                None => false,
+            };
+        }
+
         if self.type_satisfies_expected_with_coercion(actual, expected) {
             true
         } else {
-            let actual_display = if Self::is_null_literal_type(actual) {
-                "null".to_string()
-            } else {
-                actual.to_string()
-            };
+            // Two same-named types are told apart by their declaring modules; one nominal type in
+            // a message is left unqualified.
+            let (expected_display, mut actual_display) = crate::display_type_pair(expected, actual);
+            if Self::is_null_literal_type(actual) {
+                actual_display = "null".to_string();
+            }
             let message = if matches!(actual, Type::Array(_)) && !matches!(expected, Type::Array(_))
             {
                 format!(
                     "{} expects {}, found list {}",
-                    context, expected, actual_display
+                    context, expected_display, actual_display
                 )
             } else {
-                format!("{} expects {}, found {}", context, expected, actual_display)
+                let hint = self.bare_form_hint(actual, expected);
+                format!(
+                    "{} expects {}, found {}{}",
+                    context, expected_display, actual_display, hint
+                )
             };
             self.error(code, message, span);
             false
@@ -1721,6 +2497,11 @@ impl<'a> InferenceContext<'a> {
             .with_label(Label::primary(self.file_name.clone(), span))
             .build();
         self.diagnostics.push(diag);
+    }
+
+    /// Returns the contextual names resolved during analysis, as `expr → (type, member)`.
+    pub fn resolved_contextual_names(&self) -> &FxHashMap<ExprId, ContextualResolution> {
+        &self.resolved_contextual_names
     }
 
     /// Returns the collected diagnostics.
@@ -1749,22 +2530,25 @@ impl<'a> InferenceContext<'a> {
             let Some(resolved) = self.module.resolve_prepared_item(&binding) else {
                 continue;
             };
+            // The declaration this name reaches, which is what makes the type it denotes the same
+            // type wherever else it is reached — under another name, or from another module.
+            let origin = DeclaringOrigin::new(resolved.module_identity(), resolved.definition_id());
 
             match resolved {
                 ResolvedPreparedItem::Raw {
-                    item: Item::TypeAlias(alias),
+                    item: Item::TypeAlias(ref alias),
                     ..
                 } => {
                     self.type_aliases.insert(
                         binding.visible_name.clone(),
                         TypeAliasInfo {
-                            target: alias.ty,
+                            target: alias.ty.clone(),
                             span: alias.span,
                         },
                     );
                 }
-                ResolvedPreparedItem::Imported { item, .. } => {
-                    if let Some(alias) = interface_type_alias(&item) {
+                ResolvedPreparedItem::Imported { ref item, .. } => {
+                    if let Some(alias) = interface_type_alias(item) {
                         self.type_aliases.insert(
                             binding.visible_name.clone(),
                             TypeAliasInfo {
@@ -1772,46 +2556,60 @@ impl<'a> InferenceContext<'a> {
                                 span: alias.span,
                             },
                         );
-                    } else if let Some(enum_def) = interface_enum(&item) {
-                        let members = enum_def
-                            .members
-                            .iter()
-                            .map(|member| member.name.clone())
-                            .collect();
-                        self.enum_defs.insert(
-                            binding.visible_name.clone(),
-                            EnumType::new(binding.visible_name.clone(), members),
-                        );
-                    } else if let Some(mut union_def) = interface_union(&item) {
+                    } else if let Some(mut union_def) = interface_union(item) {
                         union_def.name = binding.visible_name.clone();
-                        self.union_defs
-                            .insert(binding.visible_name.clone(), union_def);
+                        self.union_defs.insert(
+                            binding.visible_name.clone(),
+                            UnionEntry {
+                                def: union_def,
+                                origin: Some(origin),
+                            },
+                        );
+                    } else if matches!(item.item, InterfaceItemKind::Record { .. }) {
+                        self.record_origins
+                            .insert(binding.visible_name.clone(), origin);
                     }
                 }
                 ResolvedPreparedItem::Raw {
-                    item: Item::Enum(enum_def),
+                    item: Item::Record(_),
                     ..
                 } => {
-                    let members = enum_def
-                        .members
-                        .iter()
-                        .map(|member| member.name.clone())
-                        .collect();
-                    self.enum_defs.insert(
-                        binding.visible_name.clone(),
-                        EnumType::new(binding.visible_name.clone(), members),
-                    );
+                    self.record_origins
+                        .insert(binding.visible_name.clone(), origin);
                 }
                 ResolvedPreparedItem::Raw {
-                    item: Item::Union(mut union_def),
+                    item: Item::Union(ref union_def),
                     ..
                 } => {
+                    let mut union_def = union_def.clone();
                     union_def.name = binding.visible_name.clone();
-                    self.union_defs
-                        .insert(binding.visible_name.clone(), union_def);
+                    self.union_defs.insert(
+                        binding.visible_name.clone(),
+                        UnionEntry {
+                            def: union_def,
+                            origin: Some(origin),
+                        },
+                    );
                 }
                 _ => {}
             }
+        }
+
+        let element_bindings = self
+            .module
+            .bindings(PreparedNamespace::Element)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        for binding in element_bindings {
+            if binding.kind != PreparedItemKind::Component {
+                continue;
+            }
+            let Some(resolved) = self.module.resolve_prepared_item(&binding) else {
+                continue;
+            };
+            self.component_origins
+                .insert(binding.visible_name.clone(), resolved.declaring_origin());
         }
     }
 
@@ -1823,7 +2621,8 @@ impl<'a> InferenceContext<'a> {
                     if let Some(default_expr) = prop.default {
                         let expected = self.type_from_type_ref(&prop.ty);
                         let actual = self.infer_expr(default_expr);
-                        self.check_typed_binding(
+                        self.check_typed_binding_for(
+                            Some(default_expr),
                             &actual,
                             &expected,
                             prop.span,
@@ -1845,7 +2644,8 @@ impl<'a> InferenceContext<'a> {
                         if let Some(default_expr) = field.default {
                             let expected = self.type_from_type_ref(&field.ty);
                             let actual = self.infer_expr(default_expr);
-                            self.check_typed_binding(
+                            self.check_typed_binding_for(
+                                Some(default_expr),
                                 &actual,
                                 &expected,
                                 field.span,
@@ -1874,6 +2674,11 @@ impl<'a> InferenceContext<'a> {
                 continue;
             };
 
+            // A function's parameter and return annotations are names the *declaring* module
+            // wrote, so they are resolved there. Resolving them here would let an unrelated local
+            // declaration sharing the spelling become an imported function's signature.
+            let declaring_module = resolved.module_identity().to_string();
+
             match resolved {
                 ResolvedPreparedItem::Raw {
                     item: Item::Function(func),
@@ -1881,7 +2686,7 @@ impl<'a> InferenceContext<'a> {
                     ..
                 } => {
                     let return_type = if let Some(ty) = func.return_type.as_ref() {
-                        self.type_from_type_ref(ty)
+                        self.type_from_type_ref_in(Some(&declaring_module), ty)
                     } else {
                         let placeholder = self.fresh_var();
                         if matches!(origin, PreparedBindingOrigin::Local) {
@@ -1895,6 +2700,7 @@ impl<'a> InferenceContext<'a> {
                         binding.visible_name.clone(),
                         &func.params,
                         return_type,
+                        Some(&declaring_module),
                     );
                 }
                 ResolvedPreparedItem::Imported { item, .. } => {
@@ -1903,9 +2709,12 @@ impl<'a> InferenceContext<'a> {
                     {
                         let param_types = params
                             .iter()
-                            .map(|param| self.type_from_type_ref(&param.ty))
+                            .map(|param| {
+                                self.type_from_type_ref_in(Some(&declaring_module), &param.ty)
+                            })
                             .collect::<Vec<_>>();
-                        let return_type = self.type_from_type_ref(&return_type);
+                        let return_type =
+                            self.type_from_type_ref_in(Some(&declaring_module), &return_type);
                         self.env.bind(
                             binding.visible_name.clone(),
                             Type::function(param_types, return_type),
@@ -1929,6 +2738,11 @@ impl<'a> InferenceContext<'a> {
                 continue;
             };
 
+            // An imported value's annotation is a name the *declaring* module wrote, so it is
+            // resolved there. Resolving it here would let an unrelated local declaration sharing
+            // the spelling become the imported value's type.
+            let declaring_module = resolved.module_identity().to_string();
+
             match resolved {
                 ResolvedPreparedItem::Raw {
                     module_identity,
@@ -1939,7 +2753,8 @@ impl<'a> InferenceContext<'a> {
                         let actual = self.infer_expr(value.value);
                         if let Some(ty_ref) = value.ty.as_ref() {
                             let expected = self.type_from_type_ref(ty_ref);
-                            self.check_typed_binding(
+                            self.check_typed_binding_for(
+                                Some(value.value),
                                 &actual,
                                 &expected,
                                 value.span,
@@ -1954,7 +2769,9 @@ impl<'a> InferenceContext<'a> {
                         value
                             .ty
                             .as_ref()
-                            .map(|ty_ref| self.type_from_type_ref(ty_ref))
+                            .map(|ty_ref| {
+                                self.type_from_type_ref_in(Some(&declaring_module), ty_ref)
+                            })
                             .unwrap_or(Type::Error)
                     };
 
@@ -1962,7 +2779,8 @@ impl<'a> InferenceContext<'a> {
                 }
                 ResolvedPreparedItem::Imported { item, .. } => {
                     if let InterfaceItemKind::Value { ty, .. } = &item.item {
-                        let binding_ty = self.type_from_type_ref(ty);
+                        let ty = ty.clone();
+                        let binding_ty = self.type_from_type_ref_in(Some(&declaring_module), &ty);
                         self.env.bind(binding.visible_name.clone(), binding_ty);
                     }
                 }
@@ -2011,23 +2829,27 @@ impl<'a> InferenceContext<'a> {
         nx_hir::resolve_record_definition(self.module, name)
     }
 
-    fn enum_info_for_expr(&self, expr_id: ExprId) -> Option<&EnumType> {
+    fn resolve_record_definition_with_origin(
+        &self,
+        name: &Name,
+    ) -> Option<(String, nx_hir::RecordDef)> {
+        nx_hir::resolve_record_definition_with_module(self.module, name)
+    }
+
+    fn union_info_for_expr(&self, expr_id: ExprId) -> Option<UnionType> {
         match self.module.raw_module().expr(expr_id) {
             ast::Expr::Ident(name) => {
                 let mut seen = FxHashSet::default();
-                self.enum_info_from_name(name, &mut seen)
+                self.union_info_from_name(name, &mut seen)
             }
             _ => None,
         }
     }
 
-    fn enum_info_from_name<'info>(
-        &'info self,
-        name: &Name,
-        seen: &mut FxHashSet<Name>,
-    ) -> Option<&'info EnumType> {
-        if let Some(info) = self.enum_defs.get(name) {
-            return Some(info);
+    /// The union a type name denotes here, following type aliases.
+    fn union_info_from_name(&self, name: &Name, seen: &mut FxHashSet<Name>) -> Option<UnionType> {
+        if let Some(entry) = self.union_defs.get(name) {
+            return Some(entry.shape());
         }
 
         if let Some(alias) = self.type_aliases.get(name) {
@@ -2035,7 +2857,7 @@ impl<'a> InferenceContext<'a> {
                 return None;
             }
             if let ast::TypeRef::Name(target) = &alias.target {
-                let target_info = self.enum_info_from_name(target, seen);
+                let target_info = self.union_info_from_name(target, seen);
                 seen.remove(name);
                 return target_info;
             }
@@ -2045,28 +2867,73 @@ impl<'a> InferenceContext<'a> {
         None
     }
 
-    fn union_type_from_def(&self, union_def: &UnionDef) -> Type {
-        Type::union_type(
-            union_def.name.clone(),
-            union_def
-                .cases
-                .iter()
-                .map(|case| case.name.clone())
-                .collect(),
-            union_def.base.clone(),
-        )
+    /// Types a member access against a union whose type is already resolved.
+    fn union_case_by_member(
+        &mut self,
+        union_info: &UnionType,
+        member: &Name,
+        span: TextSpan,
+    ) -> Type {
+        if union_info.cases.iter().any(|case| case == member) {
+            return Type::union_case_type(
+                union_info.name.clone(),
+                member.clone(),
+                union_info.origin().cloned(),
+            );
+        }
+        self.report_unknown_union_case(union_info, member, span);
+        Type::Error
+    }
+
+    /// Reports a member access that names something the union does not declare.
+    fn report_unknown_union_case(&mut self, union_info: &UnionType, case: &Name, span: TextSpan) {
+        let suggestion = Self::closest_candidate(case, &union_info.cases)
+            .map(|s| format!("; did you mean `{}`?", s))
+            .unwrap_or_default();
+        self.error(
+            "undefined-union-case",
+            format!(
+                "Union '{}' has no case named '{}'{} Cases: {}",
+                self.display_union_name(union_info),
+                case,
+                suggestion,
+                Self::candidate_list(&union_info.cases)
+            ),
+            span,
+        );
+    }
+
+    /// Renders a union's name for a diagnostic, qualified when another union here shares it.
+    ///
+    /// <para>A message that says `union 'Fit'` while a different `Fit` is declared in the module
+    /// the author is reading describes the wrong declaration to them: theirs does have the case the
+    /// message says does not exist. Naming the declaring module is what tells the two apart, and it
+    /// is added only when there are two to tell apart.</para>
+    fn display_union_name(&self, union_info: &UnionType) -> String {
+        let Some(origin) = union_info.origin() else {
+            return union_info.name.to_string();
+        };
+        let shares_the_name_here = self
+            .union_defs
+            .get(&union_info.name)
+            .is_some_and(|entry| entry.origin.as_ref() != Some(origin));
+        if shares_the_name_here {
+            format!("{}:{}", origin.module_identity(), union_info.name)
+        } else {
+            union_info.name.to_string()
+        }
     }
 
     fn union_case_from_qualified_name<'info>(
         &'info self,
         name: &Name,
-    ) -> Option<(&'info UnionDef, &'info UnionCaseDef)> {
+    ) -> Option<(&'info UnionEntry, &'info UnionCaseDef)> {
         let (union_name, case_name) = name.as_str().rsplit_once('.')?;
         let union_name = Name::new(union_name);
         let case_name = Name::new(case_name);
-        let union_def = self.union_defs.get(&union_name)?;
-        let case = union_def.cases.iter().find(|case| case.name == case_name)?;
-        Some((union_def, case))
+        let entry = self.union_defs.get(&union_name)?;
+        let case = entry.def.cases.iter().find(|case| case.name == case_name)?;
+        Some((entry, case))
     }
 
     fn type_from_type_ref(&mut self, type_ref: &ast::TypeRef) -> Type {
@@ -2094,38 +2961,42 @@ impl<'a> InferenceContext<'a> {
             return ty;
         }
 
-        if let Some(enum_ty) = self.enum_defs.get(name) {
-            return Type::Enum(enum_ty.clone());
+        if let Some(entry) = self.union_defs.get(name) {
+            return Type::Union(entry.shape());
         }
 
-        if let Some(union_def) = self.union_defs.get(name) {
-            return Type::union_type(
-                union_def.name.clone(),
-                union_def
-                    .cases
-                    .iter()
-                    .map(|case| case.name.clone())
-                    .collect(),
-                union_def.base.clone(),
-            );
-        }
+        self.nominal_named_type(name)
+    }
 
-        Type::named(name.clone())
+    /// The nominal type one visible name denotes, carrying the declaration it reaches.
+    ///
+    /// A record or component name reaches a declaration; `Element`, `object`, and a name that
+    /// reaches nothing do not, and stay origin-less.
+    fn nominal_named_type(&self, name: &Name) -> Type {
+        let origin = self
+            .record_origins
+            .get(name)
+            .or_else(|| self.component_origins.get(name))
+            .cloned();
+        Type::named_at(name.clone(), origin)
     }
 
     fn bind_function_signature(&mut self, func: &nx_hir::Function, return_type: Type) {
-        self.bind_function_signature_from_parts(func.name.clone(), &func.params, return_type);
+        self.bind_function_signature_from_parts(func.name.clone(), &func.params, return_type, None);
     }
 
+    /// Binds a function's type from its parts, resolving each parameter annotation in
+    /// `declaring_module` — the module that wrote the signature, or `None` for this one.
     fn bind_function_signature_from_parts(
         &mut self,
         name: Name,
         params: &[nx_hir::Param],
         return_type: Type,
+        declaring_module: Option<&str>,
     ) {
         let param_types = params
             .iter()
-            .map(|param| self.type_from_type_ref(&param.ty))
+            .map(|param| self.type_from_type_ref_in(declaring_module, &param.ty))
             .collect::<Vec<_>>();
         self.env
             .bind(name, Type::function(param_types, return_type));
@@ -2145,48 +3016,75 @@ impl<'a> InferenceContext<'a> {
         effective_component_contract_for_name(self.module, name)
     }
 
-    fn record_type_satisfies_expected(&self, actual: &Name, expected: &Name) -> bool {
-        is_record_subtype(self.module, actual, expected).unwrap_or(false)
+    fn record_type_satisfies_expected(&self, actual: &NamedType, expected: &NamedType) -> bool {
+        is_record_subtype(
+            self.module,
+            &actual.name,
+            actual.origin(),
+            &expected.name,
+            expected.origin(),
+        )
+        .unwrap_or(false)
     }
 
-    fn component_type_satisfies_expected(&self, actual: &Name, expected: &Name) -> bool {
-        let actual_contract = match self.effective_component_contract(actual) {
-            Ok(Some(contract)) => contract,
-            _ => return false,
-        };
-
-        let expected_contract = match self.effective_component_contract(expected) {
-            Ok(Some(contract)) => contract,
-            _ => return false,
-        };
-
-        if actual_contract.component.name == expected_contract.component.name {
-            return true;
-        }
-
-        actual_contract
-            .ancestors
-            .iter()
-            .any(|ancestor| ancestor == &expected_contract.component.name)
+    fn component_type_satisfies_expected(&self, actual: &NamedType, expected: &NamedType) -> bool {
+        nx_hir::is_component_subtype(
+            self.module,
+            &actual.name,
+            actual.origin(),
+            &expected.name,
+            expected.origin(),
+        )
+        .unwrap_or(false)
     }
 
-    fn named_type_satisfies_expected(&self, actual: &Name, expected: &Name) -> bool {
+    fn named_type_satisfies_expected(&self, actual: &NamedType, expected: &NamedType) -> bool {
         self.record_type_satisfies_expected(actual, expected)
             || self.component_type_satisfies_expected(actual, expected)
     }
 
-    fn union_type_satisfies_record(&self, union_name: &Name, expected: &Name) -> bool {
-        let Some(union_def) = self.union_defs.get(union_name) else {
+    /// Decides whether a union satisfies an expected record type through its abstract base.
+    ///
+    /// The base is a name the *union's* module wrote, so it is resolved there. Resolving it here
+    /// would let an unrelated local record of that name make the union satisfy a foreign base.
+    fn union_type_satisfies_record(
+        &self,
+        union_name: &Name,
+        union_origin: Option<&DeclaringOrigin>,
+        expected: &NamedType,
+    ) -> bool {
+        let Some(entry) = self.union_entry_for(union_name, union_origin) else {
             return false;
         };
-        let Some(base) = union_def.base.as_ref() else {
+        let Some(base) = entry.def.base.as_ref() else {
             return false;
         };
 
-        base == expected
-            || is_record_subtype(self.module, base, expected)
-                .ok()
-                .unwrap_or(false)
+        let base_origin = entry
+            .origin
+            .as_ref()
+            .and_then(|origin| self.record_origin_in(origin.module_identity(), base));
+
+        is_record_subtype(
+            self.module,
+            base,
+            base_origin.as_ref(),
+            &expected.name,
+            expected.origin(),
+        )
+        .unwrap_or(false)
+    }
+
+    /// Returns the declaration a record name reaches in `module_identity`'s own namespace.
+    fn record_origin_in(&self, module_identity: &str, name: &Name) -> Option<DeclaringOrigin> {
+        if module_identity == self.module.module_identity() {
+            return self.record_origins.get(name).cloned();
+        }
+
+        self.module
+            .resolve_in_module(PreparedNamespace::Type, module_identity, name)
+            .filter(|resolved| resolved.kind() == PreparedItemKind::Record)
+            .map(|resolved| resolved.declaring_origin())
     }
 
     fn named_type_is_element_like(&self, name: &Name) -> bool {
@@ -2216,19 +3114,22 @@ impl<'a> InferenceContext<'a> {
         match (actual, expected) {
             (_, Type::Nullable(_)) if Self::is_null_literal_type(actual) => true,
             (Type::Named(actual_name), Type::Named(expected_name))
-                if expected_name.as_str() == "Element" =>
+                if expected_name.name.as_str() == "Element" =>
             {
-                self.named_type_is_element_like(actual_name)
+                self.named_type_is_element_like(&actual_name.name)
             }
             (Type::Named(actual_name), Type::Named(expected_name)) => {
                 self.named_type_satisfies_expected(actual_name, expected_name)
             }
-            (Type::UnionCase(case), Type::Union(union)) => case.union == union.name,
+            // The case must be a case of *that* union — the one declared at the same origin.
+            // Matching on the name alone, or on the name and the case list, would let a same-named
+            // local declaration's case stand in for a foreign union's.
+            (Type::UnionCase(case), Type::Union(union)) => case.is_case_of(union),
             (Type::UnionCase(case), Type::Named(expected_name)) => {
-                self.union_type_satisfies_record(&case.union, expected_name)
+                self.union_type_satisfies_record(&case.union, case.origin(), expected_name)
             }
             (Type::Union(union), Type::Named(expected_name)) => {
-                self.union_type_satisfies_record(&union.name, expected_name)
+                self.union_type_satisfies_record(&union.name, union.origin(), expected_name)
             }
             (_, Type::Nullable(expected_inner)) => {
                 self.type_satisfies_expected(actual, expected_inner)
@@ -2273,16 +3174,15 @@ impl<'a> InferenceContext<'a> {
                 Type::nullable(self.common_supertype(lhs_inner, rhs_inner))
             }
             (Type::UnionCase(lhs_case), Type::UnionCase(rhs_case))
-                if lhs_case.union == rhs_case.union =>
+                if lhs_case.shares_union_with(rhs_case) =>
             {
-                self.union_defs
-                    .get(&lhs_case.union)
-                    .map(|union_def| self.union_type_from_def(union_def))
+                self.union_entry_for(&lhs_case.union, lhs_case.origin())
+                    .map(|entry| Type::Union(entry.shape()))
                     .unwrap_or_else(|| generic_common_supertype(lhs, rhs))
             }
             (Type::UnionCase(case), Type::Union(union))
             | (Type::Union(union), Type::UnionCase(case))
-                if case.union == union.name =>
+                if case.is_same_union_as(union) =>
             {
                 Type::Union(union.clone())
             }
@@ -2294,36 +3194,75 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
-    fn common_record_supertype(&self, lhs: &Name, rhs: &Name) -> Option<Type> {
-        let lhs_shape = self.effective_record_shape(lhs).ok().flatten()?;
-        let rhs_shape = self.effective_record_shape(rhs).ok().flatten()?;
+    /// The nearest record both lineages share, compared by declaration rather than by spelling.
+    fn common_record_supertype(&self, lhs: &NamedType, rhs: &NamedType) -> Option<Type> {
+        let lhs_shape = self.record_shape_of(lhs).ok().flatten()?;
+        let rhs_shape = self.record_shape_of(rhs).ok().flatten()?;
 
-        let mut lhs_lineage = vec![lhs_shape.record.name];
-        lhs_lineage.extend(lhs_shape.ancestors);
-
-        let mut rhs_lineage = vec![rhs_shape.record.name];
-        rhs_lineage.extend(rhs_shape.ancestors);
+        let lhs_lineage = record_lineage(&lhs_shape);
+        let rhs_lineage = record_lineage(&rhs_shape);
 
         lhs_lineage
             .into_iter()
-            .find(|candidate| rhs_lineage.iter().any(|other| other == candidate))
-            .map(Type::named)
+            .find(|candidate| {
+                rhs_lineage.iter().any(|other| {
+                    nx_hir::same_declaration(
+                        candidate.origin.as_ref(),
+                        &candidate.name,
+                        other.origin.as_ref(),
+                        &other.name,
+                    )
+                })
+            })
+            .map(|ancestor| Type::named_at(ancestor.name, ancestor.origin))
     }
 
-    fn common_component_supertype(&self, lhs: &Name, rhs: &Name) -> Option<Type> {
-        let lhs_contract = self.effective_component_contract(lhs).ok().flatten()?;
-        let rhs_contract = self.effective_component_contract(rhs).ok().flatten()?;
+    /// Returns the shape of the record a nominal type denotes.
+    ///
+    /// A type that carries an origin is read from the declaration it names, so a foreign record
+    /// resolves whether or not the asking module can spell it.
+    fn record_shape_of(
+        &self,
+        named: &NamedType,
+    ) -> Result<Option<nx_hir::EffectiveRecordShape>, nx_hir::RecordResolutionError> {
+        match named.origin() {
+            Some(origin) => nx_hir::effective_record_shape_at(self.module, origin),
+            None => self.effective_record_shape(&named.name),
+        }
+    }
 
-        let mut lhs_lineage = vec![lhs_contract.component.name];
-        lhs_lineage.extend(lhs_contract.ancestors);
+    /// The nearest component both lineages share, compared by declaration rather than by spelling.
+    fn common_component_supertype(&self, lhs: &NamedType, rhs: &NamedType) -> Option<Type> {
+        let lhs_contract = self.component_contract_of(lhs).ok().flatten()?;
+        let rhs_contract = self.component_contract_of(rhs).ok().flatten()?;
 
-        let mut rhs_lineage = vec![rhs_contract.component.name];
-        rhs_lineage.extend(rhs_contract.ancestors);
+        let lhs_lineage = component_lineage(&lhs_contract);
+        let rhs_lineage = component_lineage(&rhs_contract);
 
         lhs_lineage
             .into_iter()
-            .find(|candidate| rhs_lineage.iter().any(|other| other == candidate))
-            .map(Type::named)
+            .find(|candidate| {
+                rhs_lineage.iter().any(|other| {
+                    nx_hir::same_declaration(
+                        candidate.origin.as_ref(),
+                        &candidate.name,
+                        other.origin.as_ref(),
+                        &other.name,
+                    )
+                })
+            })
+            .map(|ancestor| Type::named_at(ancestor.name, ancestor.origin))
+    }
+
+    /// Returns the contract of the component a nominal type denotes.
+    fn component_contract_of(
+        &self,
+        named: &NamedType,
+    ) -> Result<Option<nx_hir::EffectiveComponentContract>, nx_hir::ComponentResolutionError> {
+        match named.origin() {
+            Some(origin) => nx_hir::effective_component_contract_at(self.module, origin),
+            None => self.effective_component_contract(&named.name),
+        }
     }
 }
 
@@ -2347,8 +3286,8 @@ mod tests {
     use super::*;
     use nx_diagnostics::{TextSize, TextSpan};
     use nx_hir::{
-        ast::BinOp, ast::Expr, ast::Literal, ast::TypeRef, EnumDef, EnumMember, Function, Item,
-        LoweredModule, Name, Param, PreparedModule, SourceId, TypeAlias,
+        ast::BinOp, ast::Expr, ast::Literal, ast::TypeRef, Function, Item, LoweredModule, Name,
+        Param, PreparedModule, SourceId, TypeAlias,
     };
 
     fn prepared(module: &LoweredModule) -> PreparedModule {
@@ -2389,7 +3328,7 @@ mod tests {
         let mut ctx = InferenceContext::new(&prepared);
         let ty = ctx.infer_expr(expr_id);
 
-        assert_eq!(ty, Type::bool());
+        assert_eq!(ty, Type::boolean());
     }
 
     #[test]
@@ -2583,25 +3522,28 @@ mod tests {
     }
 
     #[test]
-    fn test_infer_enum_member_access() {
+    fn test_infer_union_case_access() {
         let mut module = LoweredModule::new(SourceId::new(0));
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
-        let enum_def = EnumDef {
+        let union_def = UnionDef {
             name: Name::new("Direction"),
             visibility: nx_hir::Visibility::Export,
-            members: vec![
-                EnumMember {
+            base: None,
+            cases: vec![
+                UnionCaseDef {
                     name: Name::new("north"),
+                    fields: Vec::new(),
                     span,
                 },
-                EnumMember {
+                UnionCaseDef {
                     name: Name::new("south"),
+                    fields: Vec::new(),
                     span,
                 },
             ],
             span,
         };
-        module.add_item(Item::Enum(enum_def));
+        module.add_item(Item::Union(union_def));
 
         let base = module.alloc_expr(Expr::Ident(Name::new("Direction")));
         let expr_id = module.alloc_expr(Expr::Member {
@@ -2615,7 +3557,10 @@ mod tests {
         let ty = ctx.infer_expr(expr_id);
 
         match ty {
-            Type::Enum(enum_ty) => assert_eq!(enum_ty.name.as_str(), "Direction"),
+            Type::UnionCase(case_ty) => {
+                assert_eq!(case_ty.union.as_str(), "Direction");
+                assert_eq!(case_ty.case.as_str(), "north");
+            }
             other => panic!("Expected enum type, got {:?}", other),
         }
         assert!(
@@ -2625,19 +3570,21 @@ mod tests {
     }
 
     #[test]
-    fn test_infer_enum_invalid_member() {
+    fn test_infer_invalid_union_case() {
         let mut module = LoweredModule::new(SourceId::new(0));
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
-        let enum_def = EnumDef {
+        let union_def = UnionDef {
             name: Name::new("Status"),
             visibility: nx_hir::Visibility::Export,
-            members: vec![EnumMember {
+            base: None,
+            cases: vec![UnionCaseDef {
                 name: Name::new("active"),
+                fields: Vec::new(),
                 span,
             }],
             span,
         };
-        module.add_item(Item::Enum(enum_def));
+        module.add_item(Item::Union(union_def));
 
         let base = module.alloc_expr(Expr::Ident(Name::new("Status")));
         let expr_id = module.alloc_expr(Expr::Member {
@@ -2655,19 +3602,21 @@ mod tests {
     }
 
     #[test]
-    fn test_enum_member_access_via_alias() {
+    fn test_union_case_access_via_alias() {
         let mut module = LoweredModule::new(SourceId::new(0));
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
-        let enum_def = EnumDef {
+        let union_def = UnionDef {
             name: Name::new("Status"),
             visibility: nx_hir::Visibility::Export,
-            members: vec![EnumMember {
+            base: None,
+            cases: vec![UnionCaseDef {
                 name: Name::new("active"),
+                fields: Vec::new(),
                 span,
             }],
             span,
         };
-        module.add_item(Item::Enum(enum_def));
+        module.add_item(Item::Union(union_def));
         let alias = TypeAlias {
             name: Name::new("State"),
             visibility: nx_hir::Visibility::Export,
@@ -2688,26 +3637,28 @@ mod tests {
         let ty = ctx.infer_expr(expr_id);
 
         match ty {
-            Type::Enum(enum_ty) => assert_eq!(enum_ty.name.as_str(), "Status"),
+            Type::UnionCase(case_ty) => assert_eq!(case_ty.union.as_str(), "Status"),
             other => panic!("Expected enum type, got {:?}", other),
         }
         assert!(ctx.diagnostics().is_empty());
     }
 
     #[test]
-    fn test_function_signature_uses_enum_type() {
+    fn test_function_signature_uses_union_type() {
         let mut module = LoweredModule::new(SourceId::new(0));
         let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
-        let enum_def = EnumDef {
+        let union_def = UnionDef {
             name: Name::new("Direction"),
             visibility: nx_hir::Visibility::Export,
-            members: vec![EnumMember {
+            base: None,
+            cases: vec![UnionCaseDef {
                 name: Name::new("north"),
+                fields: Vec::new(),
                 span,
             }],
             span,
         };
-        module.add_item(Item::Enum(enum_def));
+        module.add_item(Item::Union(union_def));
 
         let base = module.alloc_expr(Expr::Ident(Name::new("Direction")));
         let member = module.alloc_expr(Expr::Member {
@@ -2736,7 +3687,7 @@ mod tests {
         let func_ty = env.lookup(&Name::new("north")).expect("function type");
         match func_ty {
             Type::Function { ret, .. } => match ret.as_ref() {
-                Type::Enum(enum_ty) => assert_eq!(enum_ty.name.as_str(), "Direction"),
+                Type::UnionCase(case_ty) => assert_eq!(case_ty.union.as_str(), "Direction"),
                 other => panic!("Expected enum return type, got {:?}", other),
             },
             other => panic!("Expected function type, got {:?}", other),

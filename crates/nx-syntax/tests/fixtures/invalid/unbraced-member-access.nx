@@ -1,0 +1,4 @@
+type Opts = { fit:string }
+component <Img fit:string /> = { <img /> }
+let o:Opts = <Opts fit="cover" />
+<Img fit=o.fit />

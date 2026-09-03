@@ -1,0 +1,179 @@
+// NX UI MVP — Level 1 graphics catalog (library `graphics`, catalog `nx.graphics@0.1.0`)
+//
+// Part of docs/drawnui-proposal; see core/core.nx for what the three libraries are and how they
+// relate. Section numbers refer to ../../NX-Drawn-UI-MVP-Object-Model-Proposal.md.
+//
+// This catalog is an SVG-shaped, retained-mode scene tree, and it is the half of the model where
+// *the document decides position*: every node states its own coordinates, in logical units within
+// the nearest Drawing view box. It is not an imperative canvas API, though it maps readily onto
+// Canvas 2D or Skia.
+//
+// Containment (§4.5): nx.graphics primitives may appear only below a Drawing or Group; a Drawing
+// may appear anywhere an nx.ui child is accepted; nx.ui components may not appear below a Drawing
+// or Group, since the MVP has no foreignObject equivalent; and a Drawing may not nest inside
+// another Drawing or Group. Child order is paint order.
+
+import "../core"
+import { UiCommon } from "../ui"
+
+
+
+// ---------------------------------------------------------------------------
+// Catalog value types (§6)
+// ---------------------------------------------------------------------------
+
+export type FillRule = nonzero | evenodd
+export type TextAnchor = start | middle | end
+export type DominantBaseline = auto | middle | hanging
+
+// contain/cover/fill are SVG preserveAspectRatio meet/slice/none spelled in the CSS object-fit
+// vocabulary that nx.ui.Image and nx.graphics.Image already use, so a generating model learns one
+// fit vocabulary instead of two. SVG folds alignment into the same string (`xMidYMid meet`); NX
+// keeps `contentAlignment` separate so neither value has to be parsed.
+export type ViewBoxFit = contain | cover | fill
+
+export type ContentAlignment = {
+  x: Anchor = center
+  y: Anchor = center
+}
+
+
+// ---------------------------------------------------------------------------
+// Components (§6.1–§6.12)
+// ---------------------------------------------------------------------------
+
+// §6.1 — accepted by every node inside a Drawing.
+//
+// `opacity` is group opacity: the node and its descendants composite as one layer, then that layer
+// blends at this alpha. The two forms differ visibly wherever descendants overlap, and SVG, Skia,
+// and Canvas 2D all provide the group form.
+//
+// `clipPath` is SVG path-data geometry in the node's local coordinate system — the space
+// established *after* its own `transform` — clipping the node and all of its descendants, always
+// with the nonzero rule regardless of `fillRule`. Referenced clip trees, masks, and filter regions
+// are deferred.
+export abstract external component <GraphicsCommon
+  opacity: float64 = 1.0
+  transform: Transform[]?           // ordered local transforms
+  clipPath: string?
+  accessibility: Accessibility?
+/>
+
+// §6.1 — accepted by every filled or stroked geometry, in addition to GraphicsCommon. NX allows
+// only one base per component, so shape properties chain off graphics properties rather than
+// forming a second mixin; that works because everything taking shape properties takes graphics
+// properties too.
+//
+// NX gap: `fill` is nullable rather than defaulted because the default is per component and a
+// derived component cannot override an inherited default. The renderer resolves null as
+// `Paint.none` for Line and Polyline, and black for closed shapes and Path. The Polyline case is a
+// deliberate divergence from SVG, which fills an open polyline by default and surprises everyone.
+export abstract external component <ShapeCommon extends GraphicsCommon
+  fill: Paint?
+  stroke: Stroke?
+  fillRule: FillRule = nonzero
+  shadows: Shadow[]?
+/>
+
+// §6.2 — root drawing surface and the bridge into Level 2 UI, so it takes UiCommon rather than
+// GraphicsCommon. When width and height are `auto`, the intrinsic size is the view box's width and
+// height in logical pixels and the intrinsic aspect ratio is width / height; one specified
+// dimension resolves the other through that ratio. Content is always clipped to the surface box,
+// the inherited `background` paints the surface before its drawing children, and the inherited
+// `accessibility` describes the surface. The portable object exposes no acceleration, cache, pixel
+// density, or invalidation settings — those are renderer configuration.
+export external component <Drawing extends UiCommon
+  viewBox: ViewBox
+  fit: ViewBoxFit = contain
+  contentAlignment: ContentAlignment?   // only meaningful when `fit` preserves the aspect ratio
+  content children: Element[]?
+/>
+
+// §6.3 — a transform/clip/opacity scope with no geometry of its own; SVG `g`, or a Skia
+// save/restore scope.
+export external component <Group extends GraphicsCommon
+  content children: Element[]?
+/>
+
+// §6.4 — SVG `rect`.
+// NX gap: a default cannot reference a sibling property, so `ry` cannot default to `rx`.
+export external component <Rect extends ShapeCommon
+  x: float64 = 0.0
+  y: float64 = 0.0
+  width: float64                    // non-negative
+  height: float64                   // non-negative
+  rx: float64 = 0.0
+  ry: float64?                      // null means "same as rx"
+/>
+
+// §6.5 — SVG `circle`. Kept separate from Ellipse: more legible for models and for people.
+export external component <Circle extends ShapeCommon
+  cx: float64
+  cy: float64
+  r: float64                        // non-negative
+/>
+
+// §6.6 — SVG `ellipse`.
+export external component <Ellipse extends ShapeCommon
+  cx: float64
+  cy: float64
+  rx: float64                       // non-negative
+  ry: float64                       // non-negative
+/>
+
+// §6.7 — SVG `line`. The inherited `fill` has no effect.
+export external component <Line extends ShapeCommon
+  x1: float64
+  y1: float64
+  x2: float64
+  y2: float64
+/>
+
+// §6.8 — SVG `polyline`: two or more vertices, path left open.
+export external component <Polyline extends ShapeCommon
+  points: Point[]
+/>
+
+// §6.9 — SVG `polygon`: three or more vertices, closing segment implicit.
+export external component <Polygon extends ShapeCommon
+  points: Point[]
+/>
+
+// §6.10 — SVG path data (M/L/H/V/C/S/Q/T/A/Z, absolute or relative). This is already the format of
+// DrawnUI's SkiaShape.PathData, so it is the strongest direct compatibility point. Renderers must
+// impose command-count, numeric-range, and rendered-bounds limits.
+export external component <Path extends ShapeCommon
+  data: string
+/>
+
+// §6.11 — single-line or explicitly line-broken text positioned in drawing coordinates. It does no
+// UI box layout; measured, wrapping text is nx.ui.Text. Numeric `fontWeight` follows modern
+// CSS/OpenType and is more portable than bold flags. Rich spans, text-on-path, shaping controls,
+// and automatic fit are deferred.
+export external component <Text extends GraphicsCommon
+  x: float64                        // text anchor x
+  y: float64                        // baseline y
+  fontFamily: string?               // null means the host default
+  fontSize: float64 = 16.0
+  fontWeight: float64 = 400.0       // 1..1000
+  fontStyle: FontStyle = normal
+  textAnchor: TextAnchor = start
+  dominantBaseline: DominantBaseline = auto
+  letterSpacing: float64 = 0.0
+  fill: Paint?                      // null resolves to black
+  stroke: Stroke?
+  shadows: Shadow[]?
+  content text: string              // `\n` requests explicit line breaks
+/>
+
+// §6.12 — image drawn into a destination rectangle, per SVG `image`. `alt` is required so that no
+// image can be generated without an accessibility decision; use "" for a purely decorative one.
+export external component <Image extends GraphicsCommon
+  x: float64 = 0.0
+  y: float64 = 0.0
+  width: float64                    // non-negative destination width
+  height: float64                   // non-negative destination height
+  source: ImageSource
+  alt: string
+  fit: ObjectFit = contain
+/>
