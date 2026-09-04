@@ -8,10 +8,10 @@
 // event handlers and animation; the logo below is drawn at rest where the original animates it.
 
 component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = {
-  <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8.0 />
+  <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 />
     BackgroundColor="#2B3035" HorizontalOptions=Fill>
-    <SkiaStack Padding=<Thickness Left=16.0 Top=12.0 Right=16.0 Bottom=12.0 /> Spacing=10.0>
-      <SkiaLabel Text={Title} FontSize=12.0 TextColor="#6EA8FE" FontAttributes=Bold
+    <SkiaStack Padding=<Thickness Left=16 Top=12 Right=16 Bottom=12 /> Spacing=10>
+      <SkiaLabel Text={Title} FontSize=12 TextColor="#6EA8FE" FontAttributes=Bold
         TextTransform=Uppercase FontFamilyFallback="FontSymbols,FontSymbols2" />
       {Children}
     </SkiaStack>
@@ -31,67 +31,67 @@ component <Tile
   AnchorX: float64?
   AnchorY: float64?
 /> = {
-  <SkiaStack Padding=<Thickness Top=12.0 Bottom=12.0 /> Spacing=6.0 WidthRequest=120.0>
-    <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=10.0 />
-      BackgroundColor="#0D6EFD" WidthRequest=96.0 HeightRequest=56.0
+  <SkiaStack Padding=<Thickness Top=12 Bottom=12 /> Spacing=6 WidthRequest=120>
+    <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=10 />
+      BackgroundColor="#0D6EFD" WidthRequest=96 HeightRequest=56
       HorizontalOptions=Center
       Rotation={Rotation} ScaleX={ScaleX} ScaleY={ScaleY} SkewX={SkewX}
       TranslationY={TranslationY} Opacity={Opacity} AnchorX={AnchorX} AnchorY={AnchorY}>
-      <SkiaLabel Text="DrawnUI" FontSize=14.0 FontFamily="FontTextBold" TextColor="#FFFFFF"
+      <SkiaLabel Text="DrawnUI" FontSize=14 FontFamily="FontTextBold" TextColor="#FFFFFF"
         HorizontalOptions=Center VerticalOptions=Center />
     </SkiaShape>
-    <SkiaLabel Text={Text} FontSize=12.0 TextColor="#ADB5BD"
+    <SkiaLabel Text={Text} FontSize=12 TextColor="#ADB5BD"
       HorizontalOptions=Center HorizontalTextAlignment=Center />
   </SkiaStack>
 }
 
 <SkiaScroll Orientation=Vertical>
-  <SkiaStack Spacing=16.0 Padding=<Thickness Left=16.0 Top=16.0 Right=16.0 Bottom=16.0 />
-    HorizontalOptions=Center MaximumWidthRequest=720.0>
-    <SkiaLabel Text="Transforms" FontSize=24.0 TextColor="#FFFFFF" HorizontalOptions=Center />
-    <SkiaLabel FontSize=13.0 TextColor="#D3D3D3" HorizontalOptions=Fill HorizontalTextAlignment=Center
+  <SkiaStack Spacing=16 Padding=<Thickness Left=16 Top=16 Right=16 Bottom=16 />
+    HorizontalOptions=Center MaximumWidthRequest=720>
+    <SkiaLabel Text="Transforms" FontSize=24 TextColor="#FFFFFF" HorizontalOptions=Center />
+    <SkiaLabel FontSize=13 TextColor="#D3D3D3" HorizontalOptions=Fill HorizontalTextAlignment=Center
       Text="Applied at render around the arranged box, so layout is untouched and caches stay valid. Same names as MAUI: TranslationX/Y, Rotation, ScaleX/Y, SkewX/Y, AnchorX/Y, Opacity." />
 
     <Card Title="One property each">
-      <SkiaWrap Spacing=4.0 HorizontalOptions=Center>
+      <SkiaWrap Spacing=4 HorizontalOptions=Center>
         <Tile Text="none" />
-        <Tile Text="Rotation={15}" Rotation=15.0 />
+        <Tile Text="Rotation={15}" Rotation=15 />
         <Tile Text="Scale={1.3}" ScaleX=1.3 ScaleY=1.3 />
-        <Tile Text="ScaleX={-1}" ScaleX=-1.0 />
-        <Tile Text="SkewX={20}" SkewX=20.0 />
-        <Tile Text="TranslationY={10}" TranslationY=10.0 />
+        <Tile Text="ScaleX={-1}" ScaleX=-1 />
+        <Tile Text="SkewX={20}" SkewX=20 />
+        <Tile Text="TranslationY={10}" TranslationY=10 />
         <Tile Text="Opacity={0.35}" Opacity=0.35 />
-        <Tile Text="Rotation={15} AnchorX/Y={0}" Rotation=15.0 AnchorX=0.0 AnchorY=0.0 />
+        <Tile Text="Rotation={15} AnchorX/Y={0}" Rotation=15 AnchorX=0 AnchorY=0 />
       </SkiaWrap>
     </Card>
 
     <Card Title="Gestures map through transforms — the original counts taps here">
-      <SkiaStack Spacing=8.0 HeightRequest=120.0 HorizontalOptions=Fill>
+      <SkiaStack Spacing=8 HeightRequest=120 HorizontalOptions=Fill>
         // The original's label reads "Tapped N×" and increments on tap: event handlers and
         // component state. The button is drawn transformed, and its ripple still lands under the
         // pointer, because the ripple is DrawnUI's own.
         <SkiaButton Text="Tapped 0×" BackgroundColor="#D63384" HorizontalOptions=Center
-          VerticalOptions=Center Rotation=-20.0 ScaleX=1.4 ScaleY=1.4 ApplyEffect=Ripple />
+          VerticalOptions=Center Rotation=-20 ScaleX=1.4 ScaleY=1.4 ApplyEffect=Ripple />
       </SkiaStack>
-      <SkiaLabel FontSize=12.0 TextColor="#ADB5BD" HorizontalOptions=Fill
+      <SkiaLabel FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Fill
         Text="The hit rect is the drawn one (inverse RenderTransformMatrix), not the layout box; the ripple lands under the finger." />
     </Card>
 
     <Card Title="Animations — the original fades, scales, translates and spins this logo">
-      <SkiaStack Spacing=0.0 HeightRequest=140.0 HorizontalOptions=Fill>
+      <SkiaStack Spacing=0 HeightRequest=140 HorizontalOptions=Fill>
         // Each button below drives a *ToAsync animation on this logo. NX has no animation and no
         // event handlers, so the logo rests at its starting position and the buttons are inert.
-        <SkiaSvg Source="images/drawnui.svg" WidthRequest=100.0 LockRatio=1.0
+        <SkiaSvg Source="images/drawnui.svg" WidthRequest=100 LockRatio=1
           HorizontalOptions=Center VerticalOptions=Center />
       </SkiaStack>
-      <SkiaWrap Spacing=6.0>
+      <SkiaWrap Spacing=6>
         <SkiaButton Text="Fade" BackgroundColor="#0D6EFD" />
         <SkiaButton Text="Scale" BackgroundColor="#0D6EFD" />
         <SkiaButton Text="Translate" BackgroundColor="#0D6EFD" />
         <SkiaButton Text="Rotate" BackgroundColor="#0D6EFD" />
         <SkiaButton Text="Spin" BackgroundColor="#20C997" />
       </SkiaWrap>
-      <SkiaLabel FontSize=12.0 TextColor="#ADB5BD" HorizontalOptions=Fill
+      <SkiaLabel FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Fill
         Text="Each *ToAsync cancels its previous run of the same kind; pass an AbortSignal to cancel from outside." />
     </Card>
   </SkiaStack>

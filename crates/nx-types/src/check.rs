@@ -197,6 +197,7 @@ pub fn analyze_prepared_module(
     // Apply contextual name resolutions before the module is snapshotted, so every consumer after
     // type checking sees the qualified member access rather than the bare source spelling.
     let contextual_resolutions = ctx.resolved_contextual_names().clone();
+    let converted_int_literals: Vec<_> = ctx.converted_int_literals().keys().copied().collect();
     let (type_env, type_diagnostics) = ctx.finish();
     diagnostics.extend(normalize_diagnostics_file_name(type_diagnostics, file_name));
     // A resolution reached a union declaration, so it has an origin. One without cannot be
@@ -220,6 +221,12 @@ pub fn analyze_prepared_module(
                 .build(),
         );
     }
+
+    // An integer literal that took a float type becomes one, for the same reason and at the same
+    // point: below here, `24` at a float property is the float literal `24.0` and nothing else.
+    // The two passes are independent — a contextual name is not an integer literal — so their
+    // order does not matter.
+    nx_hir::apply_int_literal_conversions(&mut prepared_module, &converted_int_literals);
 
     nx_hir::apply_contextual_name_resolutions(
         &mut prepared_module,
@@ -500,6 +507,216 @@ impl TypeCheckSession {
 mod tests {
     use super::*;
     use nx_hir::{Item, Name};
+
+    /// The error codes and messages `source` produces, ignoring warnings.
+    fn errors(source: &str) -> Vec<String> {
+        check_str(source, "main.nx")
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity() == nx_diagnostics::Severity::Error)
+            .map(|diagnostic| {
+                format!(
+                    "{}: {}",
+                    diagnostic.code().unwrap_or(""),
+                    diagnostic.message()
+                )
+            })
+            .collect()
+    }
+
+    fn assert_accepted(label: &str, source: &str) {
+        assert!(
+            errors(source).is_empty(),
+            "{} should type check, but reported {:?}",
+            label,
+            errors(source)
+        );
+    }
+
+    fn assert_rejected(label: &str, source: &str) -> String {
+        let reported = errors(source);
+        assert!(
+            !reported.is_empty(),
+            "{} should have been rejected, but type checked",
+            label
+        );
+        reported.join("; ")
+    }
+
+    #[test]
+    fn test_int_literal_binds_at_every_float_width() {
+        assert_accepted(
+            "an integer literal at float64",
+            "external component <B v:float64 />\nlet root() = { <B v=1 /> }",
+        );
+        assert_accepted(
+            "an integer literal at float32",
+            "external component <B v:float32 />\nlet root() = { <B v=1 /> }",
+        );
+        assert_accepted(
+            "a negative integer literal, which lowering folds into the literal",
+            "external component <B v:float64 />\nlet root() = { <B v=-1 /> }",
+        );
+        assert_accepted(
+            "an integer literal at a nullable float",
+            "external component <B v:float64? />\nlet root() = { <B v=0 /> }",
+        );
+    }
+
+    #[test]
+    fn test_int_literal_binds_at_every_site_that_declares_a_float() {
+        assert_accepted(
+            "a component property default",
+            "external component <C x: float64 = 0 />\nlet root() = { <C /> }",
+        );
+        assert_accepted(
+            "a record field default",
+            "type Opts = { x: float64 = 1 }\nlet root() = { <Opts /> }",
+        );
+        assert_accepted("an annotated let", "let x: float64 = 5");
+        assert_accepted(
+            "a constructed record field",
+            "type T = { x:float64 }\nlet root() = { <T x=3 /> }",
+        );
+        assert_accepted(
+            "a float-typed argument",
+            "let f(x:float64) = { x }\nlet root() = { f(1) }",
+        );
+        assert_accepted("a declared return type", "let g():float64 = 1");
+        assert_accepted(
+            "the elements of a float list",
+            "external component <B v:float64[] />\nlet root() = { <B v={1 2 3} /> }",
+        );
+        assert_accepted(
+            "a scalar coerced to a float list",
+            "external component <B v:float64[] />\nlet root() = { <B v=1 /> }",
+        );
+    }
+
+    #[test]
+    fn test_int_literal_binds_as_element_body_content() {
+        assert_accepted(
+            "a single content expression at a float content property",
+            "let <collect content item: float64 />: float64 = { item }\n\
+             let root() = { <collect>{1}</collect> }",
+        );
+        assert_accepted(
+            "several content expressions at a float list content property",
+            "let <collect content items: float64[] />: float64[] = { items }\n\
+             let root() = { <collect>{1} {2} {3}</collect> }",
+        );
+        assert_accepted(
+            "a record's float content field",
+            "type Wrap = { content value: float64 }\n\
+             let root() = { <Wrap>{7}</Wrap> }",
+        );
+
+        let inexact = assert_rejected(
+            "a content literal past the float64 exact-integer range",
+            "let <collect content item: float64 />: float64 = { item }\n\
+             let root() = { <collect>{9007199254740993}</collect> }",
+        );
+        assert!(
+            inexact.contains("float-literal-not-exact") && inexact.contains("float64"),
+            "the content diagnostic should name the literal and the type: {}",
+            inexact
+        );
+    }
+
+    #[test]
+    fn test_an_expected_float_type_binds_the_same_for_both_literal_spellings() {
+        // What a reader of the declaration observes is the type of the *binding*, and it is the
+        // declared one at every width. The type recorded for the literal expression is a separate
+        // question, answered by making both spellings agree rather than by the declared type.
+        for (source, declared) in [
+            ("let x: float32 = 42", "float32"),
+            ("let x: float32 = 42.0", "float32"),
+            ("let x: float64 = 42", "float64"),
+            ("let x: float64 = 42.0", "float64"),
+        ] {
+            let checked = check_str(source, "main.nx");
+            assert_eq!(
+                checked
+                    .type_env
+                    .lookup(&Name::new("x"))
+                    .map(|ty| ty.to_string()),
+                Some(declared.to_string()),
+                "`{}` should bind x at {}",
+                source,
+                declared
+            );
+        }
+    }
+
+    #[test]
+    fn test_int_literal_that_is_not_exactly_representable_is_rejected() {
+        let float64 = assert_rejected(
+            "a literal past the float64 exact-integer range",
+            "external component <B v:float64 />\nlet root() = { <B v=9007199254740993 /> }",
+        );
+        assert!(
+            float64.contains("float-literal-not-exact")
+                && float64.contains("9007199254740993")
+                && float64.contains("float64"),
+            "the diagnostic should name the literal and the type: {}",
+            float64
+        );
+
+        let float32 = assert_rejected(
+            "a literal past the float32 exact-integer range",
+            "external component <B v:float32 />\nlet root() = { <B v=16777217 /> }",
+        );
+        assert!(
+            float32.contains("float-literal-not-exact") && float32.contains("float32"),
+            "the diagnostic should name float32: {}",
+            float32
+        );
+
+        assert_accepted(
+            "the largest exactly representable float32 integer",
+            "external component <B v:float32 />\nlet root() = { <B v=16777216 /> }",
+        );
+    }
+
+    #[test]
+    fn test_contextual_typing_does_not_reach_beyond_integer_literals() {
+        assert_rejected(
+            "an int-typed parameter at a float site",
+            "external component <B v:float64 />\ncomponent <A n:int /> = { <B v={n} /> }",
+        );
+        assert_rejected(
+            "a float literal at an int site",
+            "external component <B v:int />\nlet root() = { <B v=1.5 /> }",
+        );
+        assert_rejected(
+            "a whole-valued float literal at an int site",
+            "external component <B v:int />\nlet root() = { <B v=1.0 /> }",
+        );
+    }
+
+    #[test]
+    fn test_a_site_with_no_float_expectation_leaves_the_literal_an_integer() {
+        // `object` accepts the literal already, so the conversion must never be reached there:
+        // converting would change the value a host receives on an expectation nobody declared.
+        let object_site = check_str(
+            "external component <B v:object />\nlet root() = { <B v=1 /> }",
+            "main.nx",
+        );
+        assert!(object_site
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.severity() != nx_diagnostics::Severity::Error));
+
+        let unannotated = check_str("let n = 42", "main.nx");
+        assert_eq!(
+            unannotated
+                .type_env
+                .lookup(&Name::new("n"))
+                .map(|ty| ty.to_string()),
+            Some("int".to_string()),
+            "an unannotated integer literal still infers int"
+        );
+    }
 
     #[test]
     fn test_analyze_str_preserves_import_metadata_without_resolving_imports() {

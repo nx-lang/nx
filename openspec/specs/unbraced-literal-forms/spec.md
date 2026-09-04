@@ -209,7 +209,10 @@ SHALL type check against the same types the value came from. Scalar values in pr
 SHALL be emitted in their unbraced literal form rather than wrapped in quotes: numbers as numeric
 literals, booleans as boolean literals, null as the null literal, and constant union cases as bare
 contextual names. A value of a float type SHALL be emitted with a real-literal spelling, so that it
-binds at a float-typed site rather than as an integer literal.
+reads back as a float wherever the site it is read at supplies no expected type — an unannotated
+`let`, for instance, where the spelling is all that distinguishes a float from an integer. An
+integer literal binds at a float-typed site as well, but rendering relies on the spelling rather
+than on the reader's context.
 
 A value that is not a constant case SHALL NOT be rendered as a bare contextual name. In particular a
 record SHALL be rendered in element form whether or not it has fields and whether or not its type
@@ -270,3 +273,8 @@ output that does not read back.
 - **WHEN** first-party formatting renders a `float64` field holding `-1.0`
 - **THEN** the output SHALL be `neg=-1.0`
 - **AND** it SHALL NOT be `neg="-1"` or `neg=-1`
+
+#### Scenario: A whole-valued float keeps its real-literal spelling
+- **WHEN** first-party formatting renders a `float64` field holding `24.0`
+- **THEN** the output SHALL be `24.0`
+- **AND** it SHALL NOT be shortened to `24`

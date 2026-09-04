@@ -31,7 +31,7 @@ the wire format.
 | `Color` | `string` | already a string alias upstream |
 | `GridLength` | `string` | `number \| "Auto" \| "*" \| \`${number}*\`` has no NX spelling yet; every demo writes the string form. Should become a discriminated union. |
 | `string \| GridLength[]` (`ColumnDefinitions`, `RowDefinitions`) | `string` | the demos write `"*, 2*, Auto"`; the list form is unused |
-| `number \| CornerRadius` | `CornerRadius` | the richer member. `CornerRadius={20}` becomes `CornerRadius=<CornerRadius TopLeft=20.0 ... />` — more verbose, but `ShapesPage` uses the asymmetric form and a number-only mapping would have lost it |
+| `number \| CornerRadius` | `CornerRadius` | the richer member. `CornerRadius={20}` becomes `CornerRadius=<CornerRadius TopLeft=20 ... />` — more verbose, but `ShapesPage` uses the asymmetric form and a number-only mapping would have lost it |
 | `(SkiaShadow \| Partial<SkiaShadow>)[]` | `SkiaShadow[]` | the two members describe the same shape |
 | `LayoutType \| ShapeType` (`SkiaLayout.Type`) | `SkiaLayoutType`, their merged case list | NX has no untagged unions; the two case sets do not overlap |
 

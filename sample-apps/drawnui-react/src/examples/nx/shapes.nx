@@ -3,82 +3,82 @@
 // SkiaShape: every Type, fill and stroke, corner radii, children clipped to the shape.
 
 component <Demo extends DrawnNode Title:string content Children:DrawnNode[] /> = {
-  <SkiaStack Spacing=8.0 WidthRequest=150.0>
-    <SkiaShape CornerRadius=<CornerRadius TopLeft=8.0 /> WidthRequest=150.0 HeightRequest=110.0
+  <SkiaStack Spacing=8 WidthRequest=150>
+    <SkiaShape CornerRadius=<CornerRadius TopLeft=8 /> WidthRequest=150 HeightRequest=110
       BackgroundColor="#2B3035">
       {Children}
     </SkiaShape>
-    <SkiaLabel Text={Title} FontSize=13.0 TextColor="#ADB5BD"
+    <SkiaLabel Text={Title} FontSize=13 TextColor="#ADB5BD"
       HorizontalOptions=Center />
   </SkiaStack>
 }
 
 component <Heading extends DrawnNode Text:string /> = {
-  <SkiaLabel Text={Text} FontSize=20.0 TextColor="#FFFFFF"
-    HorizontalOptions=Center Margin=<Thickness Top=8.0 /> />
+  <SkiaLabel Text={Text} FontSize=20 TextColor="#FFFFFF"
+    HorizontalOptions=Center Margin=<Thickness Top=8 /> />
 }
 
 <SkiaScroll Orientation=Vertical>
-  <SkiaStack Padding=<Thickness Left=16.0 Top=16.0 Right=16.0 Bottom=16.0 /> Spacing=20.0>
-    <SkiaLabel Text="SkiaShape" FontSize=24.0 TextColor="#FFFFFF" HorizontalOptions=Center />
+  <SkiaStack Padding=<Thickness Left=16 Top=16 Right=16 Bottom=16 /> Spacing=20>
+    <SkiaLabel Text="SkiaShape" FontSize=24 TextColor="#FFFFFF" HorizontalOptions=Center />
     <SkiaLabel Text="Stroke is drawn inside the bounds; children are clipped to the shape."
-      FontSize=13.0 TextColor="#D3D3D3" HorizontalOptions=Center />
+      FontSize=13 TextColor="#D3D3D3" HorizontalOptions=Center />
 
     <Heading Text="Shadows" />
-    <SkiaWrap Spacing=16.0 HorizontalOptions=Center MaximumWidthRequest=680.0>
+    <SkiaWrap Spacing=16 HorizontalOptions=Center MaximumWidthRequest=680>
       <Demo Title="Shadows=[{Y:4, Blur:6, Opacity:.5}]">
-        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=12.0 /> BackgroundColor="#FFFFFF"
-          WidthRequest=100.0 HeightRequest=60.0 HorizontalOptions=Center VerticalOptions=Center
-          Shadows={ <SkiaShadow X=0.0 Y=4.0 Blur=6.0 Opacity=0.5 Color="#000000" /> } />
+        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=12 /> BackgroundColor="#FFFFFF"
+          WidthRequest=100 HeightRequest=60 HorizontalOptions=Center VerticalOptions=Center
+          Shadows={ <SkiaShadow X=0 Y=4 Blur=6 Opacity=0.5 Color="#000000" /> } />
       </Demo>
       <Demo Title="Colored, offset X">
-        <SkiaShape Type=Circle BackgroundColor="#FFC107" WidthRequest=64.0 LockRatio=1.0
+        <SkiaShape Type=Circle BackgroundColor="#FFC107" WidthRequest=64 LockRatio=1
           HorizontalOptions=Center VerticalOptions=Center
-          Shadows={ <SkiaShadow X=6.0 Y=6.0 Blur=4.0 Opacity=0.8 Color="#6610F2" /> } />
+          Shadows={ <SkiaShadow X=6 Y=6 Blur=4 Opacity=0.8 Color="#6610F2" /> } />
       </Demo>
       <Demo Title="Two shadows (glow + drop)">
-        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=30.0 /> BackgroundColor="#20C997"
-          WidthRequest=110.0 HeightRequest=60.0 HorizontalOptions=Center VerticalOptions=Center
+        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=30 /> BackgroundColor="#20C997"
+          WidthRequest=110 HeightRequest=60 HorizontalOptions=Center VerticalOptions=Center
           Shadows={
-            <SkiaShadow X=0.0 Y=0.0 Blur=10.0 Opacity=0.9 Color="#20C997" />
-            <SkiaShadow X=0.0 Y=6.0 Blur=4.0 Opacity=0.6 Color="#000000" />
+            <SkiaShadow X=0 Y=0 Blur=10 Opacity=0.9 Color="#20C997" />
+            <SkiaShadow X=0 Y=6 Blur=4 Opacity=0.6 Color="#000000" />
           } />
       </Demo>
       <Demo Title="ShadowOnly + hollow ClipBackgroundColor">
-        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=12.0 /> ClipBackgroundColor=true
-          StrokeColor="#FFFFFF" StrokeWidth=2.0 WidthRequest=100.0 HeightRequest=60.0
+        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=12 /> ClipBackgroundColor=true
+          StrokeColor="#FFFFFF" StrokeWidth=2 WidthRequest=100 HeightRequest=60
           HorizontalOptions=Center VerticalOptions=Center
-          Shadows={ <SkiaShadow X=0.0 Y=5.0 Blur=5.0 Opacity=0.7 Color="#000000" /> } />
+          Shadows={ <SkiaShadow X=0 Y=5 Blur=5 Opacity=0.7 Color="#000000" /> } />
       </Demo>
     </SkiaWrap>
 
     <Heading Text="Types" />
-    <SkiaWrap Spacing=16.0 HorizontalOptions=Center MaximumWidthRequest=680.0>
+    <SkiaWrap Spacing=16 HorizontalOptions=Center MaximumWidthRequest=680>
       <Demo Title="Rectangle CornerRadius={16}">
-        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=16.0 /> BackgroundColor="#0D6EFD"
-          StrokeColor="#FFFFFF" StrokeWidth=3.0 WidthRequest=110.0 HeightRequest=70.0
+        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=16 /> BackgroundColor="#0D6EFD"
+          StrokeColor="#FFFFFF" StrokeWidth=3 WidthRequest=110 HeightRequest=70
           HorizontalOptions=Center VerticalOptions=Center />
       </Demo>
       <Demo Title="CornerRadius(24, 0, 0, 24)">
         <SkiaShape Type=Rectangle
-          CornerRadius=<CornerRadius TopLeft=24.0 TopRight=0.0 BottomLeft=0.0 BottomRight=24.0 />
-          BackgroundColor="#20C997" WidthRequest=110.0 HeightRequest=70.0
+          CornerRadius=<CornerRadius TopLeft=24 TopRight=0 BottomLeft=0 BottomRight=24 />
+          BackgroundColor="#20C997" WidthRequest=110 HeightRequest=70
           HorizontalOptions=Center VerticalOptions=Center />
       </Demo>
       <Demo Title="Circle + stroke">
-        <SkiaShape Type=Circle BackgroundColor="#6610F2" StrokeColor="#FFD93D" StrokeWidth=4.0
-          WidthRequest=80.0 LockRatio=1.0 HorizontalOptions=Center VerticalOptions=Center />
+        <SkiaShape Type=Circle BackgroundColor="#6610F2" StrokeColor="#FFD93D" StrokeWidth=4
+          WidthRequest=80 LockRatio=1 HorizontalOptions=Center VerticalOptions=Center />
       </Demo>
       <Demo Title="Ellipse">
-        <SkiaShape Type=Ellipse BackgroundColor="#DC3545" WidthRequest=120.0 HeightRequest=70.0
+        <SkiaShape Type=Ellipse BackgroundColor="#DC3545" WidthRequest=120 HeightRequest=70
           HorizontalOptions=Center VerticalOptions=Center />
       </Demo>
       <Demo Title="Arc Value1=-90 Value2=270">
-        <SkiaShape Type=Arc Value1=-90.0 Value2=270.0 StrokeColor="#0DCAF0" StrokeWidth=8.0
-          WidthRequest=80.0 LockRatio=1.0 HorizontalOptions=Center VerticalOptions=Center />
+        <SkiaShape Type=Arc Value1=-90 Value2=270 StrokeColor="#0DCAF0" StrokeWidth=8
+          WidthRequest=80 LockRatio=1 HorizontalOptions=Center VerticalOptions=Center />
       </Demo>
       <Demo Title="Polygon (star, Points)">
-        <SkiaShape Type=Polygon BackgroundColor="#FFC107" WidthRequest=90.0 LockRatio=1.0
+        <SkiaShape Type=Polygon BackgroundColor="#FFC107" WidthRequest=90 LockRatio=1
           HorizontalOptions=Center VerticalOptions=Center
           Points={
             <SkiaPoint X=0.5 Y=0.0 />   <SkiaPoint X=0.62 Y=0.38 />
@@ -89,7 +89,7 @@ component <Heading extends DrawnNode Text:string /> = {
           } />
       </Demo>
       <Demo Title="Line (Points)">
-        <SkiaShape Type=Line StrokeColor="#FD7E14" StrokeWidth=4.0 WidthRequest=120.0 HeightRequest=70.0
+        <SkiaShape Type=Line StrokeColor="#FD7E14" StrokeWidth=4 WidthRequest=120 HeightRequest=70
           HorizontalOptions=Center VerticalOptions=Center
           Points={
             <SkiaPoint X=0.0 Y=1.0 />   <SkiaPoint X=0.33 Y=0.2 />
@@ -97,32 +97,32 @@ component <Heading extends DrawnNode Text:string /> = {
           } />
       </Demo>
       <Demo Title="Path (SVG PathData)">
-        <SkiaShape Type=Path BackgroundColor="#E83E8C" WidthRequest=80.0 LockRatio=1.0
+        <SkiaShape Type=Path BackgroundColor="#E83E8C" WidthRequest=80 LockRatio=1
           HorizontalOptions=Center VerticalOptions=Center
           PathData="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
       </Demo>
       <Demo Title="Hollow: ClipBackgroundColor">
-        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=12.0 /> ClipBackgroundColor=true
-          BackgroundColor="#0D6EFD" StrokeColor="#0D6EFD" StrokeWidth=3.0
-          WidthRequest=110.0 HeightRequest=70.0 HorizontalOptions=Center VerticalOptions=Center />
+        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=12 /> ClipBackgroundColor=true
+          BackgroundColor="#0D6EFD" StrokeColor="#0D6EFD" StrokeWidth=3
+          WidthRequest=110 HeightRequest=70 HorizontalOptions=Center VerticalOptions=Center />
       </Demo>
       <Demo Title="Children clipped">
-        <SkiaShape Type=Circle BackgroundColor="#1F2937" StrokeColor="#67E8F9" StrokeWidth=3.0
-          WidthRequest=80.0 LockRatio=1.0 HorizontalOptions=Center VerticalOptions=Center>
-          <SkiaShape Type=Rectangle BackgroundColor="#67E8F9" WidthRequest=100.0 HeightRequest=24.0
+        <SkiaShape Type=Circle BackgroundColor="#1F2937" StrokeColor="#67E8F9" StrokeWidth=3
+          WidthRequest=80 LockRatio=1 HorizontalOptions=Center VerticalOptions=Center>
+          <SkiaShape Type=Rectangle BackgroundColor="#67E8F9" WidthRequest=100 HeightRequest=24
             HorizontalOptions=Center VerticalOptions=End />
-          <SkiaLabel Text="AB" FontSize=22.0 FontFamily="FontTextBold" TextColor="#FFFFFF"
-            HorizontalOptions=Center VerticalOptions=Center Margin=<Thickness Bottom=10.0 /> />
+          <SkiaLabel Text="AB" FontSize=22 FontFamily="FontTextBold" TextColor="#FFFFFF"
+            HorizontalOptions=Center VerticalOptions=Center Margin=<Thickness Bottom=10 /> />
         </SkiaShape>
       </Demo>
       <Demo Title="StrokeCap Butt, thin">
-        <SkiaShape Type=Line StrokeCap=Butt StrokeColor="#FFFFFF" StrokeWidth=1.0
-          WidthRequest=120.0 HeightRequest=40.0 HorizontalOptions=Center VerticalOptions=Center
-          Points={ <SkiaPoint X=0.0 Y=0.5 /> <SkiaPoint X=1.0 Y=0.5 /> } />
+        <SkiaShape Type=Line StrokeCap=Butt StrokeColor="#FFFFFF" StrokeWidth=1
+          WidthRequest=120 HeightRequest=40 HorizontalOptions=Center VerticalOptions=Center
+          Points={ <SkiaPoint X=0 Y=0.5 /> <SkiaPoint X=1 Y=0.5 /> } />
       </Demo>
       <Demo Title="Gradient fill">
-        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=35.0 />
-          WidthRequest=120.0 HeightRequest=70.0 HorizontalOptions=Center VerticalOptions=Center
+        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=35 />
+          WidthRequest=120 HeightRequest=70 HorizontalOptions=Center VerticalOptions=Center
           FillGradient=<SkiaGradient Type=Linear Colors={ "#FF6B6B" "#FFD93D" "#4ECDC4" }
             EndXRatio=1.0 EndYRatio=0.0 /> />
       </Demo>

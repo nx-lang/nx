@@ -47,8 +47,9 @@ pub use prepared::{
 };
 
 pub use components::{
-    apply_contextual_name_resolutions, component_declaration_origin, effective_component_contract,
-    effective_component_contract_at, effective_component_contract_for_name, is_component_subtype,
+    apply_contextual_name_resolutions, apply_int_literal_conversions, component_declaration_origin,
+    effective_component_contract, effective_component_contract_at,
+    effective_component_contract_for_name, is_component_subtype,
     promote_component_handler_bindings, resolve_component_definition,
     validate_component_definitions, ComponentAncestor, ComponentResolutionError, ContextualRewrite,
     EffectiveComponentContract, InvalidComponentBaseReason,

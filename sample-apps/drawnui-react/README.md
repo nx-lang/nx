@@ -52,6 +52,7 @@ npm run check-examples  # every example compiles, evaluates, and declares its co
 | `scripts/generate-catalog.mjs` | generates both from the vendored TypeScript |
 | `scripts/sync-drawnui.mjs` | re-copies DrawnUI's source, demo pages and assets |
 | `scripts/check-examples.mjs` | one check over the whole example set |
+| `scripts/emit-example-ir.mjs` | emits each example's NX IR, for proving an edit changed only notation |
 | `scripts/dev.mjs` | runs Vite and the compile server together (`npm run dev:all`) |
 | `server/compile.mjs` | NX source + catalog → NX IR, with diagnostics |
 | `server/index.mjs` | serves `dist/` and `POST /api/compile` |

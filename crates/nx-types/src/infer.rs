@@ -1,9 +1,9 @@
 //! Type inference for expressions.
 
 use crate::{
-    common_supertype as generic_common_supertype, is_object_type, resolve_type_ref_with,
-    resolve_type_ref_with_seen,
-    ty::{DeclaringOrigin, NamedType, UnionCaseType, UnionType},
+    common_supertype as generic_common_supertype, float_literal_target, is_object_type,
+    resolve_type_ref_with, resolve_type_ref_with_seen,
+    ty::{DeclaringOrigin, NamedType, Primitive, UnionCaseType, UnionType},
     type_satisfies_expected as generic_type_satisfies_expected, Type, TypeEnvironment,
 };
 use nx_diagnostics::{Diagnostic, Label, TextSpan};
@@ -168,6 +168,12 @@ pub struct InferenceContext<'a> {
     /// Consumed after analysis to rewrite each `Expr::ContextualName` into the qualified member
     /// access it resolved to, so nothing downstream of type checking can observe the bare spelling.
     resolved_contextual_names: FxHashMap<ExprId, ContextualResolution>,
+    /// Integer literals that took a floating-point type from their binding site.
+    ///
+    /// Consumed after analysis to rewrite each one into a float literal, on the same terms and for
+    /// the same reason as `resolved_contextual_names`: nothing downstream of type checking should
+    /// have to know that the author wrote `24` where `24.0` was expected, or be able to tell.
+    converted_int_literals: FxHashMap<ExprId, Primitive>,
 }
 
 impl<'a> InferenceContext<'a> {
@@ -192,6 +198,7 @@ impl<'a> InferenceContext<'a> {
             record_origins: FxHashMap::default(),
             component_origins: FxHashMap::default(),
             resolved_contextual_names: FxHashMap::default(),
+            converted_int_literals: FxHashMap::default(),
         };
         ctx.register_type_definitions();
         ctx.register_function_signatures();
@@ -278,7 +285,7 @@ impl<'a> InferenceContext<'a> {
                 // Infer argument types
                 let arg_tys: Vec<_> = args.iter().map(|arg| self.infer_expr(*arg)).collect();
 
-                self.infer_call(&func_ty, &arg_tys, *span)
+                self.infer_call(&func_ty, args, &arg_tys, *span)
             }
 
             // If expressions
@@ -503,7 +510,8 @@ impl<'a> InferenceContext<'a> {
 
         let return_ty = if let Some(ty) = func.return_type.as_ref() {
             let expected = self.type_from_type_ref(ty);
-            self.check_typed_binding(
+            self.check_typed_binding_for(
+                Some(func.body),
                 &body_ty,
                 &expected,
                 func.span,
@@ -977,6 +985,7 @@ impl<'a> InferenceContext<'a> {
     fn infer_call(
         &mut self,
         func_ty: &Type,
+        args: &[ExprId],
         arg_tys: &[Type],
         span: nx_diagnostics::TextSpan,
     ) -> Type {
@@ -1000,9 +1009,11 @@ impl<'a> InferenceContext<'a> {
                     return Type::Error;
                 }
 
-                // Check argument types
+                // Check argument types. The argument expression is passed so a literal written
+                // there can take the parameter's type.
                 for (i, (param_ty, arg_ty)) in params.iter().zip(arg_tys.iter()).enumerate() {
-                    self.check_typed_binding(
+                    self.check_typed_binding_for(
+                        args.get(i).copied(),
                         arg_ty,
                         param_ty,
                         span,
@@ -1545,12 +1556,10 @@ impl<'a> InferenceContext<'a> {
                     );
                     false
                 } else if let Some(expected) = spec.properties.get(content_name) {
-                    let actual = self.normalized_sequence_type(&element.content, span);
-                    self.check_typed_binding(
-                        &actual,
+                    self.check_content_binding(
+                        &element.content,
                         &expected.ty,
                         span,
-                        "content-type-mismatch",
                         format!("Content for '{}' binds to '{}'", element.tag, content_name),
                     );
                     true
@@ -1658,12 +1667,10 @@ impl<'a> InferenceContext<'a> {
                     );
                     false
                 } else if let Some(expected) = spec.properties.get(content_name) {
-                    let actual = self.normalized_sequence_type(&element.content, span);
-                    self.check_typed_binding(
-                        &actual,
+                    self.check_content_binding(
+                        &element.content,
                         &expected.ty,
                         span,
-                        "content-type-mismatch",
                         format!(
                             "Content for '{}.{}' binds to '{}'",
                             union_def.name, case.name, content_name
@@ -1868,12 +1875,10 @@ impl<'a> InferenceContext<'a> {
                     );
                     false
                 } else if let Some(expected) = spec.properties.get(content_name) {
-                    let actual = self.normalized_sequence_type(&element.content, span);
-                    self.check_typed_binding(
-                        &actual,
+                    self.check_content_binding(
+                        &element.content,
                         &expected.ty,
                         span,
-                        "content-type-mismatch",
                         format!("Content for '{}' binds to '{}'", element.tag, content_name),
                     );
                     true
@@ -2414,6 +2419,48 @@ impl<'a> InferenceContext<'a> {
         )
     }
 
+    /// Checks body content against the type its content property declares.
+    ///
+    /// <para>Content is a sequence of expressions with no expression of its own, so a rule that
+    /// attaches to an expression — a contextual name, an integer literal at a float site — cannot
+    /// reach it the way it reaches a property binding. A single content expression is checked as
+    /// itself; several are checked as the elements of the declared list.</para>
+    fn check_content_binding(
+        &mut self,
+        content: &[ExprId],
+        expected: &Type,
+        span: TextSpan,
+        context: String,
+    ) -> bool {
+        if content.len() == 1 {
+            let actual = self.infer_expr(content[0]);
+            return self.check_typed_binding_for(
+                Some(content[0]),
+                &actual,
+                expected,
+                span,
+                "content-type-mismatch",
+                context,
+            );
+        }
+
+        let actual = self.normalized_sequence_type(content, span);
+        if self.type_satisfies_expected_with_coercion(&actual, expected) {
+            return true;
+        }
+
+        if let Type::Array(element_expected) = expected.strip_nullable() {
+            match self.convert_int_literals_in(content, element_expected, span, &context) {
+                Some(true) => return true,
+                // The inexactness diagnostic is already reported.
+                Some(false) => return false,
+                None => {}
+            }
+        }
+
+        self.check_typed_binding(&actual, expected, span, "content-type-mismatch", context)
+    }
+
     fn check_typed_binding(
         &mut self,
         actual: &Type,
@@ -2464,29 +2511,143 @@ impl<'a> InferenceContext<'a> {
         }
 
         if self.type_satisfies_expected_with_coercion(actual, expected) {
-            true
-        } else {
-            // Two same-named types are told apart by their declaring modules; one nominal type in
-            // a message is left unqualified.
-            let (expected_display, mut actual_display) = crate::display_type_pair(expected, actual);
-            if Self::is_null_literal_type(actual) {
-                actual_display = "null".to_string();
+            return true;
+        }
+
+        // An integer literal written where a float is declared takes the declared type. Tried only
+        // after ordinary satisfaction, so a site that already accepts the value — `object`, an
+        // undecided type variable — keeps the literal an integer.
+        if let Some(expr) = expr {
+            if let Some(converted) = self.convert_int_literals(expr, expected, span, &context) {
+                return converted;
             }
-            let message = if matches!(actual, Type::Array(_)) && !matches!(expected, Type::Array(_))
-            {
-                format!(
-                    "{} expects {}, found list {}",
-                    context, expected_display, actual_display
-                )
-            } else {
-                let hint = self.bare_form_hint(actual, expected);
-                format!(
-                    "{} expects {}, found {}{}",
-                    context, expected_display, actual_display, hint
-                )
-            };
-            self.error(code, message, span);
-            false
+        }
+
+        // Two same-named types are told apart by their declaring modules; one nominal type in
+        // a message is left unqualified.
+        let (expected_display, mut actual_display) = crate::display_type_pair(expected, actual);
+        if Self::is_null_literal_type(actual) {
+            actual_display = "null".to_string();
+        }
+        let message = if matches!(actual, Type::Array(_)) && !matches!(expected, Type::Array(_)) {
+            format!(
+                "{} expects {}, found list {}",
+                context, expected_display, actual_display
+            )
+        } else {
+            let hint = self.bare_form_hint(actual, expected);
+            format!(
+                "{} expects {}, found {}{}",
+                context, expected_display, actual_display, hint
+            )
+        };
+        self.error(code, message, span);
+        false
+    }
+
+    /// Types the integer literals `expr` is made of by the floating-point type expected of them.
+    ///
+    /// <para>Returns `None` when the rule does not reach this expression, so the caller reports its
+    /// own mismatch; `Some(true)` when every literal converted, and `Some(false)` when one could not
+    /// be represented exactly and the diagnostic has already been reported.</para>
+    ///
+    /// <para>A list is walked because its elements are each written at the element type, and the
+    /// binding site names only the list. A single literal at a list-typed site is reached the same
+    /// way, since a scalar binds there by coercion.</para>
+    fn convert_int_literals(
+        &mut self,
+        expr: ExprId,
+        expected: &Type,
+        span: TextSpan,
+        context: &str,
+    ) -> Option<bool> {
+        match self.module.raw_module().expr(expr).clone() {
+            ast::Expr::Literal(ast::Literal::Int(value)) => {
+                let target = float_literal_target(expected)?;
+                if !target.represents_integer_exactly(value) {
+                    self.error(
+                        "float-literal-not-exact",
+                        format!(
+                            "{}: {} is not exactly representable as {}; write the value you mean as \
+                             a {} literal",
+                            context, value, target, target
+                        ),
+                        span,
+                    );
+                    return Some(false);
+                }
+                // The recorded type moves with the value. Leaving it `int` would put a float
+                // literal in the IR under an integer type annotation, which is the inconsistency
+                // the conversion exists to prevent rather than a cosmetic mismatch.
+                //
+                // It becomes `float64` rather than the target, because that is the type a written
+                // real literal takes at the same site — `infer_literal` gives every float literal
+                // `float64`, and a `float32` site narrows it no further. Recording the target here
+                // instead would make the converted `24` more precisely typed than the `24.0` it is
+                // supposed to be indistinguishable from. Which type a float literal should take at
+                // a `float32` site is a real question, but it is the same question for both
+                // spellings and not one this change answers.
+                self.env.set_expr_type(expr, Type::float64());
+                self.converted_int_literals.insert(expr, target);
+                Some(true)
+            }
+            ast::Expr::Array { elements, .. } => {
+                let Type::Array(element_expected) = expected.strip_nullable() else {
+                    return None;
+                };
+                if !self.convert_int_literals_in(&elements, element_expected, span, context)? {
+                    return Some(false);
+                }
+                // The list's own recorded type was inferred from elements that were still
+                // integers, so it says `int[]` over elements that are now floats. Recomputing it
+                // the way inference would have is what keeps the list indistinguishable from one
+                // whose elements were written as real literals.
+                let item_types: Vec<_> = elements
+                    .iter()
+                    .map(|element| {
+                        self.env
+                            .get_expr_type(*element)
+                            .cloned()
+                            .unwrap_or(Type::Error)
+                    })
+                    .collect();
+                let item_ty = self.common_sequence_item_type(&item_types, span);
+                self.env.set_expr_type(expr, Type::array(item_ty));
+                Some(true)
+            }
+            _ => None,
+        }
+    }
+
+    /// Types the integer literals in a sequence of expressions by the type expected of each one.
+    ///
+    /// <para>Every element has to end up satisfying the element type. One that is not a convertible
+    /// literal must already do so on its own, or the sequence as a whole does not bind and the
+    /// caller's mismatch is the right diagnostic.</para>
+    fn convert_int_literals_in(
+        &mut self,
+        elements: &[ExprId],
+        element_expected: &Type,
+        span: TextSpan,
+        context: &str,
+    ) -> Option<bool> {
+        let mut converted_any = false;
+        for element in elements {
+            match self.convert_int_literals(*element, element_expected, span, context) {
+                Some(true) => converted_any = true,
+                Some(false) => return Some(false),
+                None => {
+                    let actual = self.env.get_expr_type(*element)?.clone();
+                    if !self.type_satisfies_expected_with_coercion(&actual, element_expected) {
+                        return None;
+                    }
+                }
+            }
+        }
+        if converted_any {
+            Some(true)
+        } else {
+            None
         }
     }
 
@@ -2502,6 +2663,11 @@ impl<'a> InferenceContext<'a> {
     /// Returns the contextual names resolved during analysis, as `expr → (type, member)`.
     pub fn resolved_contextual_names(&self) -> &FxHashMap<ExprId, ContextualResolution> {
         &self.resolved_contextual_names
+    }
+
+    /// Returns the integer literals that took a floating-point type from their binding site.
+    pub fn converted_int_literals(&self) -> &FxHashMap<ExprId, Primitive> {
+        &self.converted_int_literals
     }
 
     /// Returns the collected diagnostics.
@@ -3345,6 +3511,52 @@ mod tests {
             &Type::named(Name::new("div")),
             &Type::named(Name::new("element"))
         ));
+    }
+
+    #[test]
+    fn test_converted_int_literals_records_only_the_literal_that_took_a_float_type() {
+        let mut module = LoweredModule::new(SourceId::new(0));
+        let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
+
+        // One literal at a declared float return type, one with nothing expecting anything.
+        let converted_body = module.alloc_expr(Expr::Literal(Literal::Int(42)));
+        let untouched_body = module.alloc_expr(Expr::Literal(Literal::Int(7)));
+
+        module.add_item(Item::Function(Function {
+            name: Name::new("declared"),
+            visibility: nx_hir::Visibility::Export,
+            params: vec![],
+            return_type: Some(TypeRef::name("float64")),
+            body: converted_body,
+            span,
+        }));
+        module.add_item(Item::Function(Function {
+            name: Name::new("inferred"),
+            visibility: nx_hir::Visibility::Export,
+            params: vec![],
+            return_type: None,
+            body: untouched_body,
+            span,
+        }));
+
+        let prepared = prepared(&module);
+        let mut ctx = InferenceContext::new(&prepared);
+        for item in module.items() {
+            if let Item::Function(func) = item {
+                ctx.infer_function(func);
+            }
+        }
+
+        assert_eq!(
+            ctx.converted_int_literals().get(&converted_body),
+            Some(&Primitive::Float64),
+            "the literal at the declared float type should be recorded"
+        );
+        assert!(
+            !ctx.converted_int_literals().contains_key(&untouched_body),
+            "a literal with no float expectation should not be recorded"
+        );
+        assert!(ctx.diagnostics().is_empty());
     }
 
     #[test]

@@ -70,6 +70,24 @@ impl Primitive {
         self.is_integer() || self.is_float()
     }
 
+    /// Whether this floating-point primitive represents `value` exactly.
+    ///
+    /// <para>Always false for a non-floating-point primitive: the question is whether converting an
+    /// integer to *this* float type loses nothing, and there is no conversion to ask about
+    /// otherwise.</para>
+    ///
+    /// <para>The comparison is made in `i128` rather than by casting the float back to `i64`,
+    /// because a float-to-integer `as` cast saturates. `i64::MAX` rounds to 2^63 as an `f64`, which
+    /// saturates back to `i64::MAX` and would report an exact conversion that did not happen. Every
+    /// `f64` reachable from an `i64` fits an `i128` unrounded, so that cast is the honest one.</para>
+    pub fn represents_integer_exactly(&self, value: i64) -> bool {
+        match self {
+            Primitive::Float32 => (value as f32) as i128 == value as i128,
+            Primitive::Float64 => (value as f64) as i128 == value as i128,
+            _ => false,
+        }
+    }
+
     /// Returns the promoted type when combining two numeric primitives of the
     /// same category (both integer or both float). Returns `None` for
     /// cross-category combinations (e.g. int32 + float64).
@@ -780,6 +798,43 @@ mod tests {
             Primitive::numeric_promotion(Primitive::Int, Primitive::Float64),
             None
         );
+    }
+
+    #[test]
+    fn test_represents_integer_exactly_at_the_float64_boundary() {
+        let exact = 1i64 << 53;
+        assert!(Primitive::Float64.represents_integer_exactly(exact));
+        assert!(!Primitive::Float64.represents_integer_exactly(exact + 1));
+        assert!(Primitive::Float64.represents_integer_exactly(-exact));
+        assert!(!Primitive::Float64.represents_integer_exactly(-exact - 1));
+    }
+
+    #[test]
+    fn test_represents_integer_exactly_at_the_float32_boundary() {
+        let exact = 1i64 << 24;
+        assert!(Primitive::Float32.represents_integer_exactly(exact));
+        assert!(!Primitive::Float32.represents_integer_exactly(exact + 1));
+        assert!(Primitive::Float32.represents_integer_exactly(-exact));
+        assert!(!Primitive::Float32.represents_integer_exactly(-exact - 1));
+    }
+
+    #[test]
+    fn test_represents_integer_exactly_does_not_saturate_at_the_i64_extremes() {
+        // The trap this guards: `i64::MAX as f64` rounds up to 2^63, and casting that back to i64
+        // saturates to i64::MAX again, which would look like a lossless round trip.
+        assert!(!Primitive::Float64.represents_integer_exactly(i64::MAX));
+        assert!(!Primitive::Float32.represents_integer_exactly(i64::MAX));
+        // i64::MIN is a power of two, so it genuinely is exact.
+        assert!(Primitive::Float64.represents_integer_exactly(i64::MIN));
+        assert!(Primitive::Float32.represents_integer_exactly(i64::MIN));
+    }
+
+    #[test]
+    fn test_represents_integer_exactly_is_false_for_non_float_primitives() {
+        assert!(!Primitive::Int.represents_integer_exactly(1));
+        assert!(!Primitive::Int32.represents_integer_exactly(1));
+        assert!(!Primitive::Int64.represents_integer_exactly(1));
+        assert!(!Primitive::String.represents_integer_exactly(1));
     }
 
     #[test]

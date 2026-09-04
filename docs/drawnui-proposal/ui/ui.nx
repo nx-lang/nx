@@ -45,16 +45,16 @@ export type TrackSize =
 export abstract external component <UiCommon
   width: Length = auto
   height: Length = auto
-  minWidth: float64 = 0.0
-  minHeight: float64 = 0.0
+  minWidth: float64 = 0
+  minHeight: float64 = 0
   maxWidth: float64?                // null means unbounded
   maxHeight: float64?
   margin: Insets?
   padding: Insets?
   alignSelf: AlignSelf = auto       // vertical (block) axis
   justifySelf: AlignSelf = auto     // horizontal (inline) axis
-  grow: float64 = 0.0
-  shrink: float64 = 1.0
+  grow: float64 = 0
+  shrink: float64 = 1
   gridColumn: int?                  // zero-based; set both gridColumn and gridRow, or neither
   gridRow: int?
   columnSpan: int = 1
@@ -64,7 +64,7 @@ export abstract external component <UiCommon
   cornerRadius: CornerRadii?
   shadows: Shadow[]?
   clip: boolean = false
-  opacity: float64 = 1.0            // 0..1; applies to the component's whole subtree
+  opacity: float64 = 1              // 0..1; applies to the component's whole subtree
   accessibility: Accessibility?     // null means derived from the component type and content
 />
 
@@ -72,7 +72,7 @@ export abstract external component <UiCommon
 // been applied, so a child with `grow > 0` under a `spaceBetween` parent is not double-counted.
 // When `wrap` is true, `gap` separates both adjacent children and adjacent lines.
 export external component <HStack extends UiCommon
-  gap: float64 = 0.0
+  gap: float64 = 0
   justify: Distribution = start     // horizontal main axis
   align: Alignment = stretch        // vertical cross axis
   wrap: boolean = false
@@ -82,7 +82,7 @@ export external component <HStack extends UiCommon
 // §7.3 — vertical flow container. Named for its axis, following SwiftUI and Tamagui, so that `row`
 // and `column` keep meaning grid structure in `Grid` below.
 export external component <VStack extends UiCommon
-  gap: float64 = 0.0
+  gap: float64 = 0
   justify: Distribution = start     // vertical main axis
   align: Alignment = stretch        // horizontal cross axis
   wrap: boolean = false
@@ -96,8 +96,8 @@ export external component <VStack extends UiCommon
 export external component <Grid extends UiCommon
   columns: TrackSize[]              // at least one
   rows: TrackSize[]?                // omitted rows are created as `auto`
-  columnGap: float64 = 0.0
-  rowGap: float64 = 0.0
+  columnGap: float64 = 0
+  rowGap: float64 = 0
   justifyItems: Alignment = stretch
   alignItems: Alignment = stretch
   content children: Element[]?
@@ -141,7 +141,7 @@ export external component <Card extends UiCommon
 export external component <Divider extends UiCommon
   axis: Axis = horizontal
   color: Color?                     // null means the theme divider color
-  thickness: float64 = 1.0
+  thickness: float64 = 1
 />
 
 // §7.10 — measured, wrapping output text. `variant` is a semantic role, not only a type ramp:
@@ -160,7 +160,7 @@ export external component <Text extends UiCommon
   fontStyle: FontStyle = normal
   textAlign: TextAlign = start
   lineHeight: float64?              // unitless multiplier
-  letterSpacing: float64 = 0.0
+  letterSpacing: float64 = 0
   maxLines: int?                    // >= 1; null 
   overflow: TextOverflow = clip
   content text: string

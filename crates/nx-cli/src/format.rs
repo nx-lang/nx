@@ -142,7 +142,9 @@ fn unspellable_action_handler() -> String {
 
 /// Renders a float so it reads back as a real literal rather than an integer one.
 ///
-/// `1.0` formats as `1` by default, which would bind as an integer literal at a float-typed site.
+/// `1.0` formats as `1` by default. An integer literal does bind at a float-typed site, but
+/// rendered output has to read back wherever it is pasted, including sites that supply no expected
+/// type: `let x = 1` infers `int`, so dropping the `.0` would round-trip a float as an integer.
 fn format_real_literal(value: f64) -> String {
     let rendered = format!("{}", value);
     if rendered.contains(['.', 'e', 'E']) || !value.is_finite() {
@@ -219,7 +221,8 @@ mod tests {
         );
     }
 
-    /// A float must keep a real-literal spelling, or it binds as an integer at a float site.
+    /// A float keeps its real-literal spelling: at a site with no expected type the spelling is
+    /// the only thing that distinguishes it from an integer.
     #[test]
     fn test_format_attribute_negative_float_keeps_real_spelling() {
         let mut fields = FxHashMap::default();
@@ -290,6 +293,15 @@ mod tests {
     fn test_format_float() {
         let value = Value::Float(3.14);
         assert_eq!(formatted(&value), "3.14");
+    }
+
+    /// A whole-valued float is the case an integer literal at a float site could tempt one to
+    /// shorten. It must not be: `let x = 24` infers `int`, so `24` does not read back as a float.
+    #[test]
+    fn test_format_whole_valued_float_keeps_its_real_spelling() {
+        assert_eq!(formatted(&Value::Float(24.0)), "24.0");
+        assert_eq!(formatted(&Value::Float(0.0)), "0.0");
+        assert_eq!(formatted(&Value::Float(-8.0)), "-8.0");
     }
 
     #[test]

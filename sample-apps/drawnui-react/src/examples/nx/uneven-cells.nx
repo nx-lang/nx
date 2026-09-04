@@ -16,15 +16,15 @@ type Post = {
 // The cell the original builds imperatively in FeedCell: a colored stripe beside a column whose
 // body text wraps to as many lines as it needs, so no two rows are the same height.
 component <FeedCell extends DrawnNode Item:Post /> = {
-  <SkiaLayout Type=Absolute Padding=<Thickness Left=16.0 Top=12.0 Right=16.0 Bottom=12.0 />
+  <SkiaLayout Type=Absolute Padding=<Thickness Left=16 Top=12 Right=16 Bottom=12 />
     BackgroundColor="#111827" UseCache=ImageDoubleBuffered
     HorizontalOptions=Fill>
-    <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=3.0 /> WidthRequest=6.0
+    <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=3 /> WidthRequest=6
       VerticalOptions=Fill BackgroundColor={Item.Color} />
-    <SkiaStack Margin=<Thickness Left=18.0 /> Spacing=6.0>
-      <SkiaLabel Text={Item.Title} FontSize=15.0 FontFamily="FontTextBold" TextColor="#FFFFFF" />
-      <SkiaLabel Text={Item.Body} FontSize=13.0 TextColor="#CBD5E1" HorizontalOptions=Fill />
-      <SkiaLabel Text={Item.Footer} FontSize=11.0 TextColor="#64748B" />
+    <SkiaStack Margin=<Thickness Left=18 /> Spacing=6>
+      <SkiaLabel Text={Item.Title} FontSize=15 FontFamily="FontTextBold" TextColor="#FFFFFF" />
+      <SkiaLabel Text={Item.Body} FontSize=13 TextColor="#CBD5E1" HorizontalOptions=Fill />
+      <SkiaLabel Text={Item.Footer} FontSize=11 TextColor="#64748B" />
     </SkiaStack>
   </SkiaLayout>
 }
@@ -46,8 +46,8 @@ let posts = {
 
 <SkiaLayer VerticalOptions=Fill>
   <SkiaScroll Orientation=Vertical>
-    <SkiaStack Padding=<Thickness Left=16.0 Top=10.0 Right=16.0 Bottom=8.0 /> Spacing=8.0>
-      <SkiaLabel FontSize=13.0 TextColor="#D3D3D3" HorizontalOptions=Center
+    <SkiaStack Padding=<Thickness Left=16 Top=10 Right=16 Bottom=8 /> Spacing=8>
+      <SkiaLabel FontSize=13 TextColor="#D3D3D3" HorizontalOptions=Center
         Text="6 rows written out — the original measures visible rows out of a paging feed" />
       for post in posts {
         <FeedCell Item={post} />

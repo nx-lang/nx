@@ -5,8 +5,9 @@ number so it can be cited from a proposal, a commit, or another finding.
 
 Seven were fixed in this change: three in the TypeScript IR runtime, which rejected values the
 language itself produces (F1–F3); three in type checking, which never looked inside a component
-body (F5, F7, F19); and one in the grammar, which rejected an element with an empty body (F20). The
-rest are worked around here; each is a candidate for its own change. The last group is not bugs at
+body (F5, F7, F19); and one in the grammar, which rejected an element with an empty body (F20). One
+more (F21) was fixed later, by a change these examples were the evidence for. The rest are worked
+around here; each is a candidate for its own change. The last group is not bugs at
 all — behavior that shaped the catalog and is worth knowing before writing NX against it.
 
 Unless a finding says otherwise, the Rust interpreter is the reference: where the two runtimes
@@ -221,6 +222,20 @@ list to a `let` first works. Both forms are fine outside content position.
 `{}`, `{ }`, `[]` and `{[]}` are all syntax errors, so a list-typed property cannot be defaulted to
 empty. Already proposed separately as the `empty-list-spelling` change; recorded here because the
 catalog generator ran into it, and it is part of why the catalog declares no defaults.
+
+### F21 — A whole number had to be written `24.0` at a float property — fixed
+
+Every numeric property in this catalog is `float64`, and an integer literal was rejected at a float
+site, so `Spacing=8 WidthRequest=150 FontSize=13` had to be written `Spacing=8.0 WidthRequest=150.0
+FontSize=13.0`. It was not a rare inconvenience: **634 of the 713 float literals in these examples**
+were whole numbers carrying a `.0` that said nothing the declaration had not already said.
+
+Fixed by the `int-literals-at-float-sites` change: an integer literal now takes the floating-point
+type its binding site declares, and is converted rather than merely tolerated, so `8` and `8.0`
+produce identical NX IR. A literal that cannot be represented exactly in the target float type is
+still rejected rather than rounded. The examples in this app were the corpus the change was measured
+against, and the proof it changed nothing but the notation is that their emitted IR is byte-identical
+across the edit.
 
 ## Not bugs — behavior worth knowing
 

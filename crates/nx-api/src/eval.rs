@@ -224,6 +224,35 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
+    fn eval_source_evaluates_an_int_literal_at_a_float_site_to_a_float() {
+        let written_as_int = eval_source(
+            "let root(): float64 = 24",
+            "eval-int-literal.nx",
+            &ProgramBuildContext::empty(),
+        );
+        let written_as_float = eval_source(
+            "let root(): float64 = 24.0",
+            "eval-float-literal.nx",
+            &ProgramBuildContext::empty(),
+        );
+
+        let EvalResult::Ok(from_int) = written_as_int else {
+            panic!("an integer literal at a float64 return type should evaluate");
+        };
+        let EvalResult::Ok(from_float) = written_as_float else {
+            panic!("a real literal at a float64 return type should evaluate");
+        };
+
+        // Equality alone would hold if both were integers, so the kind is asserted directly.
+        assert!(
+            matches!(from_int, NxValue::Float(value) if value == 24.0),
+            "expected a float value, got {:?}",
+            from_int
+        );
+        assert_eq!(from_int, from_float);
+    }
+
+    #[test]
     fn eval_source_returns_aggregated_static_diagnostics_before_runtime_execution() {
         let source = r#"
             abstract type Entity = {

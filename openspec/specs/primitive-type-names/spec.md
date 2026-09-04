@@ -70,7 +70,8 @@ canonical primitive names. The system SHALL NOT render two different names for t
 type, and SHALL NOT vary the rendered name according to how the type was spelled at its declaration.
 
 #### Scenario: Mismatch message uses canonical names throughout
-- **WHEN** a file declares `external component <B v:float64 />` and binds `<B v=1 />`
+- **WHEN** a file declares `external component <B v:float64 />` and a component parameter `n: int`,
+  and binds `<B v={n} />`
 - **THEN** the diagnostic SHALL name the expected type `float64`
 - **AND** SHALL name the found type `int`
 
@@ -80,9 +81,18 @@ type, and SHALL NOT vary the rendered name according to how the type was spelled
 - **THEN** both diagnostics SHALL render that primitive's name identically
 
 ### Requirement: Integer literals infer `int` and floating-point literals infer `float64`
-The system SHALL infer `int` for an integer literal and `float64` for a floating-point literal.
-`int` is the default integer type: it is what an unannotated integer takes, and what NX sources use
-unless a declaration has a specific reason to name a width.
+The system SHALL infer `int` for an integer literal and `float64` for a floating-point literal where
+no expected type applies. `int` is the default integer type: it is what an unannotated integer takes,
+and what NX sources use unless a declaration has a specific reason to name a width.
+
+Where a floating-point type is expected, an integer literal takes that type instead of `int`, as
+specified by `contextual-numeric-literals`. Inference from the literal's own spelling is the
+fallback, not the only rule.
+
+"Takes that type" is a statement about the binding, which is what a reader of the declaration
+observes. The type recorded for the literal *expression* is `contextual-numeric-literals`' subject,
+and it is deliberately whatever an explicit real literal takes at the same site, so that the two
+spellings stay indistinguishable.
 
 #### Scenario: Integer literal infers int
 - **WHEN** a file contains `let n = 42`
@@ -92,11 +102,20 @@ unless a declaration has a specific reason to name a width.
 - **WHEN** a file contains `let x = 1.5`
 - **THEN** analysis SHALL infer the type of `x` as `float64`
 
-### Requirement: Numeric compatibility is unchanged by the renaming
-The system SHALL continue to treat any integer type as compatible with any other integer type, and
-any floating-point type as compatible with any other floating-point type, in both directions. The
-system SHALL continue to reject an integer value at a floating-point binding site. `int`
+#### Scenario: An expected float type overrides the default
+- **WHEN** a file contains `let x: float32 = 42`
+- **THEN** analysis SHALL infer the type of `x` as `float32`
+- **AND** it SHALL NOT infer `int`
+- **AND** the result SHALL be the same as for `let x: float32 = 42.0`
+
+### Requirement: Numeric compatibility between and within the numeric categories
+The system SHALL treat any integer type as compatible with any other integer type, and any
+floating-point type as compatible with any other floating-point type, in both directions. `int`
 participates in integer compatibility exactly as `int32` and `int64` do.
+
+The system SHALL reject an integer-typed *expression* at a floating-point binding site. An integer
+*literal* at such a site is not governed by type compatibility at all: it is typed by context and
+accepted, as specified by `contextual-numeric-literals`.
 
 When the system promotes two integer operands to a common type, it SHALL follow the rank order
 `int32` < `int` < `int64` and select the higher-ranked operand's type.
@@ -114,8 +133,14 @@ When the system promotes two integer operands to a common type, it SHALL follow 
 - **WHEN** a file declares `external component <B v:float32 />` and binds `<B v=1.5 />`
 - **THEN** type checking SHALL accept the binding
 
-#### Scenario: Integer literal is still rejected at a float site
+#### Scenario: Integer literal is accepted at a float site
 - **WHEN** a file declares `external component <B v:float64 />` and binds `<B v=1 />`
+- **THEN** type checking SHALL accept the binding
+- **AND** the literal SHALL be typed `float64`
+
+#### Scenario: Integer-typed expression is still rejected at a float site
+- **WHEN** a file declares `external component <B v:float64 />` and binds `<B v={n} />` where `n` is
+  typed `int`
 - **THEN** type checking SHALL reject the binding
 
 ### Requirement: Host language type mappings are preserved under the new names

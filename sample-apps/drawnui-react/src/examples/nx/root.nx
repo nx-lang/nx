@@ -11,16 +11,16 @@ type Sample = {
 
 component <SampleCard extends DrawnNode Item:Sample /> = {
   // The original passes Tapped={() => shell.GoToAsync(route)} here; the card is otherwise identical.
-  <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=12.0 />
-    BackgroundColor="#2B3035" StrokeColor="#373B3E" StrokeWidth=1.0
+  <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=12 />
+    BackgroundColor="#2B3035" StrokeColor="#373B3E" StrokeWidth=1
     AnimationTapped=Ripple
     AccessibilityRole="button" AccessibilityLabel={Item.Title} AccessibilityHint={Item.Text}>
-    <SkiaStack Padding=<Thickness Left=24.0 Top=20.0 Right=56.0 Bottom=20.0 /> Spacing=6.0>
-      <SkiaLabel Text={Item.Title} FontSize=24.0 FontFamily="FontTextBold" TextColor="#FFFFFF" />
-      <SkiaLabel Text={Item.Text} FontSize=14.0 TextColor="#ADB5BD" />
+    <SkiaStack Padding=<Thickness Left=24 Top=20 Right=56 Bottom=20 /> Spacing=6>
+      <SkiaLabel Text={Item.Title} FontSize=24 FontFamily="FontTextBold" TextColor="#FFFFFF" />
+      <SkiaLabel Text={Item.Text} FontSize=14 TextColor="#ADB5BD" />
     </SkiaStack>
-    <SkiaLabel Text="›" FontSize=28.0 TextColor="#6EA8FE" HorizontalOptions=End
-      VerticalOptions=Center Margin=<Thickness Right=24.0 /> />
+    <SkiaLabel Text="›" FontSize=28 TextColor="#6EA8FE" HorizontalOptions=End
+      VerticalOptions=Center Margin=<Thickness Right=24 /> />
   </SkiaShape>
 }
 
@@ -39,20 +39,20 @@ let samples = {
 }
 
 <SkiaScroll Orientation=Vertical>
-  <SkiaStack Spacing=24.0 Padding=<Thickness Left=24.0 Top=24.0 Right=24.0 Bottom=40.0 />
-    HorizontalOptions=Center MaximumWidthRequest=820.0>
-    <SkiaSvg Source="images/drawnui.svg" WidthRequest=120.0 LockRatio=1.0 HorizontalOptions=Center
-      Margin=<Thickness Top=16.0 /> AccessibilityRole="img" AccessibilityLabel="DrawnUI logo" />
-    <SkiaLabel Text="DrawnUI for React" FontSize=48.0 FontFamily="FontTextBold" TextColor="#FFFFFF"
+  <SkiaStack Spacing=24 Padding=<Thickness Left=24 Top=24 Right=24 Bottom=40 />
+    HorizontalOptions=Center MaximumWidthRequest=820>
+    <SkiaSvg Source="images/drawnui.svg" WidthRequest=120 LockRatio=1 HorizontalOptions=Center
+      Margin=<Thickness Top=16 /> AccessibilityRole="img" AccessibilityLabel="DrawnUI logo" />
+    <SkiaLabel Text="DrawnUI for React" FontSize=48 FontFamily="FontTextBold" TextColor="#FFFFFF"
       HorizontalOptions=Center AccessibilityRole="heading" />
 
-    <SkiaLabel Text="Snippets" FontSize=32.0 TextColor="#DEE2E6" Margin=<Thickness Top=8.0 />
+    <SkiaLabel Text="Snippets" FontSize=32 TextColor="#DEE2E6" Margin=<Thickness Top=8 />
       AccessibilityRole="heading" />
     for sample in samples {
       <SampleCard Item={sample} />
     }
 
-    <SkiaLabel Text="helloreact.drawnui.net · github.com/DrawnUi/DrawnUi.React · MIT" FontSize=12.0
-      TextColor="#6C757D" HorizontalOptions=Center Margin=<Thickness Top=16.0 /> />
+    <SkiaLabel Text="helloreact.drawnui.net · github.com/DrawnUi/DrawnUi.React · MIT" FontSize=12
+      TextColor="#6C757D" HorizontalOptions=Center Margin=<Thickness Top=16 /> />
   </SkiaStack>
 </SkiaScroll>

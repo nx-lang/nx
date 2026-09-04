@@ -98,11 +98,11 @@ export external component <Group extends GraphicsCommon
 // §6.4 — SVG `rect`.
 // NX gap: a default cannot reference a sibling property, so `ry` cannot default to `rx`.
 export external component <Rect extends ShapeCommon
-  x: float64 = 0.0
-  y: float64 = 0.0
+  x: float64 = 0
+  y: float64 = 0
   width: float64                    // non-negative
   height: float64                   // non-negative
-  rx: float64 = 0.0
+  rx: float64 = 0
   ry: float64?                      // null means "same as rx"
 />
 
@@ -154,12 +154,12 @@ export external component <Text extends GraphicsCommon
   x: float64                        // text anchor x
   y: float64                        // baseline y
   fontFamily: string?               // null means the host default
-  fontSize: float64 = 16.0
-  fontWeight: float64 = 400.0       // 1..1000
+  fontSize: float64 = 16
+  fontWeight: float64 = 400         // 1..1000
   fontStyle: FontStyle = normal
   textAnchor: TextAnchor = start
   dominantBaseline: DominantBaseline = auto
-  letterSpacing: float64 = 0.0
+  letterSpacing: float64 = 0
   fill: Paint?                      // null resolves to black
   stroke: Stroke?
   shadows: Shadow[]?
@@ -169,8 +169,8 @@ export external component <Text extends GraphicsCommon
 // §6.12 — image drawn into a destination rectangle, per SVG `image`. `alt` is required so that no
 // image can be generated without an accessibility decision; use "" for a purely decorative one.
 export external component <Image extends GraphicsCommon
-  x: float64 = 0.0
-  y: float64 = 0.0
+  x: float64 = 0
+  y: float64 = 0
   width: float64                    // non-negative destination width
   height: float64                   // non-negative destination height
   source: ImageSource

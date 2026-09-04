@@ -580,6 +580,32 @@ pub fn apply_contextual_name_resolutions<T>(
     }
 }
 
+/// Rewrites each integer literal that took a floating-point type into a float literal.
+///
+/// <para>Runs on the same terms as [`apply_contextual_name_resolutions`] and for the same reason:
+/// once this has run, source that wrote `24` at a float-typed property is indistinguishable from
+/// source that wrote `24.0`, so no consumer below type checking needs to know the rule exists — or
+/// is able to observe that it applied.</para>
+///
+/// <para>The span is kept, so a diagnostic or a source map still points at what the author
+/// wrote.</para>
+pub fn apply_int_literal_conversions(module: &mut PreparedModule, converted: &[ExprId]) {
+    if converted.is_empty() {
+        return;
+    }
+
+    let raw_module = module.raw_module_mut();
+    for expr_id in converted {
+        let value = match raw_module.expr(*expr_id) {
+            ast::Expr::Literal(ast::Literal::Int(value)) => *value,
+            // Already rewritten, or never an integer literal: leave it alone.
+            _ => continue,
+        };
+        *raw_module.expr_mut(*expr_id) =
+            ast::Expr::Literal(ast::Literal::Float(ast::OrderedFloat(value as f64)));
+    }
+}
+
 pub fn promote_component_handler_bindings(module: &mut PreparedModule) {
     let rewrites = collect_component_handler_rewrites(module);
     if rewrites.is_empty() {

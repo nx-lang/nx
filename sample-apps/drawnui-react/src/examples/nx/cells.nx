@@ -18,37 +18,37 @@ type Contact = {
 // The cell the original builds imperatively in ContactCell: an absolute layout with the avatar at
 // the start and the text column filling the remaining width, cached as one bitmap.
 component <ContactCell extends DrawnNode Item:Contact /> = {
-  <SkiaLayout Type=Absolute Padding=<Thickness Left=12.0 Top=10.0 Right=12.0 Bottom=10.0 />
+  <SkiaLayout Type=Absolute Padding=<Thickness Left=12 Top=10 Right=12 Bottom=10 />
     BackgroundColor="#111827" UseCache=Image AnimationTapped=Ripple
     HorizontalOptions=Fill>
-    <SkiaShape Type=Circle WidthRequest=42.0 LockRatio=1.0
+    <SkiaShape Type=Circle WidthRequest=42 LockRatio=1
       VerticalOptions=Center BackgroundColor="#1F2937">
-      <SkiaLabel Text={Item.Initials} FontSize=14.0 TextColor="#67E8F9"
+      <SkiaLabel Text={Item.Initials} FontSize=14 TextColor="#67E8F9"
         HorizontalOptions=Center VerticalOptions=Center />
     </SkiaShape>
-    <SkiaStack Margin=<Thickness Left=54.0 /> Spacing=3.0
+    <SkiaStack Margin=<Thickness Left=54 /> Spacing=3
       VerticalOptions=Center HorizontalOptions=Fill>
-      <SkiaLabel Text={Item.Title} FontSize=15.0 TextColor="#FFFFFF" />
-      <SkiaLabel Text={Item.Subtitle} FontSize=12.0 TextColor="#94A3B8" MaxLines=1.0 />
+      <SkiaLabel Text={Item.Title} FontSize=15 TextColor="#FFFFFF" />
+      <SkiaLabel Text={Item.Subtitle} FontSize=12 TextColor="#94A3B8" MaxLines=1 />
     </SkiaStack>
   </SkiaLayout>
 }
 
 let contacts = {
-  <Contact Id=1.0 Initials="1" Title="Contact 1" Subtitle="Recycled drawn cell #1 — scroll me fast" />
-  <Contact Id=2.0 Initials="2" Title="Contact 2" Subtitle="Recycled drawn cell #2 — scroll me fast" />
-  <Contact Id=3.0 Initials="3" Title="Contact 3" Subtitle="Recycled drawn cell #3 — scroll me fast" />
-  <Contact Id=4.0 Initials="4" Title="Contact 4" Subtitle="Recycled drawn cell #4 — scroll me fast" />
-  <Contact Id=5.0 Initials="5" Title="Contact 5" Subtitle="Recycled drawn cell #5 — scroll me fast" />
-  <Contact Id=6.0 Initials="6" Title="Contact 6" Subtitle="Recycled drawn cell #6 — scroll me fast" />
-  <Contact Id=7.0 Initials="7" Title="Contact 7" Subtitle="Recycled drawn cell #7 — scroll me fast" />
-  <Contact Id=8.0 Initials="8" Title="Contact 8" Subtitle="Recycled drawn cell #8 — scroll me fast" />
+  <Contact Id=1 Initials="1" Title="Contact 1" Subtitle="Recycled drawn cell #1 — scroll me fast" />
+  <Contact Id=2 Initials="2" Title="Contact 2" Subtitle="Recycled drawn cell #2 — scroll me fast" />
+  <Contact Id=3 Initials="3" Title="Contact 3" Subtitle="Recycled drawn cell #3 — scroll me fast" />
+  <Contact Id=4 Initials="4" Title="Contact 4" Subtitle="Recycled drawn cell #4 — scroll me fast" />
+  <Contact Id=5 Initials="5" Title="Contact 5" Subtitle="Recycled drawn cell #5 — scroll me fast" />
+  <Contact Id=6 Initials="6" Title="Contact 6" Subtitle="Recycled drawn cell #6 — scroll me fast" />
+  <Contact Id=7 Initials="7" Title="Contact 7" Subtitle="Recycled drawn cell #7 — scroll me fast" />
+  <Contact Id=8 Initials="8" Title="Contact 8" Subtitle="Recycled drawn cell #8 — scroll me fast" />
 }
 
 <SkiaLayer VerticalOptions=Fill>
   <SkiaScroll Orientation=Vertical>
-    <SkiaStack Padding=<Thickness Left=16.0 Top=10.0 Right=16.0 Bottom=8.0 /> Spacing=8.0>
-      <SkiaLabel FontSize=13.0 TextColor="#D3D3D3" HorizontalOptions=Center
+    <SkiaStack Padding=<Thickness Left=16 Top=10 Right=16 Bottom=8 /> Spacing=8>
+      <SkiaLabel FontSize=13 TextColor="#D3D3D3" HorizontalOptions=Center
         Text="8 cells written out — the original recycles 100 000" />
       for contact in contacts {
         <ContactCell Item={contact} />

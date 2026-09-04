@@ -46,7 +46,7 @@ did, replacing a hand-written `type` / `kind` field with a real discriminator.
 | [NXE5](#nxe5) | Language gap | Components | Open | A derived component cannot override an inherited default |
 | [NXE6](#nxe6) | Language gap | Defaults | Open | A default cannot reference a sibling property |
 | [NXE7](#nxe7) | Language gap | Sequences | Open | There is no empty-sequence literal, in any position |
-| [NXE8](#nxe8) | Language gap | Defaults | Partly resolved | Qualified names in defaults still need braces; integer literals do not widen to `float64` |
+| [NXE8](#nxe8) | Language gap | Defaults | Partly resolved | Qualified names in defaults still need braces; integer literals now take a declared `float64` |
 | [NXE9](#nxe9) | Language gap | Types | Open | No refinement, range, or pattern constraints |
 | [NXE10](#nxe10) | Language gap | Modules | Open | Name qualification is exactly one segment deep |
 | [NXE11](#nxe11) | Language gap | Elements | Informational | No flat, ID-addressed authoring form |
@@ -538,8 +538,8 @@ literals are meant to exist at all — see [NXE16](#nxe16), because the publishe
 <a id="nxe8"></a>
 ### NXE8 — Qualified names in defaults need braces, and integer literals do not widen to `float64`
 
-**Status:** Partly resolved, by the `contextual-literal-binding` change. The aggregate-noise half of
-this finding is gone.
+**Status:** Partly resolved, by the `contextual-literal-binding` and `int-literals-at-float-sites`
+changes. The aggregate-noise half of this finding is gone, and so is the whole-number ceremony.
 
 **Impact:** Low. What remains touches only defaults written in qualified form, which authors now
 have no reason to write.
@@ -555,20 +555,26 @@ external component <C a: Alignment = Alignment.start />   // error: Invalid comp
 external component <C a: Alignment = {Alignment.start} /> // OK
 ```
 
-Separately, integer literals do not widen:
+Separately, integer literals used not to widen. `type Insets = { top: float64 = 0 }` reported
+*"Default value for record property 'top' expects float64, found int"*. The
+`int-literals-at-float-sites` change fixed that: an integer literal written where a floating-point
+type is declared takes that type, so both spellings are now accepted and mean the same thing.
 
 ```nx
-type Insets = { top: float64 = 0 }
-// error: Default value for record property 'top' expects float64, found int
+type Insets = { top: float64 = 0 }    // OK — the literal takes the declared float64
+type Insets = { top: float64 = 0.0 }  // OK — and identical in every observable respect
 ```
 
-**Impact on the proposal:** Appendix A writes its closed-set defaults bare (`lineCap: LineCap = butt`),
-which is now correct and reads better than the braced form this finding originally required. What is
-left is that every `float64` default must be written `0.0` / `1.0` / `4.0`; that is pure ceremony in a
-schema listing, and the `float64 = 0` error is the kind of thing that will hit every newcomer once.
+The rule is the literal's, not the `int` type's: an `int`-typed *expression* at a `float64` site is
+still rejected, and a literal too large to be represented exactly is rejected rather than rounded.
 
-**Possible enhancement:** widen integer literals to float64 in a float64-typed position; and admit bare
-member access and prefix-negated literals as `RhsExpression`.
+**Impact on the proposal:** Appendix A writes its closed-set defaults bare (`lineCap: LineCap = butt`),
+which is now correct and reads better than the braced form this finding originally required, and it
+writes its numeric defaults as `0` / `1` / `4` rather than `0.0` / `1.0` / `4.0`. What is left is
+only the qualified-name form.
+
+**Possible enhancement:** admit bare member access as `RhsExpression`. (Prefix-negated literals and
+integer-literal widening have both shipped.)
 
 **Status:** partly resolved by the `contextual-literal-binding` change.
 

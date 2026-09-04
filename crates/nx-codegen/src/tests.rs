@@ -453,6 +453,109 @@ let root() = { <User name="Ada" /> }
     assert_eq!(first.json, second.json);
 }
 
+/// The two spellings of a whole number at a float property, as one program each.
+fn float_property_program(literal: &str) -> String {
+    format!(
+        "external component <B v:float64 />\nlet root() = {{ <B v={} /> }}\n",
+        literal
+    )
+}
+
+/// Strips what two programs cannot share when their source text differs.
+///
+/// <para>`24` and `24.0` are two different files, two characters apart, so every byte offset after
+/// the literal moves, the retained source differs, and the fingerprint over them differs with it.
+/// NX IR carries source provenance deliberately — diagnostics and source maps need it — so those
+/// differences are correct rather than noise to be designed away. What must match is everything
+/// else: the declarations, the types, and the literal itself.</para>
+fn without_source_provenance(json: &str) -> serde_json::Value {
+    fn strip(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                map.remove("span");
+                map.remove("programFingerprint");
+                map.remove("source");
+                map.remove("sources");
+                for nested in map.values_mut() {
+                    strip(nested);
+                }
+            }
+            serde_json::Value::Array(items) => items.iter_mut().for_each(strip),
+            _ => {}
+        }
+    }
+
+    let mut value: serde_json::Value = serde_json::from_str(json).expect("nx ir json");
+    strip(&mut value);
+    value
+}
+
+#[test]
+fn int_literal_at_a_float_site_emits_the_same_ir_as_a_real_literal() {
+    // The guarantee the conversion exists to provide: nothing below type checking can tell which
+    // spelling the author used, so a consumer added later cannot depend on the difference.
+    let written_as_int = emit_nx_ir(&artifact_from_source(&float_property_program("24")))
+        .expect("nx ir for the integer spelling");
+    let written_as_float = emit_nx_ir(&artifact_from_source(&float_property_program("24.0")))
+        .expect("nx ir for the real spelling");
+
+    assert_eq!(
+        without_source_provenance(&written_as_int.json),
+        without_source_provenance(&written_as_float.json)
+    );
+}
+
+#[test]
+fn int_literal_at_a_float_site_is_not_emitted_as_an_integer_literal() {
+    let generated = emit_nx_ir(&artifact_from_source(&float_property_program("24")))
+        .expect("nx ir for the integer spelling");
+
+    // Asserting only equality with the real spelling would pass if both emitted an integer.
+    assert!(
+        !generated.json.contains(r#""kind":"int""#),
+        "the converted literal should not reach the IR as an int: {}",
+        generated.json
+    );
+}
+
+#[test]
+fn int_literal_at_a_float32_site_emits_the_same_ir_as_a_real_literal() {
+    let program = |literal: &str| {
+        format!(
+            "external component <B v:float32 />\nlet root() = {{ <B v={} /> }}\n",
+            literal
+        )
+    };
+    let written_as_int =
+        emit_nx_ir(&artifact_from_source(&program("24"))).expect("nx ir for the integer spelling");
+    let written_as_float =
+        emit_nx_ir(&artifact_from_source(&program("24.0"))).expect("nx ir for the real spelling");
+
+    assert_eq!(
+        without_source_provenance(&written_as_int.json),
+        without_source_provenance(&written_as_float.json)
+    );
+}
+
+#[test]
+fn int_literal_defaults_and_lists_at_float_sites_match_their_real_spellings() {
+    let program = |x: &str, items: &str| {
+        format!(
+            "type Opts = {{ x:float64 = {} }}\nexternal component <B v:float64[] />\nlet root() = {{ <B v={{{}}} /> }}\n",
+            x, items
+        )
+    };
+    let written_as_int = emit_nx_ir(&artifact_from_source(&program("0", "1 2 3")))
+        .expect("nx ir for the integer spelling");
+    let written_as_float = emit_nx_ir(&artifact_from_source(&program("0.0", "1.0 2.0 3.0")))
+        .expect("nx ir for the real spelling");
+
+    assert_eq!(
+        without_source_provenance(&written_as_int.json),
+        without_source_provenance(&written_as_float.json)
+    );
+}
+
 #[test]
 fn nx_ir_preserves_module_qualified_references() {
     let artifact = artifact_from_workspace(
@@ -548,7 +651,10 @@ let root(user: User): User = { user }"#,
 
     // A base-typed boundary accepts a value of a record that extends the base, never one of the
     // base itself, and this is the only thing in the IR that says which is which.
-    assert_eq!(ir_declaration(&document, "Base")["kind"]["isAbstract"], true);
+    assert_eq!(
+        ir_declaration(&document, "Base")["kind"]["isAbstract"],
+        true
+    );
     assert_eq!(
         ir_declaration(&document, "User")["kind"]["isAbstract"],
         false

@@ -7,13 +7,13 @@
 // the most recent interaction and needs both event handlers and component state.
 
 component <Card extends DrawnNode Title:string Style:PrebuiltControlStyle /> = {
-  <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=16.0 />
-    BackgroundColor="#F5F5F5" Padding=<Thickness Left=18.0 Top=14.0 Right=18.0 Bottom=14.0 />
+  <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=16 />
+    BackgroundColor="#F5F5F5" Padding=<Thickness Left=18 Top=14 Right=18 Bottom=14 />
     HorizontalOptions=Fill UseCache=Image>
-    <SkiaStack Spacing=14.0 HorizontalOptions=Fill>
-      <SkiaLabel Text={Title} FontSize=16.0 FontAttributes=Bold TextColor="#111827" />
+    <SkiaStack Spacing=14 HorizontalOptions=Fill>
+      <SkiaLabel Text={Title} FontSize=16 FontAttributes=Bold TextColor="#111827" />
 
-      <SkiaRow Spacing=16.0 HorizontalOptions=Fill>
+      <SkiaRow Spacing=16 HorizontalOptions=Fill>
         <SkiaSwitch ControlStyle={Style} IsToggled=true VerticalOptions=Center />
         <SkiaCheckbox ControlStyle={Style} IsToggled=true VerticalOptions=Center />
         <SkiaRadioButton ControlStyle={Style} Text="One" IsToggled=true GroupName={Title}
@@ -23,19 +23,19 @@ component <Card extends DrawnNode Title:string Style:PrebuiltControlStyle /> = {
       </SkiaRow>
 
       <SkiaButton Text="Button" ControlStyle={Style} HorizontalOptions=Start />
-      <SkiaProgress ControlStyle={Style} Value=65.0 HorizontalOptions=Fill />
-      <SkiaSlider ControlStyle={Style} End=65.0 HorizontalOptions=Fill />
-      <SkiaSlider ControlStyle={Style} EnableRange=true Start=20.0 End=80.0
+      <SkiaProgress ControlStyle={Style} Value=65 HorizontalOptions=Fill />
+      <SkiaSlider ControlStyle={Style} End=65 HorizontalOptions=Fill />
+      <SkiaSlider ControlStyle={Style} EnableRange=true Start=20 End=80
         HorizontalOptions=Fill />
     </SkiaStack>
   </SkiaShape>
 }
 
 <SkiaScroll Orientation=Vertical>
-  <SkiaStack Spacing=16.0 Padding=<Thickness Left=16.0 Top=16.0 Right=16.0 Bottom=16.0 />
-    HorizontalOptions=Center MaximumWidthRequest=720.0>
-    <SkiaLabel Text="Platform Looks" FontSize=24.0 TextColor="#FFFFFF" HorizontalOptions=Center />
-    <SkiaLabel FontSize=13.0 TextColor="#ADB5BD" HorizontalOptions=Fill HorizontalTextAlignment=Center
+  <SkiaStack Spacing=16 Padding=<Thickness Left=16 Top=16 Right=16 Bottom=16 />
+    HorizontalOptions=Center MaximumWidthRequest=720>
+    <SkiaLabel Text="Platform Looks" FontSize=24 TextColor="#FFFFFF" HorizontalOptions=Center />
+    <SkiaLabel FontSize=13 TextColor="#ADB5BD" HorizontalOptions=Fill HorizontalTextAlignment=Center
       Text="SkiaSwitch, SkiaCheckbox, SkiaRadioButton, SkiaButton, SkiaProgress, SkiaSlider — the same tree per card, only ControlStyle changes." />
     <Card Title="Default" Style=Unset />
     <Card Title="Windows — Fluent" Style=Windows />

@@ -1855,6 +1855,50 @@ mod tests {
     }
 
     #[test]
+    fn diagnostics_accept_an_int_literal_at_a_float_site_and_still_reject_an_inexact_one() {
+        // The editor runs the same analysis, so the notation has to be as quiet here as it is at
+        // the command line — a marker under `24` would make the language look like it disagreed
+        // with itself.
+        let accepted = snapshot_for("nx://tenant/ui.nx", "let width: float64 = 24", 1);
+        assert!(
+            accepted.diagnostics().expect("diagnostics")[0]
+                .diagnostics
+                .is_empty(),
+            "an integer literal at a float site should not be marked"
+        );
+
+        // The property binding is the site the notation exists for, so it gets its own check
+        // rather than riding on the annotated `let` above.
+        let property = snapshot_for(
+            "nx://tenant/ui.nx",
+            "external component <B v:float64 />\nlet root() = { <B v=1 /> }",
+            2,
+        );
+        assert!(
+            property.diagnostics().expect("diagnostics")[0]
+                .diagnostics
+                .is_empty(),
+            "an integer literal at a float property binding should not be marked"
+        );
+
+        let inexact = snapshot_for(
+            "nx://tenant/ui.nx",
+            "let width: float64 = 9007199254740993",
+            3,
+        );
+        assert!(
+            inexact.diagnostics().expect("diagnostics")[0]
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic
+                    .code
+                    .as_deref()
+                    .is_some_and(|code| code == "float-literal-not-exact")),
+            "a literal that cannot be represented should still be marked"
+        );
+    }
+
+    #[test]
     fn diagnostics_preserve_stale_version_metadata() {
         let snapshot = snapshot_for("nx://tenant/form.nx", "let count: string = 1", 3);
 
