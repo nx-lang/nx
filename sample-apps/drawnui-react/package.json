@@ -6,11 +6,12 @@
   "description": "A fiddle for NX: source on the left, DrawnUI-drawn output on the right.",
   "scripts": {
     "dev": "vite",
+    "dev:all": "node scripts/dev.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "start": "node server/index.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test \"server/*.test.mjs\" && npm run check-examples",
+    "test": "node --test \"server/*.test.mjs\" \"vite.config.test.mjs\" && npm run check-examples",
     "check-examples": "node scripts/check-examples.mjs",
     "sync-drawnui": "node scripts/sync-drawnui.mjs",
     "generate-catalog": "node scripts/generate-catalog.mjs"

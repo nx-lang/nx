@@ -11,10 +11,10 @@ import { extname, join, normalize, resolve } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { MAX_SOURCE_BYTES, compile } from "./compile.mjs";
+import { COMPILE_PORT } from "./port.mjs";
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const distRoot = join(appRoot, "dist");
-const port = Number(process.env.PORT ?? 5174);
 
 /** Compile requests are bounded by the same limit the compiler applies to source. */
 const MAX_BODY_BYTES = MAX_SOURCE_BYTES + 4096;
@@ -153,6 +153,6 @@ const server = createServer((request, response) => {
   }
 });
 
-server.listen(port, () => {
-  console.log(`drawnui fiddle listening on http://localhost:${port}`);
+server.listen(COMPILE_PORT, () => {
+  console.log(`drawnui fiddle listening on http://localhost:${COMPILE_PORT}`);
 });

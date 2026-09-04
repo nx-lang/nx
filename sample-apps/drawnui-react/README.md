@@ -31,8 +31,11 @@ npm run build     # bundles the SPA into dist/
 npm start         # serves dist/ and POST /api/compile on http://localhost:5174
 ```
 
-For development, `npm run dev` starts Vite on 5173 and proxies `/api` to the compile server, so run
-`npm start` beside it.
+For development, `npm run dev:all` starts both halves: Vite on 5173 and the compile server on 5174,
+which Vite proxies `/api` to. Either one exiting stops the other. `npm run dev` still starts Vite
+alone, for running it beside a compile server of your own — without one, `/api` answers 502 saying
+so rather than leaving compiles to time out. `PORT` moves the compile server and the proxy that
+reaches it together.
 
 ```bash
 npm run typecheck      # tsc over the app and the vendored DrawnUI source
@@ -49,8 +52,10 @@ npm run check-examples  # every example compiles, evaluates, and declares its co
 | `scripts/generate-catalog.mjs` | generates both from the vendored TypeScript |
 | `scripts/sync-drawnui.mjs` | re-copies DrawnUI's source, demo pages and assets |
 | `scripts/check-examples.mjs` | one check over the whole example set |
+| `scripts/dev.mjs` | runs Vite and the compile server together (`npm run dev:all`) |
 | `server/compile.mjs` | NX source + catalog → NX IR, with diagnostics |
 | `server/index.mjs` | serves `dist/` and `POST /api/compile` |
+| `server/port.mjs` | the compile server's port, shared with the Vite proxy and `dev:all` |
 | `src/compile/` | the client's one compile seam |
 | `src/render/` | evaluated NX values → DrawnUI controls |
 | `src/editor/` | Monaco with the repository's own NX TextMate grammar |
