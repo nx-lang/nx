@@ -112,7 +112,6 @@ PrimitiveType ::=
     "string"
     | "int" | "int32" | "int64" | "float32" | "float64"
     | "boolean"
-    | "void"
     | "object"
 
 UserDefinedType ::=
@@ -254,9 +253,11 @@ ContextualName ::=
 SignedNumericLiteral ::=
     "-" ( IntegerLiteral | RealLiteral | HexLiteral )
 
-(* A braced expression can be a single value or muliple, space delimited *)
+(* A braced expression can be empty, a single value, or multiple, space delimited. `{}` is the
+   empty list; only this rule admits zero items, ElementsBracedExpression and
+   EmbedBracedExpression still require at least one. *)
 ValuesBracedExpression ::=
-    "{" ValueExpressions "}"
+    "{" [ValueExpressions] "}"
 
 ValuesExpression ::=
     ( ValueExpression | (ValueListItemExpression)+ )
@@ -318,8 +319,11 @@ BinaryExpression ::=
     ValueExpression ( "+" | "-" | "*" | "/" | "%" | ">" | "<" | ">=" | "<=" | "==" | "!=" | "&&" | "||" ) ValueExpression
 MemberAccess ::=
     ValueExpression "." Identifier  (* includes property/field access and union case shorthand; semantic analysis distinguishes *)
+(* An argument may be a braced value, so a function takes a list the same way a property is bound
+   one. A ValuesBracedExpression is still not a ValueListItemExpression, so `f({{a} b})` does not
+   parse: a list is not an item of a list. *)
 ParenFunctionCall ::=
-    ValueExpression "(" [ ValueExpression { "," ValueExpression } ] ")"
+    ValueExpression "(" [ ValueOrValuesBracedExpression { "," ValueOrValuesBracedExpression } ] ")"
 
 Pattern ::=
     Literal | SignedNumericLiteral | QualifiedName

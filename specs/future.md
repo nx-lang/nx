@@ -186,6 +186,44 @@ If this is revisited in the future:
   uneven spacing and a binary minus operator normally should not have a space
   before it and no space after it.
 
+## Brace Recovery Reports A Closed Brace As Unclosed
+
+Admitting the empty list (`empty-list-spelling`) made `{` immediately followed by `}` a valid parse.
+That is correct for valid source, but it changed the path error recovery takes through *invalid*
+source, and one of the new paths reports a brace that is closed as unclosed:
+
+```
+error src/vscode/samples/tally-survey.nx:31:22: Unclosed brace
+   31 |         if allowBoth {
+      |                      ^ unexpected syntax here
+note: Add a closing '}' to match the opening brace
+```
+
+The brace on line 31 is closed on line 33. The real error is earlier and unrelated — the file uses
+an unsupported positional attribute form, `<Option "Yes, borrowed"/>` — and the file failed to parse
+both before and after the change. But recovery now cascades further from it: that one file went from
+21 diagnostics to 35, which is the whole of the repository corpus's 225 → 239. No valid program is
+affected, and every one of the repository's other 110 `.nx` files produces byte-identical output.
+
+The diagnostic is wrong about the thing it points at, which is worse than reporting less. An author
+whose file has one real error is told to close a brace that is already closed, and the true error is
+buried in the cascade.
+
+If this is revisited in the future:
+- Treat it as an error-recovery problem, not a grammar problem. The grammar change is correct and
+  the conflict sets are unchanged; what regressed is which recovery branch the parser reaches once
+  `{}` is a legal shape.
+- Measure with a whole-corpus before/after diagnostic diff rather than the test suite. The suite
+  stayed green through this; only running every `.nx` file against a baseline binary surfaced it.
+- Prefer suppressing cascaded diagnostics after the first hard parse error in a region over
+  special-casing the brace rule. The count going 21 → 35 is the signal: recovery is re-entering and
+  re-reporting, not finding 14 new distinct problems.
+- Fix the sample. `src/vscode/samples/tally-survey.nx` uses positional element attributes that NX
+  does not support, so it has never parsed. It is a fixture for the TextMate grammar, and the same
+  file is called out under "TextMate Grammar: The Bare-Identifier Catch-All" for 6 invalid prose
+  lines. Making it valid removes the only file in the corpus that exercises this path.
+
+
 ## Type Inference HIR Clone Cleanup
 
 `nx-types::infer` currently clones some HIR nodes to satisfy borrow-checker

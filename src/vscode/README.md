@@ -8,7 +8,7 @@ language.
 - NX file association (`.nx`)
 - TextMate grammar (`source.nx`):
   - Keywords: import, type, let, if/is/else (simple/match/condition-list), for/in, raw
-  - Primitive types: string, int, int32, int64, float32, float64, boolean, void, object
+  - Primitive types: string, int, int32, int64, float32, float64, boolean, object
   - Numbers, strings (single/double), entities, operators
   - Markup elements and attributes, closing/self-closing tags
   - Braced value regions: `{ expr }`, space-delimited `{first second}`, and typed-text `@{first second}`

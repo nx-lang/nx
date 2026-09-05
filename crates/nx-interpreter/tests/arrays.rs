@@ -133,6 +133,116 @@ fn test_empty_array() {
 }
 
 // ============================================================================
+// Braced Call Arguments
+// ============================================================================
+
+/// A braced argument reaches the parameter as a list, at each arity.
+///
+/// The one-item case is the interesting one: `{"only"}` is a scalar, and it becomes a one-element
+/// list by the same parameter coercion a property binding uses, not by anything in the brace.
+#[test]
+fn test_braced_call_arguments_arrive_as_lists() {
+    let source = r#"
+        let echo(xs:string[]): string[] = {xs}
+        let <none /> = { echo({}) }
+        let <one /> = { echo({"only"}) }
+        let <two /> = { echo({"a" "b"}) }
+    "#;
+
+    let none = execute_function(source, "none", vec![]).unwrap_or_else(|e| panic!("{}", e));
+    assert_eq!(none, Value::Array(vec![]));
+
+    let one = execute_function(source, "one", vec![]).unwrap_or_else(|e| panic!("{}", e));
+    assert_eq!(one, Value::Array(vec![Value::String(SmolStr::new("only"))]));
+
+    let two = execute_function(source, "two", vec![]).unwrap_or_else(|e| panic!("{}", e));
+    assert_eq!(
+        two,
+        Value::Array(vec![
+            Value::String(SmolStr::new("a")),
+            Value::String(SmolStr::new("b")),
+        ])
+    );
+}
+
+// ============================================================================
+// Empty Body Content
+// ============================================================================
+
+/// Returns the value bound to `field` in the record a test function returns.
+fn record_field(source: &str, function_name: &str, field: &str) -> Value {
+    let value = execute_function(source, function_name, vec![]).unwrap_or_else(|e| panic!("{}", e));
+    match value {
+        Value::Record { fields, .. } => fields
+            .get(&SmolStr::new(field))
+            .unwrap_or_else(|| panic!("no field {field:?} in {fields:?}"))
+            .clone(),
+        other => panic!("expected a record, got {other:?}"),
+    }
+}
+
+/// A body that was written and produced nothing binds the empty list.
+///
+/// The distinction is between a body and no body: `<Box />` leaves the content property to its
+/// default, while `<Box>{}</Box>` says the content is empty. Collapsing the two loses the value --
+/// the property falls through to null and then fails to coerce at a non-nullable list field.
+#[test]
+fn test_empty_body_content_binds_the_empty_list() {
+    let source = r#"
+        type Box = { content items: string[] }
+        let <empty /> = { <Box>{}</Box> }
+    "#;
+
+    assert_eq!(record_field(source, "empty", "items"), Value::Array(vec![]));
+}
+
+/// At a nullable list field the empty body is still the empty list, not the absence of one.
+///
+/// This is the `T[]?` versus `T?[]` rule the typing requirement states for property position,
+/// which body content must not contradict: it would type check and then mean something else.
+#[test]
+fn test_empty_body_content_at_a_nullable_list_field_is_not_null() {
+    let source = r#"
+        type Box = { content items: string[]? }
+        let <empty /> = { <Box>{}</Box> }
+    "#;
+
+    assert_eq!(record_field(source, "empty", "items"), Value::Array(vec![]));
+}
+
+/// An element with no body at all still leaves the content property alone.
+#[test]
+fn test_absent_body_content_leaves_the_content_property_to_its_default() {
+    let source = r#"
+        type Box = { content items: string[] = {"d"} }
+        let <bare /> = { <Box /> }
+    "#;
+
+    assert_eq!(
+        record_field(source, "bare", "items"),
+        Value::Array(vec![Value::String(SmolStr::new("d"))])
+    );
+}
+
+/// The rule is about the body, not about `{}`.
+///
+/// A `for` that iterates zero times produces no values just as `{}` does, and binds no children
+/// rather than falling back to the declared default. This source contains no `{}` at all, so it is
+/// the case that pins what the distinction is drawn on -- and the one program shape in this change
+/// that means something different than it did.
+#[test]
+fn test_a_body_that_produced_nothing_binds_the_empty_list_over_a_default() {
+    let source = r#"
+        type A = { n: int = 1 }
+        type Box = { content items: object[] = {<A n=9 />} }
+        let empty:string[] = {}
+        let <ran /> = { <Box>for x in empty { <A n=2 /> }</Box> }
+    "#;
+
+    assert_eq!(record_field(source, "ran", "items"), Value::Array(vec![]));
+}
+
+// ============================================================================
 // Nested Arrays (ignored until parser support is added)
 // ============================================================================
 

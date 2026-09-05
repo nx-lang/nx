@@ -122,7 +122,8 @@ fn builtin_type(name: &Name) -> Option<Type> {
         "float32" => Some(Type::float32()),
         "float64" => Some(Type::float64()),
         "boolean" => Some(Type::boolean()),
-        "void" => Some(Type::void()),
+        // `void` is deliberately absent. The unit type is inference-internal: it is what an `if`
+        // with no `else` takes, and nothing in NX source needs to name it.
         _ => None,
     }
 }
@@ -242,7 +243,13 @@ mod tests {
         assert_eq!(builtin_type(&Name::new("float64")), Some(Type::float64()));
         assert_eq!(builtin_type(&Name::new("boolean")), Some(Type::boolean()));
         assert_eq!(builtin_type(&Name::new("string")), Some(Type::string()));
-        assert_eq!(builtin_type(&Name::new("void")), Some(Type::void()));
+    }
+
+    #[test]
+    fn test_void_is_not_a_builtin_type() {
+        // The unit type still exists and still renders as `void`; it is only unspellable.
+        assert_eq!(builtin_type(&Name::new("void")), None);
+        assert_eq!(Type::void().to_string(), "void");
     }
 
     #[test]

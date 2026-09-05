@@ -334,7 +334,7 @@ shortens construction but does not reach a bare `120`, so it solves nothing on i
 and generates `interface LengthFloat64 extends NxRecord<"Length.float64"> {}` — silently wrong, no
 diagnostic. Bare lowercase identifiers in case position are case names, and NX's primitive type
 names are lowercase identifiers. The collision set is closed and tiny (`string int int32 int64 float32
-float64 boolean void object`), so the fix is a rule, not syntax: *a union case may not be named after a
+float64 boolean object`), so the fix is a rule, not syntax: *a union case may not be named after a
 primitive type, and a bare primitive name in case position is a type alternative*. The marked form
 `| (float64)` is the alternative if named types should be admissible as alternatives later.
 

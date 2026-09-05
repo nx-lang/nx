@@ -37,7 +37,7 @@ const KEYWORD_COMPLETIONS: &[&str] = &[
 ];
 
 const PRIMITIVE_TYPE_COMPLETIONS: &[&str] = &[
-    "string", "int", "int32", "int64", "float32", "float64", "boolean", "void", "object",
+    "string", "int", "int32", "int64", "float32", "float64", "boolean", "object",
 ];
 
 /// Built-in type names that are valid in type position but are not primitives.
@@ -1802,6 +1802,21 @@ mod tests {
             vec![DocumentInput::new(uri, source).with_version(version)],
         )
         .expect("snapshot")
+    }
+
+    /// The completion list is the primitive set, and `void` is no longer in it.
+    #[test]
+    fn primitive_type_completions_are_exactly_the_canonical_names() {
+        assert_eq!(
+            PRIMITIVE_TYPE_COMPLETIONS,
+            &["string", "int", "int32", "int64", "float32", "float64", "boolean", "object",]
+        );
+        for absent in ["void", "long", "double", "bool", "f64", "float"] {
+            assert!(
+                !PRIMITIVE_TYPE_COMPLETIONS.contains(&absent),
+                "{absent} is not an NX primitive type name"
+            );
+        }
     }
 
     #[test]

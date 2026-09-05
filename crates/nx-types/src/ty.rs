@@ -38,6 +38,14 @@ pub enum Primitive {
     Boolean,
     /// Void/unit type (functions with no return value)
     Void,
+    /// The bottom type: the type of a value that does not exist.
+    ///
+    /// <para>Inference-internal, like [`Primitive::Void`] and for the same reason — an author
+    /// receives it, they never write it. It has no source spelling and no runtime representation,
+    /// because no value has bottom type. What it exists for is the empty list: `{}` is a
+    /// `never[]`, and `never` being below every type is what makes that one value usable at every
+    /// list-typed site without the site having to be consulted.</para>
+    Never,
 }
 
 impl Primitive {
@@ -52,6 +60,7 @@ impl Primitive {
             Primitive::String => "string",
             Primitive::Boolean => "boolean",
             Primitive::Void => "void",
+            Primitive::Never => "never",
         }
     }
 
@@ -230,6 +239,11 @@ impl Type {
         Type::Primitive(Primitive::Boolean)
     }
 
+    /// Creates the bottom type, which is below every type and which no value inhabits.
+    pub fn never() -> Self {
+        Type::Primitive(Primitive::Never)
+    }
+
     /// Creates a primitive void type.
     pub fn void() -> Self {
         Type::Primitive(Primitive::Void)
@@ -326,6 +340,8 @@ impl Type {
     /// - Exact equality
     /// - Numeric width promotion within the same category (int32 ↔ int64, float32 ↔ float64)
     /// - Subtyping (e.g., T is compatible with T?)
+    /// - The bottom type, which is compatible with every type and which nothing else is compatible
+    ///   with
     /// - Error types are compatible with everything (for error recovery)
     pub fn is_compatible_with(&self, other: &Type) -> bool {
         // Exact equality
@@ -340,6 +356,17 @@ impl Type {
 
         // Unknown types are compatible with everything
         if self.is_unknown() || other.is_unknown() {
+            return true;
+        }
+
+        // The bottom type is below every type, so it satisfies every expectation. Nothing is below
+        // it, so the relation deliberately does not run the other way.
+        //
+        // NX carries two compatibility relations — this structural one and the richer
+        // `InferenceContext::type_satisfies_expected`, which knows about unions and records and
+        // does not delegate here. Both need this case, and `common_supertype` in `semantics.rs`
+        // inherits it through this one.
+        if matches!(self, Type::Primitive(Primitive::Never)) {
             return true;
         }
 

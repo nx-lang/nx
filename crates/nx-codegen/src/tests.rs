@@ -1058,6 +1058,50 @@ let root() = { <SearchBox /> }
     );
 }
 
+/// A written-but-empty body and an absent body mean different things, and the two implementations
+/// of that rule must agree.
+///
+/// <para>The interpreter keys on whether any content expression was written
+/// (`normalize_content_values` in `nx-interpreter`); code generation keys on whether the emitted
+/// content list is non-empty, in three separate places across two crates. Nothing but this test
+/// holds them together, and this is the one shape whose meaning the change altered: `<Box>{}</Box>`
+/// now binds the empty list where it previously could not be written at all.</para>
+#[test]
+fn an_empty_written_body_generates_an_empty_list_and_an_absent_one_takes_the_default() {
+    const WRITTEN: &str = r#"
+        type A = { n: int = 1 }
+        type Box = { content items: object[] = {<A n=9 />} }
+        let root() = { <Box>{}</Box> }
+    "#;
+    const ABSENT: &str = r#"
+        type A = { n: int = 1 }
+        type Box = { content items: object[] = {<A n=9 />} }
+        let root() = { <Box /> }
+    "#;
+
+    let written = artifact_from_source(WRITTEN);
+    let module = generated_file(&written, CodegenTarget::TypeScript, "m0_main.ts");
+    assert!(
+        module.contains("items: []"),
+        "a written-but-empty body should generate an empty list, got: {module}"
+    );
+    assert_json_values_eq(
+        &interpreter_json_root(WRITTEN),
+        r#"{"$type":"Box","items":[]}"#,
+    );
+
+    let absent = artifact_from_source(ABSENT);
+    let module = generated_file(&absent, CodegenTarget::TypeScript, "m0_main.ts");
+    assert!(
+        !module.contains("items: []"),
+        "an absent body should leave the declared default, got: {module}"
+    );
+    assert_json_values_eq(
+        &interpreter_json_root(ABSENT),
+        r#"{"$type":"Box","items":[{"$type":"A","n":9}]}"#,
+    );
+}
+
 #[test]
 fn emits_typescript_with_type_syntax_and_runtime_helpers() {
     let artifact = artifact_from_source("let root() = { \"hello\" }");

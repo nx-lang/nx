@@ -1,9 +1,4 @@
-# braced-value-sequences Specification
-
-## Purpose
-TBD - created by archiving change support-multi-value-braced-expressions. Update Purpose after archive.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Values braced expressions support singleton and space-delimited list forms
 The parser SHALL recognize `ValuesBracedExpression` as `{ ... }` containing either nothing at all, a
@@ -107,23 +102,6 @@ inside another brace, so `f({{a} b})` SHALL be a syntax error as well.
 #### Scenario: An empty interpolation is still rejected
 - **WHEN** a file contains `component <N /> = { <p:html>Hi @{}</p> }`
 - **THEN** the parser SHALL report a parse error
-
-### Requirement: Non-list-safe expressions must be parenthesized inside braced lists
-A braced value sequence SHALL accept bare list items only from the `ValueListItemExpression`
-subset. Expressions outside that subset, including binary and prefix-unary expressions, MUST be
-parenthesized before they can appear as list items.
-
-#### Scenario: Parenthesized binary expression is accepted as a list item
-- **WHEN** a file contains `let value = {(a + b) c}`
-- **THEN** the parser SHALL accept the braced list and treat `(a + b)` and `c` as separate ordered items
-
-#### Scenario: Bare binary expression in a list is rejected
-- **WHEN** a file contains `let value = {a + b c}`
-- **THEN** the parser SHALL report a parse error because `a + b` is not parenthesized as a list item
-
-#### Scenario: Singleton binary expression remains legal
-- **WHEN** a file contains `let value = {a - b}`
-- **THEN** the parser SHALL accept the braced expression as a single `ValueExpression`
 
 ### Requirement: Values braced expressions infer scalar or list types from source arity
 A `ValuesBracedExpression` with one source item SHALL infer to that item's type. A
@@ -272,17 +250,3 @@ default answers an absent body, and a body that produced nothing is not one.
 - **THEN** the system SHALL report a diagnostic that the element type cannot be determined
 - **AND** the diagnostic SHALL direct the author to annotate the binding
 - **AND** `value` SHALL NOT infer as `object[]`
-
-### Requirement: Multi-item braced value lists use external component inheritance for common item types
-
-When a `ValuesBracedExpression` has more than one item and type inference computes the most specific
-common item type between two named types that both resolve to external component contracts, the
-system SHALL consider the declared external component `extends` ancestry when determining whether
-one named type subsumes the other or when computing their shared named supertype. This SHALL apply
-in addition to the existing record inheritance rules used for record-named types.
-
-#### Scenario: Sibling external components unify to shared abstract base for annotated list
-
-- **WHEN** a file contains `abstract external component <Question label:string /> external component <ShortTextQuestion extends Question /> external component <LongTextQuestion extends Question /> let questions: Question[] = { <ShortTextQuestion label={"Name"} /> <LongTextQuestion label={"Details"} /> }`
-- **THEN** type checking SHALL report no errors for `questions`
-- **AND** analysis SHALL treat the braced list elements as compatible with `Question`

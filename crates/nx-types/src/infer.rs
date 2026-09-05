@@ -328,8 +328,11 @@ impl<'a> InferenceContext<'a> {
             // Arrays
             ast::Expr::Array { elements, span } => {
                 if elements.is_empty() {
-                    // Empty array - need more context to infer element type
-                    Type::array(self.fresh_var())
+                    // An empty list is a list of the bottom type. That is its type outright, not a
+                    // placeholder for one the site has yet to supply: `never` is below every type,
+                    // so `never[]` is below every list type, and the one value is usable at every
+                    // list-typed site without anything having to be resolved later.
+                    Type::array(Type::never())
                 } else {
                     let elem_tys: Vec<_> = elements.iter().map(|e| self.infer_expr(*e)).collect();
                     let item_ty = self.common_sequence_item_type(&elem_tys, *span);
@@ -520,6 +523,22 @@ impl<'a> InferenceContext<'a> {
             );
             expected
         } else {
+            // The same rule as an unannotated value binding, at the other place a binding's type
+            // can be fixed by an empty list. `never[]` is a type this function could simply have;
+            // it is reported because a signature saying only "a list of nothing in particular"
+            // tells a caller nothing, and the annotation is where that gets said.
+            if Self::mentions_never(&body_ty) {
+                self.error(
+                    "empty-list-element-type-unknown",
+                    format!(
+                        "Cannot determine the element type of the empty list returned by '{}'; \
+                         annotate the return type with the list type you mean, as in \
+                         'let {}(): string[] = {{}}'",
+                        func.name, func.name
+                    ),
+                    func.span,
+                );
+            }
             body_ty.clone()
         };
 
@@ -989,6 +1008,9 @@ impl<'a> InferenceContext<'a> {
         arg_tys: &[Type],
         span: nx_diagnostics::TextSpan,
     ) -> Type {
+        // A call that cannot be checked has already reported what is wrong with it. Adding a
+        // second diagnostic about its arguments would point the author at something downstream of
+        // the thing they actually have to fix.
         if func_ty.is_error() {
             return Type::Error;
         }
@@ -2180,6 +2202,9 @@ impl<'a> InferenceContext<'a> {
             return self.infer_expr(exprs[0]);
         }
 
+        // Content is spliced, so what an item contributes is its element type. An empty list
+        // contributes `never`, which the join discards in favour of its siblings -- and a sequence
+        // of nothing but empty lists stays a `never[]`, which is what it is.
         let item_types: Vec<_> = exprs
             .iter()
             .map(|expr_id| match self.infer_expr(*expr_id) {
@@ -2445,6 +2470,7 @@ impl<'a> InferenceContext<'a> {
         }
 
         let actual = self.normalized_sequence_type(content, span);
+
         if self.type_satisfies_expected_with_coercion(&actual, expected) {
             return true;
         }
@@ -2529,7 +2555,15 @@ impl<'a> InferenceContext<'a> {
         if Self::is_null_literal_type(actual) {
             actual_display = "null".to_string();
         }
-        let message = if matches!(actual, Type::Array(_)) && !matches!(expected, Type::Array(_)) {
+        // `never` has no source spelling, so rendering an empty list's type directly would put a
+        // name the author cannot write in front of someone who wrote `{}`.
+        if let Some(rendered) = Self::empty_list_display(actual) {
+            actual_display = rendered;
+        }
+        let message = if matches!(actual, Type::Array(_))
+            && !Self::is_empty_list_type(actual)
+            && !matches!(expected, Type::Array(_))
+        {
             format!(
                 "{} expects {}, found list {}",
                 context, expected_display, actual_display
@@ -2928,6 +2962,27 @@ impl<'a> InferenceContext<'a> {
                                 format!("Initializer for value '{}'", value.name),
                             );
                             expected
+                        } else if Self::mentions_never(&actual) {
+                            // `never[]` is a real type and this binding could simply take it. It is
+                            // reported anyway, and only here, where the binding has a name to put
+                            // in the message: a binding whose type is fixed by an empty list says
+                            // nothing about what it is a list of, and the next reader has no way to
+                            // find out. The annotation is required for legibility, not because the
+                            // system cannot type it, so the binding keeps the type it has rather
+                            // than poisoning to `Error` — exactly as the function-return arm in
+                            // `infer_function` does. A legibility rule reports once and leaves the
+                            // program otherwise typed.
+                            self.error(
+                                "empty-list-element-type-unknown",
+                                format!(
+                                    "Cannot determine the element type of the empty list bound to \
+                                     '{}'; annotate the binding with the list type you mean, as in \
+                                     'let {}: string[] = {{}}'",
+                                    value.name, value.name
+                                ),
+                                value.span,
+                            );
+                            actual
                         } else {
                             actual
                         }
@@ -3279,6 +3334,9 @@ impl<'a> InferenceContext<'a> {
 
         match (actual, expected) {
             (_, Type::Nullable(_)) if Self::is_null_literal_type(actual) => true,
+            // The bottom type satisfies every expectation, which is what makes it the bottom.
+            // Reached mostly as `never[]` against `T[]`, through the covariant array case below.
+            (Type::Primitive(Primitive::Never), _) => true,
             (Type::Named(actual_name), Type::Named(expected_name))
                 if expected_name.name.as_str() == "Element" =>
             {
@@ -3311,6 +3369,49 @@ impl<'a> InferenceContext<'a> {
         matches!(ty, Type::Nullable(inner) if matches!(inner.as_ref(), Type::Variable(_)))
     }
 
+    /// True for the type an empty braced list infers: a list of the bottom type. Nothing else
+    /// produces that shape — every non-empty list has an item type to join.
+    fn is_empty_list_type(ty: &Type) -> bool {
+        matches!(ty, Type::Array(inner) if matches!(inner.as_ref(), Type::Primitive(Primitive::Never)))
+    }
+
+    /// True when `never` occurs anywhere in this type.
+    ///
+    /// <para>Only an empty list puts it there, so this asks whether the type was fixed by one. It
+    /// looks through a function's return type as well as through lists and nullables, because an
+    /// unannotated `let f(x) = {}` is a binding whose type an empty list decided just as much as
+    /// `let a = {}` is.</para>
+    fn mentions_never(ty: &Type) -> bool {
+        match ty {
+            Type::Primitive(Primitive::Never) => true,
+            Type::Array(inner) | Type::Nullable(inner) => Self::mentions_never(inner),
+            Type::Function { ret, .. } => Self::mentions_never(ret),
+            _ => false,
+        }
+    }
+
+    /// Renders a type built around an empty list as the source spells it.
+    ///
+    /// <para>`None` for a type that holds no empty list, so a caller keeps its ordinary rendering.
+    /// `never[]` is accurate but is not what the author wrote, and it names a type they cannot
+    /// write; `{}` is. The search goes to any depth because an empty list can sit inside a list
+    /// the source wrapped around it — a `for` whose body is `{}` reads as `{}[]`.</para>
+    fn empty_list_display(ty: &Type) -> Option<String> {
+        if Self::is_empty_list_type(ty) {
+            return Some("{}".to_string());
+        }
+
+        match ty {
+            Type::Array(inner) => {
+                Self::empty_list_display(inner).map(|inner| format!("{}[]", inner))
+            }
+            Type::Nullable(inner) => {
+                Self::empty_list_display(inner).map(|inner| format!("{}?", inner))
+            }
+            _ => None,
+        }
+    }
+
     fn type_satisfies_expected_with_coercion(&self, actual: &Type, expected: &Type) -> bool {
         if self.type_satisfies_expected(actual, expected) {
             return true;
@@ -3333,6 +3434,12 @@ impl<'a> InferenceContext<'a> {
 
     fn common_supertype(&self, lhs: &Type, rhs: &Type) -> Type {
         match (lhs, rhs) {
+            // The bottom type is the identity of the join: it is below the other side already, so
+            // the other side is the least type above both. This is what lets one arm of an `if` be
+            // `{}` and the other a `string[]` without the join climbing to `object`.
+            (Type::Primitive(Primitive::Never), other) => other.clone(),
+            (other, Type::Primitive(Primitive::Never)) => other.clone(),
+
             (Type::Array(lhs_inner), Type::Array(rhs_inner)) => {
                 Type::array(self.common_supertype(lhs_inner, rhs_inner))
             }

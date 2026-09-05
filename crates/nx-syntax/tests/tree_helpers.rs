@@ -50,3 +50,18 @@ pub fn collect_kinds<'tree>(
         collect_kinds(&child, kind, out);
     }
 }
+
+/// True when any node in the subtree was inserted by error recovery rather than read from source.
+///
+/// Distinct from `is_error`: tree-sitter recovers a missing token with a zero-width `MISSING` node,
+/// which is not an `ERROR` node, so a tree can look well-formed by kind alone and still be one the
+/// parser repaired.
+#[allow(dead_code)]
+pub fn contains_missing(node: &SyntaxNode) -> bool {
+    if node.raw().is_missing() {
+        return true;
+    }
+
+    node.children_with_tokens()
+        .any(|child| contains_missing(&child))
+}

@@ -14,8 +14,14 @@ use std::fmt::Write;
 /// Pretty print a value as NX source.
 ///
 /// Fails for a value with no NX spelling rather than emitting output that does not read back.
-/// Two values are in that position today: an empty list, because `items={}` is a syntax error, and
-/// [`Value::ActionHandler`], which has no source form at all.
+/// Two values are in that position: [`Value::ActionHandler`], which has no source form at all, and
+/// a list nested directly inside another list, which has none because a braced value is not an item
+/// of a braced value.
+///
+/// An empty list is not among them — it is emitted as `{}`, on its own and in property position,
+/// at every list-typed site, including one
+/// whose declared default is itself empty, so that rendering never depends on reasoning about
+/// defaults. Emptiness is not what decides the nested case: `{{"a"}}` is as ungrammatical as `{{}}`.
 pub fn format_value(value: &Value) -> Result<String, String> {
     let mut output = String::new();
     format_value_inner(value, &mut output, 0)?;
@@ -37,11 +43,21 @@ fn format_value_inner(value: &Value, output: &mut String, indent: usize) -> Resu
             write!(output, "{}.{}", union, case).unwrap();
         }
 
-        // A top-level sequence is a run of values, one per line.
+        // A top-level sequence is a run of values, one per line -- except an empty one, which has
+        // no lines to be a run of. Emitting nothing there would read back as no value rather than
+        // as the empty list, so the braced spelling is used, the same one property position uses.
+        Value::Array(elements) if elements.is_empty() => output.push_str("{}"),
         Value::Array(elements) => {
             for (i, elem) in elements.iter().enumerate() {
                 if i > 0 {
                     output.push('\n');
+                }
+                // One value per line cannot say where an inner list ends, so a list of lists
+                // would render as the flattened run of its elements and read back as a different
+                // value. It has no spelling here for the same reason it has none in property
+                // position, and is reported the same way.
+                if matches!(elem, Value::Array(_)) {
+                    return Err(unspellable_nested_list());
                 }
                 format_value_inner(elem, output, indent)?;
             }
@@ -112,13 +128,17 @@ fn format_property_value(value: &Value, output: &mut String, indent: usize) -> R
         }
         // A sequence needs them.
         Value::Array(elements) => {
-            if elements.is_empty() {
-                return Err(unspellable_empty_list());
-            }
             output.push('{');
             for (i, element) in elements.iter().enumerate() {
                 if i > 0 {
                     output.push(' ');
+                }
+                // A brace inside a brace does not parse: `value_list_item_expression` does not
+                // admit a `ValuesBracedExpression`, so `{{"a"}}` is a syntax error and so is `{{}}`.
+                // A list of lists therefore has no NX spelling at any depth, empty or not, and is
+                // reported rather than rendered as source that cannot be read back.
+                if matches!(element, Value::Array(_)) {
+                    return Err(unspellable_nested_list());
                 }
                 format_property_value(element, output, indent)?;
             }
@@ -130,14 +150,14 @@ fn format_property_value(value: &Value, output: &mut String, indent: usize) -> R
     Ok(())
 }
 
-fn unspellable_empty_list() -> String {
-    "Cannot format an empty list: NX has no spelling for one (`items={}` is a syntax error), so \
-     any output here would read back as a different value"
-        .to_string()
-}
-
 fn unspellable_action_handler() -> String {
     "Cannot format an action handler: it has no NX source spelling".to_string()
+}
+
+fn unspellable_nested_list() -> String {
+    "Cannot format a list nested inside a list: NX has no source spelling for it, because a braced \
+     value is not admitted as an item of another braced value"
+        .to_string()
 }
 
 /// Renders a float so it reads back as a real literal rather than an integer one.
@@ -459,18 +479,212 @@ mod tests {
         );
     }
 
-    /// An empty list has no NX spelling — `items={}` is a syntax error — so it must fail rather
-    /// than emit `items="..."`, which is a `string` where a list was meant.
+    /// Evaluates a source's single element function and returns the value it produces.
+    fn evaluate(source: &str, function: &str) -> Value {
+        let parsed = nx_syntax::parse_str(source, "roundtrip.nx");
+        assert!(
+            parsed.errors.is_empty(),
+            "rendered output should parse, got: {:?}\nsource:\n{}",
+            parsed.errors,
+            source
+        );
+        let module = nx_hir::lower(parsed.root().expect("root"), nx_hir::SourceId::new(0));
+        nx_interpreter::Interpreter::new()
+            .execute_function(&module, function, Vec::new())
+            .unwrap_or_else(|e| panic!("rendered output should evaluate, got: {e}"))
+    }
+
+    /// Superseded `test_format_empty_list_property_has_no_readable_spelling`: `{}` is the spelling.
     #[test]
-    fn test_format_empty_list_property_has_no_readable_spelling() {
+    fn test_format_empty_list_property_emits_the_empty_braced_form() {
         let mut fields = FxHashMap::default();
         fields.insert(SmolStr::new("items"), Value::Array(Vec::new()));
         let value = Value::Record {
-            type_name: nx_hir::Name::new("div"),
+            type_name: nx_hir::Name::new("Box"),
             fields,
         };
 
-        let error = format_value(&value).expect_err("an empty list has no NX spelling");
-        assert!(error.contains("empty list"), "got: {error}");
+        let formatted = formatted(&value);
+        assert!(formatted.contains("items={}"), "got: {formatted}");
+        assert!(!formatted.contains("items=\""), "got: {formatted}");
+    }
+
+    /// The point of the spelling: what is rendered has to read back as the value it came from.
+    #[test]
+    fn test_format_empty_list_round_trips() {
+        let mut fields = FxHashMap::default();
+        fields.insert(SmolStr::new("items"), Value::Array(Vec::new()));
+        let value = Value::Record {
+            type_name: nx_hir::Name::new("Box"),
+            fields,
+        };
+
+        let source = format!(
+            "type Box = {{ items: string[] }}\nlet <make /> = {{ {} }}\n",
+            formatted(&value)
+        );
+
+        let result = nx_types::check_str(&source, "roundtrip.nx");
+        assert!(
+            result.errors().is_empty(),
+            "formatted output should type check, got: {:?}\nsource:\n{}",
+            result.errors(),
+            source
+        );
+
+        match evaluate(&source, "make") {
+            Value::Record { fields, .. } => match fields.get(&SmolStr::new("items")) {
+                Some(Value::Array(items)) => {
+                    assert!(items.is_empty(), "expected no items, got: {items:?}")
+                }
+                other => panic!("expected an empty list, got: {other:?}"),
+            },
+            other => panic!("expected a record, got: {other:?}"),
+        }
+    }
+
+    /// Omission is only sound where the declared default is itself empty. This is the case that
+    /// rules it out as a general strategy: omitting the field here re-reads as the default.
+    #[test]
+    fn test_format_empty_list_at_a_field_with_a_non_empty_default_still_renders() {
+        let mut fields = FxHashMap::default();
+        fields.insert(SmolStr::new("items"), Value::Array(Vec::new()));
+        let value = Value::Record {
+            type_name: nx_hir::Name::new("Box"),
+            fields,
+        };
+
+        let source = format!(
+            "type Box = {{ items: string[] = {{\"a\" \"b\"}} }}\nlet <make /> = {{ {} }}\n",
+            formatted(&value)
+        );
+
+        let result = nx_types::check_str(&source, "roundtrip.nx");
+        assert!(
+            result.errors().is_empty(),
+            "formatted output should type check, got: {:?}\nsource:\n{}",
+            result.errors(),
+            source
+        );
+
+        match evaluate(&source, "make") {
+            Value::Record { fields, .. } => match fields.get(&SmolStr::new("items")) {
+                Some(Value::Array(items)) => assert!(
+                    items.is_empty(),
+                    "the rendered empty list must not re-read as the declared default, got: {items:?}"
+                ),
+                other => panic!("expected an empty list, got: {other:?}"),
+            },
+            other => panic!("expected a record, got: {other:?}"),
+        }
+    }
+
+    /// An action handler is still unspellable, so the failure path is still exercised.
+    #[test]
+    fn test_format_action_handler_is_still_unspellable() {
+        let mut module = nx_hir::LoweredModule::new(nx_hir::SourceId::new(0));
+        let body = module.alloc_expr(nx_hir::ast::Expr::Literal(nx_hir::ast::Literal::Int(0)));
+        let value = Value::ActionHandler {
+            module_id: nx_interpreter::RuntimeModuleId::new(0),
+            component: nx_hir::Name::new("Button"),
+            emit: nx_hir::Name::new("Click"),
+            action_name: nx_hir::Name::new("Button.Click"),
+            action_module_identity: "test.nx".to_string(),
+            body,
+            captured: FxHashMap::default(),
+        };
+
+        let error = format_value(&value).expect_err("an action handler has no NX spelling");
+        assert!(error.contains("action handler"), "got: {error}");
+    }
+
+    /// A list with no elements has a spelling on its own, not only in property position.
+    ///
+    /// The top-level form is a run of values one per line, and an empty run is no output at all,
+    /// which reads back as no value rather than as the empty list. The braced spelling is the one
+    /// thing that reads back as what was rendered.
+    #[test]
+    fn test_format_top_level_empty_list_is_the_braced_form() {
+        let rendered =
+            format_value(&Value::Array(Vec::new())).expect("an empty list has an NX spelling");
+        assert_eq!(rendered, "{}");
+    }
+
+    /// One value per line cannot say where an inner list ends, so a list of lists would render as
+    /// the flattened run of its elements and read back as a different value. It is reported here
+    /// for the same reason it is reported in property position.
+    #[test]
+    fn test_format_top_level_nested_list_is_unspellable() {
+        let value = Value::Array(vec![
+            Value::Array(vec![Value::String(SmolStr::new("a"))]),
+            Value::Array(vec![Value::String(SmolStr::new("b"))]),
+        ]);
+
+        let error = format_value(&value).expect_err("a nested list has no NX spelling");
+        assert!(error.contains("nested inside a list"), "got: {error}");
+    }
+
+    /// A list of lists is reported, not rendered.
+    ///
+    /// The inner braces would be emitted as `{{}}`, and `value_list_item_expression` does not admit
+    /// a `ValuesBracedExpression`, so that output is a syntax error. Giving the empty list a
+    /// spelling removed the `is_empty` guard that used to reject this case for an unrelated reason;
+    /// the case is caught on its own terms instead.
+    #[test]
+    fn test_format_empty_list_nested_in_a_list_is_unspellable() {
+        let mut fields = FxHashMap::default();
+        fields.insert(
+            SmolStr::new("rows"),
+            Value::Array(vec![Value::Array(Vec::new())]),
+        );
+        let value = Value::Record {
+            type_name: nx_hir::Name::new("Grid"),
+            fields,
+        };
+
+        let error = format_value(&value).expect_err("a nested list has no NX spelling");
+        assert!(error.contains("nested inside a list"), "got: {error}");
+    }
+
+    /// Emptiness is not what makes the nested case unspellable, so a non-empty inner list is
+    /// reported the same way. This one was already unrenderable before the empty list had a
+    /// spelling; it was simply emitted rather than reported.
+    #[test]
+    fn test_format_non_empty_list_nested_in_a_list_is_unspellable() {
+        let mut fields = FxHashMap::default();
+        fields.insert(
+            SmolStr::new("rows"),
+            Value::Array(vec![Value::Array(vec![Value::String(SmolStr::new("a"))])]),
+        );
+        let value = Value::Record {
+            type_name: nx_hir::Name::new("Grid"),
+            fields,
+        };
+
+        let error = format_value(&value).expect_err("a nested list has no NX spelling");
+        assert!(error.contains("nested inside a list"), "got: {error}");
+    }
+
+    /// The guard is about a list directly inside a list. A record between them has an element form,
+    /// so a list of records that themselves hold lists still renders.
+    #[test]
+    fn test_format_list_of_records_holding_lists_still_renders() {
+        let mut row = FxHashMap::default();
+        row.insert(SmolStr::new("cells"), Value::Array(Vec::new()));
+        let mut fields = FxHashMap::default();
+        fields.insert(
+            SmolStr::new("rows"),
+            Value::Array(vec![Value::Record {
+                type_name: nx_hir::Name::new("Row"),
+                fields: row,
+            }]),
+        );
+        let value = Value::Record {
+            type_name: nx_hir::Name::new("Grid"),
+            fields,
+        };
+
+        let rendered = formatted(&value);
+        assert!(rendered.contains("cells={}"), "got: {rendered}");
     }
 }

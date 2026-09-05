@@ -239,20 +239,22 @@ fn test_null_literal() {
     assert_eq!(result, Value::Null);
 }
 
-/// Test void value (unit)
+/// Test the empty braced body
+///
+/// Superseded `test_void_value`, which read `{ }` as an element that produces nothing. `{}` is now
+/// the spelling of the empty list, so an empty braced body produces one. Type checking still
+/// rejects this particular source, because an unannotated binding supplies no element type, but the
+/// interpreter runs below that and evaluates the list it was given.
 #[test]
-fn test_void_value() {
-    // An element that doesn't return a value should return void/null
+fn test_empty_braced_body_is_an_empty_list() {
     let source = r#"
-        let <void_elem /> = { }
+        let <empty_elem /> = { }
     "#;
 
-    let result = execute_function(source, "void_elem", vec![]);
-    // Accept either Null or an error (depending on implementation)
+    let result = execute_function(source, "empty_elem", vec![]).unwrap_or_else(|e| panic!("{}", e));
     match result {
-        Ok(Value::Null) => (),
-        Err(_) => (),
-        Ok(other) => panic!("Expected Null or error, got {:?}", other),
+        Value::Array(items) => assert!(items.is_empty(), "Expected no items, got {:?}", items),
+        other => panic!("Expected an empty array, got {:?}", other),
     }
 }
 

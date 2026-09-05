@@ -2385,7 +2385,7 @@ impl Interpreter {
         }
 
         let content_values = self.eval_content_expressions(module, ctx, &element.content)?;
-        let normalized_content = self.normalize_content_values(content_values);
+        let normalized_content = self.normalize_content_values(&element.content, content_values);
 
         if let Some((target_module, union_def, case)) =
             self.resolve_union_case_definition(module, tag_name)
@@ -2676,9 +2676,23 @@ impl Interpreter {
         Ok(values)
     }
 
-    fn normalize_content_values(&self, content_values: Vec<Value>) -> Option<Value> {
+    /// Reduces evaluated body content to the value its content property is bound to.
+    ///
+    /// <para>`None` means the element had no body, so the content property keeps its default. A
+    /// body that was written and produced no values is a different thing: it binds the empty list,
+    /// so `<Box>{}</Box>` means what `<Box items={} />` means. The rule is about the body, not
+    /// about `{}` -- a `for` that iterates zero times produces no values too, and binds no children
+    /// rather than falling back to the declared default. An `if` that takes no branch is not among
+    /// them: it evaluates to null and never reaches the zero-value case. Only the two cases are
+    /// told apart here; the values themselves are already spliced.</para>
+    fn normalize_content_values(
+        &self,
+        content_exprs: &[ExprId],
+        content_values: Vec<Value>,
+    ) -> Option<Value> {
         match content_values.len() {
-            0 => None,
+            0 if content_exprs.is_empty() => None,
+            0 => Some(Value::Array(Vec::new())),
             1 => content_values.into_iter().next(),
             _ => Some(Value::Array(content_values)),
         }

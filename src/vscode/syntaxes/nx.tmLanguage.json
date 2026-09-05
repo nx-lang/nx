@@ -249,7 +249,7 @@
       "patterns": [
         {
           "name": "support.type.primitive.nx",
-          "match": "\\b(?:string|int|int32|int64|float32|float64|boolean|void|object)\\b"
+          "match": "\\b(?:string|int|int32|int64|float32|float64|boolean|object)\\b"
         },
         {
           "name": "keyword.operator.type-modifier.nx",
@@ -2312,7 +2312,7 @@
       "comment": "The type after an annotation colon, with its sequence and optional suffixes. Anchored with \\G so it only matches immediately after the colon.",
       "patterns": [
         {
-          "match": "\\G\\s*(string|int32|int64|int|float32|float64|boolean|void|object)(?![A-Za-z0-9_-])((?:\\[\\]|\\?)*)",
+          "match": "\\G\\s*(string|int32|int64|int|float32|float64|boolean|object)(?![A-Za-z0-9_-])((?:\\[\\]|\\?)*)",
           "captures": {
             "1": {
               "name": "support.type.primitive.nx"

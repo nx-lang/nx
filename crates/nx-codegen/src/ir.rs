@@ -1825,6 +1825,7 @@ fn primitive_name(primitive: Primitive) -> &'static str {
         Primitive::String => "string",
         Primitive::Boolean => "boolean",
         Primitive::Void => "void",
+        Primitive::Never => "never",
     }
 }
 

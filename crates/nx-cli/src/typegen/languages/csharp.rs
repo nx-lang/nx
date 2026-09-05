@@ -763,11 +763,8 @@ fn csharp_type_name_inner(
             is_reference: false,
             is_nullable: false,
         },
-        "void" => CSharpType {
-            text: "void".to_string(),
-            is_reference: false,
-            is_nullable: false,
-        },
+        // `void` is not an NX type name any more, so a `void` here is a user declaration
+        // and must resolve to the type they declared rather than to the host's `void`.
         "object" | "unknown" | "error" => CSharpType {
             text: "object".to_string(),
             is_reference: true,
@@ -937,11 +934,8 @@ fn csharp_imported_alias_target_name(
             is_reference: false,
             is_nullable: false,
         },
-        "void" => CSharpType {
-            text: "void".to_string(),
-            is_reference: false,
-            is_nullable: false,
-        },
+        // `void` is not an NX type name any more, so a `void` here is a user declaration
+        // and must resolve to the type they declared rather than to the host's `void`.
         "object" | "unknown" | "error" => CSharpType {
             text: "object".to_string(),
             is_reference: true,
@@ -1031,7 +1025,6 @@ fn imported_alias_target_uses_dependency_namespace(ty: &TypeRef) -> bool {
                 | "float32"
                 | "float64"
                 | "boolean"
-                | "void"
                 | "object"
                 | "unknown"
                 | "error"

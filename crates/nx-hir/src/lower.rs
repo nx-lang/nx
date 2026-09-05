@@ -405,6 +405,15 @@ impl LoweringContext {
     fn lower_sequence_expr_from_items(&mut self, node: SyntaxNode) -> ExprId {
         let items: Vec<_> = node.children().collect();
         match items.len() {
+            // `{}` is the empty list. Only the values brace admits zero items grammatically; a
+            // zero-item elements or embed brace can only be the product of error recovery, and
+            // stays an error expression so the recovered tree does not read as a valid empty list.
+            0 if node.kind() == SyntaxKind::VALUES_BRACED_EXPRESSION => {
+                self.alloc_expr(Expr::Array {
+                    elements: Vec::new(),
+                    span: node.span(),
+                })
+            }
             0 => self.error_expr(node.span()),
             1 => self.lower_expr(items[0]),
             _ => {

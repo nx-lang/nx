@@ -198,7 +198,7 @@ diagnostics instead of being dropped. DTO/type-only output remains separate unde
 - ✅ UTF-8 validation and encoding detection
 
 ### Type System (nx-types)
-- ✅ Primitive types: `int`, `int32`, `int64`, `float32`, `float64`, `string`, `boolean`, `void`
+- ✅ Primitive types: `int`, `int32`, `int64`, `float32`, `float64`, `string`, `boolean`, `object`
 - ✅ Compound types: arrays (`T[]`), functions, nullable (`T?`)
 - ✅ Compatibility-based type checking
 - ✅ Type inference for expressions

@@ -166,6 +166,10 @@
         {
           "type": "value_expression",
           "named": true
+        },
+        {
+          "type": "values_braced_expression",
+          "named": true
         }
       ]
     }
@@ -2295,7 +2299,7 @@
     "fields": {},
     "children": {
       "multiple": true,
-      "required": true,
+      "required": false,
       "types": [
         {
           "type": "value_expression",
@@ -2620,10 +2624,6 @@
   },
   {
     "type": "type",
-    "named": false
-  },
-  {
-    "type": "void",
     "named": false
   },
   {
