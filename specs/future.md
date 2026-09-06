@@ -400,3 +400,130 @@ If this is revisited in the future:
 - Whatever is chosen has to land in the interpreter too. Parity between the interpreter and the IR
   runtimes is asserted value-for-value by `runtime/typescript/test/emitted-ir.test.mjs`, so a change
   to the stamped form in one is a change in both.
+
+## Built-In Element Content And Property Values Are Never Type-Checked
+
+An element expression is type-checked only where its tag resolves to a declaration. For a tag that
+matches no function, component, record, or union, `infer_element_expression`
+(`crates/nx-types/src/infer.rs:1332`) falls through to `nominal_named_type` without ever reaching the
+element's properties or its content — so nothing under a built-in tag is inferred. Body content has a
+second, narrower gate on top of that: `check_element_bindings`
+(`crates/nx-types/src/infer.rs:1874`) hands content to `check_content_binding` only where the tag
+declares a content property, so even a declared component's body is inferred only when it takes one.
+
+The effect is easiest to see through the editor, which reports a type only where the checker recorded
+one. In a workspace where `<P m={x} />` reports `string` for `x`:
+
+- `<div id={x} />` reports nothing — a property value under a built-in tag.
+- `<div>{x}</div>` reports nothing — content under a built-in tag.
+- `<div>hello</div>` reports nothing on the text, though the text run lowers as a string literal with
+  a real span.
+- `let <Panel width:int /> = <div>{width}</div>` reports nothing on `width`, while the same reference
+  in a function body reports `int`.
+
+Hover being conservative there is the visible symptom, not the problem. The problem is that these
+expressions are never checked at all: a name that does not resolve, or a value of the wrong type,
+passes through a built-in tag's properties and body without a diagnostic.
+
+If this is revisited in the future:
+- Treat it as "every lowered expression is visited exactly once" rather than as an editor fix. The
+  language service reads whatever the checker recorded and needs no change of its own.
+- Expect new diagnostics on code that reports none today, and budget for triaging them. That is the
+  real cost of the change and the reason it did not ride along with an editor change.
+- Watch for double-reporting where content is already checked against a declared content property —
+  the new visit must not re-check what `check_content_binding` already checked.
+- Note that this closes the second half of "Findings not fixed" in the `resolve-editor-positions`
+  review; the first half, literal spans, was fixed in that change.
+
+## Editor Hover: The Positions Still Unanswered
+
+`resolve-editor-positions` made hover answer at declarations, references, expressions, literals,
+component tags, property names, and type annotations. The positions below still report nothing, each
+for its own reason and none of them the same reason as the section above. Each was measured against
+the tree that change left behind, on a fixture checked to produce no diagnostic first — hover
+declines inside a syntax error by design, so a fixture that does not parse reports nothing for a
+reason that has nothing to do with the position.
+
+- **A field name in a record or action declaration.** `<Panel ti|tle="x" />` reports
+  ``property `title` `` and its declared type, but `a|:int` inside `type R = { a:int }` reports
+  nothing. The property-name context the resolver produces is scoped to an element's opening tag; the
+  declaration side was never given one. The annotation next to it does hover, which makes the gap
+  look arbitrary to a reader.
+- **Declaration details that are the bare kind word.** `Declaration::detail` is `"union"` for a
+  union, `"record"` for a record, `"action"` for an action, and `"value"` for a value with no
+  annotation (`crates/nx-language-service/src/lib.rs`). Hover suppresses the second line rather than
+  repeating the kind under itself, so `type Mode = light | dark` hovers as ``union `Mode` `` and
+  nothing more. Enriching those details the way `markup_signature` enriched the component case —
+  union cases, record fields, a value's inferred type — improves hover and completion detail
+  together, because both read that one field.
+- **Operator and punctuation positions.** Hover on the `+` in `count + 1` reports nothing. This one
+  is deliberate: the lookup is bounded by the construct the position resolved to, which is what stops
+  a cursor in an unrelated string from being answered with its enclosing element's type. Widening it
+  for operators means resolving the operator to its binary expression in the position resolver, not
+  relaxing the bound.
+- **The offset between `{` and a sign.** `{|-42}` reports nothing, though `{-|42}` and `{-4|2}` both
+  report `int`. The chain descent gives a boundary offset to the node that *ends* there before the
+  one that starts there, so the brace claims it. That tie-break is what makes other positions work —
+  an unbraced `|-42` answers only because whitespace is no node and nothing competes — so changing it
+  is not local. Widening the literal rule to also accept a node the offset merely abuts would fix
+  this one position and would need re-measuring against every boundary case the resolver tests.
+- **`null`.** It infers as `T0?`, an unsolved inference variable, so hover declines rather than
+  render a variable id at a reader. It is the one literal form with no context-free type; answering
+  it means either solving the variable from the binding site before hover reads it, or deciding
+  in the renderer that an unsolved nullable spells `null`.
+- **A unit literal.** `let value = {(|) 2}` reports nothing, where the `2` beside it reports `int`.
+  `()` is valid only as an item of a list or value list (`grammar.js`), and it lowers to no literal
+  expression, so unlike the cases above there is nothing recorded for a lookup to find.
+
+## Editor Navigation: Go-To-Definition And Rename
+
+`resolve-editor-positions` built a position resolver that answers "what construct is the cursor on?"
+for hover and completion. Go-to-definition and rename need the same question answered and one thing
+more: a *definition identity* for every reference — which declaration this name binds to, not merely
+that it is a reference. That was an explicit Non-Goal of that change, and nothing was added for it.
+
+What exists to build on: `PositionContext` already distinguishes `Reference` from `Declaration`,
+`ComponentTag`, `PropertyName`, and `TypeAnnotation`, and the resolver was deliberately shaped not to
+preclude the richer result — it classifies the position without deciding what a consumer does with
+it. What is missing is resolution from a reference back to the declaration that binds it, across
+documents, which is a `nx-hir`/scope question rather than a language-service one.
+
+Rename additionally needs the inverse direction — every reference to one declaration — which nothing
+currently indexes, and it needs to know which occurrences are the same name by identity rather than
+by spelling. Expect that to be the larger half of the work.
+
+## Lint And Format Gates Do Not Cover The Whole Workspace
+
+Two repo-wide gates pass in practice only because nobody runs them over everything. Both were found
+incidentally during the `resolve-editor-positions` review and neither was caused by it.
+
+- **`cargo clippy -p nx-hir --all-targets` does not compile.** `approx_constant` is denied
+  workspace-wide and `crates/nx-hir/src/ast/expr.rs:382` uses `3.14` in a test fixture. The failure
+  is in a test target, so a crate-level `cargo clippy -p nx-hir` without `--all-targets` passes and
+  hides it. The consequence is not the lint itself but that `nx-hir`'s test targets have never been
+  linted — whatever else is in them is unmeasured. Fix the fixture (`3.15`, or an `allow` with a
+  reason), then run `--all-targets` across the workspace once to see what else surfaces.
+- **`cargo fmt --check` reports pre-existing drift** in `crates/nx-hir/src/scope.rs`,
+  `crates/nx-codegen/src/builder.rs`, `crates/nx-syntax/tests/parser_tests.rs`, and
+  `crates/nx-types/tests/contextual_literals.rs`. Small and mechanical, but it means `cargo fmt
+  --check` cannot be used as a CI gate as it stands: a real regression would not be distinguishable
+  from the standing noise. Formatting those four files once makes the gate usable.
+
+## Language Service Cost Per Request
+
+Two costs were accepted by design in `resolve-editor-positions` and are worth revisiting together
+if editor latency ever shows up in profiling, rather than separately on suspicion:
+
+- **The workspace is analyzed once per snapshot**, and a snapshot is what a request is served from.
+  Nothing is cached across snapshots. This is the same gap as "Multi-File And Incremental Source
+  Analysis" above, reached from the editor side.
+- **Each position request re-parses the queried document**, because analysis discards the syntax
+  tree and `ModuleArtifact` deliberately does not retain it — every consumer of the compile pipeline
+  would pay for a structure only the editor reads. Measured at 0.09 ms against a snapshot build that
+  type checks the whole workspace.
+- **`LoweredModule::innermost_expr_at` scans the arena linearly.** Modules hold hundreds of
+  expressions and it runs once per position query, so an index is not yet worth its invalidation
+  surface — and a genuinely sublinear interval query needs an interval tree, because lowered spans
+  neither nest reliably nor are all present. The query lives in `nx-hir` precisely so that decision
+  can be made there without touching a caller.
+

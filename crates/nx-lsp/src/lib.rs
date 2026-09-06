@@ -745,7 +745,27 @@ component <Card title:string subtitle:string /> = {
             .expect("hover")
             .map(to_lsp_hover)
             .expect("hover content");
-        assert!(matches!(hover.contents, HoverContents::Markup(_)));
+        let HoverContents::Markup(markup) = &hover.contents else {
+            panic!("expected markup hover contents");
+        };
+        assert!(markup.value.contains("function"), "got: {}", markup.value);
+        assert!(markup.value.contains("root()"), "got: {}", markup.value);
+
+        // A tag reference now hovers too, and reports the declaration it resolves to with the
+        // properties that declaration accepts.
+        let tag_hover = snapshot
+            .hover(&service_uri, TextPosition::new(6, 3))
+            .expect("hover")
+            .map(to_lsp_hover)
+            .expect("hover content");
+        let HoverContents::Markup(tag_markup) = &tag_hover.contents else {
+            panic!("expected markup hover contents");
+        };
+        assert!(
+            tag_markup.value.contains("component") && tag_markup.value.contains("subtitle:string"),
+            "got: {}",
+            tag_markup.value
+        );
 
         let completions = snapshot
             .completions(&service_uri, TextPosition::new(6, 20))
@@ -892,7 +912,11 @@ component <Card title:string subtitle:string /> = {
             .await
             .expect("hover")
             .expect("hover response");
-        assert!(matches!(hover.contents, HoverContents::Markup(_)));
+        let HoverContents::Markup(markup) = &hover.contents else {
+            panic!("expected markup hover contents");
+        };
+        assert!(markup.value.contains("function"), "got: {}", markup.value);
+        assert!(markup.value.contains("root()"), "got: {}", markup.value);
 
         let completions = server
             .completion(CompletionParams {
