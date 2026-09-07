@@ -80,4 +80,31 @@ describe('Markdown NX fenced code blocks', function () {
     const scopes = scopesForSubstring(lines[1], tokensForNxLine, 'if');
     expect(scopes).to.include('keyword.control.conditional.nx');
   });
+
+  // Hover content reaches the grammar only through this path, and the fence wraps the NX rules in
+  // a `while` rule — the one place a `^`-anchored `begin` could behave differently from the bare
+  // tokenization `hover-annotation.test.ts` does.
+  it('highlights a hover annotation inside a fenced code block', function () {
+    const lines = ['```nx', '(property) ShapeCommon.shadows: Shadow[]?', '```'];
+    let ruleStack: any = null;
+    let tokensForNxLine: IToken[] = [];
+
+    lines.forEach((line, index) => {
+      const result = markdownGrammar.tokenizeLine(line, ruleStack);
+      if (index === 1) {
+        tokensForNxLine = result.tokens;
+      }
+      ruleStack = result.ruleStack;
+    });
+
+    expect(scopesForSubstring(lines[1], tokensForNxLine, 'shadows')).to.include(
+      'variable.other.property.nx'
+    );
+    expect(scopesForSubstring(lines[1], tokensForNxLine, 'Shadow')).to.include(
+      'entity.name.type.nx'
+    );
+    expect(scopesForSubstring(lines[1], tokensForNxLine, ':')).to.include(
+      'punctuation.separator.type.annotation.nx'
+    );
+  });
 });

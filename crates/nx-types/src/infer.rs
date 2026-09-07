@@ -1456,6 +1456,21 @@ impl<'a> InferenceContext<'a> {
             return entry.case_type(case.name);
         }
 
+        // A tag that resolves to nothing has no binding contract, so there is nothing to check the
+        // element's properties and content against. Every expression written inside it is still an
+        // expression, though, and the four resolved paths above infer theirs as a side effect of
+        // checking bindings. Infer these on their own terms so that the absent tag is the only
+        // thing left unchecked, and so that the recorded types reach callers reading the type
+        // environment.
+        let property_paths = self.property_paths_for_entries(element.property_entries());
+        // Supplying one property twice is a defect in the element, not in its contract, so it is
+        // reported here as it is on every resolved path: the absent tag is the only thing left
+        // unchecked.
+        self.report_duplicate_property_paths(&property_paths, &element.tag);
+        for content in &element.content {
+            self.infer_expr(*content);
+        }
+
         self.nominal_named_type(&element.tag)
     }
 

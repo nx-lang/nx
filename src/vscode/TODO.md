@@ -53,7 +53,11 @@ started by the VS Code extension client.
 - [x] Add Rust `nx-lsp` stdio server and VS Code language client activation.
 - [x] Surface diagnostics, document symbols, hovers, and completions through LSP.
 - [x] Add a configurable `nx.server.path` development override.
-- [ ] Improve hover and completion quality with richer semantic metadata.
+- [x] Improve hover quality: fenced NX signatures, union cases and record fields, and hover at
+  member accesses, parameters, record fields, union cases, and bare property values.
+- [ ] Improve completion quality with richer semantic metadata.
+- [ ] Show doc comments in hover; NX has no doc-comment concept yet, so this needs comment
+  trivia attached during lowering.
 - [ ] Add formatting, rename, references, and go-to-definition in later milestones.
 - [ ] Add launch configurations for server + client debugging.
 - [ ] Expand native VSIX release targets beyond the initial package target.

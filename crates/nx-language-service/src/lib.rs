@@ -1,5 +1,6 @@
 //! Protocol-independent editor language service for NX.
 
+mod hover;
 mod positions;
 
 use nx_api::{
@@ -373,15 +374,13 @@ impl WorkspaceSnapshot {
         let offset = resolved.offset;
         let scope = &resolved.scope;
         match &resolved.context {
-            // A declaration and a reference both report the declaration: its kind and the
-            // signature `declaration_from_item` already computes for completion detail.
+            // A declaration and a reference both report the declaration, spelled the way its
+            // author wrote it.
             positions::PositionContext::Declaration { name, .. } => {
-                let declaration = scope.visible.get(name)?;
-                Some(declaration_hover(declaration))
+                self.declaration_hover(scope, scope.visible.get(name)?)
             }
             positions::PositionContext::ComponentTag { tag, .. } => {
-                let declaration = scope.visible.get(tag)?;
-                Some(declaration_hover(declaration))
+                self.declaration_hover(scope, scope.visible.get(tag)?)
             }
             // A name is an expression first. Looking the spelling up among the top-level
             // declarations first would answer for the wrong binding wherever a local shadows one,
@@ -390,9 +389,15 @@ impl WorkspaceSnapshot {
             // where the name reaches no expression, as in an import clause.
             positions::PositionContext::Reference { name, span } => self
                 .inferred_type_hover(uri, offset, *span)
-                .or_else(|| scope.visible.get(name).map(declaration_hover)),
+                .or_else(|| self.declaration_hover(scope, scope.visible.get(name)?)),
             positions::PositionContext::Expression { span } => {
                 self.inferred_type_hover(uri, offset, *span)
+            }
+            // The member of a member access is answered on the same terms as the access it
+            // belongs to: the access's type is the member's type, and the receiver's type names
+            // what declares it.
+            positions::PositionContext::MemberAccess { member, span } => {
+                self.member_access_hover(uri, offset, *span, member)
             }
             // A property name is not an expression and has no type of its own, but the component
             // it is supplied to declares one, and that declaration is the metadata the position
@@ -404,23 +409,124 @@ impl WorkspaceSnapshot {
                     .properties
                     .iter()
                     .find(|declared| declared.name == property)?;
-                Some(property_hover(declared))
+                Some(hover::fenced(hover::property(
+                    Some(tag),
+                    &declared.name,
+                    &declared.display_type,
+                )))
             }
             // A written type annotation names a type, and a name has a declaration behind it. An
             // annotation with nothing written in it yet does not.
             positions::PositionContext::TypeAnnotation { name, .. } => {
                 let name = name.as_deref()?;
-                scope
-                    .visible
-                    .get(name)
-                    .map(declaration_hover)
-                    .or_else(|| builtin_type_hover(name))
+                match scope.visible.get(name) {
+                    Some(declaration) => self.declaration_hover(scope, declaration),
+                    None => builtin_type_hover(name),
+                }
             }
-            // The value slot of `name=` is a place a value goes. Until one is written there is
-            // nothing to report, and once one is it resolves as an expression.
-            positions::PositionContext::PropertyValue { .. }
-            | positions::PositionContext::Unresolved => None,
+            // A bare name in a value slot resolves against the property's declared type, so it is
+            // answered the same way the same name written at any other site of that type is —
+            // design D4. A slot with nothing written in it names nothing.
+            positions::PositionContext::PropertyValue {
+                tag,
+                property,
+                name,
+                span,
+            } => {
+                let name = name.as_deref()?;
+                // The name's own span reaches the expression lowering recorded for it, so the
+                // answer here is the one the same name gets at any other site of that type. The
+                // declared type is consulted only where analysis recorded nothing.
+                self.inferred_type_hover(uri, offset, *span)
+                    .or_else(|| property_value_hover(tag, property, name, scope))
+            }
+            // A parameter, a record field, a union case, and a payload field are written by the
+            // author but named by no top-level scope; the declaration they are written in is what
+            // the type is read out of — design D2.
+            positions::PositionContext::LocalDeclaration {
+                kind, name, owner, ..
+            } => {
+                let owner_declaration = scope.visible.get(owner)?;
+                let item = scope.item(owner_declaration)?;
+                local_declaration_hover(kind, name, owner, item)
+            }
+            positions::PositionContext::Unresolved => None,
         }
+    }
+
+    /// A declaration as an author writes it, in a fenced NX block.
+    ///
+    /// <para>The spelling comes from the HIR item rather than from `Declaration::detail`, which is
+    /// the single-line projection completions render next to a label — design D6.</para>
+    fn declaration_hover(
+        &self,
+        scope: &DocumentScope,
+        declaration: &Declaration,
+    ) -> Option<String> {
+        // `Declaration` carries only the name lists completions and symbols need. Spelling a
+        // declaration from those alone loses `abstract`, `extends`, and the `action` keyword,
+        // cannot tell `let <X />` from `component <X />`, and — because `members` is filtered to
+        // payloadless cases — silently drops a union's payload cases and spells a single-case
+        // union as the type alias that spelling actually means. A fragment that wrong is the
+        // fabricated answer the conservative contract rules out, so a declaration whose module
+        // has no lowered item reports nothing instead.
+        let item = scope.item(declaration)?;
+        // Only a declaration with nothing written for its type asks analysis what it is — D5.
+        let inferred = match item {
+            Item::Value(value) if value.ty.is_none() => scope
+                .artifact(declaration)
+                .and_then(|artifact| artifact.type_env.get_expr_type(value.value))
+                .filter(|ty| !is_unresolved_type(ty))
+                .map(|ty| ty.to_string()),
+            _ => None,
+        };
+        Some(hover::fenced(hover::item_signature(
+            item,
+            declaration.kind,
+            inferred.as_deref(),
+        )))
+    }
+
+    /// The member of a member access, with the type the access has.
+    fn member_access_hover(
+        &self,
+        uri: &DocumentUri,
+        offset: usize,
+        span: ByteTextRange,
+        member: &str,
+    ) -> Option<String> {
+        let analysis = self.module_analysis(uri)?;
+        let id = analysis
+            .lowered_module()
+            .innermost_expr_at(span, (offset as u32).into())?;
+        let ty = analysis.type_env().get_expr_type(id)?;
+        if is_unresolved_type(ty) {
+            return None;
+        }
+
+        // `Role.admin` reaches this as a member access, but it names a case rather than a
+        // property of one, and reports what the case's own declaration reports.
+        let expr = analysis.lowered_module().expr(id);
+        if let Some(fragment) = hover::union_case_expression(expr, ty) {
+            return Some(hover::fenced(fragment));
+        }
+
+        // The receiver's type is what declares the member, and naming it is what tells
+        // `user.name` from any other `name`.
+        let qualifier = match expr {
+            nx_hir::ast::Expr::Member { base, .. } => analysis
+                .type_env()
+                .get_expr_type(*base)
+                .filter(|base_ty| !is_unresolved_type(base_ty))
+                .map(|base_ty| base_ty.to_string().trim_end_matches('?').to_string()),
+            _ => None,
+        };
+
+        Some(hover::fenced(hover::property(
+            qualifier.as_deref(),
+            member,
+            &ty.to_string(),
+        )))
     }
 
     /// The inferred type of the innermost expression the resolved construct covers.
@@ -444,7 +550,10 @@ impl WorkspaceSnapshot {
         if is_unresolved_type(ty) {
             return None;
         }
-        Some(format!("`{}`", ty))
+        Some(hover::fenced(hover::expression_fragment(
+            analysis.lowered_module().expr(id),
+            ty,
+        )))
     }
 
     /// Returns conservative completion items for a position in the requested document.
@@ -865,21 +974,6 @@ pub enum DocumentSymbolKind {
     Element,
 }
 
-impl DocumentSymbolKind {
-    fn display_name(self) -> &'static str {
-        match self {
-            Self::Function => "function",
-            Self::Value => "value",
-            Self::TypeAlias => "type",
-            Self::Record => "record",
-            Self::Action => "action",
-            Self::Union => "union",
-            Self::Component => "component",
-            Self::Element => "element",
-        }
-    }
-}
-
 /// Top-level document symbol.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocumentSymbol {
@@ -1044,32 +1138,91 @@ struct PropertyDeclaration {
 /// cannot resolve, which reports nothing.</para>
 fn builtin_type_hover(name: &str) -> Option<String> {
     if PRIMITIVE_TYPE_COMPLETIONS.contains(&name) {
-        return Some(format!("primitive type `{}`", name));
+        return Some(hover::fenced(hover::builtin_type("primitive type", name)));
     }
     BUILTIN_TYPE_COMPLETIONS
         .contains(&name)
-        .then(|| format!("built-in type `{}`", name))
+        .then(|| hover::fenced(hover::builtin_type("built-in type", name)))
 }
 
-/// Hover content for a property: the name it is supplied under and the type it accepts.
-fn property_hover(property: &PropertyDeclaration) -> String {
-    format!("property `{}`\n\n{}", property.name, property.display_type)
-}
-
-/// Hover content for a declaration: its kind and the signature completions already show as detail.
+/// Hover content for a declaration written inside another one.
 ///
-/// <para>`detail` is where the signature already lives — `component <Panel />` for a markup
-/// function, `function add(count: int): int` for a plain one. Hover reuses it rather than growing
-/// a second way to spell the same declaration.</para>
-fn declaration_hover(declaration: &Declaration) -> String {
-    let kind = declaration.kind.display_name();
-    // A union's detail is the bare word `union`, and an unannotated value's is `value`. Repeating
-    // the kind under itself is neither a signature nor type information, so the second line is
-    // written only where it says something the first does not.
-    if declaration.detail == kind {
-        return format!("{} `{}`", kind, declaration.name);
+/// <para>Which list of the owning item to read is what the kind decides; the type is then the one
+/// the author wrote there — design D5.</para>
+fn local_declaration_hover(
+    kind: &positions::LocalDeclarationKind,
+    name: &str,
+    owner: &str,
+    item: &Item,
+) -> Option<String> {
+    let rendered = match (kind, item) {
+        (positions::LocalDeclarationKind::Parameter, Item::Function(function)) => {
+            let param = function
+                .params
+                .iter()
+                .find(|param| param.name.as_str() == name)?;
+            hover::parameter(name, &type_ref_display(&param.ty))
+        }
+        // A component declares properties rather than parameters, and is written at the same
+        // position an element-style function's are.
+        (positions::LocalDeclarationKind::Parameter, Item::Component(component)) => {
+            let property = component
+                .props
+                .iter()
+                .find(|property| property.name.as_str() == name)?;
+            hover::property(Some(owner), name, &type_ref_display(&property.ty))
+        }
+        (positions::LocalDeclarationKind::RecordField, Item::Record(record)) => {
+            let field = record
+                .properties
+                .iter()
+                .find(|field| field.name.as_str() == name)?;
+            hover::property(Some(owner), name, &type_ref_display(&field.ty))
+        }
+        (positions::LocalDeclarationKind::UnionCase, Item::Union(union_def)) => {
+            union_def
+                .cases
+                .iter()
+                .find(|case| case.name.as_str() == name)?;
+            hover::union_case(owner, name)
+        }
+        (positions::LocalDeclarationKind::UnionPayloadField { case }, Item::Union(union_def)) => {
+            let field = union_def
+                .cases
+                .iter()
+                .find(|declared| declared.name.as_str() == case)?
+                .fields
+                .iter()
+                .find(|field| field.name.as_str() == name)?;
+            hover::property(
+                Some(&format!("{}.{}", owner, case)),
+                name,
+                &type_ref_display(&field.ty),
+            )
+        }
+        _ => return None,
+    };
+    Some(hover::fenced(rendered))
+}
+
+/// Hover content for a bare name in a value slot that analysis recorded no type for.
+///
+/// <para>A bare value resolves against the property's declared type and nothing else, so the
+/// resolution completions offer is what answers when the type environment cannot — the same
+/// declaration, reached the same way, rather than a second guess at what the name means.</para>
+fn property_value_hover(
+    tag: &str,
+    property_name: &str,
+    name: &str,
+    scope: &DocumentScope,
+) -> Option<String> {
+    let union = property_value_union(tag, property_name, scope)?;
+    if !union.members.iter().any(|member| member == name) {
+        return None;
     }
-    format!("{} `{}`\n\n{}", kind, declaration.name, declaration.detail)
+    // The same fragment the type environment produces for this position, so the fallback firing
+    // is not observable as a different answer.
+    Some(hover::fenced(hover::union_case(&union.name, name)))
 }
 
 /// A position query resolved to the construct the cursor is on, shared by hover and completions.
@@ -1167,6 +1320,24 @@ impl DocumentScope {
                 DocumentSymbolKind::Component | DocumentSymbolKind::Record
             )
         })
+    }
+
+    /// The analysis artifact of the module a declaration was declared in.
+    fn artifact(&self, declaration: &Declaration) -> Option<&ModuleArtifact> {
+        self.workspace.artifact(&declaration.origin.0)
+    }
+
+    /// The HIR item a visible declaration was lowered from — design D2.
+    ///
+    /// <para>`Declaration` is the projection completions and document symbols need, and grew the
+    /// lists those two surfaces read one name at a time. Everything else about a declaration is
+    /// still in the item it came from, and `origin` addresses that item directly, so hover reads
+    /// the declaration as written rather than through a second projection of it.</para>
+    fn item(&self, declaration: &Declaration) -> Option<&Item> {
+        self.artifact(declaration)?
+            .lowered_module
+            .as_deref()?
+            .item_by_definition(declaration.origin.1)
     }
 
     /// The declaration a type name written by the module at `origin` denotes.
@@ -1770,6 +1941,21 @@ fn property_value_members(
     property_name: &str,
     scope: &DocumentScope,
 ) -> Option<Vec<String>> {
+    let union = property_value_union(tag, property_name, scope)?;
+    (!union.members.is_empty()).then(|| union.members.clone())
+}
+
+/// The union a bare name written in one property's value slot resolves against.
+///
+/// <para>Completions and hover ask the same question here and must not answer it two ways, so they
+/// ask it once — design D4. Returns `None` where the element or property is unknown, or where the
+/// property's declared type is not a union, because a bare name is not accepted at those sites
+/// either.</para>
+fn property_value_union<'a>(
+    tag: &str,
+    property_name: &str,
+    scope: &'a DocumentScope,
+) -> Option<&'a Declaration> {
     let element = scope.element(tag)?;
 
     let type_name = element
@@ -1782,10 +1968,7 @@ fn property_value_members(
     // there. Looking it up by name among everything in the workspace is what let an unrelated
     // same-named declaration supply the members.
     let target = scope.type_in_module(&element.origin, &type_name)?;
-    if !matches!(target.kind, DocumentSymbolKind::Union) || target.members.is_empty() {
-        return None;
-    }
-    Some(target.members.clone())
+    matches!(target.kind, DocumentSymbolKind::Union).then_some(target)
 }
 
 #[derive(Debug, Clone)]
@@ -2338,7 +2521,7 @@ component <SearchBox placeholder:string /> = {
             .expect("hover")
             .expect("hover content");
 
-        assert_eq!(hover.contents, "function `root`\n\nfunction root()");
+        assert_eq!(hover.contents, nx("let root()"));
         assert_eq!(hover.version, Some(DocumentVersion::new(1)));
     }
 
@@ -2633,22 +2816,20 @@ component <SearchBox placeholder:string /> = {
         ))
         .expect("hover content");
 
-        assert!(
-            hover.contents.contains("component") && hover.contents.contains("Panel"),
-            "got: {}",
-            hover.contents
-        );
+        // An element-style function's kind is its spelling: `let <Panel />` is what an author
+        // writes, and no NX keyword `component` appears in it — design D7.
+        assert_eq!(hover.contents, nx("let <Panel mode:Mode />"));
     }
 
     /// The retained artifacts are what a position query reads, so the snapshot has to hand back an
     /// environment that actually has types in it — not an empty one that would make every hover
     /// conservative for the wrong reason.
     ///
-    /// <para>The reference is taken in a function body. A parameter interpolated into a markup
-    /// body — `let &lt;Panel width:int /&gt; = &lt;div&gt;{width}&lt;/div&gt;` — lowers with a span
-    /// but reaches the type environment with no entry. That is a gap in checking, not in what the
-    /// snapshot retains, and closing it would mean changing an analysis crate, which this change
-    /// does not do. Hover is conservative there, which the specified contract permits.</para>
+    /// <para>A parameter interpolated into a markup body — `let &lt;Panel width:int /&gt; =
+    /// &lt;div&gt;{width}&lt;/div&gt;` — used to lower with a span and reach the type environment
+    /// with no entry, because inference never visited an element whose tag resolved to nothing.
+    /// That hole is closed, and
+    /// `hover_answers_inside_an_element_whose_tag_resolves_to_nothing` pins the result.</para>
     #[test]
     fn retained_analysis_carries_inferred_types_for_a_parameter_reference() {
         let snapshot = snapshot_for(
@@ -2759,11 +2940,7 @@ component <SearchBox placeholder:string /> = {
     fn hover_over_a_component_tag_reports_the_declaration_it_resolves_to() {
         let hover = hover_at(&format!("{PANEL}<Pa⟨cursor⟩nel />\n")).expect("hover content");
 
-        assert!(
-            hover.contents.contains("component") && hover.contents.contains("Panel"),
-            "got: {}",
-            hover.contents
-        );
+        assert!(hover.contents.contains("<Panel"), "got: {}", hover.contents);
     }
 
     /// Spec: "Hover over an expression reports its inferred type".
@@ -2773,6 +2950,11 @@ component <SearchBox placeholder:string /> = {
             hover_at("let add(count:int) = { c⟨cursor⟩ount + 1 }\n").expect("hover content");
 
         assert!(hover.contents.contains("int"), "got: {}", hover.contents);
+    }
+
+    /// The fenced NX block hover content is made of, for an assertion to compare against.
+    fn nx(fragment: &str) -> String {
+        format!("```nx\n{fragment}\n```")
     }
 
     /// A hover fixture resolved against a multi-document snapshot.
@@ -2816,7 +2998,7 @@ component <SearchBox placeholder:string /> = {
         let hover = hover_at(&format!("{PANEL}<Panel title=\"he⟨cursor⟩llo\" />\n"))
             .expect("hover content");
 
-        assert_eq!(hover.contents, "`string`", "got: {}", hover.contents);
+        assert_eq!(hover.contents, nx("string"), "got: {}", hover.contents);
     }
 
     /// Design D6 recorded hover on a literal as out of reach, because lowering located no literal
@@ -2824,21 +3006,21 @@ component <SearchBox placeholder:string /> = {
     #[test]
     fn hover_over_a_literal_reports_its_type() {
         for (fixture, expected) in [
-            ("let value = \"he⟨cursor⟩llo\"\n", "`string`"),
-            ("let value = 4⟨cursor⟩2\n", "`int`"),
-            ("let value = 1.⟨cursor⟩5\n", "`float64`"),
-            ("let value = tr⟨cursor⟩ue\n", "`boolean`"),
+            ("let value = \"he⟨cursor⟩llo\"\n", nx("string")),
+            ("let value = 4⟨cursor⟩2\n", nx("int")),
+            ("let value = 1.⟨cursor⟩5\n", nx("float64")),
+            ("let value = tr⟨cursor⟩ue\n", nx("boolean")),
             // The `-` and the digits are one literal, so the cursor is on it wherever it sits —
             // and however it parsed. Unbraced it is one signed-numeric-literal node; braced or
             // nested it is a prefix `-` over the digits, which lowering folds into the same
             // literal.
-            ("let value = -4⟨cursor⟩2\n", "`int`"),
-            ("let value = ⟨cursor⟩-42\n", "`int`"),
-            ("let value = {-4⟨cursor⟩2}\n", "`int`"),
-            ("let value = {-⟨cursor⟩42}\n", "`int`"),
-            ("let value = {-1.⟨cursor⟩5}\n", "`float64`"),
-            ("let add(x:int) = {x + -1⟨cursor⟩0}\n", "`int`"),
-            ("let add(x:int) = {x + ⟨cursor⟩-10}\n", "`int`"),
+            ("let value = -4⟨cursor⟩2\n", nx("int")),
+            ("let value = ⟨cursor⟩-42\n", nx("int")),
+            ("let value = {-4⟨cursor⟩2}\n", nx("int")),
+            ("let value = {-⟨cursor⟩42}\n", nx("int")),
+            ("let value = {-1.⟨cursor⟩5}\n", nx("float64")),
+            ("let add(x:int) = {x + -1⟨cursor⟩0}\n", nx("int")),
+            ("let add(x:int) = {x + ⟨cursor⟩-10}\n", nx("int")),
         ] {
             let hover = hover_at(fixture).unwrap_or_else(|| panic!("no hover for: {fixture:?}"));
 
@@ -2852,11 +3034,16 @@ component <SearchBox placeholder:string /> = {
     #[test]
     fn hover_inside_a_list_reports_the_item_it_is_on() {
         for (fixture, expected) in [
-            ("let value = {1⟨cursor⟩ 2}\n", "`int`"),
-            ("let value = {1 2⟨cursor⟩}\n", "`int`"),
-            ("let value = {\"a⟨cursor⟩b\" \"c\"}\n", "`string`"),
-            ("let value = {1 -4⟨cursor⟩2}\n", "`int`"),
-            ("let ab = 1\nlet value = {a⟨cursor⟩b 2}\n", "value `ab`"),
+            ("let value = {1⟨cursor⟩ 2}\n", nx("int")),
+            ("let value = {1 2⟨cursor⟩}\n", nx("int")),
+            ("let value = {\"a⟨cursor⟩b\" \"c\"}\n", nx("string")),
+            ("let value = {1 -4⟨cursor⟩2}\n", nx("int")),
+            // A reference that reaches no expression type still reports its declaration, and an
+            // unannotated one reports the type analysis inferred for it — design D5.
+            (
+                "let ab = 1\nlet value = {a⟨cursor⟩b 2}\n",
+                nx("let ab: int"),
+            ),
         ] {
             let hover = hover_at(fixture).unwrap_or_else(|| panic!("no hover for: {fixture:?}"));
 
@@ -2897,13 +3084,18 @@ component <SearchBox placeholder:string /> = {
         assert!(!hover.contents.contains("value"), "got: {}", hover.contents);
     }
 
-    /// The second line of a hover is a signature or a type. Repeating the kind under itself is
-    /// neither, so a declaration whose detail says only what the kind already said omits it.
+    /// A hover states the kind once. A union spells its own — `type Mode = …` names it, and the
+    /// cases are what the reader came for, so nothing repeats the word `union` beside them.
     #[test]
     fn hover_on_a_union_declaration_does_not_repeat_its_kind() {
         let hover = hover_at("type M⟨cursor⟩ode = light | dark\n").expect("hover content");
 
-        assert_eq!(hover.contents, "union `Mode`", "got: {}", hover.contents);
+        assert_eq!(
+            hover.contents,
+            nx("type Mode = light | dark"),
+            "got: {}",
+            hover.contents
+        );
     }
 
     /// Spec: the referenced declaration may be "declared elsewhere in the workspace snapshot".
@@ -2916,11 +3108,7 @@ component <SearchBox placeholder:string /> = {
         )
         .expect("hover content");
 
-        assert!(
-            hover.contents.contains("component") && hover.contents.contains("Img"),
-            "got: {}",
-            hover.contents
-        );
+        assert!(hover.contents.contains("<Img"), "got: {}", hover.contents);
         assert!(hover.contents.contains("fit"), "got: {}", hover.contents);
     }
 
@@ -2934,11 +3122,7 @@ component <SearchBox placeholder:string /> = {
         )
         .expect("hover content");
 
-        assert!(
-            hover.contents.contains("component") && hover.contents.contains("Img"),
-            "got: {}",
-            hover.contents
-        );
+        assert!(hover.contents.contains("<Img"), "got: {}", hover.contents);
     }
 
     /// Spec: "Hover over a component declaration reports its signature".
@@ -2950,11 +3134,7 @@ component <SearchBox placeholder:string /> = {
         ))
         .expect("hover content");
 
-        assert!(
-            hover.contents.contains("component"),
-            "got: {}",
-            hover.contents
-        );
+        assert!(hover.contents.contains("<Panel"), "got: {}", hover.contents);
         assert!(hover.contents.contains("mode"), "got: {}", hover.contents);
         assert!(hover.contents.contains("Mode"), "got: {}", hover.contents);
         assert!(hover.contents.contains("title"), "got: {}", hover.contents);
@@ -2998,7 +3178,12 @@ component <SearchBox placeholder:string /> = {
         ))
         .expect("hover content");
 
-        assert_eq!(hover.contents, "union `Mode`", "got: {}", hover.contents);
+        assert_eq!(
+            hover.contents,
+            nx("type Mode = light | dark"),
+            "got: {}",
+            hover.contents
+        );
     }
 
     /// A primitive has no declaration to report, but it is still what the editor knows is there.
@@ -3007,7 +3192,8 @@ component <SearchBox placeholder:string /> = {
         let hover = hover_at("let count:i⟨cursor⟩nt = 1\n").expect("hover content");
 
         assert_eq!(
-            hover.contents, "primitive type `int`",
+            hover.contents,
+            nx("(primitive type) int"),
             "got: {}",
             hover.contents
         );
@@ -3020,22 +3206,342 @@ component <SearchBox placeholder:string /> = {
         for (fixture, expected) in [
             (
                 "action Go = {\n  query:str⟨cursor⟩ing\n}\n",
-                "primitive type `string`",
+                nx("(primitive type) string"),
             ),
-            ("type R = {\n  a:in⟨cursor⟩t\n}\n", "primitive type `int`"),
+            (
+                "type R = {\n  a:in⟨cursor⟩t\n}\n",
+                nx("(primitive type) int"),
+            ),
             (
                 "let <Panel mode:str⟨cursor⟩ing /> = <div />\n",
-                "primitive type `string`",
+                nx("(primitive type) string"),
             ),
             (
                 "let add(count:in⟨cursor⟩t) = count\n",
-                "primitive type `int`",
+                nx("(primitive type) int"),
             ),
-            ("let value:in⟨cursor⟩t = 1\n", "primitive type `int`"),
+            ("let value:in⟨cursor⟩t = 1\n", nx("(primitive type) int")),
         ] {
             let hover = hover_at(fixture).unwrap_or_else(|| panic!("no hover for: {fixture:?}"));
 
             assert_eq!(hover.contents, expected, "for: {fixture:?}");
+        }
+    }
+
+    /// Spec: "Hover answers inside an element whose tag resolves to nothing".
+    ///
+    /// <para>This is the hover half of the checker hole group 1 closed. Lowering always recorded
+    /// the span; inference never visited the expression, so the type environment had no entry to
+    /// report. Nothing in hover changed to make this answer.</para>
+    #[test]
+    fn hover_answers_inside_an_element_whose_tag_resolves_to_nothing() {
+        let inside = hover_at("let <Row count:int /> = <div>{c⟨cursor⟩ount + 1}</div>\n")
+            .expect("hover content");
+        let outside =
+            hover_at("let <Row count:int /> = {c⟨cursor⟩ount + 1}\n").expect("hover content");
+
+        assert_eq!(inside.contents, nx("int"), "got: {}", inside.contents);
+        assert_eq!(
+            inside.contents, outside.contents,
+            "an unresolved tag must not change what the expression under it reports"
+        );
+    }
+
+    /// Spec: "Hover over a member of a member access reports the member".
+    #[test]
+    fn hover_over_a_member_of_a_member_access_reports_the_member() {
+        let hover = hover_at(concat!(
+            "type User = { name:string }\n",
+            "let describe(user:User) = { user.na⟨cursor⟩me }\n"
+        ))
+        .expect("hover content");
+
+        assert_eq!(hover.contents, nx("(property) User.name: string"));
+    }
+
+    /// The receiver is not the member: a cursor before the dot still reports the value it is on.
+    #[test]
+    fn hover_on_the_receiver_of_a_member_access_reports_the_receiver() {
+        let hover = hover_at(concat!(
+            "type User = { name:string }\n",
+            "let describe(user:User) = { us⟨cursor⟩er.name }\n"
+        ))
+        .expect("hover content");
+
+        assert_eq!(hover.contents, nx("User"));
+    }
+
+    /// Spec: "Hover over a function parameter declaration reports the parameter".
+    #[test]
+    fn hover_over_a_parameter_declaration_reports_the_parameter() {
+        let plain = hover_at("let add(cou⟨cursor⟩nt:int): int = 1\n").expect("hover content");
+        assert_eq!(plain.contents, nx("(parameter) count: int"));
+
+        let element_style =
+            hover_at("let <Panel tit⟨cursor⟩le:string /> = <div />\n").expect("hover content");
+        assert_eq!(element_style.contents, nx("(parameter) title: string"));
+    }
+
+    /// The kind is stated once, in the fence, and not repeated as prose beside it.
+    #[test]
+    fn a_parameter_hover_states_its_kind_exactly_once() {
+        let hover = hover_at("let add(cou⟨cursor⟩nt:int): int = 1\n").expect("hover content");
+
+        assert_eq!(hover.contents.matches("parameter").count(), 1);
+    }
+
+    /// Spec: "Hover over a record field declaration reports the field".
+    #[test]
+    fn hover_over_a_record_field_declaration_reports_the_field() {
+        let hover = hover_at("type User = {\n  na⟨cursor⟩me: string\n}\n").expect("hover content");
+
+        assert_eq!(hover.contents, nx("(property) User.name: string"));
+    }
+
+    /// Spec: "Hover over a union case declaration reports the case".
+    #[test]
+    fn hover_over_a_union_case_declaration_reports_the_case() {
+        let case = hover_at("type Role = admin | gu⟨cursor⟩est\n").expect("hover content");
+        assert_eq!(case.contents, nx("(case) Role.guest"));
+
+        let payload_field =
+            hover_at("type S =\n  | failed { mess⟨cursor⟩age:string }\n").expect("hover content");
+        assert_eq!(
+            payload_field.contents,
+            nx("(property) S.failed.message: string")
+        );
+    }
+
+    /// Spec: "Hover over a bare property value reports what the name resolves to".
+    ///
+    /// <para>A bare name resolves against the type of the site it is written at, and that is the
+    /// whole rule: the value slot of a tag and a typed declaration are two spellings of the same
+    /// question — design D4.</para>
+    #[test]
+    fn hover_over_a_bare_property_value_reports_the_case_it_resolves_to() {
+        const ROLE: &str = concat!(
+            "type Role = admin | guest\n",
+            "let <Card role:Role /> = <div />\n"
+        );
+
+        let in_tag =
+            hover_at(&format!("{ROLE}<Card role=ad⟨cursor⟩min />\n")).expect("hover content");
+        assert_eq!(in_tag.contents, nx("(case) Role.admin"));
+
+        let at_declaration =
+            hover_at(&format!("{ROLE}let chosen: Role = ad⟨cursor⟩min\n")).expect("hover content");
+        assert_eq!(
+            in_tag.contents, at_declaration.contents,
+            "a bare name reports the same thing wherever the type expecting it is written"
+        );
+    }
+
+    /// A qualified case is a case, not a property of the union it is written under. Named in the
+    /// proposal's table of silent positions, and one of four spellings of one concept that must
+    /// agree: the case's declaration, a bare name at a typed site, a bare name in a value slot,
+    /// and this.
+    #[test]
+    fn hover_over_a_qualified_union_case_reports_the_case() {
+        const ROLE: &str = concat!(
+            "type Role = admin | guest\n",
+            "let <Card role:Role /> = <div />\n"
+        );
+
+        let qualified =
+            hover_at(&format!("{ROLE}let r: Role = {{Role.ad⟨cursor⟩min}}\n")).expect("hover");
+        let bare_at_declaration =
+            hover_at(&format!("{ROLE}let r: Role = ad⟨cursor⟩min\n")).expect("hover");
+        let bare_in_a_value_slot =
+            hover_at(&format!("{ROLE}<Card role=ad⟨cursor⟩min />\n")).expect("hover");
+        let at_the_declaration = hover_at("type Role = ad⟨cursor⟩min | guest\n").expect("hover");
+
+        assert_eq!(qualified.contents, nx("(case) Role.admin"));
+        assert_eq!(bare_at_declaration.contents, qualified.contents);
+        assert_eq!(bare_in_a_value_slot.contents, qualified.contents);
+        assert_eq!(at_the_declaration.contents, qualified.contents);
+    }
+
+    /// An expression whose *type* is a union case is not itself one. A read of a value declared
+    /// `Role.admin` reports the type it has, not `(case)`, which would name the wrong thing.
+    #[test]
+    fn hover_over_a_value_typed_by_a_union_case_reports_the_type_not_the_case() {
+        let hover = hover_at(concat!(
+            "type Role = admin | guest\n",
+            "let chosen = {Role.admin}\n",
+            "let again = {cho⟨cursor⟩sen}\n"
+        ))
+        .expect("hover content");
+
+        // The declaration it resolves to, reported as a declaration — and in particular not as
+        // `(case) Role.admin`, which would say the value *is* the case rather than has its type.
+        assert_eq!(hover.contents, nx("let chosen: Role.admin"));
+        assert!(
+            !hover.contents.contains("(case)"),
+            "got: {}",
+            hover.contents
+        );
+    }
+
+    /// Design D4's rule reaches a third place a bare name is written: a declared default.
+    #[test]
+    fn hover_over_a_bare_default_value_reports_the_case_it_resolves_to() {
+        for fixture in [
+            "type Role = admin | guest\ntype Opt = { role: Role = ad⟨cursor⟩min }\n",
+            concat!(
+                "type Role = admin | guest\n",
+                "abstract external component <Node />\n",
+                "external component <Card extends Node role:Role = ad⟨cursor⟩min />\n"
+            ),
+        ] {
+            let hover = hover_at(fixture).unwrap_or_else(|| panic!("no hover for: {fixture:?}"));
+
+            assert_eq!(hover.contents, nx("(case) Role.admin"), "for: {fixture:?}");
+        }
+    }
+
+    /// Spec: "Hover over an unannotated value declaration reports its inferred type".
+    #[test]
+    fn hover_over_an_unannotated_value_declaration_reports_its_inferred_type() {
+        let hover = hover_at("let cou⟨cursor⟩nt = 42\n").expect("hover content");
+
+        assert_eq!(hover.contents, nx("let count: int"));
+    }
+
+    /// Design D5: a written annotation is shown as written. The author chose the alias, and
+    /// expanding it to what it resolves to would answer a question nobody asked.
+    #[test]
+    fn hover_over_an_annotated_value_declaration_reports_the_annotation_as_written() {
+        let hover = hover_at(concat!(
+            "type UserId = int\n",
+            "let cur⟨cursor⟩rent: UserId = 1\n"
+        ))
+        .expect("hover content");
+
+        assert_eq!(hover.contents, nx("let current: UserId"));
+    }
+
+    /// Spec: "Hover over a union declaration reports its cases".
+    #[test]
+    fn hover_over_a_union_declaration_reports_its_cases() {
+        let hover = hover_at("type Ro⟨cursor⟩le = admin | guest\n").expect("hover content");
+
+        assert_eq!(hover.contents, nx("type Role = admin | guest"));
+    }
+
+    /// A case list that does not fit on one line takes a bar on every case, which is the house
+    /// style for a multi-line union — and a payload case is spelled with its fields.
+    #[test]
+    fn a_union_with_payload_cases_lists_them_one_per_line() {
+        let hover = hover_at(concat!(
+            "type Lo⟨cursor⟩adState =\n",
+            "  | idle\n",
+            "  | failed { message:string }\n"
+        ))
+        .expect("hover content");
+
+        assert_eq!(
+            hover.contents,
+            nx("type LoadState =\n  | idle\n  | failed { message:string }")
+        );
+    }
+
+    /// The cases a union hover lists are all of them. `Declaration::members` is filtered to the
+    /// payloadless ones, because that is what a bare-name completion may offer — which makes it
+    /// the wrong source for this, and is why the item is read from HIR instead (design D2).
+    #[test]
+    fn a_union_hover_lists_cases_a_bare_name_completion_would_not_offer() {
+        let hover = hover_at("type S⟨cursor⟩tate =\n  | idle\n  | failed { message:string }\n")
+            .expect("hover content");
+
+        assert!(hover.contents.contains("failed"), "got: {}", hover.contents);
+    }
+
+    /// Spec: "Hover over a record type declaration reports its fields".
+    #[test]
+    fn hover_over_a_record_type_declaration_reports_its_fields() {
+        let hover = hover_at("type U⟨cursor⟩ser = {\n  name: string\n  email: string?\n}\n")
+            .expect("hover content");
+
+        assert_eq!(
+            hover.contents,
+            nx("type User = {\n  name: string\n  email: string?\n}")
+        );
+    }
+
+    /// Spec: "A function declaration's hover shows an NX signature", including that it spells no
+    /// keyword NX does not have.
+    #[test]
+    fn a_function_declaration_hover_is_spelled_in_nx() {
+        let hover = hover_at("let a⟨cursor⟩dd(count:int): int = count\n").expect("hover content");
+
+        assert_eq!(hover.contents, nx("let add(count:int): int"));
+        assert!(
+            !hover.contents.contains("function"),
+            "`function` is not an NX keyword, got: {}",
+            hover.contents
+        );
+    }
+
+    /// Spec: "A type alias declaration's hover shows an NX signature".
+    #[test]
+    fn a_type_alias_hover_is_spelled_in_nx() {
+        let hover = hover_at("type S⟨cursor⟩ize = int\n").expect("hover content");
+
+        assert_eq!(hover.contents, nx("type Size = int"));
+    }
+
+    /// Spec: "An element-style function's hover shows an NX signature".
+    #[test]
+    fn an_element_style_function_hover_is_spelled_in_nx() {
+        let hover =
+            hover_at("let <P⟨cursor⟩anel title:string /> = <div />\n").expect("hover content");
+
+        assert_eq!(hover.contents, nx("let <Panel title:string />"));
+    }
+
+    /// A `component` declaration spells its own keyword, and its modifiers with it. Unlike an
+    /// element-style function, `component` *is* NX here, so the fragment carries it.
+    #[test]
+    fn a_component_declaration_hover_is_spelled_in_nx() {
+        let hover = hover_at(concat!(
+            "type Hue = Red | Green\n",
+            "external component <Pa⟨cursor⟩int colour:Hue? />\n"
+        ))
+        .expect("hover content");
+
+        assert_eq!(
+            hover.contents,
+            nx("external component <Paint colour:Hue? />")
+        );
+    }
+
+    /// An action is a record declared with the `action` keyword, and is spelled with it.
+    #[test]
+    fn an_action_declaration_hover_is_spelled_in_nx() {
+        let hover = hover_at("action G⟨cursor⟩o = {\n  query: string\n}\n").expect("hover content");
+
+        assert_eq!(hover.contents, nx("action Go = {\n  query: string\n}"));
+    }
+
+    /// Every hover that says anything says it as a fenced NX block, so a client that highlights NX
+    /// highlights the hover.
+    #[test]
+    fn hover_content_is_a_fenced_nx_block() {
+        for fixture in [
+            "let a⟨cursor⟩dd(count:int): int = count\n",
+            "type S⟨cursor⟩ize = int\n",
+            "let <P⟨cursor⟩anel title:string /> = <div />\n",
+            "let add(cou⟨cursor⟩nt:int): int = count\n",
+            "let value = 4⟨cursor⟩2\n",
+            "let count:i⟨cursor⟩nt = 1\n",
+        ] {
+            let hover = hover_at(fixture).unwrap_or_else(|| panic!("no hover for: {fixture:?}"));
+
+            assert!(
+                hover.contents.starts_with("```nx\n") && hover.contents.ends_with("\n```"),
+                "for {fixture:?}, got: {}",
+                hover.contents
+            );
         }
     }
 

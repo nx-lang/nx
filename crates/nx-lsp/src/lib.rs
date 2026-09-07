@@ -748,8 +748,10 @@ component <Card title:string subtitle:string /> = {
         let HoverContents::Markup(markup) = &hover.contents else {
             panic!("expected markup hover contents");
         };
-        assert!(markup.value.contains("function"), "got: {}", markup.value);
-        assert!(markup.value.contains("root()"), "got: {}", markup.value);
+        // Markdown, in NX: `function` is not an NX keyword and does not appear in a hover.
+        assert_eq!(markup.kind, MarkupKind::Markdown);
+        assert!(markup.value.starts_with("```nx\n"), "got: {}", markup.value);
+        assert!(markup.value.contains("let root()"), "got: {}", markup.value);
 
         // A tag reference now hovers too, and reports the declaration it resolves to with the
         // properties that declaration accepts.
@@ -915,8 +917,10 @@ component <Card title:string subtitle:string /> = {
         let HoverContents::Markup(markup) = &hover.contents else {
             panic!("expected markup hover contents");
         };
-        assert!(markup.value.contains("function"), "got: {}", markup.value);
-        assert!(markup.value.contains("root()"), "got: {}", markup.value);
+        // Markdown, in NX: `function` is not an NX keyword and does not appear in a hover.
+        assert_eq!(markup.kind, MarkupKind::Markdown);
+        assert!(markup.value.starts_with("```nx\n"), "got: {}", markup.value);
+        assert!(markup.value.contains("let root()"), "got: {}", markup.value);
 
         let completions = server
             .completion(CompletionParams {

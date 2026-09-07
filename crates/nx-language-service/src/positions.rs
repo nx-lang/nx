@@ -13,6 +13,23 @@ use nx_syntax::{SyntaxKind, SyntaxNode, SyntaxTree};
 use rustc_hash::FxHashSet;
 use text_size::TextRange;
 
+/// Which kind of nested declaration a [`PositionContext::LocalDeclaration`] names.
+///
+/// <para>One variant per part of an owning declaration that hover has to index into. They are one
+/// context rather than four because the arms would otherwise differ only in which list they
+/// read — see design D3.</para>
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LocalDeclarationKind {
+    /// A parameter of a function or of an element-style function, or a component's property.
+    Parameter,
+    /// A field of a record type.
+    RecordField,
+    /// A case of a discriminated union.
+    UnionCase,
+    /// A field of one union case's payload.
+    UnionPayloadField { case: String },
+}
+
 /// What the cursor is on, as the syntax tree describes it.
 ///
 /// <para>This is a syntactic answer. Which declaration a tag names, and what type an expression
@@ -36,9 +53,31 @@ pub(crate) enum PositionContext {
         span: TextRange,
     },
     /// The value slot of `name=` inside an opening tag, where a bare name is accepted.
+    ///
+    /// <para>`name` is the bare name written in the slot, and is absent at an empty one, where the
+    /// position is a place a name may go rather than a name. Where a name is written, `span` is
+    /// the name's own range; at an empty slot it is the cursor.</para>
     PropertyValue {
         tag: String,
         property: String,
+        name: Option<String>,
+        span: TextRange,
+    },
+    /// The member of a member-access expression, as in the `name` of `user.name`.
+    ///
+    /// <para>`span` is the range of the *whole* access, not of the member identifier. A type
+    /// lookup searches for the innermost expression a range contains, and the member's own range
+    /// cannot contain the access it is part of — see design D3.</para>
+    MemberAccess { member: String, span: TextRange },
+    /// The name of a declaration written inside another declaration.
+    ///
+    /// <para>A parameter, a record field, a union case, and a union case's payload field are each
+    /// written by the author but named by no top-level scope. `owner` is the declaration they are
+    /// written in, which is what hover reads the declared type out of.</para>
+    LocalDeclaration {
+        kind: LocalDeclarationKind,
+        name: String,
+        owner: String,
         span: TextRange,
     },
     /// A type annotation, whether or not a type has been written yet.
@@ -65,6 +104,8 @@ impl PositionContext {
             | Self::PropertyName { span, .. }
             | Self::PropertyValue { span, .. }
             | Self::TypeAnnotation { span, .. }
+            | Self::MemberAccess { span, .. }
+            | Self::LocalDeclaration { span, .. }
             | Self::Expression { span } => Some(*span),
             Self::Unresolved => None,
         }
@@ -85,6 +126,12 @@ pub(crate) fn resolve(tree: &SyntaxTree, offset: usize) -> PositionContext {
         return context;
     }
     if let Some(context) = declaration_context(&chain) {
+        return context;
+    }
+    if let Some(context) = member_access_context(&chain) {
+        return context;
+    }
+    if let Some(context) = local_declaration_context(&chain) {
         return context;
     }
     if let Some(context) = name_context(&chain) {
@@ -226,11 +273,27 @@ fn element_context(chain: &[SyntaxNode<'_>], offset: usize) -> Option<PositionCo
             .map(|child| child.text().to_string());
 
         match (is_bare, property_name) {
-            (true, Some(property)) => Some(PositionContext::PropertyValue {
-                tag,
-                property,
-                span: TextRange::new((offset as u32).into(), (offset as u32).into()),
-            }),
+            (true, Some(property)) => {
+                // A name written in the slot is a name like any other, so it is reported with its
+                // own range rather than with the cursor — design D4. An empty slot has no name
+                // node under it and keeps the cursor.
+                let written = inside.iter().rev().find(|node| {
+                    matches!(
+                        node.kind(),
+                        SyntaxKind::IDENTIFIER
+                            | SyntaxKind::CONTEXTUAL_NAME
+                            | SyntaxKind::QUALIFIED_NAME
+                    ) && !node.text().trim().is_empty()
+                });
+                Some(PositionContext::PropertyValue {
+                    tag,
+                    property,
+                    name: written.map(|node| node.text().trim().to_string()),
+                    span: written.map(|node| node.span()).unwrap_or_else(|| {
+                        TextRange::new((offset as u32).into(), (offset as u32).into())
+                    }),
+                })
+            }
             // A quoted or braced value is not a contextual-name position, so it is left to the
             // expression rules.
             _ => None,
@@ -373,6 +436,117 @@ fn declaration_context(chain: &[SyntaxNode<'_>]) -> Option<PositionContext> {
         name: innermost.text().to_string(),
         span: innermost.span(),
     })
+}
+
+/// The cursor on the member of a member-access expression.
+///
+/// <para>The member is the identifier written directly under the access. A cursor on the receiver
+/// descends through the wrapper nodes the grammar puts around an operand instead, so it is not the
+/// access's own child and is left to the reference rule.</para>
+fn member_access_context(chain: &[SyntaxNode<'_>]) -> Option<PositionContext> {
+    let innermost = *chain.last()?;
+    if innermost.kind() != SyntaxKind::IDENTIFIER {
+        return None;
+    }
+    let parent = *chain.get(chain.len().checked_sub(2)?)?;
+    if parent.kind() != SyntaxKind::MEMBER_ACCESS_EXPRESSION {
+        return None;
+    }
+
+    Some(PositionContext::MemberAccess {
+        member: innermost.text().trim().to_string(),
+        // The whole access, so that a type lookup bounded by this range can reach it — design D3.
+        span: parent.span(),
+    })
+}
+
+/// The cursor on the name of a declaration written inside another declaration.
+fn local_declaration_context(chain: &[SyntaxNode<'_>]) -> Option<PositionContext> {
+    let innermost = *chain.last()?;
+    if !matches!(
+        innermost.kind(),
+        SyntaxKind::IDENTIFIER | SyntaxKind::MARKUP_IDENTIFIER
+    ) {
+        return None;
+    }
+
+    let (definition_index, definition) = chain
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, node)| is_definition(node.kind()))?;
+    let owner = definition_name_node(*definition)?.text().trim().to_string();
+    if owner.is_empty() {
+        return None;
+    }
+    let below = &chain[definition_index + 1..];
+
+    // A name inside the declaration's body is a use, not a declaration site.
+    if below
+        .iter()
+        .any(|node| is_element(node.kind()) || is_expression_container(node.kind()))
+    {
+        return None;
+    }
+
+    let case = below
+        .iter()
+        .find(|node| node.kind() == SyntaxKind::UNION_CASE)
+        .and_then(union_case_name);
+
+    // A property definition names one thing wherever it is written; which thing depends on what it
+    // is written in. Only its own name node is that thing: a bare name written as its default
+    // value is a value, and belongs to the rules that answer for one.
+    if let Some(property) = below
+        .iter()
+        .find(|node| node.kind() == SyntaxKind::PROPERTY_DEFINITION)
+    {
+        if !property
+            .child(0)
+            .is_some_and(|name| name.span() == innermost.span())
+        {
+            return None;
+        }
+        let kind = match (definition.kind(), case) {
+            (SyntaxKind::RECORD_DEFINITION, _) => LocalDeclarationKind::RecordField,
+            (SyntaxKind::UNION_DEFINITION, Some(case)) => {
+                LocalDeclarationKind::UnionPayloadField { case }
+            }
+            (SyntaxKind::UNION_DEFINITION, None) => return None,
+            _ => LocalDeclarationKind::Parameter,
+        };
+        return Some(PositionContext::LocalDeclaration {
+            kind,
+            name: innermost.text().trim().to_string(),
+            owner,
+            span: innermost.span(),
+        });
+    }
+
+    // The case's own name, which is the identifier the case node spells directly.
+    if definition.kind() == SyntaxKind::UNION_DEFINITION && case.is_some() {
+        return Some(PositionContext::LocalDeclaration {
+            kind: LocalDeclarationKind::UnionCase,
+            name: innermost.text().trim().to_string(),
+            owner,
+            span: innermost.span(),
+        });
+    }
+
+    None
+}
+
+/// The name one union case declares, which is the first identifier written under it.
+fn union_case_name(case: &SyntaxNode<'_>) -> Option<String> {
+    case.children_with_tokens()
+        .find(|child| {
+            matches!(
+                child.kind(),
+                SyntaxKind::IDENTIFIER | SyntaxKind::MARKUP_IDENTIFIER
+            )
+        })
+        .map(|child| child.text().trim().to_string())
+        .filter(|name| !name.is_empty())
 }
 
 /// The cursor on a name written in expression position.
@@ -601,6 +775,7 @@ mod tests {
             PositionContext::PropertyValue {
                 tag: "Panel".to_string(),
                 property: "mode".to_string(),
+                name: None,
                 span: TextRange::new(14.into(), 14.into()),
             }
         );
@@ -682,6 +857,125 @@ mod tests {
 
         assert!(supplied.contains("mode"), "got: {supplied:?}");
         assert!(supplied.contains("title"), "got: {supplied:?}");
+    }
+
+    /// Design D3: the member is the access's own child, and the receiver is not.
+    #[test]
+    fn a_cursor_on_a_member_resolves_to_a_member_access() {
+        let PositionContext::MemberAccess { member, span } =
+            context_at("type U = { name:string }\nlet f(u:U) = { u.na⟨cursor⟩me }\n")
+        else {
+            panic!("expected a member-access context");
+        };
+
+        assert_eq!(member, "name");
+        // The whole access, not the member identifier: a lookup bounded by the identifier's own
+        // range could not contain the access it belongs to.
+        assert_eq!(span, TextRange::new(40.into(), 46.into()));
+    }
+
+    #[test]
+    fn a_cursor_on_the_receiver_still_resolves_to_a_reference() {
+        let PositionContext::Reference { name, .. } =
+            context_at("type U = { name:string }\nlet f(u:U) = { u⟨cursor⟩.name }\n")
+        else {
+            panic!("expected a reference context");
+        };
+
+        assert_eq!(name, "u");
+    }
+
+    #[test]
+    fn a_cursor_on_a_function_parameter_resolves_to_a_local_declaration() {
+        assert_eq!(
+            context_at("let add(cou⟨cursor⟩nt:int): int = 1\n"),
+            PositionContext::LocalDeclaration {
+                kind: LocalDeclarationKind::Parameter,
+                name: "count".to_string(),
+                owner: "add".to_string(),
+                span: TextRange::new(8.into(), 13.into()),
+            }
+        );
+    }
+
+    #[test]
+    fn a_cursor_on_an_element_style_parameter_resolves_to_a_local_declaration() {
+        let PositionContext::LocalDeclaration {
+            kind, name, owner, ..
+        } = context_at("let <Panel tit⟨cursor⟩le:string /> = <div />\n")
+        else {
+            panic!("expected a local-declaration context");
+        };
+
+        assert_eq!(kind, LocalDeclarationKind::Parameter);
+        assert_eq!(name, "title");
+        assert_eq!(owner, "Panel");
+    }
+
+    #[test]
+    fn a_cursor_on_a_record_field_resolves_to_a_local_declaration() {
+        let PositionContext::LocalDeclaration {
+            kind, name, owner, ..
+        } = context_at("type R = { na⟨cursor⟩me:string }\n")
+        else {
+            panic!("expected a local-declaration context");
+        };
+
+        assert_eq!(kind, LocalDeclarationKind::RecordField);
+        assert_eq!(name, "name");
+        assert_eq!(owner, "R");
+    }
+
+    #[test]
+    fn a_cursor_on_a_union_case_resolves_to_a_local_declaration() {
+        let PositionContext::LocalDeclaration {
+            kind, name, owner, ..
+        } = context_at("type Role = admin | gu⟨cursor⟩est\n")
+        else {
+            panic!("expected a local-declaration context");
+        };
+
+        assert_eq!(kind, LocalDeclarationKind::UnionCase);
+        assert_eq!(name, "guest");
+        assert_eq!(owner, "Role");
+    }
+
+    #[test]
+    fn a_cursor_on_a_union_payload_field_resolves_to_a_local_declaration() {
+        let PositionContext::LocalDeclaration {
+            kind, name, owner, ..
+        } = context_at("type S =\n  | failed { mess⟨cursor⟩age:string }\n")
+        else {
+            panic!("expected a local-declaration context");
+        };
+
+        assert_eq!(
+            kind,
+            LocalDeclarationKind::UnionPayloadField {
+                case: "failed".to_string()
+            }
+        );
+        assert_eq!(name, "message");
+        assert_eq!(owner, "S");
+    }
+
+    /// Design D4: a name written in a value slot is reported with its own range, and only an empty
+    /// slot reports no name.
+    #[test]
+    fn a_written_bare_property_value_reports_the_name_and_its_span() {
+        let PositionContext::PropertyValue {
+            property,
+            name,
+            span,
+            ..
+        } = context_at("<Card role=ad⟨cursor⟩min />\n")
+        else {
+            panic!("expected a property-value context");
+        };
+
+        assert_eq!(property, "role");
+        assert_eq!(name.as_deref(), Some("admin"));
+        assert_eq!(span, TextRange::new(11.into(), 16.into()));
     }
 
     #[test]

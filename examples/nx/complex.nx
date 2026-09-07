@@ -2,8 +2,12 @@
 import "./ui" as UiComponents
 import "./utils" as UtilsFormatting
 
-type TodoItem = object
-type TodoList = TodoItem[]
+type Todo = {
+  text: string
+  status: string
+  completed: boolean = false
+}
+type TodoList = Todo[]
 
 let <TodoApp
   todos:TodoList
@@ -25,7 +29,7 @@ let <TodoApp
   </UiComponents.AppShell>
 
 let <TodoStats
-  items:TodoItem[]
+  items:Todo[]
 /> =
   <div class="stats">
     if {
@@ -36,7 +40,7 @@ let <TodoStats
   </div>
 
 let <TodoList
-  items:TodoItem[]
+  items:Todo[]
   filter:string
 /> =
   <ul class="todo-list">
@@ -54,7 +58,7 @@ let <TodoList
   </ul>
 
 let <TodoItem
-  item:TodoItem
+  item:Todo
   index:int
   visible:boolean=true
 /> =

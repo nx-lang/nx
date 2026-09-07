@@ -10,6 +10,9 @@
       "include": "#comments"
     },
     {
+      "include": "#hover-annotation"
+    },
+    {
       "include": "#function-definition"
     },
     {
@@ -2464,6 +2467,82 @@
       "patterns": [
         {
           "include": "#loop-header-parts"
+        }
+      ]
+    },
+    "hover-annotation": {
+      "comment": "One line of editor hover content, such as `(property) ShapeCommon.shadows: Shadow[]?`. NX has no such form: the parenthesized kind is what hover writes for a position that has no NX spelling of its own — a parameter, a field, a case. Without these patterns the rest of the line falls out of every declaration context the grammar scopes inside, so the names go unhighlighted and the annotation colon and `?` are scoped as a ternary's. A line-based grammar cannot tell hover content from element text that happens to read the same way, so the cost is bounded rather than avoided: a line of prose beginning with one of the five kind words these patterns recognize — `property`, `parameter`, `case`, `primitive type`, `built-in type` — in the shape the pattern for that kind matches, is scoped as a hover annotation. That is the trade for highlighting every fragment hover emits.",
+      "patterns": [
+        {
+          "comment": "`(property) Owner.name: Type` — the owner is a qualifier, the last name is the thing hovered, and what follows the colon is a type.",
+          "name": "meta.annotation.hover.nx",
+          "begin": "^\\((property|parameter)\\)\\s+((?:[A-Za-z_][A-Za-z0-9_]*\\.)*)([A-Za-z_][A-Za-z0-9_-]*)\\s*(:)",
+          "beginCaptures": {
+            "1": {
+              "name": "meta.annotation.hover.kind.nx"
+            },
+            "2": {
+              "name": "entity.name.type.nx"
+            },
+            "3": {
+              "name": "variable.other.property.nx"
+            },
+            "4": {
+              "name": "punctuation.separator.type.annotation.nx"
+            }
+          },
+          "end": "$",
+          "patterns": [
+            {
+              "include": "#type-annotation"
+            }
+          ]
+        },
+        {
+          "comment": "`(case) Union.case`, which the grammar already spells this way in source.",
+          "match": "^\\((case)\\)\\s+([A-Za-z_][A-Za-z0-9_]*)(\\.)([A-Za-z_][A-Za-z0-9_-]*)\\s*$",
+          "captures": {
+            "1": {
+              "name": "meta.annotation.hover.kind.nx"
+            },
+            "2": {
+              "name": "entity.name.type.union.nx"
+            },
+            "3": {
+              "name": "punctuation.separator.dot.nx"
+            },
+            "4": {
+              "name": "entity.name.type.union.case.nx"
+            }
+          },
+          "name": "meta.annotation.hover.nx"
+        },
+        {
+          "comment": "`(primitive type) int` and `(built-in type) Element`, where the kind is followed by a bare type name. Only these two kinds: a parameter and a property always carry `name: type`, and a case always carries `Union.case`, so the patterns above claim those before this one is reached.",
+          "begin": "^\\((primitive type|built-in type)\\)(?=\\s)",
+          "beginCaptures": {
+            "1": {
+              "name": "meta.annotation.hover.kind.nx"
+            }
+          },
+          "end": "$",
+          "patterns": [
+            {
+              "include": "#types"
+            },
+            {
+              "match": "[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_-]*)*((?:\\[\\]|\\?)*)",
+              "captures": {
+                "0": {
+                  "name": "entity.name.type.nx"
+                },
+                "1": {
+                  "name": "keyword.operator.type-modifier.nx"
+                }
+              }
+            }
+          ],
+          "name": "meta.annotation.hover.nx"
         }
       ]
     }

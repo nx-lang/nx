@@ -7,6 +7,39 @@ All notable changes to this project will be documented in this file.
 - Add extension activation code, packaged server path resolution, and `nx.server.path`
 - Add package verification for compiled client runtime and native server assets
 
+### Hover
+Hover content is now a fenced `nx` code block, spelled the way an author writes the declaration, so
+the markdown-fence grammar this extension already ships highlights it. A function reads
+`let add(count:int): int` rather than `function add(count: int): int`; a union lists its cases and a
+record type lists its fields.
+
+Hover also answers where it used to say nothing:
+- Inside an intrinsic element. A type error or a hovered name under `<div>` was invisible because
+  type analysis never visited an element whose tag resolves to nothing. It does now, so the checker
+  reports those errors and hover reports those types.
+- On the member of a member access — `name` in `user.name` reports `(property) User.name: string`.
+- On a declaration written inside another: a function or element-style function parameter, a record
+  field, a union case, and a union case's payload field.
+- On a bare name written in a property value, which reports the same thing that name reports
+  anywhere else the type is expected.
+- On a value declared without a type annotation, which reports the type analysis inferred.
+
+Some hover fragments are deliberately not NX — a parameter, a field, and a union case have no
+standalone spelling in the language, so hover writes them with a parenthesized kind, as
+`(property) ShapeCommon.shadows: Shadow[]?`. The grammar scopes that shape now; before, such a line
+fell outside every declaration context and its names went unhighlighted, while its annotation colon
+and `?` were scoped as a ternary's.
+
+New scopes:
+- `meta.annotation.hover.nx` — one line of hover content in that shape
+- `meta.annotation.hover.kind.nx` — the parenthesized kind. Left unstyled by design: it is an
+  editor convention rather than NX, and reads best in the default foreground, as TypeScript's does
+
+Inside such a line the owner, the name, the annotation colon, the type, and the type suffixes take
+the same scopes they take in a declaration (`entity.name.type.nx`, `variable.other.property.nx`,
+`punctuation.separator.type.annotation.nx`, `support.type.primitive.nx`,
+`keyword.operator.type-modifier.nx`), and `(case) Role.admin` takes the union scopes source uses.
+
 ### Grammar: element-shaped declarations
 Component and `let` function declarations written in element form now tokenize as declarations
 rather than as element references. Themes and Monaco/Shiki consumers of `@nx-lang/language/grammar`

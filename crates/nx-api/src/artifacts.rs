@@ -3960,7 +3960,7 @@ let root() = { <Draw s={<Circle r=1 />} /> }"#
                 "widgets.nx",
                 br#"export abstract type Shape = { label: string? }
 export type Circle extends Shape = { r: int }
-export let <Draw s: Shape = {<Circle r=0 />} /> = <div r={s.r} />"#
+export let <Draw s: Shape = {<Circle r=0 />} /> = <div label={s.label} />"#
                     .to_vec(),
             ),
         ]);
@@ -3995,7 +3995,7 @@ let root() = { <Draw s={<Circle r=1 />} /> }"#
                 "widgets.nx",
                 br#"export abstract type Shape = { label: string? }
 export type Circle extends Shape = { r: int }
-export let <Draw s: Shape = {<Circle r=0 />} /> = <div r={s.r} />"#
+export let <Draw s: Shape = {<Circle r=0 />} /> = <div label={s.label} />"#
                     .to_vec(),
             ),
         ]);

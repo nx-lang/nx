@@ -694,6 +694,68 @@ let root(user: User): User = { user }"#,
     );
 }
 
+/// An expression written inside an intrinsic element carries the same semantic type in the IR as
+/// the same expression written outside one.
+///
+/// <para>The IR's `ty` is not decoration. `@nx-lang/ir-runtime` reads it to pick integer division
+/// from float division, so an expression that reached codegen with no type divided as a float:
+/// `&lt;div&gt;{7 / 2}&lt;/div&gt;` evaluated to `3.5` while `{ 7 / 2 }` evaluated to `3`. Nothing
+/// in codegen caused that — inference never visited an element whose tag resolves to nothing, so
+/// the type environment codegen reads had no entry to hand over.</para>
+#[test]
+fn nx_ir_types_an_expression_written_inside_an_intrinsic_element() {
+    let inside = artifact_from_source("let root() = <div>{7 / 2}</div>");
+    let generated = emit_nx_ir(&inside).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+
+    let divisions = find_typed_divisions(ir_declaration(&document, "root"));
+    assert_eq!(
+        divisions,
+        vec!["int".to_string()],
+        "the division inside the element should carry the type it has"
+    );
+}
+
+/// Every `div` expression's semantic type display, gathered from anywhere under a declaration.
+fn find_typed_divisions(node: &Value) -> Vec<String> {
+    let mut found = Vec::new();
+    collect_typed_divisions(node, &mut found);
+    found
+}
+
+fn collect_typed_divisions(node: &Value, found: &mut Vec<String>) {
+    match node {
+        Value::Object(fields) => {
+            // An expression node carries `ty` beside the `op` that spells the operator, so the
+            // type belongs to the node the operator is nested in rather than to the operator.
+            let is_division = fields
+                .get("op")
+                .and_then(|op| op.get("operator"))
+                .and_then(Value::as_str)
+                == Some("div");
+            if is_division {
+                found.push(
+                    fields
+                        .get("ty")
+                        .and_then(|ty| ty.get("display"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("<none>")
+                        .to_string(),
+                );
+            }
+            for value in fields.values() {
+                collect_typed_divisions(value, found);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_typed_divisions(item, found);
+            }
+        }
+        _ => {}
+    }
+}
+
 #[test]
 fn nx_ir_declared_element_type_is_not_shadowed_by_builtin_element_supertype() {
     let artifact = artifact_from_workspace(
