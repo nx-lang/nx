@@ -10,8 +10,10 @@
  * the catalog costs one subtraction per diagnostic: the visitor's text starts at a known line and
  * byte offset, and `classify` shifts spans back into the visitor's own coordinates. A diagnostic
  * that lands before that offset is inside the catalog, which is an application fault rather than an
- * authoring error.
+ * authoring error. The shift itself is `@nx-lang/language-http`'s prelude arithmetic, shared with
+ * the language route so the two cannot disagree about where the visitor's text starts.
  */
+import { preludeOffsets, withPrelude } from "@nx-lang/language-http";
 import { NxProgramArtifact } from "@nx-lang/sdk-node";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -22,16 +24,6 @@ const catalog = readFileSync(join(appRoot, "catalog/skia.nx"), "utf8");
 
 /** Source larger than this is rejected before it reaches the compiler. */
 export const MAX_SOURCE_BYTES = 256 * 1024;
-
-function countLines(text) {
-  let lines = 1;
-  for (const character of text) {
-    if (character === "\n") {
-      lines += 1;
-    }
-  }
-  return lines;
-}
 
 /**
  * The location a whole-program failure carries in place of one: an empty span at the very first
@@ -123,13 +115,10 @@ export function compileWithCatalog(catalogSource, source) {
     throw new RangeError(`source exceeds ${MAX_SOURCE_BYTES} bytes`);
   }
 
-  const catalogText = catalogSource.endsWith("\n") ? catalogSource : `${catalogSource}\n`;
-  const prefixText = `${catalogText}\n`;
-  const prefix = {
-    lines: countLines(prefixText) - 1,
-    bytes: Buffer.byteLength(prefixText, "utf8"),
-  };
-  const combined = `${prefixText}${source}`;
+  // The same shift the language route applies to the same catalog, so a diagnostic from a compile
+  // and a range from a hover land on the same visitor line.
+  const prefix = preludeOffsets(catalogSource);
+  const combined = withPrelude(prefix, source);
 
   try {
     const artifact = NxProgramArtifact.buildSource(combined, { fileName: "fiddle.nx" });

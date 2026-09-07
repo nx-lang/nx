@@ -1,9 +1,10 @@
 /**
- * Serves the built SPA and answers one compile request.
+ * Serves the built SPA, answers compile requests, and answers the source pane's language queries.
  *
- * The server exists only because there is no WASM build of the compiler yet. It holds no state and
- * has one route beyond static files, so replacing it later with an in-browser compiler removes this
- * file and changes nothing else.
+ * The server exists only because there is no WASM build of the compiler or the language service
+ * yet. It holds no state and has two routes beyond static files — `/api/compile` and
+ * `/api/language/*` — so replacing it later with in-browser analysis removes this file and changes
+ * nothing else.
  */
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer } from "node:http";
@@ -11,6 +12,7 @@ import { extname, join, normalize, resolve } from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { MAX_SOURCE_BYTES, compile } from "./compile.mjs";
+import { LANGUAGE_ROUTE, languageListener } from "./language.mjs";
 import { COMPILE_PORT } from "./port.mjs";
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -143,8 +145,13 @@ function failRequest(response, error) {
 
 const server = createServer((request, response) => {
   try {
-    if (request.url?.split("?")[0] === "/api/compile") {
+    const path = request.url?.split("?")[0] ?? "";
+    if (path === "/api/compile") {
       handleCompile(request, response).catch((error) => failRequest(response, error));
+      return;
+    }
+    if (path.startsWith(LANGUAGE_ROUTE)) {
+      languageListener(request, response);
       return;
     }
     serveStatic(request, response);

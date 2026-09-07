@@ -717,6 +717,35 @@ mod tests {
         assert!(message.contains("other.nx (unmapped location)"));
     }
 
+    /// LSP positions default to UTF-16 code units, which is what the server advertises by not
+    /// negotiating otherwise. An emoji earlier on the line is two units, and the position the
+    /// client sends for `name` has to land on `name`; the range sent back has to count the same
+    /// way, or the client highlights two columns to the left of the word.
+    #[test]
+    fn positions_past_a_non_bmp_character_are_utf16_in_both_directions() {
+        let uri = "nx://tenant/form.nx";
+        let source = "let greet(name:string) = { \"😀\" + name }\n";
+        let snapshot =
+            snapshot_for_open_documents(None, &one_document(uri, source, 1)).expect("snapshot");
+        let service_uri = DocumentUri::new(uri);
+
+        // `name` starts at UTF-16 column 34 (byte 36); the client points inside it.
+        let hover = snapshot
+            .hover(&service_uri, to_service_position(Position::new(0, 36)))
+            .expect("hover")
+            .map(to_lsp_hover)
+            .expect("hover content");
+
+        let HoverContents::Markup(markup) = &hover.contents else {
+            panic!("expected markup hover contents");
+        };
+        assert!(markup.value.contains("string"), "got: {}", markup.value);
+        assert_eq!(
+            hover.range,
+            Some(Range::new(Position::new(0, 34), Position::new(0, 38)))
+        );
+    }
+
     #[test]
     fn document_symbol_hover_and_completion_adapters_use_language_service_results() {
         let uri = "nx://tenant/form.nx";

@@ -1,13 +1,29 @@
 import { useEffect, useRef } from "react";
 import * as monaco from "monaco-editor";
-import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
+// Monaco 0.56 maps `monaco-editor/<path>.js` onto `esm/vs/<path>.js` through its exports map.
+import editorWorker from "monaco-editor/editor/editor.worker.js?worker";
+import { createHttpLanguageService } from "@nx-lang/language-client";
+import { NX_LANGUAGE_ID, registerNxLanguage } from "@nx-lang/monaco";
 import type { Diagnostic } from "../compile";
-import { NX_LANGUAGE_ID, registerNxLanguage } from "./nxLanguage";
 
 // Monaco expects to be told where its workers live; Vite supplies them as module workers.
 self.MonacoEnvironment = { getWorker: () => new editorWorker() };
 
-const languageReady = registerNxLanguage();
+/** The one document the fiddle edits, under the logical URI the language route sees it by. */
+const MODEL_URI = monaco.Uri.parse("nx://fiddle/fiddle.nx");
+const THEME = "github-dark";
+
+/**
+ * Highlighting, hover and completion all come from the shared Monaco integration: the grammar is
+ * the repository's published one, and hover and completion are answered by the language route the
+ * compile server mounts beside `/api/compile`. The route being unreachable is the compile server
+ * being down, which the compile pane already reports, so here the providers only fall silent.
+ */
+const registration = registerNxLanguage(monaco, {
+  service: createHttpLanguageService({ baseUrl: "/api/language" }),
+  themes: [THEME],
+  onError: (error) => console.debug("nx language", error),
+});
 
 export interface NxEditorProps {
   readonly value: string;
@@ -15,7 +31,7 @@ export interface NxEditorProps {
   readonly diagnostics: readonly Diagnostic[];
 }
 
-/** The source pane: Monaco, the repository's NX grammar, and markers for the author's own errors. */
+/** The source pane: Monaco, the shared NX integration, and markers for the author's own errors. */
 export function NxEditor({ value, onChange, diagnostics }: NxEditorProps) {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -25,14 +41,15 @@ export function NxEditor({ value, onChange, diagnostics }: NxEditorProps) {
   useEffect(() => {
     let disposed = false;
     let subscription: monaco.IDisposable | undefined;
-    void languageReady.then(() => {
+    void registration.ready.then(() => {
       if (disposed || host.current === null) {
         return;
       }
+      const model =
+        monaco.editor.getModel(MODEL_URI) ?? monaco.editor.createModel(value, NX_LANGUAGE_ID, MODEL_URI);
       const instance = monaco.editor.create(host.current, {
-        value,
-        language: NX_LANGUAGE_ID,
-        theme: "nx-dark",
+        model,
+        theme: THEME,
         automaticLayout: true,
         minimap: { enabled: false },
         scrollBeyondLastLine: false,
@@ -48,7 +65,9 @@ export function NxEditor({ value, onChange, diagnostics }: NxEditorProps) {
     return () => {
       disposed = true;
       subscription?.dispose();
+      const model = editor.current?.getModel();
       editor.current?.dispose();
+      model?.dispose();
       editor.current = null;
     };
     // The editor owns its text after creation; `value` is only the starting point.

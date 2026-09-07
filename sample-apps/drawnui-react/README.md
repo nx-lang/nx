@@ -9,6 +9,9 @@ evaluated value tree → DrawnUI controls → CanvasKit.
 ```
 NX source ──▶ @nx-lang/sdk-node ──▶ nx-ir-json ──▶ @nx-lang/ir-runtime ──▶ renderer ──▶ DrawnUI
    editor        (server)                             (browser)              (browser)     canvas
+     │
+     └── hover / completion ──▶ @nx-lang/language-http ──▶ @nx-lang/sdk-node language snapshot
+           (@nx-lang/monaco)        (server, /api/language)     (server)
 ```
 
 ## Prerequisites
@@ -21,26 +24,29 @@ NX source ──▶ @nx-lang/sdk-node ──▶ nx-ir-json ──▶ @nx-lang/ir
 
 ## Running it
 
+The app is a member of the repository's root pnpm workspace, which links the native SDK, the IR
+runtime and the shared editor packages it depends on. pnpm comes through corepack.
+
 ```bash
 # once, from the repository root
-cd bindings/node && npm install && npm run build
+corepack enable
+pnpm install
+pnpm -r build     # the native addon, the IR runtime, the shared packages, then this app
 
-cd ../../sample-apps/drawnui-react
-npm install
-npm run build     # bundles the SPA into dist/
-npm start         # serves dist/ and POST /api/compile on http://localhost:5174
+cd sample-apps/drawnui-react
+pnpm start        # serves dist/, POST /api/compile and POST /api/language/* on http://localhost:5174
 ```
 
-For development, `npm run dev:all` starts both halves: Vite on 5173 and the compile server on 5174,
-which Vite proxies `/api` to. Either one exiting stops the other. `npm run dev` still starts Vite
-alone, for running it beside a compile server of your own — without one, `/api` answers 502 saying
-so rather than leaving compiles to time out. `PORT` moves the compile server and the proxy that
-reaches it together.
+For development, `pnpm run dev:all` starts both halves: Vite on 5173 and the compile server on 5174,
+which Vite proxies `/api` to — compiles and language queries alike. Either one exiting stops the
+other. `pnpm run dev` still starts Vite alone, for running it beside a compile server of your own —
+without one, `/api` answers 502 saying so rather than leaving compiles to time out, and hover and
+completion fall silent. `PORT` moves the compile server and the proxy that reaches it together.
 
 ```bash
-npm run typecheck      # tsc over the app and the vendored DrawnUI source
-npm test               # compile-service tests, then every example
-npm run check-examples  # every example compiles, evaluates, and declares its coverage
+pnpm run typecheck      # tsc over the app and the vendored DrawnUI source
+pnpm test               # compile-service and language-route tests, the proxy tests, then every example
+pnpm run check-examples  # every example compiles, evaluates, and declares its coverage
 ```
 
 ## Layout
@@ -53,13 +59,14 @@ npm run check-examples  # every example compiles, evaluates, and declares its co
 | `scripts/sync-drawnui.mjs` | re-copies DrawnUI's source, demo pages and assets |
 | `scripts/check-examples.mjs` | one check over the whole example set |
 | `scripts/emit-example-ir.mjs` | emits each example's NX IR, for proving an edit changed only notation |
-| `scripts/dev.mjs` | runs Vite and the compile server together (`npm run dev:all`) |
+| `scripts/dev.mjs` | runs Vite and the compile server together (`pnpm run dev:all`) |
 | `server/compile.mjs` | NX source + catalog → NX IR, with diagnostics |
-| `server/index.mjs` | serves `dist/` and `POST /api/compile` |
+| `server/language.mjs` | the `@nx-lang/language-http` handler with the catalog as its prelude |
+| `server/index.mjs` | serves `dist/`, `POST /api/compile`, and `POST /api/language/*` |
 | `server/port.mjs` | the compile server's port, shared with the Vite proxy and `dev:all` |
 | `src/compile/` | the client's one compile seam |
 | `src/render/` | evaluated NX values → DrawnUI controls |
-| `src/editor/` | Monaco with the repository's own NX TextMate grammar |
+| `src/editor/` | Monaco through `@nx-lang/monaco` (grammar, highlighting, hover, completion) and `@nx-lang/language-client` |
 | `src/examples/` | the ported examples and their metadata |
 | `src/drawnui/` | vendored DrawnUI runtime — see `UPSTREAM.md` |
 | `reference/demo-pages/` | the original TSX pages, for comparison only; never built |
@@ -108,11 +115,12 @@ docker run -p 8080:8080 drawnui-fiddle
 `PORT` selects the port (8080 in the image). Nothing else is required at runtime — the catalog, the
 examples and the grammar are all in the bundle.
 
-**One compile at a time, with no deadline.** `POST /api/compile` calls the native compiler
-synchronously on the Node server's only thread. A compile that never returns — or merely a slow one
-— stops the service for everyone until it finishes, and nothing in the process can interrupt it: a
-worker thread would not help, because `terminate()` cannot preempt a native call that never returns
-to JavaScript. Only a child process can be killed. No known input hangs the compiler (the one that
-did is fixed and fuzz-tested), so this is a structural exposure rather than a live one, but it is
-the reason to put this behind something that limits request rate and body size before pointing
-untrusted traffic at it.
+**One request at a time, with no deadline.** `POST /api/compile` and `POST /api/language/*` both
+call the native binding synchronously on the Node server's only thread. A call that never returns
+— or merely a slow one — stops the service for everyone until it finishes, and nothing in the
+process can interrupt it: a worker thread would not help, because `terminate()` cannot preempt a
+native call that never returns to JavaScript. Only a child process can be killed. No known input
+hangs the compiler (the one that did is fixed and fuzz-tested), and the language route caches its
+analysis per document set so a hover storm costs one analysis, so this is a structural exposure
+rather than a live one — but it is the reason to put this behind something that limits request
+rate and body size before pointing untrusted traffic at it.

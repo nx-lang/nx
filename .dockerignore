@@ -1,0 +1,13 @@
+# Build outputs and installed dependencies: the image builds its own, and these are large.
+.git
+target
+node_modules
+**/node_modules
+**/dist
+**/out
+artifacts
+bin
+obj
+docs
+src/vscode/*.vsix
+sample-apps/drawnui-react/dist

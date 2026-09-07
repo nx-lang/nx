@@ -5,8 +5,8 @@ import { connect } from "node:net";
 import { COMPILE_PORT } from "./server/port.mjs";
 
 /**
- * Where `npm start` serves `POST /api/compile`. The port comes from the compile server itself, so an
- * ambient `PORT` moves the server and this proxy together.
+ * Where `pnpm start` serves `POST /api/compile` and `POST /api/language/*`. The port comes from the
+ * compile server itself, so an ambient `PORT` moves the server and this proxy together.
  */
 const COMPILE_HOST = "127.0.0.1";
 const COMPILE_SERVER = `http://${COMPILE_HOST}:${COMPILE_PORT}`;
@@ -17,7 +17,7 @@ const PROBE_MS = 1000;
 /** A ceiling on a proxied compile, below the 8s the app gives up after. */
 const PROXY_TIMEOUT_MS = 7000;
 
-const START_IT = "start it with `npm start`, or run `npm run dev:all` to start both";
+const START_IT = "start it with `pnpm start`, or run `pnpm run dev:all` to start both";
 
 function sendError(response: ServerResponse, status: number, message: string) {
   if (response.headersSent || response.writableEnded) {
@@ -90,10 +90,12 @@ export default defineConfig({
   plugins: [react(), compileServerProbe()],
   build: { target: "esnext" },
   server: {
-    // The NX TextMate grammar is imported from the repository rather than copied, so dev needs to
-    // be allowed to read above the app root.
+    // The shared packages are workspace links into the repository, so dev needs to be allowed to
+    // read above the app root.
     fs: { allow: [".", "../.."] },
     proxy: {
+      // Both routes the compile server answers — `/api/compile` and `/api/language/*` — share the
+      // one prefix, so one rule carries them together.
       "/api": {
         target: COMPILE_SERVER,
         // The probe clears the common case; this covers a server that dies mid-request, which would

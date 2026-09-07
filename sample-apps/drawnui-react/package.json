@@ -11,21 +11,25 @@
     "preview": "vite preview",
     "start": "node server/index.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test \"server/*.test.mjs\" \"vite.config.test.mjs\" && npm run check-examples",
+    "test": "node --test \"server/*.test.mjs\" \"vite.config.test.mjs\" && pnpm run check-examples",
     "check-examples": "node scripts/check-examples.mjs",
     "sync-drawnui": "node scripts/sync-drawnui.mjs",
     "generate-catalog": "node scripts/generate-catalog.mjs"
   },
   "dependencies": {
-    "@nx-lang/ir-runtime": "file:../../runtime/typescript",
-    "@nx-lang/sdk-node": "file:../../bindings/node",
+    "@nx-lang/ir-runtime": "workspace:*",
+    "@nx-lang/language": "file:../../src/vscode",
+    "@nx-lang/language-client": "workspace:*",
+    "@nx-lang/language-http": "workspace:*",
+    "@nx-lang/monaco": "workspace:*",
+    "@nx-lang/sdk-node": "workspace:*",
+    "@shikijs/monaco": "^4.4.3",
     "canvaskit-wasm": "^0.42.0",
-    "monaco-editor": "^0.54.0",
+    "monaco-editor": "^0.56.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-reconciler": "^0.33.0",
-    "vscode-oniguruma": "^2.0.1",
-    "vscode-textmate": "^9.2.0"
+    "shiki": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

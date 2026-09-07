@@ -32,6 +32,7 @@ function freePort() {
 let vite;
 let origin;
 let compilePort;
+/** Whatever is standing in for the compile server on `compilePort`; closed in `after`. */
 let stalling;
 
 /** Posts a compile the way the client does, and fails rather than hangs if nothing answers in time. */
@@ -83,4 +84,24 @@ test("answers a compile server that accepts the connection and then never replie
   assert.equal(response.status, 502);
   assert.match(body.error, /mid-request/);
   assert.ok(elapsed < CLIENT_DEADLINE_MS, `answered in ${elapsed}ms`);
+});
+
+test("proxies the language route to the compile server by the same rule as compiles", async () => {
+  await new Promise((fulfil) => stalling.close(fulfil));
+  // An answering stand-in: what matters is that the request arrives at the compile server's port
+  // with its path intact, not what a real answer would say.
+  stalling = createHttpServer((request, response) => {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ method: request.method, path: request.url }));
+  });
+  await new Promise((fulfil) => stalling.listen(compilePort, "127.0.0.1", fulfil));
+
+  const response = await fetch(`${origin}/api/language/hover`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+    signal: AbortSignal.timeout(CLIENT_DEADLINE_MS),
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { method: "POST", path: "/api/language/hover" });
 });

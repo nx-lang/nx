@@ -1,6 +1,15 @@
 import { NxDisposedResourceError, NxEvaluationError, NxNativeError } from "./errors.js";
+import type {
+  CompletionList,
+  DiagnosticReport,
+  DocumentSymbol,
+  Hover,
+  TextPosition
+} from "@nx-lang/language-protocol";
 import {
   loadNativeBinding,
+  type NativeLanguageDocument,
+  type NativeNxLanguageSnapshot,
   type NativeNxLibraryRegistry,
   type NativeNxProgramArtifact,
   type NativeNxProgramBuildContext,
@@ -30,6 +39,23 @@ export {
   NxNativeError
 };
 export type {
+  CompletionItem,
+  CompletionItemKind,
+  CompletionList,
+  DiagnosticReport,
+  DiagnosticSeverity,
+  DocumentDiagnostics,
+  DocumentSymbol,
+  DocumentSymbolKind,
+  EditorDiagnostic,
+  EditorRange,
+  Hover,
+  RelatedLocation,
+  TextPosition,
+  WorkspaceDiagnostic,
+  WorkspaceDiagnosticLabel
+} from "@nx-lang/language-protocol";
+export type {
   NxByteEvaluationOptions,
   NxDiagnostic,
   NxDiagnosticLabel,
@@ -54,6 +80,7 @@ const workspaceNatives = new WeakMap<NxWorkspace, NativeNxWorkspace>();
 const registryNatives = new WeakMap<NxLibraryRegistry, NativeNxLibraryRegistry>();
 const buildContextNatives = new WeakMap<NxProgramBuildContext, NativeNxProgramBuildContext>();
 const artifactNatives = new WeakMap<NxProgramArtifact, NativeNxProgramArtifact>();
+const languageSnapshotNatives = new WeakMap<NxLanguageSnapshot, NativeNxLanguageSnapshot>();
 
 const evaluationPrefix = "NX_EVALUATION:";
 const nativePrefix = "NX_NATIVE:";
@@ -350,6 +377,135 @@ export class NxProgramArtifact {
 }
 
 /**
+ * One in-memory document submitted to a language snapshot.
+ */
+export interface NxLanguageDocumentInput {
+  /**
+   * Logical URI the document is addressed by in queries, such as `nx://tenant/form.nx` or a `file:` URI.
+   */
+  readonly uri: string;
+  /**
+   * Complete source text.
+   */
+  readonly source: string;
+  /**
+   * Workspace identity NX resolves imports by, such as `tenant/form.nx`. Derived from the URI when omitted.
+   */
+  readonly identity?: string;
+  /**
+   * Editor version of the text, echoed back in every result for that document.
+   */
+  readonly version?: number;
+}
+
+/**
+ * Options for constructing a language snapshot.
+ */
+export interface NxLanguageSnapshotOptions {
+  /**
+   * Build context whose libraries every query can see. Without one, names declared only in a library are unresolved.
+   */
+  readonly buildContext?: NxProgramBuildContext;
+}
+
+/**
+ * Immutable analysis of a set of in-memory documents that answers editor queries: hover, completions, diagnostics,
+ * and document symbols.
+ *
+ * Positions count UTF-16 code units, the way JavaScript strings and browser editors count. Results are the
+ * `@nx-lang/language-protocol` answer shapes. The snapshot analyzes lazily and caches the analysis for its lifetime,
+ * so a new snapshot is needed whenever a document changes.
+ */
+export class NxLanguageSnapshot {
+  /**
+   * Analyzes `documents`, optionally against the libraries `options.buildContext` makes visible.
+   *
+   * @throws NxEvaluationError when a URI is unparseable, two documents share a URI or identity, or an identity is
+   * invalid; the message names the offending URI or identity.
+   * @throws NxDisposedResourceError when the supplied build context has already been disposed.
+   * @throws NxNativeError when the native binding cannot create the snapshot.
+   */
+  public constructor(documents: Iterable<NxLanguageDocumentInput>, options: NxLanguageSnapshotOptions = {}) {
+    const nativeDocuments = Array.from(documents, normalizeLanguageDocument);
+    const buildContext = options.buildContext;
+    const native = invokeNative(() =>
+      buildContext === undefined
+        ? new (loadNativeBinding().NativeNxLanguageSnapshot)(nativeDocuments)
+        : loadNativeBinding().NativeNxLanguageSnapshot.withBuildContext(
+            nativeDocuments,
+            getBuildContextNative(buildContext)
+          )
+    );
+    languageSnapshotNatives.set(this, native);
+  }
+
+  /**
+   * Hover content at `position` in the document at `uri`, or `null` when there is nothing to say.
+   *
+   * @throws NxEvaluationError when `uri` names no document in the snapshot.
+   * @throws NxDisposedResourceError when this snapshot has already been disposed.
+   */
+  public hover(uri: string, position: TextPosition): Hover | null {
+    const json = invokeNative(() => getLanguageSnapshotNative(this).hover(uri, position.line, position.character));
+    return json === null ? null : (parseResultJson(json) as Hover);
+  }
+
+  /**
+   * Completion candidates at `position` in the document at `uri`.
+   *
+   * @throws NxEvaluationError when `uri` names no document in the snapshot.
+   * @throws NxDisposedResourceError when this snapshot has already been disposed.
+   */
+  public completions(uri: string, position: TextPosition): CompletionList {
+    const json = invokeNative(() =>
+      getLanguageSnapshotNative(this).completions(uri, position.line, position.character)
+    );
+    return parseResultJson(json) as CompletionList;
+  }
+
+  /**
+   * Diagnostics for every document in the snapshot, plus diagnostics that belong to no document.
+   *
+   * @throws NxDisposedResourceError when this snapshot has already been disposed.
+   */
+  public diagnostics(): DiagnosticReport {
+    const json = invokeNative(() => getLanguageSnapshotNative(this).diagnostics());
+    return parseResultJson(json) as DiagnosticReport;
+  }
+
+  /**
+   * Top-level symbols of the document at `uri`.
+   *
+   * @throws NxEvaluationError when `uri` names no document in the snapshot.
+   * @throws NxDisposedResourceError when this snapshot has already been disposed.
+   */
+  public documentSymbols(uri: string): DocumentSymbol[] {
+    const json = invokeNative(() => getLanguageSnapshotNative(this).documentSymbols(uri));
+    return parseResultJson(json) as DocumentSymbol[];
+  }
+
+  /**
+   * Releases the native snapshot resource.
+   *
+   * Calling `dispose` more than once is allowed. Operations after disposal throw `NxDisposedResourceError`.
+   */
+  public dispose(): void {
+    const native = languageSnapshotNatives.get(this);
+    if (native !== undefined) {
+      invokeNative(() => native.dispose());
+      languageSnapshotNatives.delete(this);
+    }
+  }
+
+  /**
+   * Releases the native snapshot resource through JavaScript explicit resource management.
+   */
+  public [Symbol.dispose](): void {
+    this.dispose();
+  }
+}
+
+/**
  * Validates an in-memory workspace against a supplied build context and returns all NX diagnostics as data.
  */
 export function validateWorkspace(
@@ -493,6 +649,31 @@ function getBuildContextNative(buildContext: NxProgramBuildContext): NativeNxPro
     throw new NxDisposedResourceError("NxProgramBuildContext");
   }
   return native;
+}
+
+function getLanguageSnapshotNative(snapshot: NxLanguageSnapshot): NativeNxLanguageSnapshot {
+  const native = languageSnapshotNatives.get(snapshot);
+  if (native === undefined) {
+    throw new NxDisposedResourceError("NxLanguageSnapshot");
+  }
+  return native;
+}
+
+function normalizeLanguageDocument(document: NxLanguageDocumentInput): NativeLanguageDocument {
+  return {
+    uri: document.uri,
+    source: document.source,
+    ...(document.identity === undefined ? {} : { identity: document.identity }),
+    ...(document.version === undefined ? {} : { version: document.version })
+  };
+}
+
+function parseResultJson(json: string): unknown {
+  try {
+    return JSON.parse(json);
+  } catch (error) {
+    throw new NxNativeError("NX language service returned malformed JSON.", causeOption(error));
+  }
 }
 
 function getArtifactNative(artifact: NxProgramArtifact): NativeNxProgramArtifact {

@@ -7,7 +7,10 @@ use nx_api::{
     analyze_workspace_modules, validate_workspace, NxDiagnostic, NxDiagnosticLabel, NxSeverity,
     NxWorkspace, NxWorkspaceInputError, NxWorkspaceModule, ProgramBuildContext,
 };
-use nx_hir::{ast::TypeRef, Item, LocalDefinitionId, LoweredModule, PreparedNamespace, RecordKind};
+use nx_hir::{
+    ast::TypeRef, Item, LocalDefinitionId, LoweredModule, PreparedBinding, PreparedNamespace,
+    RecordKind,
+};
 use nx_syntax::{parse_str, SyntaxKind, SyntaxNode};
 use nx_types::{ModuleArtifact, TypeEnvironment};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -121,6 +124,7 @@ impl DocumentVersion {
 
 /// Zero-based editor text position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TextPosition {
     /// Zero-based line number.
     pub line: u32,
@@ -137,6 +141,7 @@ impl TextPosition {
 
 /// Editor text range with byte offsets preserved for staleness and query checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EditorRange {
     /// Range start.
     pub start: TextPosition,
@@ -224,6 +229,12 @@ pub struct WorkspaceSnapshot {
     /// the result is too, and a keystroke cannot afford to derive it again — the plain keyword
     /// path pays for it as much as the ones that use it.</para>
     declarations: OnceLock<Arc<WorkspaceDeclarations>>,
+    /// The libraries every query in this snapshot can see.
+    ///
+    /// <para>Visibility is a property of the whole analysis the snapshot caches once, so the
+    /// context belongs to the snapshot, not to a query: a per-query context would either
+    /// invalidate the cache or silently answer from the wrong one.</para>
+    build_context: ProgramBuildContext,
 }
 
 impl WorkspaceSnapshot {
@@ -272,7 +283,20 @@ impl WorkspaceSnapshot {
             by_uri,
             by_identity,
             declarations: OnceLock::new(),
+            build_context: ProgramBuildContext::empty(),
         })
+    }
+
+    /// Analyzes the snapshot against `build_context`, so that every library the context makes
+    /// visible is visible to diagnostics, hover, completion, and symbols, under the same rules
+    /// the compiler applies.
+    ///
+    /// <para>Discards any analysis already computed: the context decides what the analysis
+    /// sees, so it has to be set before the first query.</para>
+    pub fn with_build_context(mut self, build_context: ProgramBuildContext) -> Self {
+        self.build_context = build_context;
+        self.declarations = OnceLock::new();
+        self
     }
 
     /// Returns all snapshot documents.
@@ -293,7 +317,7 @@ impl WorkspaceSnapshot {
     /// Computes editor diagnostics plus diagnostics that are not tied to any submitted document.
     pub fn diagnostic_report(&self) -> Result<DiagnosticReport, SnapshotError> {
         let workspace = self.to_workspace()?;
-        let diagnostics = validate_workspace(&workspace, &ProgramBuildContext::empty());
+        let diagnostics = validate_workspace(&workspace, &self.build_context);
         Ok(self.project_diagnostic_report(&diagnostics))
     }
 
@@ -352,7 +376,7 @@ impl WorkspaceSnapshot {
             .document(uri)
             .ok_or_else(|| SnapshotError::UnknownDocument(uri.to_string()))?;
         let index = LineIndex::new(document.source());
-        let offset = index.position_to_byte_offset(document.source(), position);
+        let offset = index.position_to_byte_offset(position);
         let context = parse_str(document.source(), document.identity.as_str())
             .tree
             .map(|tree| positions::resolve(&tree, offset))
@@ -480,11 +504,32 @@ impl WorkspaceSnapshot {
                 .map(|ty| ty.to_string()),
             _ => None,
         };
-        Some(hover::fenced(hover::item_signature(
+        let mut content = hover::fenced(hover::item_signature(
             item,
             declaration.kind,
             inferred.as_deref(),
-        )))
+        ));
+        // What the declaration accepts beyond what it wrote: the chain it extends, and each
+        // inherited property with its type, so the author can see the whole contract at the tag.
+        let inherited = &declaration.properties[declaration.own_properties..];
+        if !inherited.is_empty() {
+            let bases = declaration
+                .inherited_from
+                .iter()
+                .map(|base| format!("`{base}`"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let properties = inherited
+                .iter()
+                .map(|property| format!("{}:{}", property.name, property.display_type))
+                .collect::<Vec<_>>()
+                .join("\n");
+            content.push_str(&format!(
+                "\n\nInherited from {bases}:\n\n{}",
+                hover::fenced(properties)
+            ));
+        }
+        Some(content)
     }
 
     /// The member of a member access, with the type the access has.
@@ -764,69 +809,39 @@ impl WorkspaceSnapshot {
         let Ok(workspace) = self.to_workspace() else {
             return WorkspaceDeclarations::default();
         };
-        let modules = analyze_workspace_modules(&workspace, &ProgramBuildContext::empty());
+        let modules = analyze_workspace_modules(&workspace, &self.build_context);
 
         let mut declarations = WorkspaceDeclarations::default();
         for module in modules {
-            declarations.visible_bindings.insert(
-                module.file_name.clone(),
-                module
-                    .prepared_bindings
-                    .iter()
-                    .map(|binding| {
-                        (
-                            binding.visible_name.as_str().to_string(),
-                            (
-                                binding.module_identity(&module.file_name).to_string(),
-                                binding.definition_id(),
-                            ),
-                        )
-                    })
-                    .collect(),
-            );
-
-            declarations.type_namespaces.insert(
-                module.file_name.clone(),
-                module
-                    .prepared_bindings
-                    .iter()
-                    .filter(|binding| binding.namespace == PreparedNamespace::Type)
-                    .map(|binding| {
-                        (
-                            binding.visible_name.as_str().to_string(),
-                            (
-                                binding.module_identity(&module.file_name).to_string(),
-                                binding.definition_id(),
-                            ),
-                        )
-                    })
-                    .collect(),
-            );
-
-            // The artifact is the analysis this loop was about to drop, so it is moved in rather
-            // than copied, once, whether or not the module lowered. The lowered module is behind
-            // an `Arc`, so keeping a handle to it across the move costs a refcount.
             let identity = module.file_name.clone();
-            let lowered = module.lowered_module.clone();
-            declarations.artifacts.insert(identity.clone(), module);
-
-            let Some(lowered) = lowered else {
-                continue;
-            };
             let source = self
                 .documents
                 .iter()
                 .find(|document| document.identity.as_str() == identity)
-                .map(|document| document.source())
-                .unwrap_or("");
-            for (item_index, item) in lowered.items().iter().enumerate() {
-                let origin = (identity.clone(), LocalDefinitionId::new(item_index as u32));
-                declarations
-                    .by_origin
-                    .insert(origin.clone(), declaration_from_item(item, source, origin));
+                .map(|document| document.source.clone())
+                .unwrap_or_else(|| Arc::from(""));
+            declarations.index_module(module, &source);
+        }
+
+        // A workspace module's import of a library binds names whose origin is a module of that
+        // library, and the analysis above returns only the workspace's own modules. The
+        // declarations those origins point at are read from the library snapshots the context
+        // holds, so a library name resolves the way a peer module's name does.
+        for library in self.build_context.visible_libraries() {
+            for module in &library.modules {
+                if declarations.artifacts.contains_key(&module.file_name) {
+                    continue;
+                }
+                let source = library
+                    .sources
+                    .get(&module.file_name)
+                    .cloned()
+                    .unwrap_or_else(|| Arc::from(""));
+                declarations.index_module(module.clone(), &source);
             }
         }
 
+        declarations.flatten_inheritance();
         declarations
     }
 }
@@ -857,6 +872,7 @@ fn workspace_diagnostic(diagnostic: &NxDiagnostic) -> WorkspaceDiagnostic {
 
 /// Diagnostics report for editor integrations.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DiagnosticReport {
     /// Diagnostics that can be published against submitted documents.
     pub documents: Vec<DocumentDiagnostics>,
@@ -867,6 +883,7 @@ pub struct DiagnosticReport {
 
 /// Diagnostic list for one document and version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DocumentDiagnostics {
     /// Client URI.
     pub uri: DocumentUri,
@@ -880,6 +897,7 @@ pub struct DocumentDiagnostics {
 
 /// Diagnostic that is not tied to a submitted document URI.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceDiagnostic {
     /// Severity.
     pub severity: DiagnosticSeverity,
@@ -894,6 +912,7 @@ pub struct WorkspaceDiagnostic {
 
 /// Original label metadata for a workspace diagnostic.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceDiagnosticLabel {
     /// Original NX identity or file name from the diagnostic label.
     pub identity: String,
@@ -927,6 +946,7 @@ impl From<NxSeverity> for DiagnosticSeverity {
 
 /// One diagnostic projected for editor clients.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EditorDiagnostic {
     /// Primary range.
     pub range: EditorRange,
@@ -942,6 +962,7 @@ pub struct EditorDiagnostic {
 
 /// Secondary diagnostic location.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RelatedLocation {
     /// Client URI for the related location.
     pub uri: DocumentUri,
@@ -976,6 +997,7 @@ pub enum DocumentSymbolKind {
 
 /// Top-level document symbol.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DocumentSymbol {
     /// Symbol name.
     pub name: String,
@@ -989,6 +1011,7 @@ pub struct DocumentSymbol {
 
 /// Hover result.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Hover {
     /// Client URI.
     pub uri: DocumentUri,
@@ -1004,6 +1027,7 @@ pub struct Hover {
 
 /// Completion response for one document and version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CompletionList {
     /// Client URI.
     pub uri: DocumentUri,
@@ -1034,6 +1058,7 @@ pub enum CompletionItemKind {
 
 /// Completion candidate.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CompletionItem {
     /// Insert/display label.
     pub label: String,
@@ -1105,8 +1130,15 @@ struct Declaration {
     name: String,
     kind: DocumentSymbolKind,
     detail: String,
-    /// The properties this declaration accepts, as its declaring module wrote them.
+    /// The properties this declaration accepts: its own first, as its declaring module wrote
+    /// them, then those it inherits through `extends`, nearest base first.
     properties: Vec<PropertyDeclaration>,
+    /// How many of `properties` the declaration wrote itself; the rest are inherited.
+    own_properties: usize,
+    /// The base this declaration extends, as its declaring module wrote the name.
+    base: Option<String>,
+    /// The bases the inherited properties come from, nearest first.
+    inherited_from: Vec<String>,
     /// Union case names, for contextual completions at a value position.
     members: Vec<String>,
     /// The declaration this came from, as `(module identity, definition id)`.
@@ -1129,6 +1161,10 @@ struct PropertyDeclaration {
     base_type: String,
     /// The declared type as it is written.
     display_type: String,
+    /// The module that declared the property, whose namespace `base_type` is resolved in. For an
+    /// inherited property that is the base's module, not the module of the declaration it was
+    /// reached through.
+    declaring_module: String,
 }
 
 /// Hover content for a type the language declares rather than the workspace.
@@ -1230,7 +1266,7 @@ struct ResolvedPosition<'a> {
     /// The document the position is in.
     document: &'a DocumentSnapshot,
     /// Line and character offsets for that document's source.
-    index: LineIndex,
+    index: LineIndex<'a>,
     /// The queried position as a byte offset into the source.
     offset: usize,
     /// What the cursor is on.
@@ -1277,6 +1313,139 @@ impl WorkspaceDeclarations {
     /// The analysis artifact for one module identity.
     fn artifact(&self, identity: &str) -> Option<&ModuleArtifact> {
         self.artifacts.get(identity)
+    }
+
+    /// Gives every declaration that extends a base the base's properties as well as its own.
+    ///
+    /// <para>A tag written against `<SkiaLabel extends SkiaLabelBase />` accepts everything the
+    /// chain declares, and the compiler checks it that way; hover and completion have to know the
+    /// same set or they describe a component the author cannot actually write. The base is a name
+    /// the declaring module wrote, so it is resolved in that module, and each inherited property
+    /// keeps the module that declared it so its type resolves there too.</para>
+    fn flatten_inheritance(&mut self) {
+        let extending = self
+            .by_origin
+            .iter()
+            .filter(|(_, declaration)| declaration.base.is_some())
+            .map(|(origin, _)| origin.clone())
+            .collect::<Vec<_>>();
+        let mut flattened = FxHashMap::default();
+        for origin in &extending {
+            self.flattened_properties(origin, &mut flattened, &mut Vec::new());
+        }
+        for (origin, (properties, inherited_from)) in flattened {
+            if let Some(declaration) = self.by_origin.get_mut(&origin) {
+                declaration.properties = properties;
+                declaration.inherited_from = inherited_from;
+            }
+        }
+    }
+
+    /// The full property list of the declaration at `origin`, and the bases it was read from.
+    fn flattened_properties(
+        &self,
+        origin: &DeclarationOrigin,
+        flattened: &mut FxHashMap<DeclarationOrigin, (Vec<PropertyDeclaration>, Vec<String>)>,
+        chain: &mut Vec<DeclarationOrigin>,
+    ) -> (Vec<PropertyDeclaration>, Vec<String>) {
+        if let Some(known) = flattened.get(origin) {
+            return known.clone();
+        }
+        let Some(declaration) = self.by_origin.get(origin) else {
+            return (Vec::new(), Vec::new());
+        };
+        let own = declaration.properties[..declaration.own_properties].to_vec();
+        // A cycle is a declaration error the compiler reports; here it just ends the chain.
+        let base = match (&declaration.base, chain.contains(origin)) {
+            (Some(base), false) => base,
+            _ => return (own, Vec::new()),
+        };
+        let Some(base_origin) = self.base_origin(origin, base, declaration.kind) else {
+            return (own, Vec::new());
+        };
+
+        chain.push(origin.clone());
+        let (base_properties, base_ancestors) =
+            self.flattened_properties(&base_origin, flattened, chain);
+        chain.pop();
+
+        let mut properties = own;
+        for property in base_properties {
+            if !properties.iter().any(|existing| existing.name == property.name) {
+                properties.push(property);
+            }
+        }
+        let mut inherited_from = vec![base.clone()];
+        inherited_from.extend(base_ancestors);
+        flattened.insert(origin.clone(), (properties.clone(), inherited_from.clone()));
+        (properties, inherited_from)
+    }
+
+    /// The declaration the base name written by the declaration at `origin` denotes: the same kind
+    /// of declaration, reached through the declaring module's own bindings.
+    fn base_origin(
+        &self,
+        origin: &DeclarationOrigin,
+        base: &str,
+        kind: DocumentSymbolKind,
+    ) -> Option<DeclarationOrigin> {
+        self.visible_bindings
+            .get(&origin.0)?
+            .iter()
+            .filter(|(name, _)| name == base)
+            .map(|(_, target)| target)
+            .find(|target| {
+                self.by_origin
+                    .get(*target)
+                    .is_some_and(|declaration| declaration.kind == kind)
+            })
+            .cloned()
+    }
+
+    /// Records one analyzed module: what it can see, its type namespace, its artifact, and a
+    /// `Declaration` for each of its items, read from `source`.
+    fn index_module(&mut self, module: ModuleArtifact, source: &str) {
+        let identity = module.file_name.clone();
+        let origin_of = |binding: &PreparedBinding| {
+            (
+                binding.module_identity(&identity).to_string(),
+                binding.definition_id(),
+            )
+        };
+
+        self.visible_bindings.insert(
+            identity.clone(),
+            module
+                .prepared_bindings
+                .iter()
+                .map(|binding| (binding.visible_name.as_str().to_string(), origin_of(binding)))
+                .collect(),
+        );
+
+        self.type_namespaces.insert(
+            identity.clone(),
+            module
+                .prepared_bindings
+                .iter()
+                .filter(|binding| binding.namespace == PreparedNamespace::Type)
+                .map(|binding| (binding.visible_name.as_str().to_string(), origin_of(binding)))
+                .collect(),
+        );
+
+        // The artifact is moved in rather than copied, once, whether or not the module lowered.
+        // The lowered module is behind an `Arc`, so keeping a handle to it across the move costs
+        // a refcount.
+        let lowered = module.lowered_module.clone();
+        self.artifacts.insert(identity.clone(), module);
+
+        let Some(lowered) = lowered else {
+            return;
+        };
+        for (item_index, item) in lowered.items().iter().enumerate() {
+            let origin = (identity.clone(), LocalDefinitionId::new(item_index as u32));
+            self.by_origin
+                .insert(origin.clone(), declaration_from_item(item, source, origin));
+        }
     }
 }
 
@@ -1342,7 +1511,12 @@ impl DocumentScope {
 
     /// The declaration a type name written by the module at `origin` denotes.
     fn type_in_module(&self, origin: &DeclarationOrigin, name: &str) -> Option<&Declaration> {
-        let target = self.workspace.type_namespaces.get(&origin.0)?.get(name)?;
+        self.type_declared_in(&origin.0, name)
+    }
+
+    /// The declaration a type name written by the module with identity `module` denotes.
+    fn type_declared_in(&self, module: &str, name: &str) -> Option<&Declaration> {
+        let target = self.workspace.type_namespaces.get(module)?.get(name)?;
         self.workspace.by_origin.get(target)
     }
 
@@ -1769,11 +1943,18 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
                     function
                         .params
                         .iter()
-                        .map(|param| property_declaration(param.name.as_str(), &param.ty))
+                        .map(|param| property_declaration(param.name.as_str(), &param.ty, &origin.0))
                         .collect()
                 } else {
                     Vec::new()
                 },
+                own_properties: if is_markup_function {
+                    function.params.len()
+                } else {
+                    0
+                },
+                base: None,
+                inherited_from: Vec::new(),
                 members: Vec::new(),
                 origin: origin.clone(),
             }
@@ -1787,6 +1968,9 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
                 .map(|ty| format!("value: {}", type_ref_display(ty)))
                 .unwrap_or_else(|| "value".to_string()),
             properties: Vec::new(),
+            own_properties: 0,
+            base: None,
+            inherited_from: Vec::new(),
             members: Vec::new(),
             origin: origin.clone(),
         },
@@ -1803,8 +1987,11 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
             properties: component
                 .props
                 .iter()
-                .map(|property| property_declaration(property.name.as_str(), &property.ty))
+                .map(|property| property_declaration(property.name.as_str(), &property.ty, &origin.0))
                 .collect(),
+            own_properties: component.props.len(),
+            base: component.base.as_ref().map(|base| base.as_str().to_string()),
+            inherited_from: Vec::new(),
             members: Vec::new(),
             origin: origin.clone(),
         },
@@ -1813,6 +2000,9 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
             kind: DocumentSymbolKind::TypeAlias,
             detail: format!("type = {}", type_ref_display(&alias.ty)),
             properties: Vec::new(),
+            own_properties: 0,
+            base: None,
+            inherited_from: Vec::new(),
             members: Vec::new(),
             origin: origin.clone(),
         },
@@ -1823,6 +2013,9 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
             // Only payloadless cases have a bare spelling; a payload case needs element-style
             // construction and must not be offered here.
             properties: Vec::new(),
+            own_properties: 0,
+            base: None,
+            inherited_from: Vec::new(),
             members: union_def
                 .cases
                 .iter()
@@ -1846,19 +2039,23 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
             properties: record
                 .properties
                 .iter()
-                .map(|property| property_declaration(property.name.as_str(), &property.ty))
+                .map(|property| property_declaration(property.name.as_str(), &property.ty, &origin.0))
                 .collect(),
+            own_properties: record.properties.len(),
+            base: record.base.as_ref().map(|base| base.as_str().to_string()),
+            inherited_from: Vec::new(),
             members: Vec::new(),
             origin: origin.clone(),
         },
     }
 }
 
-fn property_declaration(name: &str, ty: &TypeRef) -> PropertyDeclaration {
+fn property_declaration(name: &str, ty: &TypeRef, declaring_module: &str) -> PropertyDeclaration {
     PropertyDeclaration {
         name: name.to_string(),
         base_type: base_type_name(ty),
         display_type: type_ref_display(ty),
+        declaring_module: declaring_module.to_string(),
     }
 }
 
@@ -1958,16 +2155,15 @@ fn property_value_union<'a>(
 ) -> Option<&'a Declaration> {
     let element = scope.element(tag)?;
 
-    let type_name = element
+    let property = element
         .properties
         .iter()
-        .find(|property| property.name == property_name)
-        .map(|property| property.base_type.clone())?;
+        .find(|property| property.name == property_name)?;
 
     // The property's type was written in the declaring module's namespace, so it is resolved
-    // there. Looking it up by name among everything in the workspace is what let an unrelated
-    // same-named declaration supply the members.
-    let target = scope.type_in_module(&element.origin, &type_name)?;
+    // there — the base's module for an inherited property. Looking it up by name among everything
+    // in the workspace is what let an unrelated same-named declaration supply the members.
+    let target = scope.type_declared_in(&property.declaring_module, &property.base_type)?;
     matches!(target.kind, DocumentSymbolKind::Union).then_some(target)
 }
 
@@ -2068,12 +2264,20 @@ fn dedupe_completions(items: Vec<CompletionItem>) -> Vec<CompletionItem> {
         .collect()
 }
 
-struct LineIndex {
+/// Converts between editor positions and byte offsets in one document.
+///
+/// <para>Editors count a position's `character` in UTF-16 code units from the line start — the
+/// LSP default encoding, and the only one Monaco and VS Code's own buffers know — while every
+/// span the analysis produces is in UTF-8 bytes. This is the one place the two meet, in both
+/// directions, so a character earlier on the line that is two units and four bytes moves every
+/// later position by the right amount on each side.</para>
+struct LineIndex<'a> {
+    text: &'a str,
     line_starts: Vec<usize>,
 }
 
-impl LineIndex {
-    fn new(text: &str) -> Self {
+impl<'a> LineIndex<'a> {
+    fn new(text: &'a str) -> Self {
         let mut line_starts = vec![0usize];
         for (index, ch) in text.char_indices() {
             if ch == '\n' {
@@ -2081,7 +2285,7 @@ impl LineIndex {
             }
         }
 
-        Self { line_starts }
+        Self { text, line_starts }
     }
 
     fn range_from_bytes(&self, range: ByteTextRange) -> EditorRange {
@@ -2095,35 +2299,56 @@ impl LineIndex {
         }
     }
 
-    fn position_to_byte_offset(&self, text: &str, position: TextPosition) -> usize {
-        let line_start = self
+    /// The byte range of one line's content, without its line terminator.
+    ///
+    /// A line past the end of the document is empty at the end of the text.
+    fn line_content_bounds(&self, line: usize) -> (usize, usize) {
+        let Some(line_start) = self.line_starts.get(line).copied() else {
+            return (self.text.len(), self.text.len());
+        };
+        let next_start = self
             .line_starts
-            .get(position.line as usize)
+            .get(line + 1)
             .copied()
-            .unwrap_or_else(|| text.len());
-        let line_end = self
-            .line_starts
-            .get(position.line as usize + 1)
-            .copied()
-            .unwrap_or_else(|| text.len());
-        let line = &text[line_start..line_end];
-        let character = position.character as usize;
-        line.char_indices()
-            .nth(character)
-            .map(|(index, _)| line_start + index)
-            .unwrap_or(line_end)
+            .unwrap_or(self.text.len());
+        let content = self.text[line_start..next_start]
+            .trim_end_matches('\n')
+            .trim_end_matches('\r');
+        (line_start, line_start + content.len())
     }
 
+    /// The byte offset of an editor position, whose `character` counts UTF-16 code units.
+    ///
+    /// <para>A character offset past the end of the line is the end of the line. One that falls
+    /// between the two units of a surrogate pair is the start of that character: no byte offset
+    /// lies inside it, and the character it is inside of is the one the editor is pointing at.
+    /// </para>
+    fn position_to_byte_offset(&self, position: TextPosition) -> usize {
+        let (line_start, line_end) = self.line_content_bounds(position.line as usize);
+        let mut remaining = position.character as usize;
+        for (index, ch) in self.text[line_start..line_end].char_indices() {
+            let units = ch.len_utf16();
+            if remaining < units {
+                return line_start + index;
+            }
+            remaining -= units;
+        }
+        line_end
+    }
+
+    /// The editor position of a byte offset, with `character` in UTF-16 code units.
     fn byte_offset_to_position(&self, offset: usize) -> TextPosition {
+        let mut offset = offset.min(self.text.len());
+        while !self.text.is_char_boundary(offset) {
+            offset -= 1;
+        }
         let line_index = match self.line_starts.binary_search(&offset) {
             Ok(exact) => exact,
             Err(insert) => insert.saturating_sub(1),
         };
         let line_start = self.line_starts[line_index];
-        TextPosition::new(
-            line_index as u32,
-            (offset.saturating_sub(line_start)) as u32,
-        )
+        let character = self.text[line_start..offset].encode_utf16().count();
+        TextPosition::new(line_index as u32, character as u32)
     }
 }
 
@@ -2157,7 +2382,9 @@ mod tests {
         let prefix = &source[..offset];
         let line = prefix.matches('\n').count() as u32;
         let line_start = prefix.rfind('\n').map(|index| index + 1).unwrap_or(0);
-        let character = prefix[line_start..].chars().count() as u32;
+        // Counted the way an editor counts: in UTF-16 code units, so a fixture holding a
+        // character outside the BMP asks the question the editor would ask.
+        let character = prefix[line_start..].encode_utf16().count() as u32;
 
         let mut stripped = String::with_capacity(source.len() - marker.len());
         stripped.push_str(prefix);
@@ -2658,6 +2885,354 @@ component <SearchBox placeholder:string /> = {
             "a string-typed property has no contextual members: {:?}",
             completions.items
         );
+    }
+
+    /// Measures what a build context contributes to workspace analysis before the snapshot
+    /// carries one. Decides D1's fallback branch of `add-web-editor-packages`.
+    #[test]
+    fn measure_library_modules_reaching_workspace_analysis() {
+        use nx_api::LibraryRegistry;
+        use nx_hir::PreparedBindingTarget;
+
+        let temp = TempDir::new().expect("temp dir");
+        let ui_dir = temp.path().join("ui");
+        std::fs::create_dir_all(&ui_dir).expect("ui dir");
+        std::fs::write(
+            ui_dir.join("button.nx"),
+            "export let <Button label:string /> = <button />\n",
+        )
+        .expect("ui file");
+
+        let registry = LibraryRegistry::new();
+        let library = registry
+            .load_library_from_directory(&ui_dir)
+            .expect("library loads");
+        let context = registry.build_context();
+
+        let workspace = NxWorkspace::new(vec![NxWorkspaceModule::from_source(
+            "tenant/form.nx",
+            Arc::<str>::from("import { Button } from \"../ui\"\n<Button label=\"go\" />\n"),
+        )
+        .expect("module")])
+        .expect("workspace");
+        let modules = analyze_workspace_modules(&workspace, &context);
+
+        let names = modules
+            .iter()
+            .map(|module| module.file_name.clone())
+            .collect::<Vec<_>>();
+        eprintln!("workspace modules: {names:?}");
+        eprintln!(
+            "library modules: {:?}",
+            library
+                .modules
+                .iter()
+                .map(|module| (module.file_name.clone(), module.lowered_module.is_some()))
+                .collect::<Vec<_>>()
+        );
+        let form = modules
+            .iter()
+            .find(|module| module.file_name == "tenant/form.nx")
+            .expect("form module");
+        eprintln!(
+            "form diagnostics: {:?}",
+            form.diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.message().to_string())
+                .collect::<Vec<_>>()
+        );
+        let button = form
+            .prepared_bindings
+            .iter()
+            .find(|binding| binding.visible_name.as_str() == "Button");
+        eprintln!(
+            "Button binding: {:?}",
+            button.map(|binding| (
+                binding.module_identity("tenant/form.nx").to_string(),
+                binding.definition_id(),
+                matches!(binding.target, PreparedBindingTarget::Imported { .. }),
+            ))
+        );
+
+        assert!(button.is_some(), "the import binds Button");
+        assert!(
+            !names.iter().any(|name| name.ends_with("button.nx")),
+            "library modules are not in the workspace module list: {names:?}"
+        );
+    }
+
+    /// A library on disk that the build-context scenarios import as `"../ui"`.
+    ///
+    /// <para>The directory has to outlive nothing — the registry keeps what it loaded — but it
+    /// is returned so a test that wants to compare against the compiler can build against the
+    /// same registry.</para>
+    fn ui_library() -> (TempDir, nx_api::LibraryRegistry) {
+        let temp = TempDir::new().expect("temp dir");
+        let ui_dir = temp.path().join("ui");
+        std::fs::create_dir_all(&ui_dir).expect("ui dir");
+        std::fs::write(
+            ui_dir.join("button.nx"),
+            concat!(
+                "export type Size = small | large\n",
+                "export let <Button label:string size:Size /> = <button />\n",
+            ),
+        )
+        .expect("ui file");
+        let registry = nx_api::LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("library loads");
+        (temp, registry)
+    }
+
+    /// A single-document snapshot whose build context sees [`ui_library`].
+    fn snapshot_with_library(source: &str) -> (TempDir, WorkspaceSnapshot) {
+        let (temp, registry) = ui_library();
+        let snapshot =
+            snapshot_for("nx://tenant/form.nx", source, 1).with_build_context(registry.build_context());
+        (temp, snapshot)
+    }
+
+    const FORM_URI: &str = "nx://tenant/form.nx";
+    const IMPORT_UI: &str = "import { Button, Size } from \"../ui\"\n";
+
+    /// Spec: "Hover resolves a library component".
+    #[test]
+    fn hover_resolves_a_library_component_through_the_build_context() {
+        let (source, position) =
+            position_for(&format!("{IMPORT_UI}<But⟨cursor⟩ton label=\"go\" />\n"), CURSOR);
+        let (_temp, snapshot) = snapshot_with_library(&source);
+
+        let hover = snapshot
+            .hover(&DocumentUri::from(FORM_URI), position)
+            .expect("hover")
+            .expect("hover content");
+
+        assert!(hover.contents.contains("<Button"), "got: {}", hover.contents);
+        assert!(hover.contents.contains("label"), "got: {}", hover.contents);
+        assert!(hover.contents.contains("string"), "got: {}", hover.contents);
+        assert!(hover.contents.contains("size"), "got: {}", hover.contents);
+        assert!(hover.contents.contains("Size"), "got: {}", hover.contents);
+    }
+
+    /// Spec: "Completions offer library declarations" — the tag name.
+    #[test]
+    fn completions_offer_a_library_component_at_a_tag_name() {
+        let (source, position) = position_for(&format!("{IMPORT_UI}<⟨cursor⟩\n"), CURSOR);
+        let (_temp, snapshot) = snapshot_with_library(&source);
+
+        let labels = completion_labels(&snapshot, FORM_URI, position);
+
+        assert!(labels.contains(&"Button".to_string()), "got: {labels:?}");
+    }
+
+    /// Spec: "Completions offer library declarations" — the properties, and their values.
+    #[test]
+    fn completions_offer_a_library_components_properties_and_member_values() {
+        let (source, position) =
+            position_for(&format!("{IMPORT_UI}<Button label=\"go\" ⟨cursor⟩/>\n"), CURSOR);
+        let (_temp, snapshot) = snapshot_with_library(&source);
+        let labels = completion_labels(&snapshot, FORM_URI, position);
+        assert!(labels.contains(&"size".to_string()), "got: {labels:?}");
+        assert!(!labels.contains(&"label".to_string()), "got: {labels:?}");
+
+        let (source, position) =
+            position_for(&format!("{IMPORT_UI}<Button size=⟨cursor⟩ />\n"), CURSOR);
+        let (_temp, snapshot) = snapshot_with_library(&source);
+        let labels = completion_labels(&snapshot, FORM_URI, position);
+        assert!(labels.contains(&"small".to_string()), "got: {labels:?}");
+        assert!(labels.contains(&"large".to_string()), "got: {labels:?}");
+    }
+
+    /// Spec: "Diagnostics honor library types".
+    #[test]
+    fn diagnostics_honor_library_types_through_the_build_context() {
+        let correct = format!("{IMPORT_UI}<Button label=\"go\" size=small />\n");
+        let (_temp, snapshot) = snapshot_with_library(&correct);
+        let messages = diagnostic_messages(&snapshot);
+        assert!(messages.is_empty(), "got: {messages:?}");
+
+        let wrong = format!("{IMPORT_UI}<Button label=1 size=small />\n");
+        let (_temp, registry) = ui_library();
+        let context = registry.build_context();
+        let snapshot = snapshot_for(FORM_URI, &wrong, 1).with_build_context(context.clone());
+        let messages = diagnostic_messages(&snapshot);
+        assert!(!messages.is_empty(), "the wrong property type is reported");
+
+        let workspace = NxWorkspace::new(vec![NxWorkspaceModule::from_source(
+            "tenant/form.nx",
+            Arc::<str>::from(wrong.as_str()),
+        )
+        .expect("module")])
+        .expect("workspace");
+        let compiler = validate_workspace(&workspace, &context)
+            .into_iter()
+            .map(|diagnostic| diagnostic.message)
+            .collect::<Vec<_>>();
+        assert_eq!(messages, compiler);
+    }
+
+    /// Spec: "Snapshot without a context sees no libraries".
+    #[test]
+    fn a_snapshot_without_a_context_treats_library_names_as_unresolved() {
+        let (source, position) =
+            position_for(&format!("{IMPORT_UI}<But⟨cursor⟩ton label=\"go\" />\n"), CURSOR);
+        let snapshot = snapshot_for(FORM_URI, &source, 1);
+
+        let messages = diagnostic_messages(&snapshot);
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("Missing workspace module or loaded library")),
+            "got: {messages:?}"
+        );
+        let hover = snapshot
+            .hover(&DocumentUri::from(FORM_URI), position)
+            .expect("hover");
+        assert!(
+            hover.as_ref().is_none_or(|hover| !hover.contents.contains("label")),
+            "got: {hover:?}"
+        );
+        let labels = completion_labels(&snapshot, FORM_URI, TextPosition::new(1, 1));
+        assert!(!labels.contains(&"Button".to_string()), "got: {labels:?}");
+    }
+
+    fn diagnostic_messages(snapshot: &WorkspaceSnapshot) -> Vec<String> {
+        let report = snapshot.diagnostic_report().expect("diagnostics");
+        report
+            .documents
+            .into_iter()
+            .flat_map(|document| document.diagnostics)
+            .map(|diagnostic| diagnostic.message)
+            .chain(report.workspace.into_iter().map(|diagnostic| diagnostic.message))
+            .collect()
+    }
+
+    /// Spec: "Query after a non-BMP character resolves correctly" and "Returned range counts
+    /// UTF-16 units". The emoji is two units and four bytes; the editor's column for `name` and
+    /// the byte offset the analysis knows differ by two, and both sides have to agree on which
+    /// is which.
+    #[test]
+    fn hover_after_a_non_bmp_character_resolves_and_reports_utf16_columns() {
+        let hover = hover_at("let greet(name:string) = { \"😀\" + na⟨cursor⟩me }\n")
+            .expect("hover content");
+
+        assert!(hover.contents.contains("string"), "got: {}", hover.contents);
+        assert_eq!(hover.range.start, TextPosition::new(0, 34));
+        assert_eq!(hover.range.end, TextPosition::new(0, 38));
+        assert_eq!(hover.range.start_byte, 36);
+        assert_eq!(hover.range.end_byte, 40);
+    }
+
+    /// Spec: "Offsets past the end of a line clamp", and a position inside a surrogate pair.
+    #[test]
+    fn line_index_converts_utf16_positions_both_ways() {
+        let index = LineIndex::new("a😀b\nnext");
+
+        assert_eq!(index.position_to_byte_offset(TextPosition::new(0, 0)), 0);
+        assert_eq!(index.position_to_byte_offset(TextPosition::new(0, 1)), 1);
+        // Between the two units of the emoji: the character the editor is inside of.
+        assert_eq!(index.position_to_byte_offset(TextPosition::new(0, 2)), 1);
+        assert_eq!(index.position_to_byte_offset(TextPosition::new(0, 3)), 5);
+        assert_eq!(index.position_to_byte_offset(TextPosition::new(0, 4)), 6);
+        // Past the end of the line: the end of that line, not the next line's start.
+        assert_eq!(index.position_to_byte_offset(TextPosition::new(0, 100)), 6);
+        assert_eq!(index.position_to_byte_offset(TextPosition::new(1, 100)), 11);
+        assert_eq!(index.position_to_byte_offset(TextPosition::new(9, 0)), 11);
+
+        assert_eq!(index.byte_offset_to_position(5), TextPosition::new(0, 3));
+        assert_eq!(index.byte_offset_to_position(6), TextPosition::new(0, 4));
+        assert_eq!(index.byte_offset_to_position(7), TextPosition::new(1, 0));
+        // Inside the emoji's bytes: its start.
+        assert_eq!(index.byte_offset_to_position(3), TextPosition::new(0, 1));
+        assert_eq!(index.byte_offset_to_position(99), TextPosition::new(1, 4));
+    }
+
+    /// The JSON a binding emits from these results is read by JavaScript, whose convention is
+    /// camelCase; the field names cross that boundary once, here, rather than in every consumer.
+    #[test]
+    fn results_serialize_with_camel_case_fields() {
+        let hover = hover_at("let ad⟨cursor⟩d(count:int) = { count + 1 }\n").expect("hover");
+
+        let json = serde_json::to_string(&hover).expect("json");
+
+        assert!(json.contains("\"startByte\""), "got: {json}");
+        assert!(json.contains("\"endByte\""), "got: {json}");
+        assert!(!json.contains("start_byte"), "got: {json}");
+        assert!(!json.contains("end_byte"), "got: {json}");
+    }
+
+    /// A component that extends a base accepts the base's properties too, and hover and completion
+    /// describe the same contract the compiler checks. The base and its union live in another
+    /// module, so an inherited property's type has to be resolved where it was written.
+    const CONTROLS: (&str, &str) = (
+        "nx://tenant/controls.nx",
+        concat!(
+            "export type Mode = light | dark\n",
+            "export abstract external component <Control mode:Mode? margin:int? />\n",
+        ),
+    );
+    const LABELS: (&str, &str) = (
+        "nx://tenant/labels.nx",
+        concat!(
+            "import { Control } from \"./controls.nx\"\n",
+            "export external component <Label extends Control text:string />\n",
+        ),
+    );
+    const USES_LABEL: &str = "import { Label } from \"./labels.nx\"\n";
+
+    #[test]
+    fn property_completions_include_what_a_component_inherits() {
+        let (source, position) = position_for(&format!("{USES_LABEL}<Label ⟨cursor⟩/>\n"), CURSOR);
+        let snapshot = snapshot_of(&[("nx://tenant/form.nx", source.as_str()), CONTROLS, LABELS]);
+
+        let labels = completion_labels(&snapshot, "nx://tenant/form.nx", position);
+
+        assert!(labels.contains(&"text".to_string()), "got: {labels:?}");
+        assert!(labels.contains(&"mode".to_string()), "got: {labels:?}");
+        assert!(labels.contains(&"margin".to_string()), "got: {labels:?}");
+    }
+
+    #[test]
+    fn member_completions_resolve_an_inherited_property_type_in_the_base_module() {
+        let snapshot = snapshot_of(&[
+            ("nx://tenant/form.nx", &format!("{USES_LABEL}<Label mode= />\n")),
+            CONTROLS,
+            LABELS,
+        ]);
+
+        let labels = completion_labels(&snapshot, "nx://tenant/form.nx", TextPosition::new(1, 12));
+
+        assert!(labels.contains(&"light".to_string()), "got: {labels:?}");
+        assert!(labels.contains(&"dark".to_string()), "got: {labels:?}");
+    }
+
+    #[test]
+    fn hover_over_an_extending_component_lists_what_it_inherits() {
+        let hover = hover_in(
+            &[CONTROLS, LABELS],
+            "nx://tenant/form.nx",
+            &format!("{USES_LABEL}<La⟨cursor⟩bel text=\"hi\" />\n"),
+        )
+        .expect("hover content");
+
+        assert!(hover.contents.contains("<Label"), "got: {}", hover.contents);
+        assert!(hover.contents.contains("text:string"), "got: {}", hover.contents);
+        assert!(hover.contents.contains("Inherited from `Control`"), "got: {}", hover.contents);
+        assert!(hover.contents.contains("mode:Mode?"), "got: {}", hover.contents);
+        assert!(hover.contents.contains("margin:int?"), "got: {}", hover.contents);
+    }
+
+    #[test]
+    fn hover_over_an_inherited_property_name_reports_its_type() {
+        let hover = hover_in(
+            &[CONTROLS, LABELS],
+            "nx://tenant/form.nx",
+            &format!("{USES_LABEL}<Label mar⟨cursor⟩gin=2 />\n"),
+        )
+        .expect("hover content");
+
+        assert!(hover.contents.contains("int"), "got: {}", hover.contents);
     }
 
     fn snapshot_of(documents: &[(&str, &str)]) -> WorkspaceSnapshot {
