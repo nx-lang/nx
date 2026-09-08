@@ -1,7 +1,7 @@
 # Deployment Runbook
 
-This runbook covers day-to-day package and VS Code extension publishing. One-time environment and
-registry setup is in [deployment-setup.md](deployment-setup.md).
+This runbook covers day-to-day package and VS Code extension publishing, and the playground site.
+One-time environment, registry and hosting setup is in [deployment-setup.md](deployment-setup.md).
 
 ## Release Model
 
@@ -159,3 +159,70 @@ Public registry versions are immutable. When a published artifact is bad:
 2. Publish a higher version through the appropriate tag-driven release track.
 3. Unlist or deprecate the bad NuGet, npm, or extension version where useful.
 4. Update release notes or documentation to steer users to the fixed version.
+
+## Playground Site
+
+The NX Playground at `https://nxlang.org/playground` is the `sites/playground` workspace member,
+built and run as one Docker image on Railway behind Cloudflare. It is not part of the tag-driven
+release tracks above.
+
+### Deploy
+
+`.github/workflows/deploy-playground.yml` deploys every push to `main` that touches
+`sites/playground/`, a package the site depends on, the Rust crates or the workspace manifests
+(the workflow's `paths` list). It is the same shape as the other Railway-hosted sites: the runner
+builds and tests the workspace, then uploads the checkout with `railway up` under the project
+token in the `production` GitHub environment. Railway builds `sites/playground/Dockerfile` from
+the repository root, polls `/playground/api/health` on the new container, and switches traffic
+only once it answers `200`; the job waits for the deployment to report success, then checks the
+health endpoint and the gallery through Cloudflare. A failed check, build or health check leaves
+the previous deployment serving, and the job summary names the deployment to roll back to.
+Nothing else deploys the service: the Railway GitHub App is not installed and the service has no
+repository source.
+
+To redeploy without a change, run the workflow from the Actions tab. To deploy something that is
+not on `main`, from the repository root with the Railway CLI linked to the project:
+
+```bash
+railway up --service playground --environment production --ci
+```
+
+### Verify
+
+```bash
+curl -sI https://nxlang.org/                          # 302 to /playground
+curl -sI https://nxlang.org/playground                # 200, cache-control: no-cache
+curl -s  https://nxlang.org/playground/api/health     # {"ok":true}
+curl -sI https://nxlang.org/playground/assets/<hashed asset>   # cf-cache-status: HIT on the second request
+```
+
+Then open an example (`https://nxlang.org/playground/shapes`), edit it, and confirm the drawing
+follows and hover answers. Railway's deployment log shows `NX playground listening on ...` on
+start; a line beginning `watchdog:` means the main thread stopped answering and the process ended
+itself, after which the restart policy (`ALWAYS`, no retry budget) started a fresh one. Repeated
+`watchdog:` lines mean something is provoking the hang and are worth reading the request log for.
+
+### Roll back
+
+Railway keeps previous deployments. In the service's deployment list, choose the last good one and
+**Redeploy**; it becomes live once its health check passes. Nothing on Cloudflare needs to change.
+The immutable asset cache is safe across a rollback because the shell is never cached and names
+the assets of whichever build is live.
+
+### Change the hosting configuration
+
+The service's build, health check and restart settings are declared in `.railway/railway.ts`.
+Edit the file, then from the repository root with the CLI linked to the `nxlang` project:
+
+```bash
+railway config plan      # read-only preview of what would change on Railway
+railway config apply     # applies it, after showing the plan once more
+```
+
+Do not change those settings in the dashboard; the next apply would revert them.
+
+### Change the edge
+
+Every Cloudflare record and rule the site depends on, with its value, is listed in
+[deployment-setup.md](deployment-setup.md#playground-site-hosting). Change them there first, then
+in the dashboard, so the doc stays the record.

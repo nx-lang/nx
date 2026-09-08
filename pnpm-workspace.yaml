@@ -2,4 +2,4 @@ packages:
   - packages/*
   - runtime/typescript
   - bindings/node
-  - sample-apps/drawnui-react
+  - sites/*

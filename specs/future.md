@@ -384,7 +384,7 @@ every NX value in every target at once, including generated C# attributes. It is
 that ecosystem experience argues against for a discriminator specifically: `System.Text.Json` uses
 short author-chosen discriminators, and the fully-qualified alternative is JSON.NET's
 assembly-qualified `$type`, which welds internal structure into the wire format and moves whenever
-code moves. `$type` here is read by hand — hosts branch on it and the fiddle prints it.
+code moves. `$type` here is read by hand — hosts branch on it and the playground prints it.
 
 If this is revisited in the future:
 - Put identity *alongside* `$type`, never inside it. A separate field is ignorable by a host that
@@ -527,3 +527,125 @@ if editor latency ever shows up in profiling, rather than separately on suspicio
   neither nest reliably nor are all present. The query lives in `nx-hir` precisely so that decision
   can be made there without touching a caller.
 
+
+## Web Editor Packages: What `add-web-editor-packages` Left For Later
+
+The change that added [`language-protocol`](../openspec/specs/language-protocol/spec.md),
+[`language-http-service`](../openspec/specs/language-http-service/spec.md) and
+[`monaco-language-integration`](../openspec/specs/monaco-language-integration/spec.md) shaped four
+packages for publication and stopped short of publishing them. Each item below is a change of its
+own; none blocks using the packages from the repository's workspace today.
+
+### Publishing the packages
+
+- **The release pipeline attaches one npm tarball per release** and publishes only
+  `@nx-lang/language`. Extending it to `@nx-lang/language-protocol`, `@nx-lang/language-http`,
+  `@nx-lang/language-client`, `@nx-lang/monaco`, `@nx-lang/ir-runtime` and `@nx-lang/sdk-node`
+  means a release manifest that lists several tarballs, the one-tarball assertion in
+  `package-publish.yml` relaxed to that list, and trusted-publishing registration for each new
+  name. Every new package already passes `pnpm run verify:package` (pack, check the manifest,
+  install the tarball into a scratch project, import every export), so the pipeline change is
+  mechanical.
+- **`@nx-lang/sdk-node` needs per-platform native prebuilds** before a registry consumer can
+  install it: a napi build matrix (Linux x64/arm64, macOS, Windows) attached to the release and
+  wired through `@napi-rs/cli`'s optional-dependency convention, plus a first release of
+  `@nx-lang/language` itself, which has a pipeline but has never been published — the Monaco
+  package declares it as a peer dependency and this repository's workspace links `src/vscode` in
+  its place until then.
+
+### Folding `src/vscode` into the root workspace
+
+The extension keeps its own nested pnpm workspace. The end state is one workspace in which
+`@nx-lang/language` is a real package directory under `packages/language` holding the grammar,
+language configuration and snippets; the extension is a member that depends on it and copies the
+assets into its tree at VSIX packaging time (grammar contributions must be file paths inside the
+VSIX); `src/vscode/scripts/package-language.mjs`, which fabricates the package today, is deleted;
+and `@nx-lang/monaco` depends on it as `workspace:*` rather than through a `file:` link. That fold
+moves the lockfile and working directory four CI workflows reference (`build`, `release`,
+`package-publish`, and the VSIX publishing job) and must verify `vsce` packaging under a root
+workspace, which has a history of friction with pnpm's symlinked dependencies — the extension
+already bundles, which is the standard remedy.
+
+### ReachMe's migration
+
+In the ReachMe repository, once the packages are consumable, first confirm its `monaco-editor`,
+`shiki` and `@shikijs/monaco` versions satisfy `@nx-lang/monaco`'s peer ranges (Monaco 0.56 or
+later, Shiki 4); the ranges record what the playground and the package's tests exercise, not a feature
+the package needs, so an older Monaco there means testing the package against it and widening the
+range rather than moving ReachMe. Then: add `external/nx/packages/*` to its
+`pnpm-workspace.yaml` beside the two entries it has (or, once published, depend by version);
+replace `apps/web-app`'s `monacoNxLanguage.ts` and the highlighting half of `NxCodeEditor.tsx`
+with `registerNxLanguage` from `@nx-lang/monaco`, supplying its multi-file draft as the workspace
+callback and its authorization header through `@nx-lang/language-client`; mount
+`createNxLanguageHandler` in the Hono API under `/api/language/*` with the same registry-backed
+build context it already validates with; rename the `nx-language` `file:` link to
+`@nx-lang/language`; and remove the submodule once every package it consumed is on the registry.
+
+### Deleting the prelude
+
+`@nx-lang/language-http`'s `prelude` option exists because an imported external component loses
+its defaults and inherited properties (NXE12/NXE13), which forces the DrawnUI playground to analyze the
+catalog and the visitor's text as one module. Fixing NXE12/NXE13 is the condition for deleting the
+option, its shift helpers, and `server/compile.mjs`'s use of them: the catalog becomes a library
+loaded through a `LibraryRegistry` and passed as the handler's `buildContext`, which the handler
+already supports.
+
+## Playground: What `add-playground-site` Left For Later
+
+The playground at `nxlang.org/playground` (`sites/playground`, spec `openspec/specs/playground`)
+shipped as the DrawnUI fiddle under a public address: gallery, editor view, server-side compile,
+watchdog, Railway behind Cloudflare, the service declared in `.railway/railway.ts` and deployed
+by `.github/workflows/deploy-playground.yml` with `railway up`. The items below are what it
+deliberately does not do yet, and one question that only the first live deploy can answer.
+
+### Shareable edited source
+
+An edit lives only in the session. A visitor who writes something worth showing has no address for
+it: `/playground/<id>` always opens the example as authored. The URL scheme leaves the query and
+fragment of that address free for this — the smallest version encodes the source in the fragment
+(compressed, so a typical example fits a browser's URL limit), and a stored version would need
+somewhere to keep it and a policy for how long. Either one is a client change plus, for storage, a
+route; nothing in the current address scheme has to move.
+
+### Compile isolation
+
+Compile and language requests call the native binding synchronously on the server's only thread.
+The playground's answer today is a watchdog that ends a process whose main thread has stopped
+answering, so a hang costs every visitor a restart rather than the site. The better answer is a
+child process per compile (or a small pool) with a kill timer: a bad request then costs one request,
+the main thread never blocks, and the health route answers truthfully by construction rather than
+by being on the blocked thread. Worker threads are not enough — `terminate()` cannot preempt a
+native call — so this is a process boundary, and the compile seam in `src/compile/` and
+`server/compile.mjs` is already the one place it would go. A WASM build of the compiler would
+retire the question entirely by moving compilation into the browser.
+
+Until then the restart is unbounded by design: the Railway restart policy is `ALWAYS` with no retry
+budget, because Railway polls the health check only while a deployment starts, so the budget would
+be the only thing keeping a live service up, and a service that stops restarting after its tenth
+hang is the failure the watchdog exists to prevent. The cost is that a hang someone keeps provoking
+loops — the process comes back and is stuck again within the watchdog's deadline. The rate limit
+on `/playground/api/*` bounds how often that can happen from one client; repeated `watchdog:`
+lines in the Railway log are the signal. Process isolation retires this too: a bad request would
+then cost one child process, not the server.
+
+### Splitting the domain across services
+
+Everything the site serves is under `/playground`, so a second service on `nxlang.org` — a home
+page at `/`, the docs — is an edge change, not a code change. The root redirect is the one thing
+that moves: it lives in the playground's server and would have to be replaced by whatever serves
+`/`. Routing by path to a second Railway service needs either a Cloudflare Origin Rule with a host
+override (confirm the plan supports it) or a Worker in front of both. Whichever is chosen, the new
+service must go through Cloudflare the way the playground does: the playground has no
+Railway-generated domain on purpose, because that hostname would answer outside the edge, where the
+rate limit does not apply.
+
+### The deploy smoke test and Bot Fight Mode
+
+The workflow verifies a deployment with two `curl` calls through Cloudflare, for the health body
+and the gallery's status. Bot Fight Mode, which the setup turns on, challenges requests it classes
+as automated and cannot be exempted per path or user agent on the Free plan. Whether it challenges
+a GitHub runner is only observable live, so this stays open until the first run on `main` (review
+finding RF3). If the step sees a challenge page instead of `{"ok":true}`, the choice is between
+dropping Bot Fight Mode and keeping the rate limit alone, or keeping only the status-code check
+for the through-Cloudflare call; there is no Railway hostname to smoke-test the origin directly.
+Record the choice in `docs/deployment-setup.md`.

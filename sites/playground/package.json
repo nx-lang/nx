@@ -1,0 +1,46 @@
+{
+  "name": "@nx-lang/playground",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "The public NX Playground: edit NX source on the left and see it drawn on the right, with DrawnUI today.",
+  "scripts": {
+    "dev": "vite",
+    "dev:all": "node scripts/dev.mjs",
+    "build": "vite build",
+    "preview": "vite preview",
+    "start": "node server/index.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"server/*.test.mjs\" \"src/*.test.mjs\" \"vite.config.test.mjs\" && pnpm run check-examples",
+    "check-examples": "node scripts/check-examples.mjs",
+    "sync-drawnui": "node scripts/sync-drawnui.mjs",
+    "generate-catalog": "node scripts/generate-catalog.mjs"
+  },
+  "dependencies": {
+    "@nx-lang/ir-runtime": "workspace:*",
+    "@nx-lang/language": "file:../../src/vscode",
+    "@nx-lang/language-client": "workspace:*",
+    "@nx-lang/language-http": "workspace:*",
+    "@nx-lang/monaco": "workspace:*",
+    "@nx-lang/sdk-node": "workspace:*",
+    "@shikijs/monaco": "^4.4.3",
+    "canvaskit-wasm": "^0.42.0",
+    "monaco-editor": "^0.56.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-reconciler": "^0.33.0",
+    "shiki": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@types/react-reconciler": "^0.32.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.0.0"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

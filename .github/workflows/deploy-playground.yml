@@ -1,0 +1,199 @@
+# Deploys the NX Playground (sites/playground) to Railway the way the other Railway-hosted sites
+# deploy: a push to `main` is built and tested here, then uploaded with `railway up` under a
+# project token. Railway builds sites/playground/Dockerfile from the repository root, polls the
+# health check, and switches traffic only once the new container answers. The Railway GitHub App is
+# not installed and the service has no repository source, so nothing deploys except through this
+# workflow. Setup (project token, GitHub environment) is in docs/deployment-setup.md.
+
+name: Deploy Playground
+
+on:
+  push:
+    branches:
+      - main
+    # The site and everything its image copies (see sites/playground/Dockerfile).
+    paths:
+      - sites/playground/**
+      - packages/**
+      - bindings/node/**
+      - runtime/typescript/**
+      - crates/**
+      - src/vscode/**
+      - Cargo.toml
+      - Cargo.lock
+      - package.json
+      - pnpm-workspace.yaml
+      - pnpm-lock.yaml
+      - .github/workflows/deploy-playground.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-playground
+  cancel-in-progress: false
+
+env:
+  RAILWAY_SERVICE: playground
+  RAILWAY_ENVIRONMENT: production
+  SITE_URL: https://nxlang.org/playground
+
+jobs:
+  validate:
+    name: Build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+
+      # The native addon is built from source by `pnpm -r build`; rustup picks the toolchain from
+      # rust-toolchain.toml.
+      - name: Cache the Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the workspace
+        run: pnpm -r build
+
+      - name: Test the workspace
+        run: pnpm -r test
+
+      - name: Typecheck the site
+        run: pnpm --filter @nx-lang/playground typecheck
+
+  deploy:
+    name: Deploy to Railway production
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment:
+      name: production
+      url: https://nxlang.org/playground
+
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN_PRODUCTION }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+
+      # No dependency install: `railway up` uploads the checkout (minus gitignored paths) and the
+      # Dockerfile installs and builds inside Railway's builder.
+      - name: Install Railway CLI
+        run: npm install --global @railway/cli@latest
+
+      # The deployment that is live now, so the wait below can tell a new deployment from it and the
+      # failure summary can name what to roll back to. `none` when the service has never deployed.
+      - name: Capture the live deployment
+        id: before
+        run: |
+          set -euo pipefail
+          read -r id status < <(railway deployment list --service "$RAILWAY_SERVICE" --environment "$RAILWAY_ENVIRONMENT" --limit 1 --json \
+            | jq -r '.[0] | "\(.id // "none") \(.status // "unknown")"')
+          echo "Live deployment: $id ($status)"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+      # `--ci` streams the build log and exits when the build ends, failing the job if it fails.
+      - name: Upload and build on Railway
+        id: up
+        run: railway up --service "$RAILWAY_SERVICE" --environment "$RAILWAY_ENVIRONMENT" --ci --message "main ${GITHUB_SHA}"
+
+      # Railway starts the container, polls /playground/api/health, and reports SUCCESS once it
+      # answers, or FAILED if it never does. Either way the previous deployment keeps serving until
+      # the new one succeeds. Runs after a failed upload too, so the deployment Railway created for
+      # a build that failed is still named in the summary.
+      - name: Wait for the deployment to go live
+        id: after
+        if: ${{ !cancelled() && steps.before.outcome == 'success' }}
+        env:
+          BEFORE: ${{ steps.before.outputs.id }}
+          UPLOADED: ${{ steps.up.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          newest() {
+            railway deployment list --service "$RAILWAY_SERVICE" --environment "$RAILWAY_ENVIRONMENT" --limit 1 --json \
+              | jq -r '.[0] | "\(.id // "none") \(.status // "unknown")"'
+          }
+          if [ "$UPLOADED" != "true" ]; then
+            read -r id status < <(newest)
+            if [ "$id" != "$BEFORE" ]; then
+              echo "id=$id" >> "$GITHUB_OUTPUT"
+              echo "::error::Railway deployment $id ended as $status"
+            else
+              echo "::error::railway up failed before Railway created a deployment"
+            fi
+            exit 1
+          fi
+          for attempt in $(seq 1 60); do
+            read -r id status < <(newest)
+            if [ "$id" = "$BEFORE" ]; then
+              echo "Waiting for a deployment newer than $BEFORE ($attempt/60)"
+            else
+              echo "Deployment $id: $status ($attempt/60)"
+              echo "id=$id" >> "$GITHUB_OUTPUT"
+              case "$status" in
+                SUCCESS) exit 0 ;;
+                # SKIPPED is what Railway calls a deployment a newer one superseded.
+                FAILED|CRASHED|REMOVED|SKIPPED|CANCELED|CANCELLED)
+                  echo "::error::Railway deployment $id ended as $status"
+                  exit 1 ;;
+              esac
+            fi
+            sleep 10
+          done
+          echo "::error::Railway deployment did not go live within 10 minutes"
+          exit 1
+
+      # Through Cloudflare, so the whole path is checked: the health answer and the gallery shell.
+      - name: Smoke-test the site
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 12); do
+            health=$(curl -sS --max-time 15 -A "nx-playground-deploy" "$SITE_URL/api/health" || true)
+            shell=$(curl -sS --max-time 15 -A "nx-playground-deploy" -o /dev/null -w '%{http_code}' "$SITE_URL" || true)
+            echo "health: ${health:-no answer}; gallery: ${shell:-no answer} ($attempt/12)"
+            if [ "$health" = '{"ok":true}' ] && [ "$shell" = "200" ]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::$SITE_URL did not answer as expected after the deployment"
+          exit 1
+
+      - name: Write the deployment summary
+        if: success()
+        run: |
+          {
+            echo "Deployed the NX Playground."
+            echo ""
+            echo "- Revision: \`${GITHUB_SHA}\`"
+            echo "- Railway deployment: \`${{ steps.after.outputs.id }}\` (production/playground)"
+            echo "- Previous deployment: \`${{ steps.before.outputs.id }}\`"
+            echo "- Site: ${SITE_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report the rollback path
+        if: failure()
+        run: |
+          {
+            echo "The playground deployment did not complete."
+            echo ""
+            echo "- Revision: \`${GITHUB_SHA}\`"
+            echo "- Attempted deployment: \`${{ steps.after.outputs.id || 'not created' }}\`"
+            echo "- Previous deployment: \`${{ steps.before.outputs.id || 'unknown' }}\`, which keeps serving unless the new one went live and only the smoke test failed."
+            echo "- Manual rollback: Railway project \`nxlang\` -> environment \`production\` -> service \`playground\` -> Deployments -> the last healthy deployment -> Redeploy."
+          } >> "$GITHUB_STEP_SUMMARY"

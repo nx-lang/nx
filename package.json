@@ -8,11 +8,14 @@
     "verify:packages": "pnpm -r --filter \"./packages/*\" run verify:package"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.18.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild"
     ]
+  },
+  "devDependencies": {
+    "railway": "^3.11.0"
   }
 }
