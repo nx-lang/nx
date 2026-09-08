@@ -20,7 +20,6 @@ on:
       - crates/**
       - src/vscode/**
       - Cargo.toml
-      - Cargo.lock
       - package.json
       - pnpm-workspace.yaml
       - pnpm-lock.yaml
