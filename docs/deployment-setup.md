@@ -274,9 +274,10 @@ curl -sI https://nxlang.org/                                     # 302 → /play
 curl -s  https://nxlang.org/playground/api/health                # {"ok":true}
 curl -sI https://nxlang.org/playground/assets/<hashed asset>     # twice: second shows cf-cache-status: HIT
 curl -sI https://nxlang.org/playground                           # cf-cache-status: DYNAMIC (never HIT)
-for i in $(seq 1 120); do curl -s -o /dev/null -w "%{http_code}\n" -X POST \
-  -H 'content-type: application/json' -d '{"source":""}' https://nxlang.org/playground/api/compile; done | sort | uniq -c
-#   mostly 200, then 429 once the rate limit engages
+seq 1 200 | xargs -P 40 -I{} curl -s -o /dev/null -w "%{http_code}\n" -X POST \
+  -H 'content-type: application/json' -d '{"source":""}' https://nxlang.org/playground/api/compile | sort | uniq -c
+#   mostly 200, then 429 once the rate limit engages; the requests must be parallel, since one
+#   curl after another from outside the datacenter stays under 100 in any 10 seconds
 ```
 
 Open `https://nxlang.org/playground` in a browser without certificate warnings, open an example,
