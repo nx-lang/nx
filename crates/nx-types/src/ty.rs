@@ -38,6 +38,14 @@ pub enum Primitive {
     Boolean,
     /// Void/unit type (functions with no return value)
     Void,
+    /// The bottom type: the type of a value that does not exist.
+    ///
+    /// <para>Inference-internal, like [`Primitive::Void`] and for the same reason — an author
+    /// receives it, they never write it. It has no source spelling and no runtime representation,
+    /// because no value has bottom type. What it exists for is the empty list: `{}` is a
+    /// `never[]`, and `never` being below every type is what makes that one value usable at every
+    /// list-typed site without the site having to be consulted.</para>
+    Never,
 }
 
 impl Primitive {
@@ -52,6 +60,7 @@ impl Primitive {
             Primitive::String => "string",
             Primitive::Boolean => "boolean",
             Primitive::Void => "void",
+            Primitive::Never => "never",
         }
     }
 
@@ -68,6 +77,24 @@ impl Primitive {
     /// Returns true if this is any numeric type.
     pub fn is_numeric(&self) -> bool {
         self.is_integer() || self.is_float()
+    }
+
+    /// Whether this floating-point primitive represents `value` exactly.
+    ///
+    /// <para>Always false for a non-floating-point primitive: the question is whether converting an
+    /// integer to *this* float type loses nothing, and there is no conversion to ask about
+    /// otherwise.</para>
+    ///
+    /// <para>The comparison is made in `i128` rather than by casting the float back to `i64`,
+    /// because a float-to-integer `as` cast saturates. `i64::MAX` rounds to 2^63 as an `f64`, which
+    /// saturates back to `i64::MAX` and would report an exact conversion that did not happen. Every
+    /// `f64` reachable from an `i64` fits an `i128` unrounded, so that cast is the honest one.</para>
+    pub fn represents_integer_exactly(&self, value: i64) -> bool {
+        match self {
+            Primitive::Float32 => (value as f32) as i128 == value as i128,
+            Primitive::Float64 => (value as f64) as i128 == value as i128,
+            _ => false,
+        }
     }
 
     /// Returns the promoted type when combining two numeric primitives of the
@@ -212,6 +239,11 @@ impl Type {
         Type::Primitive(Primitive::Boolean)
     }
 
+    /// Creates the bottom type, which is below every type and which no value inhabits.
+    pub fn never() -> Self {
+        Type::Primitive(Primitive::Never)
+    }
+
     /// Creates a primitive void type.
     pub fn void() -> Self {
         Type::Primitive(Primitive::Void)
@@ -308,6 +340,8 @@ impl Type {
     /// - Exact equality
     /// - Numeric width promotion within the same category (int32 ↔ int64, float32 ↔ float64)
     /// - Subtyping (e.g., T is compatible with T?)
+    /// - The bottom type, which is compatible with every type and which nothing else is compatible
+    ///   with
     /// - Error types are compatible with everything (for error recovery)
     pub fn is_compatible_with(&self, other: &Type) -> bool {
         // Exact equality
@@ -322,6 +356,17 @@ impl Type {
 
         // Unknown types are compatible with everything
         if self.is_unknown() || other.is_unknown() {
+            return true;
+        }
+
+        // The bottom type is below every type, so it satisfies every expectation. Nothing is below
+        // it, so the relation deliberately does not run the other way.
+        //
+        // NX carries two compatibility relations — this structural one and the richer
+        // `InferenceContext::type_satisfies_expected`, which knows about unions and records and
+        // does not delegate here. Both need this case, and `common_supertype` in `semantics.rs`
+        // inherits it through this one.
+        if matches!(self, Type::Primitive(Primitive::Never)) {
             return true;
         }
 
@@ -780,6 +825,43 @@ mod tests {
             Primitive::numeric_promotion(Primitive::Int, Primitive::Float64),
             None
         );
+    }
+
+    #[test]
+    fn test_represents_integer_exactly_at_the_float64_boundary() {
+        let exact = 1i64 << 53;
+        assert!(Primitive::Float64.represents_integer_exactly(exact));
+        assert!(!Primitive::Float64.represents_integer_exactly(exact + 1));
+        assert!(Primitive::Float64.represents_integer_exactly(-exact));
+        assert!(!Primitive::Float64.represents_integer_exactly(-exact - 1));
+    }
+
+    #[test]
+    fn test_represents_integer_exactly_at_the_float32_boundary() {
+        let exact = 1i64 << 24;
+        assert!(Primitive::Float32.represents_integer_exactly(exact));
+        assert!(!Primitive::Float32.represents_integer_exactly(exact + 1));
+        assert!(Primitive::Float32.represents_integer_exactly(-exact));
+        assert!(!Primitive::Float32.represents_integer_exactly(-exact - 1));
+    }
+
+    #[test]
+    fn test_represents_integer_exactly_does_not_saturate_at_the_i64_extremes() {
+        // The trap this guards: `i64::MAX as f64` rounds up to 2^63, and casting that back to i64
+        // saturates to i64::MAX again, which would look like a lossless round trip.
+        assert!(!Primitive::Float64.represents_integer_exactly(i64::MAX));
+        assert!(!Primitive::Float32.represents_integer_exactly(i64::MAX));
+        // i64::MIN is a power of two, so it genuinely is exact.
+        assert!(Primitive::Float64.represents_integer_exactly(i64::MIN));
+        assert!(Primitive::Float32.represents_integer_exactly(i64::MIN));
+    }
+
+    #[test]
+    fn test_represents_integer_exactly_is_false_for_non_float_primitives() {
+        assert!(!Primitive::Int.represents_integer_exactly(1));
+        assert!(!Primitive::Int32.represents_integer_exactly(1));
+        assert!(!Primitive::Int64.represents_integer_exactly(1));
+        assert!(!Primitive::String.represents_integer_exactly(1));
     }
 
     #[test]

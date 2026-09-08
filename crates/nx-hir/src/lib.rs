@@ -30,7 +30,7 @@ pub mod scope;
 pub mod unions;
 
 use la_arena::{Arena, Idx};
-use nx_diagnostics::{Diagnostic, Label, Severity, TextSpan};
+use nx_diagnostics::{Diagnostic, Label, Severity, TextSize, TextSpan};
 use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
 
@@ -47,8 +47,9 @@ pub use prepared::{
 };
 
 pub use components::{
-    apply_contextual_name_resolutions, component_declaration_origin, effective_component_contract,
-    effective_component_contract_at, effective_component_contract_for_name, is_component_subtype,
+    apply_contextual_name_resolutions, apply_int_literal_conversions, component_declaration_origin,
+    effective_component_contract, effective_component_contract_at,
+    effective_component_contract_for_name, is_component_subtype,
     promote_component_handler_bindings, resolve_component_definition,
     validate_component_definitions, ComponentAncestor, ComponentResolutionError, ContextualRewrite,
     EffectiveComponentContract, InvalidComponentBaseReason,
@@ -917,6 +918,44 @@ impl LoweredModule {
         self.exprs.len()
     }
 
+    /// Every lowered expression with its arena identity, in allocation order.
+    pub fn exprs(&self) -> impl ExactSizeIterator<Item = (ExprId, &ast::Expr)> + '_ {
+        self.exprs.iter()
+    }
+
+    /// The innermost expression lying within `within` whose span covers `offset`.
+    ///
+    /// <para>This is the question an editor asks: the caller has resolved a position to some
+    /// construct and wants the expression the position names inside it. It is answered here
+    /// because the arena and the spans live here — a caller outside this crate can only rebuild
+    /// arena identities from raw indices to ask it, which is a reach around this type rather than
+    /// a use of it.</para>
+    ///
+    /// <para>`within` is the span of the construct the position resolved to, and an expression
+    /// must lie inside it, not merely cover the offset. Every enclosing expression covers the
+    /// offset, so without that bound a position inside a construct carrying no expression of its
+    /// own would be answered by whatever encloses it. An expression lowering recorded no span for
+    /// is skipped: it cannot be located by offset, so it is not the answer to a question asked by
+    /// offset.</para>
+    ///
+    /// <para>The search is linear in the size of the arena. Modules are hundreds of expressions
+    /// and this runs once per position query, so it is not worth an index yet; when it is, the
+    /// index goes here and no caller changes.</para>
+    pub fn innermost_expr_at(&self, within: TextSpan, offset: TextSize) -> Option<ExprId> {
+        let mut best: Option<(ExprId, TextSize)> = None;
+        for (id, _) in self.exprs.iter() {
+            let span = self.expr_span(id);
+            if span.is_empty() || !within.contains_range(span) || !span.contains_inclusive(offset) {
+                continue;
+            }
+            match best {
+                Some((_, width)) if width <= span.len() => {}
+                _ => best = Some((id, span.len())),
+            }
+        }
+        best.map(|(id, _)| id)
+    }
+
     /// Allocate a new element in the arena.
     pub fn alloc_element(&mut self, element: Element) -> ElementId {
         self.elements.alloc(element)
@@ -991,5 +1030,63 @@ mod tests {
 
         assert!(module.find_item("test").is_some());
         assert!(module.find_item("nonexistent").is_none());
+    }
+
+    /// A span-addressed lookup has three ways to be wrong, and each is a case here: it can answer
+    /// with an enclosing expression, with an expression outside the construct asked about, or with
+    /// one lowering never located.
+    #[test]
+    fn innermost_expr_at_answers_within_the_construct_asked_about() {
+        let mut module = LoweredModule::new(SourceId::new(0));
+        let span = |start: u32, end: u32| TextSpan::new(start.into(), end.into());
+        let at = |offset: u32| TextSize::from(offset);
+
+        // `outer` covers `inner`, which covers `leaf`; `elsewhere` is disjoint from all three, and
+        // `unlocated` is an expression lowering recorded no span for.
+        let outer = module.alloc_expr(ast::Expr::Ident(Name::new("outer")));
+        let inner = module.alloc_expr(ast::Expr::Ident(Name::new("inner")));
+        let leaf = module.alloc_expr(ast::Expr::Ident(Name::new("leaf")));
+        let elsewhere = module.alloc_expr(ast::Expr::Ident(Name::new("elsewhere")));
+        let unlocated = module.alloc_expr(ast::Expr::Ident(Name::new("unlocated")));
+        module.set_expr_span(outer, span(0, 100));
+        module.set_expr_span(inner, span(10, 40));
+        module.set_expr_span(leaf, span(20, 30));
+        module.set_expr_span(elsewhere, span(60, 70));
+        module.set_expr_span(unlocated, span(25, 25));
+
+        // Asked across the whole module, the innermost expression wins.
+        assert_eq!(module.innermost_expr_at(span(0, 100), at(25)), Some(leaf));
+        assert_eq!(module.innermost_expr_at(span(0, 100), at(35)), Some(inner));
+        assert_eq!(module.innermost_expr_at(span(0, 100), at(95)), Some(outer));
+
+        // Bounded to a construct, an expression that merely encloses that construct is not the
+        // answer, even though it covers the offset.
+        assert_eq!(module.innermost_expr_at(span(20, 30), at(25)), Some(leaf));
+        assert_eq!(module.innermost_expr_at(span(41, 50), at(45)), None);
+
+        // An expression with no recorded span cannot be located by offset.
+        assert_ne!(
+            module.innermost_expr_at(span(25, 25), at(25)),
+            Some(unlocated)
+        );
+        assert_eq!(module.innermost_expr_at(span(25, 25), at(25)), None);
+
+        // A boundary belongs to the expression it touches.
+        assert_eq!(module.innermost_expr_at(span(0, 100), at(20)), Some(leaf));
+        assert_eq!(module.innermost_expr_at(span(0, 100), at(30)), Some(leaf));
+    }
+
+    /// The iterator is what replaced rebuilding arena identities from raw indices outside the
+    /// crate, so it has to hand back the identities allocation actually returned.
+    #[test]
+    fn exprs_yields_every_expression_with_its_allocated_identity() {
+        let mut module = LoweredModule::new(SourceId::new(0));
+        let first = module.alloc_expr(ast::Expr::Ident(Name::new("first")));
+        let second = module.alloc_expr(ast::Expr::Ident(Name::new("second")));
+
+        let ids = module.exprs().map(|(id, _)| id).collect::<Vec<_>>();
+
+        assert_eq!(ids, vec![first, second]);
+        assert_eq!(module.exprs().len(), module.expr_count());
     }
 }

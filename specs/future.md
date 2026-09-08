@@ -186,6 +186,44 @@ If this is revisited in the future:
   uneven spacing and a binary minus operator normally should not have a space
   before it and no space after it.
 
+## Brace Recovery Reports A Closed Brace As Unclosed
+
+Admitting the empty list (`empty-list-spelling`) made `{` immediately followed by `}` a valid parse.
+That is correct for valid source, but it changed the path error recovery takes through *invalid*
+source, and one of the new paths reports a brace that is closed as unclosed:
+
+```
+error src/vscode/samples/tally-survey.nx:31:22: Unclosed brace
+   31 |         if allowBoth {
+      |                      ^ unexpected syntax here
+note: Add a closing '}' to match the opening brace
+```
+
+The brace on line 31 is closed on line 33. The real error is earlier and unrelated — the file uses
+an unsupported positional attribute form, `<Option "Yes, borrowed"/>` — and the file failed to parse
+both before and after the change. But recovery now cascades further from it: that one file went from
+21 diagnostics to 35, which is the whole of the repository corpus's 225 → 239. No valid program is
+affected, and every one of the repository's other 110 `.nx` files produces byte-identical output.
+
+The diagnostic is wrong about the thing it points at, which is worse than reporting less. An author
+whose file has one real error is told to close a brace that is already closed, and the true error is
+buried in the cascade.
+
+If this is revisited in the future:
+- Treat it as an error-recovery problem, not a grammar problem. The grammar change is correct and
+  the conflict sets are unchanged; what regressed is which recovery branch the parser reaches once
+  `{}` is a legal shape.
+- Measure with a whole-corpus before/after diagnostic diff rather than the test suite. The suite
+  stayed green through this; only running every `.nx` file against a baseline binary surfaced it.
+- Prefer suppressing cascaded diagnostics after the first hard parse error in a region over
+  special-casing the brace rule. The count going 21 → 35 is the signal: recovery is re-entering and
+  re-reporting, not finding 14 new distinct problems.
+- Fix the sample. `src/vscode/samples/tally-survey.nx` uses positional element attributes that NX
+  does not support, so it has never parsed. It is a fixture for the TextMate grammar, and the same
+  file is called out under "TextMate Grammar: The Bare-Identifier Catch-All" for 6 invalid prose
+  lines. Making it valid removes the only file in the corpus that exercises this path.
+
+
 ## Type Inference HIR Clone Cleanup
 
 `nx-types::infer` currently clones some HIR nodes to satisfy borrow-checker
@@ -346,7 +384,7 @@ every NX value in every target at once, including generated C# attributes. It is
 that ecosystem experience argues against for a discriminator specifically: `System.Text.Json` uses
 short author-chosen discriminators, and the fully-qualified alternative is JSON.NET's
 assembly-qualified `$type`, which welds internal structure into the wire format and moves whenever
-code moves. `$type` here is read by hand — hosts branch on it and the fiddle prints it.
+code moves. `$type` here is read by hand — hosts branch on it and the playground prints it.
 
 If this is revisited in the future:
 - Put identity *alongside* `$type`, never inside it. A separate field is ignorable by a host that
@@ -362,3 +400,252 @@ If this is revisited in the future:
 - Whatever is chosen has to land in the interpreter too. Parity between the interpreter and the IR
   runtimes is asserted value-for-value by `runtime/typescript/test/emitted-ir.test.mjs`, so a change
   to the stamped form in one is a change in both.
+
+## Built-In Element Content And Property Values Are Never Type-Checked
+
+An element expression is type-checked only where its tag resolves to a declaration. For a tag that
+matches no function, component, record, or union, `infer_element_expression`
+(`crates/nx-types/src/infer.rs:1332`) falls through to `nominal_named_type` without ever reaching the
+element's properties or its content — so nothing under a built-in tag is inferred. Body content has a
+second, narrower gate on top of that: `check_element_bindings`
+(`crates/nx-types/src/infer.rs:1874`) hands content to `check_content_binding` only where the tag
+declares a content property, so even a declared component's body is inferred only when it takes one.
+
+The effect is easiest to see through the editor, which reports a type only where the checker recorded
+one. In a workspace where `<P m={x} />` reports `string` for `x`:
+
+- `<div id={x} />` reports nothing — a property value under a built-in tag.
+- `<div>{x}</div>` reports nothing — content under a built-in tag.
+- `<div>hello</div>` reports nothing on the text, though the text run lowers as a string literal with
+  a real span.
+- `let <Panel width:int /> = <div>{width}</div>` reports nothing on `width`, while the same reference
+  in a function body reports `int`.
+
+Hover being conservative there is the visible symptom, not the problem. The problem is that these
+expressions are never checked at all: a name that does not resolve, or a value of the wrong type,
+passes through a built-in tag's properties and body without a diagnostic.
+
+If this is revisited in the future:
+- Treat it as "every lowered expression is visited exactly once" rather than as an editor fix. The
+  language service reads whatever the checker recorded and needs no change of its own.
+- Expect new diagnostics on code that reports none today, and budget for triaging them. That is the
+  real cost of the change and the reason it did not ride along with an editor change.
+- Watch for double-reporting where content is already checked against a declared content property —
+  the new visit must not re-check what `check_content_binding` already checked.
+- Note that this closes the second half of "Findings not fixed" in the `resolve-editor-positions`
+  review; the first half, literal spans, was fixed in that change.
+
+## Editor Hover: The Positions Still Unanswered
+
+`resolve-editor-positions` made hover answer at declarations, references, expressions, literals,
+component tags, property names, and type annotations. The positions below still report nothing, each
+for its own reason and none of them the same reason as the section above. Each was measured against
+the tree that change left behind, on a fixture checked to produce no diagnostic first — hover
+declines inside a syntax error by design, so a fixture that does not parse reports nothing for a
+reason that has nothing to do with the position.
+
+- **A field name in a record or action declaration.** `<Panel ti|tle="x" />` reports
+  ``property `title` `` and its declared type, but `a|:int` inside `type R = { a:int }` reports
+  nothing. The property-name context the resolver produces is scoped to an element's opening tag; the
+  declaration side was never given one. The annotation next to it does hover, which makes the gap
+  look arbitrary to a reader.
+- **Declaration details that are the bare kind word.** `Declaration::detail` is `"union"` for a
+  union, `"record"` for a record, `"action"` for an action, and `"value"` for a value with no
+  annotation (`crates/nx-language-service/src/lib.rs`). Hover suppresses the second line rather than
+  repeating the kind under itself, so `type Mode = light | dark` hovers as ``union `Mode` `` and
+  nothing more. Enriching those details the way `markup_signature` enriched the component case —
+  union cases, record fields, a value's inferred type — improves hover and completion detail
+  together, because both read that one field.
+- **Operator and punctuation positions.** Hover on the `+` in `count + 1` reports nothing. This one
+  is deliberate: the lookup is bounded by the construct the position resolved to, which is what stops
+  a cursor in an unrelated string from being answered with its enclosing element's type. Widening it
+  for operators means resolving the operator to its binary expression in the position resolver, not
+  relaxing the bound.
+- **The offset between `{` and a sign.** `{|-42}` reports nothing, though `{-|42}` and `{-4|2}` both
+  report `int`. The chain descent gives a boundary offset to the node that *ends* there before the
+  one that starts there, so the brace claims it. That tie-break is what makes other positions work —
+  an unbraced `|-42` answers only because whitespace is no node and nothing competes — so changing it
+  is not local. Widening the literal rule to also accept a node the offset merely abuts would fix
+  this one position and would need re-measuring against every boundary case the resolver tests.
+- **`null`.** It infers as `T0?`, an unsolved inference variable, so hover declines rather than
+  render a variable id at a reader. It is the one literal form with no context-free type; answering
+  it means either solving the variable from the binding site before hover reads it, or deciding
+  in the renderer that an unsolved nullable spells `null`.
+- **A unit literal.** `let value = {(|) 2}` reports nothing, where the `2` beside it reports `int`.
+  `()` is valid only as an item of a list or value list (`grammar.js`), and it lowers to no literal
+  expression, so unlike the cases above there is nothing recorded for a lookup to find.
+
+## Editor Navigation: Go-To-Definition And Rename
+
+`resolve-editor-positions` built a position resolver that answers "what construct is the cursor on?"
+for hover and completion. Go-to-definition and rename need the same question answered and one thing
+more: a *definition identity* for every reference — which declaration this name binds to, not merely
+that it is a reference. That was an explicit Non-Goal of that change, and nothing was added for it.
+
+What exists to build on: `PositionContext` already distinguishes `Reference` from `Declaration`,
+`ComponentTag`, `PropertyName`, and `TypeAnnotation`, and the resolver was deliberately shaped not to
+preclude the richer result — it classifies the position without deciding what a consumer does with
+it. What is missing is resolution from a reference back to the declaration that binds it, across
+documents, which is a `nx-hir`/scope question rather than a language-service one.
+
+Rename additionally needs the inverse direction — every reference to one declaration — which nothing
+currently indexes, and it needs to know which occurrences are the same name by identity rather than
+by spelling. Expect that to be the larger half of the work.
+
+## Lint And Format Gates Do Not Cover The Whole Workspace
+
+Two repo-wide gates pass in practice only because nobody runs them over everything. Both were found
+incidentally during the `resolve-editor-positions` review and neither was caused by it.
+
+- **`cargo clippy -p nx-hir --all-targets` does not compile.** `approx_constant` is denied
+  workspace-wide and `crates/nx-hir/src/ast/expr.rs:382` uses `3.14` in a test fixture. The failure
+  is in a test target, so a crate-level `cargo clippy -p nx-hir` without `--all-targets` passes and
+  hides it. The consequence is not the lint itself but that `nx-hir`'s test targets have never been
+  linted — whatever else is in them is unmeasured. Fix the fixture (`3.15`, or an `allow` with a
+  reason), then run `--all-targets` across the workspace once to see what else surfaces.
+- **`cargo fmt --check` reports pre-existing drift** in `crates/nx-hir/src/scope.rs`,
+  `crates/nx-codegen/src/builder.rs`, `crates/nx-syntax/tests/parser_tests.rs`, and
+  `crates/nx-types/tests/contextual_literals.rs`. Small and mechanical, but it means `cargo fmt
+  --check` cannot be used as a CI gate as it stands: a real regression would not be distinguishable
+  from the standing noise. Formatting those four files once makes the gate usable.
+
+## Language Service Cost Per Request
+
+Two costs were accepted by design in `resolve-editor-positions` and are worth revisiting together
+if editor latency ever shows up in profiling, rather than separately on suspicion:
+
+- **The workspace is analyzed once per snapshot**, and a snapshot is what a request is served from.
+  Nothing is cached across snapshots. This is the same gap as "Multi-File And Incremental Source
+  Analysis" above, reached from the editor side.
+- **Each position request re-parses the queried document**, because analysis discards the syntax
+  tree and `ModuleArtifact` deliberately does not retain it — every consumer of the compile pipeline
+  would pay for a structure only the editor reads. Measured at 0.09 ms against a snapshot build that
+  type checks the whole workspace.
+- **`LoweredModule::innermost_expr_at` scans the arena linearly.** Modules hold hundreds of
+  expressions and it runs once per position query, so an index is not yet worth its invalidation
+  surface — and a genuinely sublinear interval query needs an interval tree, because lowered spans
+  neither nest reliably nor are all present. The query lives in `nx-hir` precisely so that decision
+  can be made there without touching a caller.
+
+
+## Web Editor Packages: What `add-web-editor-packages` Left For Later
+
+The change that added [`language-protocol`](../openspec/specs/language-protocol/spec.md),
+[`language-http-service`](../openspec/specs/language-http-service/spec.md) and
+[`monaco-language-integration`](../openspec/specs/monaco-language-integration/spec.md) shaped four
+packages for publication and stopped short of publishing them. Each item below is a change of its
+own; none blocks using the packages from the repository's workspace today.
+
+### Publishing the packages
+
+- **The release pipeline attaches one npm tarball per release** and publishes only
+  `@nx-lang/language`. Extending it to `@nx-lang/language-protocol`, `@nx-lang/language-http`,
+  `@nx-lang/language-client`, `@nx-lang/monaco`, `@nx-lang/ir-runtime` and `@nx-lang/sdk-node`
+  means a release manifest that lists several tarballs, the one-tarball assertion in
+  `package-publish.yml` relaxed to that list, and trusted-publishing registration for each new
+  name. Every new package already passes `pnpm run verify:package` (pack, check the manifest,
+  install the tarball into a scratch project, import every export), so the pipeline change is
+  mechanical.
+- **`@nx-lang/sdk-node` needs per-platform native prebuilds** before a registry consumer can
+  install it: a napi build matrix (Linux x64/arm64, macOS, Windows) attached to the release and
+  wired through `@napi-rs/cli`'s optional-dependency convention, plus a first release of
+  `@nx-lang/language` itself, which has a pipeline but has never been published — the Monaco
+  package declares it as a peer dependency and this repository's workspace links `src/vscode` in
+  its place until then.
+
+### Folding `src/vscode` into the root workspace
+
+The extension keeps its own nested pnpm workspace. The end state is one workspace in which
+`@nx-lang/language` is a real package directory under `packages/language` holding the grammar,
+language configuration and snippets; the extension is a member that depends on it and copies the
+assets into its tree at VSIX packaging time (grammar contributions must be file paths inside the
+VSIX); `src/vscode/scripts/package-language.mjs`, which fabricates the package today, is deleted;
+and `@nx-lang/monaco` depends on it as `workspace:*` rather than through a `file:` link. That fold
+moves the lockfile and working directory four CI workflows reference (`build`, `release`,
+`package-publish`, and the VSIX publishing job) and must verify `vsce` packaging under a root
+workspace, which has a history of friction with pnpm's symlinked dependencies — the extension
+already bundles, which is the standard remedy.
+
+### ReachMe's migration
+
+In the ReachMe repository, once the packages are consumable, first confirm its `monaco-editor`,
+`shiki` and `@shikijs/monaco` versions satisfy `@nx-lang/monaco`'s peer ranges (Monaco 0.56 or
+later, Shiki 4); the ranges record what the playground and the package's tests exercise, not a feature
+the package needs, so an older Monaco there means testing the package against it and widening the
+range rather than moving ReachMe. Then: add `external/nx/packages/*` to its
+`pnpm-workspace.yaml` beside the two entries it has (or, once published, depend by version);
+replace `apps/web-app`'s `monacoNxLanguage.ts` and the highlighting half of `NxCodeEditor.tsx`
+with `registerNxLanguage` from `@nx-lang/monaco`, supplying its multi-file draft as the workspace
+callback and its authorization header through `@nx-lang/language-client`; mount
+`createNxLanguageHandler` in the Hono API under `/api/language/*` with the same registry-backed
+build context it already validates with; rename the `nx-language` `file:` link to
+`@nx-lang/language`; and remove the submodule once every package it consumed is on the registry.
+
+### Deleting the prelude
+
+`@nx-lang/language-http`'s `prelude` option exists because an imported external component loses
+its defaults and inherited properties (NXE12/NXE13), which forces the DrawnUI playground to analyze the
+catalog and the visitor's text as one module. Fixing NXE12/NXE13 is the condition for deleting the
+option, its shift helpers, and `server/compile.mjs`'s use of them: the catalog becomes a library
+loaded through a `LibraryRegistry` and passed as the handler's `buildContext`, which the handler
+already supports.
+
+## Playground: What `add-playground-site` Left For Later
+
+The playground at `nxlang.org/playground` (`sites/playground`, spec `openspec/specs/playground`)
+shipped as the DrawnUI fiddle under a public address: gallery, editor view, server-side compile,
+watchdog, Railway behind Cloudflare, the service declared in `.railway/railway.ts` and deployed
+by `.github/workflows/deploy-playground.yml` with `railway up`. The items below are what it
+deliberately does not do yet, and one question that only the first live deploy can answer.
+
+### Shareable edited source
+
+An edit lives only in the session. A visitor who writes something worth showing has no address for
+it: `/playground/<id>` always opens the example as authored. The URL scheme leaves the query and
+fragment of that address free for this — the smallest version encodes the source in the fragment
+(compressed, so a typical example fits a browser's URL limit), and a stored version would need
+somewhere to keep it and a policy for how long. Either one is a client change plus, for storage, a
+route; nothing in the current address scheme has to move.
+
+### Compile isolation
+
+Compile and language requests call the native binding synchronously on the server's only thread.
+The playground's answer today is a watchdog that ends a process whose main thread has stopped
+answering, so a hang costs every visitor a restart rather than the site. The better answer is a
+child process per compile (or a small pool) with a kill timer: a bad request then costs one request,
+the main thread never blocks, and the health route answers truthfully by construction rather than
+by being on the blocked thread. Worker threads are not enough — `terminate()` cannot preempt a
+native call — so this is a process boundary, and the compile seam in `src/compile/` and
+`server/compile.mjs` is already the one place it would go. A WASM build of the compiler would
+retire the question entirely by moving compilation into the browser.
+
+Until then the restart is unbounded by design: the Railway restart policy is `ALWAYS` with no retry
+budget, because Railway polls the health check only while a deployment starts, so the budget would
+be the only thing keeping a live service up, and a service that stops restarting after its tenth
+hang is the failure the watchdog exists to prevent. The cost is that a hang someone keeps provoking
+loops — the process comes back and is stuck again within the watchdog's deadline. The rate limit
+on `/playground/api/*` bounds how often that can happen from one client; repeated `watchdog:`
+lines in the Railway log are the signal. Process isolation retires this too: a bad request would
+then cost one child process, not the server.
+
+### Splitting the domain across services
+
+Everything the site serves is under `/playground`, so a second service on `nxlang.org` — a home
+page at `/`, the docs — is an edge change, not a code change. The root redirect is the one thing
+that moves: it lives in the playground's server and would have to be replaced by whatever serves
+`/`. Routing by path to a second Railway service needs either a Cloudflare Origin Rule with a host
+override (confirm the plan supports it) or a Worker in front of both. Whichever is chosen, the new
+service must go through Cloudflare the way the playground does: the playground has no
+Railway-generated domain on purpose, because that hostname would answer outside the edge, where the
+rate limit does not apply.
+
+### The deploy smoke test and Bot Fight Mode
+
+The workflow verifies a deployment with two `curl` calls through Cloudflare, for the health body
+and the gallery's status. Bot Fight Mode, which the setup turns on, challenges requests it classes
+as automated and cannot be exempted per path or user agent on the Free plan. Whether it challenges
+a GitHub runner is only observable live, so this stays open until the first run on `main` (review
+finding RF3). If the step sees a challenge page instead of `{"ok":true}`, the choice is between
+dropping Bot Fight Mode and keeping the rate limit alone, or keeping only the status-code check
+for the through-Cloudflare call; there is no Railway hostname to smoke-test the origin directly.
+Record the choice in `docs/deployment-setup.md`.

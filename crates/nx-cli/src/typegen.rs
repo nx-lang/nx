@@ -160,6 +160,99 @@ mod tests {
         lower(tree.root(), SourceId::new(0))
     }
 
+    fn generate_for(source: &str, language: TargetLanguage) -> String {
+        let module = lower_module(source, "types.nx");
+        let opts = GenerateTypesOptions {
+            language,
+            csharp_namespace: None,
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(language),
+        };
+        generate_types(&module, Path::new("types.nx"), &opts).unwrap()
+    }
+
+    /// `void` is no longer a primitive, so a user may declare a type with that name. The
+    /// primitive-name-to-host-type maps must not intercept it: the reference has to resolve to the
+    /// declaration, as it does for every other user type name.
+    ///
+    /// <para>What the name then renders as is a separate, pre-existing question — a user type named
+    /// after a host keyword (`class`, `void`) emits an unescaped identifier today, and did so for
+    /// `class` before this change. That defect is recorded in the proposal's "Not in this change".
+    /// This test pins the part the change is responsible for: the declaration is generated and the
+    /// field refers to it, rather than the field silently becoming the host's `void`.</para>
+    #[test]
+    fn a_user_declared_void_type_is_not_mapped_to_the_host_void_type() {
+        let source = "export type void = { value:int }\nexport type Holder = { n:void }\n";
+
+        let csharp = generate_for(source, TargetLanguage::CSharp);
+        assert!(
+            csharp.contains("class void"),
+            "the user's record should be generated:\n{csharp}"
+        );
+        assert!(
+            csharp.contains("[Key(\"value\")]"),
+            "the user's record should carry its own field:\n{csharp}"
+        );
+
+        let typescript = generate_for(source, TargetLanguage::TypeScript);
+        assert!(
+            typescript.contains("interface void"),
+            "the user's record should be generated:\n{typescript}"
+        );
+        // The reference reads `n: void`, which is what the keyword collision makes unavoidable
+        // without escaping. What this asserts is the part in scope: the name reached the
+        // declaration lookup, which is why an interface exists for it at all.
+        assert!(
+            typescript.contains("value: number"),
+            "the user's record should carry its own field:\n{typescript}"
+        );
+    }
+
+    #[test]
+    fn generates_the_same_defaults_for_both_spellings_of_a_whole_float() {
+        // This path reads a lowered module and never type checks, so the HIR conversion has not
+        // run: the spelling has to be settled from the field's own type or the two forms diverge.
+        for language in [TargetLanguage::CSharp, TargetLanguage::TypeScript] {
+            let written_as_int = generate_for(
+                "export type Opts = { x:float64 = 0 y:float32 = 1 }",
+                language,
+            );
+            let written_as_float = generate_for(
+                "export type Opts = { x:float64 = 0.0 y:float32 = 1.0 }",
+                language,
+            );
+
+            assert_eq!(
+                written_as_int, written_as_float,
+                "{:?} output should not depend on which spelling was written",
+                language
+            );
+        }
+    }
+
+    #[test]
+    fn generates_csharp_float_defaults_with_a_floating_point_spelling() {
+        let output = generate_for(
+            "export type Opts = { x:float64 = 0 y:float32 = 1 }",
+            TargetLanguage::CSharp,
+        );
+
+        assert!(
+            output.contains("= 0.0;"),
+            "a double default should read as a double: {}",
+            output
+        );
+        assert!(
+            output.contains("= 1.0f;"),
+            "a float default should carry the float suffix: {}",
+            output
+        );
+        // An integer field keeps its integer spelling.
+        let integers = generate_for("export type Opts = { n:int = 0 }", TargetLanguage::CSharp);
+        assert!(integers.contains("= 0;"), "{}", integers);
+        assert!(!integers.contains("= 0.0;"), "{}", integers);
+    }
+
     #[test]
     fn generates_typescript_exported_aliases_and_action_records_only() {
         let source = r#"

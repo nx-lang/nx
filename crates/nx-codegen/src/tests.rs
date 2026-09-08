@@ -453,6 +453,109 @@ let root() = { <User name="Ada" /> }
     assert_eq!(first.json, second.json);
 }
 
+/// The two spellings of a whole number at a float property, as one program each.
+fn float_property_program(literal: &str) -> String {
+    format!(
+        "external component <B v:float64 />\nlet root() = {{ <B v={} /> }}\n",
+        literal
+    )
+}
+
+/// Strips what two programs cannot share when their source text differs.
+///
+/// <para>`24` and `24.0` are two different files, two characters apart, so every byte offset after
+/// the literal moves, the retained source differs, and the fingerprint over them differs with it.
+/// NX IR carries source provenance deliberately — diagnostics and source maps need it — so those
+/// differences are correct rather than noise to be designed away. What must match is everything
+/// else: the declarations, the types, and the literal itself.</para>
+fn without_source_provenance(json: &str) -> serde_json::Value {
+    fn strip(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                map.remove("span");
+                map.remove("programFingerprint");
+                map.remove("source");
+                map.remove("sources");
+                for nested in map.values_mut() {
+                    strip(nested);
+                }
+            }
+            serde_json::Value::Array(items) => items.iter_mut().for_each(strip),
+            _ => {}
+        }
+    }
+
+    let mut value: serde_json::Value = serde_json::from_str(json).expect("nx ir json");
+    strip(&mut value);
+    value
+}
+
+#[test]
+fn int_literal_at_a_float_site_emits_the_same_ir_as_a_real_literal() {
+    // The guarantee the conversion exists to provide: nothing below type checking can tell which
+    // spelling the author used, so a consumer added later cannot depend on the difference.
+    let written_as_int = emit_nx_ir(&artifact_from_source(&float_property_program("24")))
+        .expect("nx ir for the integer spelling");
+    let written_as_float = emit_nx_ir(&artifact_from_source(&float_property_program("24.0")))
+        .expect("nx ir for the real spelling");
+
+    assert_eq!(
+        without_source_provenance(&written_as_int.json),
+        without_source_provenance(&written_as_float.json)
+    );
+}
+
+#[test]
+fn int_literal_at_a_float_site_is_not_emitted_as_an_integer_literal() {
+    let generated = emit_nx_ir(&artifact_from_source(&float_property_program("24")))
+        .expect("nx ir for the integer spelling");
+
+    // Asserting only equality with the real spelling would pass if both emitted an integer.
+    assert!(
+        !generated.json.contains(r#""kind":"int""#),
+        "the converted literal should not reach the IR as an int: {}",
+        generated.json
+    );
+}
+
+#[test]
+fn int_literal_at_a_float32_site_emits_the_same_ir_as_a_real_literal() {
+    let program = |literal: &str| {
+        format!(
+            "external component <B v:float32 />\nlet root() = {{ <B v={} /> }}\n",
+            literal
+        )
+    };
+    let written_as_int =
+        emit_nx_ir(&artifact_from_source(&program("24"))).expect("nx ir for the integer spelling");
+    let written_as_float =
+        emit_nx_ir(&artifact_from_source(&program("24.0"))).expect("nx ir for the real spelling");
+
+    assert_eq!(
+        without_source_provenance(&written_as_int.json),
+        without_source_provenance(&written_as_float.json)
+    );
+}
+
+#[test]
+fn int_literal_defaults_and_lists_at_float_sites_match_their_real_spellings() {
+    let program = |x: &str, items: &str| {
+        format!(
+            "type Opts = {{ x:float64 = {} }}\nexternal component <B v:float64[] />\nlet root() = {{ <B v={{{}}} /> }}\n",
+            x, items
+        )
+    };
+    let written_as_int = emit_nx_ir(&artifact_from_source(&program("0", "1 2 3")))
+        .expect("nx ir for the integer spelling");
+    let written_as_float = emit_nx_ir(&artifact_from_source(&program("0.0", "1.0 2.0 3.0")))
+        .expect("nx ir for the real spelling");
+
+    assert_eq!(
+        without_source_provenance(&written_as_int.json),
+        without_source_provenance(&written_as_float.json)
+    );
+}
+
 #[test]
 fn nx_ir_preserves_module_qualified_references() {
     let artifact = artifact_from_workspace(
@@ -548,7 +651,10 @@ let root(user: User): User = { user }"#,
 
     // A base-typed boundary accepts a value of a record that extends the base, never one of the
     // base itself, and this is the only thing in the IR that says which is which.
-    assert_eq!(ir_declaration(&document, "Base")["kind"]["isAbstract"], true);
+    assert_eq!(
+        ir_declaration(&document, "Base")["kind"]["isAbstract"],
+        true
+    );
     assert_eq!(
         ir_declaration(&document, "User")["kind"]["isAbstract"],
         false
@@ -586,6 +692,68 @@ let root(user: User): User = { user }"#,
         param_type["reference"]["module"],
         root["reference"]["module"]
     );
+}
+
+/// An expression written inside an intrinsic element carries the same semantic type in the IR as
+/// the same expression written outside one.
+///
+/// <para>The IR's `ty` is not decoration. `@nx-lang/ir-runtime` reads it to pick integer division
+/// from float division, so an expression that reached codegen with no type divided as a float:
+/// `&lt;div&gt;{7 / 2}&lt;/div&gt;` evaluated to `3.5` while `{ 7 / 2 }` evaluated to `3`. Nothing
+/// in codegen caused that — inference never visited an element whose tag resolves to nothing, so
+/// the type environment codegen reads had no entry to hand over.</para>
+#[test]
+fn nx_ir_types_an_expression_written_inside_an_intrinsic_element() {
+    let inside = artifact_from_source("let root() = <div>{7 / 2}</div>");
+    let generated = emit_nx_ir(&inside).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+
+    let divisions = find_typed_divisions(ir_declaration(&document, "root"));
+    assert_eq!(
+        divisions,
+        vec!["int".to_string()],
+        "the division inside the element should carry the type it has"
+    );
+}
+
+/// Every `div` expression's semantic type display, gathered from anywhere under a declaration.
+fn find_typed_divisions(node: &Value) -> Vec<String> {
+    let mut found = Vec::new();
+    collect_typed_divisions(node, &mut found);
+    found
+}
+
+fn collect_typed_divisions(node: &Value, found: &mut Vec<String>) {
+    match node {
+        Value::Object(fields) => {
+            // An expression node carries `ty` beside the `op` that spells the operator, so the
+            // type belongs to the node the operator is nested in rather than to the operator.
+            let is_division = fields
+                .get("op")
+                .and_then(|op| op.get("operator"))
+                .and_then(Value::as_str)
+                == Some("div");
+            if is_division {
+                found.push(
+                    fields
+                        .get("ty")
+                        .and_then(|ty| ty.get("display"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("<none>")
+                        .to_string(),
+                );
+            }
+            for value in fields.values() {
+                collect_typed_divisions(value, found);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_typed_divisions(item, found);
+            }
+        }
+        _ => {}
+    }
 }
 
 #[test]
@@ -949,6 +1117,50 @@ let root() = { <SearchBox /> }
     assert_eq!(
         search_box["kind"]["body"]["op"]["tag"],
         "componentDescriptor"
+    );
+}
+
+/// A written-but-empty body and an absent body mean different things, and the two implementations
+/// of that rule must agree.
+///
+/// <para>The interpreter keys on whether any content expression was written
+/// (`normalize_content_values` in `nx-interpreter`); code generation keys on whether the emitted
+/// content list is non-empty, in three separate places across two crates. Nothing but this test
+/// holds them together, and this is the one shape whose meaning the change altered: `<Box>{}</Box>`
+/// now binds the empty list where it previously could not be written at all.</para>
+#[test]
+fn an_empty_written_body_generates_an_empty_list_and_an_absent_one_takes_the_default() {
+    const WRITTEN: &str = r#"
+        type A = { n: int = 1 }
+        type Box = { content items: object[] = {<A n=9 />} }
+        let root() = { <Box>{}</Box> }
+    "#;
+    const ABSENT: &str = r#"
+        type A = { n: int = 1 }
+        type Box = { content items: object[] = {<A n=9 />} }
+        let root() = { <Box /> }
+    "#;
+
+    let written = artifact_from_source(WRITTEN);
+    let module = generated_file(&written, CodegenTarget::TypeScript, "m0_main.ts");
+    assert!(
+        module.contains("items: []"),
+        "a written-but-empty body should generate an empty list, got: {module}"
+    );
+    assert_json_values_eq(
+        &interpreter_json_root(WRITTEN),
+        r#"{"$type":"Box","items":[]}"#,
+    );
+
+    let absent = artifact_from_source(ABSENT);
+    let module = generated_file(&absent, CodegenTarget::TypeScript, "m0_main.ts");
+    assert!(
+        !module.contains("items: []"),
+        "an absent body should leave the declared default, got: {module}"
+    );
+    assert_json_values_eq(
+        &interpreter_json_root(ABSENT),
+        r#"{"$type":"Box","items":[{"$type":"A","n":9}]}"#,
     );
 }
 

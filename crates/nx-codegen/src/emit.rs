@@ -2683,7 +2683,9 @@ fn emit_named_type(
         "int" | "int32" | "int64" | "float32" | "float64" => "number".to_string(),
         "string" => "string".to_string(),
         "boolean" => "boolean".to_string(),
-        "void" => "void".to_string(),
+        // `void` is not an NX type name any more; a `void` here is a user declaration, so it falls
+        // through to the reference lookup. `Primitive::Void` still emits `void` in
+        // `emit_primitive_type` — the unit type keeps its rendering, it just has no source name.
         _ => context
             .type_reference(current_module_id, name)
             .map(|reference| {
@@ -2716,6 +2718,10 @@ fn emit_primitive_type(primitive: Primitive) -> String {
         Primitive::String => "string".to_string(),
         Primitive::Boolean => "boolean".to_string(),
         Primitive::Void => "void".to_string(),
+        // TypeScript spells the bottom type, and `readonly never[]` is exactly what an empty list
+        // is. Reaching here at all takes an unannotated binding, which is reported before code is
+        // generated, so this is the honest rendering rather than a load-bearing one.
+        Primitive::Never => "never".to_string(),
     }
 }
 

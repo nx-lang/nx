@@ -709,7 +709,7 @@ fn ts_type_name(name: &str) -> String {
         "string" => "string".to_string(),
         "int" | "int32" | "int64" | "float32" | "float64" => "number".to_string(),
         "boolean" => "boolean".to_string(),
-        "void" => "void".to_string(),
+        // `void` is not an NX type name any more; a `void` here is a user declaration.
         "object" => "unknown".to_string(),
         other => sanitize_ts_type_name(other),
     }

@@ -37,7 +37,6 @@ Primitive types (keywords)
 - INT32 ("int32"), INT64 ("int64")
 - FLOAT32 ("float32"), FLOAT64 ("float64")
 - BOOLEAN ("boolean")
-- VOID ("void")
 - OBJECT ("object")
 
 Identifiers and names
@@ -262,8 +261,12 @@ reapplying `QMARK` to the same outer type layer. `string?[]?` is valid; `string?
 `string?[]??` are invalid.
 
 PrimitiveType (AST: PrimitiveTypeSyntax)
-- PrimitiveType → STRING | INT32 | INT64 | FLOAT32 | FLOAT64 | BOOLEAN | VOID | OBJECT
-  - fields: name: "string"|"int"|"int32"|"int64"|"float32"|"float64"|"boolean"|"void"|"object"
+- PrimitiveType → STRING | INT32 | INT64 | FLOAT32 | FLOAT64 | BOOLEAN | OBJECT
+  - fields: name: "string"|"int"|"int32"|"int64"|"float32"|"float64"|"boolean"|"object"
+
+Semantic note: `void` is not among them. The unit type exists in inference — it is what an `if`
+with no `else` takes — and still renders as `void` in diagnostics, but it has no source spelling,
+so `void` in type position is an ordinary named type reference like any other undeclared name.
 
 UserDefinedType (AST: UserTypeSyntax)
 - UserDefinedType → QualifiedName
@@ -360,8 +363,13 @@ SignedNumericLiteral (AST: LiteralExpressionSyntax)
     every position, so the braced and unbraced forms share one lowered representation.
 
 ValuesBracedExpression (AST: ValuesBracedExpressionSyntax)
-- ValuesBracedExpression → LBRACE ValueExpressions RBRACE
+- ValuesBracedExpression → LBRACE [ValueExpressions] RBRACE
   - fields: items: ExpressionSyntax[]
+
+Semantic note: the item list is optional, so `{}` parses with zero items. That is the spelling of
+the empty list, and it is unique to this rule: `ElementsBracedExpression` and
+`EmbedBracedExpression` both require at least one item, so an element-position `if`/`for` body and
+`@{}` remain parse errors.
 
 ValueExpressions
 - ValueExpressions → ValueExpression
@@ -405,7 +413,13 @@ ParenFunctionCallArgumentListOpt
 - ParenFunctionCallArgumentListOpt → ε
 
 ParenFunctionCallArgumentList
-- ParenFunctionCallArgumentList → ValueExpression (COMMA ValueExpression)*
+- ParenFunctionCallArgumentList → ValueOrValuesBracedExpression (COMMA ValueOrValuesBracedExpression)*
+
+Semantic note: an argument may be a braced value, so a function is passed a list the same way a
+property is bound one — `f({})`, `f({a})`, `f({a b})`. The arity rule is the ordinary one, so a
+one-item brace is a scalar that the parameter's list type coerces. This does not make a
+`ValuesBracedExpression` a `ValueListItemExpression`: `f({{a} b})` is still a parse error, because a
+list is not an item of a list.
 
 Unit (AST: UnitLiteralSyntax)
 - Unit → LPAREN RPAREN

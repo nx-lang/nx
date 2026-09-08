@@ -1,0 +1,116 @@
+/**
+ * Proves the dev proxy answers rather than hangs when the compile server is missing or stuck.
+ *
+ * Both paths end in the same place for the app — no compile — but they are different failures, and
+ * the point of the config under test is that the client is told which one it hit before its own
+ * eight-second deadline. That deadline is what these tests assert against: an answer that arrives
+ * after it is, from the app's side, indistinguishable from the hang this replaced.
+ */
+import { strict as assert } from "node:assert";
+import { createServer as createHttpServer } from "node:http";
+import { after, before, test } from "node:test";
+import { fileURLToPath } from "node:url";
+import { createServer } from "vite";
+import { API_PREFIX, BASE_HREF } from "./base.mjs";
+
+const appRoot = fileURLToPath(new URL(".", import.meta.url));
+
+/** The deadline `src/compile/` gives a compile before it stops waiting. */
+const CLIENT_DEADLINE_MS = 8000;
+
+/** Asks the operating system for a port nothing is using, so a run never collides with a dev server. */
+function freePort() {
+  return new Promise((fulfil, reject) => {
+    const probe = createHttpServer();
+    probe.on("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const { port } = probe.address();
+      probe.close(() => fulfil(port));
+    });
+  });
+}
+
+let vite;
+let origin;
+let compilePort;
+/** Whatever is standing in for the compile server on `compilePort`; closed in `after`. */
+let stalling;
+
+/** Posts a compile the way the client does, and fails rather than hangs if nothing answers in time. */
+async function postCompile() {
+  const started = Date.now();
+  const response = await fetch(`${origin}${API_PREFIX}/compile`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ source: "component Main { }" }),
+    signal: AbortSignal.timeout(CLIENT_DEADLINE_MS),
+  });
+  const body = await response.json();
+  return { response, body, elapsed: Date.now() - started };
+}
+
+before(async () => {
+  compilePort = await freePort();
+  // Read by `server/port.mjs`, which is what the config under test points its probe and proxy at.
+  process.env.PORT = String(compilePort);
+  const vitePort = await freePort();
+  vite = await createServer({
+    root: appRoot,
+    logLevel: "error",
+    server: { port: vitePort, strictPort: true },
+  });
+  await vite.listen();
+  origin = `http://127.0.0.1:${vitePort}`;
+});
+
+after(async () => {
+  await vite?.close();
+  await new Promise((fulfil) => (stalling ? stalling.close(fulfil) : fulfil()));
+});
+
+test("the shell carries the site's <base href>, put there by the config rather than index.html", async () => {
+  // The examples name images by relative path and the editor's addresses are nested, so a shell
+  // without the base would have the browser resolve `images/baboon.jpg` against the route.
+  const response = await fetch(`${origin}${BASE_HREF}`, { signal: AbortSignal.timeout(CLIENT_DEADLINE_MS) });
+  assert.equal(response.status, 200);
+  assert.match(await response.text(), new RegExp(`<base href="${BASE_HREF}"`));
+});
+
+test("names the absent compile server instead of leaving the request to time out", async () => {
+  const { response, body, elapsed } = await postCompile();
+  assert.equal(response.status, 502);
+  assert.match(body.error, /not running/);
+  assert.ok(elapsed < CLIENT_DEADLINE_MS, `answered in ${elapsed}ms`);
+});
+
+test("answers a compile server that accepts the connection and then never replies", async () => {
+  // Listening but silent: the probe sees a live port and hands the request to the proxy, which is
+  // the only thing left that can end it.
+  stalling = createHttpServer(() => {});
+  await new Promise((fulfil) => stalling.listen(compilePort, "127.0.0.1", fulfil));
+
+  const { response, body, elapsed } = await postCompile();
+  assert.equal(response.status, 502);
+  assert.match(body.error, /mid-request/);
+  assert.ok(elapsed < CLIENT_DEADLINE_MS, `answered in ${elapsed}ms`);
+});
+
+test("proxies the language route to the compile server by the same rule as compiles", async () => {
+  await new Promise((fulfil) => stalling.close(fulfil));
+  // An answering stand-in: what matters is that the request arrives at the compile server's port
+  // with its path intact, not what a real answer would say.
+  stalling = createHttpServer((request, response) => {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ method: request.method, path: request.url }));
+  });
+  await new Promise((fulfil) => stalling.listen(compilePort, "127.0.0.1", fulfil));
+
+  const response = await fetch(`${origin}${API_PREFIX}/language/hover`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+    signal: AbortSignal.timeout(CLIENT_DEADLINE_MS),
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { method: "POST", path: `${API_PREFIX}/language/hover` });
+});

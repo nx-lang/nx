@@ -1,11 +1,18 @@
 //! Protocol-independent editor language service for NX.
 
+mod hover;
+mod positions;
+
 use nx_api::{
     analyze_workspace_modules, validate_workspace, NxDiagnostic, NxDiagnosticLabel, NxSeverity,
     NxWorkspace, NxWorkspaceInputError, NxWorkspaceModule, ProgramBuildContext,
 };
-use nx_hir::{ast::TypeRef, Item, LocalDefinitionId, PreparedNamespace, RecordKind};
+use nx_hir::{
+    ast::TypeRef, Item, LocalDefinitionId, LoweredModule, PreparedBinding, PreparedNamespace,
+    RecordKind,
+};
 use nx_syntax::{parse_str, SyntaxKind, SyntaxNode};
+use nx_types::{ModuleArtifact, TypeEnvironment};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
@@ -37,7 +44,7 @@ const KEYWORD_COMPLETIONS: &[&str] = &[
 ];
 
 const PRIMITIVE_TYPE_COMPLETIONS: &[&str] = &[
-    "string", "int", "int32", "int64", "float32", "float64", "boolean", "void", "object",
+    "string", "int", "int32", "int64", "float32", "float64", "boolean", "object",
 ];
 
 /// Built-in type names that are valid in type position but are not primitives.
@@ -117,6 +124,7 @@ impl DocumentVersion {
 
 /// Zero-based editor text position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TextPosition {
     /// Zero-based line number.
     pub line: u32,
@@ -133,6 +141,7 @@ impl TextPosition {
 
 /// Editor text range with byte offsets preserved for staleness and query checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EditorRange {
     /// Range start.
     pub start: TextPosition,
@@ -142,14 +151,6 @@ pub struct EditorRange {
     pub start_byte: u32,
     /// End byte offset in the source text.
     pub end_byte: u32,
-}
-
-impl EditorRange {
-    fn contains_byte(self, offset: usize) -> bool {
-        let start = self.start_byte as usize;
-        let end = self.end_byte as usize;
-        start <= offset && offset <= end
-    }
 }
 
 /// One document submitted to a language-service snapshot.
@@ -228,6 +229,12 @@ pub struct WorkspaceSnapshot {
     /// the result is too, and a keystroke cannot afford to derive it again — the plain keyword
     /// path pays for it as much as the ones that use it.</para>
     declarations: OnceLock<Arc<WorkspaceDeclarations>>,
+    /// The libraries every query in this snapshot can see.
+    ///
+    /// <para>Visibility is a property of the whole analysis the snapshot caches once, so the
+    /// context belongs to the snapshot, not to a query: a per-query context would either
+    /// invalidate the cache or silently answer from the wrong one.</para>
+    build_context: ProgramBuildContext,
 }
 
 impl WorkspaceSnapshot {
@@ -276,7 +283,20 @@ impl WorkspaceSnapshot {
             by_uri,
             by_identity,
             declarations: OnceLock::new(),
+            build_context: ProgramBuildContext::empty(),
         })
+    }
+
+    /// Analyzes the snapshot against `build_context`, so that every library the context makes
+    /// visible is visible to diagnostics, hover, completion, and symbols, under the same rules
+    /// the compiler applies.
+    ///
+    /// <para>Discards any analysis already computed: the context decides what the analysis
+    /// sees, so it has to be set before the first query.</para>
+    pub fn with_build_context(mut self, build_context: ProgramBuildContext) -> Self {
+        self.build_context = build_context;
+        self.declarations = OnceLock::new();
+        self
     }
 
     /// Returns all snapshot documents.
@@ -297,7 +317,7 @@ impl WorkspaceSnapshot {
     /// Computes editor diagnostics plus diagnostics that are not tied to any submitted document.
     pub fn diagnostic_report(&self) -> Result<DiagnosticReport, SnapshotError> {
         let workspace = self.to_workspace()?;
-        let diagnostics = validate_workspace(&workspace, &ProgramBuildContext::empty());
+        let diagnostics = validate_workspace(&workspace, &self.build_context);
         Ok(self.project_diagnostic_report(&diagnostics))
     }
 
@@ -313,28 +333,272 @@ impl WorkspaceSnapshot {
     }
 
     /// Returns conservative hover content for a position in the requested document.
+    ///
+    /// <para>The position is resolved against the analyzed document, so hover answers at a
+    /// reference and at an expression, not only at the name of a top-level declaration. Where the
+    /// resolved position carries nothing the analysis knows about, hover returns nothing rather
+    /// than a fabricated result.</para>
     pub fn hover(
         &self,
         uri: &DocumentUri,
         position: TextPosition,
     ) -> Result<Option<Hover>, SnapshotError> {
+        let resolved = self.resolve_position(uri, position)?;
+
+        let Some(contents) = self.hover_contents(&resolved) else {
+            return Ok(None);
+        };
+        let Some(span) = resolved.context.span() else {
+            return Ok(None);
+        };
+
+        Ok(Some(Hover {
+            uri: resolved.document.uri.clone(),
+            identity: resolved.document.identity.clone(),
+            version: resolved.document.version,
+            range: resolved.index.range_from_bytes(span),
+            contents,
+        }))
+    }
+
+    /// Turns a position query into the construct it names, once, for every query that asks.
+    ///
+    /// <para>Hover and completions must agree about what the cursor is on. Two hand-written copies
+    /// of this preamble is where that agreement would drift, so there is one. A document that does
+    /// not parse resolves to no construct, which both entry points already answer conservatively.
+    /// </para>
+    fn resolve_position(
+        &self,
+        uri: &DocumentUri,
+        position: TextPosition,
+    ) -> Result<ResolvedPosition<'_>, SnapshotError> {
         let document = self
             .document(uri)
             .ok_or_else(|| SnapshotError::UnknownDocument(uri.to_string()))?;
         let index = LineIndex::new(document.source());
-        let offset = index.position_to_byte_offset(document.source(), position);
-        let symbols = document_symbols_for_document(document);
+        let offset = index.position_to_byte_offset(position);
+        let context = parse_str(document.source(), document.identity.as_str())
+            .tree
+            .map(|tree| positions::resolve(&tree, offset))
+            .unwrap_or(positions::PositionContext::Unresolved);
+        let scope = self.document_scope(document.identity.as_str());
 
-        Ok(symbols
-            .into_iter()
-            .find(|symbol| symbol.selection_range.contains_byte(offset))
-            .map(|symbol| Hover {
-                uri: document.uri.clone(),
-                identity: document.identity.clone(),
-                version: document.version,
-                range: symbol.selection_range,
-                contents: format!("{} `{}`", symbol.kind.display_name(), symbol.name),
-            }))
+        Ok(ResolvedPosition {
+            document,
+            index,
+            offset,
+            context,
+            scope,
+        })
+    }
+
+    /// The text a resolved position reports, or nothing where the analysis has nothing to say.
+    fn hover_contents(&self, resolved: &ResolvedPosition<'_>) -> Option<String> {
+        let uri = &resolved.document.uri;
+        let offset = resolved.offset;
+        let scope = &resolved.scope;
+        match &resolved.context {
+            // A declaration and a reference both report the declaration, spelled the way its
+            // author wrote it.
+            positions::PositionContext::Declaration { name, .. } => {
+                self.declaration_hover(scope, scope.visible.get(name)?)
+            }
+            positions::PositionContext::ComponentTag { tag, .. } => {
+                self.declaration_hover(scope, scope.visible.get(tag)?)
+            }
+            // A name is an expression first. Looking the spelling up among the top-level
+            // declarations first would answer for the wrong binding wherever a local shadows one,
+            // because that map is keyed by name and knows nothing of locals; the type environment
+            // reports what the name actually resolved to. The declaration is the answer only
+            // where the name reaches no expression, as in an import clause.
+            positions::PositionContext::Reference { name, span } => self
+                .inferred_type_hover(uri, offset, *span)
+                .or_else(|| self.declaration_hover(scope, scope.visible.get(name)?)),
+            positions::PositionContext::Expression { span } => {
+                self.inferred_type_hover(uri, offset, *span)
+            }
+            // The member of a member access is answered on the same terms as the access it
+            // belongs to: the access's type is the member's type, and the receiver's type names
+            // what declares it.
+            positions::PositionContext::MemberAccess { member, span } => {
+                self.member_access_hover(uri, offset, *span, member)
+            }
+            // A property name is not an expression and has no type of its own, but the component
+            // it is supplied to declares one, and that declaration is the metadata the position
+            // has. An empty slot in a tag names no property, so it still reports nothing.
+            positions::PositionContext::PropertyName { tag, property, .. } => {
+                let property = property.as_deref()?;
+                let declared = scope
+                    .element(tag)?
+                    .properties
+                    .iter()
+                    .find(|declared| declared.name == property)?;
+                Some(hover::fenced(hover::property(
+                    Some(tag),
+                    &declared.name,
+                    &declared.display_type,
+                )))
+            }
+            // A written type annotation names a type, and a name has a declaration behind it. An
+            // annotation with nothing written in it yet does not.
+            positions::PositionContext::TypeAnnotation { name, .. } => {
+                let name = name.as_deref()?;
+                match scope.visible.get(name) {
+                    Some(declaration) => self.declaration_hover(scope, declaration),
+                    None => builtin_type_hover(name),
+                }
+            }
+            // A bare name in a value slot resolves against the property's declared type, so it is
+            // answered the same way the same name written at any other site of that type is —
+            // design D4. A slot with nothing written in it names nothing.
+            positions::PositionContext::PropertyValue {
+                tag,
+                property,
+                name,
+                span,
+            } => {
+                let name = name.as_deref()?;
+                // The name's own span reaches the expression lowering recorded for it, so the
+                // answer here is the one the same name gets at any other site of that type. The
+                // declared type is consulted only where analysis recorded nothing.
+                self.inferred_type_hover(uri, offset, *span)
+                    .or_else(|| property_value_hover(tag, property, name, scope))
+            }
+            // A parameter, a record field, a union case, and a payload field are written by the
+            // author but named by no top-level scope; the declaration they are written in is what
+            // the type is read out of — design D2.
+            positions::PositionContext::LocalDeclaration {
+                kind, name, owner, ..
+            } => {
+                let owner_declaration = scope.visible.get(owner)?;
+                let item = scope.item(owner_declaration)?;
+                local_declaration_hover(kind, name, owner, item)
+            }
+            positions::PositionContext::Unresolved => None,
+        }
+    }
+
+    /// A declaration as an author writes it, in a fenced NX block.
+    ///
+    /// <para>The spelling comes from the HIR item rather than from `Declaration::detail`, which is
+    /// the single-line projection completions render next to a label — design D6.</para>
+    fn declaration_hover(
+        &self,
+        scope: &DocumentScope,
+        declaration: &Declaration,
+    ) -> Option<String> {
+        // `Declaration` carries only the name lists completions and symbols need. Spelling a
+        // declaration from those alone loses `abstract`, `extends`, and the `action` keyword,
+        // cannot tell `let <X />` from `component <X />`, and — because `members` is filtered to
+        // payloadless cases — silently drops a union's payload cases and spells a single-case
+        // union as the type alias that spelling actually means. A fragment that wrong is the
+        // fabricated answer the conservative contract rules out, so a declaration whose module
+        // has no lowered item reports nothing instead.
+        let item = scope.item(declaration)?;
+        // Only a declaration with nothing written for its type asks analysis what it is — D5.
+        let inferred = match item {
+            Item::Value(value) if value.ty.is_none() => scope
+                .artifact(declaration)
+                .and_then(|artifact| artifact.type_env.get_expr_type(value.value))
+                .filter(|ty| !is_unresolved_type(ty))
+                .map(|ty| ty.to_string()),
+            _ => None,
+        };
+        let mut content = hover::fenced(hover::item_signature(
+            item,
+            declaration.kind,
+            inferred.as_deref(),
+        ));
+        // What the declaration accepts beyond what it wrote: the chain it extends, and each
+        // inherited property with its type, so the author can see the whole contract at the tag.
+        let inherited = &declaration.properties[declaration.own_properties..];
+        if !inherited.is_empty() {
+            let bases = declaration
+                .inherited_from
+                .iter()
+                .map(|base| format!("`{base}`"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let properties = inherited
+                .iter()
+                .map(|property| format!("{}:{}", property.name, property.display_type))
+                .collect::<Vec<_>>()
+                .join("\n");
+            content.push_str(&format!(
+                "\n\nInherited from {bases}:\n\n{}",
+                hover::fenced(properties)
+            ));
+        }
+        Some(content)
+    }
+
+    /// The member of a member access, with the type the access has.
+    fn member_access_hover(
+        &self,
+        uri: &DocumentUri,
+        offset: usize,
+        span: ByteTextRange,
+        member: &str,
+    ) -> Option<String> {
+        let analysis = self.module_analysis(uri)?;
+        let id = analysis
+            .lowered_module()
+            .innermost_expr_at(span, (offset as u32).into())?;
+        let ty = analysis.type_env().get_expr_type(id)?;
+        if is_unresolved_type(ty) {
+            return None;
+        }
+
+        // `Role.admin` reaches this as a member access, but it names a case rather than a
+        // property of one, and reports what the case's own declaration reports.
+        let expr = analysis.lowered_module().expr(id);
+        if let Some(fragment) = hover::union_case_expression(expr, ty) {
+            return Some(hover::fenced(fragment));
+        }
+
+        // The receiver's type is what declares the member, and naming it is what tells
+        // `user.name` from any other `name`.
+        let qualifier = match expr {
+            nx_hir::ast::Expr::Member { base, .. } => analysis
+                .type_env()
+                .get_expr_type(*base)
+                .filter(|base_ty| !is_unresolved_type(base_ty))
+                .map(|base_ty| base_ty.to_string().trim_end_matches('?').to_string()),
+            _ => None,
+        };
+
+        Some(hover::fenced(hover::property(
+            qualifier.as_deref(),
+            member,
+            &ty.to_string(),
+        )))
+    }
+
+    /// The inferred type of the innermost expression the resolved construct covers.
+    ///
+    /// <para>`LoweredModule::innermost_expr_at` does the locating, because the arena and the spans
+    /// are its own. What is decided here is what to do with the answer: an expression the analysis
+    /// reached but has no type for reports nothing, which is the conservative answer the contract
+    /// permits rather than the fabricated one it rules out.</para>
+    fn inferred_type_hover(
+        &self,
+        uri: &DocumentUri,
+        offset: usize,
+        within: ByteTextRange,
+    ) -> Option<String> {
+        let analysis = self.module_analysis(uri)?;
+        let id = analysis
+            .lowered_module()
+            .innermost_expr_at(within, (offset as u32).into())?;
+
+        let ty = analysis.type_env().get_expr_type(id)?;
+        if is_unresolved_type(ty) {
+            return None;
+        }
+        Some(hover::fenced(hover::expression_fragment(
+            analysis.lowered_module().expr(id),
+            ty,
+        )))
     }
 
     /// Returns conservative completion items for a position in the requested document.
@@ -343,38 +607,49 @@ impl WorkspaceSnapshot {
         uri: &DocumentUri,
         position: TextPosition,
     ) -> Result<CompletionList, SnapshotError> {
-        let document = self
-            .document(uri)
-            .ok_or_else(|| SnapshotError::UnknownDocument(uri.to_string()))?;
-        let index = LineIndex::new(document.source());
-        let offset = index.position_to_byte_offset(document.source(), position);
-        let scope = self.document_scope(document.identity.as_str());
+        let resolved = self.resolve_position(uri, position)?;
+        let scope = &resolved.scope;
 
-        let items = if let Some(members) = property_value_context(document.source(), offset, &scope)
-        {
-            // A bare value resolves against the property's declared type, so only its members are
-            // valid here; lexically visible names cannot appear unbraced.
-            members
-                .into_iter()
-                .map(|member| CompletionItem {
-                    label: member,
-                    kind: CompletionItemKind::Member,
-                    detail: None,
-                })
-                .collect()
-        } else if let Some(context) = component_property_context(document.source(), offset, &scope)
-        {
-            property_completion_items(context)
-        } else if is_type_position(document.source(), offset) {
-            type_completion_items(&scope)
-        } else {
-            general_completion_items(&scope)
+        // A context the resolver classified but the scope cannot fill in — an unknown element, a
+        // property with no union type — offers no contextual completions, and falls back to the
+        // general set exactly as an unrecognized position does.
+        let items = match &resolved.context {
+            positions::PositionContext::PropertyValue { tag, property, .. } => {
+                // A bare value resolves against the property's declared type, so only its members
+                // are valid here; lexically visible names cannot appear unbraced.
+                match property_value_members(tag, property, scope) {
+                    Some(members) => members
+                        .into_iter()
+                        .map(|member| CompletionItem {
+                            label: member,
+                            kind: CompletionItemKind::Member,
+                            detail: None,
+                        })
+                        .collect(),
+                    None => general_completion_items(scope),
+                }
+            }
+            positions::PositionContext::PropertyName { tag, supplied, .. } => {
+                match scope
+                    .visible
+                    .get(tag)
+                    .filter(|declaration| declaration.kind == DocumentSymbolKind::Component)
+                {
+                    Some(declaration) => property_completion_items(PropertyCompletionContext {
+                        properties: declaration.properties.clone(),
+                        supplied: supplied.clone(),
+                    }),
+                    None => general_completion_items(scope),
+                }
+            }
+            positions::PositionContext::TypeAnnotation { .. } => type_completion_items(scope),
+            _ => general_completion_items(scope),
         };
 
         Ok(CompletionList {
-            uri: document.uri.clone(),
-            identity: document.identity.clone(),
-            version: document.version,
+            uri: resolved.document.uri.clone(),
+            identity: resolved.document.identity.clone(),
+            version: resolved.document.version,
             items,
         })
     }
@@ -507,6 +782,21 @@ impl WorkspaceSnapshot {
         DocumentScope { visible, workspace }
     }
 
+    /// The analysis of one document, as the position resolver reads it.
+    ///
+    /// <para>Returns `None` for a document the snapshot does not hold, and for one whose analysis
+    /// produced no lowered module — a document that failed to parse has no arena to resolve a
+    /// position against.</para>
+    fn module_analysis(&self, uri: &DocumentUri) -> Option<ModuleAnalysis> {
+        let identity = self.document(uri)?.identity.as_str().to_string();
+        let workspace = self.workspace_declarations();
+        workspace.artifact(&identity)?.lowered_module.as_ref()?;
+        Some(ModuleAnalysis {
+            workspace,
+            identity,
+        })
+    }
+
     /// Analyzes the workspace once and keeps the result for the snapshot's lifetime.
     fn workspace_declarations(&self) -> Arc<WorkspaceDeclarations> {
         Arc::clone(
@@ -519,65 +809,39 @@ impl WorkspaceSnapshot {
         let Ok(workspace) = self.to_workspace() else {
             return WorkspaceDeclarations::default();
         };
-        let modules = analyze_workspace_modules(&workspace, &ProgramBuildContext::empty());
+        let modules = analyze_workspace_modules(&workspace, &self.build_context);
 
         let mut declarations = WorkspaceDeclarations::default();
-        for module in &modules {
-            declarations.visible_bindings.insert(
-                module.file_name.clone(),
-                module
-                    .prepared_bindings
-                    .iter()
-                    .map(|binding| {
-                        (
-                            binding.visible_name.as_str().to_string(),
-                            (
-                                binding.module_identity(&module.file_name).to_string(),
-                                binding.definition_id(),
-                            ),
-                        )
-                    })
-                    .collect(),
-            );
-
-            declarations.type_namespaces.insert(
-                module.file_name.clone(),
-                module
-                    .prepared_bindings
-                    .iter()
-                    .filter(|binding| binding.namespace == PreparedNamespace::Type)
-                    .map(|binding| {
-                        (
-                            binding.visible_name.as_str().to_string(),
-                            (
-                                binding.module_identity(&module.file_name).to_string(),
-                                binding.definition_id(),
-                            ),
-                        )
-                    })
-                    .collect(),
-            );
-
-            let Some(lowered) = module.lowered_module.as_ref() else {
-                continue;
-            };
+        for module in modules {
+            let identity = module.file_name.clone();
             let source = self
                 .documents
                 .iter()
-                .find(|document| document.identity.as_str() == module.file_name)
-                .map(|document| document.source())
-                .unwrap_or("");
-            for (item_index, item) in lowered.items().iter().enumerate() {
-                let origin = (
-                    module.file_name.clone(),
-                    LocalDefinitionId::new(item_index as u32),
-                );
-                declarations
-                    .by_origin
-                    .insert(origin.clone(), declaration_from_item(item, source, origin));
+                .find(|document| document.identity.as_str() == identity)
+                .map(|document| document.source.clone())
+                .unwrap_or_else(|| Arc::from(""));
+            declarations.index_module(module, &source);
+        }
+
+        // A workspace module's import of a library binds names whose origin is a module of that
+        // library, and the analysis above returns only the workspace's own modules. The
+        // declarations those origins point at are read from the library snapshots the context
+        // holds, so a library name resolves the way a peer module's name does.
+        for library in self.build_context.visible_libraries() {
+            for module in &library.modules {
+                if declarations.artifacts.contains_key(&module.file_name) {
+                    continue;
+                }
+                let source = library
+                    .sources
+                    .get(&module.file_name)
+                    .cloned()
+                    .unwrap_or_else(|| Arc::from(""));
+                declarations.index_module(module.clone(), &source);
             }
         }
 
+        declarations.flatten_inheritance();
         declarations
     }
 }
@@ -608,6 +872,7 @@ fn workspace_diagnostic(diagnostic: &NxDiagnostic) -> WorkspaceDiagnostic {
 
 /// Diagnostics report for editor integrations.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DiagnosticReport {
     /// Diagnostics that can be published against submitted documents.
     pub documents: Vec<DocumentDiagnostics>,
@@ -618,6 +883,7 @@ pub struct DiagnosticReport {
 
 /// Diagnostic list for one document and version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DocumentDiagnostics {
     /// Client URI.
     pub uri: DocumentUri,
@@ -631,6 +897,7 @@ pub struct DocumentDiagnostics {
 
 /// Diagnostic that is not tied to a submitted document URI.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceDiagnostic {
     /// Severity.
     pub severity: DiagnosticSeverity,
@@ -645,6 +912,7 @@ pub struct WorkspaceDiagnostic {
 
 /// Original label metadata for a workspace diagnostic.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceDiagnosticLabel {
     /// Original NX identity or file name from the diagnostic label.
     pub identity: String,
@@ -678,6 +946,7 @@ impl From<NxSeverity> for DiagnosticSeverity {
 
 /// One diagnostic projected for editor clients.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EditorDiagnostic {
     /// Primary range.
     pub range: EditorRange,
@@ -693,6 +962,7 @@ pub struct EditorDiagnostic {
 
 /// Secondary diagnostic location.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RelatedLocation {
     /// Client URI for the related location.
     pub uri: DocumentUri,
@@ -725,23 +995,9 @@ pub enum DocumentSymbolKind {
     Element,
 }
 
-impl DocumentSymbolKind {
-    fn display_name(self) -> &'static str {
-        match self {
-            Self::Function => "function",
-            Self::Value => "value",
-            Self::TypeAlias => "type",
-            Self::Record => "record",
-            Self::Action => "action",
-            Self::Union => "union",
-            Self::Component => "component",
-            Self::Element => "element",
-        }
-    }
-}
-
 /// Top-level document symbol.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DocumentSymbol {
     /// Symbol name.
     pub name: String,
@@ -755,6 +1011,7 @@ pub struct DocumentSymbol {
 
 /// Hover result.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Hover {
     /// Client URI.
     pub uri: DocumentUri,
@@ -770,6 +1027,7 @@ pub struct Hover {
 
 /// Completion response for one document and version.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CompletionList {
     /// Client URI.
     pub uri: DocumentUri,
@@ -800,6 +1058,7 @@ pub enum CompletionItemKind {
 
 /// Completion candidate.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CompletionItem {
     /// Insert/display label.
     pub label: String,
@@ -871,12 +1130,15 @@ struct Declaration {
     name: String,
     kind: DocumentSymbolKind,
     detail: String,
-    properties: Vec<String>,
-    /// Property name paired with the base name of its declared type, for contextual completions.
-    ///
-    /// The name is the one the *declaring* module wrote, so it is resolved in that module's
-    /// namespace rather than in the namespace of whoever is looking at it.
-    property_types: Vec<(String, String)>,
+    /// The properties this declaration accepts: its own first, as its declaring module wrote
+    /// them, then those it inherits through `extends`, nearest base first.
+    properties: Vec<PropertyDeclaration>,
+    /// How many of `properties` the declaration wrote itself; the rest are inherited.
+    own_properties: usize,
+    /// The base this declaration extends, as its declaring module wrote the name.
+    base: Option<String>,
+    /// The bases the inherited properties come from, nearest first.
+    inherited_from: Vec<String>,
     /// Union case names, for contextual completions at a value position.
     members: Vec<String>,
     /// The declaration this came from, as `(module identity, definition id)`.
@@ -884,6 +1146,134 @@ struct Declaration {
 }
 
 type DeclarationOrigin = (String, LocalDefinitionId);
+
+/// One property of a component, record, or markup function.
+///
+/// <para>The two spellings of the type are both needed and neither derives from the other here.
+/// `base_type` is what a namespace lookup takes — the declaring module's name for the type, with
+/// nullability and arity stripped, so `Fit`, `Fit?`, and `Fit[]` all reach the `Fit` declaration.
+/// `display_type` is what a reader is shown, where that stripping would be a lie.</para>
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PropertyDeclaration {
+    /// The name the property is supplied under.
+    name: String,
+    /// The base name of the declared type, resolved in the declaring module's namespace.
+    base_type: String,
+    /// The declared type as it is written.
+    display_type: String,
+    /// The module that declared the property, whose namespace `base_type` is resolved in. For an
+    /// inherited property that is the base's module, not the module of the declaration it was
+    /// reached through.
+    declaring_module: String,
+}
+
+/// Hover content for a type the language declares rather than the workspace.
+///
+/// <para>A primitive has no declaration to report, but the editor still knows what it is, and the
+/// same word is what type completions offer at this position. Anything else is a name the document
+/// cannot resolve, which reports nothing.</para>
+fn builtin_type_hover(name: &str) -> Option<String> {
+    if PRIMITIVE_TYPE_COMPLETIONS.contains(&name) {
+        return Some(hover::fenced(hover::builtin_type("primitive type", name)));
+    }
+    BUILTIN_TYPE_COMPLETIONS
+        .contains(&name)
+        .then(|| hover::fenced(hover::builtin_type("built-in type", name)))
+}
+
+/// Hover content for a declaration written inside another one.
+///
+/// <para>Which list of the owning item to read is what the kind decides; the type is then the one
+/// the author wrote there — design D5.</para>
+fn local_declaration_hover(
+    kind: &positions::LocalDeclarationKind,
+    name: &str,
+    owner: &str,
+    item: &Item,
+) -> Option<String> {
+    let rendered = match (kind, item) {
+        (positions::LocalDeclarationKind::Parameter, Item::Function(function)) => {
+            let param = function
+                .params
+                .iter()
+                .find(|param| param.name.as_str() == name)?;
+            hover::parameter(name, &type_ref_display(&param.ty))
+        }
+        // A component declares properties rather than parameters, and is written at the same
+        // position an element-style function's are.
+        (positions::LocalDeclarationKind::Parameter, Item::Component(component)) => {
+            let property = component
+                .props
+                .iter()
+                .find(|property| property.name.as_str() == name)?;
+            hover::property(Some(owner), name, &type_ref_display(&property.ty))
+        }
+        (positions::LocalDeclarationKind::RecordField, Item::Record(record)) => {
+            let field = record
+                .properties
+                .iter()
+                .find(|field| field.name.as_str() == name)?;
+            hover::property(Some(owner), name, &type_ref_display(&field.ty))
+        }
+        (positions::LocalDeclarationKind::UnionCase, Item::Union(union_def)) => {
+            union_def
+                .cases
+                .iter()
+                .find(|case| case.name.as_str() == name)?;
+            hover::union_case(owner, name)
+        }
+        (positions::LocalDeclarationKind::UnionPayloadField { case }, Item::Union(union_def)) => {
+            let field = union_def
+                .cases
+                .iter()
+                .find(|declared| declared.name.as_str() == case)?
+                .fields
+                .iter()
+                .find(|field| field.name.as_str() == name)?;
+            hover::property(
+                Some(&format!("{}.{}", owner, case)),
+                name,
+                &type_ref_display(&field.ty),
+            )
+        }
+        _ => return None,
+    };
+    Some(hover::fenced(rendered))
+}
+
+/// Hover content for a bare name in a value slot that analysis recorded no type for.
+///
+/// <para>A bare value resolves against the property's declared type and nothing else, so the
+/// resolution completions offer is what answers when the type environment cannot — the same
+/// declaration, reached the same way, rather than a second guess at what the name means.</para>
+fn property_value_hover(
+    tag: &str,
+    property_name: &str,
+    name: &str,
+    scope: &DocumentScope,
+) -> Option<String> {
+    let union = property_value_union(tag, property_name, scope)?;
+    if !union.members.iter().any(|member| member == name) {
+        return None;
+    }
+    // The same fragment the type environment produces for this position, so the fallback firing
+    // is not observable as a different answer.
+    Some(hover::fenced(hover::union_case(&union.name, name)))
+}
+
+/// A position query resolved to the construct the cursor is on, shared by hover and completions.
+struct ResolvedPosition<'a> {
+    /// The document the position is in.
+    document: &'a DocumentSnapshot,
+    /// Line and character offsets for that document's source.
+    index: LineIndex<'a>,
+    /// The queried position as a byte offset into the source.
+    offset: usize,
+    /// What the cursor is on.
+    context: positions::PositionContext,
+    /// Everything the document can name.
+    scope: DocumentScope,
+}
 
 /// Everything one document can see, resolved through its own import graph.
 ///
@@ -909,6 +1299,185 @@ struct WorkspaceDeclarations {
     type_namespaces: FxHashMap<String, FxHashMap<String, DeclarationOrigin>>,
     /// Every visible binding of each module, as `module identity → (visible name, origin)`.
     visible_bindings: FxHashMap<String, Vec<(String, DeclarationOrigin)>>,
+    /// The analysis artifact of each module, keyed by module identity.
+    ///
+    /// <para>The names and kinds above are derived from these and were all that survived. A
+    /// position query needs the rest — the expression arena the spans live in and the type
+    /// environment the inferred types live in — so the artifacts are kept rather than consumed and
+    /// dropped. They are computed once per snapshot under the same `OnceLock`, so this changes
+    /// what the snapshot holds, not how often analysis runs.</para>
+    artifacts: FxHashMap<String, ModuleArtifact>,
+}
+
+impl WorkspaceDeclarations {
+    /// The analysis artifact for one module identity.
+    fn artifact(&self, identity: &str) -> Option<&ModuleArtifact> {
+        self.artifacts.get(identity)
+    }
+
+    /// Gives every declaration that extends a base the base's properties as well as its own.
+    ///
+    /// <para>A tag written against `<SkiaLabel extends SkiaLabelBase />` accepts everything the
+    /// chain declares, and the compiler checks it that way; hover and completion have to know the
+    /// same set or they describe a component the author cannot actually write. The base is a name
+    /// the declaring module wrote, so it is resolved in that module, and each inherited property
+    /// keeps the module that declared it so its type resolves there too.</para>
+    fn flatten_inheritance(&mut self) {
+        let extending = self
+            .by_origin
+            .iter()
+            .filter(|(_, declaration)| declaration.base.is_some())
+            .map(|(origin, _)| origin.clone())
+            .collect::<Vec<_>>();
+        let mut flattened = FxHashMap::default();
+        for origin in &extending {
+            self.flattened_properties(origin, &mut flattened, &mut Vec::new());
+        }
+        for (origin, (properties, inherited_from)) in flattened {
+            if let Some(declaration) = self.by_origin.get_mut(&origin) {
+                declaration.properties = properties;
+                declaration.inherited_from = inherited_from;
+            }
+        }
+    }
+
+    /// The full property list of the declaration at `origin`, and the bases it was read from.
+    fn flattened_properties(
+        &self,
+        origin: &DeclarationOrigin,
+        flattened: &mut FxHashMap<DeclarationOrigin, (Vec<PropertyDeclaration>, Vec<String>)>,
+        chain: &mut Vec<DeclarationOrigin>,
+    ) -> (Vec<PropertyDeclaration>, Vec<String>) {
+        if let Some(known) = flattened.get(origin) {
+            return known.clone();
+        }
+        let Some(declaration) = self.by_origin.get(origin) else {
+            return (Vec::new(), Vec::new());
+        };
+        let own = declaration.properties[..declaration.own_properties].to_vec();
+        // A cycle is a declaration error the compiler reports; here it just ends the chain.
+        let base = match (&declaration.base, chain.contains(origin)) {
+            (Some(base), false) => base,
+            _ => return (own, Vec::new()),
+        };
+        let Some(base_origin) = self.base_origin(origin, base, declaration.kind) else {
+            return (own, Vec::new());
+        };
+
+        chain.push(origin.clone());
+        let (base_properties, base_ancestors) =
+            self.flattened_properties(&base_origin, flattened, chain);
+        chain.pop();
+
+        let mut properties = own;
+        for property in base_properties {
+            if !properties.iter().any(|existing| existing.name == property.name) {
+                properties.push(property);
+            }
+        }
+        let mut inherited_from = vec![base.clone()];
+        inherited_from.extend(base_ancestors);
+        flattened.insert(origin.clone(), (properties.clone(), inherited_from.clone()));
+        (properties, inherited_from)
+    }
+
+    /// The declaration the base name written by the declaration at `origin` denotes: the same kind
+    /// of declaration, reached through the declaring module's own bindings.
+    fn base_origin(
+        &self,
+        origin: &DeclarationOrigin,
+        base: &str,
+        kind: DocumentSymbolKind,
+    ) -> Option<DeclarationOrigin> {
+        self.visible_bindings
+            .get(&origin.0)?
+            .iter()
+            .filter(|(name, _)| name == base)
+            .map(|(_, target)| target)
+            .find(|target| {
+                self.by_origin
+                    .get(*target)
+                    .is_some_and(|declaration| declaration.kind == kind)
+            })
+            .cloned()
+    }
+
+    /// Records one analyzed module: what it can see, its type namespace, its artifact, and a
+    /// `Declaration` for each of its items, read from `source`.
+    fn index_module(&mut self, module: ModuleArtifact, source: &str) {
+        let identity = module.file_name.clone();
+        let origin_of = |binding: &PreparedBinding| {
+            (
+                binding.module_identity(&identity).to_string(),
+                binding.definition_id(),
+            )
+        };
+
+        self.visible_bindings.insert(
+            identity.clone(),
+            module
+                .prepared_bindings
+                .iter()
+                .map(|binding| (binding.visible_name.as_str().to_string(), origin_of(binding)))
+                .collect(),
+        );
+
+        self.type_namespaces.insert(
+            identity.clone(),
+            module
+                .prepared_bindings
+                .iter()
+                .filter(|binding| binding.namespace == PreparedNamespace::Type)
+                .map(|binding| (binding.visible_name.as_str().to_string(), origin_of(binding)))
+                .collect(),
+        );
+
+        // The artifact is moved in rather than copied, once, whether or not the module lowered.
+        // The lowered module is behind an `Arc`, so keeping a handle to it across the move costs
+        // a refcount.
+        let lowered = module.lowered_module.clone();
+        self.artifacts.insert(identity.clone(), module);
+
+        let Some(lowered) = lowered else {
+            return;
+        };
+        for (item_index, item) in lowered.items().iter().enumerate() {
+            let origin = (identity.clone(), LocalDefinitionId::new(item_index as u32));
+            self.by_origin
+                .insert(origin.clone(), declaration_from_item(item, source, origin));
+        }
+    }
+}
+
+/// One document's analysis, held open for the length of a position request.
+///
+/// <para>The artifacts live behind the snapshot's `OnceLock`, which hands out an `Arc` rather than
+/// a borrow, so a resolver that wants to read them has to hold that `Arc` while it does. This is
+/// the handle that holds it.</para>
+struct ModuleAnalysis {
+    workspace: Arc<WorkspaceDeclarations>,
+    identity: String,
+}
+
+impl ModuleAnalysis {
+    /// The lowered module every expression span is measured against.
+    fn lowered_module(&self) -> &LoweredModule {
+        self.artifact()
+            .lowered_module
+            .as_deref()
+            .expect("module analysis is only constructed for a module that lowered")
+    }
+
+    /// The inferred type of every expression the checker reached.
+    fn type_env(&self) -> &TypeEnvironment {
+        &self.artifact().type_env
+    }
+
+    fn artifact(&self) -> &ModuleArtifact {
+        self.workspace
+            .artifact(&self.identity)
+            .expect("module analysis is only constructed for a retained artifact")
+    }
 }
 
 impl DocumentScope {
@@ -922,9 +1491,32 @@ impl DocumentScope {
         })
     }
 
+    /// The analysis artifact of the module a declaration was declared in.
+    fn artifact(&self, declaration: &Declaration) -> Option<&ModuleArtifact> {
+        self.workspace.artifact(&declaration.origin.0)
+    }
+
+    /// The HIR item a visible declaration was lowered from — design D2.
+    ///
+    /// <para>`Declaration` is the projection completions and document symbols need, and grew the
+    /// lists those two surfaces read one name at a time. Everything else about a declaration is
+    /// still in the item it came from, and `origin` addresses that item directly, so hover reads
+    /// the declaration as written rather than through a second projection of it.</para>
+    fn item(&self, declaration: &Declaration) -> Option<&Item> {
+        self.artifact(declaration)?
+            .lowered_module
+            .as_deref()?
+            .item_by_definition(declaration.origin.1)
+    }
+
     /// The declaration a type name written by the module at `origin` denotes.
     fn type_in_module(&self, origin: &DeclarationOrigin, name: &str) -> Option<&Declaration> {
-        let target = self.workspace.type_namespaces.get(&origin.0)?.get(name)?;
+        self.type_declared_in(&origin.0, name)
+    }
+
+    /// The declaration a type name written by the module with identity `module` denotes.
+    fn type_declared_in(&self, module: &str, name: &str) -> Option<&Declaration> {
+        let target = self.workspace.type_namespaces.get(module)?.get(name)?;
         self.workspace.by_origin.get(target)
     }
 
@@ -1148,6 +1740,30 @@ fn hir_document_symbols(document: &DocumentSnapshot) -> Vec<DocumentSymbol> {
         .collect()
 }
 
+/// True where a type still carries something inference has not resolved.
+///
+/// <para>`?` and `<error>` are the two the checker spells as failures, but not the only two it
+/// produces where it has nothing. An unsolved variable renders as `T0` and a bare
+/// `ContextualName` renders as the name itself, which reads as a type of that name; `null` infers
+/// as `T0?`, so the unresolved part need not be at the top of the type. Rendering any of them
+/// would be the fabricated hover the conservative contract rules out.</para>
+fn is_unresolved_type(ty: &nx_types::Type) -> bool {
+    match ty {
+        nx_types::Type::Unknown
+        | nx_types::Type::Error
+        | nx_types::Type::Variable(_)
+        | nx_types::Type::ContextualName(_) => true,
+        nx_types::Type::Array(inner) | nx_types::Type::Nullable(inner) => is_unresolved_type(inner),
+        nx_types::Type::Function { params, ret } => {
+            params.iter().any(is_unresolved_type) || is_unresolved_type(ret)
+        }
+        nx_types::Type::Primitive(_)
+        | nx_types::Type::Named(_)
+        | nx_types::Type::Union(_)
+        | nx_types::Type::UnionCase(_) => false,
+    }
+}
+
 fn item_span(item: &Item) -> ByteTextRange {
     match item {
         Item::Function(function) => function.span,
@@ -1313,7 +1929,13 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
                     DocumentSymbolKind::Function
                 },
                 detail: if is_markup_function {
-                    format!("component <{} />", function.name.as_str())
+                    markup_signature(
+                        function.name.as_str(),
+                        function
+                            .params
+                            .iter()
+                            .map(|param| (param.name.as_str(), &param.ty)),
+                    )
                 } else {
                     format!("function {}", function_signature(function))
                 },
@@ -1321,20 +1943,18 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
                     function
                         .params
                         .iter()
-                        .map(|param| param.name.as_str().to_string())
+                        .map(|param| property_declaration(param.name.as_str(), &param.ty, &origin.0))
                         .collect()
                 } else {
                     Vec::new()
                 },
-                property_types: if is_markup_function {
-                    function
-                        .params
-                        .iter()
-                        .map(|param| (param.name.as_str().to_string(), base_type_name(&param.ty)))
-                        .collect()
+                own_properties: if is_markup_function {
+                    function.params.len()
                 } else {
-                    Vec::new()
+                    0
                 },
+                base: None,
+                inherited_from: Vec::new(),
                 members: Vec::new(),
                 origin: origin.clone(),
             }
@@ -1348,29 +1968,30 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
                 .map(|ty| format!("value: {}", type_ref_display(ty)))
                 .unwrap_or_else(|| "value".to_string()),
             properties: Vec::new(),
-            property_types: Vec::new(),
+            own_properties: 0,
+            base: None,
+            inherited_from: Vec::new(),
             members: Vec::new(),
             origin: origin.clone(),
         },
         Item::Component(component) => Declaration {
             name: component.name.as_str().to_string(),
             kind: DocumentSymbolKind::Component,
-            detail: format!("component <{} />", component.name.as_str()),
+            detail: markup_signature(
+                component.name.as_str(),
+                component
+                    .props
+                    .iter()
+                    .map(|property| (property.name.as_str(), &property.ty)),
+            ),
             properties: component
                 .props
                 .iter()
-                .map(|property| property.name.as_str().to_string())
+                .map(|property| property_declaration(property.name.as_str(), &property.ty, &origin.0))
                 .collect(),
-            property_types: component
-                .props
-                .iter()
-                .map(|property| {
-                    (
-                        property.name.as_str().to_string(),
-                        base_type_name(&property.ty),
-                    )
-                })
-                .collect(),
+            own_properties: component.props.len(),
+            base: component.base.as_ref().map(|base| base.as_str().to_string()),
+            inherited_from: Vec::new(),
             members: Vec::new(),
             origin: origin.clone(),
         },
@@ -1379,7 +2000,9 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
             kind: DocumentSymbolKind::TypeAlias,
             detail: format!("type = {}", type_ref_display(&alias.ty)),
             properties: Vec::new(),
-            property_types: Vec::new(),
+            own_properties: 0,
+            base: None,
+            inherited_from: Vec::new(),
             members: Vec::new(),
             origin: origin.clone(),
         },
@@ -1390,7 +2013,9 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
             // Only payloadless cases have a bare spelling; a payload case needs element-style
             // construction and must not be offered here.
             properties: Vec::new(),
-            property_types: Vec::new(),
+            own_properties: 0,
+            base: None,
+            inherited_from: Vec::new(),
             members: union_def
                 .cases
                 .iter()
@@ -1414,21 +2039,23 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
             properties: record
                 .properties
                 .iter()
-                .map(|property| property.name.as_str().to_string())
+                .map(|property| property_declaration(property.name.as_str(), &property.ty, &origin.0))
                 .collect(),
-            property_types: record
-                .properties
-                .iter()
-                .map(|property| {
-                    (
-                        property.name.as_str().to_string(),
-                        base_type_name(&property.ty),
-                    )
-                })
-                .collect(),
+            own_properties: record.properties.len(),
+            base: record.base.as_ref().map(|base| base.as_str().to_string()),
+            inherited_from: Vec::new(),
             members: Vec::new(),
             origin: origin.clone(),
         },
+    }
+}
+
+fn property_declaration(name: &str, ty: &TypeRef, declaring_module: &str) -> PropertyDeclaration {
+    PropertyDeclaration {
+        name: name.to_string(),
+        base_type: base_type_name(ty),
+        display_type: type_ref_display(ty),
+        declaring_module: declaring_module.to_string(),
     }
 }
 
@@ -1436,6 +2063,24 @@ fn source_text_for_range(source: &str, range: ByteTextRange) -> &str {
     let start: usize = range.start().into();
     let end: usize = range.end().into();
     source.get(start..end).unwrap_or_default()
+}
+
+/// A component's signature as it is written: the tag with its properties and their types.
+///
+/// <para>`component <Panel />` says only that a component exists. What the reader wants at a tag
+/// is what the tag accepts, which is the same list completions offer one name at a time.</para>
+fn markup_signature<'a>(
+    name: &str,
+    properties: impl Iterator<Item = (&'a str, &'a TypeRef)>,
+) -> String {
+    let properties = properties
+        .map(|(property, ty)| format!("{}:{}", property, type_ref_display(ty)))
+        .collect::<Vec<_>>()
+        .join(" ");
+    if properties.is_empty() {
+        return format!("component <{} />", name);
+    }
+    format!("component <{} {} />", name, properties)
 }
 
 fn function_signature(function: &nx_hir::Function) -> String {
@@ -1484,150 +2129,47 @@ fn type_ref_display(ty: &TypeRef) -> String {
     }
 }
 
-/// Detects a property *value* position — immediately after `prop=` inside an opening tag — and
-/// returns the members a bare name could resolve to there.
+/// The members a bare name could resolve to in one property's value slot.
 ///
-/// Returns `None` when the element or property is unknown, or when the property's declared type is
-/// not a union, because a bare name is not accepted at those sites either.
-fn property_value_context(
-    source: &str,
-    offset: usize,
+/// <para>Returns `None` when the element or property is unknown, or when the property's declared
+/// type is not a union, because a bare name is not accepted at those sites either.</para>
+fn property_value_members(
+    tag: &str,
+    property_name: &str,
     scope: &DocumentScope,
 ) -> Option<Vec<String>> {
-    let prefix = source.get(..offset)?;
-    let line_start = prefix.rfind('\n').map(|idx| idx + 1).unwrap_or(0);
-    let line_prefix = &prefix[line_start..];
-    let tag_start = line_prefix.rfind('<')?;
-    if line_prefix[tag_start..].starts_with("</") || line_prefix[tag_start..].starts_with("<:") {
-        return None;
-    }
-    if line_prefix[tag_start..].contains('>') {
-        return None;
-    }
+    let union = property_value_union(tag, property_name, scope)?;
+    (!union.members.is_empty()).then(|| union.members.clone())
+}
 
-    // The cursor must sit in the value of `name=`, with nothing typed yet or a partial bare word.
-    let mut cursor = line_prefix.len();
-    let bytes = line_prefix.as_bytes();
-    while cursor > 0 && is_identifier_continue(bytes[cursor - 1] as char) {
-        cursor -= 1;
-    }
-    if cursor == 0 || bytes[cursor - 1] != b'=' {
-        return None;
-    }
-    // A quoted or braced value is not a contextual-name position.
-    let name_end = cursor - 1;
-    let mut name_start = name_end;
-    while name_start > 0 && is_identifier_continue(bytes[name_start - 1] as char) {
-        name_start -= 1;
-    }
-    if name_start == name_end {
-        return None;
-    }
-    let property_name = &line_prefix[name_start..name_end];
+/// The union a bare name written in one property's value slot resolves against.
+///
+/// <para>Completions and hover ask the same question here and must not answer it two ways, so they
+/// ask it once — design D4. Returns `None` where the element or property is unknown, or where the
+/// property's declared type is not a union, because a bare name is not accepted at those sites
+/// either.</para>
+fn property_value_union<'a>(
+    tag: &str,
+    property_name: &str,
+    scope: &'a DocumentScope,
+) -> Option<&'a Declaration> {
+    let element = scope.element(tag)?;
 
-    let after_lt = &line_prefix[tag_start + 1..];
-    let tag_name = after_lt
-        .chars()
-        .take_while(|ch| ch.is_alphanumeric() || matches!(ch, '_' | '-' | '.'))
-        .collect::<String>();
-    if tag_name.is_empty() {
-        return None;
-    }
-
-    let element = scope.element(&tag_name)?;
-
-    let type_name = element
-        .property_types
+    let property = element
+        .properties
         .iter()
-        .find(|(name, _)| name == property_name)
-        .map(|(_, type_name)| type_name.clone())?;
+        .find(|property| property.name == property_name)?;
 
     // The property's type was written in the declaring module's namespace, so it is resolved
-    // there. Looking it up by name among everything in the workspace is what let an unrelated
-    // same-named declaration supply the members.
-    let target = scope.type_in_module(&element.origin, &type_name)?;
-    if !matches!(target.kind, DocumentSymbolKind::Union) || target.members.is_empty() {
-        return None;
-    }
-    Some(target.members.clone())
-}
-
-fn component_property_context(
-    source: &str,
-    offset: usize,
-    scope: &DocumentScope,
-) -> Option<PropertyCompletionContext> {
-    let prefix = source.get(..offset)?;
-    let line_start = prefix.rfind('\n').map(|idx| idx + 1).unwrap_or(0);
-    let line_prefix = &prefix[line_start..];
-    let tag_start = line_prefix.rfind('<')?;
-    if line_prefix[tag_start..].starts_with("</") || line_prefix[tag_start..].starts_with("<:") {
-        return None;
-    }
-    if line_prefix[tag_start..].contains('>') {
-        return None;
-    }
-
-    let after_lt = &line_prefix[tag_start + 1..];
-    let tag_name = after_lt
-        .chars()
-        .take_while(|ch| ch.is_alphanumeric() || matches!(ch, '_' | '-' | '.'))
-        .collect::<String>();
-    if tag_name.is_empty() {
-        return None;
-    }
-
-    let declaration = scope
-        .visible
-        .get(&tag_name)
-        .filter(|declaration| declaration.kind == DocumentSymbolKind::Component)?;
-    let supplied = supplied_properties(after_lt.get(tag_name.len()..).unwrap_or_default());
-
-    Some(PropertyCompletionContext {
-        properties: declaration.properties.clone(),
-        supplied,
-    })
-}
-
-fn supplied_properties(text: &str) -> FxHashSet<String> {
-    let mut out = FxHashSet::default();
-    let bytes = text.as_bytes();
-    let mut index = 0usize;
-    while index < bytes.len() {
-        while index < bytes.len() && !is_identifier_start(bytes[index] as char) {
-            index += 1;
-        }
-        let start = index;
-        while index < bytes.len() && is_identifier_continue(bytes[index] as char) {
-            index += 1;
-        }
-        if start == index {
-            continue;
-        }
-
-        let name = &text[start..index];
-        let mut lookahead = index;
-        while lookahead < bytes.len() && (bytes[lookahead] as char).is_whitespace() {
-            lookahead += 1;
-        }
-        if lookahead < bytes.len() && bytes[lookahead] as char == '=' {
-            out.insert(name.to_string());
-        }
-    }
-    out
-}
-
-fn is_identifier_start(ch: char) -> bool {
-    ch == '_' || ch.is_ascii_alphabetic()
-}
-
-fn is_identifier_continue(ch: char) -> bool {
-    ch == '_' || ch == '-' || ch.is_ascii_alphanumeric()
+    // there — the base's module for an inherited property. Looking it up by name among everything
+    // in the workspace is what let an unrelated same-named declaration supply the members.
+    let target = scope.type_declared_in(&property.declaring_module, &property.base_type)?;
+    matches!(target.kind, DocumentSymbolKind::Union).then_some(target)
 }
 
 #[derive(Debug, Clone)]
 struct PropertyCompletionContext {
-    properties: Vec<String>,
+    properties: Vec<PropertyDeclaration>,
     supplied: FxHashSet<String>,
 }
 
@@ -1635,23 +2177,15 @@ fn property_completion_items(context: PropertyCompletionContext) -> Vec<Completi
     context
         .properties
         .into_iter()
-        .filter(|property| !context.supplied.contains(property))
+        .filter(|property| !context.supplied.contains(&property.name))
         .map(|property| CompletionItem {
-            label: property,
+            // The detail is the property's declared type, which is what hover reports at the same
+            // position. One fact, spelled once, so the two cannot drift apart.
+            detail: Some(property.display_type),
+            label: property.name,
             kind: CompletionItemKind::Property,
-            detail: Some("component property".to_string()),
         })
         .collect()
-}
-
-fn is_type_position(source: &str, offset: usize) -> bool {
-    let prefix = source.get(..offset).unwrap_or(source);
-    let line_start = prefix.rfind('\n').map(|idx| idx + 1).unwrap_or(0);
-    let line_prefix = &prefix[line_start..];
-    let colon = line_prefix.rfind(':');
-    let equals = line_prefix.rfind('=');
-    matches!((colon, equals), (Some(colon), None) if colon < line_prefix.len())
-        || matches!((colon, equals), (Some(colon), Some(equals)) if colon > equals)
 }
 
 fn type_completion_items(scope: &DocumentScope) -> Vec<CompletionItem> {
@@ -1730,12 +2264,20 @@ fn dedupe_completions(items: Vec<CompletionItem>) -> Vec<CompletionItem> {
         .collect()
 }
 
-struct LineIndex {
+/// Converts between editor positions and byte offsets in one document.
+///
+/// <para>Editors count a position's `character` in UTF-16 code units from the line start — the
+/// LSP default encoding, and the only one Monaco and VS Code's own buffers know — while every
+/// span the analysis produces is in UTF-8 bytes. This is the one place the two meet, in both
+/// directions, so a character earlier on the line that is two units and four bytes moves every
+/// later position by the right amount on each side.</para>
+struct LineIndex<'a> {
+    text: &'a str,
     line_starts: Vec<usize>,
 }
 
-impl LineIndex {
-    fn new(text: &str) -> Self {
+impl<'a> LineIndex<'a> {
+    fn new(text: &'a str) -> Self {
         let mut line_starts = vec![0usize];
         for (index, ch) in text.char_indices() {
             if ch == '\n' {
@@ -1743,7 +2285,7 @@ impl LineIndex {
             }
         }
 
-        Self { line_starts }
+        Self { text, line_starts }
     }
 
     fn range_from_bytes(&self, range: ByteTextRange) -> EditorRange {
@@ -1757,35 +2299,56 @@ impl LineIndex {
         }
     }
 
-    fn position_to_byte_offset(&self, text: &str, position: TextPosition) -> usize {
-        let line_start = self
+    /// The byte range of one line's content, without its line terminator.
+    ///
+    /// A line past the end of the document is empty at the end of the text.
+    fn line_content_bounds(&self, line: usize) -> (usize, usize) {
+        let Some(line_start) = self.line_starts.get(line).copied() else {
+            return (self.text.len(), self.text.len());
+        };
+        let next_start = self
             .line_starts
-            .get(position.line as usize)
+            .get(line + 1)
             .copied()
-            .unwrap_or_else(|| text.len());
-        let line_end = self
-            .line_starts
-            .get(position.line as usize + 1)
-            .copied()
-            .unwrap_or_else(|| text.len());
-        let line = &text[line_start..line_end];
-        let character = position.character as usize;
-        line.char_indices()
-            .nth(character)
-            .map(|(index, _)| line_start + index)
-            .unwrap_or(line_end)
+            .unwrap_or(self.text.len());
+        let content = self.text[line_start..next_start]
+            .trim_end_matches('\n')
+            .trim_end_matches('\r');
+        (line_start, line_start + content.len())
     }
 
+    /// The byte offset of an editor position, whose `character` counts UTF-16 code units.
+    ///
+    /// <para>A character offset past the end of the line is the end of the line. One that falls
+    /// between the two units of a surrogate pair is the start of that character: no byte offset
+    /// lies inside it, and the character it is inside of is the one the editor is pointing at.
+    /// </para>
+    fn position_to_byte_offset(&self, position: TextPosition) -> usize {
+        let (line_start, line_end) = self.line_content_bounds(position.line as usize);
+        let mut remaining = position.character as usize;
+        for (index, ch) in self.text[line_start..line_end].char_indices() {
+            let units = ch.len_utf16();
+            if remaining < units {
+                return line_start + index;
+            }
+            remaining -= units;
+        }
+        line_end
+    }
+
+    /// The editor position of a byte offset, with `character` in UTF-16 code units.
     fn byte_offset_to_position(&self, offset: usize) -> TextPosition {
+        let mut offset = offset.min(self.text.len());
+        while !self.text.is_char_boundary(offset) {
+            offset -= 1;
+        }
         let line_index = match self.line_starts.binary_search(&offset) {
             Ok(exact) => exact,
             Err(insert) => insert.saturating_sub(1),
         };
         let line_start = self.line_starts[line_index];
-        TextPosition::new(
-            line_index as u32,
-            (offset.saturating_sub(line_start)) as u32,
-        )
+        let character = self.text[line_start..offset].encode_utf16().count();
+        TextPosition::new(line_index as u32, character as u32)
     }
 }
 
@@ -1802,6 +2365,138 @@ mod tests {
             vec![DocumentInput::new(uri, source).with_version(version)],
         )
         .expect("snapshot")
+    }
+
+    /// The marker fixtures write where the cursor sits.
+    const CURSOR: &str = "⟨cursor⟩";
+
+    /// Splits a marked fixture into the source the editor holds and the position of the cursor.
+    ///
+    /// <para>Scenarios about multi-line constructs are unreadable when the cursor is a pair of
+    /// literal numbers: the reader has to count columns to know what is being asked. Writing the
+    /// marker into the fixture puts the question where it can be seen.</para>
+    fn position_for(source: &str, marker: &str) -> (String, TextPosition) {
+        let offset = source
+            .find(marker)
+            .unwrap_or_else(|| panic!("fixture has no `{marker}` marker"));
+        let prefix = &source[..offset];
+        let line = prefix.matches('\n').count() as u32;
+        let line_start = prefix.rfind('\n').map(|index| index + 1).unwrap_or(0);
+        // Counted the way an editor counts: in UTF-16 code units, so a fixture holding a
+        // character outside the BMP asks the question the editor would ask.
+        let character = prefix[line_start..].encode_utf16().count() as u32;
+
+        let mut stripped = String::with_capacity(source.len() - marker.len());
+        stripped.push_str(prefix);
+        stripped.push_str(&source[offset + marker.len()..]);
+
+        (stripped, TextPosition::new(line, character))
+    }
+
+    /// Resolves completion labels for a fixture that deliberately does not parse — the half-typed
+    /// states an editor asks from, which are what this change is about.
+    ///
+    /// The exception to `assert_fixture_parses`, stated at each site rather than implied.
+    fn labels_at_incomplete(source: &str) -> Vec<String> {
+        let (source, position) = position_for(source, CURSOR);
+        let snapshot = snapshot_for("nx://tenant/form.nx", &source, 1);
+        completion_labels(&snapshot, "nx://tenant/form.nx", position)
+    }
+
+    /// Resolves completion labels for a marked fixture in a single-document snapshot.
+    fn labels_at(source: &str) -> Vec<String> {
+        let (source, position) = position_for(source, CURSOR);
+        let snapshot = snapshot_for("nx://tenant/form.nx", &source, 1);
+        assert_fixture_parses(&snapshot, &source);
+        completion_labels(&snapshot, "nx://tenant/form.nx", position)
+    }
+
+    /// Resolves hover for a marked fixture in a single-document snapshot.
+    fn hover_at(source: &str) -> Option<Hover> {
+        let (source, position) = position_for(source, CURSOR);
+        let snapshot = snapshot_for("nx://tenant/form.nx", &source, 1);
+        assert_fixture_parses(&snapshot, &source);
+        snapshot
+            .hover(&DocumentUri::from("nx://tenant/form.nx"), position)
+            .expect("hover")
+    }
+
+    /// Resolves hover for a fixture that deliberately does not parse — half-typed code, or a
+    /// syntax error that is itself under test.
+    ///
+    /// The exception to `assert_fixture_parses`, stated at each site rather than implied.
+    fn hover_at_incomplete(source: &str) -> Option<Hover> {
+        let (source, position) = position_for(source, CURSOR);
+        let snapshot = snapshot_for("nx://tenant/form.nx", &source, 1);
+        snapshot
+            .hover(&DocumentUri::from("nx://tenant/form.nx"), position)
+            .expect("hover")
+    }
+
+    /// Fails where a fixture is not valid NX.
+    ///
+    /// <para>Hover declines inside a syntax error deliberately — pinned by
+    /// `hover_inside_a_declaration_with_a_syntax_error_returns_no_result` — and the `None` it
+    /// returns there is indistinguishable from the `None` a position hover genuinely cannot answer
+    /// returns. So a fixture with a typo in it reads as a discovered gap, and the cost is
+    /// asymmetric: a fixture that should hover and does not fails its assertion, while one that
+    /// cannot parse looks exactly like the finding its author went looking for. Three wrong
+    /// conclusions were drawn from that in this change's review cycle, one of which reached
+    /// `specs/future.md`.</para>
+    fn assert_fixture_parses(snapshot: &WorkspaceSnapshot, source: &str) {
+        let errors: Vec<String> = snapshot
+            .diagnostics()
+            .expect("diagnostics")
+            .into_iter()
+            .flat_map(|document| document.diagnostics)
+            .filter(|diagnostic| diagnostic.code.as_deref() == Some("syntax-error"))
+            .map(|diagnostic| diagnostic.message)
+            .collect();
+
+        assert!(
+            errors.is_empty(),
+            "fixture is not valid NX: {source:?} — {errors:?}"
+        );
+    }
+
+    /// Asserts two spellings of one construct offer identical completions.
+    ///
+    /// <para>The single-line spelling is the behavior that works today, so it is the standard the
+    /// multi-line spelling is held to — the specified guarantee is that layout does not change the
+    /// answer, not that some particular list comes back.</para>
+    ///
+    /// <para>Exempt from `assert_fixture_parses` by construction rather than by omission: a parity
+    /// fixture is half-typed on both sides, because the positions where layout could change the
+    /// answer are the ones mid-edit. Naming the exemption here is what `hover_at_incomplete` and
+    /// `labels_at_incomplete` do at their call sites.</para>
+    fn assert_same_completions(single_line: &str, multi_line: &str, marker: &str) {
+        let (single_source, single_position) = position_for(single_line, marker);
+        let (multi_source, multi_position) = position_for(multi_line, marker);
+        let single = snapshot_for("nx://tenant/form.nx", &single_source, 1);
+        let multi = snapshot_for("nx://tenant/form.nx", &multi_source, 1);
+
+        let expected = completion_labels(&single, "nx://tenant/form.nx", single_position);
+        let actual = completion_labels(&multi, "nx://tenant/form.nx", multi_position);
+
+        assert_eq!(
+            expected, actual,
+            "layout changed the completions\n  single-line: {expected:?}\n   multi-line: {actual:?}"
+        );
+    }
+
+    /// The completion list is the primitive set, and `void` is no longer in it.
+    #[test]
+    fn primitive_type_completions_are_exactly_the_canonical_names() {
+        assert_eq!(
+            PRIMITIVE_TYPE_COMPLETIONS,
+            &["string", "int", "int32", "int64", "float32", "float64", "boolean", "object",]
+        );
+        for absent in ["void", "long", "double", "bool", "f64", "float"] {
+            assert!(
+                !PRIMITIVE_TYPE_COMPLETIONS.contains(&absent),
+                "{absent} is not an NX primitive type name"
+            );
+        }
     }
 
     #[test]
@@ -1852,6 +2547,50 @@ mod tests {
         let valid_diagnostics = valid.diagnostics().expect("valid diagnostics");
         assert_eq!(valid_diagnostics[0].version, Some(DocumentVersion::new(2)));
         assert!(valid_diagnostics[0].diagnostics.is_empty());
+    }
+
+    #[test]
+    fn diagnostics_accept_an_int_literal_at_a_float_site_and_still_reject_an_inexact_one() {
+        // The editor runs the same analysis, so the notation has to be as quiet here as it is at
+        // the command line — a marker under `24` would make the language look like it disagreed
+        // with itself.
+        let accepted = snapshot_for("nx://tenant/ui.nx", "let width: float64 = 24", 1);
+        assert!(
+            accepted.diagnostics().expect("diagnostics")[0]
+                .diagnostics
+                .is_empty(),
+            "an integer literal at a float site should not be marked"
+        );
+
+        // The property binding is the site the notation exists for, so it gets its own check
+        // rather than riding on the annotated `let` above.
+        let property = snapshot_for(
+            "nx://tenant/ui.nx",
+            "external component <B v:float64 />\nlet root() = { <B v=1 /> }",
+            2,
+        );
+        assert!(
+            property.diagnostics().expect("diagnostics")[0]
+                .diagnostics
+                .is_empty(),
+            "an integer literal at a float property binding should not be marked"
+        );
+
+        let inexact = snapshot_for(
+            "nx://tenant/ui.nx",
+            "let width: float64 = 9007199254740993",
+            3,
+        );
+        assert!(
+            inexact.diagnostics().expect("diagnostics")[0]
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic
+                    .code
+                    .as_deref()
+                    .is_some_and(|code| code == "float-literal-not-exact")),
+            "a literal that cannot be represented should still be marked"
+        );
     }
 
     #[test]
@@ -2009,7 +2748,7 @@ component <SearchBox placeholder:string /> = {
             .expect("hover")
             .expect("hover content");
 
-        assert_eq!(hover.contents, "function `root`");
+        assert_eq!(hover.contents, nx("let root()"));
         assert_eq!(hover.version, Some(DocumentVersion::new(1)));
     }
 
@@ -2074,14 +2813,14 @@ component <SearchBox placeholder:string /> = {
 
     #[test]
     fn property_value_completions_offer_members_of_the_declared_type() {
-        let source =
-            "type Fit = fill | contain | cover\nlet <Img fit:Fit /> = <img />\n<Img fit= />\n";
-        let snapshot = snapshot_for("nx://tenant/form.nx", source, 1);
+        let (source, position) = position_for(
+            "type Fit = fill | contain | cover\nlet <Img fit:Fit /> = <img />\n<Img fit=⟨cursor⟩ />\n",
+            CURSOR,
+        );
+        let snapshot = snapshot_for("nx://tenant/form.nx", &source, 1);
         let uri = DocumentUri::from("nx://tenant/form.nx");
 
-        let completions = snapshot
-            .completions(&uri, TextPosition::new(2, 9))
-            .expect("completions");
+        let completions = snapshot.completions(&uri, position).expect("completions");
         let labels = completions
             .items
             .iter()
@@ -2146,6 +2885,354 @@ component <SearchBox placeholder:string /> = {
             "a string-typed property has no contextual members: {:?}",
             completions.items
         );
+    }
+
+    /// Measures what a build context contributes to workspace analysis before the snapshot
+    /// carries one. Decides D1's fallback branch of `add-web-editor-packages`.
+    #[test]
+    fn measure_library_modules_reaching_workspace_analysis() {
+        use nx_api::LibraryRegistry;
+        use nx_hir::PreparedBindingTarget;
+
+        let temp = TempDir::new().expect("temp dir");
+        let ui_dir = temp.path().join("ui");
+        std::fs::create_dir_all(&ui_dir).expect("ui dir");
+        std::fs::write(
+            ui_dir.join("button.nx"),
+            "export let <Button label:string /> = <button />\n",
+        )
+        .expect("ui file");
+
+        let registry = LibraryRegistry::new();
+        let library = registry
+            .load_library_from_directory(&ui_dir)
+            .expect("library loads");
+        let context = registry.build_context();
+
+        let workspace = NxWorkspace::new(vec![NxWorkspaceModule::from_source(
+            "tenant/form.nx",
+            Arc::<str>::from("import { Button } from \"../ui\"\n<Button label=\"go\" />\n"),
+        )
+        .expect("module")])
+        .expect("workspace");
+        let modules = analyze_workspace_modules(&workspace, &context);
+
+        let names = modules
+            .iter()
+            .map(|module| module.file_name.clone())
+            .collect::<Vec<_>>();
+        eprintln!("workspace modules: {names:?}");
+        eprintln!(
+            "library modules: {:?}",
+            library
+                .modules
+                .iter()
+                .map(|module| (module.file_name.clone(), module.lowered_module.is_some()))
+                .collect::<Vec<_>>()
+        );
+        let form = modules
+            .iter()
+            .find(|module| module.file_name == "tenant/form.nx")
+            .expect("form module");
+        eprintln!(
+            "form diagnostics: {:?}",
+            form.diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.message().to_string())
+                .collect::<Vec<_>>()
+        );
+        let button = form
+            .prepared_bindings
+            .iter()
+            .find(|binding| binding.visible_name.as_str() == "Button");
+        eprintln!(
+            "Button binding: {:?}",
+            button.map(|binding| (
+                binding.module_identity("tenant/form.nx").to_string(),
+                binding.definition_id(),
+                matches!(binding.target, PreparedBindingTarget::Imported { .. }),
+            ))
+        );
+
+        assert!(button.is_some(), "the import binds Button");
+        assert!(
+            !names.iter().any(|name| name.ends_with("button.nx")),
+            "library modules are not in the workspace module list: {names:?}"
+        );
+    }
+
+    /// A library on disk that the build-context scenarios import as `"../ui"`.
+    ///
+    /// <para>The directory has to outlive nothing — the registry keeps what it loaded — but it
+    /// is returned so a test that wants to compare against the compiler can build against the
+    /// same registry.</para>
+    fn ui_library() -> (TempDir, nx_api::LibraryRegistry) {
+        let temp = TempDir::new().expect("temp dir");
+        let ui_dir = temp.path().join("ui");
+        std::fs::create_dir_all(&ui_dir).expect("ui dir");
+        std::fs::write(
+            ui_dir.join("button.nx"),
+            concat!(
+                "export type Size = small | large\n",
+                "export let <Button label:string size:Size /> = <button />\n",
+            ),
+        )
+        .expect("ui file");
+        let registry = nx_api::LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&ui_dir)
+            .expect("library loads");
+        (temp, registry)
+    }
+
+    /// A single-document snapshot whose build context sees [`ui_library`].
+    fn snapshot_with_library(source: &str) -> (TempDir, WorkspaceSnapshot) {
+        let (temp, registry) = ui_library();
+        let snapshot =
+            snapshot_for("nx://tenant/form.nx", source, 1).with_build_context(registry.build_context());
+        (temp, snapshot)
+    }
+
+    const FORM_URI: &str = "nx://tenant/form.nx";
+    const IMPORT_UI: &str = "import { Button, Size } from \"../ui\"\n";
+
+    /// Spec: "Hover resolves a library component".
+    #[test]
+    fn hover_resolves_a_library_component_through_the_build_context() {
+        let (source, position) =
+            position_for(&format!("{IMPORT_UI}<But⟨cursor⟩ton label=\"go\" />\n"), CURSOR);
+        let (_temp, snapshot) = snapshot_with_library(&source);
+
+        let hover = snapshot
+            .hover(&DocumentUri::from(FORM_URI), position)
+            .expect("hover")
+            .expect("hover content");
+
+        assert!(hover.contents.contains("<Button"), "got: {}", hover.contents);
+        assert!(hover.contents.contains("label"), "got: {}", hover.contents);
+        assert!(hover.contents.contains("string"), "got: {}", hover.contents);
+        assert!(hover.contents.contains("size"), "got: {}", hover.contents);
+        assert!(hover.contents.contains("Size"), "got: {}", hover.contents);
+    }
+
+    /// Spec: "Completions offer library declarations" — the tag name.
+    #[test]
+    fn completions_offer_a_library_component_at_a_tag_name() {
+        let (source, position) = position_for(&format!("{IMPORT_UI}<⟨cursor⟩\n"), CURSOR);
+        let (_temp, snapshot) = snapshot_with_library(&source);
+
+        let labels = completion_labels(&snapshot, FORM_URI, position);
+
+        assert!(labels.contains(&"Button".to_string()), "got: {labels:?}");
+    }
+
+    /// Spec: "Completions offer library declarations" — the properties, and their values.
+    #[test]
+    fn completions_offer_a_library_components_properties_and_member_values() {
+        let (source, position) =
+            position_for(&format!("{IMPORT_UI}<Button label=\"go\" ⟨cursor⟩/>\n"), CURSOR);
+        let (_temp, snapshot) = snapshot_with_library(&source);
+        let labels = completion_labels(&snapshot, FORM_URI, position);
+        assert!(labels.contains(&"size".to_string()), "got: {labels:?}");
+        assert!(!labels.contains(&"label".to_string()), "got: {labels:?}");
+
+        let (source, position) =
+            position_for(&format!("{IMPORT_UI}<Button size=⟨cursor⟩ />\n"), CURSOR);
+        let (_temp, snapshot) = snapshot_with_library(&source);
+        let labels = completion_labels(&snapshot, FORM_URI, position);
+        assert!(labels.contains(&"small".to_string()), "got: {labels:?}");
+        assert!(labels.contains(&"large".to_string()), "got: {labels:?}");
+    }
+
+    /// Spec: "Diagnostics honor library types".
+    #[test]
+    fn diagnostics_honor_library_types_through_the_build_context() {
+        let correct = format!("{IMPORT_UI}<Button label=\"go\" size=small />\n");
+        let (_temp, snapshot) = snapshot_with_library(&correct);
+        let messages = diagnostic_messages(&snapshot);
+        assert!(messages.is_empty(), "got: {messages:?}");
+
+        let wrong = format!("{IMPORT_UI}<Button label=1 size=small />\n");
+        let (_temp, registry) = ui_library();
+        let context = registry.build_context();
+        let snapshot = snapshot_for(FORM_URI, &wrong, 1).with_build_context(context.clone());
+        let messages = diagnostic_messages(&snapshot);
+        assert!(!messages.is_empty(), "the wrong property type is reported");
+
+        let workspace = NxWorkspace::new(vec![NxWorkspaceModule::from_source(
+            "tenant/form.nx",
+            Arc::<str>::from(wrong.as_str()),
+        )
+        .expect("module")])
+        .expect("workspace");
+        let compiler = validate_workspace(&workspace, &context)
+            .into_iter()
+            .map(|diagnostic| diagnostic.message)
+            .collect::<Vec<_>>();
+        assert_eq!(messages, compiler);
+    }
+
+    /// Spec: "Snapshot without a context sees no libraries".
+    #[test]
+    fn a_snapshot_without_a_context_treats_library_names_as_unresolved() {
+        let (source, position) =
+            position_for(&format!("{IMPORT_UI}<But⟨cursor⟩ton label=\"go\" />\n"), CURSOR);
+        let snapshot = snapshot_for(FORM_URI, &source, 1);
+
+        let messages = diagnostic_messages(&snapshot);
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("Missing workspace module or loaded library")),
+            "got: {messages:?}"
+        );
+        let hover = snapshot
+            .hover(&DocumentUri::from(FORM_URI), position)
+            .expect("hover");
+        assert!(
+            hover.as_ref().is_none_or(|hover| !hover.contents.contains("label")),
+            "got: {hover:?}"
+        );
+        let labels = completion_labels(&snapshot, FORM_URI, TextPosition::new(1, 1));
+        assert!(!labels.contains(&"Button".to_string()), "got: {labels:?}");
+    }
+
+    fn diagnostic_messages(snapshot: &WorkspaceSnapshot) -> Vec<String> {
+        let report = snapshot.diagnostic_report().expect("diagnostics");
+        report
+            .documents
+            .into_iter()
+            .flat_map(|document| document.diagnostics)
+            .map(|diagnostic| diagnostic.message)
+            .chain(report.workspace.into_iter().map(|diagnostic| diagnostic.message))
+            .collect()
+    }
+
+    /// Spec: "Query after a non-BMP character resolves correctly" and "Returned range counts
+    /// UTF-16 units". The emoji is two units and four bytes; the editor's column for `name` and
+    /// the byte offset the analysis knows differ by two, and both sides have to agree on which
+    /// is which.
+    #[test]
+    fn hover_after_a_non_bmp_character_resolves_and_reports_utf16_columns() {
+        let hover = hover_at("let greet(name:string) = { \"😀\" + na⟨cursor⟩me }\n")
+            .expect("hover content");
+
+        assert!(hover.contents.contains("string"), "got: {}", hover.contents);
+        assert_eq!(hover.range.start, TextPosition::new(0, 34));
+        assert_eq!(hover.range.end, TextPosition::new(0, 38));
+        assert_eq!(hover.range.start_byte, 36);
+        assert_eq!(hover.range.end_byte, 40);
+    }
+
+    /// Spec: "Offsets past the end of a line clamp", and a position inside a surrogate pair.
+    #[test]
+    fn line_index_converts_utf16_positions_both_ways() {
+        let index = LineIndex::new("a😀b\nnext");
+
+        assert_eq!(index.position_to_byte_offset(TextPosition::new(0, 0)), 0);
+        assert_eq!(index.position_to_byte_offset(TextPosition::new(0, 1)), 1);
+        // Between the two units of the emoji: the character the editor is inside of.
+        assert_eq!(index.position_to_byte_offset(TextPosition::new(0, 2)), 1);
+        assert_eq!(index.position_to_byte_offset(TextPosition::new(0, 3)), 5);
+        assert_eq!(index.position_to_byte_offset(TextPosition::new(0, 4)), 6);
+        // Past the end of the line: the end of that line, not the next line's start.
+        assert_eq!(index.position_to_byte_offset(TextPosition::new(0, 100)), 6);
+        assert_eq!(index.position_to_byte_offset(TextPosition::new(1, 100)), 11);
+        assert_eq!(index.position_to_byte_offset(TextPosition::new(9, 0)), 11);
+
+        assert_eq!(index.byte_offset_to_position(5), TextPosition::new(0, 3));
+        assert_eq!(index.byte_offset_to_position(6), TextPosition::new(0, 4));
+        assert_eq!(index.byte_offset_to_position(7), TextPosition::new(1, 0));
+        // Inside the emoji's bytes: its start.
+        assert_eq!(index.byte_offset_to_position(3), TextPosition::new(0, 1));
+        assert_eq!(index.byte_offset_to_position(99), TextPosition::new(1, 4));
+    }
+
+    /// The JSON a binding emits from these results is read by JavaScript, whose convention is
+    /// camelCase; the field names cross that boundary once, here, rather than in every consumer.
+    #[test]
+    fn results_serialize_with_camel_case_fields() {
+        let hover = hover_at("let ad⟨cursor⟩d(count:int) = { count + 1 }\n").expect("hover");
+
+        let json = serde_json::to_string(&hover).expect("json");
+
+        assert!(json.contains("\"startByte\""), "got: {json}");
+        assert!(json.contains("\"endByte\""), "got: {json}");
+        assert!(!json.contains("start_byte"), "got: {json}");
+        assert!(!json.contains("end_byte"), "got: {json}");
+    }
+
+    /// A component that extends a base accepts the base's properties too, and hover and completion
+    /// describe the same contract the compiler checks. The base and its union live in another
+    /// module, so an inherited property's type has to be resolved where it was written.
+    const CONTROLS: (&str, &str) = (
+        "nx://tenant/controls.nx",
+        concat!(
+            "export type Mode = light | dark\n",
+            "export abstract external component <Control mode:Mode? margin:int? />\n",
+        ),
+    );
+    const LABELS: (&str, &str) = (
+        "nx://tenant/labels.nx",
+        concat!(
+            "import { Control } from \"./controls.nx\"\n",
+            "export external component <Label extends Control text:string />\n",
+        ),
+    );
+    const USES_LABEL: &str = "import { Label } from \"./labels.nx\"\n";
+
+    #[test]
+    fn property_completions_include_what_a_component_inherits() {
+        let (source, position) = position_for(&format!("{USES_LABEL}<Label ⟨cursor⟩/>\n"), CURSOR);
+        let snapshot = snapshot_of(&[("nx://tenant/form.nx", source.as_str()), CONTROLS, LABELS]);
+
+        let labels = completion_labels(&snapshot, "nx://tenant/form.nx", position);
+
+        assert!(labels.contains(&"text".to_string()), "got: {labels:?}");
+        assert!(labels.contains(&"mode".to_string()), "got: {labels:?}");
+        assert!(labels.contains(&"margin".to_string()), "got: {labels:?}");
+    }
+
+    #[test]
+    fn member_completions_resolve_an_inherited_property_type_in_the_base_module() {
+        let snapshot = snapshot_of(&[
+            ("nx://tenant/form.nx", &format!("{USES_LABEL}<Label mode= />\n")),
+            CONTROLS,
+            LABELS,
+        ]);
+
+        let labels = completion_labels(&snapshot, "nx://tenant/form.nx", TextPosition::new(1, 12));
+
+        assert!(labels.contains(&"light".to_string()), "got: {labels:?}");
+        assert!(labels.contains(&"dark".to_string()), "got: {labels:?}");
+    }
+
+    #[test]
+    fn hover_over_an_extending_component_lists_what_it_inherits() {
+        let hover = hover_in(
+            &[CONTROLS, LABELS],
+            "nx://tenant/form.nx",
+            &format!("{USES_LABEL}<La⟨cursor⟩bel text=\"hi\" />\n"),
+        )
+        .expect("hover content");
+
+        assert!(hover.contents.contains("<Label"), "got: {}", hover.contents);
+        assert!(hover.contents.contains("text:string"), "got: {}", hover.contents);
+        assert!(hover.contents.contains("Inherited from `Control`"), "got: {}", hover.contents);
+        assert!(hover.contents.contains("mode:Mode?"), "got: {}", hover.contents);
+        assert!(hover.contents.contains("margin:int?"), "got: {}", hover.contents);
+    }
+
+    #[test]
+    fn hover_over_an_inherited_property_name_reports_its_type() {
+        let hover = hover_in(
+            &[CONTROLS, LABELS],
+            "nx://tenant/form.nx",
+            &format!("{USES_LABEL}<Label mar⟨cursor⟩gin=2 />\n"),
+        )
+        .expect("hover content");
+
+        assert!(hover.contents.contains("int"), "got: {}", hover.contents);
     }
 
     fn snapshot_of(documents: &[(&str, &str)]) -> WorkspaceSnapshot {
@@ -2251,25 +3338,891 @@ component <SearchBox placeholder:string /> = {
         assert!(!labels.contains(&"stretch".to_string()), "got: {labels:?}");
     }
 
-    #[test]
-    fn component_property_completions_omit_supplied_properties() {
-        let source = r#"
-let <Card title:string subtitle:string /> = <div>{title}</div>
-<Card title="Hello" />
-"#;
-        let snapshot = snapshot_for("nx://tenant/form.nx", source, 1);
-        let uri = DocumentUri::from("nx://tenant/form.nx");
+    // ---------------------------------------------------------------------------------------
+    // The single-line behavior the measurement table in `proposal.md` recorded as working. These
+    // are the standard the resolver replaces the line-scanning heuristics against: a regression on
+    // any of them is attributable to the replacement rather than to the change as a whole.
+    // ---------------------------------------------------------------------------------------
 
-        let completions = snapshot
-            .completions(&uri, TextPosition::new(2, 20))
-            .expect("completions");
-        let labels = completions
-            .items
-            .iter()
-            .map(|item| item.label.as_str())
+    const PANEL: &str = concat!(
+        "type Mode = light | dark\n",
+        "let <Panel mode:Mode title:string caption:string /> = <div />\n"
+    );
+
+    #[test]
+    fn baseline_single_line_tag_offers_property_names() {
+        let labels = labels_at(&format!("{PANEL}<Panel ⟨cursor⟩/>\n"));
+
+        assert_eq!(
+            labels,
+            vec![
+                "mode".to_string(),
+                "title".to_string(),
+                "caption".to_string()
+            ],
+            "got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn baseline_single_line_tag_offers_property_value_members() {
+        let labels = labels_at_incomplete(&format!("{PANEL}<Panel mode=⟨cursor⟩ />\n"));
+
+        assert_eq!(
+            labels,
+            vec!["light".to_string(), "dark".to_string()],
+            "got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn baseline_single_line_tag_omits_a_supplied_property() {
+        let labels = labels_at(&format!("{PANEL}<Panel mode=\"light\" ⟨cursor⟩/>\n"));
+
+        assert!(!labels.contains(&"mode".to_string()), "got: {labels:?}");
+        assert!(labels.contains(&"title".to_string()), "got: {labels:?}");
+    }
+
+    #[test]
+    fn baseline_hover_on_a_declaration_name_reports_its_kind() {
+        let hover = hover_at(concat!(
+            "type Mode = light | dark\n",
+            "let <P⟨cursor⟩anel mode:Mode /> = <div />\n"
+        ))
+        .expect("hover content");
+
+        // An element-style function's kind is its spelling: `let <Panel />` is what an author
+        // writes, and no NX keyword `component` appears in it — design D7.
+        assert_eq!(hover.contents, nx("let <Panel mode:Mode />"));
+    }
+
+    /// The retained artifacts are what a position query reads, so the snapshot has to hand back an
+    /// environment that actually has types in it — not an empty one that would make every hover
+    /// conservative for the wrong reason.
+    ///
+    /// <para>A parameter interpolated into a markup body — `let &lt;Panel width:int /&gt; =
+    /// &lt;div&gt;{width}&lt;/div&gt;` — used to lower with a span and reach the type environment
+    /// with no entry, because inference never visited an element whose tag resolved to nothing.
+    /// That hole is closed, and
+    /// `hover_answers_inside_an_element_whose_tag_resolves_to_nothing` pins the result.</para>
+    #[test]
+    fn retained_analysis_carries_inferred_types_for_a_parameter_reference() {
+        let snapshot = snapshot_for(
+            "nx://tenant/form.nx",
+            "let add(count:int) = { count + 1 }\n",
+            1,
+        );
+
+        let analysis = snapshot
+            .module_analysis(&DocumentUri::from("nx://tenant/form.nx"))
+            .expect("retained analysis");
+        let module = analysis.lowered_module();
+        let types = analysis.type_env();
+
+        let counts = module
+            .exprs()
+            .filter(|(_, expr)| {
+                matches!(expr, nx_hir::ast::Expr::Ident(name) if name.as_str() == "count")
+            })
+            .map(|(id, _)| id)
             .collect::<Vec<_>>();
 
-        assert!(!labels.contains(&"title"));
-        assert!(labels.contains(&"subtitle"));
+        assert!(!counts.is_empty(), "the body reference should have lowered");
+        assert!(
+            counts.iter().any(|id| types
+                .get_expr_type(*id)
+                .is_some_and(|ty| ty.to_string() == "int")),
+            "no `count` reference carried its declared type"
+        );
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // The specified scenarios. Layout must not change what a position means, hover must answer at
+    // references and expressions, and neither may invent an answer where analysis has none.
+    // ---------------------------------------------------------------------------------------
+
+    /// Spec: "Multi-line opening tag offers the same property completions as a single-line one".
+    #[test]
+    fn multi_line_opening_tag_offers_the_same_property_completions() {
+        assert_same_completions(
+            &format!("{PANEL}<Panel ⟨cursor⟩/>\n"),
+            &format!("{PANEL}<Panel\n  ⟨cursor⟩\n/>\n"),
+            CURSOR,
+        );
+    }
+
+    /// Spec: "Multi-line opening tag offers contextual member completions".
+    #[test]
+    fn multi_line_opening_tag_offers_contextual_member_completions() {
+        assert_same_completions(
+            &format!("{PANEL}<Panel mode=⟨cursor⟩ />\n"),
+            &format!("{PANEL}<Panel\n  mode=⟨cursor⟩\n/>\n"),
+            CURSOR,
+        );
+
+        let labels = labels_at_incomplete(&format!("{PANEL}<Panel\n  mode=⟨cursor⟩\n/>\n"));
+        assert!(labels.contains(&"light".to_string()), "got: {labels:?}");
+        assert!(labels.contains(&"dark".to_string()), "got: {labels:?}");
+    }
+
+    /// Spec: "Supplied properties are recognized anywhere in the opening tag".
+    #[test]
+    fn a_property_supplied_on_another_line_is_not_offered_again() {
+        let labels = labels_at(&format!(
+            "{PANEL}<Panel\n  mode=\"light\"\n  ⟨cursor⟩\n  caption=\"c\"\n/>\n"
+        ));
+
+        assert!(!labels.contains(&"mode".to_string()), "got: {labels:?}");
+        assert!(!labels.contains(&"caption".to_string()), "got: {labels:?}");
+        assert!(labels.contains(&"title".to_string()), "got: {labels:?}");
+    }
+
+    /// Spec: "Type completions are offered in a multi-line signature".
+    #[test]
+    fn type_completions_are_offered_in_a_multi_line_signature() {
+        let labels = labels_at_incomplete(concat!(
+            "type Mode = light | dark\n",
+            "let <Panel\n",
+            "  title:string\n",
+            "  mode:⟨cursor⟩\n",
+            "/> = <div />\n"
+        ));
+
+        assert!(labels.contains(&"string".to_string()), "got: {labels:?}");
+        assert!(labels.contains(&"boolean".to_string()), "got: {labels:?}");
+        assert!(labels.contains(&"Mode".to_string()), "got: {labels:?}");
+        // A type position is not a declaration position, so the keyword list must be absent.
+        assert!(!labels.contains(&"import".to_string()), "got: {labels:?}");
+        assert!(
+            !labels.contains(&"component".to_string()),
+            "got: {labels:?}"
+        );
+        assert!(!labels.contains(&"let".to_string()), "got: {labels:?}");
+    }
+
+    /// The same requirement read the other way: a colon that is not an annotation must not make a
+    /// property-name position look like a type position just because it shares the cursor's line.
+    #[test]
+    fn a_colon_inside_a_property_value_does_not_make_a_type_position() {
+        let labels = labels_at(&format!("{PANEL}<Panel\n  title=\"a:b\" ⟨cursor⟩\n/>\n"));
+
+        assert!(labels.contains(&"mode".to_string()), "got: {labels:?}");
+        assert!(!labels.contains(&"string".to_string()), "got: {labels:?}");
+    }
+
+    /// Spec: "Hover over a reference reports the referenced declaration".
+    #[test]
+    fn hover_over_a_component_tag_reports_the_declaration_it_resolves_to() {
+        let hover = hover_at(&format!("{PANEL}<Pa⟨cursor⟩nel />\n")).expect("hover content");
+
+        assert!(hover.contents.contains("<Panel"), "got: {}", hover.contents);
+    }
+
+    /// Spec: "Hover over an expression reports its inferred type".
+    #[test]
+    fn hover_over_a_parameter_reference_reports_its_inferred_type() {
+        let hover =
+            hover_at("let add(count:int) = { c⟨cursor⟩ount + 1 }\n").expect("hover content");
+
+        assert!(hover.contents.contains("int"), "got: {}", hover.contents);
+    }
+
+    /// The fenced NX block hover content is made of, for an assertion to compare against.
+    fn nx(fragment: &str) -> String {
+        format!("```nx\n{fragment}\n```")
+    }
+
+    /// A hover fixture resolved against a multi-document snapshot.
+    fn hover_in(documents: &[(&str, &str)], uri: &str, marked: &str) -> Option<Hover> {
+        let (source, position) = position_for(marked, CURSOR);
+        let mut all = vec![(uri, source.as_str())];
+        all.extend_from_slice(documents);
+        let snapshot = snapshot_of(&all);
+        assert_fixture_parses(&snapshot, &source);
+        snapshot
+            .hover(&DocumentUri::from(uri), position)
+            .expect("hover")
+    }
+
+    const WIDGETS: (&str, &str) = (
+        "nx://tenant/widgets.nx",
+        "export type Fit = fill | contain | cover\nexport let <Img fit:Fit /> = <img />\n",
+    );
+
+    /// The name being edited is not a name already supplied. Counting it would offer every
+    /// property of the tag except the one the cursor is in the middle of typing.
+    #[test]
+    fn the_property_name_under_the_cursor_is_still_offered() {
+        for spelling in [
+            format!("{PANEL}<Panel mo⟨cursor⟩de=\"light\" />\n"),
+            format!("{PANEL}<Panel\n  mo⟨cursor⟩de=\"light\"\n/>\n"),
+        ] {
+            let labels = labels_at(&spelling);
+
+            assert!(labels.contains(&"mode".to_string()), "got: {labels:?}");
+            assert!(labels.contains(&"title".to_string()), "got: {labels:?}");
+        }
+    }
+
+    /// A cursor in a quoted property value is on the string, so the string's type is the answer.
+    /// The element the string is written inside is not: answering with the type the tag evaluates
+    /// to would be the fabricated hover the contract rules out, and it is what a lookup by offset
+    /// alone reported before the resolved construct bounded it.
+    #[test]
+    fn hover_inside_a_string_property_value_reports_the_string_not_its_element() {
+        let hover = hover_at(&format!("{PANEL}<Panel title=\"he⟨cursor⟩llo\" />\n"))
+            .expect("hover content");
+
+        assert_eq!(hover.contents, nx("string"), "got: {}", hover.contents);
+    }
+
+    /// Design D6 recorded hover on a literal as out of reach, because lowering located no literal
+    /// by offset. It records their spans now, so the type a literal already had reaches the reader.
+    #[test]
+    fn hover_over_a_literal_reports_its_type() {
+        for (fixture, expected) in [
+            ("let value = \"he⟨cursor⟩llo\"\n", nx("string")),
+            ("let value = 4⟨cursor⟩2\n", nx("int")),
+            ("let value = 1.⟨cursor⟩5\n", nx("float64")),
+            ("let value = tr⟨cursor⟩ue\n", nx("boolean")),
+            // The `-` and the digits are one literal, so the cursor is on it wherever it sits —
+            // and however it parsed. Unbraced it is one signed-numeric-literal node; braced or
+            // nested it is a prefix `-` over the digits, which lowering folds into the same
+            // literal.
+            ("let value = -4⟨cursor⟩2\n", nx("int")),
+            ("let value = ⟨cursor⟩-42\n", nx("int")),
+            ("let value = {-4⟨cursor⟩2}\n", nx("int")),
+            ("let value = {-⟨cursor⟩42}\n", nx("int")),
+            ("let value = {-1.⟨cursor⟩5}\n", nx("float64")),
+            ("let add(x:int) = {x + -1⟨cursor⟩0}\n", nx("int")),
+            ("let add(x:int) = {x + ⟨cursor⟩-10}\n", nx("int")),
+        ] {
+            let hover = hover_at(fixture).unwrap_or_else(|| panic!("no hover for: {fixture:?}"));
+
+            assert_eq!(hover.contents, expected, "for: {fixture:?}");
+        }
+    }
+
+    /// A list is written `{a b}`, and its items are ordinary expressions — a literal answers there,
+    /// and so does a reference. Pinned because the opposite was measured from `[1, 2]`, which is
+    /// not NX and so reported nothing for the reason every syntax error does.
+    #[test]
+    fn hover_inside_a_list_reports_the_item_it_is_on() {
+        for (fixture, expected) in [
+            ("let value = {1⟨cursor⟩ 2}\n", nx("int")),
+            ("let value = {1 2⟨cursor⟩}\n", nx("int")),
+            ("let value = {\"a⟨cursor⟩b\" \"c\"}\n", nx("string")),
+            ("let value = {1 -4⟨cursor⟩2}\n", nx("int")),
+            // A reference that reaches no expression type still reports its declaration, and an
+            // unannotated one reports the type analysis inferred for it — design D5.
+            (
+                "let ab = 1\nlet value = {a⟨cursor⟩b 2}\n",
+                nx("let ab: int"),
+            ),
+        ] {
+            let hover = hover_at(fixture).unwrap_or_else(|| panic!("no hover for: {fixture:?}"));
+
+            assert_eq!(hover.contents, expected, "for: {fixture:?}");
+        }
+    }
+
+    /// `null` is the one literal inference has no type for on its own: it infers as `T0?`, an
+    /// unsolved variable. The variable's id is not a type a reader can act on, so the conservative
+    /// answer is no hover rather than one naming it.
+    #[test]
+    fn hover_over_a_null_literal_reports_no_type() {
+        for fixture in [
+            "let value = nu⟨cursor⟩ll\n",
+            "let value:string? = nu⟨cursor⟩ll\n",
+        ] {
+            let hover = hover_at(fixture);
+
+            assert!(
+                hover.is_none(),
+                "for {fixture:?}, got: {:?}",
+                hover.map(|hover| hover.contents)
+            );
+        }
+    }
+
+    /// A local shadows the top-level declaration of the same name, so the name the cursor is on is
+    /// not the one a lookup by spelling finds. The type environment knows which binding it is.
+    #[test]
+    fn hover_on_a_shadowing_parameter_reports_the_parameter_not_the_top_level_name() {
+        let hover = hover_at(concat!(
+            "let count = \"top\"\n",
+            "let add(count:int) = { c⟨cursor⟩ount + 1 }\n"
+        ))
+        .expect("hover content");
+
+        assert!(hover.contents.contains("int"), "got: {}", hover.contents);
+        assert!(!hover.contents.contains("value"), "got: {}", hover.contents);
+    }
+
+    /// A hover states the kind once. A union spells its own — `type Mode = …` names it, and the
+    /// cases are what the reader came for, so nothing repeats the word `union` beside them.
+    #[test]
+    fn hover_on_a_union_declaration_does_not_repeat_its_kind() {
+        let hover = hover_at("type M⟨cursor⟩ode = light | dark\n").expect("hover content");
+
+        assert_eq!(
+            hover.contents,
+            nx("type Mode = light | dark"),
+            "got: {}",
+            hover.contents
+        );
+    }
+
+    /// Spec: the referenced declaration may be "declared elsewhere in the workspace snapshot".
+    #[test]
+    fn hover_over_a_selectively_imported_tag_reports_the_declaration() {
+        let hover = hover_in(
+            &[WIDGETS],
+            "nx://tenant/app.nx",
+            "import { Img } from \"./widgets.nx\"\n<I⟨cursor⟩mg />\n",
+        )
+        .expect("hover content");
+
+        assert!(hover.contents.contains("<Img"), "got: {}", hover.contents);
+        assert!(hover.contents.contains("fit"), "got: {}", hover.contents);
+    }
+
+    /// The alias is the name the tag is written under, so hover has to go through it too.
+    #[test]
+    fn hover_over_a_wildcard_aliased_tag_reports_the_declaration() {
+        let hover = hover_in(
+            &[WIDGETS],
+            "nx://tenant/app.nx",
+            "import \"./widgets.nx\" as ui\n<ui.I⟨cursor⟩mg />\n",
+        )
+        .expect("hover content");
+
+        assert!(hover.contents.contains("<Img"), "got: {}", hover.contents);
+    }
+
+    /// Spec: "Hover over a component declaration reports its signature".
+    #[test]
+    fn hover_over_a_component_declaration_reports_its_properties() {
+        let hover = hover_at(concat!(
+            "type Mode = light | dark\n",
+            "let <Pa⟨cursor⟩nel mode:Mode title:string /> = <div />\n"
+        ))
+        .expect("hover content");
+
+        assert!(hover.contents.contains("<Panel"), "got: {}", hover.contents);
+        assert!(hover.contents.contains("mode"), "got: {}", hover.contents);
+        assert!(hover.contents.contains("Mode"), "got: {}", hover.contents);
+        assert!(hover.contents.contains("title"), "got: {}", hover.contents);
+        assert!(hover.contents.contains("string"), "got: {}", hover.contents);
+    }
+
+    /// Spec: "Hover over a property name reports the property's declared type".
+    #[test]
+    fn hover_over_a_property_name_reports_its_declared_type() {
+        for spelling in [
+            format!("{PANEL}<Panel ti⟨cursor⟩tle=\"x\" />\n"),
+            format!("{PANEL}<Panel\n  ti⟨cursor⟩tle=\"x\"\n/>\n"),
+        ] {
+            let hover = hover_at(&spelling).expect("hover content");
+
+            assert!(
+                hover.contents.contains("property"),
+                "got: {}",
+                hover.contents
+            );
+            assert!(hover.contents.contains("title"), "got: {}", hover.contents);
+            assert!(hover.contents.contains("string"), "got: {}", hover.contents);
+        }
+    }
+
+    /// An empty slot names no property, so there is nothing to report there.
+    #[test]
+    fn hover_over_an_empty_property_slot_returns_no_result() {
+        assert!(
+            hover_at(&format!("{PANEL}<Panel ⟨cursor⟩/>\n")).is_none(),
+            "an empty property slot reported hover"
+        );
+    }
+
+    /// Spec: "Hover over a type annotation reports the type it names".
+    #[test]
+    fn hover_over_a_type_annotation_reports_the_type_it_names() {
+        let hover = hover_at(concat!(
+            "type Mode = light | dark\n",
+            "let <Panel mode:M⟨cursor⟩ode /> = <div />\n"
+        ))
+        .expect("hover content");
+
+        assert_eq!(
+            hover.contents,
+            nx("type Mode = light | dark"),
+            "got: {}",
+            hover.contents
+        );
+    }
+
+    /// A primitive has no declaration to report, but it is still what the editor knows is there.
+    #[test]
+    fn hover_over_a_primitive_type_annotation_reports_the_primitive() {
+        let hover = hover_at("let count:i⟨cursor⟩nt = 1\n").expect("hover content");
+
+        assert_eq!(
+            hover.contents,
+            nx("(primitive type) int"),
+            "got: {}",
+            hover.contents
+        );
+    }
+
+    /// An annotation is an annotation wherever it is written, so every declaration that can carry
+    /// one answers at it — the resolver keys on the annotation, not on what encloses it.
+    #[test]
+    fn hover_over_a_type_annotation_reports_it_in_every_declaration_that_can_carry_one() {
+        for (fixture, expected) in [
+            (
+                "action Go = {\n  query:str⟨cursor⟩ing\n}\n",
+                nx("(primitive type) string"),
+            ),
+            (
+                "type R = {\n  a:in⟨cursor⟩t\n}\n",
+                nx("(primitive type) int"),
+            ),
+            (
+                "let <Panel mode:str⟨cursor⟩ing /> = <div />\n",
+                nx("(primitive type) string"),
+            ),
+            (
+                "let add(count:in⟨cursor⟩t) = count\n",
+                nx("(primitive type) int"),
+            ),
+            ("let value:in⟨cursor⟩t = 1\n", nx("(primitive type) int")),
+        ] {
+            let hover = hover_at(fixture).unwrap_or_else(|| panic!("no hover for: {fixture:?}"));
+
+            assert_eq!(hover.contents, expected, "for: {fixture:?}");
+        }
+    }
+
+    /// Spec: "Hover answers inside an element whose tag resolves to nothing".
+    ///
+    /// <para>This is the hover half of the checker hole group 1 closed. Lowering always recorded
+    /// the span; inference never visited the expression, so the type environment had no entry to
+    /// report. Nothing in hover changed to make this answer.</para>
+    #[test]
+    fn hover_answers_inside_an_element_whose_tag_resolves_to_nothing() {
+        let inside = hover_at("let <Row count:int /> = <div>{c⟨cursor⟩ount + 1}</div>\n")
+            .expect("hover content");
+        let outside =
+            hover_at("let <Row count:int /> = {c⟨cursor⟩ount + 1}\n").expect("hover content");
+
+        assert_eq!(inside.contents, nx("int"), "got: {}", inside.contents);
+        assert_eq!(
+            inside.contents, outside.contents,
+            "an unresolved tag must not change what the expression under it reports"
+        );
+    }
+
+    /// Spec: "Hover over a member of a member access reports the member".
+    #[test]
+    fn hover_over_a_member_of_a_member_access_reports_the_member() {
+        let hover = hover_at(concat!(
+            "type User = { name:string }\n",
+            "let describe(user:User) = { user.na⟨cursor⟩me }\n"
+        ))
+        .expect("hover content");
+
+        assert_eq!(hover.contents, nx("(property) User.name: string"));
+    }
+
+    /// The receiver is not the member: a cursor before the dot still reports the value it is on.
+    #[test]
+    fn hover_on_the_receiver_of_a_member_access_reports_the_receiver() {
+        let hover = hover_at(concat!(
+            "type User = { name:string }\n",
+            "let describe(user:User) = { us⟨cursor⟩er.name }\n"
+        ))
+        .expect("hover content");
+
+        assert_eq!(hover.contents, nx("User"));
+    }
+
+    /// Spec: "Hover over a function parameter declaration reports the parameter".
+    #[test]
+    fn hover_over_a_parameter_declaration_reports_the_parameter() {
+        let plain = hover_at("let add(cou⟨cursor⟩nt:int): int = 1\n").expect("hover content");
+        assert_eq!(plain.contents, nx("(parameter) count: int"));
+
+        let element_style =
+            hover_at("let <Panel tit⟨cursor⟩le:string /> = <div />\n").expect("hover content");
+        assert_eq!(element_style.contents, nx("(parameter) title: string"));
+    }
+
+    /// The kind is stated once, in the fence, and not repeated as prose beside it.
+    #[test]
+    fn a_parameter_hover_states_its_kind_exactly_once() {
+        let hover = hover_at("let add(cou⟨cursor⟩nt:int): int = 1\n").expect("hover content");
+
+        assert_eq!(hover.contents.matches("parameter").count(), 1);
+    }
+
+    /// Spec: "Hover over a record field declaration reports the field".
+    #[test]
+    fn hover_over_a_record_field_declaration_reports_the_field() {
+        let hover = hover_at("type User = {\n  na⟨cursor⟩me: string\n}\n").expect("hover content");
+
+        assert_eq!(hover.contents, nx("(property) User.name: string"));
+    }
+
+    /// Spec: "Hover over a union case declaration reports the case".
+    #[test]
+    fn hover_over_a_union_case_declaration_reports_the_case() {
+        let case = hover_at("type Role = admin | gu⟨cursor⟩est\n").expect("hover content");
+        assert_eq!(case.contents, nx("(case) Role.guest"));
+
+        let payload_field =
+            hover_at("type S =\n  | failed { mess⟨cursor⟩age:string }\n").expect("hover content");
+        assert_eq!(
+            payload_field.contents,
+            nx("(property) S.failed.message: string")
+        );
+    }
+
+    /// Spec: "Hover over a bare property value reports what the name resolves to".
+    ///
+    /// <para>A bare name resolves against the type of the site it is written at, and that is the
+    /// whole rule: the value slot of a tag and a typed declaration are two spellings of the same
+    /// question — design D4.</para>
+    #[test]
+    fn hover_over_a_bare_property_value_reports_the_case_it_resolves_to() {
+        const ROLE: &str = concat!(
+            "type Role = admin | guest\n",
+            "let <Card role:Role /> = <div />\n"
+        );
+
+        let in_tag =
+            hover_at(&format!("{ROLE}<Card role=ad⟨cursor⟩min />\n")).expect("hover content");
+        assert_eq!(in_tag.contents, nx("(case) Role.admin"));
+
+        let at_declaration =
+            hover_at(&format!("{ROLE}let chosen: Role = ad⟨cursor⟩min\n")).expect("hover content");
+        assert_eq!(
+            in_tag.contents, at_declaration.contents,
+            "a bare name reports the same thing wherever the type expecting it is written"
+        );
+    }
+
+    /// A qualified case is a case, not a property of the union it is written under. Named in the
+    /// proposal's table of silent positions, and one of four spellings of one concept that must
+    /// agree: the case's declaration, a bare name at a typed site, a bare name in a value slot,
+    /// and this.
+    #[test]
+    fn hover_over_a_qualified_union_case_reports_the_case() {
+        const ROLE: &str = concat!(
+            "type Role = admin | guest\n",
+            "let <Card role:Role /> = <div />\n"
+        );
+
+        let qualified =
+            hover_at(&format!("{ROLE}let r: Role = {{Role.ad⟨cursor⟩min}}\n")).expect("hover");
+        let bare_at_declaration =
+            hover_at(&format!("{ROLE}let r: Role = ad⟨cursor⟩min\n")).expect("hover");
+        let bare_in_a_value_slot =
+            hover_at(&format!("{ROLE}<Card role=ad⟨cursor⟩min />\n")).expect("hover");
+        let at_the_declaration = hover_at("type Role = ad⟨cursor⟩min | guest\n").expect("hover");
+
+        assert_eq!(qualified.contents, nx("(case) Role.admin"));
+        assert_eq!(bare_at_declaration.contents, qualified.contents);
+        assert_eq!(bare_in_a_value_slot.contents, qualified.contents);
+        assert_eq!(at_the_declaration.contents, qualified.contents);
+    }
+
+    /// An expression whose *type* is a union case is not itself one. A read of a value declared
+    /// `Role.admin` reports the type it has, not `(case)`, which would name the wrong thing.
+    #[test]
+    fn hover_over_a_value_typed_by_a_union_case_reports_the_type_not_the_case() {
+        let hover = hover_at(concat!(
+            "type Role = admin | guest\n",
+            "let chosen = {Role.admin}\n",
+            "let again = {cho⟨cursor⟩sen}\n"
+        ))
+        .expect("hover content");
+
+        // The declaration it resolves to, reported as a declaration — and in particular not as
+        // `(case) Role.admin`, which would say the value *is* the case rather than has its type.
+        assert_eq!(hover.contents, nx("let chosen: Role.admin"));
+        assert!(
+            !hover.contents.contains("(case)"),
+            "got: {}",
+            hover.contents
+        );
+    }
+
+    /// Design D4's rule reaches a third place a bare name is written: a declared default.
+    #[test]
+    fn hover_over_a_bare_default_value_reports_the_case_it_resolves_to() {
+        for fixture in [
+            "type Role = admin | guest\ntype Opt = { role: Role = ad⟨cursor⟩min }\n",
+            concat!(
+                "type Role = admin | guest\n",
+                "abstract external component <Node />\n",
+                "external component <Card extends Node role:Role = ad⟨cursor⟩min />\n"
+            ),
+        ] {
+            let hover = hover_at(fixture).unwrap_or_else(|| panic!("no hover for: {fixture:?}"));
+
+            assert_eq!(hover.contents, nx("(case) Role.admin"), "for: {fixture:?}");
+        }
+    }
+
+    /// Spec: "Hover over an unannotated value declaration reports its inferred type".
+    #[test]
+    fn hover_over_an_unannotated_value_declaration_reports_its_inferred_type() {
+        let hover = hover_at("let cou⟨cursor⟩nt = 42\n").expect("hover content");
+
+        assert_eq!(hover.contents, nx("let count: int"));
+    }
+
+    /// Design D5: a written annotation is shown as written. The author chose the alias, and
+    /// expanding it to what it resolves to would answer a question nobody asked.
+    #[test]
+    fn hover_over_an_annotated_value_declaration_reports_the_annotation_as_written() {
+        let hover = hover_at(concat!(
+            "type UserId = int\n",
+            "let cur⟨cursor⟩rent: UserId = 1\n"
+        ))
+        .expect("hover content");
+
+        assert_eq!(hover.contents, nx("let current: UserId"));
+    }
+
+    /// Spec: "Hover over a union declaration reports its cases".
+    #[test]
+    fn hover_over_a_union_declaration_reports_its_cases() {
+        let hover = hover_at("type Ro⟨cursor⟩le = admin | guest\n").expect("hover content");
+
+        assert_eq!(hover.contents, nx("type Role = admin | guest"));
+    }
+
+    /// A case list that does not fit on one line takes a bar on every case, which is the house
+    /// style for a multi-line union — and a payload case is spelled with its fields.
+    #[test]
+    fn a_union_with_payload_cases_lists_them_one_per_line() {
+        let hover = hover_at(concat!(
+            "type Lo⟨cursor⟩adState =\n",
+            "  | idle\n",
+            "  | failed { message:string }\n"
+        ))
+        .expect("hover content");
+
+        assert_eq!(
+            hover.contents,
+            nx("type LoadState =\n  | idle\n  | failed { message:string }")
+        );
+    }
+
+    /// The cases a union hover lists are all of them. `Declaration::members` is filtered to the
+    /// payloadless ones, because that is what a bare-name completion may offer — which makes it
+    /// the wrong source for this, and is why the item is read from HIR instead (design D2).
+    #[test]
+    fn a_union_hover_lists_cases_a_bare_name_completion_would_not_offer() {
+        let hover = hover_at("type S⟨cursor⟩tate =\n  | idle\n  | failed { message:string }\n")
+            .expect("hover content");
+
+        assert!(hover.contents.contains("failed"), "got: {}", hover.contents);
+    }
+
+    /// Spec: "Hover over a record type declaration reports its fields".
+    #[test]
+    fn hover_over_a_record_type_declaration_reports_its_fields() {
+        let hover = hover_at("type U⟨cursor⟩ser = {\n  name: string\n  email: string?\n}\n")
+            .expect("hover content");
+
+        assert_eq!(
+            hover.contents,
+            nx("type User = {\n  name: string\n  email: string?\n}")
+        );
+    }
+
+    /// Spec: "A function declaration's hover shows an NX signature", including that it spells no
+    /// keyword NX does not have.
+    #[test]
+    fn a_function_declaration_hover_is_spelled_in_nx() {
+        let hover = hover_at("let a⟨cursor⟩dd(count:int): int = count\n").expect("hover content");
+
+        assert_eq!(hover.contents, nx("let add(count:int): int"));
+        assert!(
+            !hover.contents.contains("function"),
+            "`function` is not an NX keyword, got: {}",
+            hover.contents
+        );
+    }
+
+    /// Spec: "A type alias declaration's hover shows an NX signature".
+    #[test]
+    fn a_type_alias_hover_is_spelled_in_nx() {
+        let hover = hover_at("type S⟨cursor⟩ize = int\n").expect("hover content");
+
+        assert_eq!(hover.contents, nx("type Size = int"));
+    }
+
+    /// Spec: "An element-style function's hover shows an NX signature".
+    #[test]
+    fn an_element_style_function_hover_is_spelled_in_nx() {
+        let hover =
+            hover_at("let <P⟨cursor⟩anel title:string /> = <div />\n").expect("hover content");
+
+        assert_eq!(hover.contents, nx("let <Panel title:string />"));
+    }
+
+    /// A `component` declaration spells its own keyword, and its modifiers with it. Unlike an
+    /// element-style function, `component` *is* NX here, so the fragment carries it.
+    #[test]
+    fn a_component_declaration_hover_is_spelled_in_nx() {
+        let hover = hover_at(concat!(
+            "type Hue = Red | Green\n",
+            "external component <Pa⟨cursor⟩int colour:Hue? />\n"
+        ))
+        .expect("hover content");
+
+        assert_eq!(
+            hover.contents,
+            nx("external component <Paint colour:Hue? />")
+        );
+    }
+
+    /// An action is a record declared with the `action` keyword, and is spelled with it.
+    #[test]
+    fn an_action_declaration_hover_is_spelled_in_nx() {
+        let hover = hover_at("action G⟨cursor⟩o = {\n  query: string\n}\n").expect("hover content");
+
+        assert_eq!(hover.contents, nx("action Go = {\n  query: string\n}"));
+    }
+
+    /// Every hover that says anything says it as a fenced NX block, so a client that highlights NX
+    /// highlights the hover.
+    #[test]
+    fn hover_content_is_a_fenced_nx_block() {
+        for fixture in [
+            "let a⟨cursor⟩dd(count:int): int = count\n",
+            "type S⟨cursor⟩ize = int\n",
+            "let <P⟨cursor⟩anel title:string /> = <div />\n",
+            "let add(cou⟨cursor⟩nt:int): int = count\n",
+            "let value = 4⟨cursor⟩2\n",
+            "let count:i⟨cursor⟩nt = 1\n",
+        ] {
+            let hover = hover_at(fixture).unwrap_or_else(|| panic!("no hover for: {fixture:?}"));
+
+            assert!(
+                hover.contents.starts_with("```nx\n") && hover.contents.ends_with("\n```"),
+                "for {fixture:?}, got: {}",
+                hover.contents
+            );
+        }
+    }
+
+    /// An annotation with nothing written in it names no type.
+    #[test]
+    fn hover_over_an_empty_type_annotation_returns_no_result() {
+        assert!(
+            hover_at_incomplete("let value:⟨cursor⟩ = 1\n").is_none(),
+            "an empty annotation reported hover"
+        );
+    }
+
+    /// Spec: "A position inside no identifiable construct yields no contextual result".
+    ///
+    /// A position in ordinary whitespace is not a property, value, or type position, so it falls
+    /// back to the general completion set rather than to a contextual one.
+    #[test]
+    fn a_position_in_no_construct_offers_no_contextual_completions() {
+        let (source, position) = position_for(&format!("{PANEL}⟨cursor⟩\n"), CURSOR);
+        let snapshot = snapshot_for("nx://tenant/form.nx", &source, 1);
+        let completions = snapshot
+            .completions(&DocumentUri::from("nx://tenant/form.nx"), position)
+            .expect("completions");
+
+        assert!(
+            completions.items.iter().all(|item| !matches!(
+                item.kind,
+                CompletionItemKind::Member | CompletionItemKind::Property
+            )),
+            "got: {:?}",
+            completions.items
+        );
+    }
+
+    /// Spec: "Hover on unknown syntax returns no result".
+    #[test]
+    fn hover_on_a_keyword_returns_no_result() {
+        assert!(hover_at("l⟨cursor⟩et root() = 1\n").is_none());
+    }
+
+    /// Spec: "Hover on an expression with no inferred type returns no result".
+    #[test]
+    fn hover_inside_a_declaration_with_a_syntax_error_returns_no_result() {
+        assert!(hover_at_incomplete("let broken( = { mis⟨cursor⟩sing }\n").is_none());
+    }
+
+    // Malformed states the design's first Risk enumerates. These assert only that a position query
+    // answers at all — tree-sitter's recovery is what is under test, not any particular answer.
+
+    #[test]
+    fn malformed_documents_answer_position_queries_without_panicking() {
+        for fixture in [
+            // An unterminated tag.
+            "let <Panel mode:string /> = <div />\n<Panel ⟨cursor⟩\n",
+            // An empty property slot on its own line.
+            "let <Panel mode:string /> = <div />\n<Panel\n  ⟨cursor⟩\n/>\n",
+            // `name=` with no value.
+            "let <Panel mode:string /> = <div />\n<Panel mode=⟨cursor⟩ />\n",
+            // An annotation with no type.
+            "let value:⟨cursor⟩\n",
+            // An annotation with no type, in a signature.
+            "let <Panel mode:⟨cursor⟩ /> = <div />\n",
+        ] {
+            let (source, position) = position_for(fixture, CURSOR);
+            let snapshot = snapshot_for("nx://tenant/form.nx", &source, 1);
+            let uri = DocumentUri::from("nx://tenant/form.nx");
+
+            snapshot.completions(&uri, position).expect("completions");
+            snapshot.hover(&uri, position).expect("hover");
+        }
+    }
+
+    /// The parity helper has to be able to fail, or the parity tests written with it prove
+    /// nothing. Two single-line spellings of the same tag agree; two genuinely different
+    /// positions do not.
+    #[test]
+    fn parity_helper_distinguishes_agreeing_and_disagreeing_positions() {
+        const DECLARATIONS: &str =
+            "type Fit = fill | contain | cover\nlet <Img fit:Fit /> = <img />\n";
+
+        assert_same_completions(
+            &format!("{DECLARATIONS}<Img fit=⟨cursor⟩ />\n"),
+            &format!("{DECLARATIONS}<Img  fit=⟨cursor⟩ />\n"),
+            CURSOR,
+        );
+
+        let disagreement = std::panic::catch_unwind(|| {
+            assert_same_completions(
+                &format!("{DECLARATIONS}<Img fit=⟨cursor⟩ />\n"),
+                &format!("{DECLARATIONS}⟨cursor⟩\n"),
+                CURSOR,
+            );
+        });
+        assert!(
+            disagreement.is_err(),
+            "a property value and a top-level position must not offer the same completions"
+        );
+    }
+
+    #[test]
+    fn component_property_completions_omit_supplied_properties() {
+        let labels = labels_at(
+            "\nlet <Card title:string subtitle:string /> = <div>{title}</div>\n<Card title=\"Hello\" ⟨cursor⟩/>\n",
+        );
+
+        assert!(!labels.contains(&"title".to_string()), "got: {labels:?}");
+        assert!(labels.contains(&"subtitle".to_string()), "got: {labels:?}");
     }
 }

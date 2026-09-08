@@ -13,6 +13,39 @@ type UserId = string
 type EventHandler = (string) => void
 ```
 
+## Numeric Literals
+The numeric primitives are `int`, `int32`, `int64`, `float32` and `float64`. An integer literal
+infers `int` and a literal with a decimal point infers `float64`, but where a floating-point type is
+declared, an integer literal takes that type instead — so a whole number needs no `.0`.
+
+```nx
+type Box = { width: float64  height: float64  opacity: float64 = 1 }
+
+let square = <Box width=24 height=24 opacity=0.5 />
+```
+
+`width=24` and `width=24.0` are the same value: the literal is converted, not merely accepted, so
+both produce identical output. The declaration decides, which means the rule applies wherever one is
+in scope — property bindings, defaults, annotated `let` bindings, arguments, and list elements — and
+nowhere else. An integer literal with nothing expecting a float is still an `int`:
+
+```nx
+let count = 24            // int, because nothing here declares otherwise
+let ratio: float64 = 24   // float64, because the annotation says so
+```
+
+Two limits are deliberate. A literal that cannot be represented exactly in the target float type is
+rejected rather than rounded, and the rule covers literals only: a value already typed `int` is not
+converted, because whether that conversion loses anything cannot be known until it runs.
+
+```nx
+// Rejected: the value is not exactly representable as a float64.
+let exact: float64 = 9007199254740993
+
+// Rejected: `n` is an int-typed expression, not a literal.
+let scaled(n: int) = { <Box width={n} /> }
+```
+
 ## Record Types
 Record types use `type Name = { ... }` declarations. Record inheritance is limited to single-base
 inheritance from abstract records.

@@ -193,6 +193,10 @@ PublishScripts/
 **/[Pp]ackages/*
 # except build/, which is used as an MSBuild target.
 !**/[Pp]ackages/build/
+# The repository's own npm packages live under /packages; only their outputs are ignored.
+!/packages/*
+/packages/*/dist/
+/packages/*/node_modules/
 # Uncomment if necessary however generally it will be regenerated when needed
 #!**/[Pp]ackages/repositories.config
 # NuGet v3's project.json files produces more ignorable files

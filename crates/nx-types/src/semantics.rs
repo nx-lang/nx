@@ -36,6 +36,23 @@ pub fn is_object_type(ty: &Type) -> bool {
     matches!(ty, Type::Named(named) if named.name.as_str() == "object")
 }
 
+/// The floating-point primitive an integer literal written at this site would take, if any.
+///
+/// <para>`None` for every other expected type, and that breadth is the point: `object` accepts any
+/// value, and an unresolved type variable has not decided what it accepts yet. Converting a literal
+/// on either basis would change the value a host receives on the strength of an expectation that
+/// was never a floating-point one.</para>
+///
+/// <para>A list-typed site answers with its element type because a scalar binds there by coercion,
+/// so the element type is the expectation a literal written at that site actually meets.</para>
+pub fn float_literal_target(expected: &Type) -> Option<Primitive> {
+    match expected.strip_nullable() {
+        Type::Primitive(primitive) if primitive.is_float() => Some(*primitive),
+        Type::Array(element) => float_literal_target(element),
+        _ => None,
+    }
+}
+
 pub fn type_satisfies_expected(actual: &Type, expected: &Type) -> bool {
     actual.is_compatible_with(expected) || is_object_type(expected)
 }
@@ -105,7 +122,8 @@ fn builtin_type(name: &Name) -> Option<Type> {
         "float32" => Some(Type::float32()),
         "float64" => Some(Type::float64()),
         "boolean" => Some(Type::boolean()),
-        "void" => Some(Type::void()),
+        // `void` is deliberately absent. The unit type is inference-internal: it is what an `if`
+        // with no `else` takes, and nothing in NX source needs to name it.
         _ => None,
     }
 }
@@ -225,7 +243,13 @@ mod tests {
         assert_eq!(builtin_type(&Name::new("float64")), Some(Type::float64()));
         assert_eq!(builtin_type(&Name::new("boolean")), Some(Type::boolean()));
         assert_eq!(builtin_type(&Name::new("string")), Some(Type::string()));
-        assert_eq!(builtin_type(&Name::new("void")), Some(Type::void()));
+    }
+
+    #[test]
+    fn test_void_is_not_a_builtin_type() {
+        // The unit type still exists and still renders as `void`; it is only unspellable.
+        assert_eq!(builtin_type(&Name::new("void")), None);
+        assert_eq!(Type::void().to_string(), "void");
     }
 
     #[test]
@@ -247,6 +271,50 @@ mod tests {
         assert!(is_object_type(&Type::named("object")));
         assert!(!is_object_type(&Type::named("Object")));
         assert!(!is_object_type(&Type::named("OBJECT")));
+    }
+
+    #[test]
+    fn test_float_literal_target_finds_each_float_width() {
+        assert_eq!(
+            float_literal_target(&Type::float64()),
+            Some(Primitive::Float64)
+        );
+        assert_eq!(
+            float_literal_target(&Type::float32()),
+            Some(Primitive::Float32)
+        );
+    }
+
+    #[test]
+    fn test_float_literal_target_sees_through_nullable_and_list() {
+        assert_eq!(
+            float_literal_target(&Type::nullable(Type::float64())),
+            Some(Primitive::Float64)
+        );
+        assert_eq!(
+            float_literal_target(&Type::array(Type::float32())),
+            Some(Primitive::Float32)
+        );
+        assert_eq!(
+            float_literal_target(&Type::nullable(Type::array(
+                Type::nullable(Type::float64())
+            ))),
+            Some(Primitive::Float64)
+        );
+    }
+
+    #[test]
+    fn test_float_literal_target_declines_every_non_float_expectation() {
+        // `object` accepts anything and a type variable has not decided yet; converting on either
+        // basis would change the value on the strength of an expectation nobody made.
+        assert_eq!(float_literal_target(&Type::named("object")), None);
+        assert_eq!(float_literal_target(&Type::Variable(0)), None);
+        assert_eq!(float_literal_target(&Type::int()), None);
+        assert_eq!(float_literal_target(&Type::int32()), None);
+        assert_eq!(float_literal_target(&Type::string()), None);
+        assert_eq!(float_literal_target(&Type::boolean()), None);
+        assert_eq!(float_literal_target(&Type::named("Thickness")), None);
+        assert_eq!(float_literal_target(&Type::array(Type::int())), None);
     }
 
     #[test]

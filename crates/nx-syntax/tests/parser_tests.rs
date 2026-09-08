@@ -11,7 +11,7 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use tree_helpers::{contains_kind, count_kind, find_first_kind};
+use tree_helpers::{contains_kind, contains_missing, count_kind, find_first_kind};
 
 /// Helper to resolve test fixture paths (works from both crate and workspace root)
 fn fixture_path(relative: &str) -> PathBuf {
@@ -1245,6 +1245,239 @@ fn test_parse_text_and_embed_braced_lists() {
 }
 
 #[test]
+fn test_parse_empty_braced_value_at_annotated_let() {
+    let source = "let value:string[] = {}";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "Empty braced value should parse. Errors: {:?}",
+        result.errors
+    );
+
+    let root = result.root().expect("Should have root node");
+    let braced = find_first_kind(&root, SyntaxKind::VALUES_BRACED_EXPRESSION)
+        .expect("Expected values braced expression");
+    assert_eq!(
+        count_kind(&braced, SyntaxKind::VALUE_LIST_ITEM_EXPRESSION),
+        0,
+        "Empty braces should have no list items"
+    );
+    // The real assertion: before the empty form was admitted this source still produced a
+    // `values_braced_expression`, but only because recovery inserted a zero-width MISSING
+    // identifier inside it. Absence of that node is what distinguishes parsing from recovering.
+    assert!(
+        !contains_missing(&braced),
+        "Empty braces should parse outright, not by inserting a missing node"
+    );
+}
+
+#[test]
+fn test_parse_empty_braced_value_in_property_position() {
+    let source = "let c = <Img fits={} />";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "Empty braced property value should parse. Errors: {:?}",
+        result.errors
+    );
+
+    let root = result.root().expect("Should have root node");
+    let braced = find_first_kind(&root, SyntaxKind::VALUES_BRACED_EXPRESSION)
+        .expect("Expected values braced expression");
+    assert_eq!(
+        count_kind(&braced, SyntaxKind::VALUE_LIST_ITEM_EXPRESSION),
+        0,
+        "Empty braces should have no list items"
+    );
+    assert!(!contains_missing(&braced), "Expected no recovery node");
+}
+
+#[test]
+fn test_parse_empty_braced_value_in_markup_child_position() {
+    let source = "component <N /> = { <List>{}</List> }";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "Empty braced child content should parse. Errors: {:?}",
+        result.errors
+    );
+
+    let root = result.root().expect("Should have root node");
+    assert!(
+        contains_kind(&root, SyntaxKind::VALUES_BRACED_EXPRESSION),
+        "Markup child content should be a values braced expression"
+    );
+    assert!(!contains_missing(&root), "Expected no recovery node");
+}
+
+#[test]
+fn test_parse_empty_element_body_is_still_rejected() {
+    // `elements_braced_expression` is a separate rule over a `repeat1`, so admitting the empty
+    // values brace deliberately does not reach element-position bodies.
+    let source = "component <N r:boolean /> = { <div>if r {} else { <B/> }</div> }";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.has_errors(),
+        "An empty element-position `if` body should still be a parse error"
+    );
+}
+
+#[test]
+fn test_parse_empty_for_body_is_still_rejected() {
+    let source = "component <N /> = { <div>for x in xs {}</div> }";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.has_errors(),
+        "An empty element-position `for` body should still be a parse error"
+    );
+}
+
+/// The empty form reaches every rule that references `values_braced_expression`, not only the
+/// positions the design set out to change. Value-position `if` branches, a value-position `for`
+/// body, and match and condition arm bodies are all that rule, so `{}` parses in each -- a parse
+/// error in all of them before this change. They are pinned here because what parses is what the
+/// type checker then has to have an answer for.
+#[test]
+fn test_parse_empty_braced_value_in_value_position_control_flow() {
+    let sources = [
+        "let pick(c:boolean): string[] = {if c {\"a\" \"b\"} else {}}",
+        "let pick(c:boolean): string[] = {if { c => {} else => {\"a\" \"b\"} }}",
+        "let xs:string[][] = {for y in ys {}}",
+    ];
+
+    for source in sources {
+        let result = parse_str(source, "test.nx");
+        assert!(
+            result.is_ok(),
+            "`{{}}` should parse in a value-position body: {source}. Errors: {:?}",
+            result.errors
+        );
+
+        let root = result.root().expect("Should have root node");
+        assert!(
+            !contains_missing(&root),
+            "Expected no recovery node in: {source}"
+        );
+    }
+}
+
+#[test]
+fn test_parse_empty_interpolation_is_still_rejected() {
+    let source = "component <N /> = { <p:html>Hi @{}</p> }";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.has_errors(),
+        "An empty interpolation `@{{}}` should still be a parse error"
+    );
+}
+
+#[test]
+fn test_parse_empty_braced_value_as_a_call_argument() {
+    // A call argument takes a braced value on its own rule, so a function is passed a list the
+    // same way a property is bound one.
+    let source = "let n = {count({})}";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "An empty braced call argument should parse. Errors: {:?}",
+        result.errors
+    );
+
+    let root = result.root().expect("Should have root node");
+    let call = find_first_kind(&root, SyntaxKind::CALL_EXPRESSION).expect("Expected a call");
+    let argument = find_first_kind(&call, SyntaxKind::VALUES_BRACED_EXPRESSION)
+        .expect("Expected the argument to be a values braced expression");
+    assert_eq!(
+        count_kind(&argument, SyntaxKind::VALUE_LIST_ITEM_EXPRESSION),
+        0,
+        "Empty braces should have no list items"
+    );
+    assert!(!contains_missing(&argument), "Expected no recovery node");
+}
+
+#[test]
+fn test_parse_braced_list_as_a_call_argument() {
+    let source = "let n = {count({\"a\" \"b\"})}";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "A braced list call argument should parse. Errors: {:?}",
+        result.errors
+    );
+
+    let root = result.root().expect("Should have root node");
+    let call = find_first_kind(&root, SyntaxKind::CALL_EXPRESSION).expect("Expected a call");
+    let argument = find_first_kind(&call, SyntaxKind::VALUES_BRACED_EXPRESSION)
+        .expect("Expected the argument to be a values braced expression");
+    assert_eq!(
+        count_kind(&argument, SyntaxKind::VALUE_LIST_ITEM_EXPRESSION),
+        2,
+        "The braced argument should keep both items"
+    );
+}
+
+#[test]
+fn test_parse_braced_values_in_every_argument_position() {
+    // Each argument is admitted independently, so a braced value is not restricted to the first
+    // one and mixes freely with ordinary expressions.
+    let source = "let n = {pick({}, x, {\"a\" \"b\"})}";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.is_ok(),
+        "Braced values should parse in any argument position. Errors: {:?}",
+        result.errors
+    );
+
+    let root = result.root().expect("Should have root node");
+    let call = find_first_kind(&root, SyntaxKind::CALL_EXPRESSION).expect("Expected a call");
+    assert_eq!(
+        count_kind(&call, SyntaxKind::VALUES_BRACED_EXPRESSION),
+        2,
+        "Expected both braced arguments"
+    );
+}
+
+#[test]
+fn test_parse_braced_value_is_still_not_a_list_item() {
+    // Admitting the brace as an argument deliberately does not admit it as a list item: a list is
+    // still not an item of a list, at any arity.
+    for source in [
+        "let items = {{\"a\"} b}",
+        "let items = {{} b}",
+        "let v = <Box items={{\"a\" \"b\"}} />",
+        "let v = <Box items={{}} />",
+    ] {
+        let result = parse_str(source, "test.nx");
+        assert!(
+            result.has_errors(),
+            "A braced value nested in a braced value should still be a parse error: {}",
+            source
+        );
+    }
+}
+
+#[test]
+fn test_parse_braced_value_is_still_not_a_list_item_inside_an_argument() {
+    // The argument rule admits one brace, not a brace whose items are braces.
+    let source = "let n = {count({{\"a\"} \"b\"})}";
+    let result = parse_str(source, "test.nx");
+
+    assert!(
+        result.has_errors(),
+        "A braced list item inside a braced argument should still be a parse error"
+    );
+}
+
+#[test]
 fn test_parse_singleton_binary_braced_expression() {
     let source = "let arithmetic = {a - b}";
     let result = parse_str(source, "test.nx");
@@ -1396,12 +1629,14 @@ fn test_parse_embed_braced_element_list() {
 
 #[test]
 fn test_parse_rejects_nested_braced_value_sequences() {
+    // Not pending: at arity one the brace is a scalar, so a nested brace would collapse and a
+    // one-row list of lists would have no spelling while a two-row one did.
     let source = "let items = {{a b} {c d}}";
     let result = parse_str(source, "test.nx");
 
     assert!(
         !result.is_ok(),
-        "Nested braced value sequences should fail to parse until the grammar allows them explicitly"
+        "A braced value is not an item of a braced value: a list is not an item of a list"
     );
     assert!(
         !result.errors.is_empty(),
@@ -1410,18 +1645,22 @@ fn test_parse_rejects_nested_braced_value_sequences() {
 }
 
 #[test]
-fn test_parse_rejects_empty_braced_expression() {
+fn test_parse_accepts_empty_braced_expression() {
+    // Superseded `test_parse_rejects_empty_braced_expression`: `{}` is now the spelling of the
+    // empty list. Typing it still requires an expected type, but that is a type-checking rule.
     let source = "let items = {}";
     let result = parse_str(source, "test.nx");
 
     assert!(
-        !result.is_ok(),
-        "Empty braced expressions should fail to parse"
+        result.is_ok(),
+        "Empty braced expressions should parse. Errors: {:?}",
+        result.errors
     );
-    assert!(
-        !result.errors.is_empty(),
-        "Expected parse errors for empty braced expressions"
-    );
+
+    let root = result.root().expect("Should have root node");
+    let braced = find_first_kind(&root, SyntaxKind::VALUES_BRACED_EXPRESSION)
+        .expect("Expected values braced expression");
+    assert!(!contains_missing(&braced), "Expected no recovery node");
 }
 
 #[test]

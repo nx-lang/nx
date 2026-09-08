@@ -242,7 +242,6 @@ module.exports = grammar({
       'float32',
       'float64',
       'boolean',
-      'void',
       'object',
     ),
 
@@ -423,12 +422,14 @@ module.exports = grammar({
 
     contextual_name: $ => $.identifier,
 
+    // Zero items is admitted so an empty list has a spelling: `{}`. It stays on this rule only --
+    // `elements_braced_expression` and `embed_braced_expression` still require at least one item.
     values_braced_expression: $ => seq(
       '{',
-      choice(
+      optional(choice(
         prec.dynamic(2, $.value_expression),
         prec.dynamic(1, $._value_list_expression),
-      ),
+      )),
       '}',
     ),
 
@@ -511,11 +512,20 @@ module.exports = grammar({
       field('callee', $.value_expression),
       token.immediate('('),
       optional(seq(
-        $.value_expression,
-        repeat(seq(',', $.value_expression)),
+        $._call_argument,
+        repeat(seq(',', $._call_argument)),
       )),
       ')',
     )),
+
+    // An argument may be a braced value, so a function is passed a list the same way a property
+    // is bound one: `f({})`, `f({a})`, `f({a b})`. The brace is admitted here and nowhere else
+    // new -- `value_list_item_expression` still excludes it, so a list is still not an item of a
+    // list. Hidden, so the argument's own node reaches lowering directly.
+    _call_argument: $ => choice(
+      $.value_expression,
+      $.values_braced_expression,
+    ),
 
     member_access_expression: $ => prec.left(140, seq(
       field('target', $.value_expression),

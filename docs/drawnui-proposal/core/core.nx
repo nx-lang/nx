@@ -100,17 +100,17 @@ export type ViewBox = {
 // NX gap: the wire form also allows one scalar meaning all four sides, so `padding: 20` here has to
 // name every side. That shorthand is most of the token cost of a generated layout.
 export type Insets = {
-  top: float64 = 0.0
-  right: float64 = 0.0
-  bottom: float64 = 0.0
-  left: float64 = 0.0
+  top: float64 = 0
+  right: float64 = 0
+  bottom: float64 = 0
+  left: float64 = 0
 }
 
 export type CornerRadii = {
-  topLeft: float64 = 0.0
-  topRight: float64 = 0.0
-  bottomRight: float64 = 0.0
-  bottomLeft: float64 = 0.0
+  topLeft: float64 = 0
+  topRight: float64 = 0
+  bottomRight: float64 = 0
+  bottomLeft: float64 = 0
 }
 
 
@@ -127,7 +127,7 @@ export type GradientUnits = objectBoundingBox | userSpaceOnUse
 export type GradientStop = {
   offset: float64                   // 0..1
   color: Color
-  opacity: float64 = 1.0            // 0..1
+  opacity: float64 = 1              // 0..1
 }
 
 // At least two stops, in non-decreasing offset order; renderers clamp offsets but must not reorder.
@@ -168,19 +168,19 @@ export type LineJoin = miter | round | bevel
 // any position, so "defaults to empty" is spelled nullable.
 export type Stroke = {
   paint: Paint
-  width: float64 = 1.0
+  width: float64 = 1
   lineCap: LineCap = butt
   lineJoin: LineJoin = miter
-  miterLimit: float64 = 4.0
+  miterLimit: float64 = 4
   dashArray: float64[]?
-  dashOffset: float64 = 0.0
+  dashOffset: float64 = 0
 }
 
 export type Shadow = {
   color: Color
-  offsetX: float64 = 0.0
-  offsetY: float64 = 0.0
-  blur: float64 = 0.0               // >= 0
+  offsetX: float64 = 0
+  offsetY: float64 = 0
+  blur: float64 = 0                 // >= 0
 }
 
 // Equivalent to an SVG transform list read left to right: matrices concatenate in array order, so
@@ -191,14 +191,14 @@ export type Shadow = {
 export type Transform =
   | translate { x: float64 y: float64 }
   | scale { x: float64 y: float64? }        // null y means uniform scale
-  | rotate { degrees: float64 cx: float64 = 0.0 cy: float64 = 0.0 }
+  | rotate { degrees: float64 cx: float64 = 0 cy: float64 = 0 }
   | skewX { degrees: float64 }
   | skewY { degrees: float64 }
   | matrix { a: float64 b: float64 c: float64 d: float64 e: float64 f: float64 }
 
 export type Border = {
   paint: Paint
-  width: float64 = 1.0
+  width: float64 = 1
 }
 
 

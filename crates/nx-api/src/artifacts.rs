@@ -56,6 +56,12 @@ pub struct LibraryArtifact {
     /// A consumer reads a declaration's type references in the namespace of the module that wrote
     /// them, so it needs the answers that module reached, not only its own items.
     pub namespaces: FxHashMap<String, Arc<ModuleNamespace>>,
+    /// The source text of each of this library's modules, keyed by module identity.
+    ///
+    /// An editor describing a library declaration reads its signature from the text it was
+    /// written in, the same way it reads a workspace declaration, so the text has to survive
+    /// the load rather than be re-read from the directory on every query.
+    pub sources: FxHashMap<String, Arc<str>>,
     pub dependency_roots: Vec<PathBuf>,
     pub diagnostics: Vec<Diagnostic>,
     pub fingerprint: u64,
@@ -325,6 +331,19 @@ impl ProgramBuildContext {
         }
 
         self.registry.get_loaded_library(root)
+    }
+
+    /// Every loaded library this context makes visible, ordered by root path.
+    ///
+    /// This is the set an import in this context can select from; a tool that describes what a
+    /// program in this context can name reads the same set.
+    pub fn visible_libraries(&self) -> Vec<Arc<LibraryArtifact>> {
+        let mut roots = self.visible_roots.iter().collect::<Vec<_>>();
+        roots.sort();
+        roots
+            .into_iter()
+            .filter_map(|root| self.registry.get_loaded_library(root))
+            .collect()
     }
 
     fn visible_library_by_logical_identity(&self, identity: &str) -> LogicalLibraryResolution {
@@ -632,6 +651,16 @@ fn build_library_artifact_with_registry(
         modules.push(artifact);
     }
 
+    let sources = source_files
+        .iter()
+        .map(|source_file| {
+            (
+                source_file.file_name.clone(),
+                Arc::<str>::from(source_file.source.as_str()),
+            )
+        })
+        .collect();
+
     Ok(LibraryArtifact {
         root_path,
         modules,
@@ -640,6 +669,7 @@ fn build_library_artifact_with_registry(
         exported_items,
         visible_to_library_items,
         namespaces,
+        sources,
         dependency_roots,
         diagnostics,
         fingerprint: hasher.finish(),
@@ -3960,7 +3990,7 @@ let root() = { <Draw s={<Circle r=1 />} /> }"#
                 "widgets.nx",
                 br#"export abstract type Shape = { label: string? }
 export type Circle extends Shape = { r: int }
-export let <Draw s: Shape = {<Circle r=0 />} /> = <div r={s.r} />"#
+export let <Draw s: Shape = {<Circle r=0 />} /> = <div label={s.label} />"#
                     .to_vec(),
             ),
         ]);
@@ -3995,7 +4025,7 @@ let root() = { <Draw s={<Circle r=1 />} /> }"#
                 "widgets.nx",
                 br#"export abstract type Shape = { label: string? }
 export type Circle extends Shape = { r: int }
-export let <Draw s: Shape = {<Circle r=0 />} /> = <div r={s.r} />"#
+export let <Draw s: Shape = {<Circle r=0 />} /> = <div label={s.label} />"#
                     .to_vec(),
             ),
         ]);

@@ -45,9 +45,33 @@ export interface NativeNxProgramArtifact {
   dispose(): void;
 }
 
+export interface NativeLanguageDocument {
+  readonly uri: string;
+  readonly source: string;
+  readonly identity?: string;
+  readonly version?: number;
+}
+
+export interface NativeNxLanguageSnapshot {
+  hover(uri: string, line: number, character: number): string | null;
+  completions(uri: string, line: number, character: number): string;
+  diagnostics(): string;
+  documentSymbols(uri: string): string;
+  dispose(): void;
+}
+
+export interface NativeNxLanguageSnapshotConstructor {
+  new (documents: readonly NativeLanguageDocument[]): NativeNxLanguageSnapshot;
+  withBuildContext(
+    documents: readonly NativeLanguageDocument[],
+    buildContext: NativeNxProgramBuildContext
+  ): NativeNxLanguageSnapshot;
+}
+
 export interface NativeBinding {
   readonly NativeNxWorkspace: NativeNxWorkspaceConstructor;
   readonly NativeNxLibraryRegistry: NativeNxLibraryRegistryConstructor;
+  readonly NativeNxLanguageSnapshot: NativeNxLanguageSnapshotConstructor;
 }
 
 let binding: NativeBinding | undefined;

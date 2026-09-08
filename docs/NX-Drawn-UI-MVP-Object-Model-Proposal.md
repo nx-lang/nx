@@ -257,17 +257,17 @@ type ViewBox = {
 }
 
 type Insets = {
-  top: float64 = 0.0
-  right: float64 = 0.0
-  bottom: float64 = 0.0
-  left: float64 = 0.0
+  top: float64 = 0
+  right: float64 = 0
+  bottom: float64 = 0
+  left: float64 = 0
 }
 
 type CornerRadii = {
-  topLeft: float64 = 0.0
-  topRight: float64 = 0.0
-  bottomRight: float64 = 0.0
-  bottomLeft: float64 = 0.0
+  topLeft: float64 = 0
+  topRight: float64 = 0
+  bottomRight: float64 = 0
+  bottomLeft: float64 = 0
 }
 ```
 
@@ -289,7 +289,7 @@ type GradientUnits = objectBoundingBox | userSpaceOnUse
 type GradientStop = {
   offset: float64          // 0..1
   color: Color
-  opacity: float64 = 1.0   // 0..1
+  opacity: float64 = 1     // 0..1
 }
 
 type Paint =
@@ -330,32 +330,32 @@ type LineJoin = miter | round | bevel
 
 type Stroke = {
   paint: Paint
-  width: float64 = 1.0
+  width: float64 = 1
   lineCap: LineCap = butt
   lineJoin: LineJoin = miter
-  miterLimit: float64 = 4.0
+  miterLimit: float64 = 4
   dashArray: float64[]?
-  dashOffset: float64 = 0.0
+  dashOffset: float64 = 0
 }
 
 type Shadow = {
   color: Color
-  offsetX: float64 = 0.0
-  offsetY: float64 = 0.0
-  blur: float64 = 0.0      // >= 0
+  offsetX: float64 = 0
+  offsetY: float64 = 0
+  blur: float64 = 0        // >= 0
 }
 
 type Transform =
   | translate { x: float64 y: float64 }
   | scale { x: float64 y: float64? }        // null y means uniform scale
-  | rotate { degrees: float64 cx: float64 = 0.0 cy: float64 = 0.0 }
+  | rotate { degrees: float64 cx: float64 = 0 cy: float64 = 0 }
   | skewX { degrees: float64 }
   | skewY { degrees: float64 }
   | matrix { a: float64 b: float64 c: float64 d: float64 e: float64 f: float64 }
 
 type Border = {
   paint: Paint
-  width: float64 = 1.0
+  width: float64 = 1
 }
 ```
 
@@ -391,7 +391,7 @@ Every node inside a `Drawing` accepts `GraphicsCommonProps`, declared in NX as a
 
 ```nx
 abstract external component <GraphicsCommon
-  opacity: float64 = 1.0
+  opacity: float64 = 1
   transform: Transform[]?
   clipPath: string?
   accessibility: Accessibility?
@@ -607,16 +607,16 @@ Every Level 2 component, plus `nx.graphics.Drawing`, accepts these optional flat
 abstract external component <UiCommon
   width: Length = auto
   height: Length = auto
-  minWidth: float64 = 0.0
-  minHeight: float64 = 0.0
+  minWidth: float64 = 0
+  minHeight: float64 = 0
   maxWidth: float64?
   maxHeight: float64?
   margin: Insets?
   padding: Insets?
   alignSelf: AlignSelf = auto
   justifySelf: AlignSelf = auto
-  grow: float64 = 0.0
-  shrink: float64 = 1.0
+  grow: float64 = 0
+  shrink: float64 = 1
   gridColumn: int?
   gridRow: int?
   columnSpan: int = 1
@@ -626,7 +626,7 @@ abstract external component <UiCommon
   cornerRadius: CornerRadii?
   shadows: Shadow[]?
   clip: boolean = false
-  opacity: float64 = 1.0
+  opacity: float64 = 1
   accessibility: Accessibility?
 />
 ```
@@ -1130,23 +1130,23 @@ export type ViewBox = {
 }
 
 export type Insets = {
-  top: float64 = 0.0
-  right: float64 = 0.0
-  bottom: float64 = 0.0
-  left: float64 = 0.0
+  top: float64 = 0
+  right: float64 = 0
+  bottom: float64 = 0
+  left: float64 = 0
 }
 
 export type CornerRadii = {
-  topLeft: float64 = 0.0
-  topRight: float64 = 0.0
-  bottomRight: float64 = 0.0
-  bottomLeft: float64 = 0.0
+  topLeft: float64 = 0
+  topRight: float64 = 0
+  bottomRight: float64 = 0
+  bottomLeft: float64 = 0
 }
 
 export type GradientStop = {
   offset: float64                       // 0..1
   color: Color
-  opacity: float64 = 1.0                // 0..1
+  opacity: float64 = 1                  // 0..1
 }
 
 export type Paint =
@@ -1172,32 +1172,32 @@ export type Paint =
 
 export type Stroke = {
   paint: Paint
-  width: float64 = 1.0
+  width: float64 = 1
   lineCap: LineCap = butt
   lineJoin: LineJoin = miter
-  miterLimit: float64 = 4.0
+  miterLimit: float64 = 4
   dashArray: float64[]?
-  dashOffset: float64 = 0.0
+  dashOffset: float64 = 0
 }
 
 export type Shadow = {
   color: Color
-  offsetX: float64 = 0.0
-  offsetY: float64 = 0.0
-  blur: float64 = 0.0                   // >= 0
+  offsetX: float64 = 0
+  offsetY: float64 = 0
+  blur: float64 = 0                     // >= 0
 }
 
 export type Transform =
   | translate { x: float64 y: float64 }
   | scale { x: float64 y: float64? }        // null y means uniform scale
-  | rotate { degrees: float64 cx: float64 = 0.0 cy: float64 = 0.0 }
+  | rotate { degrees: float64 cx: float64 = 0 cy: float64 = 0 }
   | skewX { degrees: float64 }
   | skewY { degrees: float64 }
   | matrix { a: float64 b: float64 c: float64 d: float64 e: float64 f: float64 }
 
 export type Border = {
   paint: Paint
-  width: float64 = 1.0
+  width: float64 = 1
 }
 
 export type ImageSource =
@@ -1232,16 +1232,16 @@ export type TrackSize =
 export abstract external component <UiCommon
   width: Length = auto
   height: Length = auto
-  minWidth: float64 = 0.0
-  minHeight: float64 = 0.0
+  minWidth: float64 = 0
+  minHeight: float64 = 0
   maxWidth: float64?
   maxHeight: float64?
   margin: Insets?
   padding: Insets?
   alignSelf: AlignSelf = auto
   justifySelf: AlignSelf = auto
-  grow: float64 = 0.0
-  shrink: float64 = 1.0
+  grow: float64 = 0
+  shrink: float64 = 1
   gridColumn: int?
   gridRow: int?
   columnSpan: int = 1
@@ -1251,12 +1251,12 @@ export abstract external component <UiCommon
   cornerRadius: CornerRadii?
   shadows: Shadow[]?
   clip: boolean = false
-  opacity: float64 = 1.0
+  opacity: float64 = 1
   accessibility: Accessibility?
 />
 
 export external component <HStack extends UiCommon
-  gap: float64 = 0.0
+  gap: float64 = 0
   justify: Distribution = start
   align: Alignment = stretch
   wrap: boolean = false
@@ -1264,7 +1264,7 @@ export external component <HStack extends UiCommon
 />
 
 export external component <VStack extends UiCommon
-  gap: float64 = 0.0
+  gap: float64 = 0
   justify: Distribution = start
   align: Alignment = stretch
   wrap: boolean = false
@@ -1274,8 +1274,8 @@ export external component <VStack extends UiCommon
 export external component <Grid extends UiCommon
   columns: TrackSize[]
   rows: TrackSize[]?
-  columnGap: float64 = 0.0
-  rowGap: float64 = 0.0
+  columnGap: float64 = 0
+  rowGap: float64 = 0
   justifyItems: Alignment = stretch
   alignItems: Alignment = stretch
   content children: Element[]?
@@ -1305,7 +1305,7 @@ export external component <Card extends UiCommon
 export external component <Divider extends UiCommon
   axis: Axis = horizontal
   color: Color?
-  thickness: float64 = 1.0
+  thickness: float64 = 1
 />
 
 export external component <Text extends UiCommon
@@ -1318,7 +1318,7 @@ export external component <Text extends UiCommon
   fontStyle: FontStyle = normal
   textAlign: TextAlign = start
   lineHeight: float64?
-  letterSpacing: float64 = 0.0
+  letterSpacing: float64 = 0
   maxLines: int?
   overflow: TextOverflow = clip
   content text: string
@@ -1356,7 +1356,7 @@ export type ContentAlignment = {
 }
 
 export abstract external component <GraphicsCommon
-  opacity: float64 = 1.0
+  opacity: float64 = 1
   transform: Transform[]?
   clipPath: string?
   accessibility: Accessibility?
@@ -1381,11 +1381,11 @@ export external component <Group extends GraphicsCommon
 />
 
 export external component <Rect extends ShapeCommon
-  x: float64 = 0.0
-  y: float64 = 0.0
+  x: float64 = 0
+  y: float64 = 0
   width: float64
   height: float64
-  rx: float64 = 0.0
+  rx: float64 = 0
   ry: float64?                          // null means "same as rx"
 />
 
@@ -1425,12 +1425,12 @@ export external component <Text extends GraphicsCommon
   x: float64
   y: float64
   fontFamily: string?
-  fontSize: float64 = 16.0
-  fontWeight: float64 = 400.0
+  fontSize: float64 = 16
+  fontWeight: float64 = 400
   fontStyle: FontStyle = normal
   textAnchor: TextAnchor = start
   dominantBaseline: DominantBaseline = auto
-  letterSpacing: float64 = 0.0
+  letterSpacing: float64 = 0
   fill: Paint?
   stroke: Stroke?
   shadows: Shadow[]?
@@ -1438,8 +1438,8 @@ export external component <Text extends GraphicsCommon
 />
 
 export external component <Image extends GraphicsCommon
-  x: float64 = 0.0
-  y: float64 = 0.0
+  x: float64 = 0
+  y: float64 = 0
   width: float64
   height: float64
   source: ImageSource
@@ -1478,7 +1478,7 @@ A case that declares no fields, in a union that declares no base, is the excepti
 
 **A default cannot be an empty sequence.** `= []` and `= {}` are both rejected — a braced default must contain at least one item, and bracket-list literals are not accepted in default position at all. Every `T[]` property whose default is "empty" is therefore written `T[]?`. This is filed against NX as the `empty-list-spelling` change: an empty list has no source spelling at all, not merely none in default position, so it also cannot be round-tripped by the formatter.
 
-**A default cannot be a *qualified* case name.** `= Alignment.start` is a syntax error and must be braced as `= {Alignment.start}`. The bare forms are fine and are what Appendix A uses: `= -1.0` and `= start` both parse, because an unbraced value position takes a literal and a bare name resolves against the property's declared type. Integer literals still do not widen: `float64` properties must be written `= 0.0`, not `= 0`.
+**A default cannot be a *qualified* case name.** `= Alignment.start` is a syntax error and must be braced as `= {Alignment.start}`. The bare forms are fine and are what Appendix A uses: `= -1.0` and `= start` both parse, because an unbraced value position takes a literal and a bare name resolves against the property's declared type. An integer literal at a `float64` property is fine: `= 0` and `= 0.0` are accepted on the same terms, and Appendix A writes the shorter form.
 
 **No refinement or pattern constraints.** `ElementId`'s regex, `opacity`'s 0..1 range, `fontWeight`'s 1..1000, `columnSpan >= 1`, and "at least two gradient stops" are all invisible to NX's type system. They stay in the JSON Schema, which means the schema — not the NX declarations — remains the normative validator. The NX listing is the shape; the schema is the contract.
 
@@ -1490,7 +1490,7 @@ A case that declares no fields, in a union that declares no base, is the excepti
 
 Two further items are implementation gaps rather than language gaps, and both were reproduced against the toolchain in this repository:
 
-- **Prop defaults on an imported external component are not applied at the call site.** Given `lib/a.nx` with `export external component <Rect extends Base x: float64 = 0.0 y: float64 />` and `app/main.nx` with `<lib.Rect y={5.0} />`, analysis reports *"Element 'lib.Rect' requires property 'x'"*. The same declarations in one library check cleanly.
+- **Prop defaults on an imported external component are not applied at the call site.** Given `lib/a.nx` with `export external component <Rect extends Base x: float64 = 0 y: float64 />` and `app/main.nx` with `<lib.Rect y={5.0} />`, analysis reports *"Element 'lib.Rect' requires property 'x'"*. The same declarations in one library check cleanly.
 - **Props inherited from an imported abstract external base are not visible at the call site.** With the same two libraries, `<lib.Rect ... width={2.0} fill={"red"} />` reports *"Element 'lib.Rect' has no property 'width'"* and the same for `fill`, though both are declared on `Base`.
 
 Together these make the three-library layout in Appendix A uncheckable today: it is valid NX, and each library checks on its own, but a document that imports two catalogs cannot yet be type-checked against them. A single-library variant of the same catalog plus the §8.1 document does check end to end. Both should be filed against the NX toolchain before an NX-authored catalog is committed to.

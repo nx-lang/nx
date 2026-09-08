@@ -226,16 +226,33 @@ impl LoweringContext {
     /// Returns `None` for any other operand, so negation of a non-literal stays a unary operation.
     /// Folding everywhere — unbraced, braced, and inside a larger expression — keeps a single
     /// lowered representation for `-1.0`, `{-1.0}`, and the `-90` in `{-90 + rotation}`.
-    fn fold_negated_literal(&mut self, operand: ExprId) -> Option<ExprId> {
+    ///
+    /// <para>The operand is rewritten in place rather than replaced by a second expression. The
+    /// two spell one literal, and leaving the unnegated one in the arena would leave an expression
+    /// nothing references but a lookup by offset still finds — where it would shadow the folded
+    /// literal, being the narrower of the two.</para>
+    fn fold_negated_literal(&mut self, operand: ExprId, span: TextSpan) -> Option<ExprId> {
         let folded = match self.module.expr(operand) {
             Expr::Literal(Literal::Int(value)) => Literal::Int(value.wrapping_neg()),
             Expr::Literal(Literal::Float(value)) => Literal::Float(OrderedFloat(-value.0)),
             _ => return None,
         };
-        let ty = self.expr_type(operand);
-        let expr = self.alloc_expr(Expr::Literal(folded));
+        *self.module.expr_mut(operand) = Expr::Literal(folded);
+        // The span is the whole written form, `-` included: that is what the reader points at.
+        self.module.set_expr_span(operand, span);
+        Some(operand)
+    }
+
+    /// Allocates a literal with its type and the span it was written at.
+    ///
+    /// <para>`Expr::Literal` carries no span of its own, so a literal is located through the
+    /// module's span map like an identifier is. Without an entry there a literal cannot be found
+    /// by offset at all, which is what kept an editor from reporting the type of one.</para>
+    fn literal_expr(&mut self, literal: Literal, ty: TypeTag, span: TextSpan) -> ExprId {
+        let expr = self.alloc_expr(Expr::Literal(literal));
         self.set_expr_type(expr, ty);
-        Some(expr)
+        self.module.set_expr_span(expr, span);
+        expr
     }
 
     fn set_expr_type(&mut self, expr: ExprId, ty: TypeTag) {
@@ -405,6 +422,15 @@ impl LoweringContext {
     fn lower_sequence_expr_from_items(&mut self, node: SyntaxNode) -> ExprId {
         let items: Vec<_> = node.children().collect();
         match items.len() {
+            // `{}` is the empty list. Only the values brace admits zero items grammatically; a
+            // zero-item elements or embed brace can only be the product of error recovery, and
+            // stays an error expression so the recovered tree does not read as a valid empty list.
+            0 if node.kind() == SyntaxKind::VALUES_BRACED_EXPRESSION => {
+                self.alloc_expr(Expr::Array {
+                    elements: Vec::new(),
+                    span: node.span(),
+                })
+            }
             0 => self.error_expr(node.span()),
             1 => self.lower_expr(items[0]),
             _ => {
@@ -847,19 +873,17 @@ impl LoweringContext {
             // Literals
             SyntaxKind::STRING_LITERAL | SyntaxKind::STRING_EXPRESSION => {
                 let s = Self::unquote_string_literal(node.text());
-                let expr = self.alloc_expr(Expr::Literal(Literal::String(SmolStr::new(s))));
-                self.set_expr_type(expr, TypeTag::String);
-                expr
+                self.literal_expr(
+                    Literal::String(SmolStr::new(s)),
+                    TypeTag::String,
+                    node.span(),
+                )
             }
 
             SyntaxKind::INT_LITERAL => {
                 let text = node.text();
                 match text.parse::<i64>() {
-                    Ok(value) => {
-                        let expr = self.alloc_expr(Expr::Literal(Literal::Int(value)));
-                        self.set_expr_type(expr, TypeTag::Int);
-                        expr
-                    }
+                    Ok(value) => self.literal_expr(Literal::Int(value), TypeTag::Int, node.span()),
                     Err(_) => self.error_expr(node.span()),
                 }
             }
@@ -868,11 +892,7 @@ impl LoweringContext {
                 let text = node.text();
                 let digits = text.trim_start_matches("0x").trim_start_matches("0X");
                 match i64::from_str_radix(digits, 16) {
-                    Ok(value) => {
-                        let expr = self.alloc_expr(Expr::Literal(Literal::Int(value)));
-                        self.set_expr_type(expr, TypeTag::Int);
-                        expr
-                    }
+                    Ok(value) => self.literal_expr(Literal::Int(value), TypeTag::Int, node.span()),
                     Err(_) => self.error_expr(node.span()),
                 }
             }
@@ -882,13 +902,13 @@ impl LoweringContext {
             | SyntaxKind::REAL_LITERAL => {
                 let text = node.text();
                 if let Ok(value) = text.parse::<i64>() {
-                    let expr = self.alloc_expr(Expr::Literal(Literal::Int(value)));
-                    self.set_expr_type(expr, TypeTag::Int);
-                    expr
+                    self.literal_expr(Literal::Int(value), TypeTag::Int, node.span())
                 } else if let Ok(value) = text.parse::<f64>() {
-                    let expr = self.alloc_expr(Expr::Literal(Literal::Float(OrderedFloat(value))));
-                    self.set_expr_type(expr, TypeTag::Float64);
-                    expr
+                    self.literal_expr(
+                        Literal::Float(OrderedFloat(value)),
+                        TypeTag::Float64,
+                        node.span(),
+                    )
                 } else {
                     self.error_expr(node.span())
                 }
@@ -899,15 +919,11 @@ impl LoweringContext {
             | SyntaxKind::BOOLEAN_EXPRESSION => {
                 let text = node.text();
                 let value = text == "true";
-                let expr = self.alloc_expr(Expr::Literal(Literal::Boolean(value)));
-                self.set_expr_type(expr, TypeTag::Boolean);
-                expr
+                self.literal_expr(Literal::Boolean(value), TypeTag::Boolean, node.span())
             }
 
             SyntaxKind::NULL_LITERAL | SyntaxKind::NULL_EXPRESSION => {
-                let expr = self.alloc_expr(Expr::Literal(Literal::Null));
-                self.set_expr_type(expr, TypeTag::Null);
-                expr
+                self.literal_expr(Literal::Null, TypeTag::Null, node.span())
             }
 
             // Identifier
@@ -1040,7 +1056,7 @@ impl LoweringContext {
                     });
 
                 if op == UnOp::Neg {
-                    if let Some(folded) = self.fold_negated_literal(expr) {
+                    if let Some(folded) = self.fold_negated_literal(expr, node.span()) {
                         return folded;
                     }
                 }
@@ -1206,7 +1222,7 @@ impl LoweringContext {
                 .find(|n| !matches!(n.kind(), SyntaxKind::MINUS))
                 .map(|n| {
                     let operand = self.lower_expr(n);
-                    self.fold_negated_literal(operand)
+                    self.fold_negated_literal(operand, node.span())
                         .unwrap_or_else(|| self.error_expr(node.span()))
                 })
                 .unwrap_or_else(|| self.error_expr(node.span())),
@@ -1697,10 +1713,18 @@ impl LoweringContext {
                 }
             }
             SyntaxKind::TEXT_RUN | SyntaxKind::RAW_TEXT_RUN => {
+                // Text in a body is a string literal like any other, so it is allocated the same
+                // way — one place records a literal's span, and a literal cannot arrive without
+                // one. Nothing reads this span yet: an offset in element content resolves to no
+                // expression today (`specs/future.md`, unchecked element content). The type is
+                // lowering-local and inert here, since a text run is never an operand.
                 let text = node.text();
                 if !text.trim().is_empty() {
-                    content
-                        .push(self.alloc_expr(Expr::Literal(Literal::String(SmolStr::new(text)))));
+                    content.push(self.literal_expr(
+                        Literal::String(SmolStr::new(text)),
+                        TypeTag::String,
+                        node.span(),
+                    ));
                 }
             }
             _ => {}
@@ -2088,6 +2112,67 @@ mod tests {
         let module = ctx.finish();
         assert_eq!(module.items().len(), 0);
         assert!(module.imports.is_empty());
+    }
+
+    /// A literal is located by the span map like every other expression. Without an entry there
+    /// it cannot be found by offset at all, which is what kept an editor from reporting its type.
+    #[test]
+    fn literals_record_the_span_they_were_written_at() {
+        let source =
+            "let s = \"hi\"\nlet i = 42\nlet f = 1.5\nlet b = true\nlet n = null\nlet m = -42\n";
+        let tree = parse_str(source, "literals.nx")
+            .tree
+            .expect("Should parse literals");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let located = module
+            .exprs()
+            .filter(|(_, expr)| matches!(expr, Expr::Literal(_)))
+            .map(|(id, expr)| (expr.clone(), module.expr_span(id)))
+            .collect::<Vec<_>>();
+
+        assert_eq!(located.len(), 6, "got: {located:?}");
+        for (expr, span) in &located {
+            assert!(
+                !span.is_empty(),
+                "{expr:?} carries no span, so no offset can reach it"
+            );
+            assert_eq!(
+                &source[usize::from(span.start())..usize::from(span.end())],
+                match expr {
+                    Expr::Literal(Literal::String(value)) => format!("\"{value}\""),
+                    Expr::Literal(Literal::Int(value)) => value.to_string(),
+                    Expr::Literal(Literal::Float(value)) => format!("{}", value.0),
+                    Expr::Literal(Literal::Boolean(value)) => value.to_string(),
+                    Expr::Literal(Literal::Null) => "null".to_string(),
+                    other => panic!("unexpected literal {other:?}"),
+                },
+                "the span does not cover what was written"
+            );
+        }
+    }
+
+    /// Folding `-` into the literal rewrites the operand rather than leaving it behind. A discarded
+    /// operand would still be findable by offset, and being the narrower of the two it would shadow
+    /// the folded literal — which is the one the checker typed.
+    #[test]
+    fn a_folded_negative_literal_leaves_no_unnegated_expression_behind() {
+        let source = "let m = -42\n";
+        let tree = parse_str(source, "negative.nx")
+            .tree
+            .expect("Should parse a negative literal");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let literals = module
+            .exprs()
+            .filter(|(_, expr)| matches!(expr, Expr::Literal(_)))
+            .map(|(id, expr)| (expr.clone(), module.expr_span(id)))
+            .collect::<Vec<_>>();
+
+        assert_eq!(literals.len(), 1, "got: {literals:?}");
+        assert!(matches!(literals[0].0, Expr::Literal(Literal::Int(-42))));
+        assert_eq!(&source[8..11], "-42");
+        assert_eq!(literals[0].1, TextSpan::new(8.into(), 11.into()));
     }
 
     #[test]

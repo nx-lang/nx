@@ -89,3 +89,11 @@ let loadStatus = {
 type Offset = { dx: float64 = -1.0  dy: float64 = -1.0 }
 
 let shifted: Offset = <Offset dx=-2.5 />
+
+// A whole number needs no `.0` at a float site: the literal takes the type the declaration names,
+// so `8` and `8.0` are the same value. It is the declaration that decides, not the spelling —
+// an integer literal with nothing expecting a float is still an `int`.
+type Inset = { top: float64 = 0  left: float64 = 0 }
+
+let padded: Inset = <Inset top=8 left=-4 />
+let count = 8

@@ -1,9 +1,9 @@
 //! Type inference for expressions.
 
 use crate::{
-    common_supertype as generic_common_supertype, is_object_type, resolve_type_ref_with,
-    resolve_type_ref_with_seen,
-    ty::{DeclaringOrigin, NamedType, UnionCaseType, UnionType},
+    common_supertype as generic_common_supertype, float_literal_target, is_object_type,
+    resolve_type_ref_with, resolve_type_ref_with_seen,
+    ty::{DeclaringOrigin, NamedType, Primitive, UnionCaseType, UnionType},
     type_satisfies_expected as generic_type_satisfies_expected, Type, TypeEnvironment,
 };
 use nx_diagnostics::{Diagnostic, Label, TextSpan};
@@ -168,6 +168,12 @@ pub struct InferenceContext<'a> {
     /// Consumed after analysis to rewrite each `Expr::ContextualName` into the qualified member
     /// access it resolved to, so nothing downstream of type checking can observe the bare spelling.
     resolved_contextual_names: FxHashMap<ExprId, ContextualResolution>,
+    /// Integer literals that took a floating-point type from their binding site.
+    ///
+    /// Consumed after analysis to rewrite each one into a float literal, on the same terms and for
+    /// the same reason as `resolved_contextual_names`: nothing downstream of type checking should
+    /// have to know that the author wrote `24` where `24.0` was expected, or be able to tell.
+    converted_int_literals: FxHashMap<ExprId, Primitive>,
 }
 
 impl<'a> InferenceContext<'a> {
@@ -192,6 +198,7 @@ impl<'a> InferenceContext<'a> {
             record_origins: FxHashMap::default(),
             component_origins: FxHashMap::default(),
             resolved_contextual_names: FxHashMap::default(),
+            converted_int_literals: FxHashMap::default(),
         };
         ctx.register_type_definitions();
         ctx.register_function_signatures();
@@ -278,7 +285,7 @@ impl<'a> InferenceContext<'a> {
                 // Infer argument types
                 let arg_tys: Vec<_> = args.iter().map(|arg| self.infer_expr(*arg)).collect();
 
-                self.infer_call(&func_ty, &arg_tys, *span)
+                self.infer_call(&func_ty, args, &arg_tys, *span)
             }
 
             // If expressions
@@ -321,8 +328,11 @@ impl<'a> InferenceContext<'a> {
             // Arrays
             ast::Expr::Array { elements, span } => {
                 if elements.is_empty() {
-                    // Empty array - need more context to infer element type
-                    Type::array(self.fresh_var())
+                    // An empty list is a list of the bottom type. That is its type outright, not a
+                    // placeholder for one the site has yet to supply: `never` is below every type,
+                    // so `never[]` is below every list type, and the one value is usable at every
+                    // list-typed site without anything having to be resolved later.
+                    Type::array(Type::never())
                 } else {
                     let elem_tys: Vec<_> = elements.iter().map(|e| self.infer_expr(*e)).collect();
                     let item_ty = self.common_sequence_item_type(&elem_tys, *span);
@@ -503,7 +513,8 @@ impl<'a> InferenceContext<'a> {
 
         let return_ty = if let Some(ty) = func.return_type.as_ref() {
             let expected = self.type_from_type_ref(ty);
-            self.check_typed_binding(
+            self.check_typed_binding_for(
+                Some(func.body),
                 &body_ty,
                 &expected,
                 func.span,
@@ -512,6 +523,22 @@ impl<'a> InferenceContext<'a> {
             );
             expected
         } else {
+            // The same rule as an unannotated value binding, at the other place a binding's type
+            // can be fixed by an empty list. `never[]` is a type this function could simply have;
+            // it is reported because a signature saying only "a list of nothing in particular"
+            // tells a caller nothing, and the annotation is where that gets said.
+            if Self::mentions_never(&body_ty) {
+                self.error(
+                    "empty-list-element-type-unknown",
+                    format!(
+                        "Cannot determine the element type of the empty list returned by '{}'; \
+                         annotate the return type with the list type you mean, as in \
+                         'let {}(): string[] = {{}}'",
+                        func.name, func.name
+                    ),
+                    func.span,
+                );
+            }
             body_ty.clone()
         };
 
@@ -977,9 +1004,13 @@ impl<'a> InferenceContext<'a> {
     fn infer_call(
         &mut self,
         func_ty: &Type,
+        args: &[ExprId],
         arg_tys: &[Type],
         span: nx_diagnostics::TextSpan,
     ) -> Type {
+        // A call that cannot be checked has already reported what is wrong with it. Adding a
+        // second diagnostic about its arguments would point the author at something downstream of
+        // the thing they actually have to fix.
         if func_ty.is_error() {
             return Type::Error;
         }
@@ -1000,9 +1031,11 @@ impl<'a> InferenceContext<'a> {
                     return Type::Error;
                 }
 
-                // Check argument types
+                // Check argument types. The argument expression is passed so a literal written
+                // there can take the parameter's type.
                 for (i, (param_ty, arg_ty)) in params.iter().zip(arg_tys.iter()).enumerate() {
-                    self.check_typed_binding(
+                    self.check_typed_binding_for(
+                        args.get(i).copied(),
                         arg_ty,
                         param_ty,
                         span,
@@ -1423,6 +1456,21 @@ impl<'a> InferenceContext<'a> {
             return entry.case_type(case.name);
         }
 
+        // A tag that resolves to nothing has no binding contract, so there is nothing to check the
+        // element's properties and content against. Every expression written inside it is still an
+        // expression, though, and the four resolved paths above infer theirs as a side effect of
+        // checking bindings. Infer these on their own terms so that the absent tag is the only
+        // thing left unchecked, and so that the recorded types reach callers reading the type
+        // environment.
+        let property_paths = self.property_paths_for_entries(element.property_entries());
+        // Supplying one property twice is a defect in the element, not in its contract, so it is
+        // reported here as it is on every resolved path: the absent tag is the only thing left
+        // unchecked.
+        self.report_duplicate_property_paths(&property_paths, &element.tag);
+        for content in &element.content {
+            self.infer_expr(*content);
+        }
+
         self.nominal_named_type(&element.tag)
     }
 
@@ -1545,12 +1593,10 @@ impl<'a> InferenceContext<'a> {
                     );
                     false
                 } else if let Some(expected) = spec.properties.get(content_name) {
-                    let actual = self.normalized_sequence_type(&element.content, span);
-                    self.check_typed_binding(
-                        &actual,
+                    self.check_content_binding(
+                        &element.content,
                         &expected.ty,
                         span,
-                        "content-type-mismatch",
                         format!("Content for '{}' binds to '{}'", element.tag, content_name),
                     );
                     true
@@ -1658,12 +1704,10 @@ impl<'a> InferenceContext<'a> {
                     );
                     false
                 } else if let Some(expected) = spec.properties.get(content_name) {
-                    let actual = self.normalized_sequence_type(&element.content, span);
-                    self.check_typed_binding(
-                        &actual,
+                    self.check_content_binding(
+                        &element.content,
                         &expected.ty,
                         span,
-                        "content-type-mismatch",
                         format!(
                             "Content for '{}.{}' binds to '{}'",
                             union_def.name, case.name, content_name
@@ -1868,12 +1912,10 @@ impl<'a> InferenceContext<'a> {
                     );
                     false
                 } else if let Some(expected) = spec.properties.get(content_name) {
-                    let actual = self.normalized_sequence_type(&element.content, span);
-                    self.check_typed_binding(
-                        &actual,
+                    self.check_content_binding(
+                        &element.content,
                         &expected.ty,
                         span,
-                        "content-type-mismatch",
                         format!("Content for '{}' binds to '{}'", element.tag, content_name),
                     );
                     true
@@ -2175,6 +2217,9 @@ impl<'a> InferenceContext<'a> {
             return self.infer_expr(exprs[0]);
         }
 
+        // Content is spliced, so what an item contributes is its element type. An empty list
+        // contributes `never`, which the join discards in favour of its siblings -- and a sequence
+        // of nothing but empty lists stays a `never[]`, which is what it is.
         let item_types: Vec<_> = exprs
             .iter()
             .map(|expr_id| match self.infer_expr(*expr_id) {
@@ -2414,6 +2459,49 @@ impl<'a> InferenceContext<'a> {
         )
     }
 
+    /// Checks body content against the type its content property declares.
+    ///
+    /// <para>Content is a sequence of expressions with no expression of its own, so a rule that
+    /// attaches to an expression — a contextual name, an integer literal at a float site — cannot
+    /// reach it the way it reaches a property binding. A single content expression is checked as
+    /// itself; several are checked as the elements of the declared list.</para>
+    fn check_content_binding(
+        &mut self,
+        content: &[ExprId],
+        expected: &Type,
+        span: TextSpan,
+        context: String,
+    ) -> bool {
+        if content.len() == 1 {
+            let actual = self.infer_expr(content[0]);
+            return self.check_typed_binding_for(
+                Some(content[0]),
+                &actual,
+                expected,
+                span,
+                "content-type-mismatch",
+                context,
+            );
+        }
+
+        let actual = self.normalized_sequence_type(content, span);
+
+        if self.type_satisfies_expected_with_coercion(&actual, expected) {
+            return true;
+        }
+
+        if let Type::Array(element_expected) = expected.strip_nullable() {
+            match self.convert_int_literals_in(content, element_expected, span, &context) {
+                Some(true) => return true,
+                // The inexactness diagnostic is already reported.
+                Some(false) => return false,
+                None => {}
+            }
+        }
+
+        self.check_typed_binding(&actual, expected, span, "content-type-mismatch", context)
+    }
+
     fn check_typed_binding(
         &mut self,
         actual: &Type,
@@ -2464,29 +2552,151 @@ impl<'a> InferenceContext<'a> {
         }
 
         if self.type_satisfies_expected_with_coercion(actual, expected) {
-            true
-        } else {
-            // Two same-named types are told apart by their declaring modules; one nominal type in
-            // a message is left unqualified.
-            let (expected_display, mut actual_display) = crate::display_type_pair(expected, actual);
-            if Self::is_null_literal_type(actual) {
-                actual_display = "null".to_string();
+            return true;
+        }
+
+        // An integer literal written where a float is declared takes the declared type. Tried only
+        // after ordinary satisfaction, so a site that already accepts the value — `object`, an
+        // undecided type variable — keeps the literal an integer.
+        if let Some(expr) = expr {
+            if let Some(converted) = self.convert_int_literals(expr, expected, span, &context) {
+                return converted;
             }
-            let message = if matches!(actual, Type::Array(_)) && !matches!(expected, Type::Array(_))
-            {
-                format!(
-                    "{} expects {}, found list {}",
-                    context, expected_display, actual_display
-                )
-            } else {
-                let hint = self.bare_form_hint(actual, expected);
-                format!(
-                    "{} expects {}, found {}{}",
-                    context, expected_display, actual_display, hint
-                )
-            };
-            self.error(code, message, span);
-            false
+        }
+
+        // Two same-named types are told apart by their declaring modules; one nominal type in
+        // a message is left unqualified.
+        let (expected_display, mut actual_display) = crate::display_type_pair(expected, actual);
+        if Self::is_null_literal_type(actual) {
+            actual_display = "null".to_string();
+        }
+        // `never` has no source spelling, so rendering an empty list's type directly would put a
+        // name the author cannot write in front of someone who wrote `{}`.
+        if let Some(rendered) = Self::empty_list_display(actual) {
+            actual_display = rendered;
+        }
+        let message = if matches!(actual, Type::Array(_))
+            && !Self::is_empty_list_type(actual)
+            && !matches!(expected, Type::Array(_))
+        {
+            format!(
+                "{} expects {}, found list {}",
+                context, expected_display, actual_display
+            )
+        } else {
+            let hint = self.bare_form_hint(actual, expected);
+            format!(
+                "{} expects {}, found {}{}",
+                context, expected_display, actual_display, hint
+            )
+        };
+        self.error(code, message, span);
+        false
+    }
+
+    /// Types the integer literals `expr` is made of by the floating-point type expected of them.
+    ///
+    /// <para>Returns `None` when the rule does not reach this expression, so the caller reports its
+    /// own mismatch; `Some(true)` when every literal converted, and `Some(false)` when one could not
+    /// be represented exactly and the diagnostic has already been reported.</para>
+    ///
+    /// <para>A list is walked because its elements are each written at the element type, and the
+    /// binding site names only the list. A single literal at a list-typed site is reached the same
+    /// way, since a scalar binds there by coercion.</para>
+    fn convert_int_literals(
+        &mut self,
+        expr: ExprId,
+        expected: &Type,
+        span: TextSpan,
+        context: &str,
+    ) -> Option<bool> {
+        match self.module.raw_module().expr(expr).clone() {
+            ast::Expr::Literal(ast::Literal::Int(value)) => {
+                let target = float_literal_target(expected)?;
+                if !target.represents_integer_exactly(value) {
+                    self.error(
+                        "float-literal-not-exact",
+                        format!(
+                            "{}: {} is not exactly representable as {}; write the value you mean as \
+                             a {} literal",
+                            context, value, target, target
+                        ),
+                        span,
+                    );
+                    return Some(false);
+                }
+                // The recorded type moves with the value. Leaving it `int` would put a float
+                // literal in the IR under an integer type annotation, which is the inconsistency
+                // the conversion exists to prevent rather than a cosmetic mismatch.
+                //
+                // It becomes `float64` rather than the target, because that is the type a written
+                // real literal takes at the same site — `infer_literal` gives every float literal
+                // `float64`, and a `float32` site narrows it no further. Recording the target here
+                // instead would make the converted `24` more precisely typed than the `24.0` it is
+                // supposed to be indistinguishable from. Which type a float literal should take at
+                // a `float32` site is a real question, but it is the same question for both
+                // spellings and not one this change answers.
+                self.env.set_expr_type(expr, Type::float64());
+                self.converted_int_literals.insert(expr, target);
+                Some(true)
+            }
+            ast::Expr::Array { elements, .. } => {
+                let Type::Array(element_expected) = expected.strip_nullable() else {
+                    return None;
+                };
+                if !self.convert_int_literals_in(&elements, element_expected, span, context)? {
+                    return Some(false);
+                }
+                // The list's own recorded type was inferred from elements that were still
+                // integers, so it says `int[]` over elements that are now floats. Recomputing it
+                // the way inference would have is what keeps the list indistinguishable from one
+                // whose elements were written as real literals.
+                let item_types: Vec<_> = elements
+                    .iter()
+                    .map(|element| {
+                        self.env
+                            .get_expr_type(*element)
+                            .cloned()
+                            .unwrap_or(Type::Error)
+                    })
+                    .collect();
+                let item_ty = self.common_sequence_item_type(&item_types, span);
+                self.env.set_expr_type(expr, Type::array(item_ty));
+                Some(true)
+            }
+            _ => None,
+        }
+    }
+
+    /// Types the integer literals in a sequence of expressions by the type expected of each one.
+    ///
+    /// <para>Every element has to end up satisfying the element type. One that is not a convertible
+    /// literal must already do so on its own, or the sequence as a whole does not bind and the
+    /// caller's mismatch is the right diagnostic.</para>
+    fn convert_int_literals_in(
+        &mut self,
+        elements: &[ExprId],
+        element_expected: &Type,
+        span: TextSpan,
+        context: &str,
+    ) -> Option<bool> {
+        let mut converted_any = false;
+        for element in elements {
+            match self.convert_int_literals(*element, element_expected, span, context) {
+                Some(true) => converted_any = true,
+                Some(false) => return Some(false),
+                None => {
+                    let actual = self.env.get_expr_type(*element)?.clone();
+                    if !self.type_satisfies_expected_with_coercion(&actual, element_expected) {
+                        return None;
+                    }
+                }
+            }
+        }
+        if converted_any {
+            Some(true)
+        } else {
+            None
         }
     }
 
@@ -2502,6 +2712,11 @@ impl<'a> InferenceContext<'a> {
     /// Returns the contextual names resolved during analysis, as `expr → (type, member)`.
     pub fn resolved_contextual_names(&self) -> &FxHashMap<ExprId, ContextualResolution> {
         &self.resolved_contextual_names
+    }
+
+    /// Returns the integer literals that took a floating-point type from their binding site.
+    pub fn converted_int_literals(&self) -> &FxHashMap<ExprId, Primitive> {
+        &self.converted_int_literals
     }
 
     /// Returns the collected diagnostics.
@@ -2762,6 +2977,27 @@ impl<'a> InferenceContext<'a> {
                                 format!("Initializer for value '{}'", value.name),
                             );
                             expected
+                        } else if Self::mentions_never(&actual) {
+                            // `never[]` is a real type and this binding could simply take it. It is
+                            // reported anyway, and only here, where the binding has a name to put
+                            // in the message: a binding whose type is fixed by an empty list says
+                            // nothing about what it is a list of, and the next reader has no way to
+                            // find out. The annotation is required for legibility, not because the
+                            // system cannot type it, so the binding keeps the type it has rather
+                            // than poisoning to `Error` — exactly as the function-return arm in
+                            // `infer_function` does. A legibility rule reports once and leaves the
+                            // program otherwise typed.
+                            self.error(
+                                "empty-list-element-type-unknown",
+                                format!(
+                                    "Cannot determine the element type of the empty list bound to \
+                                     '{}'; annotate the binding with the list type you mean, as in \
+                                     'let {}: string[] = {{}}'",
+                                    value.name, value.name
+                                ),
+                                value.span,
+                            );
+                            actual
                         } else {
                             actual
                         }
@@ -3113,6 +3349,9 @@ impl<'a> InferenceContext<'a> {
 
         match (actual, expected) {
             (_, Type::Nullable(_)) if Self::is_null_literal_type(actual) => true,
+            // The bottom type satisfies every expectation, which is what makes it the bottom.
+            // Reached mostly as `never[]` against `T[]`, through the covariant array case below.
+            (Type::Primitive(Primitive::Never), _) => true,
             (Type::Named(actual_name), Type::Named(expected_name))
                 if expected_name.name.as_str() == "Element" =>
             {
@@ -3145,6 +3384,49 @@ impl<'a> InferenceContext<'a> {
         matches!(ty, Type::Nullable(inner) if matches!(inner.as_ref(), Type::Variable(_)))
     }
 
+    /// True for the type an empty braced list infers: a list of the bottom type. Nothing else
+    /// produces that shape — every non-empty list has an item type to join.
+    fn is_empty_list_type(ty: &Type) -> bool {
+        matches!(ty, Type::Array(inner) if matches!(inner.as_ref(), Type::Primitive(Primitive::Never)))
+    }
+
+    /// True when `never` occurs anywhere in this type.
+    ///
+    /// <para>Only an empty list puts it there, so this asks whether the type was fixed by one. It
+    /// looks through a function's return type as well as through lists and nullables, because an
+    /// unannotated `let f(x) = {}` is a binding whose type an empty list decided just as much as
+    /// `let a = {}` is.</para>
+    fn mentions_never(ty: &Type) -> bool {
+        match ty {
+            Type::Primitive(Primitive::Never) => true,
+            Type::Array(inner) | Type::Nullable(inner) => Self::mentions_never(inner),
+            Type::Function { ret, .. } => Self::mentions_never(ret),
+            _ => false,
+        }
+    }
+
+    /// Renders a type built around an empty list as the source spells it.
+    ///
+    /// <para>`None` for a type that holds no empty list, so a caller keeps its ordinary rendering.
+    /// `never[]` is accurate but is not what the author wrote, and it names a type they cannot
+    /// write; `{}` is. The search goes to any depth because an empty list can sit inside a list
+    /// the source wrapped around it — a `for` whose body is `{}` reads as `{}[]`.</para>
+    fn empty_list_display(ty: &Type) -> Option<String> {
+        if Self::is_empty_list_type(ty) {
+            return Some("{}".to_string());
+        }
+
+        match ty {
+            Type::Array(inner) => {
+                Self::empty_list_display(inner).map(|inner| format!("{}[]", inner))
+            }
+            Type::Nullable(inner) => {
+                Self::empty_list_display(inner).map(|inner| format!("{}?", inner))
+            }
+            _ => None,
+        }
+    }
+
     fn type_satisfies_expected_with_coercion(&self, actual: &Type, expected: &Type) -> bool {
         if self.type_satisfies_expected(actual, expected) {
             return true;
@@ -3167,6 +3449,12 @@ impl<'a> InferenceContext<'a> {
 
     fn common_supertype(&self, lhs: &Type, rhs: &Type) -> Type {
         match (lhs, rhs) {
+            // The bottom type is the identity of the join: it is below the other side already, so
+            // the other side is the least type above both. This is what lets one arm of an `if` be
+            // `{}` and the other a `string[]` without the join climbing to `object`.
+            (Type::Primitive(Primitive::Never), other) => other.clone(),
+            (other, Type::Primitive(Primitive::Never)) => other.clone(),
+
             (Type::Array(lhs_inner), Type::Array(rhs_inner)) => {
                 Type::array(self.common_supertype(lhs_inner, rhs_inner))
             }
@@ -3345,6 +3633,52 @@ mod tests {
             &Type::named(Name::new("div")),
             &Type::named(Name::new("element"))
         ));
+    }
+
+    #[test]
+    fn test_converted_int_literals_records_only_the_literal_that_took_a_float_type() {
+        let mut module = LoweredModule::new(SourceId::new(0));
+        let span = TextSpan::new(TextSize::from(0), TextSize::from(0));
+
+        // One literal at a declared float return type, one with nothing expecting anything.
+        let converted_body = module.alloc_expr(Expr::Literal(Literal::Int(42)));
+        let untouched_body = module.alloc_expr(Expr::Literal(Literal::Int(7)));
+
+        module.add_item(Item::Function(Function {
+            name: Name::new("declared"),
+            visibility: nx_hir::Visibility::Export,
+            params: vec![],
+            return_type: Some(TypeRef::name("float64")),
+            body: converted_body,
+            span,
+        }));
+        module.add_item(Item::Function(Function {
+            name: Name::new("inferred"),
+            visibility: nx_hir::Visibility::Export,
+            params: vec![],
+            return_type: None,
+            body: untouched_body,
+            span,
+        }));
+
+        let prepared = prepared(&module);
+        let mut ctx = InferenceContext::new(&prepared);
+        for item in module.items() {
+            if let Item::Function(func) = item {
+                ctx.infer_function(func);
+            }
+        }
+
+        assert_eq!(
+            ctx.converted_int_literals().get(&converted_body),
+            Some(&Primitive::Float64),
+            "the literal at the declared float type should be recorded"
+        );
+        assert!(
+            !ctx.converted_int_literals().contains_key(&untouched_body),
+            "a literal with no float expectation should not be recorded"
+        );
+        assert!(ctx.diagnostics().is_empty());
     }
 
     #[test]

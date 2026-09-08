@@ -272,12 +272,12 @@ export type LineJoin = miter | round | bevel
 // Stroke geometry is scaled by the effective transform, as in SVG and Skia; there is no equivalent
 // of `vector-effect: non-scaling-stroke`.
 export type StrokeStyle = {
-  width: float64 = 1.0
+  width: float64 = 1
   cap: LineCap = butt
   join: LineJoin = miter
-  miterLimit: float64 = 4.0
+  miterLimit: float64 = 4
   dashArray: float64[]?
-  dashOffset: float64 = 0.0
+  dashOffset: float64 = 0
 }
 
 
@@ -335,7 +335,7 @@ export type FontStyle = normal | italic
 
 export type Font = {
   family: string?                   // null means the host default
-  weight: float64 = 400.0           // 1..1000
+  weight: float64 = 400             // 1..1000
   style: FontStyle = normal
 }
 
@@ -355,8 +355,8 @@ export type TextBaseline = alphabetic | top | middle | bottom | hanging
 export type TextRun = {
   text: string                      // no line breaking; `\n` is invalid, emit one run per line
   font: FontId
-  size: float64 = 16.0
-  letterSpacing: float64 = 0.0
+  size: float64 = 16
+  letterSpacing: float64 = 0
   anchor: TextAnchor = start
   baseline: TextBaseline = alphabetic
 }

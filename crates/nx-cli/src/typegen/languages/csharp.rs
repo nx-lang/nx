@@ -542,11 +542,24 @@ fn csharp_default_initializer(
         ExportedLiteralDefault::String(value) => {
             format!("\"{}\"", escape_csharp_string_literal(value))
         }
+        // Type generation reads a lowered module, so the conversion that turns an integer literal
+        // at a float site into a float literal has not run here — that pass belongs to type
+        // checking, which this path does not go through. `= 0` on a `double` compiles, but it
+        // would leave the same declaration generating different text depending on which pipeline
+        // produced it, so the spelling is settled from the field's own type instead.
+        ExportedLiteralDefault::Int(value) if csharp_type_is_floating_point(field_type) => {
+            csharp_float_literal(nx_hir::ast::OrderedFloat(*value as f64), field_type)
+        }
         ExportedLiteralDefault::Int(value) => value.to_string(),
         ExportedLiteralDefault::Float(value) => csharp_float_literal(*value, field_type),
         ExportedLiteralDefault::Boolean(value) => value.to_string(),
         ExportedLiteralDefault::Null => "null".to_string(),
     })
+}
+
+/// Whether this generated type is one a float literal spelling belongs on.
+fn csharp_type_is_floating_point(field_type: &CSharpType) -> bool {
+    matches!(field_type.text.trim_end_matches('?'), "float" | "double")
 }
 
 fn csharp_float_literal(value: nx_hir::ast::OrderedFloat, field_type: &CSharpType) -> String {
@@ -750,11 +763,8 @@ fn csharp_type_name_inner(
             is_reference: false,
             is_nullable: false,
         },
-        "void" => CSharpType {
-            text: "void".to_string(),
-            is_reference: false,
-            is_nullable: false,
-        },
+        // `void` is not an NX type name any more, so a `void` here is a user declaration
+        // and must resolve to the type they declared rather than to the host's `void`.
         "object" | "unknown" | "error" => CSharpType {
             text: "object".to_string(),
             is_reference: true,
@@ -924,11 +934,8 @@ fn csharp_imported_alias_target_name(
             is_reference: false,
             is_nullable: false,
         },
-        "void" => CSharpType {
-            text: "void".to_string(),
-            is_reference: false,
-            is_nullable: false,
-        },
+        // `void` is not an NX type name any more, so a `void` here is a user declaration
+        // and must resolve to the type they declared rather than to the host's `void`.
         "object" | "unknown" | "error" => CSharpType {
             text: "object".to_string(),
             is_reference: true,
@@ -1018,7 +1025,6 @@ fn imported_alias_target_uses_dependency_namespace(ty: &TypeRef) -> bool {
                 | "float32"
                 | "float64"
                 | "boolean"
-                | "void"
                 | "object"
                 | "unknown"
                 | "error"

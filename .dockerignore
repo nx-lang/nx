@@ -1,0 +1,17 @@
+# The build context for sites/playground/Dockerfile is the repository root, so this is the one
+# ignore file the image build reads. Build outputs and installed dependencies: the image builds its
+# own, and these are large. The vendored DrawnUI demo pages under sites/playground/reference are
+# read only by the sync script, never by a build.
+.git
+target
+**/target
+node_modules
+**/node_modules
+**/dist
+**/out
+artifacts
+bin
+obj
+docs
+src/vscode/*.vsix
+sites/playground/reference

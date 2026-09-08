@@ -7,6 +7,9 @@ use nx_api::{
     ProgramBuildContext,
 };
 use nx_codegen::{emit_nx_ir, GeneratedNxIr, NxIrEntrypointMetadata, NxIrMetadata};
+use nx_language_service::{
+    DocumentInput, DocumentUri, SnapshotError, TextPosition, WorkspaceSnapshot,
+};
 use nx_value::NxValue;
 use serde::Serialize;
 
@@ -174,6 +177,125 @@ impl NativeNxProgramBuildContext {
             .as_ref()
             .ok_or_else(|| disposed_error("NxProgramBuildContext"))
     }
+}
+
+/// One in-memory document submitted to a language snapshot.
+#[napi(object)]
+pub struct NativeLanguageDocument {
+    pub uri: String,
+    pub source: String,
+    pub identity: Option<String>,
+    pub version: Option<i32>,
+}
+
+/// An analyzed, immutable set of in-memory documents that answers editor queries.
+///
+/// Results are returned as JSON strings in the language service's serialized shape, which is the
+/// `@nx-lang/language-protocol` shape; the TypeScript wrapper parses them.
+#[napi]
+pub struct NativeNxLanguageSnapshot {
+    snapshot: Option<WorkspaceSnapshot>,
+}
+
+#[napi]
+impl NativeNxLanguageSnapshot {
+    #[napi(constructor)]
+    pub fn new(documents: Vec<NativeLanguageDocument>) -> Result<Self> {
+        let snapshot = language_snapshot(documents)?;
+        Ok(Self {
+            snapshot: Some(snapshot),
+        })
+    }
+
+    /// Builds a snapshot that sees every library `build_context` makes visible.
+    #[napi(factory)]
+    pub fn with_build_context(
+        documents: Vec<NativeLanguageDocument>,
+        build_context: &NativeNxProgramBuildContext,
+    ) -> Result<Self> {
+        let build_context = build_context.build_context()?.clone();
+        let snapshot = language_snapshot(documents)?.with_build_context(build_context);
+        Ok(Self {
+            snapshot: Some(snapshot),
+        })
+    }
+
+    /// Hover content at a UTF-16 position, as JSON, or `null` when there is none.
+    #[napi]
+    pub fn hover(&self, uri: String, line: u32, character: u32) -> Result<Option<String>> {
+        let snapshot = self.snapshot()?;
+        let hover = snapshot
+            .hover(&DocumentUri::new(uri), TextPosition::new(line, character))
+            .map_err(snapshot_error)?;
+        hover.map(|hover| result_json(&hover)).transpose()
+    }
+
+    /// Completions at a UTF-16 position, as JSON.
+    #[napi]
+    pub fn completions(&self, uri: String, line: u32, character: u32) -> Result<String> {
+        let snapshot = self.snapshot()?;
+        let completions = snapshot
+            .completions(&DocumentUri::new(uri), TextPosition::new(line, character))
+            .map_err(snapshot_error)?;
+        result_json(&completions)
+    }
+
+    /// The diagnostic report for every document in the snapshot, as JSON.
+    #[napi]
+    pub fn diagnostics(&self) -> Result<String> {
+        let snapshot = self.snapshot()?;
+        let report = snapshot.diagnostic_report().map_err(snapshot_error)?;
+        result_json(&report)
+    }
+
+    /// Top-level symbols of one document, as JSON.
+    #[napi]
+    pub fn document_symbols(&self, uri: String) -> Result<String> {
+        let snapshot = self.snapshot()?;
+        let symbols = snapshot
+            .document_symbols(&DocumentUri::new(uri))
+            .map_err(snapshot_error)?;
+        result_json(&symbols)
+    }
+
+    #[napi]
+    pub fn dispose(&mut self) {
+        self.snapshot = None;
+    }
+
+    fn snapshot(&self) -> Result<&WorkspaceSnapshot> {
+        self.snapshot
+            .as_ref()
+            .ok_or_else(|| disposed_error("NxLanguageSnapshot"))
+    }
+}
+
+fn language_snapshot(documents: Vec<NativeLanguageDocument>) -> Result<WorkspaceSnapshot> {
+    let mut inputs = Vec::with_capacity(documents.len());
+    for document in documents {
+        let mut input = DocumentInput::new(document.uri, document.source);
+        if let Some(identity) = document.identity {
+            input = input.with_identity(identity).map_err(snapshot_error)?;
+        }
+        if let Some(version) = document.version {
+            input = input.with_version(version);
+        }
+        inputs.push(input);
+    }
+    WorkspaceSnapshot::from_documents(Option::<std::path::PathBuf>::None, inputs)
+        .map_err(snapshot_error)
+}
+
+fn snapshot_error(error: SnapshotError) -> Error {
+    input_error_message("language-snapshot-input-error", error.to_string())
+}
+
+fn result_json<T: Serialize>(value: &T) -> Result<String> {
+    serde_json::to_string(value).map_err(|error| {
+        native_error(format!(
+            "Failed to serialize NX language service result: {error}"
+        ))
+    })
 }
 
 #[napi]

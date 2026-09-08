@@ -21,29 +21,31 @@ JSON document.
 
 ## Local Source Consumption
 
-Install package dependencies:
+This package is a member of the repository's root pnpm workspace, alongside
+`@nx-lang/language-protocol`, which it depends on. Install once at the repository root (pnpm is
+provided through corepack):
 
 ```bash
-cd bindings/node
-npm install
+corepack enable
+pnpm install
 ```
 
 Build the native addon and TypeScript wrapper:
 
 ```bash
-npm run build
+pnpm run --dir bindings/node build
 ```
 
 Run the Node tests:
 
 ```bash
-npm test
+pnpm run --dir bindings/node test
 ```
 
 For native-only rebuilds:
 
 ```bash
-npm run build:native
+pnpm run --dir bindings/node build:native
 ```
 
 The native build script compiles `nx-sdk-node-native` through Cargo and copies the resulting dynamic
@@ -84,6 +86,61 @@ const diagnostics = workspace.validate(buildContext);
 
 Workspace module identities use NX logical path normalization. Duplicate normalized identities such
 as `lib/config.nx` and `lib/./config.nx` are rejected with structured diagnostics.
+
+## Language Snapshots
+
+`NxLanguageSnapshot` answers editor queries — hover, completions, diagnostics, and document
+symbols — over a set of in-memory documents addressed by logical URI. Results are the
+`@nx-lang/language-protocol` shapes, re-exported from this package; positions count UTF-16 code
+units, the way JavaScript strings do.
+
+```ts
+import { NxLanguageSnapshot } from "@nx-lang/sdk-node";
+
+const snapshot = new NxLanguageSnapshot([
+  {
+    uri: "nx://tenant/form.nx",
+    version: 1,
+    source: `type Mode = light | dark
+let <Panel mode:Mode title:string /> = <div />
+<Panel mode=light title="Hello" />
+`
+  }
+]);
+
+try {
+  const hover = snapshot.hover("nx://tenant/form.nx", { line: 2, character: 3 });
+  console.log(hover?.contents); // ```nx\nlet <Panel mode:Mode title:string />\n```
+  console.log(hover?.range);    // { start: { line: 2, character: 1 }, end: { line: 2, character: 6 }, startByte: 73, endByte: 78 }
+
+  // Inside `mode=`: the property under the cursor is offered; `title` is already supplied.
+  const completions = snapshot.completions("nx://tenant/form.nx", { line: 2, character: 7 });
+  console.log(completions.items.map((item) => item.label)); // [ "mode" ]
+
+  const report = snapshot.diagnostics();
+  console.log(report.documents[0].diagnostics.length); // 0
+} finally {
+  snapshot.dispose();
+}
+```
+
+A snapshot is immutable: build a new one when a document changes. Analysis runs on the first query
+and is cached for the snapshot's lifetime, so several queries against unchanged text cost one
+analysis.
+
+**Build contexts.** Libraries loaded through an `NxLibraryRegistry` are visible to a snapshot only
+when it is constructed with a build context from that registry:
+
+```ts
+const registry = new NxLibraryRegistry();
+registry.loadFromDirectory("/srv/nx/ui");
+const buildContext = registry.createBuildContext();
+
+const snapshot = new NxLanguageSnapshot(documents, { buildContext });
+```
+
+Without one, a name that only a library declares is unresolved — hover says nothing about it and
+diagnostics report the import as missing, exactly as the compiler would without that context.
 
 ## Program Artifacts
 
