@@ -223,7 +223,7 @@ Nothing in the site depends on who runs `docker build`.
 |---|---|---|
 | SSL/TLS → Overview → encryption mode | **Full** (not strict) | Railway's docs: "If you have proxying enabled on Cloudflare (the orange cloud), you MUST set your SSL/TLS settings to Full -- Full (Strict) will not work as intended." For proxied domains Railway "may not always be able to issue a certificate for the domain" and then serves its default `*.up.railway.app` certificate, which strict would reject with a 526 on every page. Full still encrypts edge-to-origin traffic; Flexible would loop with Railway's own HTTPS redirect. |
 | SSL/TLS → Edge Certificates → Always Use HTTPS | **On** | `http://nxlang.org/playground` redirects at the edge before reaching Railway. |
-| Security → Bots → Bot Fight Mode | **On** | Cheap protection for a single-threaded origin. |
+| Security → Bots → Bot Fight Mode | **Off** | It was on for the first deploy and challenged the workflow's smoke test from the GitHub runner (a Cloudflare managed challenge, 403, on every attempt), so each run reported a failed deploy for a live one. The Free plan cannot exempt it by path or user agent. The rate limit below is what bounds load on the single-threaded origin, and it does not depend on classifying the client, so Bot Fight Mode is off and stays off. |
 | Analytics → Web Analytics | **Enable, excluding visitor data in the EU**, for `nxlang.org` (proxy-injected beacon) | Cookie-less, so no consent banner, and the EU exclusion removes the remaining ePrivacy question at the cost of not seeing EU visitors — the same choice as the account's other sites. No snippet in the site. Dashboard only: the API token permission for it is not available on the zone-scoped token used for the rest. |
 
 ### Cloudflare rules
