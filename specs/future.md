@@ -596,7 +596,7 @@ The playground at `nxlang.org/playground` (`sites/playground`, spec `openspec/sp
 shipped as the DrawnUI fiddle under a public address: gallery, editor view, server-side compile,
 watchdog, Railway behind Cloudflare, the service declared in `.railway/railway.ts` and deployed
 by `.github/workflows/deploy-playground.yml` with `railway up`. The items below are what it
-deliberately does not do yet, and one question that only the first live deploy can answer.
+deliberately does not do yet.
 
 ### Shareable edited source
 
@@ -638,14 +638,3 @@ override (confirm the plan supports it) or a Worker in front of both. Whichever 
 service must go through Cloudflare the way the playground does: the playground has no
 Railway-generated domain on purpose, because that hostname would answer outside the edge, where the
 rate limit does not apply.
-
-### The deploy smoke test and Bot Fight Mode
-
-The workflow verifies a deployment with two `curl` calls through Cloudflare, for the health body
-and the gallery's status. Bot Fight Mode, which the setup turns on, challenges requests it classes
-as automated and cannot be exempted per path or user agent on the Free plan. Whether it challenges
-a GitHub runner is only observable live, so this stays open until the first run on `main` (review
-finding RF3). If the step sees a challenge page instead of `{"ok":true}`, the choice is between
-dropping Bot Fight Mode and keeping the rate limit alone, or keeping only the status-code check
-for the through-Cloudflare call; there is no Railway hostname to smoke-test the origin directly.
-Record the choice in `docs/deployment-setup.md`.

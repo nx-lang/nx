@@ -223,7 +223,7 @@ Nothing in the site depends on who runs `docker build`.
 |---|---|---|
 | SSL/TLS → Overview → encryption mode | **Full** (not strict) | Railway's docs: "If you have proxying enabled on Cloudflare (the orange cloud), you MUST set your SSL/TLS settings to Full -- Full (Strict) will not work as intended." For proxied domains Railway "may not always be able to issue a certificate for the domain" and then serves its default `*.up.railway.app` certificate, which strict would reject with a 526 on every page. Full still encrypts edge-to-origin traffic; Flexible would loop with Railway's own HTTPS redirect. |
 | SSL/TLS → Edge Certificates → Always Use HTTPS | **On** | `http://nxlang.org/playground` redirects at the edge before reaching Railway. |
-| Security → Bots → Bot Fight Mode | **On** | Cheap protection for a single-threaded origin. |
+| Security → Bots → Bot Fight Mode | **Off** | It was on for the first deploy and challenged the workflow's smoke test from the GitHub runner (a Cloudflare managed challenge, 403, on every attempt), so each run reported a failed deploy for a live one. The Free plan cannot exempt it by path or user agent. The rate limit below is what bounds load on the single-threaded origin, and it does not depend on classifying the client, so Bot Fight Mode is off and stays off. |
 | Analytics → Web Analytics | **Enable, excluding visitor data in the EU**, for `nxlang.org` (proxy-injected beacon) | Cookie-less, so no consent banner, and the EU exclusion removes the remaining ePrivacy question at the cost of not seeing EU visitors — the same choice as the account's other sites. No snippet in the site. Dashboard only: the API token permission for it is not available on the zone-scoped token used for the rest. |
 
 ### Cloudflare rules
@@ -274,9 +274,13 @@ curl -sI https://nxlang.org/                                     # 302 → /play
 curl -s  https://nxlang.org/playground/api/health                # {"ok":true}
 curl -sI https://nxlang.org/playground/assets/<hashed asset>     # twice: second shows cf-cache-status: HIT
 curl -sI https://nxlang.org/playground                           # cf-cache-status: DYNAMIC (never HIT)
-for i in $(seq 1 120); do curl -s -o /dev/null -w "%{http_code}\n" -X POST \
-  -H 'content-type: application/json' -d '{"source":""}' https://nxlang.org/playground/api/compile; done | sort | uniq -c
-#   mostly 200, then 429 once the rate limit engages
+curl -s -H 'accept: text/html' https://nxlang.org/playground | grep -c cloudflareinsights   # 1: the beacon is injected
+#   the edge injects the Web Analytics beacon only into responses to requests that accept HTML,
+#   so a bare curl shows none and proves nothing
+seq 1 200 | xargs -P 40 -I{} curl -s -o /dev/null -w "%{http_code}\n" -X POST \
+  -H 'content-type: application/json' -d '{"source":""}' https://nxlang.org/playground/api/compile | sort | uniq -c
+#   mostly 200, then 429 once the rate limit engages; the requests must be parallel, since one
+#   curl after another from outside the datacenter stays under 100 in any 10 seconds
 ```
 
 Open `https://nxlang.org/playground` in a browser without certificate warnings, open an example,

@@ -112,8 +112,9 @@ jobs:
         run: railway up --service "$RAILWAY_SERVICE" --environment "$RAILWAY_ENVIRONMENT" --ci --message "main ${GITHUB_SHA}"
 
       # Railway starts the container, polls /playground/api/health, and reports SUCCESS once it
-      # answers, or FAILED if it never does. Either way the previous deployment keeps serving until
-      # the new one succeeds. Runs after a failed upload too, so the deployment Railway created for
+      # answers, or FAILED if it never does, or SKIPPED without starting one when the upload matches
+      # the live deployment. In every case the previous deployment keeps serving until a new one
+      # succeeds. Runs after a failed upload too, so the deployment Railway created for
       # a build that failed is still named in the summary.
       - name: Wait for the deployment to go live
         id: after
@@ -146,8 +147,12 @@ jobs:
               echo "id=$id" >> "$GITHUB_OUTPUT"
               case "$status" in
                 SUCCESS) exit 0 ;;
-                # SKIPPED is what Railway calls a deployment a newer one superseded.
-                FAILED|CRASHED|REMOVED|SKIPPED|CANCELED|CANCELLED)
+                # Railway skips a deployment whose upload matches the live one ("No changes to
+                # watched files"); the live deployment stands and the smoke test still runs.
+                SKIPPED)
+                  echo "Railway skipped the deployment: the upload matches what is live"
+                  exit 0 ;;
+                FAILED|CRASHED|REMOVED|CANCELED|CANCELLED)
                   echo "::error::Railway deployment $id ended as $status"
                   exit 1 ;;
               esac
