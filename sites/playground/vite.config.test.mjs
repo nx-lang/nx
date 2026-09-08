@@ -57,7 +57,10 @@ before(async () => {
   vite = await createServer({
     root: appRoot,
     logLevel: "error",
-    server: { port: vitePort, strictPort: true },
+    // The address the requests below go to. Left to Vite, the listener is `localhost`, which Node
+    // resolves to `::1` where the hosts file names it (GitHub's runners do), and a fetch to
+    // 127.0.0.1 is then refused on a port Vite is listening on.
+    server: { host: "127.0.0.1", port: vitePort, strictPort: true },
   });
   await vite.listen();
   origin = `http://127.0.0.1:${vitePort}`;
