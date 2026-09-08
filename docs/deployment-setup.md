@@ -180,11 +180,12 @@ Merge to `main` (or run the workflow from the Actions tab), or deploy a checkout
 repository root with the CLI linked to the project:
 
 ```bash
-railway up --service playground --environment production --ci
+railway up --service playground --environment production
 ```
 
-The first build compiles the Rust addon, so it is the slowest one; watch the log (the workflow
-streams it, or `railway logs --build`) for two things:
+The first build compiles the Rust addon, so it is the slowest one; watch the log (`railway up`
+streams it at a terminal; the workflow prints it only when the build fails, and `railway logs
+--build` shows it any time) for two things:
 
 - the upload size printed by `railway up` — it should be a few megabytes, since the upload skips
   gitignored paths (`node_modules`, `dist`, `target`). The root `.dockerignore` — the one ignore

@@ -106,16 +106,20 @@ jobs:
           echo "Live deployment: $id ($status)"
           echo "id=$id" >> "$GITHUB_OUTPUT"
 
-      # `--ci` streams the build log and exits when the build ends, failing the job if it fails.
-      - name: Upload and build on Railway
+      # `--detach` returns once the upload is accepted and Railway has created the deployment; the
+      # step below decides the outcome. (`--ci` would stream the build log and exit on SUCCESS or
+      # FAILED, but it ignores every other status, so on a deployment Railway skips as unchanged it
+      # sat for five to eleven minutes until the log stream closed.)
+      - name: Upload to Railway
         id: up
-        run: railway up --service "$RAILWAY_SERVICE" --environment "$RAILWAY_ENVIRONMENT" --ci --message "main ${GITHUB_SHA}"
+        run: railway up --service "$RAILWAY_SERVICE" --environment "$RAILWAY_ENVIRONMENT" --detach --message "main ${GITHUB_SHA}"
 
-      # Railway starts the container, polls /playground/api/health, and reports SUCCESS once it
-      # answers, or FAILED if it never does, or SKIPPED without starting one when the upload matches
-      # the live deployment. In every case the previous deployment keeps serving until a new one
-      # succeeds. Runs after a failed upload too, so the deployment Railway created for
-      # a build that failed is still named in the summary.
+      # Railway builds the image, starts the container, polls /playground/api/health, and reports
+      # SUCCESS once it answers, FAILED if the build or the health check fails, or SKIPPED without
+      # building when the upload matches the live deployment. In every case the previous deployment
+      # keeps serving until a new one succeeds. A failed build's log is printed here, since nothing
+      # streams it any more. Runs after a failed upload too, so a deployment Railway created before
+      # the upload failed is still named in the summary.
       - name: Wait for the deployment to go live
         id: after
         if: ${{ !cancelled() && steps.before.outcome == 'success' }}
@@ -138,12 +142,12 @@ jobs:
             fi
             exit 1
           fi
-          for attempt in $(seq 1 60); do
+          for attempt in $(seq 1 120); do
             read -r id status < <(newest)
             if [ "$id" = "$BEFORE" ]; then
-              echo "Waiting for a deployment newer than $BEFORE ($attempt/60)"
+              echo "Waiting for a deployment newer than $BEFORE ($attempt/120)"
             else
-              echo "Deployment $id: $status ($attempt/60)"
+              echo "Deployment $id: $status ($attempt/120)"
               echo "id=$id" >> "$GITHUB_OUTPUT"
               case "$status" in
                 SUCCESS) exit 0 ;;
@@ -153,13 +157,16 @@ jobs:
                   echo "Railway skipped the deployment: the upload matches what is live"
                   exit 0 ;;
                 FAILED|CRASHED|REMOVED|CANCELED|CANCELLED)
+                  echo "::group::Build log of $id"
+                  railway logs "$id" --build --lines 200 || true
+                  echo "::endgroup::"
                   echo "::error::Railway deployment $id ended as $status"
                   exit 1 ;;
               esac
             fi
             sleep 10
           done
-          echo "::error::Railway deployment did not go live within 10 minutes"
+          echo "::error::Railway deployment did not go live within 20 minutes"
           exit 1
 
       # Through Cloudflare, so the whole path is checked: the health answer and the gallery shell.
