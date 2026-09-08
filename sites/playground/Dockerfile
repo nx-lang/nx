@@ -25,7 +25,9 @@ COPY packages ./packages
 COPY bindings/node ./bindings/node
 COPY runtime/typescript ./runtime/typescript
 COPY crates ./crates
-COPY Cargo.toml Cargo.lock ./
+# No Cargo.lock: the repository ignores it, so the checkout this image is built from has none and
+# cargo resolves one here, as it does in the validate job that precedes a deploy.
+COPY Cargo.toml ./
 COPY src/vscode/package.json src/vscode/language-configuration.json src/vscode/README.md src/vscode/CHANGELOG.md src/vscode/LICENSE ./src/vscode/
 COPY src/vscode/syntaxes ./src/vscode/syntaxes
 COPY src/vscode/snippets ./src/vscode/snippets
