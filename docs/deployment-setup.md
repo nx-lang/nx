@@ -274,6 +274,9 @@ curl -sI https://nxlang.org/                                     # 302 → /play
 curl -s  https://nxlang.org/playground/api/health                # {"ok":true}
 curl -sI https://nxlang.org/playground/assets/<hashed asset>     # twice: second shows cf-cache-status: HIT
 curl -sI https://nxlang.org/playground                           # cf-cache-status: DYNAMIC (never HIT)
+curl -s -H 'accept: text/html' https://nxlang.org/playground | grep -c cloudflareinsights   # 1: the beacon is injected
+#   the edge injects the Web Analytics beacon only into responses to requests that accept HTML,
+#   so a bare curl shows none and proves nothing
 seq 1 200 | xargs -P 40 -I{} curl -s -o /dev/null -w "%{http_code}\n" -X POST \
   -H 'content-type: application/json' -d '{"source":""}' https://nxlang.org/playground/api/compile | sort | uniq -c
 #   mostly 200, then 429 once the rate limit engages; the requests must be parallel, since one
