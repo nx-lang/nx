@@ -1,0 +1,281 @@
+// Ported from the DrawnUI React demo's SkiaScroll page.
+//
+// SkiaScroll features: Header (in the flow, sticky, behind with parallax), Footer, scroll bars,
+// pull to refresh, SnapToChildren, TrackIndexPosition. A header, footer or refresh indicator is a
+// child with Tag="Header", Tag="Footer" or Tag="RefreshIndicator"; the scroll picks it out.
+//
+// Scrolling, snapping, the scroll bars and the pull all work here: they are the control's own.
+// What is missing is what the original wires from outside — the RefreshCommand that puts the
+// scroll into its refreshing state for two seconds, and the CurrentIndex readouts in two card
+// titles — which need event handlers and component state. Without a command the indicator follows
+// the pull and springs back.
+
+component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = {
+  <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 />
+    BackgroundColor="#2B3035" HorizontalOptions=Fill>
+    <SkiaStack Padding=<Thickness Left=16 Top=12 Right=16 Bottom=12 /> Spacing=10>
+      <SkiaLabel Text={Title} FontSize=12 TextColor="#6EA8FE" FontAttributes=Bold
+        TextTransform=Uppercase />
+      {Children}
+    </SkiaStack>
+  </SkiaShape>
+}
+
+component <Bar extends DrawnNode Text:string Color:string /> = {
+  <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> BackgroundColor={Color}
+    HorizontalOptions=Fill HeightRequest=40 UseCache=Operations>
+    <SkiaLabel Text={Text} FontSize=13 TextColor="#FFFFFF" VerticalOptions=Center
+      Margin=<Thickness Left=12 Right=12 /> />
+  </SkiaShape>
+}
+
+<SkiaScroll Orientation=Vertical>
+  <SkiaStack Spacing=16 Padding=<Thickness Left=16 Top=16 Right=16 Bottom=16 />
+    HorizontalOptions=Center MaximumWidthRequest=720 UseCache=Operations>
+    <SkiaLabel Text="SkiaScroll" FontSize=24 TextColor="#FFFFFF" HorizontalOptions=Center />
+
+    <Card Title="Header + Footer in the flow · Tag='Header' / Tag='Footer' children scroll with the content">
+      <SkiaScroll HeightRequest=240 BackgroundColor="#212529" IgnoreWrongDirection=true>
+        <SkiaLayer Tag="Header" HeightRequest=70 BackgroundColor="#0F3460">
+          <SkiaLabel Text="Header (70 pt) · scrolls away" FontSize=16 TextColor="#FFFFFF"
+            HorizontalOptions=Center VerticalOptions=Center />
+        </SkiaLayer>
+        <SkiaStack Spacing=6 Padding=<Thickness Left=8 Top=8 Right=8 Bottom=8 />>
+          <Bar Text="Row 1" Color="#0F3460" />
+          <Bar Text="Row 2" Color="#533483" />
+          <Bar Text="Row 3" Color="#1B4332" />
+          <Bar Text="Row 4" Color="#7B2D26" />
+          <Bar Text="Row 5" Color="#495057" />
+          <Bar Text="Row 6" Color="#0D6EFD" />
+          <Bar Text="Row 7" Color="#D63384" />
+          <Bar Text="Row 8" Color="#2D6A4F" />
+          <Bar Text="Row 9" Color="#0F3460" />
+          <Bar Text="Row 10" Color="#533483" />
+          <Bar Text="Row 11" Color="#1B4332" />
+          <Bar Text="Row 12" Color="#7B2D26" />
+          <Bar Text="Row 13" Color="#495057" />
+          <Bar Text="Row 14" Color="#0D6EFD" />
+        </SkiaStack>
+        <SkiaLayer Tag="Footer" HeightRequest=50 BackgroundColor="#533483">
+          <SkiaLabel Text="Footer (50 pt) · after the content" FontSize=14 TextColor="#FFFFFF"
+            HorizontalOptions=Center VerticalOptions=Center />
+        </SkiaLayer>
+      </SkiaScroll>
+    </Card>
+
+    <Card Title="HeaderSticky · the header stays at the top, drawn over the content">
+      <SkiaScroll HeightRequest=220 BackgroundColor="#212529" HeaderSticky=true IgnoreWrongDirection=true>
+        <SkiaLayer Tag="Header" HeightRequest=44 BackgroundColor="#0D6EFD">
+          <SkiaLabel Text="Sticky header" FontSize=15 TextColor="#FFFFFF"
+            HorizontalOptions=Center VerticalOptions=Center />
+        </SkiaLayer>
+        <SkiaStack Spacing=6 Padding=<Thickness Left=8 Top=8 Right=8 Bottom=8 />>
+          <Bar Text="Under sticky 1" Color="#0F3460" />
+          <Bar Text="Under sticky 2" Color="#533483" />
+          <Bar Text="Under sticky 3" Color="#1B4332" />
+          <Bar Text="Under sticky 4" Color="#7B2D26" />
+          <Bar Text="Under sticky 5" Color="#495057" />
+          <Bar Text="Under sticky 6" Color="#0D6EFD" />
+          <Bar Text="Under sticky 7" Color="#D63384" />
+          <Bar Text="Under sticky 8" Color="#2D6A4F" />
+          <Bar Text="Under sticky 9" Color="#0F3460" />
+          <Bar Text="Under sticky 10" Color="#533483" />
+          <Bar Text="Under sticky 11" Color="#1B4332" />
+          <Bar Text="Under sticky 12" Color="#7B2D26" />
+          <Bar Text="Under sticky 13" Color="#495057" />
+          <Bar Text="Under sticky 14" Color="#0D6EFD" />
+        </SkiaStack>
+      </SkiaScroll>
+    </Card>
+
+    <Card Title="HeaderBehind + HeaderParallaxRatio=0.5 · the content covers the header, which moves at half speed">
+      <SkiaScroll HeightRequest=260 BackgroundColor="#212529" HeaderBehind=true HeaderParallaxRatio=0.5
+        ContentOffset=-24 IgnoreWrongDirection=true>
+        <SkiaLayer Tag="Header" HeightRequest=160>
+          <SkiaImage Source="images/baboon.jpg" Aspect=AspectCover HorizontalOptions=Fill VerticalOptions=Fill />
+          <SkiaLabel Text="Parallax cover" FontSize=22 FontFamily="FontTextBold" TextColor="#FFFFFF"
+            HorizontalOptions=Center VerticalOptions=Center DropShadowColor="#000000" DropShadowSize=4 />
+        </SkiaLayer>
+        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=24 TopRight=24 BottomLeft=0 BottomRight=0 />
+          BackgroundColor="#2B3035" HorizontalOptions=Fill>
+          <SkiaStack Spacing=6 Padding=<Thickness Left=8 Top=8 Right=8 Bottom=8 />>
+            <Bar Text="Content over the cover 1" Color="#0F3460" />
+            <Bar Text="Content over the cover 2" Color="#533483" />
+            <Bar Text="Content over the cover 3" Color="#1B4332" />
+            <Bar Text="Content over the cover 4" Color="#7B2D26" />
+            <Bar Text="Content over the cover 5" Color="#495057" />
+            <Bar Text="Content over the cover 6" Color="#0D6EFD" />
+            <Bar Text="Content over the cover 7" Color="#D63384" />
+            <Bar Text="Content over the cover 8" Color="#2D6A4F" />
+            <Bar Text="Content over the cover 9" Color="#0F3460" />
+            <Bar Text="Content over the cover 10" Color="#533483" />
+            <Bar Text="Content over the cover 11" Color="#1B4332" />
+            <Bar Text="Content over the cover 12" Color="#7B2D26" />
+          </SkiaStack>
+        </SkiaShape>
+      </SkiaScroll>
+    </Card>
+
+    <Card Title="ScrollBarsVisibility='Vertical' + ScrollBarThumbColor · default SkiaScrollBar, auto-hides 1 s after scrolling">
+      <SkiaScroll HeightRequest=200 BackgroundColor="#212529" ScrollBarsVisibility=Vertical
+        ScrollBarThumbColor="#6EA8FE" ScrollBarTrackColor="#FFFFFF22" IgnoreWrongDirection=true>
+        <SkiaStack Spacing=6 Padding=<Thickness Left=8 Top=8 Right=8 Bottom=8 />>
+          <Bar Text="Scrollbar row 1" Color="#0F3460" />
+          <Bar Text="Scrollbar row 2" Color="#533483" />
+          <Bar Text="Scrollbar row 3" Color="#1B4332" />
+          <Bar Text="Scrollbar row 4" Color="#7B2D26" />
+          <Bar Text="Scrollbar row 5" Color="#495057" />
+          <Bar Text="Scrollbar row 6" Color="#0D6EFD" />
+          <Bar Text="Scrollbar row 7" Color="#D63384" />
+          <Bar Text="Scrollbar row 8" Color="#2D6A4F" />
+          <Bar Text="Scrollbar row 9" Color="#0F3460" />
+          <Bar Text="Scrollbar row 10" Color="#533483" />
+          <Bar Text="Scrollbar row 11" Color="#1B4332" />
+          <Bar Text="Scrollbar row 12" Color="#7B2D26" />
+          <Bar Text="Scrollbar row 13" Color="#495057" />
+          <Bar Text="Scrollbar row 14" Color="#0D6EFD" />
+          <Bar Text="Scrollbar row 15" Color="#D63384" />
+          <Bar Text="Scrollbar row 16" Color="#2D6A4F" />
+        </SkiaStack>
+      </SkiaScroll>
+      <SkiaScroll Orientation=Horizontal HeightRequest=70 BackgroundColor="#212529"
+        ScrollBarsVisibility=Horizontal ScrollBarThumbColor="#FFC107">
+        <SkiaRow Spacing=8 Padding=<Thickness Left=8 Top=8 Right=8 Bottom=8 />>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=120 HeightRequest=50 BackgroundColor="#0F3460" UseCache=Operations>
+            <SkiaLabel Text="H 1" FontSize=13 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=120 HeightRequest=50 BackgroundColor="#533483" UseCache=Operations>
+            <SkiaLabel Text="H 2" FontSize=13 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=120 HeightRequest=50 BackgroundColor="#1B4332" UseCache=Operations>
+            <SkiaLabel Text="H 3" FontSize=13 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=120 HeightRequest=50 BackgroundColor="#7B2D26" UseCache=Operations>
+            <SkiaLabel Text="H 4" FontSize=13 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=120 HeightRequest=50 BackgroundColor="#495057" UseCache=Operations>
+            <SkiaLabel Text="H 5" FontSize=13 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=120 HeightRequest=50 BackgroundColor="#0D6EFD" UseCache=Operations>
+            <SkiaLabel Text="H 6" FontSize=13 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=120 HeightRequest=50 BackgroundColor="#D63384" UseCache=Operations>
+            <SkiaLabel Text="H 7" FontSize=13 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=120 HeightRequest=50 BackgroundColor="#2D6A4F" UseCache=Operations>
+            <SkiaLabel Text="H 8" FontSize=13 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=120 HeightRequest=50 BackgroundColor="#0F3460" UseCache=Operations>
+            <SkiaLabel Text="H 9" FontSize=13 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=120 HeightRequest=50 BackgroundColor="#533483" UseCache=Operations>
+            <SkiaLabel Text="H 10" FontSize=13 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=120 HeightRequest=50 BackgroundColor="#1B4332" UseCache=Operations>
+            <SkiaLabel Text="H 11" FontSize=13 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=120 HeightRequest=50 BackgroundColor="#7B2D26" UseCache=Operations>
+            <SkiaLabel Text="H 12" FontSize=13 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=120 HeightRequest=50 BackgroundColor="#495057" UseCache=Operations>
+            <SkiaLabel Text="H 13" FontSize=13 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=120 HeightRequest=50 BackgroundColor="#0D6EFD" UseCache=Operations>
+            <SkiaLabel Text="H 14" FontSize=13 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+        </SkiaRow>
+      </SkiaScroll>
+    </Card>
+
+    <Card Title="RefreshEnabled + RefreshIndicator (Tag='RefreshIndicator') · RefreshDistanceLimit 60, RefreshShowDistance 50 · pull down past 60 pt">
+      // The original's RefreshCommand sets IsRefreshing for two seconds and reports it in the
+      // title. Without a command the indicator follows the pull and springs back.
+      <SkiaScroll HeightRequest=220 BackgroundColor="#212529" RefreshEnabled=true RefreshDistanceLimit=60
+        IgnoreWrongDirection=true>
+        <RefreshIndicator Tag="RefreshIndicator" HeightRequest=50>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=20 /> BackgroundColor="#0D6EFD"
+            HorizontalOptions=Center VerticalOptions=Center WidthRequest=160 HeightRequest=36>
+            <SkiaLabel Text="↻ refresh" FontFamilyFallback="FontSymbols,FontSymbols2" FontSize=14
+              TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+        </RefreshIndicator>
+        <SkiaStack Spacing=6 Padding=<Thickness Left=8 Top=8 Right=8 Bottom=8 />>
+          <Bar Text="Pull down 1" Color="#0F3460" />
+          <Bar Text="Pull down 2" Color="#533483" />
+          <Bar Text="Pull down 3" Color="#1B4332" />
+          <Bar Text="Pull down 4" Color="#7B2D26" />
+          <Bar Text="Pull down 5" Color="#495057" />
+          <Bar Text="Pull down 6" Color="#0D6EFD" />
+          <Bar Text="Pull down 7" Color="#D63384" />
+          <Bar Text="Pull down 8" Color="#2D6A4F" />
+          <Bar Text="Pull down 9" Color="#0F3460" />
+          <Bar Text="Pull down 10" Color="#533483" />
+          <Bar Text="Pull down 11" Color="#1B4332" />
+          <Bar Text="Pull down 12" Color="#7B2D26" />
+        </SkiaStack>
+      </SkiaScroll>
+    </Card>
+
+    <Card Title="SnapToChildren='Center' + TrackIndexPosition='Center' (horizontal) · the original reports CurrentIndex here">
+      <SkiaScroll Orientation=Horizontal HeightRequest=120 BackgroundColor="#212529"
+        SnapToChildren=Center TrackIndexPosition=Center>
+        <SkiaRow Spacing=12 Padding=<Thickness Left=8 Top=8 Right=8 Bottom=8 />>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=10 /> WidthRequest=200 HeightRequest=100 BackgroundColor="#0F3460" UseCache=Operations>
+            <SkiaLabel Text="Snap 0" FontSize=18 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=10 /> WidthRequest=200 HeightRequest=100 BackgroundColor="#533483" UseCache=Operations>
+            <SkiaLabel Text="Snap 1" FontSize=18 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=10 /> WidthRequest=200 HeightRequest=100 BackgroundColor="#1B4332" UseCache=Operations>
+            <SkiaLabel Text="Snap 2" FontSize=18 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=10 /> WidthRequest=200 HeightRequest=100 BackgroundColor="#7B2D26" UseCache=Operations>
+            <SkiaLabel Text="Snap 3" FontSize=18 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=10 /> WidthRequest=200 HeightRequest=100 BackgroundColor="#495057" UseCache=Operations>
+            <SkiaLabel Text="Snap 4" FontSize=18 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=10 /> WidthRequest=200 HeightRequest=100 BackgroundColor="#0D6EFD" UseCache=Operations>
+            <SkiaLabel Text="Snap 5" FontSize=18 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=10 /> WidthRequest=200 HeightRequest=100 BackgroundColor="#D63384" UseCache=Operations>
+            <SkiaLabel Text="Snap 6" FontSize=18 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=10 /> WidthRequest=200 HeightRequest=100 BackgroundColor="#2D6A4F" UseCache=Operations>
+            <SkiaLabel Text="Snap 7" FontSize=18 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=10 /> WidthRequest=200 HeightRequest=100 BackgroundColor="#0F3460" UseCache=Operations>
+            <SkiaLabel Text="Snap 8" FontSize=18 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=10 /> WidthRequest=200 HeightRequest=100 BackgroundColor="#533483" UseCache=Operations>
+            <SkiaLabel Text="Snap 9" FontSize=18 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center />
+          </SkiaShape>
+        </SkiaRow>
+      </SkiaScroll>
+    </Card>
+
+    <Card Title="TrackIndexPosition='Start' (vertical) · SnapToChildren='Side' · the original reports CurrentIndex here">
+      <SkiaScroll HeightRequest=180 BackgroundColor="#212529" TrackIndexPosition=Start SnapToChildren=Side
+        IgnoreWrongDirection=true>
+        <SkiaStack Spacing=6 Padding=<Thickness Left=8 Top=8 Right=8 Bottom=8 />>
+          <Bar Text="Tracked 1" Color="#0F3460" />
+          <Bar Text="Tracked 2" Color="#533483" />
+          <Bar Text="Tracked 3" Color="#1B4332" />
+          <Bar Text="Tracked 4" Color="#7B2D26" />
+          <Bar Text="Tracked 5" Color="#495057" />
+          <Bar Text="Tracked 6" Color="#0D6EFD" />
+          <Bar Text="Tracked 7" Color="#D63384" />
+          <Bar Text="Tracked 8" Color="#2D6A4F" />
+          <Bar Text="Tracked 9" Color="#0F3460" />
+          <Bar Text="Tracked 10" Color="#533483" />
+          <Bar Text="Tracked 11" Color="#1B4332" />
+          <Bar Text="Tracked 12" Color="#7B2D26" />
+          <Bar Text="Tracked 13" Color="#495057" />
+          <Bar Text="Tracked 14" Color="#0D6EFD" />
+          <Bar Text="Tracked 15" Color="#D63384" />
+          <Bar Text="Tracked 16" Color="#2D6A4F" />
+        </SkiaStack>
+      </SkiaScroll>
+    </Card>
+  </SkiaStack>
+</SkiaScroll>

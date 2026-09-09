@@ -25,6 +25,9 @@ const COPIES = [
   { from: "samples/demo/pages", to: "reference/demo-pages", what: "demo pages (reference only)" },
   { from: "samples/public/fonts", to: "public/fonts", what: "shared fonts" },
   { from: "samples/public/images", to: "public/images", what: "shared images" },
+  { from: "samples/public/lottie", to: "public/lottie", what: "Lottie animations" },
+  { from: "samples/public/anims", to: "public/anims", what: "sprite sheets" },
+  { from: "samples/public/shaders", to: "public/shaders", what: "SkSL shaders" },
 ];
 
 function parseSource(argv) {

@@ -84,7 +84,13 @@ export class SkiaDrawer extends SnappingLayout {
   }
 
   override UpdateReportedPosition(): void {
-    if (this.InTransition || this.SnapPoints.length < 2) return;
+    if (this.InTransition) return;
+    this.ReportFromSnap();
+  }
+
+  /** IsOpen from the anchor the drawer rests on / travels to. */
+  private ReportFromSnap(): void {
+    if (this.SnapPoints.length < 2) return;
     const hidden = this.SnapPoints[1];
     const open = !(Math.abs(hidden.X - this.CurrentSnap.X) <= 1 && Math.abs(hidden.Y - this.CurrentSnap.Y) <= 1);
     if (open !== this.isOpen) { this.isOpen = open; this.IsOpenChanged?.(this, open); this.NotifyAccessibility(); }
@@ -92,7 +98,8 @@ export class SkiaDrawer extends SnappingLayout {
 
   override CheckTransitionEnded(): boolean {
     const ended = super.CheckTransitionEnded();
-    if (ended && this.InTransition) this.StateTransitionComplete?.(this, this.isOpen);
+    // the transition just ended: report the reached state first (a gesture-driven close has not been reported yet)
+    if (ended && this.InTransition) { this.ReportFromSnap(); this.StateTransitionComplete?.(this, this.isOpen); }
     return ended;
   }
 

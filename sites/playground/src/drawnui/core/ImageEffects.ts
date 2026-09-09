@@ -42,6 +42,17 @@ export const SkiaImageEffects = {
     const mid = Math.pow(0.5, g), slope = 2 * (mid - 0) , offset = 0.5 - slope * 0.5 + (mid - 0.5) * 0;
     return SkiaImageEffects.Matrix([slope, 0, 0, 0, offset, 0, slope, 0, 0, offset, 0, 0, slope, 0, offset, 0, 0, 0, 1, 0]);
   },
+  /** C# HSL: saturation + lightness matrices, then a tint with the color at (hue, 1, lightness) (MAUI Color.FromHsla). */
+  HSL(hue: number, saturation: number, lightness: number, mode: BlendMode): ColorFilter {
+    const CK = Super.CK;
+    const h = ((hue % 1) + 1) % 1, l = Math.max(0, Math.min(1, lightness));
+    const q = l < 0.5 ? l * 2 : 1, p = 2 * l - q; // s = 1
+    const ch = (t: number) => { t = ((t % 1) + 1) % 1; return t < 1 / 6 ? p + (q - p) * 6 * t : t < 0.5 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p; };
+    const toHex = (v: number) => Math.round(v * 255).toString(16).padStart(2, "0");
+    const tint = `#${toHex(ch(h + 1 / 3))}${toHex(ch(h))}${toHex(ch(h - 1 / 3))}`;
+    const combined = CK.ColorFilter.MakeCompose(SkiaImageEffects.Saturation(saturation), SkiaImageEffects.Lightness(lightness));
+    return CK.ColorFilter.MakeCompose(combined, SkiaImageEffects.Tint(tint, mode));
+  },
   TintSL(tint: Color, saturation: number, lightness: number, mode: BlendMode): ColorFilter {
     const CK = Super.CK;
     const a = CK.ColorFilter.MakeCompose(SkiaImageEffects.Lightness(lightness), SkiaImageEffects.Saturation(saturation));

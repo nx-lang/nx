@@ -1,13 +1,21 @@
 import metadata from "./examples.json";
 import type { Capability, Coverage, Example } from "./types";
 import accessibility from "./nx/accessibility.nx?raw";
+import animations from "./nx/animations.nx?raw";
 import cells from "./nx/cells.nx?raw";
+import editor from "./nx/editor.nx?raw";
 import images from "./nx/images.nx?raw";
+import keyboard from "./nx/keyboard.nx?raw";
 import layouts from "./nx/layouts.nx?raw";
 import looks from "./nx/looks.nx?raw";
+import reorder from "./nx/reorder.nx?raw";
 import rootMenu from "./nx/root.nx?raw";
+import scroll from "./nx/scroll.nx?raw";
+import shaders from "./nx/shaders.nx?raw";
 import shapes from "./nx/shapes.nx?raw";
+import shell from "./nx/shell.nx?raw";
 import snapping from "./nx/snapping.nx?raw";
+import sprites from "./nx/sprites.nx?raw";
 import svg from "./nx/svg.nx?raw";
 import text from "./nx/text.nx?raw";
 import transforms from "./nx/transforms.nx?raw";
@@ -16,13 +24,21 @@ import unevenCells from "./nx/uneven-cells.nx?raw";
 /** Every example's NX, by the id its metadata gives it. */
 const SOURCES: Record<string, string> = {
   accessibility,
+  animations,
   cells,
+  editor,
   images,
+  keyboard,
   layouts,
   looks,
+  reorder,
   root: rootMenu,
+  scroll,
+  shaders,
   shapes,
+  shell,
   snapping,
+  sprites,
   svg,
   text,
   transforms,

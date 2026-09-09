@@ -83,6 +83,24 @@ export type DrawerDirection = "FromBottom" | "FromTop" | "FromLeft" | "FromRight
 
 /** DrawnUi LayoutType. */
 export type LayoutType = "Absolute" | "Column" | "Row" | "Wrap" | "Grid";
+/** MAUI ReturnType: what the keyboard's return key means (SkiaEditor: Send submits a multiline editor). */
+export type ReturnType = "Default" | "Done" | "Go" | "Next" | "Search" | "Send";
+/** DrawnUi SkiaEditor.SkiaEditorKeyboard. */
+export type SkiaEditorKeyboard = "Default" | "Numeric" | "Decimal" | "Phone" | "Email";
+
+/** DrawnUi BevelType: None, Bevel (light top/left, shadow bottom/right), Emboss (the opposite). */
+export type BevelType = "None" | "Bevel" | "Emboss";
+/** DrawnUi SkiaBevel: bevel / emboss edge parameters of a SkiaShape (Depth in points). */
+export class SkiaBevel {
+  Depth = 2;
+  LightColor: Color = "#FFFFFF";
+  ShadowColor: Color = "#000000";
+  /** Applies to both the light and the shadow edge. */
+  Opacity = 0.5;
+  constructor(init?: Partial<SkiaBevel>) { if (init) Object.assign(this, init); }
+  static From(v: SkiaBevel | Partial<SkiaBevel>): SkiaBevel { return v instanceof SkiaBevel ? v : new SkiaBevel(v); }
+}
+
 /** DrawnUi SkiaShadow: a drop shadow painted with the shape (offset and blur in points; Color alpha 1 = use Opacity). */
 export class SkiaShadow {
   X = 2;
@@ -134,20 +152,41 @@ export type DrawImageAlignment = "Start" | "Center" | "End";
 export type ScrollOrientation = "Vertical" | "Horizontal" | "Both" | "Neither";
 
 /**
- * DrawnUi SkiaCacheType. Operations = recorded draw commands (SkPicture) replayed each frame;
+ * DrawnUi SkiaCacheType. Operations / OperationsFull = recorded draw commands (SkPicture) replayed each frame.
  * Image = offscreen surface snapshot blitted each frame (GPU-backed when the canvas is WebGL).
- * GPU / ImageDoubleBuffered / ImageComposite / ImageCompositeGPU are accepted and currently resolve to Image.
+ * ImageDoubleBuffered = an Image cache that keeps the previous one and draws it — or DrawPlaceholder when there is
+ * none — while a new one cannot be produced yet.
+ * ImageComposite / ImageCompositeGPU = an Image cache whose offscreen surface survives between records: when only
+ * children changed, their old and new bounds plus the siblings those overlap are erased and only those children are
+ * painted again.
+ * GPU resolves to Image and ImageCompositeGPU to ImageComposite; the browser has no separate GPU-only path.
  */
 export type SkiaCacheType = "None" | "Operations" | "OperationsFull" | "Image" | "ImageDoubleBuffered" | "ImageComposite" | "ImageCompositeGPU" | "GPU";
 
-/** DrawnUi SkiaGradient (Linear only): colors spread from Start to End, ratios of the control's rect. */
+/** DrawnUi GradientType (Conical accepted, drawn as Circular). */
+export type GradientType = "None" | "Linear" | "Circular" | "Oval" | "Sweep" | "Conical";
+/** SKShaderTileMode. */
+export type ShaderTileMode = "Clamp" | "Repeat" | "Mirror" | "Decal";
+
+/**
+ * DrawnUi SkiaGradient: colors spread over the control's rect. Linear from Start to End (ratios, or `Angle` in CSS
+ * degrees), Circular / Oval centered at Start, Sweep around the center (Value1 start angle, Value2 sweep on the
+ * control). `ColorPositions` (0..1, one per color), `TileMode`, `Light` (< 1 darker, > 1 lighter), `Opacity`, `BlendMode`.
+ */
 export interface SkiaGradient {
-  Type: "Linear";
+  Type?: GradientType;
   Colors: Color[];
+  ColorPositions?: number[];
   StartXRatio?: number;
   StartYRatio?: number;
   EndXRatio?: number;
   EndYRatio?: number;
+  /** CSS-style angle in degrees; overrides the Start/End ratios for Linear. */
+  Angle?: number;
+  TileMode?: ShaderTileMode;
+  Light?: number;
+  Opacity?: number;
+  BlendMode?: string;
 }
 
 /** DrawnUi RecyclingTemplate: Enabled = pool of cells for the visible range, Disabled = one view per item. */
@@ -156,6 +195,8 @@ export type RecyclingTemplate = "Enabled" | "Disabled";
 /** DrawnUi MeasuringStrategy (MeasureVisible not ported yet). */
 export type MeasuringStrategy = "MeasureAll" | "MeasureFirst" | "MeasureVisible";
 
+/** DrawnUi SnapToChildrenType: snap the scroll to a child after scrolling stops. */
+export type SnapToChildrenType = "Disabled" | "Center" | "Side";
 /** DrawnUi RelativePositionType for ScrollToIndex. */
 export type RelativePositionType = "None" | "Start" | "Center" | "End";
 

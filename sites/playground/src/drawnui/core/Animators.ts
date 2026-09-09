@@ -171,7 +171,14 @@ export class RenderingAnimator extends SkiaValueAnimator implements IOverlayEffe
   override Stop(): void {
     const parent = this.Parent;
     super.Stop();
-    parent?.Repaint();
+    parent?.RepaintComposition(); // ancestors re-record without the effect
+  }
+
+  /** While running, the ancestors' caches hold a frame without this effect: stale them so the parent's ExecutePostAnimators runs (C# parent invalidation). */
+  override TickFrame(frameTimeNanos: number): boolean {
+    const finished = super.TickFrame(frameTimeNanos);
+    if (this.IsRunning) this.Parent?.RepaintComposition();
+    return finished;
   }
 
   Render(context: DrawingContext, control: SkiaControl): boolean {

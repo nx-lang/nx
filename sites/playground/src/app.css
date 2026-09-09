@@ -126,7 +126,9 @@ body {
 
 .gallery-head h1 { font-size: 28px; margin: 0 0 4px; }
 .gallery-head .subtitle { color: var(--ink); font-size: 16px; margin: 0 0 8px; }
-.gallery-head p { color: var(--ink-dim); font-size: 14px; margin: 0; max-width: 62ch; line-height: 1.5; }
+.gallery-head p { color: var(--ink-dim); font-size: 14px; margin: 0; line-height: 1.5; }
+.gallery-head a { color: #6ea8fe; text-decoration: none; }
+.gallery-head a:hover { text-decoration: underline; }
 
 .cards {
   max-width: 860px;

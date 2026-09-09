@@ -1,15 +1,22 @@
 import type { Canvas as SkCanvas, Image, Path, SkPicture, Surface } from "canvaskit-wasm";
 import { Super } from "./Super";
+import { SkiaStyles } from "./Styles";
 import { type Color, Colors, type LayoutOptions, SKRect, ScaledSize, type SkiaCacheType, type SkiaGradient, type SkiaTouchAnimation, Thickness } from "./Types";
 import { type IOverlayEffect, RippleAnimator, SkiaValueAnimator } from "./Animators";
 import { Easing } from "./Easing";
 import type { Canvas } from "./Canvas";
 import { Aria } from "./Accessibility";
-import { ControlTappedEventArgs, GestureEventProcessingInfo, type LockTouch, SKPoint, SkiaGesturesInfo, SkiaGesturesParameters, TouchActionEventArgs } from "./Gestures";
+import { ContextMenuEventArgs, ControlTappedEventArgs, GestureEventProcessingInfo, type LockTouch, SKPoint, SkiaGesturesInfo, SkiaGesturesParameters, TouchActionEventArgs } from "./Gestures";
+import { type CachedTexture, type IPostRendererEffect, IsPostRendererEffect, type SkiaEffect } from "./SkiaEffect";
 
 /** Mirrors DrawnUi DrawingContext: ctx.Context.Canvas / Surface, ctx.Destination (pixels), ctx.Scale. */
 export interface DrawingContext {
-  Context: { Canvas: SkCanvas; Surface?: Surface };
+  /**
+   * Surface = where the pixels end up (an Image cache surface or the on-screen one), Origin = that surface's top-left
+   * in canvas pixels (caches are translated to their own origin), Recording = the canvas records a picture
+   * (Operations cache) that is replayed on Surface later.
+   */
+  Context: { Canvas: SkCanvas; Surface?: Surface; Origin?: { X: number; Y: number }; Recording?: boolean };
   Destination: SKRect;
   Scale: number;
 }
@@ -99,12 +106,24 @@ export class SkiaControl {
   Opacity = 1;
   /** Clip everything this control draws (content, children, effects per ClipEffects) to its DrawingRect. */
   IsClippedToBounds = false;
+  /** Paint-time offset in points (C# Left/Top: moves the cached output without a matrix; here a plain translate). */
+  Left = 0;
+  Top = 0;
+  private zIndex = 0;
+  /** Drawing order among siblings: higher draws later (on top) and receives gestures first (C# ZIndex). */
+  get ZIndex(): number { return this.zIndex; }
+  set ZIndex(v: number) { if (this.zIndex !== v) { this.zIndex = v; this.Parent?.InvalidateViewsOrder(); this.RepaintComposition(); } }
+  /** A layout re-sorts its children by ZIndex on the next draw (C# _orderedChildren reset). */
+  InvalidateViewsOrder(): void {}
+  /** Fraction of the available box a Fill control takes (C# DefineAvailableSize); alignment stays inside the full box. */
+  HorizontalFillRatio = 1;
+  VerticalFillRatio = 1;
 
   /** Sets ScaleX and ScaleY together (MAUI Scale). */
   get Scale(): number { return this.ScaleX; }
   set Scale(v: number) { this.ScaleX = v; this.ScaleY = v; }
   get HasTransform(): boolean {
-    return this.TranslationX !== 0 || this.TranslationY !== 0 || this.Rotation !== 0 || this.ScaleX !== 1 || this.ScaleY !== 1 || this.SkewX !== 0 || this.SkewY !== 0;
+    return this.TranslationX !== 0 || this.TranslationY !== 0 || this.Left !== 0 || this.Top !== 0 || this.Rotation !== 0 || this.ScaleX !== 1 || this.ScaleY !== 1 || this.SkewX !== 0 || this.SkewY !== 0;
   }
   /** Matrix applied at the last render (canvas space), undefined when none; gestures map through its inverse. */
   RenderTransformMatrix?: number[];
@@ -138,8 +157,35 @@ export class SkiaControl {
       case "None": return "None";
       case "Operations": case "OperationsFull": return "Operations";
       case "ImageDoubleBuffered": return "ImageDoubleBuffered";
-      default: return "Image"; // Image, GPU, ImageComposite(GPU) -> single offscreen image for now
+      case "ImageComposite": case "ImageCompositeGPU": return "ImageComposite";
+      default: return "Image"; // Image, GPU -> single offscreen image
     }
+  }
+  /** C# IsCacheComposite: the offscreen surface is kept and only the changed children are re-recorded. */
+  get IsCacheComposite(): boolean { return this.UsingCacheType === "ImageComposite"; }
+  /** Children reported dirty since the last composite record (C# DirtyChildrenInternal, filled by RepaintComposition). */
+  readonly DirtyChildrenInternal = new Set<SkiaControl>();
+  /** True while a composite re-record paints only the dirty children (C# IsRenderingWithComposition). */
+  IsRenderingWithComposition = false;
+  /** Composite surface kept across records; its size follows the expanded cache rect. */
+  private compositeSurface?: Surface;
+  /** Own content or structure changed: the next composite record is a full one. */
+  private compositeFull = true;
+  /** Canvas-pixel bounds this control covered when its parent last recorded it (composite erase region). */
+  private lastCompositeBounds?: SKRect;
+  /** What the last composite record did (diagnostics): "full" or "partial", the number of children re-recorded and which ones. */
+  LastCompositeRecord: { Mode: "full" | "partial"; Children: number; Dirty: readonly SkiaControl[] } = { Mode: "full", Children: 0, Dirty: [] };
+  /** The children a composite record can re-record individually; layouts return their views. */
+  protected GetCompositeChildren(): readonly SkiaControl[] { return []; }
+  /** C# TrackChildAsDirty (DirtyChildrenTracker): the child changed without a remeasure of this control. */
+  TrackChildAsDirty(child: SkiaControl): void { if (this.IsCacheComposite) this.DirtyChildrenInternal.add(child); }
+  /** Drawn bounds in canvas pixels including transforms and effects margins (C# GetTransformedDirtyBounds). */
+  GetTransformedDirtyBounds(): SKRect {
+    const r = this.ExpandedCacheRect(this.RenderingScale), m = this.RenderTransformMatrix;
+    if (!m) return r;
+    const pts = Super.CK.Matrix.mapPoints(m, [r.Left, r.Top, r.Right, r.Top, r.Right, r.Bottom, r.Left, r.Bottom]);
+    const xs = [pts[0], pts[2], pts[4], pts[6]], ys = [pts[1], pts[3], pts[5], pts[7]];
+    return new SKRect(Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys));
   }
   /** Current cache, if any. */
   RenderObject?: CachedObject;
@@ -160,11 +206,49 @@ export class SkiaControl {
   AnimationTappedSpeed = 0;
   /** Overlay effects drawn above this control's content every frame (ripple etc). */
   readonly PostAnimators: IOverlayEffect[] = [];
+
+  // ---- visual effects (C# VisualEffects: attached SkiaEffect objects) ----
+  private visualEffects: SkiaEffect[] = [];
+  /** Post-renderer effects among VisualEffects (C# EffectPostRenderers). */
+  EffectPostRenderers: (SkiaEffect & IPostRendererEffect)[] = [];
+  /** Skip every attached effect (C# DisableEffects). */
+  DisableEffects = false;
+  /** Effects attached to this control; assign a new array to change them (they are attached/detached here). */
+  get VisualEffects(): readonly SkiaEffect[] { return this.visualEffects; }
+  set VisualEffects(v: readonly SkiaEffect[] | undefined) {
+    const next = v ? [...v] : [];
+    for (const e of this.visualEffects) if (!next.includes(e)) e.Dettach();
+    for (const e of next) if (e.Parent !== this) e.Attach(this);
+    this.visualEffects = next;
+    this.OnVisualEffectsChanged();
+  }
+  protected OnVisualEffectsChanged(): void {
+    this.EffectPostRenderers = this.visualEffects.filter(IsPostRendererEffect);
+    this.InvalidateEffectsMargin();
+    this.InvalidateCache();
+    this.RepaintComposition();
+  }
+  /** Post renderers that can render this frame (compiled shaders); an unready effect leaves the control drawn plainly. */
+  private ActivePostRenderers(): (SkiaEffect & IPostRendererEffect)[] {
+    if (this.DisableEffects || this.EffectPostRenderers.length === 0) return [];
+    return this.EffectPostRenderers.filter((e) => e.NeedApply);
+  }
+  /** C# CachedImage: the cached texture and the canvas rect it was rasterized over (Image caches only). */
+  get CachedImage(): CachedTexture | undefined {
+    const c = this.RenderObject;
+    return c?.Image ? { Image: c.Image, Bounds: c.Bounds } : undefined;
+  }
   /** Clip overlay effects to the control's shape (CreateClip). */
   ClipEffects = true;
 
   // ---- gesture events (single handler each; C# events map to one callback prop) ----
   Tapped?: (sender: SkiaControl, e: ControlTappedEventArgs) => void;
+  /**
+   * Context-menu request over this control (right click, long press on touch, Menu key). Return true to handle it:
+   * the browser's own canvas menu is suppressed. Routed deepest child first, then parents, then Canvas.ContextMenu.
+   * Not in DrawnUi.Net (a web concept).
+   */
+  ContextMenu?: (sender: SkiaControl, e: ContextMenuEventArgs) => boolean | void;
   ChildTapped?: (sender: SkiaControl, e: ControlTappedEventArgs) => void;
   /** Raw gesture hook: set e.Consumed = true to stop propagation (not for Up). */
   ConsumeGestures?: (sender: SkiaControl, e: SkiaGesturesInfo) => void;
@@ -172,6 +256,18 @@ export class SkiaControl {
   // ---- tree ----
   Parent?: SkiaControl;
   /** Containers override; a leaf control cannot host children. */
+  private styledInitially = false;
+
+  /**
+   * C# ApplyInitialStyles: takes the property defaults registered with `ConfigureStyles` for this control's class.
+   * The reconciler calls it with `atConstruction` right after `new`, before the JSX props, so props win; a control
+   * built in code-behind is styled on its first measure and keeps whatever the code already set.
+   */
+  ApplyInitialStyles(atConstruction = false): void {
+    this.styledInitially = true;
+    if (!SkiaStyles.IsEmpty) SkiaStyles.Apply(this, atConstruction);
+  }
+
   AddSubView(_control: SkiaControl): void { throw new Error(`DrawnUi: ${this.constructor.name} cannot host children`); }
   InsertSubView(_index: number, control: SkiaControl): void { this.AddSubView(control); }
   RemoveSubView(_control: SkiaControl): void {}
@@ -196,6 +292,7 @@ export class SkiaControl {
    * this is what keeps a cached tree from re-measuring text every frame.
    */
   Measure(widthConstraint: number, heightConstraint: number, scale: number): ScaledSize {
+    if (!this.styledInitially) this.ApplyInitialStyles(false);
     if (!this.NeedMeasure && this.RenderingScale === scale
       && Object.is(this.lastWidthConstraint, widthConstraint) && Object.is(this.lastHeightConstraint, heightConstraint)) {
       return this.MeasuredSize;
@@ -257,6 +354,8 @@ export class SkiaControl {
     // DrawnUi DefineAvailableSize: a Maximum*Request caps the available box; a Fill control then fills only that.
     if (this.WidthRequest < 0 && this.MaximumWidthRequest >= 0) availW = Math.min(availW, this.MaximumWidthRequest * scale);
     if (this.HeightRequest < 0 && this.MaximumHeightRequest >= 0) availH = Math.min(availH, this.MaximumHeightRequest * scale);
+    if (this.HorizontalFillRatio !== 1) availW = Math.ceil(availW * this.HorizontalFillRatio);
+    if (this.VerticalFillRatio !== 1) availH = Math.ceil(availH * this.VerticalFillRatio);
 
     const w = this.HorizontalOptions === "Fill" ? availW : Math.min(availW, this.MeasuredSize.Pixels.Width - m.HorizontalThickness * scale);
     const h = this.VerticalOptions === "Fill" ? availH : Math.min(availH, this.MeasuredSize.Pixels.Height - m.VerticalThickness * scale);
@@ -304,6 +403,11 @@ export class SkiaControl {
   get AccessibilityCanInteract(): boolean { return this.accessibilityCanInteract ?? this.DefaultAccessibilityCanInteract(); }
   set AccessibilityCanInteract(v: boolean) { if (this.accessibilityCanInteract !== v) { this.accessibilityCanInteract = v; this.AccessibilityChanged(); } }
   protected DefaultAccessibilityCanInteract(): boolean { return !!this.Tapped; }
+  /**
+   * Whether the mouse at this point (pixels, relative to DrawingRect's origin) is over something tappable, for the
+   * host's pointer cursor. Default: the control as a whole (AccessibilityCanInteract); SkiaLabel adds its tappable spans.
+   */
+  WantsPointerCursor(_x: number, _y: number): boolean { return this.AccessibilityCanInteract; }
 
   /** aria-pressed for toggles; undefined = not a toggle. */
   get AccessibilityIsPressed(): boolean | undefined { return this.accessibilityIsPressed; }
@@ -314,6 +418,17 @@ export class SkiaControl {
   set AccessibilityLive(v: string | undefined) { if (this.accessibilityLive !== v) { this.accessibilityLive = v; this.AccessibilityChanged(); } }
 
   get IsAccessibilityElement(): boolean { const r = this.AccessibilityRole; return r != null && r !== Aria.RolePresentation; }
+
+  private accessibilityTextSelectable = false;
+  /**
+   * Opt-in (React extension, off by default): the control's text is rendered as real, invisible DOM text in the
+   * accessibility overlay with pointer events, so the browser selects / copies it like HTML. Pointer input over the
+   * text then goes to the selection, not to the drawn control — never enable it on gesture-driven controls.
+   */
+  get AccessibilityTextSelectable(): boolean { return this.accessibilityTextSelectable; }
+  set AccessibilityTextSelectable(v: boolean) { if (this.accessibilityTextSelectable !== v) { this.accessibilityTextSelectable = v; this.AccessibilityChanged(); } }
+  /** Text lines for AccessibilityTextSelectable in CSS px relative to the node (SkiaLabel implements it). */
+  GetAccessibilityTextLines(_scale: number): import("./Accessibility").AccessibilityTextLine[] { return []; }
 
   /** Hit rect in canvas pixels used to position the overlay element: the drawn (transformed) bounds, like C# HitBoxWithTransforms. */
   GetAccessibilityPixelRect(): SKRect {
@@ -402,7 +517,14 @@ export class SkiaControl {
   private effectsMarginCache?: { scale: number; margin: Thickness };
   /** Cached ComputeEffectsMargin (reset by InvalidateMeasure) — C# AggregatedEffectsMarginPixels. */
   EffectsMargin(scale: number): Thickness {
-    if (!this.effectsMarginCache || this.effectsMarginCache.scale !== scale) this.effectsMarginCache = { scale, margin: this.ComputeEffectsMargin(scale) };
+    if (!this.effectsMarginCache || this.effectsMarginCache.scale !== scale) {
+      let m = this.ComputeEffectsMargin(scale);
+      if (!this.DisableEffects) for (const e of this.visualEffects) { // C# ComputeEffectsMargin: per-side max over the attached effects
+        const em = e.GetEffectMargin(scale);
+        if (em.Left > m.Left || em.Top > m.Top || em.Right > m.Right || em.Bottom > m.Bottom) m = new Thickness(Math.max(m.Left, em.Left), Math.max(m.Top, em.Top), Math.max(m.Right, em.Right), Math.max(m.Bottom, em.Bottom));
+      }
+      this.effectsMarginCache = { scale, margin: m };
+    }
     return this.effectsMarginCache.margin;
   }
 
@@ -414,10 +536,13 @@ export class SkiaControl {
   }
 
   Render(ctx: DrawingContext): void {
-    if (!this.IsVisible || this.Opacity <= 0) return;
+    if (!this.IsVisible || this.Opacity <= 0 || this.IsDisposed) return;
     const canvas = ctx.Context.Canvas;
     const applyOpacity = this.Opacity < 1;
-    const needTransform = this.HasTransform;
+    // C# Left/Top: a cached control is blitted at an offset, no matrix and no save/restore around the subtree
+    const offsetOnly = (this.Left !== 0 || this.Top !== 0) && this.UsingCacheType !== "None" && this.TranslationX === 0 && this.TranslationY === 0
+      && this.Rotation === 0 && this.ScaleX === 1 && this.ScaleY === 1 && this.SkewX === 0 && this.SkewY === 0;
+    const needTransform = this.HasTransform && !offsetOnly;
     let saved = false;
     // same as DrawnUi: opacity = a layer with alpha, transforms = canvas matrix around the whole subtree (cache included)
     if (applyOpacity) {
@@ -430,25 +555,29 @@ export class SkiaControl {
       canvas.save();
       saved = true;
     }
+    let dx = 0, dy = 0;
     if (needTransform) {
       this.RenderTransformMatrix = this.CreateRenderTransformMatrix(this.DrawingRect, ctx.Scale);
       canvas.concat(this.RenderTransformMatrix);
+    } else if (offsetOnly) {
+      dx = this.Left * ctx.Scale; dy = this.Top * ctx.Scale;
+      this.RenderTransformMatrix = Super.CK.Matrix.translated(dx, dy); // gestures / accessibility still map through it
     } else {
       this.RenderTransformMatrix = undefined;
     }
     if (this.IsClippedToBounds) {
       if (!saved) { canvas.save(); saved = true; }
       const c = this.ClipEffects ? this.DrawingRect : this.ExpandedCacheRect(ctx.Scale);
-      canvas.clipRect(Super.CK.LTRBRect(c.Left, c.Top, c.Right, c.Bottom), Super.CK.ClipOp.Intersect, true);
+      canvas.clipRect(Super.CK.LTRBRect(c.Left + dx, c.Top + dy, c.Right + dx, c.Bottom + dy), Super.CK.ClipOp.Intersect, true);
     }
-    this.RenderContent(ctx);
+    this.RenderContent(ctx, dx, dy);
     if (saved) canvas.restore();
   }
 
   /** Port of DrawnUi ApplyTransforms: T(-pivot) · rotation · scale/skew · T(pivot) · translation, in canvas pixels. */
   protected CreateRenderTransformMatrix(destination: SKRect, scale: number): number[] {
     const M = Super.CK.Matrix;
-    const moveX = this.TranslationX * scale, moveY = this.TranslationY * scale;
+    const moveX = (this.TranslationX + this.Left) * scale, moveY = (this.TranslationY + this.Top) * scale;
     if (this.Rotation === 0 && this.ScaleX === 1 && this.ScaleY === 1 && this.SkewX === 0 && this.SkewY === 0) return M.translated(moveX, moveY);
     const px = destination.Left + destination.Width * this.AnchorX;
     const py = destination.Top + destination.Height * this.AnchorY;
@@ -470,21 +599,39 @@ export class SkiaControl {
     return new SKPoint(p[0], p[1]);
   }
 
+  /**
+   * Image caches are rasterized over whole device pixels: the expanded rect snapped outward to integers, so the blit
+   * lands 1:1 (no sub-pixel resample) and effects sampling the cache at `fragCoord - iOffset` hit texel centers.
+   */
+  private AlignedCacheRect(scale: number): SKRect {
+    const r = this.ExpandedCacheRect(scale);
+    return new SKRect(Math.floor(r.Left), Math.floor(r.Top), Math.ceil(r.Right), Math.ceil(r.Bottom));
+  }
+
   /** Cache blit or live paint, then post animators — the part a transform/opacity layer wraps. */
-  private RenderContent(ctx: DrawingContext): void {
-    const own: DrawingContext = { ...ctx, Destination: this.DrawingRect };
+  private RenderContent(ctx: DrawingContext, dx = 0, dy = 0): void {
+    const dest = dx !== 0 || dy !== 0 ? new SKRect(this.DrawingRect.Left + dx, this.DrawingRect.Top + dy, this.DrawingRect.Right + dx, this.DrawingRect.Bottom + dy) : this.DrawingRect;
+    const own: DrawingContext = { ...ctx, Destination: dest };
     const cacheType = this.UsingCacheType;
+    const post = this.ActivePostRenderers();
     if (cacheType === "None") {
       this.DestroyRenderingObject();
       this.PaintContent(own);
+      // C# DrawDirectInternal: post renderers run after the direct paint, snapshotting what was painted
+      for (const e of post) e.Render(own);
     } else {
-      const r = this.ExpandedCacheRect(ctx.Scale);
+      const r = cacheType === "Operations" ? this.ExpandedCacheRect(ctx.Scale) : this.AlignedCacheRect(ctx.Scale);
       const stale = this.cacheDirty || !this.RenderObject || this.RenderObject.Type !== cacheType
         || this.RenderObject.Scale !== ctx.Scale
         || Math.round(this.RenderObject.Bounds.Width) !== Math.round(r.Width) || Math.round(this.RenderObject.Bounds.Height) !== Math.round(r.Height);
-      if (stale) this.CreateRenderingObject(own, cacheType);
-      if (this.RenderObject) this.RenderObject.Draw(ctx.Context.Canvas, r.Left, r.Top);
-      else if (this.RenderObjectPrevious) this.RenderObjectPrevious.Draw(ctx.Context.Canvas, r.Left, r.Top); // double buffer: last good frame
+      if (stale) this.CreateRenderingObject({ ...ctx, Destination: this.DrawingRect }, cacheType);
+      if (this.RenderObject) {
+        // C# DrawRenderObject: with post renderers an Image cache is not blitted, the effects sample it (CachedImage)
+        // and paint the result; a picture cache has no texture, so it is replayed first and snapshotted by the effect
+        if (post.length === 0 || !this.RenderObject.Image) this.RenderObject.Draw(ctx.Context.Canvas, r.Left + dx, r.Top + dy);
+        for (const e of post) e.Render(own);
+      }
+      else if (this.RenderObjectPrevious) this.RenderObjectPrevious.Draw(ctx.Context.Canvas, r.Left + dx, r.Top + dy); // double buffer: last good frame
       else this.DrawPlaceholder(own);
     }
     this.ExecutePostAnimators(own);
@@ -492,7 +639,7 @@ export class SkiaControl {
 
   /** Background + Paint(): the part of the control that a cache captures. */
   protected PaintContent(ctx: DrawingContext): void {
-    if (this.BackgroundColor || this.FillGradient || this.PaintsBackgroundWithoutColor()) this.PaintBackground(ctx);
+    if (this.BackgroundColor || (this.FillGradient && this.FillGradientPaintsBackground()) || this.PaintsBackgroundWithoutColor()) this.PaintBackground(ctx);
     this.Paint(ctx);
   }
   /** Subclasses whose PaintBackground has something to draw without a BackgroundColor (shape shadows). */
@@ -510,21 +657,24 @@ export class SkiaControl {
   /** Records/renders the content into a new CachedObject for the current DrawingRect. */
   protected CreateRenderingObject(ctx: DrawingContext, cacheType: SkiaCacheType): void {
     const CK = Super.CK;
-    const r = this.ExpandedCacheRect(ctx.Scale); // includes what shadows/effects paint outside the box
+    // includes what shadows/effects paint outside the box; image caches on whole pixels
+    const r = cacheType === "Operations" ? this.ExpandedCacheRect(ctx.Scale) : this.AlignedCacheRect(ctx.Scale);
     const w = Math.max(1, Math.round(r.Width)), h = Math.max(1, Math.round(r.Height));
     if (cacheType === "ImageDoubleBuffered") {
       // keep the previous frame as the fallback until the new cache exists
       if (this.RenderObject) { this.DisposePrevious(); this.RenderObjectPrevious = this.RenderObject; this.RenderObject = undefined; }
-    } else {
+    } else if (cacheType !== "ImageComposite") { // a composite keeps its previous object to patch it
       this.DestroyRenderingObject();
     }
     if (cacheType === "Operations") {
       const recorder = new CK.PictureRecorder();
       const canvas = recorder.beginRecording(CK.LTRBRect(r.Left, r.Top, r.Right, r.Bottom));
-      this.PaintContent({ ...ctx, Context: { ...ctx.Context, Canvas: canvas } });
+      this.PaintContent({ ...ctx, Context: { ...ctx.Context, Canvas: canvas, Recording: true } });
       const picture = recorder.finishRecordingAsPicture();
       recorder.delete();
       this.RenderObject = new CachedObject("Operations", r, ctx.Scale, picture);
+    } else if (cacheType === "ImageComposite") {
+      this.CreateCompositeRenderingObject(ctx, r, w, h);
     } else {
       const main = ctx.Context.Surface;
       if (!main) { this.PaintContent(ctx); return; } // no surface to derive from (e.g. recording): draw live
@@ -533,12 +683,81 @@ export class SkiaControl {
       const canvas = offscreen.getCanvas();
       canvas.clear(CK.TRANSPARENT);
       canvas.translate(-r.Left, -r.Top);
-      this.PaintContent({ ...ctx, Context: { Canvas: canvas, Surface: offscreen } });
+      this.PaintContent({ ...ctx, Context: { Canvas: canvas, Surface: offscreen, Origin: { X: r.Left, Y: r.Top } } });
       const image = offscreen.makeImageSnapshot();
       offscreen.delete();
       this.RenderObject = new CachedObject(cacheType, r, ctx.Scale, undefined, image);
     }
     this.cacheDirty = false;
+  }
+
+  /**
+   * C# ImageComposite (SetupRenderingWithComposition + CreateRenderingObject reuse): the offscreen surface survives
+   * between records; when only some children changed (RepaintComposition from a child, no remeasure of this control)
+   * their old and new bounds — plus every sibling they overlap — are erased and just those children are painted
+   * again. Anything else (own content, structure, size, scale) records fully.
+   */
+  private CreateCompositeRenderingObject(ctx: DrawingContext, r: SKRect, w: number, h: number): void {
+    const CK = Super.CK;
+    const main = ctx.Context.Surface;
+    if (!main) { this.PaintContent(ctx); return; }
+    let surface = this.compositeSurface;
+    const prev = this.RenderObject;
+    const sameGeometry = !!surface && !!prev && prev.Type === "ImageComposite" && prev.Scale === ctx.Scale
+      && Math.round(prev.Bounds.Width) === w && Math.round(prev.Bounds.Height) === h;
+    if (!sameGeometry) { surface?.delete(); surface = main.makeSurface({ ...main.imageInfo(), width: w, height: h }) ?? undefined; this.compositeSurface = surface; }
+    if (!surface) { this.PaintContent(ctx); return; }
+    const canvas = surface.getCanvas();
+    const children = this.GetCompositeChildren();
+    const partial = sameGeometry && !this.compositeFull && this.DirtyChildrenInternal.size > 0 && children.length > 0;
+    const offset = prev && sameGeometry ? { X: r.Left - prev.Bounds.Left, Y: r.Top - prev.Bounds.Top } : { X: 0, Y: 0 };
+    const saved = canvas.save();
+    canvas.translate(-r.Left, -r.Top);
+    if (partial) {
+      // dirty = reported children + siblings intersecting their old or new bounds (C# makes intersecting children dirty too)
+      const dirty = new Set<SkiaControl>();
+      const rects: SKRect[] = [];
+      const boundsOf = (c: SkiaControl): SKRect[] => {
+        const out = [c.GetTransformedDirtyBounds()];
+        if (c.lastCompositeBounds) out.push(new SKRect(c.lastCompositeBounds.Left + offset.X, c.lastCompositeBounds.Top + offset.Y, c.lastCompositeBounds.Right + offset.X, c.lastCompositeBounds.Bottom + offset.Y));
+        return out;
+      };
+      for (const c of this.DirtyChildrenInternal) if (children.includes(c)) { dirty.add(c); rects.push(...boundsOf(c)); }
+      let grew = true;
+      while (grew) {
+        grew = false;
+        for (const c of children) {
+          if (dirty.has(c) || !c.IsVisible) continue;
+          const own = boundsOf(c);
+          if (rects.some((d) => own.some((o) => o.Left < d.Right && d.Left < o.Right && o.Top < d.Bottom && d.Top < o.Bottom))) { dirty.add(c); rects.push(...own); grew = true; }
+        }
+      }
+      const clip = new CK.PathBuilder();
+      const erase = new CK.Paint(); erase.setBlendMode(CK.BlendMode.Clear);
+      for (const d of rects) { const l = Math.floor(d.Left), t = Math.floor(d.Top), rr = Math.ceil(d.Right), b = Math.ceil(d.Bottom); clip.addRect(CK.LTRBRect(l, t, rr, b)); canvas.drawRect(CK.LTRBRect(l, t, rr, b), erase); }
+      erase.delete();
+      const path = clip.detach(); clip.delete();
+      canvas.clipPath(path, CK.ClipOp.Intersect, false);
+      path.delete();
+      this.IsRenderingWithComposition = true;
+      this.DirtyChildrenInternal.clear();
+      for (const c of dirty) this.DirtyChildrenInternal.add(c);
+      this.PaintContent({ ...ctx, Context: { Canvas: canvas, Surface: surface, Origin: { X: r.Left, Y: r.Top } } });
+      this.IsRenderingWithComposition = false;
+      this.LastCompositeRecord = { Mode: "partial", Children: dirty.size, Dirty: [...dirty] };
+    } else {
+      canvas.clear(CK.TRANSPARENT);
+      this.PaintContent({ ...ctx, Context: { Canvas: canvas, Surface: surface, Origin: { X: r.Left, Y: r.Top } } });
+      this.LastCompositeRecord = { Mode: "full", Children: children.length, Dirty: children };
+    }
+    canvas.restoreToCount(saved);
+    for (const c of children) c.lastCompositeBounds = c.IsVisible ? c.GetTransformedDirtyBounds() : undefined;
+    this.DirtyChildrenInternal.clear();
+    this.compositeFull = false;
+    const image = surface.makeImageSnapshot();
+    const old = this.RenderObject;
+    this.RenderObject = new CachedObject("ImageComposite", r, ctx.Scale, undefined, image);
+    if (old) { const sv = this.Superview; if (sv) sv.DisposeObject(old); else old.Dispose(); }
   }
 
   private DisposePrevious(): void {
@@ -559,8 +778,10 @@ export class SkiaControl {
     if (sv) sv.DisposeObject(old); else old.Dispose();
   }
 
-  /** Marks the cache stale; re-recorded on the next frame. */
-  InvalidateCache(): void { this.cacheDirty = true; }
+  /** Marks the cache stale; re-recorded on the next frame (a composite records fully: its own content changed). */
+  InvalidateCache(): void { this.cacheDirty = true; this.compositeFull = true; }
+  /** Effects margin recomputed on the next use (C# InvalidateEffectsMargin). */
+  InvalidateEffectsMargin(): void { this.effectsMarginCache = undefined; }
 
   /** Draws PostAnimators above content; an effect returning true asks for another frame. */
   ExecutePostAnimators(ctx: DrawingContext): void {
@@ -592,24 +813,145 @@ export class SkiaControl {
     const paint = new CK.Paint();
     paint.setAntiAlias(true);
     if (this.BackgroundColor) paint.setColor(Super.ParseColor(this.BackgroundColor));
-    const g = this.FillGradient;
-    if (g && g.Colors.length > 0) {
-      const colors = g.Colors.map((c) => Super.ParseColor(c));
-      const shader = CK.Shader.MakeLinearGradient(
-        [rect.Left + rect.Width * (g.StartXRatio ?? 0), rect.Top + rect.Height * (g.StartYRatio ?? 0)],
-        [rect.Left + rect.Width * (g.EndXRatio ?? 0), rect.Top + rect.Height * (g.EndYRatio ?? 1)],
-        colors, null, CK.TileMode.Clamp,
-      );
-      paint.setShader(shader);
-      shader.delete();
-    }
+    if (this.FillGradient && this.FillGradientPaintsBackground()) this.SetupGradient(paint, this.FillGradient, rect);
     return paint;
+  }
+
+  /** Whether FillGradient fills the background (C# base: yes, even without BackgroundColor; SkiaLabel: only the glyphs unless BackgroundColor is set). */
+  protected FillGradientPaintsBackground(): boolean { return true; }
+
+  /** Shaders built for a gradient object, keyed by the rect they were built for (C# cached SetupGradient overload). */
+  private gradientShaders?: Map<SkiaGradient, Map<string, import("canvaskit-wasm").Shader>>;
+
+  /** C# SetupGradient: white base color, the gradient's BlendMode and a (cached) shader on the paint. */
+  SetupGradient(paint: import("canvaskit-wasm").Paint, gradient: SkiaGradient, rect: SKRect): boolean {
+    const CK = Super.CK;
+    const key = `${rect.Left},${rect.Top},${rect.Width},${rect.Height}|${this.Value1},${this.Value2}`;
+    this.gradientShaders ??= new Map();
+    let byRect = this.gradientShaders.get(gradient);
+    if (!byRect) {
+      // a new gradient object (React re-render literal) replaces the old ones: drop their shaders
+      for (const m of this.gradientShaders.values()) for (const s of m.values()) s.delete();
+      this.gradientShaders.clear();
+      byRect = new Map();
+      this.gradientShaders.set(gradient, byRect);
+    }
+    let shader = byRect.get(key);
+    if (!shader) {
+      const made = this.CreateGradient(rect, gradient);
+      if (!made) return false;
+      if (byRect.size >= 32) { for (const s of byRect.values()) s.delete(); byRect.clear(); } // GradientByLines on long text
+      byRect.set(key, made);
+      shader = made;
+    }
+    paint.setColor(CK.WHITE);
+    const blend = gradient.BlendMode ? (CK.BlendMode as unknown as Record<string, import("canvaskit-wasm").BlendMode>)[gradient.BlendMode] : undefined;
+    if (blend) paint.setBlendMode(blend);
+    paint.setShader(shader);
+    return true;
+  }
+
+  /** Port of C# CreateGradient: Linear / Circular / Oval / Sweep shader over the rect (pixels); null for None. */
+  CreateGradient(rect: SKRect, g: SkiaGradient): import("canvaskit-wasm").Shader | null {
+    const type = g.Type ?? "Linear";
+    if (type === "None" || !g.Colors || g.Colors.length === 0) return null;
+    const CK = Super.CK;
+    const light = g.Light ?? 1, opacity = g.Opacity ?? 1;
+    const colors = g.Colors.map((c) => {
+      const p = Super.ParseColor(c);
+      let rgb: [number, number, number] = [p[0], p[1], p[2]];
+      if (light !== 1) rgb = SkiaControl.AdjustLightness(rgb, light);
+      return Float32Array.of(rgb[0], rgb[1], rgb[2], p[3] * opacity);
+    });
+    const positions = g.ColorPositions && g.ColorPositions.length === colors.length ? g.ColorPositions : null;
+    const tile = (CK.TileMode as unknown as Record<string, import("canvaskit-wasm").TileMode>)[g.TileMode ?? "Clamp"] ?? CK.TileMode.Clamp;
+    switch (type) {
+      case "Sweep":
+        return CK.Shader.MakeSweepGradient(rect.Left + rect.Width / 2, rect.Top + rect.Height / 2, colors, positions, tile, null, 0, this.Value1, this.Value1 + (this.Value2 || 360));
+      case "Circular": case "Conical": case "Oval": {
+        const cx = rect.Left + (g.StartXRatio ?? 0) * rect.Width, cy = rect.Top + (g.StartYRatio ?? 0) * rect.Height;
+        if (type !== "Oval") return CK.Shader.MakeRadialGradient([cx, cy], Math.min(rect.Width / 2, rect.Height / 2), colors, positions, tile);
+        const scaleX = rect.Width >= rect.Height ? 1 : rect.Width / rect.Height;
+        const scaleY = rect.Height >= rect.Width ? 1 : rect.Height / rect.Width;
+        return CK.Shader.MakeRadialGradient([cx, cy], Math.max(rect.Width / 2, rect.Height / 2), colors, positions, tile, CK.Matrix.scaled(scaleX, scaleY, cx, cy));
+      }
+      default: {
+        let sx = g.StartXRatio ?? 0, sy = g.StartYRatio ?? 0, ex = g.EndXRatio ?? 0, ey = g.EndYRatio ?? 1;
+        if (g.Angle != null) [sx, sy, ex, ey] = SkiaControl.LinearGradientAngleToPoints(g.Angle);
+        return CK.Shader.MakeLinearGradient([rect.Left + rect.Width * sx, rect.Top + rect.Height * sy], [rect.Left + rect.Width * ex, rect.Top + rect.Height * ey], colors, positions, tile);
+      }
+    }
+  }
+
+  /** C# SkiaGradient.LinearGradientAngleToPoints (CSS angle -> start/end ratios). */
+  static LinearGradientAngleToPoints(direction: number): [number, number, number, number] {
+    direction -= 90;
+    if (direction < 0) direction = 360 + direction;
+    if (direction > 360) direction = 360;
+    const eps = Math.pow(2, -52);
+    const angle = direction % 360;
+    const rad = (d: number) => (d * Math.PI) / 180;
+    let sx = Math.cos(rad(180 - angle)), sy = Math.sin(rad(180 - angle)), ex = Math.cos(rad(360 - angle)), ey = Math.sin(rad(360 - angle));
+    if (sx <= 0 || Math.abs(sx) <= eps) sx = 0;
+    if (sy <= 0 || Math.abs(sy) <= eps) sy = 0;
+    if (ex <= 0 || Math.abs(ex) <= eps) ex = 0;
+    if (ey <= 0 || Math.abs(ey) <= eps) ey = 0;
+    return [sx, sy, ex, ey];
+  }
+
+  /** C# MakeDarker / MakeLighter: HSL lightness scaled down (light < 1) or pushed toward white (light > 1). */
+  static AdjustLightness(rgb: [number, number, number], light: number): [number, number, number] {
+    const [r, g, b] = rgb;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h = 0, s = 0;
+    let l = (max + min) / 2;
+    if (max !== min) {
+      const d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      if (max === r) h = (g - b) / d + (g < b ? 6 : 0); else if (max === g) h = (b - r) / d + 2; else h = (r - g) / d + 4;
+      h /= 6;
+    }
+    l = light < 1 ? l * light : l + (1 - l) * (light - 1);
+    l = Math.max(0, Math.min(1, l));
+    if (s === 0) return [l, l, l];
+    const hue = (p: number, q: number, t: number) => { if (t < 0) t += 1; if (t > 1) t -= 1; if (t < 1 / 6) return p + (q - p) * 6 * t; if (t < 1 / 2) return q; if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6; return p; };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+    return [hue(p, q, h + 1 / 3), hue(p, q, h), hue(p, q, h - 1 / 3)];
   }
 
   /** Override to draw own content into ctx.Destination. */
   protected Paint(_ctx: DrawingContext): void {}
 
   // ---- invalidation (same names as DrawnUi) ----
+
+  // ---- disposal (C# Dispose / OnDisposing) ----
+  IsDisposed = false;
+
+  /**
+   * Frees what the control owns: caches, gradient shaders, running animations and overlay effects, the accessibility
+   * node, then the children. Called by the React renderer when the element leaves the tree (detachDeletedInstance).
+   */
+  Dispose(): void {
+    if (this.IsDisposed) return;
+    this.IsDisposed = true;
+    this.OnDisposing();
+    for (const c of this.ownAnimations.values()) c.abort();
+    this.ownAnimations.clear();
+    for (const e of [...this.PostAnimators]) (e as { Stop?: () => void }).Stop?.();
+    this.PostAnimators.length = 0;
+    this.DestroyRenderingObject();
+    this.compositeSurface?.delete(); this.compositeSurface = undefined;
+    for (const e of this.visualEffects) e.Dispose(); // C# disposes attached effects with the control
+    this.visualEffects = []; this.EffectPostRenderers = [];
+    if (this.gradientShaders) { for (const m of this.gradientShaders.values()) for (const s of m.values()) s.delete(); this.gradientShaders.clear(); }
+    this.UnregisterAccessibility();
+    this.DisposeChildren();
+    this.Parent = undefined;
+  }
+  /** Subclasses release their own native objects here (before the base frees caches and children). */
+  protected OnDisposing(): void {}
+  /** Layouts dispose their children here. */
+  protected DisposeChildren(): void {}
 
   /** Content changed: cache invalidated + remeasure + redraw (bubbles to every ancestor, whose caches go stale too). */
   Update(): void {
@@ -626,8 +968,8 @@ export class SkiaControl {
    * cache holds its composited output, so those are staled before redrawing (DrawnUi RedrawCanvas + parent invalidation).
    */
   RepaintComposition(): void {
-    let p = this.Parent;
-    while (p) { p.cacheDirty = true; p = p.Parent; }
+    let child: SkiaControl = this, p = this.Parent;
+    while (p) { p.cacheDirty = true; p.TrackChildAsDirty(child); child = p; p = p.Parent; }
     this.Repaint();
   }
 
@@ -635,6 +977,7 @@ export class SkiaControl {
   InvalidateMeasure(): void {
     this.NeedMeasure = true;
     this.cacheDirty = true;
+    this.compositeFull = true; // structure may change: a composite cannot patch it
     this.effectsMarginCache = undefined;
     if (this.Parent) this.Parent.InvalidateMeasure();
     else this.Superview?.Update();
@@ -653,6 +996,23 @@ export class SkiaControl {
   IsGestureForChild(child: SkiaControl, point: SKPoint): boolean {
     const local = child.TransformPointToLocalSpace(point);
     return child.HitIsInside(local.X, local.Y);
+  }
+
+  /**
+   * Routes a context-menu request like a tap: visible, non-transparent children under the point first (top-most
+   * first, each in its own transformed space), then this control's ContextMenu handler. True = handled.
+   */
+  ProcessContextMenu(point: SKPoint, e: ContextMenuEventArgs): boolean {
+    const listeners = this.GetGestureListeners();
+    for (let i = listeners.length - 1; i >= 0; i--) {
+      const listener = listeners[i];
+      if (!listener.IsVisible || listener.InputTransparent || !this.IsGestureForChild(listener, point)) continue;
+      if (listener.ProcessContextMenu(listener.TransformPointToLocalSpace(point), e)) return true;
+    }
+    if (!this.ContextMenu) return false;
+    e.Control = this;
+    e.Local = new SKPoint(point.X - this.DrawingRect.Left, point.Y - this.DrawingRect.Top);
+    return this.ContextMenu(this, e) === true;
   }
 
   /** Children that may receive gestures, top-most LAST (layouts return their Views). */
@@ -687,6 +1047,12 @@ export class SkiaControl {
       const sent = new SkiaGesturesInfo(args, apply);
       this.ConsumeGestures(this, sent);
       if (args.Type !== "Up" && sent.Consumed) return this;
+    }
+
+    // C# EffectsGestureProcessors: attached effects that process gestures (ISkiaGestureProcessor) see them first
+    if (!this.DisableEffects) for (const e of this.visualEffects) {
+      const p = (e as unknown as { ProcessGestures?: (a: SkiaGesturesParameters, i: GestureEventProcessingInfo) => SkiaControl | null }).ProcessGestures;
+      if (typeof p === "function" && p.call(e, args, apply) && args.Type !== "Up") return this;
     }
 
     if (this.CheckChildrenGesturesLocked(args.Type)) return consumedDefault;

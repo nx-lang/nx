@@ -34,7 +34,7 @@ export function LooksPage() {
   return (
     <SkiaScroll Orientation="Vertical">
       <SkiaStack Spacing={16} Padding={new Thickness(16)} HorizontalOptions="Center" MaximumWidthRequest={720}>
-        <SkiaLabel Text="Platform Looks" FontSize={24} TextColor="#FFFFFF" HorizontalOptions="Center" />
+        <SkiaLabel Text="Common Controls" FontSize={24} TextColor="#FFFFFF" HorizontalOptions="Center" />
         <SkiaLabel Text="SkiaSwitch, SkiaCheckbox, SkiaRadioButton, SkiaButton, SkiaProgress, SkiaSlider — the same tree per card, only ControlStyle changes (the Fiddle 'Looks' snippet)." FontSize={13} TextColor="#ADB5BD" HorizontalOptions="Fill" HorizontalTextAlignment="Center" />
         <SkiaLabel Text={`Last: ${last}`} FontSize={13} TextColor="#6EA8FE" HorizontalOptions="Center" />
         <Card title="Default" style="Unset" log={setLast} />

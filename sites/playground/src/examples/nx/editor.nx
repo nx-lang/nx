@@ -1,0 +1,85 @@
+// Ported from the DrawnUI React demo's Editor page.
+//
+// SkiaEditor: drawn text input with caret, selection, placeholder, password, multiline and the
+// platform looks. Typing, the caret, selection and the password bullets all work here — a focused
+// editor is mirrored by a hidden textarea, and that is the control's own machinery.
+//
+// One deviation from the original: every editor names FontFamily="FontText". The demo's style
+// default for labels does not reach an editor (it is a shape, not a label), and the engine
+// re-applies its own empty FontFamily to the text on every change, so without this the placeholder
+// draws in OpenSans and the text typed over it does not (FINDINGS F25).
+//
+// What is missing is what the original reads back and drives: the readouts in the first and third
+// card titles (Text, IsFocused, cursor and selection, the submitted value, the password length), the
+// buttons that call Focus, SelectAll, InsertAtCursor and set Text, and the chat list that collects
+// submitted messages. Those need event handlers and component state; the buttons are drawn and do
+// nothing, and the chat card starts empty as the original does.
+
+component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = {
+  <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 />
+    BackgroundColor="#2B3035" HorizontalOptions=Fill>
+    <SkiaStack Padding=<Thickness Left=16 Top=12 Right=16 Bottom=12 /> Spacing=10>
+      <SkiaLabel Text={Title} FontSize=12 TextColor="#6EA8FE" FontAttributes=Bold
+        TextTransform=Uppercase />
+      {Children}
+    </SkiaStack>
+  </SkiaShape>
+}
+
+<SkiaScroll Orientation=Vertical>
+  <SkiaStack Spacing=16 Padding=<Thickness Left=16 Top=16 Right=16 Bottom=120 />
+    HorizontalOptions=Center MaximumWidthRequest=720>
+    <SkiaLabel Text="SkiaEditor" FontSize=24 TextColor="#FFFFFF" HorizontalOptions=Center />
+
+    <Card Title="Single line — the original shows Text, IsFocused, cursor, selection and the submitted value here">
+      <SkiaEditor FontFamily="FontText" FontFamilyFallback="FontSymbols,FontSymbols2,FontEmoji" PlaceholderText="Type here, Enter submits" FontSize=16 />
+      // The original's buttons set IsFocused, call SelectAll() and InsertAtCursor('🙂'), and
+      // assign Text.
+      <SkiaWrap Spacing=8>
+        <SkiaButton Text="Focus" BackgroundColor="#0D6EFD" FontSize=13 />
+        <SkiaButton Text="SelectAll()" BackgroundColor="#495057" FontSize=13 />
+        <SkiaButton Text="InsertAtCursor('🙂')" BackgroundColor="#495057" FontSize=13
+          FontFamilyFallback="FontSymbols,FontSymbols2" />
+        <SkiaButton Text="Set Text" BackgroundColor="#495057" FontSize=13 />
+        <SkiaButton Text="Clear" BackgroundColor="#495057" FontSize=13 />
+      </SkiaWrap>
+      <SkiaLabel FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Fill
+        Text="A focused editor is mirrored by a hidden textarea (TextInputProxy): IME composition, the mobile soft keyboard, autocorrect, native paste / cut / undo land in the drawn editor through the same stub methods the physical keyboard uses." />
+    </Card>
+
+    <Card Title="ControlStyle — Cupertino, Material, Material3, Windows (C# ApplyControlStyleVisuals palettes)">
+      <SkiaWrap Spacing=10>
+        <SkiaEditor FontFamily="FontText" FontFamilyFallback="FontSymbols,FontSymbols2,FontEmoji" ControlStyle=Cupertino PlaceholderText="Cupertino" WidthRequest=200 />
+        <SkiaEditor FontFamily="FontText" FontFamilyFallback="FontSymbols,FontSymbols2,FontEmoji" ControlStyle=Material PlaceholderText="Material" WidthRequest=200 />
+        <SkiaEditor FontFamily="FontText" FontFamilyFallback="FontSymbols,FontSymbols2,FontEmoji" ControlStyle=Material3 PlaceholderText="Material3" WidthRequest=200 />
+        <SkiaEditor FontFamily="FontText" FontFamilyFallback="FontSymbols,FontSymbols2,FontEmoji" ControlStyle=Windows PlaceholderText="Windows" WidthRequest=200 />
+      </SkiaWrap>
+    </Card>
+
+    <Card Title="IsPassword — chars hidden behind bullets, KeyboardType Numeric / Email input modes">
+      <SkiaWrap Spacing=10>
+        <SkiaEditor FontFamily="FontText" FontFamilyFallback="FontSymbols,FontSymbols2,FontEmoji" IsPassword=true PlaceholderText="Password" WidthRequest=220 />
+        <SkiaEditor FontFamily="FontText" FontFamilyFallback="FontSymbols,FontSymbols2,FontEmoji" KeyboardType=Numeric PlaceholderText="Numeric (inputmode)" WidthRequest=220 />
+        <SkiaEditor FontFamily="FontText" FontFamilyFallback="FontSymbols,FontSymbols2,FontEmoji" KeyboardType=Email PlaceholderText="Email" WidthRequest=220 />
+      </SkiaWrap>
+    </Card>
+
+    <Card Title="Multiline — MaxLines={4}: Enter inserts a line, the box scrolls to the caret">
+      <SkiaEditor FontFamily="FontText" FontFamilyFallback="FontSymbols,FontSymbols2,FontEmoji" MaxLines=4 FontSize=15
+        PlaceholderText="Write a few lines… wrapping, arrows, Shift+arrows select, double tap / long press selects a word" />
+    </Card>
+
+    <Card Title="Multiline + AutoHeight — MaxLines={-1}: the editor grows with the text">
+      <SkiaEditor FontFamily="FontText" FontFamilyFallback="FontSymbols,FontSymbols2,FontEmoji" MaxLines=-1 AutoHeight=true PlaceholderText="Grows as you type" FontSize=15
+        Text="First line
+Second line" />
+    </Card>
+
+    <Card Title="Chat input — MaxLines={3} ReturnType='Send': Enter submits and keeps focus, Shift+Enter breaks the line · 0 sent">
+      // The original appends each submitted message above the editor and clears it; that needs
+      // event handlers and component state, so the list stays empty here.
+      <SkiaEditor FontFamily="FontText" FontFamilyFallback="FontSymbols,FontSymbols2,FontEmoji" MaxLines=3 ReturnType=Send PlaceholderText="Message" FontSize=15
+        HorizontalOptions=Fill />
+    </Card>
+  </SkiaStack>
+</SkiaScroll>

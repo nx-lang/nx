@@ -70,6 +70,8 @@ export class SkiaSvg extends SkiaControl {
     this.Update();
   }
 
+  protected override OnDisposing(): void { this.loadGeneration++; this.DropRaster(); }
+
   private DropRaster(): void {
     this.raster?.delete();
     this.raster = undefined;

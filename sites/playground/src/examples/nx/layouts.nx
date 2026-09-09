@@ -1,7 +1,13 @@
 // Ported from the DrawnUI React demo's Layouts page.
 //
 // Every SkiaLayout type: Absolute (SkiaLayer), Column (SkiaStack), Row (SkiaRow), Wrap (SkiaWrap),
-// Grid (SkiaGrid).
+// Grid (SkiaGrid), plus ZIndex and fill ratios, the ImageComposite cache, and SkiaDecoratedGrid.
+//
+// The original's last five cards are built on things NX cannot express yet. The composite card
+// spins one child from a timer and outlines what the cache re-recorded (animation, component
+// state); here the shapes are drawn at rest. The templated cards bind ItemsSource to recycled cell
+// classes and change Split from buttons (list virtualization, code-behind, event handlers); here
+// the same layouts hold static children.
 
 component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = {
   <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 />
@@ -56,6 +62,25 @@ component <Box
 component <Heading extends DrawnNode Text:string /> = {
   <SkiaLabel Text={Text} FontSize=20 TextColor="#FFFFFF"
     HorizontalOptions=Center Margin=<Thickness Top=8 /> />
+}
+
+// The original's ChipCell, a recycled SkiaDynamicDrawnCell bound per item; here a plain component.
+component <ItemChip extends DrawnNode Text:string Color:string Column:float64? Row:float64? /> = {
+  <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=10 /> BackgroundColor={Color}
+    HorizontalOptions=Fill Column={Column} Row={Row}>
+    <SkiaLabel Text={Text} FontSize=13 TextColor="#DEE2E6" HorizontalOptions=Center
+      Padding=<Thickness Left=12 Top=8 Right=12 Bottom=8 /> />
+  </SkiaShape>
+}
+
+// The original's TextCell: a title and a value, padded, no background — the grid lines separate
+// the cells.
+component <Fact extends DrawnNode Title:string Value:string Column:float64 Row:float64 /> = {
+  <SkiaStack Padding=<Thickness Left=12 Top=10 Right=12 Bottom=10 /> HorizontalOptions=Fill
+    Column={Column} Row={Row}>
+    <SkiaLabel Text={Title} FontSize=11 TextColor="#8B95A1" TextTransform=Uppercase />
+    <SkiaLabel Text={Value} FontSize=15 TextColor="#DEE2E6" FontFamily="FontTextBold" />
+  </SkiaStack>
 }
 
 component <Chip extends DrawnNode Text:string /> = {
@@ -130,6 +155,27 @@ let chipLabels = {
     </Card>
 
     <Heading Text="Column · SkiaStack" />
+    <Card Title="ZIndex draws later (on top); HorizontalFillRatio/VerticalFillRatio = fraction of the box; Left/Top nudge the drawn output">
+      <SkiaLayer HeightRequest=120 BackgroundColor="#212529" HorizontalOptions=Fill>
+        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 /> BackgroundColor="#0D6EFD"
+          HorizontalOptions=Fill VerticalOptions=Fill HorizontalFillRatio=0.5 VerticalFillRatio=0.75 ZIndex=2>
+          <SkiaLabel Text="ZIndex=2 · FillRatio 0.5 × 0.75" FontSize=12 TextColor="#FFFFFF"
+            HorizontalOptions=Center VerticalOptions=Center />
+        </SkiaShape>
+        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 /> BackgroundColor="#D63384"
+          WidthRequest=220 HeightRequest=70 Margin=<Thickness Left=120 Top=30 /> ZIndex=1>
+          <SkiaLabel Text="ZIndex=1, declared second" FontSize=12 TextColor="#FFFFFF"
+            HorizontalOptions=Center VerticalOptions=Center />
+        </SkiaShape>
+        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 /> BackgroundColor="#20C997"
+          WidthRequest=160 HeightRequest=50 HorizontalOptions=End VerticalOptions=End
+          Left=-20 Top=-10 ZIndex=3>
+          <SkiaLabel Text="Left=-20 Top=-10 · ZIndex=3" FontSize=11 TextColor="#1A1A2E"
+            HorizontalOptions=Center VerticalOptions=Center />
+        </SkiaShape>
+      </SkiaLayer>
+    </Card>
+
     <Card Title="Vertical stack, Spacing between children, each child aligns horizontally on its own">
       <SkiaStack Padding=<Thickness Left=8 Top=8 Right=8 Bottom=8 /> Spacing=6 BackgroundColor="#1F2937">
         <Box Text="Start (default)" Color="#0D6EFD" />
@@ -203,6 +249,131 @@ let chipLabels = {
           <Chip Text={label} />
         }
       </SkiaWrap>
+    </Card>
+
+    <Heading Text="Caching · UseCache=ImageComposite" />
+    // The original spins the yellow square from a timer and outlines the children the composite
+    // re-recorded on each frame — that needs animation and component state. Here the layer is
+    // composited once, at rest.
+    <Card Title="SkiaLayer UseCache='ImageComposite' · 24 shapes + 1 rotating (at rest here)">
+      <SkiaLayer HeightRequest=150 HorizontalOptions=Fill>
+        <SkiaLayer UseCache=ImageComposite HeightRequest=150 HorizontalOptions=Fill BackgroundColor="#212529">
+          <SkiaShape Type=Circle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=40 HeightRequest=40
+            BackgroundColor="#0F3460" Margin=<Thickness Left=12 Top=12 /> UseCache=Operations />
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=40 HeightRequest=40
+            BackgroundColor="#533483" Margin=<Thickness Left=64 Top=12 /> UseCache=Operations />
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=40 HeightRequest=40
+            BackgroundColor="#1B4332" Margin=<Thickness Left=116 Top=12 /> UseCache=Operations />
+          <SkiaShape Type=Circle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=40 HeightRequest=40
+            BackgroundColor="#7B2D26" Margin=<Thickness Left=168 Top=12 /> UseCache=Operations />
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=40 HeightRequest=40
+            BackgroundColor="#495057" Margin=<Thickness Left=220 Top=12 /> UseCache=Operations />
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=40 HeightRequest=40
+            BackgroundColor="#0D6EFD" Margin=<Thickness Left=272 Top=12 /> UseCache=Operations />
+          <SkiaShape Type=Circle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=40 HeightRequest=40
+            BackgroundColor="#D63384" Margin=<Thickness Left=324 Top=12 /> UseCache=Operations />
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=40 HeightRequest=40
+            BackgroundColor="#2D6A4F" Margin=<Thickness Left=376 Top=12 /> UseCache=Operations />
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=40 HeightRequest=40
+            BackgroundColor="#0F3460" Margin=<Thickness Left=428 Top=12 /> UseCache=Operations />
+          <SkiaShape Type=Circle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=40 HeightRequest=40
+            BackgroundColor="#533483" Margin=<Thickness Left=480 Top=12 /> UseCache=Operations />
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=40 HeightRequest=40
+            BackgroundColor="#1B4332" Margin=<Thickness Left=532 Top=12 /> UseCache=Operations />
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=40 HeightRequest=40
+            BackgroundColor="#7B2D26" Margin=<Thickness Left=584 Top=12 /> UseCache=Operations />
+          <SkiaShape Type=Circle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=40 HeightRequest=40
+            BackgroundColor="#495057" Margin=<Thickness Left=12 Top=82 /> UseCache=Operations />
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=40 HeightRequest=40
+            BackgroundColor="#0D6EFD" Margin=<Thickness Left=64 Top=82 /> UseCache=Operations />
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=40 HeightRequest=40
+            BackgroundColor="#D63384" Margin=<Thickness Left=116 Top=82 /> UseCache=Operations />
+          <SkiaShape Type=Circle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=40 HeightRequest=40
+            BackgroundColor="#2D6A4F" Margin=<Thickness Left=168 Top=82 /> UseCache=Operations />
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=40 HeightRequest=40
+            BackgroundColor="#0F3460" Margin=<Thickness Left=220 Top=82 /> UseCache=Operations />
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=40 HeightRequest=40
+            BackgroundColor="#533483" Margin=<Thickness Left=272 Top=82 /> UseCache=Operations />
+          <SkiaShape Type=Circle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=40 HeightRequest=40
+            BackgroundColor="#1B4332" Margin=<Thickness Left=324 Top=82 /> UseCache=Operations />
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=40 HeightRequest=40
+            BackgroundColor="#7B2D26" Margin=<Thickness Left=376 Top=82 /> UseCache=Operations />
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=40 HeightRequest=40
+            BackgroundColor="#495057" Margin=<Thickness Left=428 Top=82 /> UseCache=Operations />
+          <SkiaShape Type=Circle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=40 HeightRequest=40
+            BackgroundColor="#0D6EFD" Margin=<Thickness Left=480 Top=82 /> UseCache=Operations />
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=40 HeightRequest=40
+            BackgroundColor="#D63384" Margin=<Thickness Left=532 Top=82 /> UseCache=Operations />
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=6 /> WidthRequest=40 HeightRequest=40
+            BackgroundColor="#2D6A4F" Margin=<Thickness Left=584 Top=82 /> UseCache=Operations />
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=4 /> WidthRequest=44 HeightRequest=44
+            BackgroundColor="#FFC107" Margin=<Thickness Left=296 Top=45 /> UseCache=Operations ZIndex=5 />
+        </SkiaLayer>
+      </SkiaLayer>
+      <SkiaLabel FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Fill
+        Text="In the original the yellow square rotates and white outlines mark the children the last record repainted (the rotating one + every sibling its old and new bounds overlap); the others are kept in the cache surface untouched. RepaintComposition() from the spinning child marks it dirty in the composite parent." />
+    </Card>
+
+    <Heading Text="ItemsSource + ItemTemplate for Wrap / Row / Grid · Split" />
+    // The original binds ItemsSource to recycled cell classes and changes Split, DynamicColumns and
+    // the item count from buttons. That needs list virtualization, code-behind and event handlers;
+    // the same layouts hold ten static chips here, and Split still lays them out in fixed slots.
+    <Card Title="SkiaWrap (10 static chips, the original recycles ChipCells) · Split=3 · DynamicColumns=false">
+      <SkiaWrap Spacing=8 Split=3 DynamicColumns=false>
+          <ItemChip Text="Item 1" Color="#0F3460" />
+          <ItemChip Text="Item 2" Color="#533483" />
+          <ItemChip Text="Item 3" Color="#1B4332" />
+          <ItemChip Text="Item 4" Color="#7B2D26" />
+          <ItemChip Text="Item 5" Color="#495057" />
+          <ItemChip Text="Item 6" Color="#0D6EFD" />
+          <ItemChip Text="Item 7" Color="#D63384" />
+          <ItemChip Text="Item 8" Color="#2D6A4F" />
+          <ItemChip Text="Item 9" Color="#0F3460" />
+          <ItemChip Text="Item 10" Color="#533483" />
+      </SkiaWrap>
+    </Card>
+    <Card Title="SkiaRow (same chips, laid out horizontally, every item realized)">
+      <SkiaRow Spacing=8>
+          <ItemChip Text="Item 1" Color="#0F3460" />
+          <ItemChip Text="Item 2" Color="#533483" />
+          <ItemChip Text="Item 3" Color="#1B4332" />
+          <ItemChip Text="Item 4" Color="#7B2D26" />
+          <ItemChip Text="Item 5" Color="#495057" />
+      </SkiaRow>
+    </Card>
+    <Card Title="SkiaDecoratedGrid · 4 columns · ColumnSpacing / RowSpacing 1 · gradient lines in the spacing">
+      // The original fills the grid from ItemsSource with Split=4; these cells are placed by
+      // Column and Row instead.
+      <SkiaDecoratedGrid ColumnDefinitions="*,*,*,*" ColumnSpacing=1 RowSpacing=1 BackgroundColor="#212529">
+          <Fact Title="Engine" Value="Skia" Column=0 Row=0 />
+          <Fact Title="Language" Value="TypeScript" Column=1 Row=0 />
+          <Fact Title="Layouts" Value="5 types" Column=2 Row=0 />
+          <Fact Title="Cache" Value="4 kinds" Column=3 Row=0 />
+          <Fact Title="Gestures" Value="Unified" Column=0 Row=1 />
+          <Fact Title="Shaders" Value="SkSL" Column=1 Row=1 />
+          <Fact Title="Fonts" Value="Any TTF" Column=2 Row=1 />
+          <Fact Title="Animations" Value="60 fps" Column=3 Row=1 />
+          <Fact Title="Navigation" Value="SkiaShell" Column=0 Row=2 />
+          <Fact Title="Accessibility" Value="ARIA overlay" Column=1 Row=2 />
+          <Fact Title="License" Value="MIT" Column=2 Row=2 />
+          <Fact Title="Docs" Value="drawnui.net" Column=3 Row=2 />
+      </SkiaDecoratedGrid>
+    </Card>
+    <Card Title="SkiaGrid · 3 columns · column-major (the original's Split=3 Invert)">
+      // Invert fills a templated grid top to bottom, then the next column; the same order is
+      // written out here.
+      <SkiaGrid ColumnDefinitions="*,*,*" ColumnSpacing=8 RowSpacing=8>
+          <ItemChip Text="Item 1" Color="#0F3460" Column=0 Row=0 />
+          <ItemChip Text="Item 2" Color="#533483" Column=0 Row=1 />
+          <ItemChip Text="Item 3" Color="#1B4332" Column=0 Row=2 />
+          <ItemChip Text="Item 4" Color="#7B2D26" Column=0 Row=3 />
+          <ItemChip Text="Item 5" Color="#495057" Column=1 Row=0 />
+          <ItemChip Text="Item 6" Color="#0D6EFD" Column=1 Row=1 />
+          <ItemChip Text="Item 7" Color="#D63384" Column=1 Row=2 />
+          <ItemChip Text="Item 8" Color="#2D6A4F" Column=1 Row=3 />
+          <ItemChip Text="Item 9" Color="#0F3460" Column=2 Row=0 />
+          <ItemChip Text="Item 10" Color="#533483" Column=2 Row=1 />
+      </SkiaGrid>
     </Card>
   </SkiaStack>
 </SkiaScroll>

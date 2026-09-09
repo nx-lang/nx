@@ -47,6 +47,11 @@ export function AccessibilityPage() {
           <SkiaLabel Text={`Nodes in the overlay: ${nodes} · focused: ${focused} · last activated: ${lastActivated}`} FontSize={14} TextColor="#DEE2E6" HorizontalOptions="Fill" AccessibilityRole={Aria.RoleStatus} AccessibilityLive={Aria.LivePolite} />
         </Card>
 
+        <Card title="AccessibilityTextSelectable — real selectable text over the drawn label (opt-in)">
+          <SkiaLabel AccessibilityTextSelectable Text="This paragraph is drawn on the canvas, but the accessibility overlay also carries it as real, invisible text in the same font and line positions. Select it with the mouse or touch, copy it with Ctrl+C, let a screen reader read it word by word — like any HTML paragraph. Off by default: pointer input over selectable text goes to the selection, not to the drawn control, so it is never turned on for buttons, carousels or anything gesture-driven." FontSize={14} TextColor="#DEE2E6" HorizontalOptions="Fill" />
+          <SkiaLabel Text="This one is a normal label: exposed to screen readers, not selectable." FontSize={12} TextColor="#ADB5BD" HorizontalOptions="Fill" />
+        </Card>
+
         <Card title="Buttons — label from Text, hint, custom label, disabled">
           <SkiaWrap Spacing={8}>
             <SkiaButton Text={`Tapped ${count}×`} BackgroundColor="#0D6EFD" AccessibilityHint="Increments the counter" Tapped={() => { setCount((c) => c + 1); setLastActivated("counter"); }} />

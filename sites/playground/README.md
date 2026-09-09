@@ -54,7 +54,7 @@ completion fall silent. `PORT` moves the compile server and the proxy that reach
 
 ```bash
 pnpm run typecheck      # tsc over the site and the vendored DrawnUI source
-pnpm test               # server, route, proxy and watchdog tests, then every example
+pnpm test               # server, route, proxy, watchdog and example-check tests, then every example
 pnpm run check-examples  # every example compiles, evaluates, and declares its coverage
 ```
 
@@ -95,10 +95,20 @@ npm run sync-drawnui -- --source /path/to/DrawnUi.React
 npm run generate-catalog          # regenerate the catalog after a sync
 ```
 
-The sync records the upstream commit in `src/drawnui/UPSTREAM.md`. The catalog is committed, so a
-sync that changes it shows up as a reviewable diff. Local edits to the vendored copy are allowed
-where they improve NX compatibility; `docs/CATALOG.md` is where they are recorded, because a sync
-overwrites them.
+The sync copies upstream's `src` whole, the demo pages for reference, and the asset trees the
+examples read: `fonts/`, `images/`, and — since the preview.4 sync — `lottie/` (Skottie
+animations), `anims/` (sprite sheets) and `shaders/` (SkSL, including the `transitions/` set the
+shader carousel uses), each landing under `public/` by the same name. It records the upstream
+commit in `src/drawnui/UPSTREAM.md`. The catalog is committed, so a sync that changes it shows up
+as a reviewable diff. Local edits to the vendored copy are allowed where they improve NX
+compatibility; `docs/CATALOG.md` is where they are recorded, because a sync overwrites them. The
+vendored Vite plugin (`src/drawnui/vite/`, upstream's build-time crawler) imports an optional peer
+the site does not install, so `tsconfig.json` excludes it from the type check rather than the sync
+pruning it.
+
+The vendored runtime loads CanvasKit's "full" build, roughly 0.9 MB more of WASM than the default
+one, because Lottie playback (Skottie) lives only there. The binary is a hashed build asset and is
+cached like the previous one.
 
 ## What it does not do
 
@@ -108,11 +118,14 @@ own behavior still works: scroll regions scroll, carousels swipe, drawers drag, 
 switches toggle, sliders drag. What is missing is anything that would have to run authored NX in
 response — counters, readouts, navigation, animation.
 
-All twelve DrawnUI demo pages are ported — none is omitted — and each says where it stands:
-**complete** (no note), **static** (drawn correctly, nothing responds), or **reduced** (scaled down,
-because NX cannot express the mechanism the original demonstrates). Every non-complete example names
-the missing capability from a fixed vocabulary — `event-handlers`, `animation`, `component-state`,
-`list-virtualization` — so the gallery can be read as a coverage report on NX rather than a list of
+All twenty DrawnUI demo pages at the vendored commit are ported — none is omitted — and each says
+where it stands: **complete** (no note), **static** (drawn correctly, nothing responds), or
+**reduced** (scaled down, because NX cannot express the mechanism the original demonstrates). Only
+SVG is complete today; the rest gained interaction or code-driven mechanisms upstream and say so.
+Every non-complete example names the missing capability from a fixed vocabulary —
+`event-handlers`, `animation`, `component-state`, `list-virtualization`, `code-behind` (an engine
+object built or driven from code: a shader effect, a CanvasKit filter, a sprite set, a cell class
+with drag logic) — so the gallery can be read as a coverage report on NX rather than a list of
 disclaimers.
 
 See `docs/FINDINGS.md` for the toolchain gaps this site ran into, and `docs/CATALOG.md` for where the

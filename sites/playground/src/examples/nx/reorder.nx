@@ -1,0 +1,123 @@
+// Ported from the DrawnUI React demo's Drag to reorder page.
+//
+// The original is Android's language preferences: drag a row by its grip and it lifts into a ghost
+// that floats over the list, the list reorders live under it keeping its measured heights and its
+// scroll offset, and the drop glides into the new slot. Every part of that is built in code — a
+// ReorderCell class carrying the drag logic (code-behind) over a recycled ItemsSource (list
+// virtualization), a ghost the page moves per frame and a status line it rewrites (component state,
+// event handlers). None of it can be expressed in NX yet.
+//
+// What is ported is the list itself: every language as a static row with its grip, title, locale
+// tag and colored stroke, in a SkiaScroll that scrolls, under the two status lines as the page
+// opens, with the three buttons drawn inert at the bottom.
+
+type Language = {
+  Title: string
+  Tag: string
+  Color: string
+}
+
+// The original's ReorderCell: an Absolute cell with a frame, a grip, a title and the locale tag.
+// The grip is where the drag lives in the original; here it is only drawn.
+component <Row extends DrawnNode Item:Language /> = {
+  <SkiaLayer HeightRequest=44 HorizontalOptions=Fill>
+    <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 /> BackgroundColor="#111827"
+      StrokeWidth=1 StrokeColor={Item.Color} HorizontalOptions=Fill VerticalOptions=Fill />
+    // The original labels the grip "Reorder <title>". `"Reorder " + Item.Title` compiles but fails
+    // at runtime: `+` on a record field lowers to a numeric add (FINDINGS F22), so the label is the
+    // title and the verb goes in the hint.
+    <SkiaLayer WidthRequest=26 HorizontalOptions=Start VerticalOptions=Fill Margin=<Thickness Left=10 />
+      AccessibilityRole="button" AccessibilityLabel={Item.Title} AccessibilityHint="Reorder">
+      <SkiaStack Spacing=3 VerticalOptions=Center HorizontalOptions=Fill>
+        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=1 /> HeightRequest=2 WidthRequest=16 BackgroundColor="#94A3B8" HorizontalOptions=Center />
+        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=1 /> HeightRequest=2 WidthRequest=16 BackgroundColor="#94A3B8" HorizontalOptions=Center />
+        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=1 /> HeightRequest=2 WidthRequest=16 BackgroundColor="#94A3B8" HorizontalOptions=Center />
+      </SkiaStack>
+    </SkiaLayer>
+    <SkiaLabel Text={Item.Title} FontSize=14 TextColor="#FFFFFF" VerticalOptions=Center
+      Margin=<Thickness Left=46 Right=60 /> />
+    <SkiaLabel Text={Item.Tag} FontSize=12 TextColor="#94A3B8" HorizontalOptions=End VerticalOptions=Center
+      Margin=<Thickness Right=14 /> />
+  </SkiaLayer>
+}
+
+// Latin, Cyrillic and Greek only: the demo registers OpenSans and nothing else, and a script it has
+// no glyphs for would draw a row of tofu.
+let languages = {
+  <Language Title="English (United States)" Tag="en-US" Color="#0D6EFD" />
+  <Language Title="Español (España)" Tag="es-ES" Color="#6610F2" />
+  <Language Title="Français (France)" Tag="fr-FR" Color="#D63384" />
+  <Language Title="Deutsch (Deutschland)" Tag="de-DE" Color="#FD7E14" />
+  <Language Title="Italiano (Italia)" Tag="it-IT" Color="#20C997" />
+  <Language Title="Português (Brasil)" Tag="pt-BR" Color="#0DCAF0" />
+  <Language Title="Nederlands (Nederland)" Tag="nl-NL" Color="#FFC107" />
+  <Language Title="Svenska (Sverige)" Tag="sv-SE" Color="#0D6EFD" />
+  <Language Title="Norsk bokmål (Norge)" Tag="nb-NO" Color="#6610F2" />
+  <Language Title="Dansk (Danmark)" Tag="da-DK" Color="#D63384" />
+  <Language Title="Suomi (Suomi)" Tag="fi-FI" Color="#FD7E14" />
+  <Language Title="Íslenska (Ísland)" Tag="is-IS" Color="#20C997" />
+  <Language Title="Polski (Polska)" Tag="pl-PL" Color="#0DCAF0" />
+  <Language Title="Čeština (Česko)" Tag="cs-CZ" Color="#FFC107" />
+  <Language Title="Slovenčina (Slovensko)" Tag="sk-SK" Color="#0D6EFD" />
+  <Language Title="Magyar (Magyarország)" Tag="hu-HU" Color="#6610F2" />
+  <Language Title="Română (România)" Tag="ro-RO" Color="#D63384" />
+  <Language Title="Hrvatski (Hrvatska)" Tag="hr-HR" Color="#FD7E14" />
+  <Language Title="Slovenščina (Slovenija)" Tag="sl-SI" Color="#20C997" />
+  <Language Title="Bosanski (Bosna i Hercegovina)" Tag="bs-BA" Color="#0DCAF0" />
+  <Language Title="Shqip (Shqipëri)" Tag="sq-AL" Color="#FFC107" />
+  <Language Title="Lietuvių (Lietuva)" Tag="lt-LT" Color="#0D6EFD" />
+  <Language Title="Latviešu (Latvija)" Tag="lv-LV" Color="#6610F2" />
+  <Language Title="Eesti (Eesti)" Tag="et-EE" Color="#D63384" />
+  <Language Title="Русский (Россия)" Tag="ru-RU" Color="#FD7E14" />
+  <Language Title="Українська (Україна)" Tag="uk-UA" Color="#20C997" />
+  <Language Title="Беларуская (Беларусь)" Tag="be-BY" Color="#0DCAF0" />
+  <Language Title="Български (България)" Tag="bg-BG" Color="#FFC107" />
+  <Language Title="Македонски (Македонија)" Tag="mk-MK" Color="#0D6EFD" />
+  <Language Title="Српски (Србија)" Tag="sr-RS" Color="#6610F2" />
+  <Language Title="Қазақша (Қазақстан)" Tag="kk-KZ" Color="#D63384" />
+  <Language Title="Кыргызча (Кыргызстан)" Tag="ky-KG" Color="#FD7E14" />
+  <Language Title="Монгол (Монгол)" Tag="mn-MN" Color="#20C997" />
+  <Language Title="Ελληνικά (Ελλάδα)" Tag="el-GR" Color="#0DCAF0" />
+  <Language Title="Türkçe (Türkiye)" Tag="tr-TR" Color="#FFC107" />
+  <Language Title="Azərbaycan (Azərbaycan)" Tag="az-AZ" Color="#0D6EFD" />
+  <Language Title="Oʻzbekcha (Oʻzbekiston)" Tag="uz-UZ" Color="#6610F2" />
+  <Language Title="Català (Espanya)" Tag="ca-ES" Color="#D63384" />
+  <Language Title="Galego (España)" Tag="gl-ES" Color="#FD7E14" />
+  <Language Title="Euskara (Espainia)" Tag="eu-ES" Color="#20C997" />
+  <Language Title="Gaeilge (Éire)" Tag="ga-IE" Color="#0DCAF0" />
+  <Language Title="Gàidhlig (Alba)" Tag="gd-GB" Color="#FFC107" />
+  <Language Title="Cymraeg (Cymru)" Tag="cy-GB" Color="#0D6EFD" />
+  <Language Title="Malti (Malta)" Tag="mt-MT" Color="#6610F2" />
+  <Language Title="Bahasa Indonesia (Indonesia)" Tag="id-ID" Color="#D63384" />
+  <Language Title="Bahasa Melayu (Malaysia)" Tag="ms-MY" Color="#FD7E14" />
+  <Language Title="Filipino (Pilipinas)" Tag="fil-PH" Color="#20C997" />
+  <Language Title="Tiếng Việt (Việt Nam)" Tag="vi-VN" Color="#0DCAF0" />
+  <Language Title="Kiswahili (Kenya)" Tag="sw-KE" Color="#FFC107" />
+  <Language Title="Afrikaans (Suid-Afrika)" Tag="af-ZA" Color="#0D6EFD" />
+}
+
+<SkiaLayer VerticalOptions=Fill>
+  <SkiaStack Spacing=2 Margin=<Thickness Top=8 />>
+    <SkiaLabel Text="50 languages in order of preference · drag by the grip, hold at an edge to keep going"
+      FontSize=13 TextColor="#D3D3D3" HorizontalOptions=Center />
+    // The original rewrites this line on every pick-up, move, drop and scroll.
+    <SkiaLabel Text="drag a language by its grip, or use the buttons" FontSize=12 TextColor="#6EA8FE"
+      HorizontalOptions=Center />
+  </SkiaStack>
+
+  // The original recycles these rows through ItemsSource with RecyclingTemplate and MeasureFirst.
+  <SkiaScroll Orientation=Vertical Margin=<Thickness Top=58 Bottom=44 />>
+    <SkiaStack Spacing=6 Padding=<Thickness Left=12 Top=8 Right=12 Bottom=8 />>
+      for language in languages {
+        <Row Item={language} />
+      }
+    </SkiaStack>
+  </SkiaScroll>
+
+  // The original's buttons permute the list: move the first row below the tenth, reverse, reset.
+  <SkiaWrap Spacing=6 Margin=<Thickness Left=8 Right=8 Bottom=8 /> HorizontalOptions=Center VerticalOptions=End>
+    <SkiaButton Text="1st below 10th" FontSize=13 BackgroundColor="#495057" />
+    <SkiaButton Text="Reverse" FontSize=13 BackgroundColor="#495057" />
+    <SkiaButton Text="Reset" FontSize=13 BackgroundColor="#495057" />
+  </SkiaWrap>
+</SkiaLayer>

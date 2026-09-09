@@ -21,7 +21,7 @@ const LOREM = "DrawnUI draws every pixel itself: text is shaped and rasterized b
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <SkiaShape Type="Rectangle" CornerRadius={8} BackgroundColor="#2B3035" HorizontalOptions="Fill">
+    <SkiaShape Type="Rectangle" CornerRadius={8} BackgroundColor="#2B3035" HorizontalOptions="Fill" UseCache="Image">
       <SkiaStack Spacing={8} Padding={new Thickness(16, 12)}>
         <SkiaLabel Text={title} FontSize={12} TextColor="#6EA8FE" FontAttributes="Bold" TextTransform="Uppercase" />
         {children}
@@ -36,7 +36,7 @@ export function TextPage() {
   const [link, setLink] = useState("none");
   return (
     <SkiaScroll Orientation="Vertical">
-      <SkiaStack Spacing={16} Padding={new Thickness(16)} HorizontalOptions="Center" MaximumWidthRequest={720}>
+      <SkiaStack Spacing={16} Padding={new Thickness(16)} HorizontalOptions="Center" MaximumWidthRequest={720} UseCache="Operations">
         <SkiaLabel Text="SkiaLabel" FontSize={24} TextColor={Colors.White} HorizontalOptions="Center" />
 
         <Card title="Word wrap · HorizontalOptions=Fill">
@@ -93,6 +93,15 @@ export function TextPage() {
             <SkiaLabel Text="Start" FontSize={14} TextColor="#DEE2E6" WidthRequest={215} HeightRequest={90} VerticalTextAlignment="Start" HorizontalTextAlignment="Center" BackgroundColor="#22FFFFFF" />
             <SkiaLabel Text="Center" FontSize={14} TextColor="#DEE2E6" WidthRequest={215} HeightRequest={90} VerticalTextAlignment="Center" HorizontalTextAlignment="Center" BackgroundColor="#22FFFFFF" />
             <SkiaLabel Text="End" FontSize={14} TextColor="#DEE2E6" WidthRequest={215} HeightRequest={90} VerticalTextAlignment="End" HorizontalTextAlignment="Center" BackgroundColor="#22FFFFFF" />
+          </SkiaWrap>
+        </Card>
+
+        <Card title="StrokeColor / StrokeWidth, StrokeGradient, DropShadow* — outline under the fill, shadow below (C# DrawText order)">
+          <SkiaWrap Spacing={16}>
+            <SkiaLabel Text="Outlined" FontSize={32} FontFamily="FontTextBold" TextColor="#212529" StrokeColor="#FFC107" StrokeWidth={1.5} />
+            <SkiaLabel Text="Gradient stroke" FontSize={32} FontFamily="FontTextBold" TextColor="#212529" StrokeColor={Colors.White} StrokeWidth={2} StrokeGradient={{ Type: "Linear", Angle: 0, Colors: ["#0DCAF0", "#D63384"] }} />
+            <SkiaLabel Text="Drop shadow" FontSize={32} FontFamily="FontTextBold" TextColor="#DEE2E6" DropShadowColor="#000000" DropShadowSize={2} DropShadowOffsetX={3} DropShadowOffsetY={3} />
+            <SkiaLabel Text="Both + gradient fill" FontSize={32} FontFamily="FontTextBold" TextColor={Colors.White} FillGradient={{ Type: "Linear", Angle: 90, Colors: ["#FFC107", "#FD7E14"] }} StrokeColor="#3D2B00" StrokeWidth={1} DropShadowColor="#66000000" DropShadowSize={3} DropShadowOffsetX={2} DropShadowOffsetY={4} />
           </SkiaWrap>
         </Card>
 

@@ -1,4 +1,4 @@
-// Ported from the DrawnUI React demo's Platform Looks page.
+// Ported from the DrawnUI React demo's Common Controls page.
 //
 // One card per prebuilt style; the same tree each time, only ControlStyle changes.
 //
@@ -34,7 +34,7 @@ component <Card extends DrawnNode Title:string Style:PrebuiltControlStyle /> = {
 <SkiaScroll Orientation=Vertical>
   <SkiaStack Spacing=16 Padding=<Thickness Left=16 Top=16 Right=16 Bottom=16 />
     HorizontalOptions=Center MaximumWidthRequest=720>
-    <SkiaLabel Text="Platform Looks" FontSize=24 TextColor="#FFFFFF" HorizontalOptions=Center />
+    <SkiaLabel Text="Common Controls" FontSize=24 TextColor="#FFFFFF" HorizontalOptions=Center />
     <SkiaLabel FontSize=13 TextColor="#ADB5BD" HorizontalOptions=Fill HorizontalTextAlignment=Center
       Text="SkiaSwitch, SkiaCheckbox, SkiaRadioButton, SkiaButton, SkiaProgress, SkiaSlider — the same tree per card, only ControlStyle changes." />
     <Card Title="Default" Style=Unset />

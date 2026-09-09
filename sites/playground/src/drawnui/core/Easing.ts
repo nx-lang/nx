@@ -7,5 +7,7 @@ export class Easing {
   static readonly CubicIn = new Easing((x) => x * x * x);
   static readonly CubicOut = new Easing((x) => (x - 1) ** 3 + 1);
   static readonly CubicInOut = new Easing((x) => (x < 0.5 ? 4 * x ** 3 : (x - 1) * (2 * x - 2) ** 2 + 1));
+  static readonly SinOut = new Easing((x) => Math.sin((x * Math.PI) / 2));
+  static readonly SinIn = new Easing((x) => 1 - Math.cos((x * Math.PI) / 2));
   static readonly Default = Easing.CubicInOut;
 }

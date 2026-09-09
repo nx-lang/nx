@@ -5,7 +5,10 @@
 // so an unset property is left for the control to decide rather than restated here, and the
 // catalog cannot drift from the vendored code it was generated against.
 
+type BevelType = None | Bevel | Emboss
+
 type BlendMode =
+  | Color
   | Darken
   | Lighten
   | Saturation
@@ -33,7 +36,6 @@ type BlendMode =
   | Exclusion
   | Multiply
   | Hue
-  | Color
   | Luminosity
 
 type DrawerDirection = FromBottom | FromTop | FromLeft | FromRight
@@ -51,6 +53,14 @@ type DrawTextAlignment =
 
 type FontAttributes = None | Bold | Italic | BoldItalic
 
+type GradientType =
+  | None
+  | Linear
+  | Circular
+  | Oval
+  | Sweep
+  | Conical
+
 type LayoutOptions = Start | Center | End | Fill
 
 type LineBreakMode =
@@ -60,6 +70,8 @@ type LineBreakMode =
   | HeadTruncation
   | MiddleTruncation
   | TailTruncation
+
+type LoadPriority = Low | Normal | High
 
 type LockTouch = Enabled | Disabled | PassNone | PassTap | PassTapAndLongPress
 
@@ -75,7 +87,23 @@ type PrebuiltControlStyle =
 
 type RecyclingTemplate = Enabled | Disabled
 
+type RelativePositionType = Start | Center | End | None
+
+type ReturnType =
+  | Default
+  | Done
+  | Go
+  | Next
+  | Search
+  | Send
+
+type ScrollBarDock = Start | End
+
+type ScrollBarVisibility = None | Horizontal | Vertical | Both
+
 type ScrollOrientation = Horizontal | Vertical | Both | Neither
+
+type ShaderTileMode = Clamp | Repeat | Mirror | Decal
 
 type ShapeType =
   | Rectangle
@@ -98,15 +126,15 @@ type SkiaCacheType =
   | ImageCompositeGPU
   | GPU
 
-type SkiaGradientType = | Linear
+type SkiaEditorKeyboard = Default | Numeric | Decimal | Phone | Email
 
 type SkiaImageEffect =
   | Custom
   | None
+  | Brightness
   | Darken
   | Lighten
   | Contrast
-  | Brightness
   | Gamma
   | Saturation
   | BlackAndWhite
@@ -136,6 +164,8 @@ type SkiaLayoutType =
 
 type SkiaTouchAnimation = None | Ripple | Shimmer
 
+type SnapToChildrenType = Disabled | Center | Side
+
 type StrokeCap = Butt | Round | Square
 
 type TextAlignment = Start | Center | End
@@ -161,13 +191,26 @@ type CornerRadius = {
   BottomRight: float64?
 }
 
+type SkiaBevel = {
+  Depth: float64?
+  LightColor: string?
+  ShadowColor: string?
+  Opacity: float64?
+}
+
 type SkiaGradient = {
-  Type: SkiaGradientType?
+  Type: GradientType?
   Colors: string[]?
+  ColorPositions: float64[]?
   StartXRatio: float64?
   StartYRatio: float64?
   EndXRatio: float64?
   EndYRatio: float64?
+  Angle: float64?
+  TileMode: ShaderTileMode?
+  Light: float64?
+  Opacity: float64?
+  BlendMode: string?
 }
 
 type SkiaPoint = {
@@ -201,6 +244,7 @@ abstract external component
   AccessibilityLabel: string?
   AccessibilityLive: string?
   AccessibilityRole: string?
+  AccessibilityTextSelectable: boolean?
   AnchorX: float64?
   AnchorY: float64?
   AnimationTapped: SkiaTouchAnimation?
@@ -210,12 +254,16 @@ abstract external component
   ClipEffects: boolean?
   Column: float64?
   ColumnSpan: float64?
+  DisableEffects: boolean?
   FillGradient: SkiaGradient?
   HeightRequest: float64?
+  HorizontalFillRatio: float64?
   HorizontalOptions: LayoutOptions?
   InputTransparent: boolean?
+  IsCacheComposite: boolean?
   IsClippedToBounds: boolean?
   IsVisible: boolean?
+  Left: float64?
   LockChildrenGestures: LockTouch?
   LockRatio: float64?
   Margin: Thickness?
@@ -233,15 +281,18 @@ abstract external component
   SkewX: float64?
   SkewY: float64?
   Tag: string?
+  Top: float64?
   TouchEffectColor: string?
   TranslationX: float64?
   TranslationY: float64?
   UseCache: SkiaCacheType?
   Value1: float64?
   Value2: float64?
+  VerticalFillRatio: float64?
   VerticalOptions: LayoutOptions?
   VirtualisationInflated: float64?
   WidthRequest: float64?
+  ZIndex: float64?
 />
 
 abstract external component
@@ -251,36 +302,25 @@ abstract external component
   ColumnSpacing: float64?
   DefaultColumnDefinition: string?
   DefaultRowDefinition: string?
+  DynamicColumns: boolean?
+  Invert: boolean?
   MeasureItemsStrategy: MeasuringStrategy?
   Padding: Thickness?
   RecyclingTemplate: RecyclingTemplate?
   RowDefinitions: string?
   RowSpacing: float64?
   Spacing: float64?
+  Split: float64?
+  SplitAlign: boolean?
   Type: SkiaLayoutType?
 />
 
-abstract external component
-<SkiaLabelBase extends SkiaControl
-  FontAttributes: FontAttributes?
-  FontFamily: string?
-  FontFamilyFallback: string?
-  FontSize: float64?
-  FontWeight: float64?
-  HorizontalTextAlignment: DrawTextAlignment?
-  LineBreakMode: LineBreakMode?
-  LineHeight: float64?
-  LineSpacing: float64?
-  MaxLines: float64?
-  Padding: Thickness?
-  Text: string?
-  TextColor: string?
-  TextTransform: TextTransform?
-  VerticalTextAlignment: TextAlignment?
-/>
+abstract external component <SkiaGridBase extends SkiaLayoutBase />
 
 abstract external component
 <SkiaShapeBase extends SkiaLayoutBase
+  Bevel: SkiaBevel?
+  BevelType: BevelType?
   ClipBackgroundColor: boolean?
   CornerRadius: CornerRadius?
   PathData: string?
@@ -288,7 +328,68 @@ abstract external component
   Shadows: SkiaShadow[]?
   StrokeCap: StrokeCap?
   StrokeColor: string?
+  StrokeGradient: SkiaGradient?
   StrokeWidth: float64?
+/>
+
+abstract external component
+<AnimatedFramesRenderer extends SkiaControl
+  AutoPlay: boolean?
+  DefaultFrame: float64?
+  Repeat: float64?
+  SpeedRatio: float64?
+/>
+
+abstract external component
+<SkiaLabelBase extends SkiaControl
+  DropShadowColor: string?
+  DropShadowOffsetX: float64?
+  DropShadowOffsetY: float64?
+  DropShadowSize: float64?
+  FontAttributes: FontAttributes?
+  FontFamily: string?
+  FontFamilyFallback: string?
+  FontSize: float64?
+  FontWeight: float64?
+  GradientByLines: boolean?
+  HorizontalTextAlignment: DrawTextAlignment?
+  KeepSpacesOnLineBreaks: boolean?
+  LineBreakMode: LineBreakMode?
+  LineHeight: float64?
+  LineSpacing: float64?
+  MaxLines: float64?
+  NeedsGlyphPositions: boolean?
+  Padding: Thickness?
+  StrokeColor: string?
+  StrokeGradient: SkiaGradient?
+  StrokeWidth: float64?
+  Text: string?
+  TextColor: string?
+  TextTransform: TextTransform?
+  VerticalTextAlignment: TextAlignment?
+/>
+
+abstract external component
+<SkiaImageBase extends SkiaControl
+  AddEffect: SkiaImageEffect?
+  Aspect: TransformAspect?
+  Blur: float64?
+  Brightness: float64?
+  ColorTint: string?
+  Contrast: float64?
+  Darken: float64?
+  EffectBlendMode: BlendMode?
+  Gamma: float64?
+  HorizontalAlignment: DrawImageAlignment?
+  HorizontalOffset: float64?
+  Lighten: float64?
+  LoadPriority: LoadPriority?
+  Saturation: float64?
+  Source: string?
+  VerticalAlignment: DrawImageAlignment?
+  VerticalOffset: float64?
+  ZoomX: float64?
+  ZoomY: float64?
 />
 
 abstract external component
@@ -314,6 +415,19 @@ abstract external component
   RubberDamping: float64?
   RubberEffect: float64?
   SnapDistanceRatio: float64?
+/>
+
+abstract external component
+<SkiaCarouselBase extends SnappingLayout
+  DynamicSize: boolean?
+  IsLooped: boolean?
+  IsRightToLeft: boolean?
+  IsVertical: boolean?
+  LinearSpeedMs: float64?
+  PreloadNeighboors: boolean?
+  SelectedIndex: float64?
+  SidesOffset: float64?
+  SwipeSpeed: float64?
 />
 
 external component
@@ -342,7 +456,79 @@ external component
 />
 
 external component
-<SkiaGrid extends SkiaLayoutBase
+<SkiaGrid extends SkiaGridBase
+  content Children: DrawnNode[]?
+/>
+
+external component
+<SkiaDecoratedGrid extends SkiaGridBase
+  HorizontalLine: SkiaGradient?
+  VerticalLine: SkiaGradient?
+  content Children: DrawnNode[]?
+/>
+
+external component
+<SkiaBackdrop extends SkiaLayoutBase
+  Blur: float64?
+  Brightness: float64?
+  UseContext: boolean?
+  content Children: DrawnNode[]?
+/>
+
+external component
+<SkiaEditor extends SkiaShapeBase
+  AutoHeight: boolean?
+  CanShowCursor: boolean?
+  ControlStyle: PrebuiltControlStyle?
+  CursorColor: string?
+  CursorPosition: float64?
+  FontFamily: string?
+  FontFamilyFallback: string?
+  FontSize: float64?
+  FontWeight: float64?
+  HorizontalTextAlignment: DrawTextAlignment?
+  IsFocused: boolean?
+  IsPassword: boolean?
+  IsSpellCheckEnabled: boolean?
+  KeyboardType: SkiaEditorKeyboard?
+  LineHeight: float64?
+  MaxLines: float64?
+  PlaceholderColor: string?
+  PlaceholderHorizontalAlignment: DrawTextAlignment?
+  PlaceholderText: string?
+  ReturnType: ReturnType?
+  SelectionColor: string?
+  SelectionLength: float64?
+  Text: string?
+  TextColor: string?
+  TextGradient: SkiaGradient?
+  UseMarkdown: boolean?
+  UseUnicode: boolean?
+  VerticalTextAlignment: TextAlignment?
+/>
+
+external component
+<SkiaSprite extends AnimatedFramesRenderer
+  AnimationName: string?
+  Columns: float64?
+  CurrentFrame: float64?
+  FrameSequence: float64[]?
+  FramesPerSecond: float64?
+  MaxFrames: float64?
+  RenderAnchorX: float64?
+  RenderAnchorY: float64?
+  RenderHeightUnits: float64?
+  RenderOffsetXUnits: float64?
+  RenderOffsetYUnits: float64?
+  RenderUnitsPerPixel: float64?
+  RenderWidthUnits: float64?
+  Rows: float64?
+  Source: string?
+/>
+
+external component
+<SkiaSpriteSet extends SkiaLayoutBase
+  State: float64?
   content Children: DrawnNode[]?
 />
 
@@ -408,26 +594,16 @@ external component
   TextColor: string?
 />
 
+external component <SkiaImage extends SkiaImageBase />
+
 external component
-<SkiaImage extends SkiaControl
-  AddEffect: SkiaImageEffect?
-  Aspect: TransformAspect?
-  Blur: float64?
-  Brightness: float64?
-  ColorTint: string?
-  Contrast: float64?
-  Darken: float64?
-  EffectBlendMode: BlendMode?
-  Gamma: float64?
-  HorizontalAlignment: DrawImageAlignment?
-  HorizontalOffset: float64?
-  Lighten: float64?
-  Saturation: float64?
-  Source: string?
-  VerticalAlignment: DrawImageAlignment?
-  VerticalOffset: float64?
-  ZoomX: float64?
-  ZoomY: float64?
+<SkiaImageTiles extends SkiaImageBase
+  TileAspect: TransformAspect?
+  TileCacheType: SkiaCacheType?
+  TileHeight: float64?
+  TileOffsetX: float64?
+  TileOffsetY: float64?
+  TileWidth: float64?
 />
 
 external component
@@ -441,24 +617,77 @@ external component
 />
 
 external component
+<SkiaLottie extends AnimatedFramesRenderer
+  ApplyIsOnWhenNotPlaying: boolean?
+  Colors: string[]?
+  ColorTint: string?
+  DefaultFrameWhenOn: float64?
+  IsOn: boolean?
+  Source: string?
+  StopAtCurrentFrame: boolean?
+/>
+
+external component
+<SkiaGif extends AnimatedFramesRenderer
+  Aspect: TransformAspect?
+  HorizontalAlignment: DrawImageAlignment?
+  Source: string?
+  VerticalAlignment: DrawImageAlignment?
+/>
+
+external component
 <SkiaScroll extends SkiaControl
   AutoScrollingSpeedMs: float64?
   Bounces: boolean?
   ChangeDistancePanned: float64?
   ChangeVelocityScrolled: float64?
+  ContentOffset: float64?
   FrictionScrolled: float64?
+  HeaderBehind: boolean?
+  HeaderParallaxRatio: float64?
+  HeaderSticky: boolean?
   IgnoreWrongDirection: boolean?
+  IsRefreshing: boolean?
   LoadMoreOffset: float64?
   LoadMoreTopOffset: float64?
   MaxBounceVelocity: float64?
   MaxVelocity: float64?
   Orientation: ScrollOrientation?
+  ParallaxOverscrollEnabled: boolean?
+  RefreshDistanceLimit: float64?
+  RefreshEnabled: boolean?
+  RefreshShowDistance: float64?
   RespondsToGestures: boolean?
   RubberDamping: float64?
   RubberEffect: float64?
+  ScrollBarsVisibility: ScrollBarVisibility?
+  ScrollBarThumbColor: string?
+  ScrollBarTrackColor: string?
   ScrollingSpeedMs: float64?
+  SnapToChildren: SnapToChildrenType?
+  TrackIndexPosition: RelativePositionType?
+  TrackIndexPositionOffset: float64?
   ViewportOffsetX: float64?
   ViewportOffsetY: float64?
+  content Children: DrawnNode[]?
+/>
+
+external component
+<SkiaScrollBar extends SkiaLayoutBase
+  AutoHide: boolean?
+  Dock: ScrollBarDock?
+  EdgeMargin: float64?
+  HideDelaySecs: float64?
+  MinThumbSize: float64?
+  Thickness: float64?
+  ThumbColor: string?
+  TrackColor: string?
+  content Children: DrawnNode[]?
+/>
+
+external component
+<RefreshIndicator extends SkiaLayoutBase
+  Orientation: ScrollOrientation?
   content Children: DrawnNode[]?
 />
 
@@ -516,11 +745,16 @@ external component
 />
 
 external component
-<SkiaCarousel extends SnappingLayout
-  IsRightToLeft: boolean?
-  IsVertical: boolean?
-  SelectedIndex: float64?
-  SidesOffset: float64?
+<SkiaCarousel extends SkiaCarouselBase
+  content Children: DrawnNode[]?
+/>
+
+external component
+<SkiaShaderCarousel extends SkiaCarouselBase
+  InterruptedTransitionMs: float64?
+  TransitionShader: string?
+  TransitionShaderCode: string?
+  TransitionTemplate: string?
   content Children: DrawnNode[]?
 />
 

@@ -1,7 +1,14 @@
 // Ported from the DrawnUI React demo's Images page.
 //
-// SkiaImage: one source in every TransformAspect, then the effects, then alignment inside the box.
-// The aspect row is written as a loop over a list of records — the original maps over an array.
+// SkiaImage: one source in every TransformAspect, then the effects, custom filters, SkiaImageTiles,
+// the preload queue, and alignment inside the box. The aspect row is written as a loop over a list
+// of records — the original maps over an array.
+//
+// Three of the original's cards are built in code. The custom-filter card hands CanvasKit filter
+// objects to PaintColorFilter and PaintImageFilter (code-behind); those hosts draw plain here. The
+// tile card animates TileOffsetX from a timer (animation); here the offset is fixed. The preload
+// card drives SkiaImageManager from a button and reports the queue (event handlers); the button is
+// drawn and does nothing.
 
 type AspectDemo = {
   Aspect: TransformAspect
@@ -102,7 +109,33 @@ let aspects = {
         <SkiaImage Source="images/baboon.jpg" WidthRequest=160 HeightRequest=100
           BackgroundColor="#000000" HorizontalOffset=-40 Aspect=AspectFit />
       </Tile>
+      <Tile Title="HSL Gamma=0.6 (hue) Sat=1 Bright=0.5">
+        <SkiaImage Source="images/baboon.jpg" WidthRequest=160 HeightRequest=100
+          BackgroundColor="#FFFFFF" AddEffect=HSL Gamma=0.6 Saturation=1 Brightness=0.5 />
+      </Tile>
     </SkiaWrap>
+
+    <Heading Text="Custom filters · AddEffect=Custom + PaintColorFilter / PaintImageFilter" />
+    // The original builds a CanvasKit ColorFilter (a red/blue channel swap) and an ImageFilter
+    // (MakeDilate) in code and assigns them here. The catalog has no way to spell an engine object,
+    // so both images draw unfiltered.
+    <SkiaWrap Spacing=16 HorizontalOptions=Center MaximumWidthRequest=720>
+      <Tile Title="PaintColorFilter = MakeMatrix (R↔B) — code-behind, drawn plain">
+        <SkiaImage Source="images/baboon.jpg" WidthRequest=160 HeightRequest=100 AddEffect=Custom />
+      </Tile>
+      <Tile Title="PaintImageFilter = MakeDilate(4) — code-behind, drawn plain">
+        <SkiaImage Source="images/baboon.jpg" WidthRequest=160 HeightRequest=100 />
+      </Tile>
+    </SkiaWrap>
+
+    <Heading Text="SkiaImageTiles · TileWidth/TileHeight, TileOffsetX animates in the original" />
+    <SkiaImageTiles Source="images/baboon.jpg" TileWidth=64 TileHeight=64 TileOffsetX=40 TileOffsetY=20
+      HorizontalOptions=Center WidthRequest=400 HeightRequest=160 BackgroundColor="#000000" />
+
+    <Heading Text="SkiaImageManager preload queue · idle" />
+    // The original's button preloads eight urls through the priority queue and reports how many
+    // were in flight; without event handlers it is drawn and does nothing.
+    <SkiaButton Text="PreloadImages(8 urls, Low)" BackgroundColor="#0D6EFD" FontSize=13 HorizontalOptions=Center />
 
     <Heading Text="Alignment inside the box" />
     <SkiaWrap Spacing=16 HorizontalOptions=Center MaximumWidthRequest=720>

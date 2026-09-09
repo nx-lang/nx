@@ -255,7 +255,7 @@ function mapType(checker, type, context, preferred) {
     // the record where one is present, `string` where the members are literal spellings of one.
     const richest = type.types.find((member) => {
       const cleaned = stripUndefined(checker, member);
-      return cleaned.symbol !== undefined && declaredIn(cleaned.symbol, "src/drawnui");
+      return cleaned.symbol !== undefined && declaredIn(cleaned.symbol, "core/Types");
     });
     if (richest !== undefined) {
       return mapType(checker, stripUndefined(checker, richest), context, preferred);
@@ -271,7 +271,11 @@ function mapType(checker, type, context, preferred) {
     return null;
   }
 
-  if (type.symbol !== undefined && declaredIn(type.symbol, "src/drawnui")) {
+  // A record is one of DrawnUI's value types, which all live in `core/Types`. Any other class —
+  // a control, an effect, the canvas — is an engine object an author cannot build, and following
+  // it would walk the whole engine into the catalog (`VisualEffects: SkiaEffect[]` reaches
+  // `SkiaControl` through `Parent`). Those properties are omitted and listed like callbacks.
+  if (type.symbol !== undefined && declaredIn(type.symbol, "core/Types")) {
     const name = type.symbol.name;
     // `Partial<SkiaShadow>` and friends resolve to the same shape under a mapped-type name.
     const cleanName = name.startsWith("Partial<") ? name.slice(8, -1) : name;

@@ -1,5 +1,15 @@
 [
   {
+    "owner": "AnimatedFramesRenderer",
+    "property": "Finished",
+    "reason": "(sender: AnimatedFramesRenderer) => void"
+  },
+  {
+    "owner": "AnimatedFramesRenderer",
+    "property": "Started",
+    "reason": "(sender: AnimatedFramesRenderer) => void"
+  },
+  {
     "owner": "SkiaButton",
     "property": "Down",
     "reason": "(sender: SkiaButton, args: SkiaGesturesParameters) => void"
@@ -8,6 +18,16 @@
     "owner": "SkiaButton",
     "property": "Up",
     "reason": "(sender: SkiaButton, args: SkiaGesturesParameters) => void"
+  },
+  {
+    "owner": "SkiaCarousel",
+    "property": "ItemAppearing",
+    "reason": "(sender: SkiaCarousel, index: number) => void"
+  },
+  {
+    "owner": "SkiaCarousel",
+    "property": "ItemDisappearing",
+    "reason": "(sender: SkiaCarousel, index: number) => void"
   },
   {
     "owner": "SkiaCarousel",
@@ -31,8 +51,18 @@
   },
   {
     "owner": "SkiaControl",
+    "property": "ContextMenu",
+    "reason": "(sender: SkiaControl, e: ContextMenuEventArgs) => boolean | void"
+  },
+  {
+    "owner": "SkiaControl",
     "property": "Tapped",
     "reason": "(sender: SkiaControl, e: ControlTappedEventArgs) => void"
+  },
+  {
+    "owner": "SkiaControl",
+    "property": "VisualEffects",
+    "reason": "readonly SkiaEffect[]"
   },
   {
     "owner": "SkiaDrawer",
@@ -43,6 +73,36 @@
     "owner": "SkiaDrawer",
     "property": "StateTransitionComplete",
     "reason": "(sender: SkiaDrawer, isOpen: boolean) => void"
+  },
+  {
+    "owner": "SkiaEditor",
+    "property": "CursorMoved",
+    "reason": "(sender: SkiaEditor) => void"
+  },
+  {
+    "owner": "SkiaEditor",
+    "property": "FocusChanged",
+    "reason": "(sender: SkiaEditor, focused: boolean) => void"
+  },
+  {
+    "owner": "SkiaEditor",
+    "property": "TextChanged",
+    "reason": "(sender: SkiaEditor, text: string) => void"
+  },
+  {
+    "owner": "SkiaEditor",
+    "property": "TextSubmitted",
+    "reason": "(sender: SkiaEditor, text: string) => void"
+  },
+  {
+    "owner": "SkiaGif",
+    "property": "Error",
+    "reason": "(sender: SkiaGif, error: Error) => void"
+  },
+  {
+    "owner": "SkiaGif",
+    "property": "Success",
+    "reason": "(sender: SkiaGif, source: string) => void"
   },
   {
     "owner": "SkiaHotspot",
@@ -61,6 +121,16 @@
   },
   {
     "owner": "SkiaImage",
+    "property": "PaintColorFilter",
+    "reason": "ColorFilter"
+  },
+  {
+    "owner": "SkiaImage",
+    "property": "PaintImageFilter",
+    "reason": "ImageFilter"
+  },
+  {
+    "owner": "SkiaImage",
     "property": "Success",
     "reason": "(sender: SkiaImage, source: string) => void"
   },
@@ -75,9 +145,29 @@
     "reason": "() => SkiaControl"
   },
   {
+    "owner": "SkiaLottie",
+    "property": "Error",
+    "reason": "(sender: SkiaLottie, error: Error) => void"
+  },
+  {
+    "owner": "SkiaLottie",
+    "property": "ProcessJson",
+    "reason": "(json: string) => string"
+  },
+  {
+    "owner": "SkiaLottie",
+    "property": "Success",
+    "reason": "(sender: SkiaLottie, source: string) => void"
+  },
+  {
     "owner": "SkiaRichLabel",
     "property": "LinkTapped",
     "reason": "(sender: SkiaRichLabel, url: string) => void"
+  },
+  {
+    "owner": "SkiaScroll",
+    "property": "CurrentIndexChanged",
+    "reason": "(sender: SkiaScroll, index: number) => void"
   },
   {
     "owner": "SkiaScroll",
@@ -91,8 +181,18 @@
   },
   {
     "owner": "SkiaScroll",
+    "property": "RefreshCommand",
+    "reason": "(sender: SkiaScroll) => void"
+  },
+  {
+    "owner": "SkiaScroll",
     "property": "Scrolled",
     "reason": "(sender: SkiaScroll, e: ScaledPoint) => void"
+  },
+  {
+    "owner": "SkiaShaderCarousel",
+    "property": "FromToChanged",
+    "reason": "(sender: SkiaShaderCarousel) => void"
   },
   {
     "owner": "SkiaSlider",
@@ -103,6 +203,16 @@
     "owner": "SkiaSlider",
     "property": "StartChanged",
     "reason": "(sender: SkiaSlider, value: number) => void"
+  },
+  {
+    "owner": "SkiaSprite",
+    "property": "Error",
+    "reason": "(sender: SkiaSprite, error: Error) => void"
+  },
+  {
+    "owner": "SkiaSprite",
+    "property": "Success",
+    "reason": "(sender: SkiaSprite, source: string) => void"
   },
   {
     "owner": "SkiaSvg",

@@ -7,8 +7,8 @@ those edits, so re-apply them from that list.
 | | |
 |---|---|
 | Upstream | `/home/bret/src/DrawnUi.React` |
-| Commit | `0e4a32deca041701c27faf278a35f9424161a871` |
-| Copied | 2026-09-02 |
+| Commit | `f617e070e26502fc55b565986bf2547f83aaf224` |
+| Copied | 2026-09-08 |
 
 Trees copied:
 
@@ -16,3 +16,6 @@ Trees copied:
 - `samples/demo/pages` → `reference/demo-pages` — demo pages (reference only)
 - `samples/public/fonts` → `public/fonts` — shared fonts
 - `samples/public/images` → `public/images` — shared images
+- `samples/public/lottie` → `public/lottie` — Lottie animations
+- `samples/public/anims` → `public/anims` — sprite sheets
+- `samples/public/shaders` → `public/shaders` — SkSL shaders

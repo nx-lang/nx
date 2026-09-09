@@ -26,8 +26,13 @@
     "name": "Images",
     "blurb": "SkiaImage \u2014 every TransformAspect, alignment, clipping",
     "file": "images.nx",
-    "coverage": "complete",
-    "capabilities": []
+    "coverage": "reduced",
+    "capabilities": [
+      "code-behind",
+      "animation",
+      "event-handlers"
+    ],
+    "demonstrates": "custom CanvasKit filters built in code, an animated tile offset and the image preload queue"
   },
   {
     "id": "svg",
@@ -42,8 +47,10 @@
     "name": "Shapes",
     "blurb": "SkiaShape \u2014 rectangle, circle, ellipse, arc, polygon, line, path; stroke, corner radii, clipping",
     "file": "shapes.nx",
-    "coverage": "complete",
-    "capabilities": []
+    "coverage": "static",
+    "capabilities": [
+      "event-handlers"
+    ]
   },
   {
     "id": "text",
@@ -60,12 +67,18 @@
     "name": "Layouts",
     "blurb": "Every SkiaLayout type \u2014 Absolute, Column, Row, Wrap, Grid (tracks, spans, spacing)",
     "file": "layouts.nx",
-    "coverage": "complete",
-    "capabilities": []
+    "coverage": "reduced",
+    "capabilities": [
+      "list-virtualization",
+      "code-behind",
+      "animation",
+      "event-handlers"
+    ],
+    "demonstrates": "templated Wrap, Row, Grid and DecoratedGrid with Split, and an ImageComposite layer re-recording one spinning child"
   },
   {
     "id": "looks",
-    "name": "Platform Looks",
+    "name": "Common Controls",
     "blurb": "SkiaSwitch, SkiaCheckbox, SkiaRadioButton, SkiaProgress, SkiaSlider, SkiaButton \u2014 five styles",
     "file": "looks.nx",
     "coverage": "static",
@@ -82,8 +95,91 @@
     "coverage": "static",
     "capabilities": [
       "event-handlers",
+      "component-state",
+      "list-virtualization"
+    ]
+  },
+  {
+    "id": "animations",
+    "name": "Lottie & GIF",
+    "blurb": "SkiaLottie (Skottie: AutoPlay, Repeat, SpeedRatio, IsOn, ColorTint) and SkiaGif frames on the canvas frame loop",
+    "file": "animations.nx",
+    "coverage": "static",
+    "capabilities": [
+      "event-handlers",
       "component-state"
     ]
+  },
+  {
+    "id": "shell",
+    "name": "Shell",
+    "blurb": "SkiaShell \u2014 page transitions, OpenPopupAsync, PushModalAsync (drawer), ShowToast",
+    "file": "shell.nx",
+    "coverage": "reduced",
+    "capabilities": [
+      "event-handlers",
+      "component-state"
+    ],
+    "demonstrates": "page navigation, popups, modals, toasts and a tabbed shell driven from code"
+  },
+  {
+    "id": "editor",
+    "name": "Editor",
+    "blurb": "SkiaEditor \u2014 drawn text input: caret, selection, placeholder, password, multiline, ControlStyle looks",
+    "file": "editor.nx",
+    "coverage": "static",
+    "capabilities": [
+      "event-handlers",
+      "component-state"
+    ]
+  },
+  {
+    "id": "keyboard",
+    "name": "Keyboard Input",
+    "blurb": "KeyboardManager \u2014 window-level KeyDown / KeyUp / KeyChar with modifier state, the Blazor sandbox probe",
+    "file": "keyboard.nx",
+    "coverage": "static",
+    "capabilities": [
+      "event-handlers",
+      "component-state"
+    ]
+  },
+  {
+    "id": "scroll",
+    "name": "SkiaScroll",
+    "blurb": "Header in flow / sticky / behind with parallax, Footer, scroll bars, pull to refresh, SnapToChildren, TrackIndexPosition",
+    "file": "scroll.nx",
+    "coverage": "static",
+    "capabilities": [
+      "event-handlers",
+      "component-state"
+    ]
+  },
+  {
+    "id": "shaders",
+    "name": "Shaders",
+    "blurb": "SkiaShaderEffect \u2014 SkSL on any control (iImage1, iTime, iMouse, custom uniforms, touch ripples) and SkiaShaderCarousel gl-transitions",
+    "file": "shaders.nx",
+    "coverage": "reduced",
+    "capabilities": [
+      "code-behind",
+      "animation",
+      "event-handlers"
+    ],
+    "demonstrates": "SkSL effects attached through VisualEffects, with uniforms, time and touch driven from code"
+  },
+  {
+    "id": "sprites",
+    "name": "Sprites",
+    "blurb": "SkiaSprite spritesheets and a SkiaSpriteSet warrior on a tile board, moved with the keyboard (FastRepro sprites)",
+    "file": "sprites.nx",
+    "coverage": "reduced",
+    "capabilities": [
+      "code-behind",
+      "event-handlers",
+      "component-state"
+    ],
+    "demonstrates": "a SkiaSpriteSet warrior moved across the board with the keyboard"
   },
   {
     "id": "transforms",
@@ -96,6 +192,20 @@
       "animation",
       "component-state"
     ]
+  },
+  {
+    "id": "reorder",
+    "name": "Drag to reorder",
+    "blurb": "Language preferences, Android style: drag one by its grip and it lifts and floats over the list, which reorders live under it",
+    "file": "reorder.nx",
+    "coverage": "reduced",
+    "capabilities": [
+      "code-behind",
+      "event-handlers",
+      "component-state",
+      "list-virtualization"
+    ],
+    "demonstrates": "reordering a templated list in place by dragging a row, the row lifted into a ghost that floats over the list"
   },
   {
     "id": "accessibility",
@@ -111,11 +221,12 @@
   {
     "id": "root",
     "name": "Root menu",
-    "blurb": "The demo site's own landing page \u2014 logo, title and a card per sample",
+    "blurb": "The demo site's own landing page \u2014 logo, title, subtitle and a card per sample",
     "file": "root.nx",
     "coverage": "static",
     "capabilities": [
-      "event-handlers"
+      "event-handlers",
+      "component-state"
     ]
   }
 ]
