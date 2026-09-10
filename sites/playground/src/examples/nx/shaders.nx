@@ -1,0 +1,107 @@
+// Ported from the DrawnUI React demo's Shaders page.
+//
+// The one thing here that works as in the original is the SkiaShaderCarousel: its slides never
+// move, and a ShaderTransitionEffect blends the Image caches of the outgoing and incoming slides
+// through a gl-transitions style SkSL file. Swipe it. The original recycles its slides through an
+// ItemTemplate and switches the transition from buttons; here four static slides use the cube
+// transition and the buttons are inert.
+//
+// Everything else on the original page is a SkiaShaderEffect attached to a control through
+// VisualEffects — a touch-ripple effect that is also a gesture processor, an inline wave shader
+// with a uniform set from buttons, a generative plasma with no input texture, a pass-through blit
+// toggled on and off — each ticked by a looping animator. Those are engine objects built in code
+// (code-behind), driven by animation and event handlers, and the catalog has no way to spell them.
+// The hosts are drawn plain, with a note where each effect would be.
+
+component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = {
+  <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 />
+    BackgroundColor="#2B3035" HorizontalOptions=Fill>
+    <SkiaStack Padding=<Thickness Left=16 Top=12 Right=16 Bottom=12 /> Spacing=10>
+      <SkiaLabel Text={Title} FontSize=12 TextColor="#6EA8FE" FontAttributes=Bold
+        TextTransform=Uppercase />
+      {Children}
+    </SkiaStack>
+  </SkiaShape>
+}
+
+// A slide of the shader carousel: it MUST be cached as Image, the transition effect samples the
+// cache. The original's PhotoSlide class picks its photo by ContextIndex.
+component <PhotoSlide extends DrawnNode Source:string Title:string /> = {
+  <SkiaLayer UseCache=Image HorizontalOptions=Fill VerticalOptions=Fill>
+    <SkiaImage Source={Source} Aspect=AspectCover HorizontalOptions=Fill VerticalOptions=Fill />
+    <SkiaLabel Text={Title} FontSize=28 TextColor="#FFFFFF" HorizontalOptions=Center VerticalOptions=Center
+      DropShadowColor="#000000" DropShadowSize=4 />
+  </SkiaLayer>
+}
+
+<SkiaScroll Orientation=Vertical>
+  <SkiaStack Spacing=16 Padding=<Thickness Left=16 Top=16 Right=16 Bottom=16 />
+    HorizontalOptions=Center MaximumWidthRequest=720>
+    <SkiaLabel Text="Shaders" FontSize=24 TextColor="#FFFFFF" HorizontalOptions=Center />
+
+    <Card Title="SkiaShaderCarousel — TransitionShader='shaders/transitions/cube.sksl' · IsLooped · LinearSpeedMs=750">
+      <SkiaShaderCarousel HeightRequest=280 IsLooped=true LinearSpeedMs=750
+        TransitionShader="shaders/transitions/cube.sksl">
+        <PhotoSlide Source="images/hugrobot2.jpg" Title="Slide 1" />
+        <PhotoSlide Source="images/8.jpg" Title="Slide 2" />
+        <PhotoSlide Source="images/dungeon.jpg" Title="Slide 3" />
+        <PhotoSlide Source="images/nebula.jpg" Title="Slide 4" />
+      </SkiaShaderCarousel>
+      // The original's buttons call GoPrev() / GoNext() and swap the transition file.
+      <SkiaWrap Spacing=6>
+        <SkiaButton Text="‹ Prev" FontFamilyFallback="FontSymbols,FontSymbols2" BackgroundColor="#0F3460" FontSize=13 />
+        <SkiaButton Text="Next ›" FontFamilyFallback="FontSymbols,FontSymbols2" BackgroundColor="#0F3460" FontSize=13 />
+        <SkiaButton Text="cube" BackgroundColor="#533483" FontSize=12 />
+        <SkiaButton Text="fade" BackgroundColor="#495057" FontSize=12 />
+        <SkiaButton Text="swirl" BackgroundColor="#495057" FontSize=12 />
+        <SkiaButton Text="doorway" BackgroundColor="#495057" FontSize=12 />
+        <SkiaButton Text="bounce" BackgroundColor="#495057" FontSize=12 />
+        <SkiaButton Text="waterdrop" BackgroundColor="#495057" FontSize=12 />
+        <SkiaButton Text="pixelize" BackgroundColor="#495057" FontSize=12 />
+        <SkiaButton Text="windowslice" BackgroundColor="#495057" FontSize=12 />
+        <SkiaButton Text="crosszoom" BackgroundColor="#495057" FontSize=12 />
+        <SkiaButton Text="pagecurl" BackgroundColor="#495057" FontSize=12 />
+        <SkiaButton Text="morph" BackgroundColor="#495057" FontSize=12 />
+        <SkiaButton Text="heart" BackgroundColor="#495057" FontSize=12 />
+        <SkiaButton Text="kaleidoscope" BackgroundColor="#495057" FontSize=12 />
+        <SkiaButton Text="wind" BackgroundColor="#495057" FontSize=12 />
+      </SkiaWrap>
+      <SkiaLabel FontFamilyFallback="FontSymbols,FontSymbols2" FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Fill
+        Text="Slides never move: a ShaderTransitionEffect blends the Image caches of the outgoing and incoming slides (iImage1 / iImage2, progress, ratio) through a gl-transitions style transition(uv) wrapped by the adapter template. Swipe, or drag slowly to scrub the transition; a swipe during a transition wraps it up first (InterruptedTransitionMs)." />
+    </Card>
+
+    <Card Title="SkiaShaderEffect on a SkiaImage — ShaderSource='shaders/ripples.sksl' (Sandbox MultiRippleWithTouchEffect) · drawn without the effect">
+      <SkiaImage Source="images/hugrobot2.jpg" Aspect=AspectCover HorizontalOptions=Fill HeightRequest=260 UseCache=Image />
+      <SkiaLabel FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Fill
+        Text="In the original this image carries a MultiRippleWithTouchEffect in VisualEffects: an ISkiaGestureProcessor where every Down starts a ripple at the touch point, animated 0→1 over 4.5 s and passed as origins[10] / progresses[10] array uniforms. That is code-behind, so the image draws plain here." />
+    </Card>
+
+    <Card Title="Inline ShaderCode + SetUniform('strength', 0.01) + iTime · drawn without the effect">
+      <SkiaImage Source="images/8.jpg" Aspect=AspectCover HorizontalOptions=Fill HeightRequest=200 UseCache=Image />
+      // The original's buttons set the shader's strength uniform and pause its animator.
+      <SkiaWrap Spacing=6>
+        <SkiaButton Text="strength 0" BackgroundColor="#495057" FontSize=12 />
+        <SkiaButton Text="strength 0.005" BackgroundColor="#495057" FontSize=12 />
+        <SkiaButton Text="strength 0.01" BackgroundColor="#533483" FontSize=12 />
+        <SkiaButton Text="strength 0.03" BackgroundColor="#495057" FontSize=12 />
+        <SkiaButton Text="Pause" BackgroundColor="#0D6EFD" FontSize=12 />
+      </SkiaWrap>
+      <SkiaLabel FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Fill
+        Text="The original wraps this image in an inline SkSL wave that displaces iImage1 by sin/cos of iTime, with a looping SkiaValueAnimator on the host asking for frames. Code-behind and animation; the image draws plain." />
+    </Card>
+
+    <Card Title="Generative shader — UseBackground='Never' on a SkiaLayer (no input texture) · drawn without the effect">
+      <SkiaLayer HorizontalOptions=Fill HeightRequest=140 BackgroundColor="#212529">
+        <SkiaLabel FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Center VerticalOptions=Center
+          HorizontalTextAlignment=Center MaximumWidthRequest=560
+          Text="The original fills this layer with a plasma shader built from iTime alone. Code-behind; the layer is empty here." />
+      </SkiaLayer>
+    </Card>
+
+    <Card Title="ShaderSource='shaders/blit.sksl' (pass-through) toggled through VisualEffects · off">
+      <SkiaImage Source="images/dungeon.jpg" Aspect=AspectCover HorizontalOptions=Fill HeightRequest=160 UseCache=Image />
+      // The original's button adds and removes the effect; VisualEffects is not in the catalog.
+      <SkiaButton Text="Add effect" BackgroundColor="#0D6EFD" FontSize=12 />
+    </Card>
+  </SkiaStack>
+</SkiaScroll>

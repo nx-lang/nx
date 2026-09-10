@@ -1,4 +1,4 @@
-import { Colors, SkiaLabel, SkiaScroll, SkiaShape, SkiaStack, SkiaWrap, Thickness } from "drawnui-react";
+import { Colors, SkiaLabel, SkiaScroll, SkiaShape, SkiaStack, SkiaWrap, Thickness, useShell } from "drawnui-react";
 import { CornerRadius, SkiaPoint } from "drawnui-react/core";
 
 const HEART = "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z";
@@ -18,11 +18,70 @@ function Demo({ title, children }: { title: string; children: React.ReactNode })
 
 /** SkiaShape: every Type, fill + stroke, corner radii, children clipped to the shape. */
 export function ShapesPage() {
+  const shell = useShell();
   return (
     <SkiaScroll Orientation="Vertical">
       <SkiaStack Spacing={20} Padding={new Thickness(16)}>
         <SkiaLabel Text="SkiaShape" FontSize={24} TextColor={Colors.White} HorizontalOptions="Center" />
         <SkiaLabel Text="Stroke is drawn inside the bounds; children are clipped to the shape." FontSize={13} TextColor={Colors.LightGray} HorizontalOptions="Center" />
+
+        <SkiaLabel Text="ContextMenu" FontSize={20} TextColor={Colors.White} HorizontalOptions="Center" Margin={new Thickness(0, 8, 0, 0)} />
+        <SkiaLabel Text="Right-click / long-press the shape: its ContextMenu handler takes the request and the browser menu stays away. Elsewhere on the canvas the browser menu shows as usual." FontSize={13} TextColor={Colors.LightGray} HorizontalOptions="Center" MaximumWidthRequest={680} HorizontalTextAlignment="Center" />
+        <SkiaWrap Spacing={16} HorizontalOptions="Center" MaximumWidthRequest={680}>
+          <Demo title="ContextMenu -> toast">
+            <SkiaShape Type="Rectangle" CornerRadius={12} WidthRequest={120} HeightRequest={70} HorizontalOptions="Center" VerticalOptions="Center" BackgroundColor="#0D6EFD"
+              ContextMenu={(_, e) => { shell.ShowToast(`ContextMenu at ${Math.round(e.Local.X)}, ${Math.round(e.Local.Y)} px (${e.Source})`); return true; }}>
+              <SkiaLabel Text="right-click me" FontSize={13} TextColor={Colors.White} HorizontalOptions="Center" VerticalOptions="Center" />
+            </SkiaShape>
+          </Demo>
+        </SkiaWrap>
+
+        <SkiaLabel Text="FillGradient / StrokeGradient" FontSize={20} TextColor={Colors.White} HorizontalOptions="Center" Margin={new Thickness(0, 8, 0, 0)} />
+        <SkiaWrap Spacing={16} HorizontalOptions="Center" MaximumWidthRequest={680}>
+          <Demo title="Linear · Angle={45}">
+            <SkiaShape Type="Rectangle" CornerRadius={12} WidthRequest={110} HeightRequest={70} HorizontalOptions="Center" VerticalOptions="Center" FillGradient={{ Type: "Linear", Angle: 45, Colors: ["#0D6EFD", "#D63384"] }} />
+          </Demo>
+          <Demo title="Circular at (0.5, 0.5)">
+            <SkiaShape Type="Circle" WidthRequest={80} LockRatio={1} HorizontalOptions="Center" VerticalOptions="Center" FillGradient={{ Type: "Circular", StartXRatio: 0.5, StartYRatio: 0.5, Colors: ["#FFFFFF", "#0D6EFD", "#0A2A6B"], ColorPositions: [0, 0.6, 1] }} />
+          </Demo>
+          <Demo title="Oval · Light={1.4}">
+            <SkiaShape Type="Ellipse" WidthRequest={120} HeightRequest={60} HorizontalOptions="Center" VerticalOptions="Center" FillGradient={{ Type: "Oval", StartXRatio: 0.5, StartYRatio: 0.5, Light: 1.4, Colors: ["#20C997", "#0F3460"] }} />
+          </Demo>
+          <Demo title="Sweep · TileMode Repeat">
+            <SkiaShape Type="Circle" WidthRequest={80} LockRatio={1} HorizontalOptions="Center" VerticalOptions="Center" FillGradient={{ Type: "Sweep", Colors: ["#E94560", "#FFC107", "#20C997", "#0D6EFD", "#E94560"] }} />
+          </Demo>
+          <Demo title="StrokeGradient · StrokeWidth 8">
+            <SkiaShape Type="Rectangle" CornerRadius={16} WidthRequest={110} HeightRequest={70} HorizontalOptions="Center" VerticalOptions="Center" StrokeWidth={8} ClipBackgroundColor StrokeGradient={{ Type: "Linear", StartXRatio: 0, EndXRatio: 1, EndYRatio: 0, Colors: ["#FFC107", "#D63384"] }} />
+          </Demo>
+          <Demo title="SkiaLabel FillGradient → glyphs (GradientByLines)">
+            <SkiaLabel Text="Gradient text, line by line" FontSize={18} FontFamily="FontTextBold" TextColor={Colors.White} HorizontalOptions="Center" VerticalOptions="Center" HorizontalTextAlignment="Center" WidthRequest={130} FillGradient={{ Type: "Linear", Angle: 90, Colors: ["#FFC107", "#D63384"] }} />
+          </Demo>
+          <Demo title="Label: BackgroundColor + FillGradient = both">
+            <SkiaLabel Text="bg + text" FontSize={16} TextColor={Colors.White} BackgroundColor="#212529" Padding={new Thickness(12, 8)} HorizontalOptions="Center" VerticalOptions="Center" GradientByLines={false} FillGradient={{ Type: "Linear", Angle: 0, Colors: ["#6610F2", "#0DCAF0"] }} />
+          </Demo>
+        </SkiaWrap>
+
+        <SkiaLabel Text="Bevel / Emboss" FontSize={20} TextColor={Colors.White} HorizontalOptions="Center" Margin={new Thickness(0, 8, 0, 0)} />
+        <SkiaWrap Spacing={16} HorizontalOptions="Center" MaximumWidthRequest={680}>
+          <Demo title="BevelType=Bevel · Depth 4">
+            <SkiaShape Type="Rectangle" CornerRadius={12} BackgroundColor="#495057" WidthRequest={110} HeightRequest={70} HorizontalOptions="Center" VerticalOptions="Center" BevelType="Bevel" Bevel={{ Depth: 4 }} />
+          </Demo>
+          <Demo title="BevelType=Emboss · Depth 4">
+            <SkiaShape Type="Rectangle" CornerRadius={12} BackgroundColor="#495057" WidthRequest={110} HeightRequest={70} HorizontalOptions="Center" VerticalOptions="Center" BevelType="Emboss" Bevel={{ Depth: 4 }} />
+          </Demo>
+          <Demo title="Circle · Bevel, colored edges">
+            <SkiaShape Type="Circle" BackgroundColor="#0D6EFD" WidthRequest={80} LockRatio={1} HorizontalOptions="Center" VerticalOptions="Center" BevelType="Bevel" Bevel={{ Depth: 6, LightColor: "#9EC5FE", ShadowColor: "#052C65", Opacity: 0.8 }} />
+          </Demo>
+          <Demo title="Polygon (star) · Emboss">
+            <SkiaShape Type="Polygon" Points={STAR} BackgroundColor="#FFC107" WidthRequest={90} HeightRequest={90} HorizontalOptions="Center" VerticalOptions="Center" BevelType="Emboss" Bevel={{ Depth: 3, Opacity: 0.7 }} />
+          </Demo>
+          <Demo title="Path (heart) · Bevel">
+            <SkiaShape Type="Path" PathData={HEART} BackgroundColor="#D63384" WidthRequest={90} HeightRequest={90} HorizontalOptions="Center" VerticalOptions="Center" BevelType="Bevel" Bevel={{ Depth: 3, Opacity: 0.7 }} />
+          </Demo>
+          <Demo title="Sharp rectangle · Bevel, Opacity 1">
+            <SkiaShape Type="Rectangle" BackgroundColor="#6C757D" WidthRequest={110} HeightRequest={70} HorizontalOptions="Center" VerticalOptions="Center" BevelType="Bevel" Bevel={{ Depth: 5, Opacity: 1 }} />
+          </Demo>
+        </SkiaWrap>
 
         <SkiaLabel Text="Shadows" FontSize={20} TextColor={Colors.White} HorizontalOptions="Center" Margin={new Thickness(0, 8, 0, 0)} />
         <SkiaWrap Spacing={16} HorizontalOptions="Center" MaximumWidthRequest={680}>

@@ -5,7 +5,7 @@ both it and `catalog/catalog-meta.json` are committed. This file records the pla
 generated catalog is deliberately not a faithful copy of the object model it was derived from, so
 that a surprise in the playground can be checked against a list rather than guessed at.
 
-It covers 23 components, 22 unions and 5 record types.
+It covers 34 components, 31 unions and 6 record types.
 
 ## Every property is optional
 
@@ -33,11 +33,25 @@ the wire format.
 | `string \| GridLength[]` (`ColumnDefinitions`, `RowDefinitions`) | `string` | the demos write `"*, 2*, Auto"`; the list form is unused |
 | `number \| CornerRadius` | `CornerRadius` | the richer member. `CornerRadius={20}` becomes `CornerRadius=<CornerRadius TopLeft=20 ... />` — more verbose, but `ShapesPage` uses the asymmetric form and a number-only mapping would have lost it |
 | `(SkiaShadow \| Partial<SkiaShadow>)[]` | `SkiaShadow[]` | the two members describe the same shape |
+| `SkiaBevel \| Partial<SkiaBevel>` (`SkiaShape.Bevel`) | `SkiaBevel` | the same; the renderer constructs a `SkiaBevel` from the record, as it does a `SkiaShadow` |
 | `LayoutType \| ShapeType` (`SkiaLayout.Type`) | `SkiaLayoutType`, their merged case list | NX has no untagged unions; the two case sets do not overlap |
 
 Record fields are optional for the same reason component properties are, including fields DrawnUI
 treats as required — `SkiaGradient.Colors` among them. A gradient with no colors draws wrong rather
-than failing to compile.
+than failing to compile. `SkiaGradient` is an interface upstream, so it stays a plain object; its
+`Type`, `ColorPositions`, `Angle`, `TileMode`, `Light`, `Opacity` and `BlendMode` pass through as
+written, and `BlendMode` is a `string` because upstream types it that way rather than as the
+`BlendMode` union `SkiaImage.EffectBlendMode` uses.
+
+## Records are DrawnUI's value types, nothing else
+
+A class-typed property becomes a record only when the class is declared in DrawnUI's `core/Types`
+module — `Thickness`, `CornerRadius`, `SkiaPoint`, `SkiaShadow`, `SkiaBevel` and the `SkiaGradient`
+interface. A property typed as any other class (a control, an effect, the canvas, a CanvasKit
+filter) is an engine object an author cannot build in NX, so it is omitted and listed below with
+the callbacks. Without that rule the `VisualEffects: SkiaEffect[]` property would walk the whole
+engine into the catalog: `SkiaEffect` has a `Parent: SkiaControl`, and a `SkiaControl` reaches
+`Canvas`, `SKRect` and every private field along the way.
 
 ## `DrawnNode`, a root DrawnUI does not have
 
@@ -50,8 +64,9 @@ the fifty properties `SkiaControl` carries.
 
 Only abstract components may be extended in NX, so a control that is both a registered tag and the
 base of another tag is emitted twice: an abstract `SkiaLayoutBase` carrying the properties, and a
-concrete `SkiaLayout` extending it. This affects `SkiaLayout`, `SkiaLabel` and `SkiaShape`. The
-`...Base` names are an artifact of that rule and are never written in NX source.
+concrete `SkiaLayout` extending it. This affects `SkiaLayout`, `SkiaShape`, `SkiaLabel`,
+`SkiaImage`, `SkiaCarousel` and `SkiaGrid`. The `...Base` names are an artifact of that rule and
+are never written in NX source.
 
 ## Restated properties folded into their base
 
@@ -71,8 +86,17 @@ not stop you.
 
 ## Properties with no NX expression
 
-25 event handlers are omitted, since the TypeScript IR runtime has no action dispatch:
-`SkiaButton.Down`, `SkiaButton.Up`, `SkiaCarousel.SelectedIndexChanged`, `SkiaControl.ChildTapped`, `SkiaControl.ConsumeGestures`, `SkiaControl.Tapped`, `SkiaDrawer.IsOpenChanged`, `SkiaDrawer.StateTransitionComplete`, `SkiaHotspot.Down`, `SkiaHotspot.Up`, `SkiaImage.Error`, `SkiaImage.Success`, `SkiaRichLabel.LinkTapped`, `SkiaScroll.LoadMoreCommand`, `SkiaScroll.LoadMoreTopCommand`, `SkiaScroll.Scrolled`, `SkiaSlider.EndChanged`, `SkiaSlider.StartChanged`, `SkiaSvg.Error`, `SkiaSvg.Success`, `SkiaToggle.Toggled`, `SnappingLayout.Scrolled`, `SnappingLayout.Stopped`, `SnappingLayout.TransitionChanged`, `TextSpan.Tapped`.
+43 event handlers are omitted, since the TypeScript IR runtime has no action dispatch:
+`AnimatedFramesRenderer.Finished`, `AnimatedFramesRenderer.Started`, `SkiaButton.Down`, `SkiaButton.Up`, `SkiaCarousel.ItemAppearing`, `SkiaCarousel.ItemDisappearing`, `SkiaCarousel.SelectedIndexChanged`, `SkiaControl.ChildTapped`, `SkiaControl.ConsumeGestures`, `SkiaControl.ContextMenu`, `SkiaControl.Tapped`, `SkiaDrawer.IsOpenChanged`, `SkiaDrawer.StateTransitionComplete`, `SkiaEditor.CursorMoved`, `SkiaEditor.FocusChanged`, `SkiaEditor.TextChanged`, `SkiaEditor.TextSubmitted`, `SkiaGif.Error`, `SkiaGif.Success`, `SkiaHotspot.Down`, `SkiaHotspot.Up`, `SkiaImage.Error`, `SkiaImage.Success`, `SkiaLottie.Error`, `SkiaLottie.Success`, `SkiaRichLabel.LinkTapped`, `SkiaScroll.CurrentIndexChanged`, `SkiaScroll.LoadMoreCommand`, `SkiaScroll.LoadMoreTopCommand`, `SkiaScroll.RefreshCommand`, `SkiaScroll.Scrolled`, `SkiaShaderCarousel.FromToChanged`, `SkiaSlider.EndChanged`, `SkiaSlider.StartChanged`, `SkiaSprite.Error`, `SkiaSprite.Success`, `SkiaSvg.Error`, `SkiaSvg.Success`, `SkiaToggle.Toggled`, `SnappingLayout.Scrolled`, `SnappingLayout.Stopped`, `SnappingLayout.TransitionChanged`, `TextSpan.Tapped`.
+
+Three properties are references to engine objects, built in code and attached to a control — what
+the examples call `code-behind`:
+
+| Property | TypeScript type |
+|---|---|
+| `SkiaControl.VisualEffects` | `readonly SkiaEffect[]` |
+| `SkiaImage.PaintColorFilter` | `ColorFilter` |
+| `SkiaImage.PaintImageFilter` | `ImageFilter` |
 
 The rest:
 
@@ -81,9 +105,12 @@ The rest:
 | `SkiaControl.BindingContext` | `unknown` |
 | `SkiaLayout.ItemsSource` | `readonly unknown[]` |
 | `SkiaLayout.ItemTemplate` | `() => SkiaControl` |
+| `SkiaLottie.ProcessJson` | `(json: string) => string` |
 
 `ItemsSource` and `ItemTemplate` are what `Cells` and `UnevenCells` are built on, which is why those
-examples are ported as `reduced` over a short fixed list.
+examples are ported as `reduced` over a short fixed list. `VisualEffects` is what the Shaders page
+is built on, and `PaintColorFilter` what the custom-filter card in Images is; both are ported the
+same way, with the host drawn plain.
 
 ## Writing NX against this catalog
 

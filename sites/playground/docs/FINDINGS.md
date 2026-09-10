@@ -237,6 +237,62 @@ still rejected rather than rounded. The examples in this app were the corpus the
 against, and the proof it changed nothing but the notation is that their emitted IR is byte-identical
 across the edit.
 
+## Found by the preview.4 sync
+
+Three more, found while bringing the examples up to DrawnUI `f617e07`. One is the compiler's; two
+are the engine's, worked around in the site's own code rather than in the vendored tree, so a
+future sync does not erase the fix.
+
+### F22 — `+` on a record field is a numeric add, not a string concatenation
+
+`"Reorder " + Item.Title` compiled with no diagnostic and failed in the browser with `Operator 'add'
+requires JavaScript-safe numeric values`. HIR lowering turns `+` into `Concat` only when both
+operands carry a string type tag at lowering time (`crates/nx-hir/src/lower.rs`, the `BinOp::Add`
+arm); a string literal and a `string` prop do, a record field access does not, so the operator
+stays `Add` and every runtime rejects the string operands. `Text + ": On"` on a `string` prop works,
+which is why the Carousel & Drawer toggles could keep it. The Drag to reorder rows label the grip
+with the title alone and put the verb in the hint.
+
+`check-examples` did not catch it, because `evaluateFunction(root)` evaluates a component *use*
+to its descriptor and leaves the body to the renderer, which expands it through
+`initializeComponent`. The check now expands every authored component the way the renderer does,
+so a runtime failure inside a component body fails the check.
+
+## Engine integration
+
+### F23 — A focused drawn editor kept every keystroke while Monaco had focus
+
+DrawnUI's `SkiaEditor` subscribes to keys at window level and lets go only when another DOM text
+field takes focus — its input proxy checks for an `INPUT`, a `TEXTAREA` or a contenteditable.
+Monaco 0.56 edits through an EditContext host, a plain `div`, so after clicking a drawn editor in
+the output pane and then into the source pane, typed characters went to the drawn editor and Monaco
+saw only the navigation keys. Worked around in `src/editor/NxEditor.tsx`: Monaco taking focus
+unfocuses `SkiaEditor.Focused`. The reverse direction needs nothing, since the proxy's hidden
+textarea takes DOM focus from Monaco on its own. Worth reporting upstream.
+
+### F24 — `RenderingMode="Default"` never takes effect, and twenty previews exhausted WebGL
+
+The gallery asked for software rendering per preview precisely so that a page of canvases would
+not exhaust the browser's WebGL contexts. It never got it: the engine creates its surface in the
+`CanvasView` constructor, and the React wrapper assigns `RenderingMode` afterwards, so every
+preview is a WebGL canvas. Twelve fit under Chromium's limit of about sixteen live contexts and the
+gap went unnoticed; at twenty, the oldest canvases lost their context and drew blank, with a
+shader-compilation error per frame. Pre-existing — the live site's twelve previews are WebGL too —
+and worked around in `src/gallery/Gallery.tsx`: a card's canvas is mounted only while the card is
+near the viewport, and unmounting disposes the view, which releases its context. Worth reporting
+upstream.
+
+### F25 — A drawn editor's typed text falls back to Skia's built-in face
+
+`SkiaEditor` is a shape, not a label, so the demo's label style (`FontFamily: "FontText"`) never
+reaches it. Its inner text and placeholder labels are built in code and pick the style up on
+first measure, but every `UpdateLabel()` — on each keystroke — overwrites their `FontFamily` with
+the editor's own, which defaults to `""`, and upstream now resolves `""` to Skia's built-in face.
+The placeholder draws in OpenSans and the text typed over it draws in a monospace fallback. The
+demo has the same configuration and the same result. Worked around in `editor.nx`, where every
+editor names `FontFamily="FontText"` — the one place an example deviates from its original on
+purpose. Worth reporting upstream.
+
 ## Not bugs — behavior worth knowing
 
 ### F14 — `Element[]?` does not accept an external component as content

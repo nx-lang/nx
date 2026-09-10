@@ -13,9 +13,16 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compile } from "../server/compile.mjs";
+import { expandComponents } from "./expand-components.mjs";
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const CAPABILITIES = new Set(["event-handlers", "animation", "component-state", "list-virtualization"]);
+const CAPABILITIES = new Set([
+  "event-handlers",
+  "animation",
+  "component-state",
+  "list-virtualization",
+  "code-behind",
+]);
 const COVERAGE = new Set(["complete", "static", "reduced"]);
 
 const examples = JSON.parse(readFileSync(join(appRoot, "src/examples/examples.json"), "utf8"));
@@ -58,7 +65,8 @@ for (const example of examples) {
     failures.push(`${label}: unexpected diagnostic — ${diagnostic.message}`);
   }
   try {
-    evaluateFunction(prepareNxIrProgram(result.ir), "root");
+    const program = prepareNxIrProgram(result.ir);
+    expandComponents(program, evaluateFunction(program, "root"));
   } catch (error) {
     failures.push(`${label}: evaluation failed — ${error.message}`);
     continue;

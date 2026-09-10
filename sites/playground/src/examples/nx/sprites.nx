@@ -1,0 +1,113 @@
+// Ported from the DrawnUI React demo's Sprites page.
+//
+// SkiaSprite spritesheets (the FastRepro SpriteTestPage) and a tile board (SpriteSnappedBoardPage).
+// The sprites animate on their own — cutting frames from the sheet and playing them is the
+// control's — so the three cards and the board's trees and warrior all run as in the original.
+//
+// What is missing is the player. The original's warrior is a WarriorSprite, a SkiaSpriteSet subclass
+// built in code that maps idle / walk / attack states to three sheets and mirrors itself to face
+// left; arrow keys, WASD and the buttons move it a tile at a time with TranslateToAsync. That is
+// code-behind driven by event handlers and component state, so the board here has no player: the
+// blue warrior is absent and the tile it would start on is empty. The Pause / fps / Seek buttons
+// on the first card are drawn in their starting state and do nothing.
+
+component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = {
+  <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 />
+    BackgroundColor="#2B3035" HorizontalOptions=Fill>
+    <SkiaStack Padding=<Thickness Left=16 Top=12 Right=16 Bottom=12 /> Spacing=10>
+      <SkiaLabel Text={Title} FontSize=12 TextColor="#6EA8FE" FontAttributes=Bold
+        TextTransform=Uppercase />
+      {Children}
+    </SkiaStack>
+  </SkiaShape>
+}
+
+<SkiaScroll Orientation=Vertical>
+  <SkiaStack Spacing=16 Padding=<Thickness Left=16 Top=16 Right=16 Bottom=16 />
+    HorizontalOptions=Center MaximumWidthRequest=720>
+    <SkiaLabel Text="Sprites" FontSize=24 TextColor="#FFFFFF" HorizontalOptions=Center />
+
+    <Card Title="SkiaSprite — Source='anims/BlueWarrior/Warrior_Idle.png' Columns={8} Rows={1} · the original reports frames, size and duration here">
+      <SkiaRow Spacing=16>
+        <SkiaSprite Source="anims/BlueWarrior/Warrior_Idle.png" Columns=8 Rows=1 FramesPerSecond=15 Repeat=-1
+          WidthRequest=160 HeightRequest=160 BackgroundColor="#212529" UseCache=Image />
+        <SkiaSprite Source="anims/RedWarrior/Warrior_Attack1.png" Columns=4 Rows=1 FramesPerSecond=8 Repeat=-1
+          WidthRequest=160 HeightRequest=160 BackgroundColor="#212529" UseCache=Image />
+        <SkiaSprite Source="anims/Trees/Tree1.png" Columns=8 Rows=1 FramesPerSecond=6 Repeat=-1
+          WidthRequest=160 HeightRequest=160 BackgroundColor="#212529" UseCache=Image />
+        <SkiaStack Spacing=8 VerticalOptions=Center HorizontalOptions=Fill>
+          // The original's buttons call Stop()/Start(), change FramesPerSecond and Seek(0).
+          <SkiaWrap Spacing=8>
+            <SkiaButton Text="Pause" BackgroundColor="#0D6EFD" FontSize=13 />
+            <SkiaButton Text="5 fps" BackgroundColor="#495057" FontSize=13 />
+            <SkiaButton Text="15 fps" BackgroundColor="#533483" FontSize=13 />
+            <SkiaButton Text="30 fps" BackgroundColor="#495057" FontSize=13 />
+            <SkiaButton Text="Seek(0)" BackgroundColor="#495057" FontSize=13 />
+          </SkiaWrap>
+          <SkiaLabel FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Fill
+            Text="Frames are cut from the sheet by Columns × Rows, transparent borders trimmed per frame (C# SpriteFrameImage), nearest sampling; the animator runs 0..DurationMs and picks the frame by time." />
+        </SkiaStack>
+      </SkiaRow>
+    </Card>
+
+    <Card Title="SkiaSpriteSet warrior on a tile board — the original moves a player with arrows / WASD and Space; there is no player here">
+      <SkiaLayer WidthRequest=576 HeightRequest=256 BackgroundColor="#1B4332" HorizontalOptions=Center
+        IsClippedToBounds=true>
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#2D6A4F" Margin=<Thickness Left=0 Top=0 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#40916C" Margin=<Thickness Left=64 Top=0 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#2D6A4F" Margin=<Thickness Left=128 Top=0 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#40916C" Margin=<Thickness Left=192 Top=0 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#2D6A4F" Margin=<Thickness Left=256 Top=0 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#40916C" Margin=<Thickness Left=320 Top=0 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#2D6A4F" Margin=<Thickness Left=384 Top=0 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#40916C" Margin=<Thickness Left=448 Top=0 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#2D6A4F" Margin=<Thickness Left=512 Top=0 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#40916C" Margin=<Thickness Left=0 Top=64 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#2D6A4F" Margin=<Thickness Left=64 Top=64 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#40916C" Margin=<Thickness Left=128 Top=64 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#2D6A4F" Margin=<Thickness Left=192 Top=64 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#40916C" Margin=<Thickness Left=256 Top=64 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#2D6A4F" Margin=<Thickness Left=320 Top=64 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#40916C" Margin=<Thickness Left=384 Top=64 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#2D6A4F" Margin=<Thickness Left=448 Top=64 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#40916C" Margin=<Thickness Left=512 Top=64 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#2D6A4F" Margin=<Thickness Left=0 Top=128 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#40916C" Margin=<Thickness Left=64 Top=128 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#2D6A4F" Margin=<Thickness Left=128 Top=128 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#40916C" Margin=<Thickness Left=192 Top=128 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#2D6A4F" Margin=<Thickness Left=256 Top=128 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#40916C" Margin=<Thickness Left=320 Top=128 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#2D6A4F" Margin=<Thickness Left=384 Top=128 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#40916C" Margin=<Thickness Left=448 Top=128 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#2D6A4F" Margin=<Thickness Left=512 Top=128 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#40916C" Margin=<Thickness Left=0 Top=192 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#2D6A4F" Margin=<Thickness Left=64 Top=192 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#40916C" Margin=<Thickness Left=128 Top=192 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#2D6A4F" Margin=<Thickness Left=192 Top=192 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#40916C" Margin=<Thickness Left=256 Top=192 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#2D6A4F" Margin=<Thickness Left=320 Top=192 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#40916C" Margin=<Thickness Left=384 Top=192 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#2D6A4F" Margin=<Thickness Left=448 Top=192 /> />
+          <SkiaShape Type=Rectangle WidthRequest=64 HeightRequest=64 BackgroundColor="#40916C" Margin=<Thickness Left=512 Top=192 /> />
+        <SkiaSprite Source="anims/Trees/Tree1.png" Columns=8 Rows=1 FramesPerSecond=6 Repeat=-1
+          WidthRequest=64 HeightRequest=64 Margin=<Thickness Left=320 /> UseCache=Image />
+        <SkiaSprite Source="anims/Trees/Tree2.png" Columns=8 Rows=1 FramesPerSecond=5 Repeat=-1
+          WidthRequest=64 HeightRequest=64 Margin=<Thickness Left=448 Top=128 /> UseCache=Image />
+        <SkiaSprite Source="anims/RedWarrior/Warrior_Idle.png" Columns=8 Rows=1 FramesPerSecond=15 Repeat=-1
+          WidthRequest=64 HeightRequest=64 Margin=<Thickness Left=384 Top=192 /> ScaleX=-1 UseCache=Image ZIndex=9 />
+        // The original adds the player here — a WarriorSprite, a SkiaSpriteSet subclass built in
+        // code — and moves it from the keyboard. NX has no code-behind yet, so there is no player.
+      </SkiaLayer>
+      // The original's buttons move the player a tile at a time; here they do nothing.
+      <SkiaWrap Spacing=8 HorizontalOptions=Center>
+        <SkiaButton Text="← Left" FontFamilyFallback="FontSymbols,FontSymbols2" BackgroundColor="#0F3460" FontSize=13 />
+        <SkiaButton Text="↑ Up" FontFamilyFallback="FontSymbols,FontSymbols2" BackgroundColor="#0F3460" FontSize=13 />
+        <SkiaButton Text="↓ Down" FontFamilyFallback="FontSymbols,FontSymbols2" BackgroundColor="#0F3460" FontSize=13 />
+        <SkiaButton Text="Right →" FontFamilyFallback="FontSymbols,FontSymbols2" BackgroundColor="#0F3460" FontSize=13 />
+        <SkiaButton Text="Attack (Space)" BackgroundColor="#D63384" FontSize=13 />
+      </SkiaWrap>
+      <SkiaLabel FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Fill
+        Text="WarriorSprite extends SkiaSpriteSet: Define(0 idle, 1 run, 2 attack) with the FastRepro sheets; WState maps to State and mirrors CurrentSprite.ScaleX; the move is a TranslateToAsync to the target tile while the walk state plays. All of that is code-behind." />
+    </Card>
+  </SkiaStack>
+</SkiaScroll>

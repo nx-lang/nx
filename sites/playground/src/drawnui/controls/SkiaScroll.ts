@@ -1,7 +1,9 @@
 import { type DrawingContext, SkiaControl } from "../core/SkiaControl";
 import { Super } from "../core/Super";
-import { type RelativePositionType, SKRect, ScaledSize, type ScrollOrientation } from "../core/Types";
+import { type Color, type RelativePositionType, SKRect, ScaledSize, type ScrollOrientation, type SnapToChildrenType } from "../core/Types";
 import { SkiaLayout } from "./SkiaLayout";
+import { type IScrollBar, type ScrollBarVisibility, SkiaScrollBar } from "./SkiaScrollBar";
+import type { IRefreshIndicator } from "./RefreshIndicator";
 import { type GestureEventProcessingInfo, SKPoint, type SkiaGesturesParameters } from "../core/Gestures";
 import {
   RubberBandUtils, ScrollFlingAnimator, Spring, SpringWithVelocityAnimator, VelocityAccumulator,
@@ -35,6 +37,215 @@ export class SkiaScroll extends SkiaControl {
   ScrollingSpeedMs = 400;
   IgnoreWrongDirection = false;
   RespondsToGestures = true;
+
+  // ---- header / footer (C# SkiaScroll.Header / Footer) ----
+  private header?: SkiaControl;
+  private footer?: SkiaControl;
+  /** A view before the content along the scroll axis; `Tag="Header"` on a JSX child sets it. */
+  get Header(): SkiaControl | undefined { return this.header; }
+  set Header(v: SkiaControl | undefined) { if (this.header === v) return; if (this.header) this.header.Parent = undefined; this.header = v; if (v) { v.Parent = this; v.ZIndex = 1; } this.InvalidateMeasure(); }
+  /** A view after the content along the scroll axis; `Tag="Footer"` on a JSX child sets it. */
+  get Footer(): SkiaControl | undefined { return this.footer; }
+  set Footer(v: SkiaControl | undefined) { if (this.footer === v) return; if (this.footer) this.footer.Parent = undefined; this.footer = v; if (v) v.Parent = this; this.InvalidateMeasure(); }
+  /** The header stays at the viewport start while the content scrolls under it (drawn over the content unless HeaderBehind). */
+  HeaderSticky = false;
+  /** The header is drawn behind the content (the content covers it as it scrolls, parallax covers). */
+  HeaderBehind = false;
+  /** 1 = the header scrolls with the content, 0.5 = at half speed (parallax), 0 = stays. */
+  HeaderParallaxRatio = 1;
+  /** Apply the parallax while overscrolling at the start too (false: the header follows the content there). */
+  ParallaxOverscrollEnabled = true;
+  /** Extra points between a HeaderBehind / HeaderSticky header and the content (C# ContentOffset). */
+  ContentOffset = 0;
+  private headerSize: ScaledSize = ScaledSize.Default;
+  private footerSize: ScaledSize = ScaledSize.Default;
+
+  // ---- scroll bars (C# ScrollBar / ScrollBarHorizontal / ScrollBarsVisibility) ----
+  private scrollBar?: IScrollBar & SkiaControl;
+  private scrollBarHorizontal?: IScrollBar & SkiaControl;
+  private scrollBarsVisibility: ScrollBarVisibility = "None";
+  /** Creates default SkiaScrollBar overlays for the given axes (matched against Orientation). */
+  get ScrollBarsVisibility(): ScrollBarVisibility { return this.scrollBarsVisibility; }
+  set ScrollBarsVisibility(v: ScrollBarVisibility) { if (this.scrollBarsVisibility === v) return; this.scrollBarsVisibility = v; this.ApplyScrollBarsVisibility(); }
+  /** Custom vertical bar (IScrollBar control); `Tag="ScrollBar"` on a JSX child sets it. */
+  get ScrollBar(): (IScrollBar & SkiaControl) | undefined { return this.scrollBar; }
+  set ScrollBar(v: (IScrollBar & SkiaControl) | undefined) { if (this.scrollBar === v) return; if (this.scrollBar) { this.scrollBar.Parent = undefined; this.scrollBar.Dispose(); } this.scrollBar = v; if (v) { v.Parent = this; this.ApplyScrollBarColors(v); } this.scrollBarLast = undefined; this.Repaint(); }
+  get ScrollBarHorizontal(): (IScrollBar & SkiaControl) | undefined { return this.scrollBarHorizontal; }
+  set ScrollBarHorizontal(v: (IScrollBar & SkiaControl) | undefined) { if (this.scrollBarHorizontal === v) return; if (this.scrollBarHorizontal) { this.scrollBarHorizontal.Parent = undefined; this.scrollBarHorizontal.Dispose(); } this.scrollBarHorizontal = v; if (v) { v.Parent = this; this.ApplyScrollBarColors(v); } this.scrollBarHLast = undefined; this.Repaint(); }
+  private scrollBarThumbColor?: Color;
+  private scrollBarTrackColor?: Color;
+  /** Colors applied to the default SkiaScrollBar (C# ScrollBarThumbColor / ScrollBarTrackColor). */
+  get ScrollBarThumbColor(): Color | undefined { return this.scrollBarThumbColor; }
+  set ScrollBarThumbColor(v: Color | undefined) { this.scrollBarThumbColor = v; if (this.scrollBar) this.ApplyScrollBarColors(this.scrollBar); if (this.scrollBarHorizontal) this.ApplyScrollBarColors(this.scrollBarHorizontal); }
+  get ScrollBarTrackColor(): Color | undefined { return this.scrollBarTrackColor; }
+  set ScrollBarTrackColor(v: Color | undefined) { this.scrollBarTrackColor = v; if (this.scrollBar) this.ApplyScrollBarColors(this.scrollBar); if (this.scrollBarHorizontal) this.ApplyScrollBarColors(this.scrollBarHorizontal); }
+  private scrollBarLast?: string;
+  private scrollBarHLast?: string;
+  private ApplyScrollBarColors(bar: SkiaControl): void {
+    if (!(bar instanceof SkiaScrollBar)) return;
+    if (this.scrollBarThumbColor) bar.ThumbColor = this.scrollBarThumbColor;
+    if (this.scrollBarTrackColor) bar.TrackColor = this.scrollBarTrackColor;
+  }
+  /** C# ApplyScrollBarsVisibility: a default bar per wanted axis, none otherwise. */
+  protected ApplyScrollBarsVisibility(): void {
+    const wantV = this.scrollBarsVisibility === "Vertical" || this.scrollBarsVisibility === "Both";
+    const wantH = this.scrollBarsVisibility === "Horizontal" || this.scrollBarsVisibility === "Both";
+    if (wantV && !this.scrollBar) this.ScrollBar = new SkiaScrollBar();
+    else if (!wantV && this.scrollBar instanceof SkiaScrollBar) this.ScrollBar = undefined;
+    if (wantH && !this.scrollBarHorizontal) this.ScrollBarHorizontal = new SkiaScrollBar();
+    else if (!wantH && this.scrollBarHorizontal instanceof SkiaScrollBar) this.ScrollBarHorizontal = undefined;
+  }
+  /** C# UpdateScrollBarIndicator: pushes progress / thumb ratio / overscroll / scrolling state when any changed. */
+  protected UpdateScrollBarIndicator(): void {
+    const isScrolling = this.IsScrolling || this.IsUserPanning;
+    const scale = this.RenderingScale;
+    const viewportH = this.DrawingRect.Height / scale, viewportW = this.DrawingRect.Width / scale;
+    const extentH = this.ContentSize.Units.Height + this.HeaderExtentPts + this.FooterExtentPts, extentW = this.ContentSize.Units.Width + this.HeaderExtentPts + this.FooterExtentPts;
+    if (this.scrollBar && this.Orientation !== "Horizontal") {
+      const min = this.ContentOffsetBounds.Top;
+      const progress = min !== 0 ? this.offsetY / min : 0;
+      const ratio = extentH > 0 ? viewportH / extentH : 1;
+      const key = `${progress.toFixed(4)}|${ratio.toFixed(4)}|${this.OverscrollDistance.Y.toFixed(1)}|${isScrolling}`;
+      if (key !== this.scrollBarLast) { this.scrollBarLast = key; this.scrollBar.SetScrollProgress("Vertical", progress, ratio, this.OverscrollDistance.Y, isScrolling); }
+    }
+    if (this.scrollBarHorizontal && this.Orientation !== "Vertical") {
+      const min = this.ContentOffsetBounds.Left;
+      const progress = min !== 0 ? this.offsetX / min : 0;
+      const ratio = extentW > 0 ? viewportW / extentW : 1;
+      const key = `${progress.toFixed(4)}|${ratio.toFixed(4)}|${this.OverscrollDistance.X.toFixed(1)}|${isScrolling}`;
+      if (key !== this.scrollBarHLast) { this.scrollBarHLast = key; this.scrollBarHorizontal.SetScrollProgress("Horizontal", progress, ratio, this.OverscrollDistance.X, isScrolling); }
+    }
+  }
+
+  // ---- pull to refresh (C# RefreshEnabled / RefreshIndicator / RefreshCommand) ----
+  RefreshEnabled = false;
+  /** Called when the pull passed RefreshDistanceLimit (C# RefreshCommand); set IsRefreshing = false when done. */
+  RefreshCommand?: (sender: SkiaScroll) => void;
+  /** Pull distance (points) that triggers the refresh. */
+  RefreshDistanceLimit = 150;
+  /** Distance (points) where the indicator stops moving and stays while refreshing. */
+  RefreshShowDistance = 50;
+  private refreshIndicator?: IRefreshIndicator & SkiaControl;
+  /** The pull-to-refresh view (IRefreshIndicator control); `Tag="RefreshIndicator"` on a JSX child sets it. */
+  get RefreshIndicator(): (IRefreshIndicator & SkiaControl) | undefined { return this.refreshIndicator; }
+  set RefreshIndicator(v: (IRefreshIndicator & SkiaControl) | undefined) { if (this.refreshIndicator === v) return; if (this.refreshIndicator) this.refreshIndicator.Parent = undefined; this.refreshIndicator = v; if (v) v.Parent = this; this.InvalidateMeasure(); }
+  private isRefreshing = false;
+  private wasRefreshing = false;
+  private scrollLocked = false;
+  get IsRefreshing(): boolean { return this.isRefreshing; }
+  set IsRefreshing(v: boolean) { if (this.isRefreshing === v) return; this.SetIsRefreshing(v, false); }
+  private get UsingRefreshDistanceLimit(): number { return Math.max(this.RefreshDistanceLimit, this.RefreshShowDistance); }
+  /** C# SetIsRefreshing: true locks the scroll at RefreshShowDistance and runs RefreshCommand; false hides the indicator. */
+  SetIsRefreshing(state: boolean, initial: boolean): void {
+    this.isRefreshing = state;
+    if (state) {
+      this.wasRefreshing = true; this.scrollLocked = true;
+      this.ShowRefreshIndicatorForced();
+      this.RefreshCommand?.(this);
+    } else {
+      this.scrollLocked = false;
+      if (initial || (this.offsetX === 0 && this.offsetY === 0)) this.HideRefreshIndicator();
+      else { this.wasRefreshing = false; this.ScrollTo(this.Orientation === "Horizontal" ? 0 : this.offsetX, this.Orientation === "Horizontal" ? this.offsetY : 0, this.AutoScrollingSpeedMs / 1000, false); }
+    }
+    this.Repaint();
+  }
+  protected HideRefreshIndicator(): void {
+    this.refreshIndicator?.SetDragRatio(0, 0, this.RefreshShowDistance, this.RefreshDistanceLimit);
+    this.scrollLocked = false; this.wasRefreshing = false;
+  }
+  /** C# ShowRefreshIndicatorForced: parks the offset at RefreshShowDistance and shows the indicator fully. */
+  protected ShowRefreshIndicatorForced(): void {
+    const ind = this.refreshIndicator;
+    if (!ind) return;
+    ind.IsVisible = true;
+    if (this.Orientation === "Horizontal") { if (this.offsetX < this.RefreshShowDistance) this.ViewportOffsetX = this.RefreshShowDistance; ind.SetDragRatio(1, this.offsetX, this.RefreshShowDistance, this.RefreshDistanceLimit); }
+    else { if (this.offsetY < this.RefreshShowDistance) this.ViewportOffsetY = this.RefreshShowDistance; ind.SetDragRatio(1, this.offsetY, this.RefreshShowDistance, this.RefreshDistanceLimit); }
+  }
+  /** C# CheckNeedRefresh + ApplyScrollPositionToRefreshViewUnsafe: called from every scroll change. */
+  protected CheckNeedRefresh(): void {
+    const ind = this.refreshIndicator;
+    if (this.isRefreshing) { if (ind && !ind.IsVisible) this.ShowRefreshIndicatorForced(); return; }
+    if (!this.RefreshEnabled || !ind) return;
+    const horizontal = this.Orientation === "Horizontal";
+    const over = horizontal ? this.OverscrollDistance.X : this.OverscrollDistance.Y;
+    const offset = horizontal ? this.offsetX : this.offsetY;
+    if (over > 0) {
+      const ratio = over / this.RefreshShowDistance;
+      ind.SetDragRatio(ratio, offset, this.RefreshShowDistance, this.RefreshDistanceLimit);
+      const canRefresh = offset > this.UsingRefreshDistanceLimit;
+      if (this.IsUserPanning && canRefresh && !this.isRefreshing && this.RefreshCommand && !this.wasRefreshing && !this.scrollLocked) this.IsRefreshing = true;
+    } else if (ind.IsVisible && !this.wasRefreshing) this.HideRefreshIndicator();
+    else if (over <= 0 && this.wasRefreshing && !this.isRefreshing) { this.wasRefreshing = false; this.HideRefreshIndicator(); }
+  }
+
+  // ---- snapping / index tracking (C# SnapToChildren / TrackIndexPosition) ----
+  /** Snap to the child at the tracked position after scrolling stops: Center = centered in the viewport, Side = aligned to the viewport start (or end when TrackIndexPosition is End). */
+  SnapToChildren: SnapToChildrenType = "Disabled";
+  /** The viewport position whose child index is reported as CurrentIndex (None = off). */
+  TrackIndexPosition: RelativePositionType = "None";
+  /** Points added to the tracked position (C# TrackIndexPositionOffset). */
+  TrackIndexPositionOffset = 8;
+  /** Index of the content child at the tracked position, -1 when none. */
+  CurrentIndex = -1;
+  CurrentIndexChanged?: (sender: SkiaScroll, index: number) => void;
+  private isSnapping = false;
+  private snapped = false;
+  /** The content child covering the tracked viewport point (C# CurrentIndexHit): index, its rect and the point, canvas px. */
+  protected GetIndexHit(position: RelativePositionType): { Index: number; Area: SKRect; Point: SKPoint } | undefined {
+    const layout = this.content instanceof SkiaLayout ? this.content : undefined;
+    if (!layout || position === "None") return undefined;
+    const r = this.DrawingRect, scale = this.RenderingScale, off = this.TrackIndexPositionOffset * scale;
+    const horizontal = this.Orientation === "Horizontal";
+    const along = position === "Start" ? off : position === "End" ? (horizontal ? r.Width : r.Height) - off : (horizontal ? r.Width : r.Height) / 2;
+    const point = horizontal ? new SKPoint(r.Left + along, r.Top + r.Height / 2) : new SKPoint(r.Left + r.Width / 2, r.Top + along);
+    const views = layout.Views;
+    for (let i = 0; i < views.length; i++) {
+      const v = views[i], a = v.DrawingRect;
+      if (!v.IsVisible || a.Width <= 0 || a.Height <= 0) continue;
+      const inside = horizontal ? point.X >= a.Left && point.X < a.Right : point.Y >= a.Top && point.Y < a.Bottom;
+      if (inside) return { Index: v.ContextIndex >= 0 ? v.ContextIndex : i, Area: a, Point: point };
+    }
+    return undefined;
+  }
+  private TrackIndex(): void {
+    if (this.TrackIndexPosition === "None") return;
+    const hit = this.GetIndexHit(this.TrackIndexPosition);
+    const index = hit ? hit.Index : -1;
+    if (index !== this.CurrentIndex) { this.CurrentIndex = index; this.CurrentIndexChanged?.(this, index); }
+  }
+  /** C# CheckNeedToSnap: after the fling stopped, not panning, no bounce, no ordered scroll. */
+  protected CheckNeedToSnap(): boolean {
+    return !(this.isSnapping || this.snapped || this.IsUserFocused || this.SnapToChildren === "Disabled" || this.bounceX.IsRunning || this.bounceY.IsRunning || this.animatorFlingX.IsRunning || this.animatorFlingY.IsRunning);
+  }
+  /** C# Snap: scroll so the tracked child is centered / aligned to the side. */
+  Snap(maxTimeSecs: number): void {
+    if (this.isSnapping) return;
+    this.isSnapping = true;
+    try {
+      const position = this.SnapToChildren === "Center" ? "Center" : this.TrackIndexPosition === "End" ? "End" : "Start";
+      const hit = this.GetIndexHit(position);
+      if (!hit) return;
+      const horizontal = this.Orientation === "Horizontal", scale = this.RenderingScale, r = this.DrawingRect, content = this.content!;
+      // geometry from the last paint (child and content rects are consistent there): where the child's anchor sits from the content start
+      const contentStart = horizontal ? content.DrawingRect.Left : content.DrawingRect.Top;
+      const anchor = this.SnapToChildren === "Center" ? (horizontal ? hit.Area.Left + hit.Area.Width / 2 : hit.Area.Top + hit.Area.Height / 2) : position === "End" ? (horizontal ? hit.Area.Right : hit.Area.Bottom) : (horizontal ? hit.Area.Left : hit.Area.Top);
+      const relPts = (anchor - contentStart) / scale;
+      const pointPts = ((horizontal ? hit.Point.X - r.Left : hit.Point.Y - r.Top)) / scale;
+      const target = pointPts - this.HeaderExtentPts - relPts; // content start + header + rel must land on the tracked point
+      const current = horizontal ? this.offsetX : this.offsetY;
+      if (Math.abs(target - current) * scale <= scale * 2) return;
+      this.snapped = true;
+      this.StopAnimators();
+      this.ScrollTo(horizontal ? target : this.offsetX, horizontal ? this.offsetY : target, maxTimeSecs, true);
+    } finally { this.isSnapping = false; }
+  }
+
+  private get HeaderExtentPts(): number {
+    if (!this.header) return 0;
+    const size = this.Orientation === "Horizontal" ? this.headerSize.Units.Width : this.headerSize.Units.Height;
+    return size + (this.HeaderBehind || this.HeaderSticky ? this.ContentOffset : 0);
+  }
+  private get FooterExtentPts(): number { return this.footer ? (this.Orientation === "Horizontal" ? this.footerSize.Units.Width : this.footerSize.Units.Height) : 0; }
 
   /** Offset changed (drag, fling, bounce, ScrollTo). */
   Scrolled?: (sender: SkiaScroll, e: ScaledPoint) => void;
@@ -114,6 +325,18 @@ export class SkiaScroll extends SkiaControl {
   private readonly animatorFlingY = new ScrollFlingAnimator(this);
   private readonly bounceX = new SpringWithVelocityAnimator(this);
   private readonly bounceY = new SpringWithVelocityAnimator(this);
+
+  protected override OnDisposing(): void {
+    this.animatorFlingX.Stop(); this.animatorFlingY.Stop(); this.bounceX.Stop(); this.bounceY.Stop();
+  }
+  protected override DisposeChildren(): void {
+    this.content?.Dispose(); this.content = undefined;
+    this.header?.Dispose(); this.header = undefined;
+    this.footer?.Dispose(); this.footer = undefined;
+    this.refreshIndicator?.Dispose(); this.refreshIndicator = undefined;
+    this.scrollBar?.Dispose(); this.scrollBar = undefined;
+    this.scrollBarHorizontal?.Dispose(); this.scrollBarHorizontal = undefined;
+  }
   private readonly velocity = new VelocityAccumulator();
   private panningCurrentOffsetPts = SKPoint.Empty;
   private panningLastDelta = SKPoint.Empty;
@@ -134,13 +357,16 @@ export class SkiaScroll extends SkiaControl {
     this.bounceY.OnUpdated = (v) => { this.ViewportOffsetY = v; };
     for (const a of [this.animatorFlingX, this.animatorFlingY, this.bounceX, this.bounceY]) {
       a.OnStart = () => { this.IsScrolling = true; };
-      a.OnStop = () => { this.IsScrolling = this.animatorFlingX.IsRunning || this.animatorFlingY.IsRunning || this.bounceX.IsRunning || this.bounceY.IsRunning; };
+      a.OnStop = () => {
+        this.IsScrolling = this.animatorFlingX.IsRunning || this.animatorFlingY.IsRunning || this.bounceX.IsRunning || this.bounceY.IsRunning;
+        if (!this.IsScrolling) { this.Repaint(); queueMicrotask(() => { if (this.CheckNeedToSnap()) this.Snap(this.AutoScrollingSpeedMs / 1000); }); }
+      };
     }
     // DrawnUi OnScrollerStopped: a fling that was cut at the edge hands its remaining velocity to the bounce.
     const flingStop = this.animatorFlingY.OnStop!;
-    this.animatorFlingY.OnStop = () => { flingStop(); if (this.animatorFlingY.WasStarted) this.BounceIfNeeded(this.animatorFlingY, false); };
+    this.animatorFlingY.OnStop = () => { this.LandScrollTo(this.animatorFlingY, false); flingStop(); if (this.animatorFlingY.WasStarted) this.BounceIfNeeded(this.animatorFlingY, false); };
     const flingStopX = this.animatorFlingX.OnStop!;
-    this.animatorFlingX.OnStop = () => { flingStopX(); if (this.animatorFlingX.WasStarted) this.BounceIfNeeded(this.animatorFlingX, true); };
+    this.animatorFlingX.OnStop = () => { this.LandScrollTo(this.animatorFlingX, true); flingStopX(); if (this.animatorFlingX.WasStarted) this.BounceIfNeeded(this.animatorFlingX, true); };
   }
 
   /** DrawnUi BounceIfNeeded: after an edge-cut fling finishes, bounce with the velocity it still had. */
@@ -155,11 +381,35 @@ export class SkiaScroll extends SkiaControl {
     else this.Bounce(this.bounceY, this.animatorFlingY, this.offsetY, edge, velocity);
   }
 
-  // ---- tree (single Content) ----
-  override AddSubView(control: SkiaControl): void { this.Content = control; }
-  override InsertSubView(_index: number, control: SkiaControl): void { this.Content = control; }
-  override RemoveSubView(control: SkiaControl): void { if (this.content === control) this.Content = undefined; }
-  protected override GetGestureListeners(): readonly SkiaControl[] { return this.content ? [this.content] : []; }
+  // ---- tree: one Content, plus tagged extras (JSX children with Tag Header / Footer / RefreshIndicator / ScrollBar / ScrollBarHorizontal) ----
+  override AddSubView(control: SkiaControl): void {
+    switch (control.Tag) {
+      case "Header": this.Header = control; return;
+      case "Footer": this.Footer = control; return;
+      case "RefreshIndicator": this.RefreshIndicator = control as IRefreshIndicator & SkiaControl; return;
+      case "ScrollBar": this.ScrollBar = control as IScrollBar & SkiaControl; return;
+      case "ScrollBarHorizontal": this.ScrollBarHorizontal = control as IScrollBar & SkiaControl; return;
+    }
+    this.Content = control;
+  }
+  override InsertSubView(_index: number, control: SkiaControl): void { this.AddSubView(control); }
+  override RemoveSubView(control: SkiaControl): void {
+    if (this.content === control) this.Content = undefined;
+    else if (this.header === control) this.Header = undefined;
+    else if (this.footer === control) this.Footer = undefined;
+    else if (this.refreshIndicator === control) this.RefreshIndicator = undefined;
+    else if (this.scrollBar === control) this.scrollBar = undefined;
+    else if (this.scrollBarHorizontal === control) this.scrollBarHorizontal = undefined;
+  }
+  /** Draw order: behind header, content, flow / sticky header, footer (the base walks it top-most first for gestures). */
+  protected override GetGestureListeners(): readonly SkiaControl[] {
+    const list: SkiaControl[] = [];
+    if (this.header && this.HeaderBehind) list.push(this.header);
+    if (this.content) list.push(this.content);
+    if (this.header && !this.HeaderBehind) list.push(this.header);
+    if (this.footer) list.push(this.footer);
+    return list;
+  }
 
   // ---- measure / arrange ----
 
@@ -171,16 +421,22 @@ export class SkiaScroll extends SkiaControl {
       const h = this.Orientation === "Vertical" || this.Orientation === "Both" ? Infinity : heightConstraint;
       this.ContentSize = c.Measure(w, h, scale);
     } else this.ContentSize = ScaledSize.Default;
-    const rw = isFinite(widthConstraint) ? widthConstraint : this.ContentSize.Pixels.Width;
-    const rh = isFinite(heightConstraint) ? heightConstraint : this.ContentSize.Pixels.Height;
+    // C#: header / footer measured with the scroll's constraints (they span the viewport across the axis)
+    this.headerSize = this.header && this.header.IsVisible ? this.header.Measure(widthConstraint, heightConstraint, scale) : ScaledSize.Default;
+    this.footerSize = this.footer && this.footer.IsVisible ? this.footer.Measure(widthConstraint, heightConstraint, scale) : ScaledSize.Default;
+    if (this.refreshIndicator) this.refreshIndicator.Measure(widthConstraint, heightConstraint, scale);
+    const extra = (this.HeaderExtentPts + this.FooterExtentPts) * scale;
+    const rw = isFinite(widthConstraint) ? widthConstraint : this.ContentSize.Pixels.Width + (this.Orientation === "Horizontal" ? extra : 0);
+    const rh = isFinite(heightConstraint) ? heightConstraint : this.ContentSize.Pixels.Height + (this.Orientation !== "Horizontal" ? extra : 0);
     return ScaledSize.FromPixels(rw, rh, scale);
   }
 
   protected override OnLayoutChanged(): void {
     const scale = this.RenderingScale;
     const viewportW = this.DrawingRect.Width / scale, viewportH = this.DrawingRect.Height / scale;
-    const width = Math.max(0, this.ContentSize.Units.Width - viewportW);
-    const height = Math.max(0, this.ContentSize.Units.Height - viewportH);
+    const extra = this.HeaderExtentPts + this.FooterExtentPts;
+    const width = Math.max(0, this.ContentSize.Units.Width + (this.Orientation === "Horizontal" ? extra : 0) - viewportW);
+    const height = Math.max(0, this.ContentSize.Units.Height + (this.Orientation !== "Horizontal" ? extra : 0) - viewportH);
     this.ContentOffsetBounds = new SKRect(-width, -height, 0, 0);
     this.ArrangeContent();
     this.CheckLoadMore();
@@ -199,10 +455,41 @@ export class SkiaScroll extends SkiaControl {
     // Offsets are snapped to whole device pixels: a fractional offset would rasterize every glyph at a
     // different sub-pixel phase each frame (text shimmer while scrolling). DrawnUi gets the same result from
     // nearest-sampled cached cells; here the snap applies to the whole content, cached or not.
-    const x = r.Left + (alongX ? Math.round(this.offsetX * scale) : 0);
-    const y = r.Top + (alongY ? Math.round(this.offsetY * scale) : 0);
+    const headerPx = Math.round(this.HeaderExtentPts * scale);
+    const x = r.Left + (alongX ? Math.round(this.offsetX * scale) + (this.Orientation === "Horizontal" ? headerPx : 0) : 0);
+    const y = r.Top + (alongY ? Math.round(this.offsetY * scale) + (this.Orientation !== "Horizontal" ? headerPx : 0) : 0);
     c.Arrange(SKRect.Create(x, y, w, h), c.WidthRequest, c.HeightRequest, scale);
     this.OverscrollDistance = this.CalculateOverscrollDistance(this.offsetX, this.offsetY);
+    this.ArrangeHeaderFooter(r, scale);
+  }
+
+  /** Header: sticky = pinned at the viewport start, else scrolled at HeaderParallaxRatio of the offset; footer after the content. */
+  private ArrangeHeaderFooter(r: SKRect, scale: number): void {
+    const horizontal = this.Orientation === "Horizontal";
+    const offset = horizontal ? this.offsetX : this.offsetY;
+    if (this.header) {
+      let pos = 0;
+      if (!this.HeaderSticky) {
+        const overscrollStart = (horizontal ? this.OverscrollDistance.X : this.OverscrollDistance.Y) > 0;
+        pos = !this.ParallaxOverscrollEnabled && overscrollStart ? offset : offset * this.HeaderParallaxRatio;
+      }
+      const hw = horizontal ? this.headerSize.Pixels.Width : r.Width, hh = horizontal ? r.Height : this.headerSize.Pixels.Height;
+      const rect = horizontal ? SKRect.Create(r.Left + Math.round(pos * scale), r.Top, hw, hh) : SKRect.Create(r.Left, r.Top + Math.round(pos * scale), hw, hh);
+      this.header.Arrange(rect, this.header.WidthRequest, this.header.HeightRequest, scale);
+    }
+    if (this.footer) {
+      const contentEnd = (this.HeaderExtentPts + (horizontal ? this.ContentSize.Units.Width : this.ContentSize.Units.Height)) * scale;
+      const fw = horizontal ? this.footerSize.Pixels.Width : r.Width, fh = horizontal ? r.Height : this.footerSize.Pixels.Height;
+      const rect = horizontal ? SKRect.Create(r.Left + Math.round(offset * scale) + contentEnd, r.Top, fw, fh) : SKRect.Create(r.Left, r.Top + Math.round(offset * scale) + contentEnd, fw, fh);
+      this.footer.Arrange(rect, this.footer.WidthRequest, this.footer.HeightRequest, scale);
+    }
+    if (this.refreshIndicator) {
+      const ind = this.refreshIndicator;
+      const m = ind.MeasuredSize.Pixels;
+      const rect = horizontal ? SKRect.Create(r.Left, r.Top, m.Width, r.Height) : SKRect.Create(r.Left, r.Top, r.Width, m.Height);
+      ind.Arrange(rect, ind.WidthRequest, ind.HeightRequest, scale);
+    }
+    for (const bar of [this.scrollBar, this.scrollBarHorizontal]) if (bar) { bar.Measure(r.Width, r.Height, scale); bar.Arrange(r, bar.WidthRequest, bar.HeightRequest, scale); }
   }
 
   protected override Paint(ctx: DrawingContext): void {
@@ -213,13 +500,24 @@ export class SkiaScroll extends SkiaControl {
     const d = ctx.Destination;
     const saved = canvas.save();
     canvas.clipRect(Super.CK.LTRBRect(d.Left, d.Top, d.Right, d.Bottom), Super.CK.ClipOp.Intersect, true);
+    const header = this.header, onScreen = (v: SkiaControl) => { const a = v.DrawingRect; return a.Right > d.Left && a.Left < d.Right && a.Bottom > d.Top && a.Top < d.Bottom; };
+    // C# order: a HeaderBehind header first (under the content), the content, a flow / sticky header over it, the footer
+    if (header && header.IsVisible && this.HeaderBehind && onScreen(header)) header.Render(ctx);
     c.Render(ctx);
+    if (header && header.IsVisible && !this.HeaderBehind && onScreen(header)) header.Render(ctx);
+    if (this.footer && this.footer.IsVisible && onScreen(this.footer)) this.footer.Render(ctx);
+    if (this.RefreshEnabled && this.refreshIndicator && this.refreshIndicator.IsVisible && (this.OverScrolled || this.isRefreshing)) this.refreshIndicator.Render(ctx);
+    this.UpdateScrollBarIndicator();
+    for (const bar of [this.scrollBar, this.scrollBarHorizontal]) if (bar && bar.IsVisible && bar.Opacity > 0) bar.Render(ctx);
     canvas.restoreToCount(saved);
   }
 
   private OnScrolled(): void {
     this.CheckLoadMore();
-    this.Repaint();
+    this.OverscrollDistance = this.CalculateOverscrollDistance(this.offsetX, this.offsetY);
+    this.CheckNeedRefresh();
+    this.TrackIndex();
+    this.RepaintComposition(); // a scroll inside a cached parent: that parent must re-record (its own cache is None by default)
     this.Scrolled?.(this, { Units: new SKPoint(this.offsetX, this.offsetY), Pixels: new SKPoint(this.offsetX * this.RenderingScale, this.offsetY * this.RenderingScale) });
   }
 
@@ -264,11 +562,24 @@ export class SkiaScroll extends SkiaControl {
     }
   }
 
+  /** Destination of the running ScrollTo per axis: the deceleration curve stops within its threshold, the exact value is applied when it finishes. */
+  private scrollToTargetX: number | null = null;
+  private scrollToTargetY: number | null = null;
+  private LandScrollTo(animator: ScrollFlingAnimator, horizontal: boolean): void {
+    const target = horizontal ? this.scrollToTargetX : this.scrollToTargetY;
+    if (target === null) return;
+    if (horizontal) this.scrollToTargetX = null; else this.scrollToTargetY = null;
+    if (!animator.SelfFinished) return;
+    if (horizontal) this.ViewportOffsetX = target; else this.ViewportOffsetY = target;
+  }
+
   ScrollTo(x: number, y: number, maxSpeedSecs: number, clamp = true): void {
     this.StopAnimators(); // also forgets any pending edge bounce: a programmatic scroll never bounces
     let tx = x, ty = y;
     if (clamp) { const c = this.ClampOffset(x, y, this.ContentOffsetBounds, true); tx = c.X; ty = c.Y; }
     const rate = 1 - this.DecelerationRatio;
+    this.scrollToTargetX = maxSpeedSecs > 0 && this.Orientation !== "Vertical" && tx !== this.offsetX ? tx : null;
+    this.scrollToTargetY = maxSpeedSecs > 0 && this.Orientation !== "Horizontal" && ty !== this.offsetY ? ty : null;
     if (maxSpeedSecs > 0) {
       if (this.Orientation !== "Vertical" && tx !== this.offsetX) { this.animatorFlingX.InitializeWithDestination(this.offsetX, tx, maxSpeedSecs, rate); this.animatorFlingX.Start(); }
       if (this.Orientation !== "Horizontal" && ty !== this.offsetY) { this.animatorFlingY.InitializeWithDestination(this.offsetY, ty, maxSpeedSecs, rate); this.animatorFlingY.Start(); }
@@ -306,6 +617,7 @@ export class SkiaScroll extends SkiaControl {
 
   private StopAnimators(): void {
     this.flingEdgeX = null; this.flingEdgeY = null;
+    this.scrollToTargetX = null; this.scrollToTargetY = null;
     this.animatorFlingX.Stop(); this.animatorFlingY.Stop(); this.bounceX.Stop(); this.bounceY.Stop();
   }
 
@@ -330,14 +642,17 @@ export class SkiaScroll extends SkiaControl {
 
     if (args.Type === "Down") {
       this.hadDown = true;
+      this.snapped = false;
       if (this.RespondsToGestures) { this.StopAnimators(); this.ResetPan(); }
       return super.ProcessGestures(args, apply) ?? consumedDefault; // children see Down (buttons press)
     }
 
     if (args.Type === "Wheel") {
-      if (!this.RespondsToGestures) return super.ProcessGestures(args, apply);
-      this.ApplyWheelScroll(e.Wheel.Delta);
-      return this;
+      // a nested scroll under the pointer takes the wheel first; the outer one scrolls when the inner is at its edge
+      const child = super.ProcessGestures(args, apply);
+      if (child && child !== this) return child;
+      if (!this.RespondsToGestures) return child ?? consumedDefault;
+      return this.ApplyWheelScroll(e.Wheel.Delta) ? this : consumedDefault;
     }
 
     this.velocityY = e.Distance.Velocity.Y / scale;
@@ -389,6 +704,8 @@ export class SkiaScroll extends SkiaControl {
 
       if (this.OverScrolled) {
         const rest = this.ClampOffset(this.offsetX, this.offsetY, this.ContentOffsetBounds, true);
+        // refreshing: the bounce settles at RefreshShowDistance so the indicator stays in view (C# ScrollLocked)
+        if (this.isRefreshing && this.scrollLocked) { if (this.Orientation === "Horizontal") rest.X = this.RefreshShowDistance; else rest.Y = this.RefreshShowDistance; }
         const bvx = Math.sign(vx) * Math.min(Math.abs(vx), this.MaxBounceVelocity);
         const bvy = Math.sign(vy) * Math.min(Math.abs(vy), this.MaxBounceVelocity);
         if (this.OverscrollDistance.Y !== 0) { this.Bounce(this.bounceY, this.animatorFlingY, this.offsetY, rest.Y, bvy); fling = true; }
@@ -402,6 +719,7 @@ export class SkiaScroll extends SkiaControl {
         if (this.Orientation !== "Horizontal" && Math.abs(vy) > SkiaScroll.MinVelocity) { this.bounceY.Stop(); fling = this.StartToFlingFrom(this.animatorFlingY, this.offsetY, vy, false) || fling; }
       }
       this.Repaint();
+      if (!fling && wasPanning && this.CheckNeedToSnap()) this.Snap(this.AutoScrollingSpeedMs / 1000);
       return fling || wasPanning ? this : childConsumed ?? consumedDefault;
     }
 
@@ -441,13 +759,17 @@ export class SkiaScroll extends SkiaControl {
    * Notches arriving while the previous one is still animating add onto its target, so a fast wheel
    * spin travels N steps instead of restarting from the barely-moved current offset.
    */
-  private ApplyWheelScroll(delta: number): void {
+  private ApplyWheelScroll(delta: number): boolean {
     const step = SkiaScroll.WheelLineSize * -Math.sign(delta); // wheel down = content up = more negative offset
     const horizontal = this.Orientation === "Horizontal";
     const running = horizontal ? this.animatorFlingX : this.animatorFlingY;
     const base = running.IsRunning && running.Parameters ? running.Parameters.Destination : horizontal ? this.offsetX : this.offsetY;
+    const b = this.ContentOffsetBounds;
+    const min = horizontal ? b.Left : b.Top, max = horizontal ? b.Right : b.Bottom;
+    if ((step < 0 && base <= min) || (step > 0 && base >= max)) return false; // at the edge: let an outer scroll take it
     let x = this.offsetX, y = this.offsetY;
     if (horizontal) x = base + step; else y = base + step;
     this.ScrollTo(x, y, this.AutoScrollingSpeedMs / 1000, true);
+    return true;
   }
 }

@@ -1,5 +1,5 @@
 import meta from "../../catalog/catalog-meta.json";
-import { CornerRadius, SkiaPoint, SkiaShadow, Thickness } from "../drawnui/index";
+import { CornerRadius, SkiaBevel, SkiaPoint, SkiaShadow, Thickness } from "../drawnui/index";
 
 /** Anything the IR runtime can hand back. */
 export type NxValue = string | number | boolean | null | NxValue[] | NxObject;
@@ -37,6 +37,7 @@ const CONSTRUCTORS: Record<string, (fields: Record<string, unknown>) => unknown>
     ),
   SkiaPoint: (fields) => new SkiaPoint((fields.X as number) ?? 0, (fields.Y as number) ?? 0),
   SkiaShadow: (fields) => new SkiaShadow(fields as Partial<SkiaShadow>),
+  SkiaBevel: (fields) => new SkiaBevel(fields as Partial<SkiaBevel>),
 };
 
 const unions = meta.unions as Record<string, readonly string[]>;

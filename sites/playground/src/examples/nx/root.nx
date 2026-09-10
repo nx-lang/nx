@@ -1,58 +1,85 @@
 // Ported from the DrawnUI React demo's root menu.
 //
-// The demo site's landing page: logo, title, and a card per sample. Its cards navigate when tapped
-// — that needs event handlers, so here they are drawn but inert. DrawnUI's own ripple still plays,
-// because the ripple is the control's behavior rather than authored NX.
+// The demo site's landing page: logo, title, subtitle, and a card per sample flowing in a SkiaWrap —
+// two columns when the page is wide, one when it is not. Its cards navigate when tapped, and the
+// footer's repository span opens a browser tab — both need event handlers, so here they are drawn
+// but inert. DrawnUI's own ripple still plays, because the ripple is the control's behavior rather
+// than authored NX.
+//
+// The original sizes its cards from the window width so two columns fit at any size. That is
+// component state driven by a resize listener; the port fixes the card width instead, at what
+// the original computes for a page about 810 points wide — two columns from there up to the
+// page's maximum width, one column below it.
 
 type Sample = {
   Title: string
   Text: string
+  // The title gradient. The original cycles through the six drawnui.net accents by card index.
+  Colors: string[]
 }
 
 component <SampleCard extends DrawnNode Item:Sample /> = {
   // The original passes Tapped={() => shell.GoToAsync(route)} here; the card is otherwise identical.
   <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=12 />
-    BackgroundColor="#2B3035" StrokeColor="#373B3E" StrokeWidth=1
+    BackgroundColor="#2B3035" StrokeColor="#373B3E" StrokeWidth=1 WidthRequest=372
     AnimationTapped=Ripple
     AccessibilityRole="button" AccessibilityLabel={Item.Title} AccessibilityHint={Item.Text}>
-    <SkiaStack Padding=<Thickness Left=24 Top=20 Right=56 Bottom=20 /> Spacing=6>
-      <SkiaLabel Text={Item.Title} FontSize=24 FontFamily="FontTextBold" TextColor="#FFFFFF" />
-      <SkiaLabel Text={Item.Text} FontSize=14 TextColor="#ADB5BD" />
+    <SkiaStack Padding=<Thickness Left=24 Top=20 Right=48 Bottom=20 /> Spacing=6>
+      <SkiaLabel Text={Item.Title} FontSize=22 FontFamily="FontTextBold" TextColor="#FFFFFF"
+        FillGradient=<SkiaGradient Type=Linear Angle=0 Colors={Item.Colors} />
+        AccessibilityRole="presentation" />
+      <SkiaLabel Text={Item.Text} FontSize=13 TextColor="#ADB5BD" AccessibilityRole="presentation" />
     </SkiaStack>
     <SkiaLabel Text="›" FontSize=28 TextColor="#6EA8FE" HorizontalOptions=End
-      VerticalOptions=Center Margin=<Thickness Right=24 /> />
+      VerticalOptions=Center Margin=<Thickness Right=20 /> AccessibilityRole="presentation" />
   </SkiaShape>
 }
 
 let samples = {
-  <Sample Title="Recycled cells" Text="100 000 items in a SkiaScroll, RecyclingTemplate + MeasureFirst, UseCache=Image" />
-  <Sample Title="Uneven cells" Text="Rows of different heights — MeasureVisible, LoadMore at both ends, ImageDoubleBuffered cells" />
-  <Sample Title="Images" Text="SkiaImage — every TransformAspect, alignment, clipping" />
-  <Sample Title="SVG" Text="SkiaSvg — file and inline sources, TintColor, LockRatio" />
-  <Sample Title="Shapes" Text="SkiaShape — rectangle, circle, ellipse, arc, polygon, line, path; stroke, corner radii, clipping" />
-  <Sample Title="Text" Text="SkiaLabel — word wrap, MaxLines, alignment, spans, weights, glyph fallback" />
-  <Sample Title="Layouts" Text="Every SkiaLayout type — Absolute, Column, Row, Wrap, Grid (tracks, spans, spacing)" />
-  <Sample Title="Platform Looks" Text="SkiaSwitch, SkiaCheckbox, SkiaRadioButton, SkiaProgress, SkiaSlider, SkiaButton — Default, Windows, Cupertino, Material, Material3" />
-  <Sample Title="Carousel & Drawer" Text="SkiaCarousel (swipe, SidesOffset peek, SelectedIndex) and SkiaDrawer (drag from an edge, snap by velocity)" />
-  <Sample Title="Transforms" Text="Rotation, Scale, Skew, Translation, Opacity — hit-testing through them, *ToAsync animations" />
-  <Sample Title="Accessibility" Text="ARIA overlay over the canvas — roles, labels, hints, toggles, live regions, keyboard" />
+  <Sample Title="Recycled cells" Text="100 000 items in a SkiaScroll, RecyclingTemplate + MeasureFirst, UseCache=Image" Colors={ "#6EA8FE" "#0D6EFD" } />
+  <Sample Title="Uneven cells" Text="Rows of different heights — MeasureVisible, LoadMore at both ends, ImageDoubleBuffered cells" Colors={ "#D63384" "#FD7E14" } />
+  <Sample Title="Images" Text="SkiaImage — every TransformAspect, alignment, clipping" Colors={ "#20C997" "#0DCAF0" } />
+  <Sample Title="SVG" Text="SkiaSvg — file and inline sources, TintColor, LockRatio" Colors={ "#FFC107" "#FD7E14" } />
+  <Sample Title="Shapes" Text="SkiaShape — rectangle, circle, ellipse, arc, polygon, line, path; stroke, corner radii, clipping" Colors={ "#A98EFF" "#6610F2" } />
+  <Sample Title="Text" Text="SkiaLabel — word wrap, MaxLines, alignment, spans, weights, glyph fallback" Colors={ "#0DCAF0" "#6EA8FE" } />
+  <Sample Title="Layouts" Text="Every SkiaLayout type — Absolute, Column, Row, Wrap, Grid (tracks, spans, spacing)" Colors={ "#6EA8FE" "#0D6EFD" } />
+  <Sample Title="Common Controls" Text="SkiaSwitch, SkiaCheckbox, SkiaRadioButton, SkiaProgress, SkiaSlider, SkiaButton — Default, Windows, Cupertino, Material, Material3" Colors={ "#D63384" "#FD7E14" } />
+  <Sample Title="Carousel & Drawer" Text="SkiaCarousel (swipe, SidesOffset peek, SelectedIndex) and SkiaDrawer (drag from an edge, snap by velocity)" Colors={ "#20C997" "#0DCAF0" } />
+  <Sample Title="Lottie & GIF" Text="SkiaLottie (Skottie: AutoPlay, Repeat, SpeedRatio, IsOn, ColorTint) and SkiaGif frames on the canvas frame loop" Colors={ "#FFC107" "#FD7E14" } />
+  <Sample Title="Shell" Text="SkiaShell — page transitions, OpenPopupAsync, PushModalAsync (drawer), ShowToast" Colors={ "#A98EFF" "#6610F2" } />
+  <Sample Title="Editor" Text="SkiaEditor — drawn text input: caret, selection, placeholder, password, multiline, ControlStyle looks" Colors={ "#0DCAF0" "#6EA8FE" } />
+  <Sample Title="Keyboard Input" Text="KeyboardManager — window-level KeyDown / KeyUp / KeyChar with modifier state, the Blazor sandbox probe" Colors={ "#6EA8FE" "#0D6EFD" } />
+  <Sample Title="SkiaScroll" Text="Header in flow / sticky / behind with parallax, Footer, scroll bars, pull to refresh, SnapToChildren, TrackIndexPosition" Colors={ "#D63384" "#FD7E14" } />
+  <Sample Title="Shaders" Text="SkiaShaderEffect — SkSL on any control (iImage1, iTime, iMouse, custom uniforms, touch ripples) and SkiaShaderCarousel gl-transitions" Colors={ "#20C997" "#0DCAF0" } />
+  <Sample Title="Sprites" Text="SkiaSprite spritesheets and a SkiaSpriteSet warrior on a tile board, moved with the keyboard (FastRepro sprites)" Colors={ "#FFC107" "#FD7E14" } />
+  <Sample Title="Transforms" Text="Rotation, Scale, Skew, Translation, Opacity — hit-testing through them, *ToAsync animations" Colors={ "#A98EFF" "#6610F2" } />
+  <Sample Title="Drag to reorder" Text="Language preferences, Android style: drag one by its grip and it lifts and floats over the list, which reorders live under it keeping its measured heights and its scroll offset, then the drop glides into the new slot" Colors={ "#0DCAF0" "#6EA8FE" } />
+  <Sample Title="Accessibility" Text="ARIA overlay over the canvas — roles, labels, hints, toggles, live regions, keyboard" Colors={ "#6EA8FE" "#0D6EFD" } />
 }
 
 <SkiaScroll Orientation=Vertical>
   <SkiaStack Spacing=24 Padding=<Thickness Left=24 Top=24 Right=24 Bottom=40 />
-    HorizontalOptions=Center MaximumWidthRequest=820>
+    HorizontalOptions=Center MaximumWidthRequest=820 UseCache=Image>
     <SkiaSvg Source="images/drawnui.svg" WidthRequest=120 LockRatio=1 HorizontalOptions=Center
       Margin=<Thickness Top=16 /> AccessibilityRole="img" AccessibilityLabel="DrawnUI logo" />
     <SkiaLabel Text="DrawnUI for React" FontSize=48 FontFamily="FontTextBold" TextColor="#FFFFFF"
       HorizontalOptions=Center AccessibilityRole="heading" />
+    <SkiaLabel Text="A UI rendering engine on top of CanvasKit: layouts, controls, gestures, effects and animations"
+      FontSize=16 TextColor="#ADB5BD" HorizontalOptions=Center HorizontalTextAlignment=Center
+      Margin=<Thickness Top=-12 /> />
 
-    <SkiaLabel Text="Snippets" FontSize=32 TextColor="#DEE2E6" Margin=<Thickness Top=8 />
-      AccessibilityRole="heading" />
-    for sample in samples {
-      <SampleCard Item={sample} />
-    }
+    <SkiaWrap Spacing=16 HorizontalOptions=Fill>
+      for sample in samples {
+        <SampleCard Item={sample} />
+      }
+    </SkiaWrap>
 
-    <SkiaLabel Text="helloreact.drawnui.net · github.com/DrawnUi/DrawnUi.React · MIT" FontSize=12
-      TextColor="#6C757D" HorizontalOptions=Center Margin=<Thickness Top=16 /> />
+    // The original's middle span opens the repository when tapped; without event handlers it is
+    // colored like a link and does nothing.
+    <SkiaLabel FontSize=12 TextColor="#6C757D" HorizontalOptions=Center Margin=<Thickness Top=16 />>
+      <TextSpan Text="helloreact.drawnui.net · " />
+      <TextSpan Text="github.com/DrawnUi/DrawnUi.React" TextColor="#6EA8FE" />
+      <TextSpan Text=" · MIT" />
+    </SkiaLabel>
   </SkiaStack>
 </SkiaScroll>

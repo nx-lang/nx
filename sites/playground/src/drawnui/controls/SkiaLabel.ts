@@ -3,7 +3,7 @@ import { type DrawingContext, SkiaControl } from "../core/SkiaControl";
 import { ControlTappedEventArgs, type GestureEventProcessingInfo, type SkiaGesturesParameters } from "../core/Gestures";
 import { Super } from "../core/Super";
 import {
-  type Color, Colors, type DrawTextAlignment, type FontAttributes, type LineBreakMode, ScaledSize, SKRect, type TextAlignment,
+  type Color, Colors, type DrawTextAlignment, type FontAttributes, type LineBreakMode, ScaledSize, SKRect, type SkiaGradient, type TextAlignment,
   type TextTransform, Thickness,
 } from "../core/Types";
 import { TextSpan } from "./TextSpan";
@@ -14,6 +14,11 @@ interface SpanFonts { Key: string; Main: Font; Fallbacks: Font[]; Ascent: number
 interface TextRun { Text: string; Font: Font; Width: number; Span?: TextSpan; Fonts: SpanFonts }
 /** One laid-out line: runs, total advance, max ascent above / descent below the baseline (pixels). */
 interface TextLine { Runs: TextRun[]; Width: number; Ascent: number; Descent: number }
+
+/** One code point of the laid-out text: its UTF-16 index/length in Text and its box in pixels relative to DrawingRect. */
+export interface GlyphBox { Index: number; Length: number; Line: number; Left: number; Top: number; Width: number; Height: number }
+/** A laid-out line: first text index, box in pixels relative to DrawingRect. */
+export interface LineBox { Line: number; Start: number; End: number; Left: number; Top: number; Width: number; Height: number }
 /** A wrap unit: a word (or glued span fragment) with its style. */
 interface Token { Text: string; Fonts: SpanFonts; Span?: TextSpan; SpaceBefore: boolean; TrailingSpace?: boolean }
 
@@ -337,8 +342,112 @@ export class SkiaLabel extends SkiaControl {
     this.lines = this.text || this.Spans.length > 0 ? this.LayoutLines(widthConstraint - px, scale) : [];
     let width = 0;
     for (const l of this.lines) width = Math.max(width, l.Width);
-    return ScaledSize.FromPixels(Math.ceil(width) + px, Math.ceil(this.BlockHeight()) + py, scale);
+    const extra = this.EffectsExtra(scale);
+    this.LayoutVersion++;
+    return ScaledSize.FromPixels(Math.ceil(width + extra.W) + px, Math.ceil(this.BlockHeight() + extra.H) + py, scale);
   }
+
+  /** C# GradientByLines: FillGradient spans each line's bounds (default) instead of the whole text block. */
+  GradientByLines = true;
+  /** C# KeepSpacesOnLineBreaks / NeedsGlyphPositions: accepted; glyph boxes are always available through GetGlyphBoxes. */
+  KeepSpacesOnLineBreaks = false;
+  NeedsGlyphPositions = false;
+  /** Bumped on every measure: consumers cache GetGlyphBoxes() against it. */
+  LayoutVersion = 0;
+  /** Height of the first laid-out line in pixels (C# MeasuredLineHeight); 0 before the first measure. */
+  get MeasuredLineHeight(): number { return this.lines.length ? this.LineHeightPx(this.lines[0]) : 0; }
+
+  /** Line origins relative to DrawingRect, same alignment math as Paint. */
+  private LineGeometry(): { x: number; y: number; w: number; h: number; text: string }[] {
+    const scale = this.RenderingScale, d = this.DrawingRect, p = this.padding;
+    const left = p.Left * scale, right = d.Width - p.Right * scale, top = p.Top * scale, bottom = d.Height - p.Bottom * scale;
+    const extra = this.EffectsExtra(scale);
+    const blockH = this.BlockHeight() + extra.H;
+    let y = top;
+    if (this.verticalTextAlignment === "Center") y = top + (bottom - top - blockH) / 2;
+    else if (this.verticalTextAlignment === "End") y = bottom - blockH;
+    y += extra.Stroke / 2;
+    const out: { x: number; y: number; w: number; h: number; text: string }[] = [];
+    for (const line of this.lines) {
+      const lh = this.LineHeightPx(line);
+      const lineW = line.Width + extra.W;
+      let x = left;
+      if (this.horizontalTextAlignment === "Center") x = left + (right - left - lineW) / 2;
+      else if (this.horizontalTextAlignment === "End") x = right - lineW;
+      x += extra.Stroke / 2;
+      out.push({ x, y, w: line.Width, h: lh, text: line.Runs.map((r) => r.Text).join("") });
+      y += lh * this.lineSpacing;
+    }
+    return out;
+  }
+
+  /** Lines as CSS text for the accessibility overlay (AccessibilityTextSelectable): font alias chain, weight and px size. */
+  override GetAccessibilityTextLines(scale: number): import("../core/Accessibility").AccessibilityTextLine[] {
+    const family = [this.fontFamily || Super.DefaultFontAlias, ...this.fontFamilyFallback.split(",").map((f) => f.trim()).filter(Boolean)].filter(Boolean).join(", ");
+    const weight = this.fontWeight > 0 ? this.fontWeight : this.fontAttributes === "Bold" || this.fontAttributes === "BoldItalic" ? 600 : 400;
+    const size = this.fontSize;
+    return this.LineGeometry().map((g) => ({ Text: g.text, Left: g.x / scale, Top: g.y / scale, Width: g.w / scale, Height: g.h / scale, FontFamily: family, FontWeight: weight, FontSize: size }));
+  }
+
+  /** Laid-out lines with their text index range (a wrapped-away space or line break sits between two lines). */
+  GetLineBoxes(): LineBox[] {
+    const geo = this.LineGeometry();
+    const out: LineBox[] = [];
+    let cursor = 0;
+    geo.forEach((g, i) => {
+      let start = g.text.length ? this.text.indexOf(g.text, cursor) : cursor;
+      if (start < 0) start = cursor;
+      const end = start + g.text.length;
+      out.push({ Line: i, Start: start, End: end, Left: g.x, Top: g.y, Width: g.w, Height: g.h });
+      cursor = end;
+    });
+    return out;
+  }
+
+  /** Every code point of the laid-out text with its box (editor caret / selection / hit testing). */
+  GetGlyphBoxes(): GlyphBox[] {
+    const out: GlyphBox[] = [];
+    const geo = this.LineGeometry();
+    let cursor = 0;
+    this.lines.forEach((line, li) => {
+      const g = geo[li];
+      let start = g.text.length ? this.text.indexOf(g.text, cursor) : cursor;
+      if (start < 0) start = cursor;
+      let x = g.x, index = start;
+      for (const run of line.Runs) {
+        const cps = Array.from(run.Text);
+        const widths = run.Font.getGlyphWidths(run.Font.getGlyphIDs(run.Text, cps.length));
+        cps.forEach((cp, k) => {
+          const w = widths[k] ?? 0;
+          out.push({ Index: index, Length: cp.length, Line: li, Left: x, Top: g.y, Width: w, Height: g.h });
+          x += w; index += cp.length;
+        });
+      }
+      cursor = start + g.text.length;
+    });
+    return out;
+  }
+  /** Outline around the glyphs, drawn under the fill (C# StrokeColor / StrokeWidth in points; Transparent = none). */
+  StrokeColor: Color = Colors.Transparent;
+  StrokeWidth = 1;
+  StrokeGradient?: SkiaGradient;
+  /** Drop shadow: a stroked copy of the text offset by DropShadowOffsetX/Y points (C# DropShadow*). */
+  DropShadowColor: Color = Colors.Transparent;
+  DropShadowSize = 2;
+  DropShadowOffsetX = 2;
+  DropShadowOffsetY = 2;
+
+  private HasStroke(): boolean { return this.StrokeWidth > 0 && this.StrokeColor !== Colors.Transparent; }
+  private HasDropShadow(): boolean { return this.DropShadowSize > 0 && this.DropShadowColor !== Colors.Transparent; }
+  /** C# measurement: stroke adds StrokeWidth*2 on each axis, the shadow adds DropShadowSize + offset (pixels). */
+  private EffectsExtra(scale: number): { W: number; H: number; Stroke: number } {
+    const stroke = this.HasStroke() ? this.StrokeWidth * 2 * scale : 0;
+    const sw = this.HasDropShadow() ? (this.DropShadowSize + this.DropShadowOffsetX) * scale : 0;
+    const sh = this.HasDropShadow() ? (this.DropShadowSize + this.DropShadowOffsetY) * scale : 0;
+    return { W: stroke + sw, H: stroke + sh, Stroke: stroke };
+  }
+  /** C# SkiaLabel.SetupBackgroundPaint: no BackgroundColor = no background, the gradient goes on the glyphs. */
+  protected override FillGradientPaintsBackground(): boolean { return !!this.BackgroundColor; }
 
   protected override Paint(ctx: DrawingContext): void {
     if (this.lines.length === 0 || !this.mainFonts) return;
@@ -347,10 +456,18 @@ export class SkiaLabel extends SkiaControl {
     const p = this.padding;
     const left = d.Left + p.Left * scale, right = d.Right - p.Right * scale;
     const top = d.Top + p.Top * scale, bottom = d.Bottom - p.Bottom * scale;
-    const blockH = this.BlockHeight();
+    const extra = this.EffectsExtra(scale);
+    const blockH = this.BlockHeight() + extra.H;
     let y = top;
     if (this.verticalTextAlignment === "Center") y = top + (bottom - top - blockH) / 2;
     else if (this.verticalTextAlignment === "End") y = bottom - blockH;
+    // C#: the glyphs sit strokeOffset in from the left/top of the inflated box, the shadow band stays below/right
+    y += extra.Stroke / 2;
+    const CKp = Super.CK;
+    let strokePaint: InstanceType<typeof CKp.Paint> | undefined, shadowPaint: InstanceType<typeof CKp.Paint> | undefined;
+    if (this.HasStroke()) { strokePaint = new CKp.Paint(); strokePaint.setAntiAlias(true); strokePaint.setStyle(CKp.PaintStyle.Stroke); strokePaint.setStrokeWidth(this.StrokeWidth * 2 * scale); strokePaint.setColor(Super.ParseColor(this.StrokeColor)); }
+    if (this.HasDropShadow()) { shadowPaint = new CKp.Paint(); shadowPaint.setAntiAlias(true); shadowPaint.setStyle(CKp.PaintStyle.Stroke); shadowPaint.setStrokeWidth(this.DropShadowSize * 2 * scale); shadowPaint.setColor(Super.ParseColor(this.DropShadowColor)); }
+    const shadowDx = Math.trunc(this.DropShadowOffsetX * scale), shadowDy = Math.trunc(this.DropShadowOffsetY * scale);
 
     for (const s of this.Spans) s.Rects.length = 0;
 
@@ -369,12 +486,19 @@ export class SkiaLabel extends SkiaControl {
       return paint;
     };
     const canvas = ctx.Context.Canvas;
+    const gradient = this.FillGradient;
+    const textRect = new SKRect(left, top, right, bottom);
     for (const line of this.lines) {
       const lh = this.LineHeightPx(line);
+      const lineW = line.Width + extra.W;
       let x = left;
-      if (this.horizontalTextAlignment === "Center") x = left + (right - left - line.Width) / 2;
-      else if (this.horizontalTextAlignment === "End") x = right - line.Width;
+      if (this.horizontalTextAlignment === "Center") x = left + (right - left - lineW) / 2;
+      else if (this.horizontalTextAlignment === "End") x = right - lineW;
+      x += extra.Stroke / 2;
       const baseline = y + line.Ascent;
+      // C# paintDefault gets the gradient over rectDraw, or over line.Bounds per line (GradientByLines)
+      const gradientRect = gradient ? (this.GradientByLines ? new SKRect(x, y, x + line.Width, y + lh) : textRect) : undefined;
+      if (strokePaint && this.StrokeGradient) this.SetupGradient(strokePaint, this.StrokeGradient, gradientRect ?? new SKRect(x, y, x + line.Width, y + lh));
       for (const run of line.Runs) {
         const span = run.Span;
         if (span) {
@@ -382,7 +506,14 @@ export class SkiaLabel extends SkiaControl {
           if (span.BackgroundColor) canvas.drawRect(CK.LTRBRect(x, y, x + run.Width, y + lh), paintFor(span.BackgroundColor));
         }
         const color = span?.TextColor ?? this.textColor;
-        if (run.Text) canvas.drawText(run.Text, x, baseline, paintFor(color), run.Font);
+        if (run.Text) {
+          // C# DrawText order: drop shadow, stroke, fill
+          if (shadowPaint) canvas.drawText(run.Text, x + shadowDx, baseline + shadowDy, shadowPaint, run.Font);
+          if (strokePaint) canvas.drawText(run.Text, x, baseline, strokePaint, run.Font);
+          const paint = paintFor(color);
+          if (gradient && gradientRect) this.SetupGradient(paint, gradient, gradientRect);
+          canvas.drawText(run.Text, x, baseline, paint, run.Font);
+        }
         if (span?.HasDecorations) {
           // same geometry as C# DrawSpanDecorations; CanvasKit exposes no underline/strikeout/x-height metrics,
           // so the C# fallbacks apply: underline 1 scaled px under the baseline, strikeout at half an estimated x-height
@@ -401,6 +532,7 @@ export class SkiaLabel extends SkiaControl {
       y += lh * this.lineSpacing;
     }
     for (const paint of paints.values()) paint.delete();
+    strokePaint?.delete(); shadowPaint?.delete();
   }
 
   // ---- span taps (port of C# SkiaLabel.ProcessGestures) ----
@@ -416,6 +548,13 @@ export class SkiaLabel extends SkiaControl {
       }
     }
     return super.ProcessGestures(args, apply);
+  }
+
+  /** Pointer cursor over a tappable span (the label itself may not be tappable). */
+  override WantsPointerCursor(x: number, y: number): boolean {
+    if (super.WantsPointerCursor(x, y)) return true;
+    for (const span of this.Spans) if (span.HasTapHandler && span.HitIsInside(x, y)) return true;
+    return false;
   }
 
   /** Return null to not consume the tap. */

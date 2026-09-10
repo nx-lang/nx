@@ -1,6 +1,10 @@
 // Ported from the DrawnUI React demo's Shapes page.
 //
-// SkiaShape: every Type, fill and stroke, corner radii, children clipped to the shape.
+// SkiaShape: every Type, fill and stroke, gradients, bevels, shadows, corner radii, children
+// clipped to the shape.
+//
+// The original's first card handles ContextMenu — a right-click shows a toast instead of the
+// browser menu. That is an event handler, so the shape is drawn and the right-click falls through.
 
 component <Demo extends DrawnNode Title:string content Children:DrawnNode[] /> = {
   <SkiaStack Spacing=8 WidthRequest=150>
@@ -13,6 +17,16 @@ component <Demo extends DrawnNode Title:string content Children:DrawnNode[] /> =
   </SkiaStack>
 }
 
+let heart = "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"
+
+let star = {
+  <SkiaPoint X=0.5 Y=0.0 />   <SkiaPoint X=0.62 Y=0.38 />
+  <SkiaPoint X=1.0 Y=0.38 />  <SkiaPoint X=0.69 Y=0.61 />
+  <SkiaPoint X=0.81 Y=1.0 />  <SkiaPoint X=0.5 Y=0.76 />
+  <SkiaPoint X=0.19 Y=1.0 />  <SkiaPoint X=0.31 Y=0.61 />
+  <SkiaPoint X=0.0 Y=0.38 />  <SkiaPoint X=0.38 Y=0.38 />
+}
+
 component <Heading extends DrawnNode Text:string /> = {
   <SkiaLabel Text={Text} FontSize=20 TextColor="#FFFFFF"
     HorizontalOptions=Center Margin=<Thickness Top=8 /> />
@@ -23,6 +37,96 @@ component <Heading extends DrawnNode Text:string /> = {
     <SkiaLabel Text="SkiaShape" FontSize=24 TextColor="#FFFFFF" HorizontalOptions=Center />
     <SkiaLabel Text="Stroke is drawn inside the bounds; children are clipped to the shape."
       FontSize=13 TextColor="#D3D3D3" HorizontalOptions=Center />
+
+    <Heading Text="ContextMenu" />
+    <SkiaLabel FontSize=13 TextColor="#D3D3D3" HorizontalOptions=Center MaximumWidthRequest=680
+      HorizontalTextAlignment=Center
+      Text="In the original, right-click / long-press the shape and its ContextMenu handler takes the request; the browser menu stays away. Without event handlers the browser menu shows here as it does elsewhere on the canvas." />
+    <SkiaWrap Spacing=16 HorizontalOptions=Center MaximumWidthRequest=680>
+      <Demo Title="ContextMenu -> toast">
+        // The original passes ContextMenu={(_, e) => { shell.ShowToast(...); return true; }} here.
+        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=12 /> WidthRequest=120 HeightRequest=70
+          HorizontalOptions=Center VerticalOptions=Center BackgroundColor="#0D6EFD">
+          <SkiaLabel Text="right-click me" FontSize=13 TextColor="#FFFFFF"
+            HorizontalOptions=Center VerticalOptions=Center />
+        </SkiaShape>
+      </Demo>
+    </SkiaWrap>
+
+    <Heading Text="FillGradient / StrokeGradient" />
+    <SkiaWrap Spacing=16 HorizontalOptions=Center MaximumWidthRequest=680>
+      <Demo Title="Linear · Angle={45}">
+        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=12 /> WidthRequest=110 HeightRequest=70
+          HorizontalOptions=Center VerticalOptions=Center
+          FillGradient=<SkiaGradient Type=Linear Angle=45 Colors={ "#0D6EFD" "#D63384" } /> />
+      </Demo>
+      <Demo Title="Circular at (0.5, 0.5)">
+        <SkiaShape Type=Circle WidthRequest=80 LockRatio=1 HorizontalOptions=Center VerticalOptions=Center
+          FillGradient=<SkiaGradient Type=Circular StartXRatio=0.5 StartYRatio=0.5
+            Colors={ "#FFFFFF" "#0D6EFD" "#0A2A6B" } ColorPositions={ 0.0 0.6 1.0 } /> />
+      </Demo>
+      <Demo Title="Oval · Light={1.4}">
+        <SkiaShape Type=Ellipse WidthRequest=120 HeightRequest=60 HorizontalOptions=Center VerticalOptions=Center
+          FillGradient=<SkiaGradient Type=Oval StartXRatio=0.5 StartYRatio=0.5 Light=1.4
+            Colors={ "#20C997" "#0F3460" } /> />
+      </Demo>
+      <Demo Title="Sweep · TileMode Repeat">
+        <SkiaShape Type=Circle WidthRequest=80 LockRatio=1 HorizontalOptions=Center VerticalOptions=Center
+          FillGradient=<SkiaGradient Type=Sweep
+            Colors={ "#E94560" "#FFC107" "#20C997" "#0D6EFD" "#E94560" } /> />
+      </Demo>
+      <Demo Title="StrokeGradient · StrokeWidth 8">
+        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=16 /> WidthRequest=110 HeightRequest=70
+          HorizontalOptions=Center VerticalOptions=Center StrokeWidth=8 ClipBackgroundColor=true
+          StrokeGradient=<SkiaGradient Type=Linear StartXRatio=0.0 EndXRatio=1.0 EndYRatio=0.0
+            Colors={ "#FFC107" "#D63384" } /> />
+      </Demo>
+      <Demo Title="SkiaLabel FillGradient → glyphs (GradientByLines)">
+        <SkiaLabel Text="Gradient text, line by line" FontSize=18 FontFamily="FontTextBold" TextColor="#FFFFFF"
+          HorizontalOptions=Center VerticalOptions=Center HorizontalTextAlignment=Center WidthRequest=130
+          FillGradient=<SkiaGradient Type=Linear Angle=90 Colors={ "#FFC107" "#D63384" } /> />
+      </Demo>
+      <Demo Title="Label: BackgroundColor + FillGradient = both">
+        <SkiaLabel Text="bg + text" FontSize=16 TextColor="#FFFFFF" BackgroundColor="#212529"
+          Padding=<Thickness Left=12 Top=8 Right=12 Bottom=8 />
+          HorizontalOptions=Center VerticalOptions=Center GradientByLines=false
+          FillGradient=<SkiaGradient Type=Linear Angle=0 Colors={ "#6610F2" "#0DCAF0" } /> />
+      </Demo>
+    </SkiaWrap>
+
+    <Heading Text="Bevel / Emboss" />
+    <SkiaWrap Spacing=16 HorizontalOptions=Center MaximumWidthRequest=680>
+      <Demo Title="BevelType=Bevel · Depth 4">
+        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=12 /> BackgroundColor="#495057"
+          WidthRequest=110 HeightRequest=70 HorizontalOptions=Center VerticalOptions=Center
+          BevelType=Bevel Bevel=<SkiaBevel Depth=4 /> />
+      </Demo>
+      <Demo Title="BevelType=Emboss · Depth 4">
+        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=12 /> BackgroundColor="#495057"
+          WidthRequest=110 HeightRequest=70 HorizontalOptions=Center VerticalOptions=Center
+          BevelType=Emboss Bevel=<SkiaBevel Depth=4 /> />
+      </Demo>
+      <Demo Title="Circle · Bevel, colored edges">
+        <SkiaShape Type=Circle BackgroundColor="#0D6EFD" WidthRequest=80 LockRatio=1
+          HorizontalOptions=Center VerticalOptions=Center BevelType=Bevel
+          Bevel=<SkiaBevel Depth=6 LightColor="#9EC5FE" ShadowColor="#052C65" Opacity=0.8 /> />
+      </Demo>
+      <Demo Title="Polygon (star) · Emboss">
+        <SkiaShape Type=Polygon Points={star} BackgroundColor="#FFC107" WidthRequest=90 HeightRequest=90
+          HorizontalOptions=Center VerticalOptions=Center
+          BevelType=Emboss Bevel=<SkiaBevel Depth=3 Opacity=0.7 /> />
+      </Demo>
+      <Demo Title="Path (heart) · Bevel">
+        <SkiaShape Type=Path PathData={heart} BackgroundColor="#D63384" WidthRequest=90 HeightRequest=90
+          HorizontalOptions=Center VerticalOptions=Center
+          BevelType=Bevel Bevel=<SkiaBevel Depth=3 Opacity=0.7 /> />
+      </Demo>
+      <Demo Title="Sharp rectangle · Bevel, Opacity 1">
+        <SkiaShape Type=Rectangle BackgroundColor="#6C757D" WidthRequest=110 HeightRequest=70
+          HorizontalOptions=Center VerticalOptions=Center
+          BevelType=Bevel Bevel=<SkiaBevel Depth=5 Opacity=1.0 /> />
+      </Demo>
+    </SkiaWrap>
 
     <Heading Text="Shadows" />
     <SkiaWrap Spacing=16 HorizontalOptions=Center MaximumWidthRequest=680>
@@ -78,15 +182,8 @@ component <Heading extends DrawnNode Text:string /> = {
           WidthRequest=80 LockRatio=1 HorizontalOptions=Center VerticalOptions=Center />
       </Demo>
       <Demo Title="Polygon (star, Points)">
-        <SkiaShape Type=Polygon BackgroundColor="#FFC107" WidthRequest=90 LockRatio=1
-          HorizontalOptions=Center VerticalOptions=Center
-          Points={
-            <SkiaPoint X=0.5 Y=0.0 />   <SkiaPoint X=0.62 Y=0.38 />
-            <SkiaPoint X=1.0 Y=0.38 />  <SkiaPoint X=0.69 Y=0.61 />
-            <SkiaPoint X=0.81 Y=1.0 />  <SkiaPoint X=0.5 Y=0.76 />
-            <SkiaPoint X=0.19 Y=1.0 />  <SkiaPoint X=0.31 Y=0.61 />
-            <SkiaPoint X=0.0 Y=0.38 />  <SkiaPoint X=0.38 Y=0.38 />
-          } />
+        <SkiaShape Type=Polygon Points={star} BackgroundColor="#FFC107" WidthRequest=90 LockRatio=1
+          HorizontalOptions=Center VerticalOptions=Center />
       </Demo>
       <Demo Title="Line (Points)">
         <SkiaShape Type=Line StrokeColor="#FD7E14" StrokeWidth=4 WidthRequest=120 HeightRequest=70
@@ -97,9 +194,8 @@ component <Heading extends DrawnNode Text:string /> = {
           } />
       </Demo>
       <Demo Title="Path (SVG PathData)">
-        <SkiaShape Type=Path BackgroundColor="#E83E8C" WidthRequest=80 LockRatio=1
-          HorizontalOptions=Center VerticalOptions=Center
-          PathData="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+        <SkiaShape Type=Path PathData={heart} BackgroundColor="#E83E8C" WidthRequest=80 LockRatio=1
+          HorizontalOptions=Center VerticalOptions=Center />
       </Demo>
       <Demo Title="Hollow: ClipBackgroundColor">
         <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=12 /> ClipBackgroundColor=true

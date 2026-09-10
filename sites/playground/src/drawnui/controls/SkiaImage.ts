@@ -1,6 +1,6 @@
-import type { Image } from "canvaskit-wasm";
+import type { ColorFilter, Image, ImageFilter } from "canvaskit-wasm";
 import { type DrawingContext, SkiaControl } from "../core/SkiaControl";
-import { SkiaImageManager } from "../core/SkiaImageManager";
+import { type LoadPriority, SkiaImageManager } from "../core/SkiaImageManager";
 import { Super } from "../core/Super";
 import { type Color, Colors, type DrawImageAlignment, SKRect, ScaledSize, type TransformAspect } from "../core/Types";
 import { type BlendMode, type SkiaImageEffect, SkiaImageEffects } from "../core/ImageEffects";
@@ -32,8 +32,17 @@ export class SkiaImage extends SkiaControl {
   HorizontalOffset = 0;
   VerticalOffset = 0;
 
+  /**
+   * C# PaintColorFilter / PaintImageFilter: set your own CanvasKit filters (owned by you, not deleted here); a color
+   * filter set here is used instead of the one derived from `AddEffect` (`AddEffect="Custom"` derives none), an image
+   * filter replaces the `Blur` one.
+   */
+  PaintColorFilter?: ColorFilter;
+  PaintImageFilter?: ImageFilter;
+
   /** C# PaintColorFilter selection (null = no filter). */
-  private CreateColorFilter() {
+  private CreateColorFilter(): ColorFilter | null {
+    if (this.PaintColorFilter) return null; // custom filter applied as is
     switch (this.AddEffect) {
       case "Tint": return this.ColorTint !== Colors.Transparent ? SkiaImageEffects.Tint(this.ColorTint, this.EffectBlendMode) : null;
       case "Darken": return this.Darken !== 0 ? SkiaImageEffects.Darken(this.Darken) : null;
@@ -47,7 +56,8 @@ export class SkiaImage extends SkiaControl {
       case "Saturation": return this.Saturation >= 0 ? SkiaImageEffects.Saturation(this.Saturation) : null;
       case "Brightness": return this.Brightness >= 1 ? SkiaImageEffects.Brightness(this.Brightness) : null;
       case "TSL": return this.BackgroundColor && this.BackgroundColor !== Colors.Transparent ? SkiaImageEffects.TintSL(this.BackgroundColor, this.Saturation, this.Brightness, this.EffectBlendMode) : null;
-      default: return null;
+      case "HSL": return this.BackgroundColor && this.BackgroundColor !== Colors.Transparent ? SkiaImageEffects.HSL(this.Gamma, this.Saturation, this.Brightness, this.EffectBlendMode) : null;
+      default: return null; // None, Custom (PaintColorFilter)
     }
   }
 
@@ -57,11 +67,22 @@ export class SkiaImage extends SkiaControl {
 
   /** Decoded image currently shown. */
   LoadedSource?: Image;
+  /** C# ImageBitmap: show an already decoded image (shared, not owned) instead of loading a Source. */
+  get ImageBitmap(): Image | undefined { return this.LoadedSource; }
+  set ImageBitmap(image: Image | undefined) {
+    if (this.LoadedSource === image) return;
+    this.loadGeneration++; this.IsLoading = false;
+    this.LoadedSource = image;
+    this.Update();
+  }
   IsLoading = false;
   /** Where the scaled image was drawn last frame, canvas pixels. */
   DisplayRect: SKRect = SKRect.Empty;
   /** Scale applied to the source per axis at the last measure/draw (DrawnUi AspectScale). */
   AspectScale = { X: 0, Y: 0 };
+
+  /** Queue priority of the Source load (C# LoadPriority). */
+  LoadPriority: LoadPriority = "Normal";
 
   private source = "";
   private loadGeneration = 0;
@@ -75,7 +96,7 @@ export class SkiaImage extends SkiaControl {
     this.LoadedSource = undefined;
     if (!value) { this.IsLoading = false; this.Update(); return; }
     this.IsLoading = true;
-    SkiaImageManager.Instance.LoadImageAsync(value).then(
+    SkiaImageManager.Instance.LoadImageManagedAsync(value, undefined, this.LoadPriority).then(
       (image) => { if (generation !== this.loadGeneration) return; this.IsLoading = false; this.LoadedSource = image; this.Update(); this.Success?.(this, value); },
       (error: Error) => { if (generation !== this.loadGeneration) return; this.IsLoading = false; this.Error?.(this, error); },
     );
@@ -112,7 +133,7 @@ export class SkiaImage extends SkiaControl {
         aspectX = aspectY = width < dest.Width ? Math.max(s1, s2) : 1;
         if (width * aspectX > dest.Width || height * aspectY > dest.Height) aspectX = aspectY = Math.min(s1, s2);
         break;
-      case "Tile": break; // not ported: draws like None
+      case "Tile": break; // C# too: tiling is SkiaImageTiles
     }
     return { X: aspectX, Y: aspectY };
   }
@@ -162,15 +183,16 @@ export class SkiaImage extends SkiaControl {
 
     const CK = Super.CK;
     const canvas = ctx.Context.Canvas;
-    const overflows = this.Blur > 0 || display.Left < dest.Left || display.Top < dest.Top || display.Right > dest.Right || display.Bottom > dest.Bottom;
+    const overflows = this.Blur > 0 || !!this.PaintImageFilter || display.Left < dest.Left || display.Top < dest.Top || display.Right > dest.Right || display.Bottom > dest.Bottom;
     const saved = canvas.save();
     if (overflows) canvas.clipRect(CK.LTRBRect(dest.Left, dest.Top, dest.Right, dest.Bottom), CK.ClipOp.Intersect, true);
     const paint = new CK.Paint();
     paint.setAntiAlias(true);
     const colorFilter = this.CreateColorFilter();
     if (colorFilter) paint.setColorFilter(colorFilter);
-    const blur = this.Blur > 0 ? CK.ImageFilter.MakeBlur(this.Blur * scale, this.Blur * scale, CK.TileMode.Mirror, null) : null;
-    if (blur) paint.setImageFilter(blur);
+    const blur = !this.PaintImageFilter && this.Blur > 0 ? CK.ImageFilter.MakeBlur(this.Blur * scale, this.Blur * scale, CK.TileMode.Mirror, null) : null;
+    if (this.PaintImageFilter) paint.setImageFilter(this.PaintImageFilter); else if (blur) paint.setImageFilter(blur);
+    if (this.PaintColorFilter) paint.setColorFilter(this.PaintColorFilter);
     canvas.drawImageRectOptions(
       img,
       CK.LTRBRect(0, 0, img.width(), img.height()),

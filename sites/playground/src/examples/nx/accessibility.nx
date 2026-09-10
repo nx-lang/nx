@@ -37,6 +37,14 @@ component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> =
         TextColor="#DEE2E6" HorizontalOptions=Fill AccessibilityRole="status" AccessibilityLive="polite" />
     </Card>
 
+    <Card Title="AccessibilityTextSelectable — real selectable text over the drawn label (opt-in)">
+      // Selection is the overlay's own behavior, so it works here as in the original.
+      <SkiaLabel AccessibilityTextSelectable=true FontSize=14 TextColor="#DEE2E6" HorizontalOptions=Fill
+        Text="This paragraph is drawn on the canvas, but the accessibility overlay also carries it as real, invisible text in the same font and line positions. Select it with the mouse or touch, copy it with Ctrl+C, let a screen reader read it word by word — like any HTML paragraph. Off by default: pointer input over selectable text goes to the selection, not to the drawn control, so it is never turned on for buttons, carousels or anything gesture-driven." />
+      <SkiaLabel FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Fill
+        Text="This one is a normal label: exposed to screen readers, not selectable." />
+    </Card>
+
     <Card Title="Buttons — label from Text, hint, custom label, disabled">
       <SkiaWrap Spacing=8>
         // The original counts taps in this button's own text.

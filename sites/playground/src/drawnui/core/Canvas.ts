@@ -5,7 +5,8 @@ import { Super } from "./Super";
 import { SkiaAccessibilityManager } from "./Accessibility";
 import { type Color, Colors, type RenderingModeType, SKRect } from "./Types";
 import {
-  GestureEventProcessingInfo, type GesturesMode, SKPoint, SkiaGesturesParameters, TouchActionEventArgs,
+  ContextMenuEventArgs, type ContextMenuSource,
+  GestureEventProcessingInfo, PointerData, type GesturesMode, SKPoint, SkiaGesturesParameters, TouchActionEventArgs,
   type TouchActionResult, type TouchActionType,
 } from "./Gestures";
 
@@ -132,6 +133,7 @@ export class Canvas {
     this.AccessibilityManager.OnFrameEnd(this.RenderingScale, this.Element.width, this.Element.height, () => this.Update());
     const now = performance.now();
     this.FrameTime = now - started;
+    this.FrameIndex++;
     this.frameTimes.push(now);
     while (this.frameTimes.length && this.frameTimes[0] < now - 1000) this.frameTimes.shift();
     this.FPS = this.frameTimes.length;
@@ -140,10 +142,10 @@ export class Canvas {
 
   // ---- deferred disposal (DrawnUi DisposeObject: never delete Skia objects mid-frame) ----
 
-  private readonly disposeQueue: CachedObject[] = [];
+  private readonly disposeQueue: { Dispose(): void }[] = [];
 
   /** Queues a cache for deletion after the current frame has been flushed. */
-  DisposeObject(obj: CachedObject): void { this.disposeQueue.push(obj); }
+  DisposeObject(obj: { Dispose(): void }): void { this.disposeQueue.push(obj); }
 
   private DrainDisposeQueue(): void {
     if (this.disposeQueue.length === 0) return;
@@ -174,10 +176,53 @@ export class Canvas {
     return executed;
   }
 
+  /** Frames drawn so far (SkiaBackdrop uses it to refresh once after a cached record). */
+  FrameIndex = 0;
+
+  /** On-screen surface (SkiaBackdrop snapshots it). */
+  get Surface(): Surface | undefined { return this.surface; }
+
+  /**
+   * A picture of what is on screen right now, as PNG bytes (C# DrawnView.TakeScreenShot).
+   *
+   * The on-screen canvas cannot simply be read: an accelerated surface lives in a WebGL drawing
+   * buffer the browser clears after compositing, so both `canvas.toDataURL()` and a snapshot of
+   * the live surface come back blank. The content is therefore drawn once more into an offscreen
+   * RASTER surface, which can be read back anywhere.
+   *
+   * This is a still picture, not a frame of the loop: animators are not ticked and the frame
+   * counters do not move, so taking one never changes what the next real frame shows.
+   */
+  TakeScreenShot(): Uint8Array | null {
+    const CK = Super.CK;
+    const w = this.Element.width, h = this.Element.height;
+    if (!CK || !w || !h) return null;
+    const surface = CK.MakeSurface(w, h);
+    if (!surface) return null;
+    try {
+      const canvas = surface.getCanvas();
+      canvas.clear(Super.ParseColor(this.BackgroundColor));
+      const root = this.content;
+      if (root) {
+        const scale = this.RenderingScale;
+        root.Measure(w, h, scale);
+        root.Arrange(new SKRect(0, 0, w, h), root.WidthRequest, root.HeightRequest, scale);
+        root.Render({ Context: { Canvas: canvas, Surface: surface }, Destination: new SKRect(0, 0, w, h), Scale: scale });
+      }
+      surface.flush();
+      const image = surface.makeImageSnapshot();
+      if (!image) return null;
+      try { return image.encodeToBytes(); } finally { image.delete(); }
+    } finally {
+      surface.delete();
+    }
+  }
+
   Dispose(): void {
     this.disposed = true;
     this.Gestures = "Disabled";
     this.observer.disconnect();
+    this.content?.Dispose();
     this.Content = undefined;
     this.ReleaseSurface();
     this.grContext?.delete();
@@ -208,7 +253,8 @@ export class Canvas {
       e.type === "pointerup" ? "Released" :
       e.type === "pointercancel" ? "Cancelled" : undefined;
     if (!type) return;
-    if (type === "Moved" && !this.activeTouchIds.has(e.pointerId)) return; // hover not ported (TouchActionResult.Pointer)
+    if (type === "Moved" && !this.activeTouchIds.has(e.pointerId)) { if (e.pointerType === "mouse") this.UpdateCursor(e.offsetX, e.offsetY); return; } // hover not ported (TouchActionResult.Pointer)
+    if ((type === "Released" || type === "Cancelled") && !this.activeTouchIds.has(e.pointerId)) return; // Up of a pointer that never pressed here
     // Capture so Up outside the element still arrives; throws for synthetic events (tests) — harmless.
     if (type === "Pressed") { try { this.Element.setPointerCapture(e.pointerId); } catch { /* synthetic pointer */ } }
 
@@ -218,9 +264,53 @@ export class Canvas {
     args.Type = type;
     args.Scale = this.RenderingScale;
     args.Location = new SKPoint((e.clientX - rect.left) * this.RenderingScale, (e.clientY - rect.top) * this.RenderingScale);
+    // every mouse button is delivered with its PointerData (AppoMobi.Gestures): a right click is a Down / Up / Tapped
+    // with Button "Right" for games and custom controls, and a ContextMenu on top
+    const pd = new PointerData();
+    pd.Button = e.button === 0 ? "Left" : e.button === 1 ? "Middle" : e.button === 2 ? "Right" : e.button === 3 ? "XButton1" : e.button === 4 ? "XButton2" : "Extended";
+    pd.ButtonNumber = e.button === 1 ? 3 : e.button === 2 ? 2 : e.button + 1;
+    pd.DeviceType = e.pointerType === "touch" ? "Touch" : e.pointerType === "pen" ? "Pen" : "Mouse";
+    pd.PressedButtons = e.buttons;
+    args.Pointer = pd;
     this.OnTouchAction(args);
   };
   private readonly preventTouch = (e: TouchEvent) => e.preventDefault();
+
+  /** Called when no control handled a context-menu request; return true to suppress the browser's canvas menu. */
+  ContextMenu?: (sender: Canvas, e: ContextMenuEventArgs) => boolean | void;
+
+  /** DOM contextmenu (right click / long press / Menu key) -> ContextMenuEventArgs routed through the tree like a tap. */
+  private readonly onContextMenu = (e: MouseEvent) => {
+    const rect = this.Element.getBoundingClientRect();
+    const scale = this.RenderingScale;
+    const x = e.clientX - rect.left, y = e.clientY - rect.top;
+    const pointerType = (e as PointerEvent).pointerType;
+    const source: ContextMenuSource = pointerType === "touch" || pointerType === "pen" ? "touch" : pointerType === "mouse" || e.button === 2 ? "mouse" : "keyboard";
+    const args = new ContextMenuEventArgs(new SKPoint(x, y), new SKPoint(x * scale, y * scale), source, e);
+    let handled = this.content?.ProcessContextMenu(args.Pixels, args) ?? false;
+    if (!handled && this.ContextMenu) handled = this.ContextMenu(this, args) === true;
+    if (handled) e.preventDefault();
+  };
+
+  private cursorPointer = false;
+  /**
+   * DrawnUi.Blazor shows `cursor: pointer` over interactive controls through its overlay elements; here the overlay
+   * is pointer-events:none, so the mouse position is tested against the accessibility snapshot (the accessible
+   * controls' rects in points, already sorted and rate-limited), each hit control answering WantsPointerCursor
+   * (itself tappable, or a tappable span of a label), and the canvas element's cursor is switched only when the
+   * answer changes. Mouse moves only, no work without a mouse and none in the frame loop.
+   */
+  private UpdateCursor(x: number, y: number): void {
+    let hit = false;
+    const scale = this.RenderingScale;
+    for (const n of this.AccessibilityManager.Snapshot) {
+      if (x < n.Rect.Left || x >= n.Rect.Right || y < n.Rect.Top || y >= n.Rect.Bottom) continue;
+      // the control decides (whole control, or a tappable span of a label); point in pixels relative to the control's
+      // origin, taken from the snapshot rect (already carries the scroll / cache offset; a rotated control gets its bbox)
+      if (n.Source.WantsPointerCursor((x - n.Rect.Left) * scale, (y - n.Rect.Top) * scale)) { hit = true; break; }
+    }
+    if (hit !== this.cursorPointer) { this.cursorPointer = hit; this.Element.style.cursor = hit ? "pointer" : ""; }
+  }
 
   /** Mouse wheel -> TouchActionResult.Wheel (page scroll suppressed while gestures are enabled). */
   private readonly onWheel = (e: WheelEvent) => {
@@ -241,6 +331,7 @@ export class Canvas {
     el.style.touchAction = "none";
     el.style.userSelect = "none";
     for (const t of ["pointerdown", "pointermove", "pointerup", "pointercancel"]) el.addEventListener(t, this.onPointer as EventListener);
+    el.addEventListener("contextmenu", this.onContextMenu);
     el.addEventListener("wheel", this.onWheel, { passive: false });
     if (this.gestures === "Lock") el.addEventListener("touchmove", this.preventTouch, { passive: false });
   }
@@ -250,6 +341,7 @@ export class Canvas {
     el.style.touchAction = "";
     el.style.userSelect = "";
     for (const t of ["pointerdown", "pointermove", "pointerup", "pointercancel"]) el.removeEventListener(t, this.onPointer as EventListener);
+    el.removeEventListener("contextmenu", this.onContextMenu);
     el.removeEventListener("wheel", this.onWheel);
     el.removeEventListener("touchmove", this.preventTouch);
     this.activeTouchIds.clear(); this.pointerDownArgs.clear(); this.previousTouchArgs.clear();
@@ -308,8 +400,38 @@ export class Canvas {
     for (const args of batch) this.ProcessGestures(root, args);
   }
 
+  /**
+   * The control that consumed the current gesture keeps it until it lets go (DrawnUi Canvas.HadInput). Without this a
+   * gesture is re-routed by the pointer position on every event, so anything the finger drags away from — a drag
+   * handle, a slider thumb, a button being held — stops receiving Panning the moment the pointer leaves its box.
+   * Single pointer, which is what the web gives us here; C# keeps a set for multi-touch.
+   */
+  private gestureOwner: SkiaControl | null = null;
+
+  /** DrawnUi IsSavedGesture: the types replayed to the owner instead of being routed again. */
+  private static IsSavedGesture(type: SkiaGesturesParameters["Type"]): boolean {
+    return type === "Panning" || type === "Wheel" || type === "Up";
+  }
+
   /** Entry into the control tree, same shape as DrawnUi Canvas.ProcessGestures. */
   protected ProcessGestures(root: SkiaControl, args: SkiaGesturesParameters): SkiaControl | null {
-    return root.ProcessGestures(args, new GestureEventProcessingInfo(args.Event.Location, SKPoint.Empty, SKPoint.Empty, null));
+    const info = () => new GestureEventProcessingInfo(args.Event.Location, SKPoint.Empty, SKPoint.Empty, null);
+
+    if (args.Type === "Down") this.gestureOwner = null;
+    else if (this.gestureOwner && Canvas.IsSavedGesture(args.Type)) {
+      const owner = this.gestureOwner;
+      const alive = !!owner.Superview && owner.IsVisible && !owner.InputTransparent;
+      const consumed = alive ? owner.OnSkiaGestureEvent(args, info()) : null;
+      if (consumed) {
+        // it still wants the gesture: nobody else sees this one (C# skips the tree pass for a saved gesture)
+        this.gestureOwner = args.Type === "Up" ? null : consumed;
+        return consumed;
+      }
+      this.gestureOwner = null; // it let go (a button whose press turned into a pan): route normally again
+    }
+
+    const consumed = root.ProcessGestures(args, info());
+    this.gestureOwner = consumed && args.Type !== "Up" ? consumed : null;
+    return consumed;
   }
 }

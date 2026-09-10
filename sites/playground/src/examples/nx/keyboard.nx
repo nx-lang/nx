@@ -1,0 +1,43 @@
+// Ported from the DrawnUI React demo's Keyboard Input page.
+//
+// The Blazor sandbox's keyboard probe: KeyboardManager attaches window-level keydown / keyup
+// listeners and the page reports the last key, the modifier state, the printable characters and
+// the five most recent events. Every line of that is state written from a key handler, so the
+// probe is drawn here exactly as it looks before the first key is pressed — the cream card, the
+// blue banner, and five "Waiting for input" rows — and stays that way.
+
+<SkiaScroll Orientation=Vertical>
+  <SkiaStack Spacing=16 Padding=<Thickness Left=16 Top=16 Right=16 Bottom=16 />
+    HorizontalOptions=Center MaximumWidthRequest=720>
+    <SkiaLabel Text="Keyboard Input" FontSize=24 TextColor="#FFFFFF" HorizontalOptions=Center />
+    <SkiaLabel FontSize=13 TextColor="#ADB5BD" HorizontalOptions=Fill HorizontalTextAlignment=Center
+      Text="KeyboardManager attaches window-level keydown / keyup listeners like the DrawnUi.Blazor and Wasm heads (drawnui-keyboard.js): shortcuts, game input, drawn editors. In the original, click the page and press letters, arrows, modifiers or function keys; here the probe stays at its initial state." />
+
+    // The Blazor probe canvas: cream card, blue banner, last key, modifiers, recent events.
+    <SkiaStack Spacing=14 Padding=<Thickness Left=20 Top=20 Right=20 Bottom=20 /> BackgroundColor="#FEFDF6"
+      HorizontalOptions=Fill>
+      <SkiaLabel Text="Keyboard input ready" FontSize=28 FontFamily="FontTextBold" TextColor="#252B37"
+        HorizontalOptions=Fill />
+      <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=18 /> BackgroundColor="#3C639F"
+        HeightRequest=92 HorizontalOptions=Fill Padding=<Thickness Left=16 Top=16 Right=16 Bottom=16 />>
+        <SkiaLabel Text="Press letters, arrows, modifiers, or function keys" FontSize=18 TextColor="#FFFFFF"
+          HorizontalOptions=Fill VerticalOptions=Center />
+      </SkiaShape>
+      <SkiaLabel Text="Last key: waiting" FontSize=16 TextColor="#41495A" HorizontalOptions=Fill />
+      <SkiaLabel Text="Modifiers: shift false, ctrl false, alt false" FontSize=14 TextColor="#636F80"
+        HorizontalOptions=Fill />
+      <SkiaLabel Text="KeyChar (printable, no Ctrl/Alt): ''" FontSize=14 TextColor="#636F80"
+        HorizontalOptions=Fill />
+      <SkiaStack Spacing=8 Padding=<Thickness Left=14 Top=14 Right=14 Bottom=14 /> BackgroundColor="#F2EDE0"
+        HorizontalOptions=Fill>
+        <SkiaLabel Text="Recent events" FontSize=18 FontFamily="FontTextBold" TextColor="#47321C"
+          HorizontalOptions=Fill />
+        <SkiaLabel Text="Waiting for input" FontSize=14 TextColor="#5C4A35" HorizontalOptions=Fill />
+        <SkiaLabel Text="Waiting for input" FontSize=14 TextColor="#5C4A35" HorizontalOptions=Fill />
+        <SkiaLabel Text="Waiting for input" FontSize=14 TextColor="#5C4A35" HorizontalOptions=Fill />
+        <SkiaLabel Text="Waiting for input" FontSize=14 TextColor="#5C4A35" HorizontalOptions=Fill />
+        <SkiaLabel Text="Waiting for input" FontSize=14 TextColor="#5C4A35" HorizontalOptions=Fill />
+      </SkiaStack>
+    </SkiaStack>
+  </SkiaStack>
+</SkiaScroll>

@@ -12,12 +12,23 @@ import { SkiaRadioButton } from "../controls/SkiaRadioButton";
 import { SkiaProgress } from "../controls/SkiaProgress";
 import { SkiaSlider } from "../controls/SkiaSlider";
 import { SkiaCarousel } from "../controls/SkiaCarousel";
+import { SkiaShaderCarousel } from "../controls/SkiaShaderCarousel";
 import { SkiaDrawer } from "../controls/SkiaDrawer";
 import { SkiaGrid, SkiaLayer, SkiaLayout, SkiaRow, SkiaStack, SkiaWrap } from "../controls/SkiaLayout";
 import { SkiaHotspot } from "../controls/SkiaHotspot";
 import { SkiaButton } from "../controls/SkiaButton";
 import { SkiaImage } from "../controls/SkiaImage";
+import { SkiaImageTiles } from "../controls/SkiaImageTiles";
+import { SkiaDecoratedGrid } from "../controls/SkiaDecoratedGrid";
+import { SkiaScrollBar } from "../controls/SkiaScrollBar";
+import { RefreshIndicator } from "../controls/RefreshIndicator";
 import { SkiaSvg } from "../controls/SkiaSvg";
+import { SkiaBackdrop } from "../controls/SkiaBackdrop";
+import { SkiaEditor } from "../controls/SkiaEditor";
+import { SkiaSprite } from "../controls/SkiaSprite";
+import { SkiaSpriteSet } from "../controls/SkiaSpriteSet";
+import { SkiaLottie } from "../controls/SkiaLottie";
+import { SkiaGif } from "../controls/SkiaGif";
 import { SkiaScroll } from "../controls/SkiaScroll";
 import { SkiaFrame, SkiaShape } from "../controls/SkiaShape";
 
@@ -26,8 +37,8 @@ type HostInstance = SkiaControl | TextSpan;
 
 /** JSX tag name -> engine class. Add a control here to expose it to React. */
 export const Registry: Record<string, new () => HostInstance> = {
-  SkiaLayout, SkiaStack, SkiaRow, SkiaLayer, SkiaWrap, SkiaGrid, SkiaLabel, SkiaRichLabel, TextSpan, SkiaHotspot, SkiaButton, SkiaImage, SkiaSvg, SkiaScroll, SkiaShape, SkiaFrame,
-  SkiaSwitch, SkiaCheckbox, SkiaRadioButton, SkiaProgress, SkiaSlider, SkiaCarousel, SkiaDrawer,
+  SkiaLayout, SkiaStack, SkiaRow, SkiaLayer, SkiaWrap, SkiaGrid, SkiaDecoratedGrid, SkiaBackdrop, SkiaEditor, SkiaSprite, SkiaSpriteSet, SkiaLabel, SkiaRichLabel, TextSpan, SkiaHotspot, SkiaButton, SkiaImage, SkiaImageTiles, SkiaSvg, SkiaLottie, SkiaGif, SkiaScroll, SkiaScrollBar, RefreshIndicator, SkiaShape, SkiaFrame,
+  SkiaSwitch, SkiaCheckbox, SkiaRadioButton, SkiaProgress, SkiaSlider, SkiaCarousel, SkiaShaderCarousel, SkiaDrawer,
 };
 
 type Props = Record<string, unknown>;
@@ -81,6 +92,8 @@ const hostConfig: Cfg & Record<string, unknown> = {
     const ctor = Registry[type];
     if (!ctor) throw new Error(`DrawnUi: unknown control <${type}>`);
     const inst = new ctor();
+    // ConfigureStyles defaults first, the JSX props below override them (a TextSpan is not a control, it has none)
+    (inst as Partial<SkiaControl>).ApplyInitialStyles?.(true);
     applyProps(inst, null, props);
     return inst as SkiaControl;
   },
@@ -122,7 +135,8 @@ const hostConfig: Cfg & Record<string, unknown> = {
   afterActiveInstanceBlur: noop,
   prepareScopeUpdate: noop,
   getInstanceFromScope: () => null,
-  detachDeletedInstance: noop,
+  // React deleted the element: free the engine resources (C# Dispose); children are disposed by their parent first
+  detachDeletedInstance: (inst: HostInstance) => { (inst as SkiaControl).Dispose?.(); },
 
   setCurrentUpdatePriority: (p: number) => { currentUpdatePriority = p; },
   getCurrentUpdatePriority: () => currentUpdatePriority,

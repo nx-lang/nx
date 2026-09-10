@@ -14,8 +14,19 @@ export type Coverage = "complete" | "static" | "reduced";
  * across a dozen cards, and cannot be searched. Tags make the gallery a coverage report — "four
  * examples need event handlers" is a roadmap signal — and when a capability lands, one search names
  * every example ready to be upgraded.
+ *
+ * `code-behind` is an engine object built or driven from code and attached to a control — a
+ * shader effect in `VisualEffects`, a CanvasKit filter in `PaintColorFilter`, a `SkiaSpriteSet`
+ * subclass, a cell class carrying drag logic. It is what DrawnUI's own docs call code-behind, and
+ * none of the other tags names it: the missing piece is neither a handler nor state but an object
+ * NX has no way to construct.
  */
-export type Capability = "event-handlers" | "animation" | "component-state" | "list-virtualization";
+export type Capability =
+  | "event-handlers"
+  | "animation"
+  | "component-state"
+  | "list-virtualization"
+  | "code-behind";
 
 /** The one place each capability is worded, so two examples sharing a tag word it identically. */
 export const CAPABILITY_WORDING: Record<Capability, string> = {
@@ -23,6 +34,7 @@ export const CAPABILITY_WORDING: Record<Capability, string> = {
   animation: "animation",
   "component-state": "component state",
   "list-virtualization": "list virtualization",
+  "code-behind": "code-behind",
 };
 
 export interface Example {

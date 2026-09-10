@@ -2,7 +2,13 @@
   "contentProperty": "Children",
   "nodeRoot": "DrawnNode",
   "unions": {
+    "BevelType": [
+      "None",
+      "Bevel",
+      "Emboss"
+    ],
     "BlendMode": [
+      "Color",
       "Darken",
       "Lighten",
       "Saturation",
@@ -30,7 +36,6 @@
       "Exclusion",
       "Multiply",
       "Hue",
-      "Color",
       "Luminosity"
     ],
     "DrawImageAlignment": [
@@ -59,6 +64,14 @@
       "Italic",
       "BoldItalic"
     ],
+    "GradientType": [
+      "None",
+      "Linear",
+      "Circular",
+      "Oval",
+      "Sweep",
+      "Conical"
+    ],
     "LayoutOptions": [
       "Start",
       "Center",
@@ -72,6 +85,11 @@
       "HeadTruncation",
       "MiddleTruncation",
       "TailTruncation"
+    ],
+    "LoadPriority": [
+      "Low",
+      "Normal",
+      "High"
     ],
     "LockTouch": [
       "Enabled",
@@ -97,11 +115,41 @@
       "Enabled",
       "Disabled"
     ],
+    "RelativePositionType": [
+      "Start",
+      "Center",
+      "End",
+      "None"
+    ],
+    "ReturnType": [
+      "Default",
+      "Done",
+      "Go",
+      "Next",
+      "Search",
+      "Send"
+    ],
+    "ScrollBarDock": [
+      "Start",
+      "End"
+    ],
+    "ScrollBarVisibility": [
+      "None",
+      "Horizontal",
+      "Vertical",
+      "Both"
+    ],
     "ScrollOrientation": [
       "Horizontal",
       "Vertical",
       "Both",
       "Neither"
+    ],
+    "ShaderTileMode": [
+      "Clamp",
+      "Repeat",
+      "Mirror",
+      "Decal"
     ],
     "ShapeType": [
       "Rectangle",
@@ -124,16 +172,20 @@
       "ImageCompositeGPU",
       "GPU"
     ],
-    "SkiaGradientType": [
-      "Linear"
+    "SkiaEditorKeyboard": [
+      "Default",
+      "Numeric",
+      "Decimal",
+      "Phone",
+      "Email"
     ],
     "SkiaImageEffect": [
       "Custom",
       "None",
+      "Brightness",
       "Darken",
       "Lighten",
       "Contrast",
-      "Brightness",
       "Gamma",
       "Saturation",
       "BlackAndWhite",
@@ -165,6 +217,11 @@
       "None",
       "Ripple",
       "Shimmer"
+    ],
+    "SnapToChildrenType": [
+      "Disabled",
+      "Center",
+      "Side"
     ],
     "StrokeCap": [
       "Butt",
@@ -205,15 +262,30 @@
         "BottomRight"
       ]
     },
+    "SkiaBevel": {
+      "construct": "SkiaBevel",
+      "fields": [
+        "Depth",
+        "LightColor",
+        "ShadowColor",
+        "Opacity"
+      ]
+    },
     "SkiaGradient": {
       "construct": null,
       "fields": [
         "Type",
         "Colors",
+        "ColorPositions",
         "StartXRatio",
         "StartYRatio",
         "EndXRatio",
-        "EndYRatio"
+        "EndYRatio",
+        "Angle",
+        "TileMode",
+        "Light",
+        "Opacity",
+        "BlendMode"
       ]
     },
     "SkiaPoint": {
@@ -269,6 +341,26 @@
       "class": "SkiaGrid",
       "content": "Children"
     },
+    "SkiaDecoratedGrid": {
+      "class": "SkiaDecoratedGrid",
+      "content": "Children"
+    },
+    "SkiaBackdrop": {
+      "class": "SkiaBackdrop",
+      "content": "Children"
+    },
+    "SkiaEditor": {
+      "class": "SkiaEditor",
+      "content": null
+    },
+    "SkiaSprite": {
+      "class": "SkiaSprite",
+      "content": null
+    },
+    "SkiaSpriteSet": {
+      "class": "SkiaSpriteSet",
+      "content": "Children"
+    },
     "SkiaLabel": {
       "class": "SkiaLabel",
       "content": "Children"
@@ -293,12 +385,32 @@
       "class": "SkiaImage",
       "content": null
     },
+    "SkiaImageTiles": {
+      "class": "SkiaImageTiles",
+      "content": null
+    },
     "SkiaSvg": {
       "class": "SkiaSvg",
       "content": null
     },
+    "SkiaLottie": {
+      "class": "SkiaLottie",
+      "content": null
+    },
+    "SkiaGif": {
+      "class": "SkiaGif",
+      "content": null
+    },
     "SkiaScroll": {
       "class": "SkiaScroll",
+      "content": "Children"
+    },
+    "SkiaScrollBar": {
+      "class": "SkiaScrollBar",
+      "content": "Children"
+    },
+    "RefreshIndicator": {
+      "class": "RefreshIndicator",
       "content": "Children"
     },
     "SkiaShape": {
@@ -331,6 +443,10 @@
     },
     "SkiaCarousel": {
       "class": "SkiaCarousel",
+      "content": "Children"
+    },
+    "SkiaShaderCarousel": {
+      "class": "SkiaShaderCarousel",
       "content": "Children"
     },
     "SkiaDrawer": {

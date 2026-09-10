@@ -20,6 +20,9 @@ export const Aria = {
   LivePolite: "polite", LiveAssertive: "assertive",
 } as const;
 
+/** One laid-out text line exposed for native selection (AccessibilityTextSelectable): CSS px relative to the node. */
+export interface AccessibilityTextLine { Text: string; Left: number; Top: number; Width: number; Height: number; FontFamily: string; FontWeight: number; FontSize: number }
+
 /** One entry of the accessibility snapshot (DrawnUi AccessibilityNode). Rect is CSS pixels relative to the canvas. */
 export interface AccessibilityNode {
   Id: number;
@@ -31,6 +34,8 @@ export interface AccessibilityNode {
   IsPressed?: boolean;
   Live?: string;
   Source: SkiaControl;
+  /** Real text lines rendered into the overlay so the browser can select / copy them (opt-in per control). */
+  TextLines?: AccessibilityTextLine[];
 }
 
 /**
@@ -101,6 +106,7 @@ export class SkiaAccessibilityManager {
     for (const n of this.nodes) {
       if (!n.Superview) { this.nodes.delete(n); n.OnAccessibilityUnregistered(); continue; } // detached from the tree
       if (!n.IsVisible || !n.IsAccessibilityElement || n.AccessibilityRole === Aria.RolePresentation) continue;
+      if (AccessibilityManagerHiddenByAncestor(n)) continue; // e.g. the root page kept mounted under a pushed shell page
       const px = n.GetAccessibilityPixelRect();
       if (px.Width <= 0 || px.Height <= 0) continue;
       // nodes beyond the canvas stay in the tree (scroll content reachable with Tab, the overlay scrolls them into view);
@@ -110,6 +116,7 @@ export class SkiaAccessibilityManager {
         Id: n.AccessibilityId, Label: n.AccessibilityLabel, Hint: n.AccessibilityHint, Role: n.AccessibilityRole!,
         Rect: new SKRect(px.Left / scale, px.Top / scale, px.Right / scale, px.Bottom / scale),
         CanInteract: n.AccessibilityCanInteract, IsPressed: n.AccessibilityIsPressed, Live: n.AccessibilityLive, Source: n,
+        TextLines: n.AccessibilityTextSelectable ? n.GetAccessibilityTextLines(scale) : undefined,
       });
     }
     list.sort((a, b) => a.Rect.Top - b.Rect.Top || a.Rect.Left - b.Rect.Left);
@@ -126,7 +133,20 @@ export class SkiaAccessibilityManager {
         || x.IsPressed !== y.IsPressed || x.Live !== y.Live
         || Math.abs(x.Rect.Left - y.Rect.Left) > 0.5 || Math.abs(x.Rect.Top - y.Rect.Top) > 0.5
         || Math.abs(x.Rect.Right - y.Rect.Right) > 0.5 || Math.abs(x.Rect.Bottom - y.Rect.Bottom) > 0.5) return false;
+      const tx = x.TextLines, ty = y.TextLines;
+      if (!!tx !== !!ty) return false;
+      if (tx && ty) {
+        if (tx.length !== ty.length) return false;
+        for (let j = 0; j < tx.length; j++) if (tx[j].Text !== ty[j].Text || Math.abs(tx[j].Left - ty[j].Left) > 0.5 || Math.abs(tx[j].Top - ty[j].Top) > 0.5 || tx[j].FontSize !== ty[j].FontSize) return false;
+      }
     }
     return true;
   }
+}
+
+/** True when any ancestor is hidden (IsVisible false or Opacity 0): the subtree is not drawn, so it gets no nodes. */
+function AccessibilityManagerHiddenByAncestor(control: { Parent?: { IsVisible: boolean; Opacity: number; Parent?: unknown } }): boolean {
+  let p = control.Parent as { IsVisible: boolean; Opacity: number; Parent?: unknown } | undefined;
+  while (p) { if (!p.IsVisible || p.Opacity <= 0) return true; p = p.Parent as typeof p; }
+  return false;
 }

@@ -1,7 +1,7 @@
 import type { Path } from "canvaskit-wasm";
 import { type DrawingContext } from "../core/SkiaControl";
 import { Super } from "../core/Super";
-import { type Color, Colors, CornerRadius, SKRect, type ShapeType, SkiaShadow, type SkiaPoint, type StrokeCap, Thickness } from "../core/Types";
+import { type BevelType, type Color, Colors, CornerRadius, SKRect, type ShapeType, SkiaBevel, type SkiaGradient, SkiaShadow, type SkiaPoint, type StrokeCap, Thickness } from "../core/Types";
 import { SkiaLayout } from "./SkiaLayout";
 
 /**
@@ -20,6 +20,14 @@ export class SkiaShape extends SkiaLayout {
   StrokeWidth = 0;
   StrokeColor: Color = Colors.Gray;
   StrokeCap: StrokeCap = "Round";
+  /** Gradient painted along the stroke instead of StrokeColor (C# StrokeGradient). */
+  StrokeGradient?: SkiaGradient;
+  /** Raised (Bevel) or pressed-in (Emboss) edges, drawn with Bevel after the background (C# BevelType). */
+  BevelType: BevelType = "None";
+  private bevel?: SkiaBevel;
+  /** Edge depth / colors / opacity; plain `{ Depth, LightColor, ShadowColor, Opacity }` literals accepted. */
+  get Bevel(): SkiaBevel | Partial<SkiaBevel> | undefined { return this.bevel; }
+  set Bevel(v: SkiaBevel | Partial<SkiaBevel> | undefined) { this.bevel = v ? SkiaBevel.From(v) : undefined; this.Update(); }
   /** Hollow shape: the background is not filled, only the stroke (and children) are drawn. */
   ClipBackgroundColor = false;
   /** Polygon / Line vertices as ratios (0..1) of the shape rect. */
@@ -175,9 +183,81 @@ export class SkiaShape extends SkiaLayout {
     path.delete();
   }
 
+  /** C# PaintBevelEffect: two stroked edge paths (top/left and bottom/right) in the light / shadow colors. */
+  private PaintBevelEffect(ctx: DrawingContext, rect: SKRect, depth: number): void {
+    const bevel = this.bevel;
+    if (this.BevelType === "None" || !bevel || depth <= 0) return;
+    const CK = Super.CK;
+    const tl = new CK.PathBuilder(), br = new CK.PathBuilder();
+    const half = depth / 2;
+    const type = this.Type;
+    const arc = (b: import("canvaskit-wasm").PathBuilder, l: number, t: number, r: number, bt: number, start: number, sweep: number) => b.addArc(CK.LTRBRect(l, t, r, bt), start, sweep);
+    if (type === "Rectangle") {
+      const c = this.cornerRadius, s = ctx.Scale;
+      const rTL = c.TopLeft * s, rTR = c.TopRight * s, rBR = c.BottomRight * s, rBL = c.BottomLeft * s;
+      if (rTL === 0 && rTR === 0 && rBR === 0 && rBL === 0) {
+        tl.moveTo(rect.Left, rect.Top + half); tl.lineTo(rect.Right, rect.Top + half);
+        tl.moveTo(rect.Left + half, rect.Top); tl.lineTo(rect.Left + half, rect.Bottom);
+        br.moveTo(rect.Left, rect.Bottom - half); br.lineTo(rect.Right, rect.Bottom - half);
+        br.moveTo(rect.Right - half, rect.Top); br.lineTo(rect.Right - half, rect.Bottom);
+      } else {
+        if (rTL > half) arc(tl, rect.Left + half, rect.Top + half, rect.Left + 2 * rTL - half, rect.Top + 2 * rTL - half, 180, 90);
+        tl.moveTo(rect.Left + rTL, rect.Top + half); tl.lineTo(rect.Right - rTR, rect.Top + half);
+        if (rTR > half) arc(tl, rect.Right - 2 * rTR + half, rect.Top + half, rect.Right - half, rect.Top + 2 * rTR - half, 270, 45);
+        if (rBL > half) arc(tl, rect.Left + half, rect.Bottom - 2 * rBL + half, rect.Left + 2 * rBL - half, rect.Bottom - half, 135, 45);
+        tl.moveTo(rect.Left + half, rect.Top + rTL); tl.lineTo(rect.Left + half, rect.Bottom - rBL);
+        if (rTR > half) arc(br, rect.Right - 2 * rTR + half, rect.Top + half, rect.Right - half, rect.Top + 2 * rTR - half, 315, 45);
+        br.moveTo(rect.Right - half, rect.Top + rTR); br.lineTo(rect.Right - half, rect.Bottom - rBR);
+        if (rBR > half) arc(br, rect.Right - 2 * rBR + half, rect.Bottom - 2 * rBR + half, rect.Right - half, rect.Bottom - half, 0, 90);
+        if (rBL > half) arc(br, rect.Left + half, rect.Bottom - 2 * rBL + half, rect.Left + 2 * rBL - half, rect.Bottom - half, 90, 45);
+        br.moveTo(rect.Left + rBL, rect.Bottom - half); br.lineTo(rect.Right - rBR, rect.Bottom - half);
+      }
+    } else if (type === "Circle" || type === "Ellipse") {
+      let l = rect.Left, t = rect.Top, r = rect.Right, b = rect.Bottom;
+      if (type === "Circle") { const d = Math.min(rect.Width, rect.Height), cx = rect.Left + rect.Width / 2, cy = rect.Top + rect.Height / 2; l = cx - d / 2; r = cx + d / 2; t = cy - d / 2; b = cy + d / 2; }
+      arc(tl, l + half, t + half, r - half, b - half, 135, 180);
+      arc(br, l + half, t + half, r - half, b - half, 315, 180);
+    } else if (type === "Path" && this.PathData) {
+      // C# SKPathMeasure: first half of the outline is the light edge, second half the shadow edge
+      const path = this.CreateShapePath(rect, ctx.Scale);
+      const iter = new CK.ContourMeasureIter(path, false, 1);
+      const contour = iter.next();
+      if (contour) {
+        const len = contour.length();
+        const a = contour.getSegment(0, len / 2, true), b = contour.getSegment(len / 2, len, true);
+        tl.addPath(a); br.addPath(b);
+        a.delete(); b.delete(); contour.delete();
+      }
+      iter.delete(); path.delete();
+    } else if (type === "Polygon" && this.Points.length >= 3) {
+      const pts = this.Points, cx = rect.Left + rect.Width / 2, cy = rect.Top + rect.Height / 2;
+      const p = (i: number) => [rect.Left + pts[i].X * rect.Width, rect.Top + pts[i].Y * rect.Height] as const;
+      for (let i = 0; i < pts.length; i++) {
+        const [x1, y1] = p(i), [x2, y2] = p((i + 1) % pts.length);
+        const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+        const light = (mx <= cx && my <= cy) || (mx <= cx && my >= cy) || (mx >= cx && my <= cy);
+        const b = light ? tl : br;
+        b.moveTo(x1, y1); b.lineTo(x2, y2);
+      }
+    }
+    const topLeft = tl.detach(), bottomRight = br.detach();
+    tl.delete(); br.delete();
+    const paint = new CK.Paint();
+    paint.setAntiAlias(true);
+    paint.setStyle(CK.PaintStyle.Stroke);
+    paint.setStrokeWidth(depth);
+    const withAlpha = (c: Color) => { const f = Super.ParseColor(c); return Float32Array.of(f[0], f[1], f[2], bevel.Opacity); };
+    const light = withAlpha(bevel.LightColor), shadow = withAlpha(bevel.ShadowColor);
+    const canvas = ctx.Context.Canvas;
+    paint.setColor(this.BevelType === "Bevel" ? light : shadow); canvas.drawPath(topLeft, paint);
+    paint.setColor(this.BevelType === "Bevel" ? shadow : light); canvas.drawPath(bottomRight, paint);
+    paint.delete(); topLeft.delete(); bottomRight.delete();
+  }
+
   protected override Paint(ctx: DrawingContext): void {
     const CK = Super.CK;
     const canvas = ctx.Context.Canvas;
+    if (this.BevelType !== "None" && this.bevel) this.PaintBevelEffect(ctx, this.StrokeAwareRect(ctx.Destination, ctx.Scale), this.bevel.Depth * ctx.Scale);
     if (this.Views.length > 0) {
       const clip = this.CreateClip();
       const saved = canvas.save();
@@ -194,6 +274,7 @@ export class SkiaShape extends SkiaLayout {
       paint.setStyle(CK.PaintStyle.Stroke);
       paint.setStrokeWidth(Math.max(1, this.StrokePixels(ctx.Scale)));
       paint.setColor(Super.ParseColor(this.StrokeColor));
+      if (this.StrokeGradient) this.SetupGradient(paint, this.StrokeGradient, rect);
       paint.setStrokeCap(this.StrokeCap === "Butt" ? CK.StrokeCap.Butt : this.StrokeCap === "Square" ? CK.StrokeCap.Square : CK.StrokeCap.Round);
       paint.setStrokeJoin(this.StrokeCap === "Round" ? CK.StrokeJoin.Round : CK.StrokeJoin.Miter);
       canvas.drawPath(path, paint);

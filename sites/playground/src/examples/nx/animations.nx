@@ -1,0 +1,88 @@
+// Ported from the DrawnUI React demo's Lottie & GIF page.
+//
+// SkiaLottie (CanvasKit Skottie) and SkiaGif: AnimatedFramesRenderer descendants. Both play on
+// their own — playback is the control's, not authored NX — so every animation here runs as in the
+// original. What is missing is what the original drives from outside: the Start/Stop/Seek/GoToEnd
+// buttons, the SpeedRatio buttons, the IsOn toggle, and the status readouts in the card titles
+// (frame counts, "playing", "Finished"), which need event handlers and component state. The
+// buttons are drawn in their starting state and do nothing.
+
+component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = {
+  <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 />
+    BackgroundColor="#2B3035" HorizontalOptions=Fill>
+    <SkiaStack Padding=<Thickness Left=16 Top=12 Right=16 Bottom=12 /> Spacing=10>
+      <SkiaLabel Text={Title} FontSize=12 TextColor="#6EA8FE" FontAttributes=Bold
+        TextTransform=Uppercase />
+      {Children}
+    </SkiaStack>
+  </SkiaShape>
+}
+
+<SkiaScroll Orientation=Vertical>
+  <SkiaStack Spacing=16 Padding=<Thickness Left=16 Top=16 Right=16 Bottom=16 />
+    HorizontalOptions=Center MaximumWidthRequest=720>
+    <SkiaLabel Text="Lottie & GIF" FontSize=24 TextColor="#FFFFFF" HorizontalOptions=Center />
+
+    <Card Title="SkiaLottie — Source='lottie/shield.json' Repeat={-1} · playing">
+      <SkiaRow Spacing=16>
+        <SkiaLottie Source="lottie/shield.json" WidthRequest=160 HeightRequest=160 Repeat=-1 SpeedRatio=1 />
+        <SkiaStack Spacing=8 VerticalOptions=Center HorizontalOptions=Fill>
+          // The original's buttons call Start(), Stop(), Seek(30) and GoToEnd() on the Lottie.
+          <SkiaWrap Spacing=8>
+            <SkiaButton Text="Start" BackgroundColor="#0D6EFD" FontSize=13 />
+            <SkiaButton Text="Stop" BackgroundColor="#6C757D" FontSize=13 />
+            <SkiaButton Text="Seek(30)" BackgroundColor="#6C757D" FontSize=13 />
+            <SkiaButton Text="GoToEnd" BackgroundColor="#6C757D" FontSize=13 />
+          </SkiaWrap>
+          <SkiaRow Spacing=8>
+            <SkiaLabel Text="SpeedRatio" FontSize=13 TextColor="#ADB5BD" VerticalOptions=Center />
+            <SkiaButton Text="0.5x" BackgroundColor="#495057" FontSize=13 />
+            <SkiaButton Text="1x" BackgroundColor="#533483" FontSize=13 />
+            <SkiaButton Text="2x" BackgroundColor="#495057" FontSize=13 />
+          </SkiaRow>
+          <SkiaLabel FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Fill
+            Text="Skottie renders the vector animation every frame into an ImageDoubleBuffered cache; the animator is the C# RangeAnimator over InPoint..OutPoint." />
+        </SkiaStack>
+      </SkiaRow>
+    </Card>
+
+    <Card Title="ColorTint / Colors — colors replaced in the JSON before parsing (C# ApplyTint)">
+      <SkiaRow Spacing=12>
+        <SkiaLottie Source="lottie/ok.json" WidthRequest=90 HeightRequest=90 Repeat=-1 />
+        <SkiaLottie Source="lottie/ok.json" WidthRequest=90 HeightRequest=90 Repeat=-1 ColorTint="#20C997" />
+        <SkiaLottie Source="lottie/ok.json" WidthRequest=90 HeightRequest=90 Repeat=-1 Colors={ "#D63384" "#FFC107" } />
+        <SkiaLottie Source="lottie/shield.json" WidthRequest=90 HeightRequest=90 Repeat=-1 ColorTint="#0DCAF0" SpeedRatio=0.5 />
+      </SkiaRow>
+    </Card>
+
+    <Card Title="IsOn toggle — AutoPlay={false}, DefaultFrame=0 / DefaultFrameWhenOn=-1 · IsOn=false">
+      <SkiaRow Spacing=16>
+        <SkiaLottie Source="lottie/ok.json" WidthRequest=90 HeightRequest=90 AutoPlay=false
+          DefaultFrame=0 DefaultFrameWhenOn=-1 IsOn=false />
+        // The original flips IsOn from this button; without event handlers the Lottie rests on
+        // frame 0.
+        <SkiaButton Text="IsOn = true" BackgroundColor="#6610F2" VerticalOptions=Center />
+        <SkiaLabel FontSize=12 TextColor="#ADB5BD" VerticalOptions=Center HorizontalOptions=Fill
+          Text="Stopped animations show DefaultFrame, or DefaultFrameWhenOn (-1 = last frame) when IsOn: the C# recipe for animated checkboxes." />
+      </SkiaRow>
+    </Card>
+
+    <Card Title="SkiaGif — Source='images/banana.gif' Aspect=AspectFitFill · playing">
+      <SkiaRow Spacing=16>
+        <SkiaGif Source="images/banana.gif" WidthRequest=140 HeightRequest=140 Repeat=-1 BackgroundColor="#212529" />
+        <SkiaGif Source="images/banana.gif" WidthRequest=70 HeightRequest=140 Repeat=-1 SpeedRatio=2
+          Aspect=AspectCover BackgroundColor="#212529" />
+        <SkiaStack Spacing=8 VerticalOptions=Center HorizontalOptions=Fill>
+          // The original's buttons call Start(), Stop() and Seek(-1) on the GIF.
+          <SkiaWrap Spacing=8>
+            <SkiaButton Text="Start" BackgroundColor="#0D6EFD" FontSize=13 />
+            <SkiaButton Text="Stop" BackgroundColor="#6C757D" FontSize=13 />
+            <SkiaButton Text="Seek(-1)" BackgroundColor="#6C757D" FontSize=13 />
+          </SkiaWrap>
+          <SkiaLabel FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Fill
+            Text="Every frame is decoded once (CanvasKit AnimatedImage); the animator runs over 0..DurationMs and picks the frame by time, like C# GifAnimation." />
+        </SkiaStack>
+      </SkiaRow>
+    </Card>
+  </SkiaStack>
+</SkiaScroll>

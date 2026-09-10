@@ -50,6 +50,9 @@ export class ViewsAdapter {
     for (const [index, view] of moved) this.inUse.set(index, view);
   }
 
+  /** The realized view for an index, if any (no creation). */
+  GetViewForIndex(index: number): SkiaControl | undefined { return this.inUse.get(index); }
+
   /** View bound to items[index]: existing, recycled from the pool, or freshly created. */
   GetOrCreateViewForIndex(index: number): SkiaControl | undefined {
     const existing = this.inUse.get(index);
@@ -78,6 +81,20 @@ export class ViewsAdapter {
   ReleaseOutside(first: number, last: number): void {
     if (this.recycling !== "Enabled") return;
     for (const index of [...this.inUse.keys()]) if (index < first || index > last) this.ReleaseViewAt(index);
+  }
+
+  /** Releases every realized index not in `keep` (non-contiguous sets, e.g. a looped carousel). */
+  ReleaseExcept(keep: ReadonlySet<number>): void {
+    if (this.recycling !== "Enabled") return;
+    for (const index of [...this.inUse.keys()]) if (!keep.has(index)) this.ReleaseViewAt(index);
+  }
+
+  /** Disposes every realized and pooled view (the layout is being disposed). */
+  DisposeAll(): void {
+    for (const v of this.inUse.values()) v.Dispose();
+    for (const v of this.pool) v.Dispose();
+    this.inUse.clear();
+    this.pool.length = 0;
   }
 
   /** Views currently bound, in index order (gesture listeners / drawing). */

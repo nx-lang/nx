@@ -12,7 +12,7 @@ export class SKPoint {
 /** Raw platform action (subset of TouchActionType). */
 export type TouchActionType = "Pressed" | "Moved" | "Released" | "Cancelled" | "Wheel" | "Pointer";
 
-/** Recognized gesture (TouchActionResult). LongPressing/Wheel/Pointer/Touch declared for parity, not produced yet. */
+/** Recognized gesture (TouchActionResult). LongPressing/Pointer/Touch declared for parity, not produced yet. */
 export type TouchActionResult = "Touch" | "Down" | "Up" | "Tapped" | "LongPressing" | "Panning" | "Wheel" | "Pointer";
 
 export type GesturesMode = "Disabled" | "Enabled" | "Lock";
@@ -28,9 +28,25 @@ export class DistanceInfo {
   Velocity = SKPoint.Empty;
 }
 
+/** AppoMobi.Gestures MouseButton: which button pressed / released (DOM button 0..4). */
+export type MouseButton = "Left" | "Middle" | "Right" | "XButton1" | "XButton2" | "Extended";
+export type PointerDeviceType = "Mouse" | "Touch" | "Pen";
+
+/** AppoMobi.Gestures PointerData: the device and button behind a Down / Up / Tapped (every button is delivered). */
+export class PointerData {
+  Button: MouseButton = "Left";
+  /** 1 = Left, 2 = Right, 3 = Middle, 4+ = extended, like AppoMobi.Gestures. */
+  ButtonNumber = 1;
+  DeviceType: PointerDeviceType = "Mouse";
+  /** DOM `buttons` bitmask of the buttons held (1 left, 2 right, 4 middle, 8 back, 16 forward). */
+  PressedButtons = 0;
+}
+
 /** AppoMobi.Gestures TouchActionEventArgs. */
 export class TouchActionEventArgs {
   Id = 0;
+  /** Device and button of this event (mouse, pen, touch); undefined for wheel. */
+  Pointer?: PointerData;
   Type: TouchActionType = "Pressed";
   /** Pixels. */
   Location = SKPoint.Empty;
@@ -96,6 +112,30 @@ export class SkiaGesturesInfo {
 }
 
 /** DrawnUi ControlTappedEventArgs. */
+/** Where a context-menu request came from: right click, long press (Android fires contextmenu), or the keyboard Menu key. */
+export type ContextMenuSource = "mouse" | "touch" | "keyboard";
+
+/**
+ * Arguments of SkiaControl.ContextMenu / Canvas.ContextMenu: a browser `contextmenu` request on the canvas (right
+ * click, long press on touch, the Menu key). Handlers return true to take it: the browser's own menu ("Save image")
+ * is then suppressed; otherwise it shows as usual.
+ */
+export class ContextMenuEventArgs {
+  /** Deepest control under the point that had a ContextMenu handler (set while routing). */
+  Control?: SkiaControl;
+  /** Point inside Control, in pixels relative to its DrawingRect origin (set while routing). */
+  Local: SKPoint = SKPoint.Empty;
+  constructor(
+    /** Point on the canvas, in points (CSS px). */
+    public Location: SKPoint,
+    /** Same point in pixels (canvas space). */
+    public Pixels: SKPoint,
+    public Source: ContextMenuSource,
+    /** The DOM event: modifiers, target, preventDefault if you need it yourself. */
+    public Native: MouseEvent,
+  ) {}
+}
+
 export class ControlTappedEventArgs {
   constructor(
     public Control: SkiaControl,

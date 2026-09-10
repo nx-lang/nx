@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "start": "node server/index.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test \"server/*.test.mjs\" \"src/*.test.mjs\" \"vite.config.test.mjs\" && pnpm run check-examples",
+    "test": "node --test \"server/*.test.mjs\" \"scripts/*.test.mjs\" \"src/*.test.mjs\" \"vite.config.test.mjs\" && pnpm run check-examples",
     "check-examples": "node scripts/check-examples.mjs",
     "sync-drawnui": "node scripts/sync-drawnui.mjs",
     "generate-catalog": "node scripts/generate-catalog.mjs"

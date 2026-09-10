@@ -5,6 +5,7 @@ import editorWorker from "monaco-editor/editor/editor.worker.js?worker";
 import { createHttpLanguageService } from "@nx-lang/language-client";
 import { NX_LANGUAGE_ID, registerNxLanguage } from "@nx-lang/monaco";
 import type { Diagnostic } from "../compile";
+import { SkiaEditor } from "../drawnui/index";
 import { API_ROOT } from "../paths";
 
 // Monaco expects to be told where its workers live; Vite supplies them as module workers.
@@ -42,6 +43,7 @@ export function NxEditor({ value, onChange, diagnostics }: NxEditorProps) {
   useEffect(() => {
     let disposed = false;
     let subscription: monaco.IDisposable | undefined;
+    let focusSubscription: monaco.IDisposable | undefined;
     void registration.ready.then(() => {
       if (disposed || host.current === null) {
         return;
@@ -62,10 +64,21 @@ export function NxEditor({ value, onChange, diagnostics }: NxEditorProps) {
       subscription = instance.onDidChangeModelContent(() => {
         latestChange.current(instance.getValue());
       });
+      // A focused drawn editor (SkiaEditor, in the output pane) takes every keystroke at window
+      // level, and DrawnUI lets go of it only when an INPUT, TEXTAREA or contenteditable takes DOM
+      // focus. Monaco edits through an EditContext host, which is none of those, so typing into
+      // the source pane would land in the drawn editor instead. Monaco taking focus is the signal
+      // that the drawn editor should give it up. See FINDINGS.md F23.
+      focusSubscription = instance.onDidFocusEditorText(() => {
+        if (SkiaEditor.Focused !== undefined) {
+          SkiaEditor.Focused.IsFocused = false;
+        }
+      });
     });
     return () => {
       disposed = true;
       subscription?.dispose();
+      focusSubscription?.dispose();
       const model = editor.current?.getModel();
       editor.current?.dispose();
       model?.dispose();
