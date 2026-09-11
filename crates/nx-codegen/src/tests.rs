@@ -2936,3 +2936,17 @@ let root() = <User.Update email={null} />
 
     assert_json_values_eq(&output, r#"{ "$type": "User.Update", "email": null }"#);
 }
+
+#[test]
+fn generated_javascript_constructs_a_component_update_record_from_its_state() {
+    let Some(output) = execute_generated_javascript_root(
+        r#"
+component <Counter /> = { state { count:int = 0 label:string = "x" } <Label /> }
+let root() = <Counter.Update count=1 />
+"#,
+    ) else {
+        return;
+    };
+
+    assert_json_values_eq(&output, r#"{ "$type": "Counter.Update", "count": 1 }"#);
+}

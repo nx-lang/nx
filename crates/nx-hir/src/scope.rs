@@ -328,26 +328,24 @@ impl<'a> UndefinedIdentifierChecker<'a> {
                 }
                 Item::Component(component) => {
                     let scope = self.scope_manager.create_child(self.scope_manager.root());
-                    let props = crate::effective_component_contract_for_name(
-                        self.module,
-                        &component.name,
-                    )
-                    .ok()
-                    .flatten()
-                    .map(|contract| {
-                        contract
-                            .props
-                            .into_iter()
-                            .map(|field| (field.name, field.span))
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_else(|| {
-                        component
-                            .props
-                            .iter()
-                            .map(|field| (field.name.clone(), field.span))
-                            .collect::<Vec<_>>()
-                    });
+                    let props =
+                        crate::effective_component_contract_for_name(self.module, &component.name)
+                            .ok()
+                            .flatten()
+                            .map(|contract| {
+                                contract
+                                    .props
+                                    .into_iter()
+                                    .map(|field| (field.name, field.span))
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_else(|| {
+                                component
+                                    .props
+                                    .iter()
+                                    .map(|field| (field.name.clone(), field.span))
+                                    .collect::<Vec<_>>()
+                            });
 
                     // A default is built where the field it defaults is materialized: the props in
                     // order, then the state. So a default sees the fields before it and nothing

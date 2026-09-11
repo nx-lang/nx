@@ -1,57 +1,18 @@
 # Follow-ups from `add-update-actions`
 
 Work identified while reviewing and fixing the `add-update-actions` change that was deliberately
-left for later. Item 1 patches a known gap; item 2 is the design proposal for where update records
-and host representations should go next; the rest are smaller options and loose ends.
+left for later. Item 1 is the design proposal for where update records and host representations
+should go next; the rest are smaller options and loose ends. Resolving inherited companion field
+types in the module that wrote them, and the test gaps the review left open, landed in
+`resolve-inherited-companion-field-types`.
 
-## 1. Resolve inherited companion field types in the module that wrote them
-
-**Gap.** A `<T>_update` companion copies its target's effective fields, inherited ones included,
-because a patch of `User` is not a patch of its base and so the companion extends nothing in either
-target language. A copied field's type was written in the base's module. When that base lives in
-another library and the importing module does not itself import the field's type, typegen writes
-the bare name on the companion and neither emitter can resolve it:
-
-```nx
-// named/Named.nx
-export type Tag = a | b
-export abstract type Named = { name:string tag:Tag }
-
-// types.nx
-import { Named } from "./named"
-export type User extends Named = { email:string }
-// User_update gets `tag?: Tag`, and `Tag` is not in scope here.
-```
-
-Plain records never hit this: `User extends NamedBase` in TypeScript and `User : Named` in C#
-inherit the field, and the base's own generated file resolves `Tag`.
-
-**Today.** Generation warns, naming the companion, the field, the type, and the import that would
-fix it (`warn_about_unresolvable_inherited_fields` in `crates/nx-cli/src/typegen/model.rs`). The
-generated file still carries the bare name.
-
-**To do.** Resolve the copied field's type in the namespace of the module that declared the field,
-and emit a reference to that library's generated declaration: a package import with a local alias
-in TypeScript, `global::<Dependency.Namespace>.Tag` in C#. Both emitters already do this for types
-the module imports explicitly, so the work is in the model:
-
-- Carry the declaring module on `ExportedRecordField`, which `nx_hir::EffectiveField.module_identity`
-  already provides.
-- Map that module identity back to the library root and name the emitters use for dependency
-  packages and namespaces.
-- Resolve the type name through that library's namespace, since it may be a library-local alias,
-  and emit the exported name; a type the library does not export cannot be generated and should
-  keep the warning.
-- Add a cli-code-generation scenario: a companion field typed by a dependency's exported type
-  references that type's generated declaration without the importing module naming it.
-
-## 2. Proposal: first-class properties, and update records as property maps
+## 1. Proposal: first-class properties, and update records as property maps
 
 This is the design direction the review discussion settled on. It keeps the `T.Update` type, the
 element-shaped construction syntax, and the wire format exactly as they are today, and changes what
 sits underneath them in the language, the runtime, and the generated host code.
 
-### 2.1 What an update already is
+### 1.1 What an update already is
 
 An update record is the same value seen from two sides:
 
@@ -65,7 +26,7 @@ An update record is the same value seen from two sides:
 What the record-shaped view gives is per-field typing at construction. What the map view gives is
 genericity: iterate the changed keys, apply, merge, diff. NX has the first and none of the second.
 
-### 2.2 Language: a first-class property reference
+### 1.2 Language: a first-class property reference
 
 Add a typed property reference, in the sense of Swift's `KeyPath<Root, Value>` and Kotlin's
 `KProperty1<T, V>`: a value that names one property of a record type and carries that property's
@@ -94,14 +55,14 @@ Two constraints to hold:
   is a different and much larger design. A property reference makes that extension possible later
   without forcing it now.
 
-### 2.3 Runtime
+### 1.3 Runtime
 
 No change to `Value::Record` or the encoding. The property reference is a new `Value` variant
 carrying the record type, the field name, and the field's declared type; `apply`, `merge`, and
 `diff` operate on the map that update records already are. The absent-versus-null rule is enforced
 where it is today, at construction and at patch application.
 
-### 2.4 Generated C#: a map with typed accessors
+### 1.4 Generated C#: a map with typed accessors
 
 Today the generated `<T>_update` class stores one `NxOptional<T>` per field and needs the
 `NxOptional<T>` JSON converter, the `NxOptional<T>` MessagePack formatter, a per-property
@@ -156,7 +117,7 @@ What it gives hosts: iterate changed fields, `IsSet`, `Unset`, merge, build an u
 dirty fields, apply by name. This is the OData `Delta<T>` model with typed accessors. The public
 property surface is unchanged, so `new User_update { Email = null }` still works.
 
-Then make the schema entry a property reference, matching 2.2:
+Then make the schema entry a property reference, matching 1.2:
 
 ```csharp
 public static class UserFields
@@ -173,9 +134,9 @@ With a generated getter and setter delegate on `NxProperty<TRecord, TValue>`, `A
 and `Diff(before, after)` become base-class methods, and `User_update` is little more than
 `NxUpdate<User>` plus named accessors. Composing `FieldTypes` from a dependency's companion schema
 (`NxSchema.Merge(Named_update.Schema, OwnSchema)`) also makes an imported base's fields reachable
-through their keys even where item 1 has not yet generated an accessor for them.
+through their keys.
 
-### 2.5 Generated TypeScript
+### 1.5 Generated TypeScript
 
 The runtime value is already a plain object holding only present keys, and `User_update` with
 optional properties is already the typed map at the type level, so TypeScript needs no storage
@@ -183,7 +144,7 @@ change. For symmetry with C# and with the NX property feature, generate the prop
 (`UserFields.name: NxProperty<User, string>`) and ship `apply`, `merge`, and `diff` helpers typed by
 them in the runtime package.
 
-### 2.6 What does not change, and sequencing
+### 1.6 What does not change, and sequencing
 
 The `T.Update` type, the absent-versus-null rule, the `$type` discriminator, the JSON and
 MessagePack encodings, the `NxOptional<T>` accessor type on generated C#, and the dotnet-binding
@@ -195,15 +156,7 @@ spec all stay as they are. Suggested order:
 3. Design the NX-side property reference and the built-ins, with the host shapes from steps 1 and
    2 as the target for typegen.
 
-## 3. Compose TypeScript companions instead of flattening
-
-`export interface User_update extends Omit<Named_update, "$type">` lets the TypeScript compiler
-pull inherited fields from the base's generated companion, which removes typegen's need to know
-them and sidesteps item 1 for TypeScript. It generates less and reads well. Not adopted yet because
-C# has no equivalent without class inheritance, and the two emitters should agree on where
-inherited fields come from.
-
-## 4. Synthesize `T.Update` on demand
+## 2. Synthesize `T.Update` on demand
 
 Lowering synthesizes an `Item::Record` named `<Name>.Update` for every record, action, inline
 emit, and component with state, appended at the end of every module. NX IR emits only the ones a
@@ -218,14 +171,7 @@ from the imported `X` instead of needing the library to export it. Worth doing o
 bloat shows up in the performance tests or the language service; the eager form is simpler to
 reason about.
 
-## 5. Test gaps left open
-
-- A checker test for `T.Update` including fields inherited across modules needs a multi-module
-  session fixture; typegen now covers the cross-library case, the checker does not.
-- The nx-codegen test asserting the canonical `Counter.Update` value skips when `node` is absent,
-  like every other generated-JavaScript test. That pattern predates this change.
-
-## 6. Host record construction runs outside the call's resource limits
+## 3. Host record construction runs outside the call's resource limits
 
 `construct_host_record_value` in `crates/nx-interpreter/src/interpreter.rs` rebuilds every
 host-supplied record from its fields, and evaluates any default a nested plain record needs in a
@@ -235,7 +181,7 @@ initialization, evaluation, or dispatch do not bound default evaluation for reco
 input. Thread the call's context (or at least its limits) into the host construction path once
 those defaults can do real work; today they are literal or near-literal.
 
-## 7. Union case payloads from the host reach the case builder by name only
+## 4. Union case payloads from the host reach the case builder by name only
 
 The same path builds a host-supplied payload union case (`{ $type: "Shape.Circle", r: 1 }`) through
 `resolve_union_case_definition`, which resolves the union by name from the field's owner module. A
@@ -243,3 +189,22 @@ case the owner module cannot name by that spelling (a library-local alias, or an
 knows but the module does not) is kept as supplied rather than checked. Plain records go through
 `resolve_record_definition` with the same limit. Resolving by declaring origin, as
 `eval_resolved_union_case` does for authored cases, would close it; no scenario needs it yet.
+
+## 5. Generated-JavaScript tests pass vacuously without `node`
+
+Every test in `crates/nx-codegen/src/tests.rs` that executes generated JavaScript returns early
+when `node` is absent, `generated_javascript_constructs_a_component_update_record_from_its_state`
+included. The pattern predates `add-update-actions`; a CI check that `node` is on the path would
+keep the whole family from passing vacuously.
+
+## 6. A transitive origin generates a reference to a library the package does not depend on
+
+`resolve-inherited-companion-field-types` resolves an inherited companion field's type in the
+module that wrote it, so when `people` imports `Named` from `named`, and `named` typed the field by
+`Tag` from `tags`, the generated `people` output carries `import type { Tag } from "tags"` and
+`global::<Tags.Namespace>.Tag`. That is what an explicit import would produce, but `people` has no
+declared dependency on `tags`, and for npm and NuGet a direct reference needs a direct dependency.
+The existing "assumed package" warning says the package *name* may be wrong, not that the edge is
+undeclared. Either the generated package manifest and project references need the transitive
+origin added, or the warning should say the origin library is not a direct dependency when that is
+the case.

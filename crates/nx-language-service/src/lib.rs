@@ -1371,7 +1371,10 @@ impl WorkspaceDeclarations {
 
         let mut properties = own;
         for property in base_properties {
-            if !properties.iter().any(|existing| existing.name == property.name) {
+            if !properties
+                .iter()
+                .any(|existing| existing.name == property.name)
+            {
                 properties.push(property);
             }
         }
@@ -1418,7 +1421,12 @@ impl WorkspaceDeclarations {
             module
                 .prepared_bindings
                 .iter()
-                .map(|binding| (binding.visible_name.as_str().to_string(), origin_of(binding)))
+                .map(|binding| {
+                    (
+                        binding.visible_name.as_str().to_string(),
+                        origin_of(binding),
+                    )
+                })
                 .collect(),
         );
 
@@ -1428,7 +1436,12 @@ impl WorkspaceDeclarations {
                 .prepared_bindings
                 .iter()
                 .filter(|binding| binding.namespace == PreparedNamespace::Type)
-                .map(|binding| (binding.visible_name.as_str().to_string(), origin_of(binding)))
+                .map(|binding| {
+                    (
+                        binding.visible_name.as_str().to_string(),
+                        origin_of(binding),
+                    )
+                })
                 .collect(),
         );
 
@@ -1943,7 +1956,9 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
                     function
                         .params
                         .iter()
-                        .map(|param| property_declaration(param.name.as_str(), &param.ty, &origin.0))
+                        .map(|param| {
+                            property_declaration(param.name.as_str(), &param.ty, &origin.0)
+                        })
                         .collect()
                 } else {
                     Vec::new()
@@ -1987,10 +2002,15 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
             properties: component
                 .props
                 .iter()
-                .map(|property| property_declaration(property.name.as_str(), &property.ty, &origin.0))
+                .map(|property| {
+                    property_declaration(property.name.as_str(), &property.ty, &origin.0)
+                })
                 .collect(),
             own_properties: component.props.len(),
-            base: component.base.as_ref().map(|base| base.as_str().to_string()),
+            base: component
+                .base
+                .as_ref()
+                .map(|base| base.as_str().to_string()),
             inherited_from: Vec::new(),
             members: Vec::new(),
             origin: origin.clone(),
@@ -2039,7 +2059,9 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
             properties: record
                 .properties
                 .iter()
-                .map(|property| property_declaration(property.name.as_str(), &property.ty, &origin.0))
+                .map(|property| {
+                    property_declaration(property.name.as_str(), &property.ty, &origin.0)
+                })
                 .collect(),
             own_properties: record.properties.len(),
             base: record.base.as_ref().map(|base| base.as_str().to_string()),
@@ -2988,8 +3010,8 @@ component <SearchBox placeholder:string /> = {
     /// A single-document snapshot whose build context sees [`ui_library`].
     fn snapshot_with_library(source: &str) -> (TempDir, WorkspaceSnapshot) {
         let (temp, registry) = ui_library();
-        let snapshot =
-            snapshot_for("nx://tenant/form.nx", source, 1).with_build_context(registry.build_context());
+        let snapshot = snapshot_for("nx://tenant/form.nx", source, 1)
+            .with_build_context(registry.build_context());
         (temp, snapshot)
     }
 
@@ -2999,8 +3021,10 @@ component <SearchBox placeholder:string /> = {
     /// Spec: "Hover resolves a library component".
     #[test]
     fn hover_resolves_a_library_component_through_the_build_context() {
-        let (source, position) =
-            position_for(&format!("{IMPORT_UI}<But⟨cursor⟩ton label=\"go\" />\n"), CURSOR);
+        let (source, position) = position_for(
+            &format!("{IMPORT_UI}<But⟨cursor⟩ton label=\"go\" />\n"),
+            CURSOR,
+        );
         let (_temp, snapshot) = snapshot_with_library(&source);
 
         let hover = snapshot
@@ -3008,7 +3032,11 @@ component <SearchBox placeholder:string /> = {
             .expect("hover")
             .expect("hover content");
 
-        assert!(hover.contents.contains("<Button"), "got: {}", hover.contents);
+        assert!(
+            hover.contents.contains("<Button"),
+            "got: {}",
+            hover.contents
+        );
         assert!(hover.contents.contains("label"), "got: {}", hover.contents);
         assert!(hover.contents.contains("string"), "got: {}", hover.contents);
         assert!(hover.contents.contains("size"), "got: {}", hover.contents);
@@ -3029,8 +3057,10 @@ component <SearchBox placeholder:string /> = {
     /// Spec: "Completions offer library declarations" — the properties, and their values.
     #[test]
     fn completions_offer_a_library_components_properties_and_member_values() {
-        let (source, position) =
-            position_for(&format!("{IMPORT_UI}<Button label=\"go\" ⟨cursor⟩/>\n"), CURSOR);
+        let (source, position) = position_for(
+            &format!("{IMPORT_UI}<Button label=\"go\" ⟨cursor⟩/>\n"),
+            CURSOR,
+        );
         let (_temp, snapshot) = snapshot_with_library(&source);
         let labels = completion_labels(&snapshot, FORM_URI, position);
         assert!(labels.contains(&"size".to_string()), "got: {labels:?}");
@@ -3075,8 +3105,10 @@ component <SearchBox placeholder:string /> = {
     /// Spec: "Snapshot without a context sees no libraries".
     #[test]
     fn a_snapshot_without_a_context_treats_library_names_as_unresolved() {
-        let (source, position) =
-            position_for(&format!("{IMPORT_UI}<But⟨cursor⟩ton label=\"go\" />\n"), CURSOR);
+        let (source, position) = position_for(
+            &format!("{IMPORT_UI}<But⟨cursor⟩ton label=\"go\" />\n"),
+            CURSOR,
+        );
         let snapshot = snapshot_for(FORM_URI, &source, 1);
 
         let messages = diagnostic_messages(&snapshot);
@@ -3090,7 +3122,9 @@ component <SearchBox placeholder:string /> = {
             .hover(&DocumentUri::from(FORM_URI), position)
             .expect("hover");
         assert!(
-            hover.as_ref().is_none_or(|hover| !hover.contents.contains("label")),
+            hover
+                .as_ref()
+                .is_none_or(|hover| !hover.contents.contains("label")),
             "got: {hover:?}"
         );
         let labels = completion_labels(&snapshot, FORM_URI, TextPosition::new(1, 1));
@@ -3104,7 +3138,12 @@ component <SearchBox placeholder:string /> = {
             .into_iter()
             .flat_map(|document| document.diagnostics)
             .map(|diagnostic| diagnostic.message)
-            .chain(report.workspace.into_iter().map(|diagnostic| diagnostic.message))
+            .chain(
+                report
+                    .workspace
+                    .into_iter()
+                    .map(|diagnostic| diagnostic.message),
+            )
             .collect()
     }
 
@@ -3196,7 +3235,10 @@ component <SearchBox placeholder:string /> = {
     #[test]
     fn member_completions_resolve_an_inherited_property_type_in_the_base_module() {
         let snapshot = snapshot_of(&[
-            ("nx://tenant/form.nx", &format!("{USES_LABEL}<Label mode= />\n")),
+            (
+                "nx://tenant/form.nx",
+                &format!("{USES_LABEL}<Label mode= />\n"),
+            ),
             CONTROLS,
             LABELS,
         ]);
@@ -3217,10 +3259,26 @@ component <SearchBox placeholder:string /> = {
         .expect("hover content");
 
         assert!(hover.contents.contains("<Label"), "got: {}", hover.contents);
-        assert!(hover.contents.contains("text:string"), "got: {}", hover.contents);
-        assert!(hover.contents.contains("Inherited from `Control`"), "got: {}", hover.contents);
-        assert!(hover.contents.contains("mode:Mode?"), "got: {}", hover.contents);
-        assert!(hover.contents.contains("margin:int?"), "got: {}", hover.contents);
+        assert!(
+            hover.contents.contains("text:string"),
+            "got: {}",
+            hover.contents
+        );
+        assert!(
+            hover.contents.contains("Inherited from `Control`"),
+            "got: {}",
+            hover.contents
+        );
+        assert!(
+            hover.contents.contains("mode:Mode?"),
+            "got: {}",
+            hover.contents
+        );
+        assert!(
+            hover.contents.contains("margin:int?"),
+            "got: {}",
+            hover.contents
+        );
     }
 
     #[test]

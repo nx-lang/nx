@@ -2,6 +2,8 @@ mod editorconfig;
 mod languages;
 mod model;
 pub mod options;
+#[cfg(test)]
+mod test_support;
 mod writer;
 
 use crate::typegen::options::FormatOptions;
@@ -147,6 +149,7 @@ fn collect_language_warnings(
 
 #[cfg(test)]
 mod tests {
+    use super::test_support::write_library;
     use super::*;
     use nx_api::build_library_artifact_from_directory;
     use std::fs;
@@ -2468,20 +2471,26 @@ export type QuestionFlowInitialExperience = {
             TargetLanguage::CSharp,
         );
 
-        let (_, counter) = output
-            .split_once("public sealed class Counter_update")
-            .expect("Counter_update companion");
-        let counter = counter.split("public sealed class").next().expect("companion body");
-        assert!(counter.contains("public string NxType => \"Counter.Update\";"), "{counter}");
-        assert!(counter.contains("public NxOptional<long> Count { get; set; }"), "{counter}");
+        let counter = csharp_companion_body(&output, "Counter_update");
+        assert!(
+            counter.contains("public string NxType => \"Counter.Update\";"),
+            "{counter}"
+        );
+        assert!(
+            counter.contains("public NxOptional<long> Count { get; set; }"),
+            "{counter}"
+        );
         assert!(!counter.contains("Step"), "{counter}");
 
-        let (_, saved) = output
-            .split_once("public sealed class Saved_update")
-            .expect("Saved_update companion");
-        let saved = saved.split("public sealed class").next().expect("companion body");
-        assert!(saved.contains("public string NxType => \"Saved.Update\";"), "{saved}");
-        assert!(saved.contains("public NxOptional<string> Note { get; set; }"), "{saved}");
+        let saved = csharp_companion_body(&output, "Saved_update");
+        assert!(
+            saved.contains("public string NxType => \"Saved.Update\";"),
+            "{saved}"
+        );
+        assert!(
+            saved.contains("public NxOptional<string> Note { get; set; }"),
+            "{saved}"
+        );
 
         let (_, update) = output
             .split_once(
@@ -2540,12 +2549,15 @@ export type QuestionFlowInitialExperience = {
             TargetLanguage::CSharp,
         );
 
-        let (_, form) = output
-            .split_once("public sealed class Form")
-            .expect("Form record");
-        let form = form.split("public sealed class").next().expect("record body");
-        assert!(form.contains("public User_update? Pending { get; set; }"), "{form}");
-        assert!(form.contains("public User_update[] Drafts { get; set; }"), "{form}");
+        let form = csharp_companion_body(&output, "Form");
+        assert!(
+            form.contains("public User_update? Pending { get; set; }"),
+            "{form}"
+        );
+        assert!(
+            form.contains("public User_update[] Drafts { get; set; }"),
+            "{form}"
+        );
         assert!(!output.contains("User.Update?"), "{output}");
     }
 
@@ -2593,57 +2605,476 @@ export type User extends Named = { email:string }
         );
     }
 
-    /// A copied field's type was written in the base's module; when this module cannot name it,
-    /// the generated companion cannot either, and generation says so instead of miscompiling
-    /// silently.
-    #[test]
-    fn update_companion_warns_when_an_inherited_field_type_is_not_imported() {
-        let temp_dir = TempDir::new().expect("temp dir");
-        let named_dir = temp_dir.path().join("named");
-        fs::create_dir_all(&named_dir).expect("named dir");
-        fs::write(
-            named_dir.join("Named.nx"),
-            "export type Tag = a | b\nexport abstract type Named = { name:string tag:Tag }",
-        )
-        .expect("named file");
-        let source_path = temp_dir.path().join("types.nx");
-        let opts = GenerateTypesOptions {
-            language: TargetLanguage::TypeScript,
-            csharp_namespace: None,
+    fn library_options(language: TargetLanguage) -> GenerateTypesOptions {
+        GenerateTypesOptions {
+            language,
+            csharp_namespace: Some("Test.People".to_string()),
             typescript_package_prefix: None,
-            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
-        };
+            format: options::FormatOptions::defaults_for(language),
+        }
+    }
 
-        let selective = r#"import { Named } from "./named"
+    fn generated_file(output: &GeneratedOutput<Vec<GeneratedFile>>, name: &str) -> String {
+        output
+            .value
+            .iter()
+            .find(|file| file.relative_path == Path::new(name))
+            .unwrap_or_else(|| panic!("{name} among {:?}", output.value))
+            .content
+            .clone()
+    }
 
-export type User extends Named = { email:string }
-"#;
-        fs::write(&source_path, selective).expect("source file");
-        let generated = generate_types_with_warnings(selective, &source_path, &opts).unwrap();
-        assert!(
-            generated.warnings.iter().any(|warning| {
-                warning.contains("'User_update' inherits field 'tag' typed 'Tag'")
-                    && warning.contains("does not import 'Tag'")
-            }),
-            "{:?}",
-            generated.warnings
+    fn csharp_companion_body(content: &str, companion: &str) -> String {
+        let (_, body) = content
+            .split_once(&format!("public sealed class {companion}"))
+            .unwrap_or_else(|| panic!("{companion} companion in {content}"));
+        body.split("public sealed class")
+            .next()
+            .expect("body")
+            .to_string()
+    }
+
+    /// A copied field's type was written in the base's module and resolves there, so the
+    /// companion references the dependency's declaration whether or not this module imports it.
+    #[test]
+    fn update_companion_resolves_an_inherited_field_type_the_module_does_not_import() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let people_dir = temp_dir.path().join("people");
+        write_library(
+            &temp_dir.path().join("named"),
+            &[(
+                "Named.nx",
+                "export type Tag = a | b\nexport abstract type Named = { name:string tag:Tag }",
+            )],
         );
-
-        let wildcard = r#"import "./named"
+        write_library(
+            &people_dir,
+            &[(
+                "User.nx",
+                r#"import { Named } from "../named"
 
 export type User extends Named = { email:string }
-"#;
-        fs::write(&source_path, wildcard).expect("source file");
-        let generated = generate_types_with_warnings(wildcard, &source_path, &opts).unwrap();
+"#,
+            )],
+        );
+        let artifact = build_library_artifact_from_directory(&people_dir).expect("library build");
+
+        let typescript = generate_library_types_with_warnings(
+            &artifact,
+            &library_options(TargetLanguage::TypeScript),
+        )
+        .unwrap();
+        let user = generated_file(&typescript, "User.ts");
         assert!(
-            !generated
+            user.contains("import type { Tag } from \"named\";"),
+            "{user}"
+        );
+        assert!(user.contains("tag?: Tag;"), "{user}");
+        assert!(
+            !typescript
                 .warnings
                 .iter()
                 .any(|warning| warning.contains("User_update")),
             "{:?}",
-            generated.warnings
+            typescript.warnings
         );
-        assert!(generated.value.contains("tag?: Tag;"), "{}", generated.value);
+
+        let csharp = generate_library_types_with_warnings(
+            &artifact,
+            &library_options(TargetLanguage::CSharp),
+        )
+        .unwrap();
+        let user_update =
+            csharp_companion_body(&generated_file(&csharp, "User.g.cs"), "User_update");
+        assert!(
+            user_update.contains("public NxOptional<global::Test.Named.Tag> Tag { get; set; }"),
+            "{user_update}"
+        );
+        assert!(
+            !csharp
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("User_update")),
+            "{:?}",
+            csharp.warnings
+        );
+    }
+
+    fn source_options(language: TargetLanguage) -> GenerateTypesOptions {
+        GenerateTypesOptions {
+            language,
+            csharp_namespace: Some("Test.People".to_string()),
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(language),
+        }
+    }
+
+    /// The same resolution serves a single source file, and a wildcard import that already brought
+    /// the type in is reused rather than imported a second time. Single-file TypeScript output
+    /// carries no import lines at all, so there the visible name on the field is the whole story.
+    #[test]
+    fn source_update_companion_resolves_an_inherited_field_type_through_either_import_form() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        write_library(
+            &temp_dir.path().join("named"),
+            &[(
+                "Named.nx",
+                "export type Tag = a | b\nexport abstract type Named = { name:string tag:Tag }",
+            )],
+        );
+        let source_path = temp_dir.path().join("people.nx");
+
+        for import in ["import { Named } from \"./named\"", "import \"./named\""] {
+            let source =
+                format!("{import}\n\nexport type User extends Named = {{ email:string }}\n");
+            fs::write(&source_path, &source).expect("source file");
+
+            let typescript = generate_types_with_warnings(
+                &source,
+                &source_path,
+                &source_options(TargetLanguage::TypeScript),
+            )
+            .unwrap();
+            assert!(
+                typescript.value.contains("tag?: Tag;"),
+                "{import}: {}",
+                typescript.value
+            );
+            assert!(
+                !typescript.value.contains("named_Tag"),
+                "{import}: a reused wildcard import keeps its bare visible name: {}",
+                typescript.value
+            );
+            assert!(
+                !typescript
+                    .warnings
+                    .iter()
+                    .any(|warning| warning.contains("User_update")),
+                "{import}: {:?}",
+                typescript.warnings
+            );
+
+            let csharp = generate_types_with_warnings(
+                &source,
+                &source_path,
+                &source_options(TargetLanguage::CSharp),
+            )
+            .unwrap();
+            let user_update = csharp_companion_body(&csharp.value, "User_update");
+            assert!(
+                user_update.contains("public NxOptional<global::Test.Named.Tag> Tag { get; set; }"),
+                "{import}: {user_update}"
+            );
+            assert!(
+                !csharp
+                    .warnings
+                    .iter()
+                    .any(|warning| warning.contains("User_update")),
+                "{import}: {:?}",
+                csharp.warnings
+            );
+        }
+    }
+
+    /// A field typed by a peer of the generating library needs no imported type: the graph
+    /// declares the peer, and each emitter's own cross-module linkage reaches it.
+    #[test]
+    fn library_update_companion_resolves_an_inherited_field_type_declared_by_a_peer() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let ui_dir = temp_dir.path().join("ui");
+        write_library(
+            &ui_dir,
+            &[
+                ("tag.nx", "export type Tag = a | b"),
+                (
+                    "named.nx",
+                    "export abstract type Named = { name:string tag:Tag }",
+                ),
+                (
+                    "user.nx",
+                    "export type User extends Named = { email:string }",
+                ),
+            ],
+        );
+        let artifact = build_library_artifact_from_directory(&ui_dir).expect("library build");
+
+        let typescript = generate_library_types_with_warnings(
+            &artifact,
+            &library_options(TargetLanguage::TypeScript),
+        )
+        .unwrap();
+        let user = generated_file(&typescript, "user.ts");
+        assert!(
+            user.contains("import type { Tag } from \"./tag\";"),
+            "{user}"
+        );
+        assert!(user.contains("tag?: Tag;"), "{user}");
+        assert!(typescript.warnings.is_empty(), "{:?}", typescript.warnings);
+
+        let csharp = generate_library_types_with_warnings(
+            &artifact,
+            &library_options(TargetLanguage::CSharp),
+        )
+        .unwrap();
+        let user_update =
+            csharp_companion_body(&generated_file(&csharp, "user.g.cs"), "User_update");
+        assert!(
+            user_update.contains("public NxOptional<Tag> Tag { get; set; }"),
+            "a peer in the same namespace needs no qualification: {user_update}"
+        );
+        assert!(csharp.warnings.is_empty(), "{:?}", csharp.warnings);
+    }
+
+    /// When the generating module declares the dependency's exported name itself, the synthesized
+    /// import takes a qualified visible name, which each emitter sanitizes as it does for an
+    /// explicit qualified import.
+    #[test]
+    fn update_companion_qualifies_a_resolved_import_that_collides_with_a_local_declaration() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        write_library(
+            &temp_dir.path().join("named"),
+            &[(
+                "Named.nx",
+                "export type Tag = a | b\nexport abstract type Named = { name:string tag:Tag }",
+            )],
+        );
+        let source_path = temp_dir.path().join("people.nx");
+        let source = r#"import { Named } from "./named"
+
+export type Tag = { label:string }
+export type User extends Named = { email:string own:Tag }
+"#;
+        fs::write(&source_path, source).expect("source file");
+
+        let typescript = generate_types_with_warnings(
+            source,
+            &source_path,
+            &source_options(TargetLanguage::TypeScript),
+        )
+        .unwrap();
+        assert!(
+            typescript.value.contains("tag?: named_Tag;"),
+            "{}",
+            typescript.value
+        );
+        assert!(
+            typescript.value.contains("own?: Tag;"),
+            "{}",
+            typescript.value
+        );
+        assert!(typescript.warnings.is_empty(), "{:?}", typescript.warnings);
+
+        let csharp = generate_types_with_warnings(
+            source,
+            &source_path,
+            &source_options(TargetLanguage::CSharp),
+        )
+        .unwrap();
+        let user_update = csharp_companion_body(&csharp.value, "User_update");
+        assert!(
+            user_update.contains("public NxOptional<global::Test.Named.Tag> Tag { get; set; }"),
+            "{user_update}"
+        );
+        assert!(
+            user_update.contains("public NxOptional<Tag> Own { get; set; }"),
+            "{user_update}"
+        );
+    }
+
+    /// An explicit import wins over a peer declaration of the same name in both emitters, so a
+    /// bare peer name would silently mean the import; generation warns instead.
+    #[test]
+    fn library_update_companion_warns_when_an_import_shadows_the_peer_an_inherited_field_names() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let ui_dir = temp_dir.path().join("ui");
+        write_library(
+            &temp_dir.path().join("other"),
+            &[("Tag.nx", "export type Tag = { label:string }")],
+        );
+        write_library(
+            &ui_dir,
+            &[
+                ("tag.nx", "export type Tag = a | b"),
+                (
+                    "named.nx",
+                    "export abstract type Named = { name:string tag:Tag }",
+                ),
+                (
+                    "user.nx",
+                    r#"import { Tag } from "../other"
+
+export type User extends Named = { email:string other:Tag }
+"#,
+                ),
+            ],
+        );
+        let artifact = build_library_artifact_from_directory(&ui_dir).expect("library build");
+
+        for language in [TargetLanguage::TypeScript, TargetLanguage::CSharp] {
+            let output =
+                generate_library_types_with_warnings(&artifact, &library_options(language))
+                    .unwrap();
+            assert!(
+                output.warnings.iter().any(|warning| {
+                    warning.contains("'User_update' inherits field 'tag' typed 'Tag'")
+                        && warning.contains("the import of 'Tag' from 'other' shadows")
+                        && warning.contains("under a qualifier")
+                }),
+                "{language:?}: {:?}",
+                output.warnings
+            );
+            match language {
+                TargetLanguage::TypeScript => {
+                    let user = generated_file(&output, "user.ts");
+                    assert!(user.contains("tag?: Tag;"), "{user}");
+                }
+                TargetLanguage::CSharp => {
+                    let user_update =
+                        csharp_companion_body(&generated_file(&output, "user.g.cs"), "User_update");
+                    assert!(
+                        user_update.contains("public NxOptional<Tag> Tag { get; set; }"),
+                        "{user_update}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The declaring module's alias is its own business: the companion references the origin the
+    /// alias reached, under the origin's exported name.
+    #[test]
+    fn update_companion_resolves_an_inherited_field_type_through_the_declaring_module_alias() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let people_dir = temp_dir.path().join("people");
+        write_library(
+            &temp_dir.path().join("tags"),
+            &[("Tag.nx", "export type Tag = a | b")],
+        );
+        write_library(
+            &temp_dir.path().join("named"),
+            &[(
+                "Named.nx",
+                r#"import { Tag as t.Tag } from "../tags"
+
+export abstract type Named = { name:string tag:t.Tag }
+"#,
+            )],
+        );
+        write_library(
+            &people_dir,
+            &[(
+                "User.nx",
+                r#"import { Named } from "../named"
+
+export type User extends Named = { email:string }
+"#,
+            )],
+        );
+        let artifact = build_library_artifact_from_directory(&people_dir).expect("library build");
+
+        let typescript = generate_library_types_with_warnings(
+            &artifact,
+            &library_options(TargetLanguage::TypeScript),
+        )
+        .unwrap();
+        let user = generated_file(&typescript, "User.ts");
+        assert!(
+            user.contains("import type { Tag } from \"tags\";"),
+            "{user}"
+        );
+        assert!(user.contains("tag?: Tag;"), "{user}");
+        assert!(
+            !user.contains(": t.Tag") && !user.contains("t_Tag"),
+            "{user}"
+        );
+        assert!(typescript
+            .warnings
+            .iter()
+            .all(|warning| !warning.contains("User_update")));
+
+        let csharp = generate_library_types_with_warnings(
+            &artifact,
+            &library_options(TargetLanguage::CSharp),
+        )
+        .unwrap();
+        let user = generated_file(&csharp, "User.g.cs");
+        let user_update = csharp_companion_body(&user, "User_update");
+        assert!(
+            user_update.contains("public NxOptional<global::Test.Tags.Tag> Tag { get; set; }"),
+            "{user_update}"
+        );
+        assert!(
+            !user.contains("<t.Tag>") && !user.contains("t_Tag"),
+            "{user}"
+        );
+        assert!(csharp
+            .warnings
+            .iter()
+            .all(|warning| !warning.contains("User_update")));
+    }
+
+    /// A type the dependency keeps to itself cannot be referenced from here, and generation says
+    /// so instead of miscompiling silently.
+    #[test]
+    fn update_companion_warns_when_an_inherited_field_type_is_not_exported() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let people_dir = temp_dir.path().join("people");
+        write_library(
+            &temp_dir.path().join("named"),
+            &[(
+                "Named.nx",
+                "type Tag = a | b\nexport abstract type Named = { name:string tag:Tag }",
+            )],
+        );
+        write_library(
+            &people_dir,
+            &[(
+                "User.nx",
+                r#"import { Named } from "../named"
+
+export type User extends Named = { email:string }
+"#,
+            )],
+        );
+        let artifact = build_library_artifact_from_directory(&people_dir).expect("library build");
+
+        let typescript = generate_library_types_with_warnings(
+            &artifact,
+            &library_options(TargetLanguage::TypeScript),
+        )
+        .unwrap();
+        assert!(
+            typescript.warnings.iter().any(|warning| {
+                warning.contains("'User_update' inherits field 'tag' typed 'Tag'")
+                    && warning.contains("does not export 'Tag'")
+                    && warning.contains("export it from 'named'")
+            }),
+            "{:?}",
+            typescript.warnings
+        );
+        let user = generated_file(&typescript, "User.ts");
+        assert!(user.contains("tag?: Tag;"), "{user}");
+
+        let csharp = generate_library_types_with_warnings(
+            &artifact,
+            &library_options(TargetLanguage::CSharp),
+        )
+        .unwrap();
+        assert!(
+            csharp.warnings.iter().any(|warning| {
+                warning.contains("'User_update' inherits field 'tag' typed 'Tag'")
+                    && warning.contains("does not export 'Tag'")
+                    && warning.contains("export it from 'named'")
+            }),
+            "{:?}",
+            csharp.warnings
+        );
+        let user_update =
+            csharp_companion_body(&generated_file(&csharp, "User.g.cs"), "User_update");
+        assert!(
+            user_update.contains("public NxOptional<Tag> Tag { get; set; }"),
+            "{user_update}"
+        );
     }
 
     /// The same holds for a library whose module extends a base from a library it imports.
@@ -2677,18 +3108,16 @@ export type User extends Named = { email:string }
         };
 
         let output = generate_library_types_with_warnings(&artifact, &opts).unwrap();
-        let user = output
-            .value
-            .iter()
-            .find(|file| file.relative_path == PathBuf::from("User.g.cs"))
-            .expect("User.g.cs");
-        let (_, user_update) = user
-            .content
-            .split_once("public sealed class User_update")
-            .expect("User_update companion");
-        let user_update = user_update.split("public sealed class").next().expect("body");
-        assert!(user_update.contains("public NxOptional<string> Name { get; set; }"), "{user_update}");
-        assert!(user_update.contains("public NxOptional<string> Email { get; set; }"), "{user_update}");
+        let user_update =
+            csharp_companion_body(&generated_file(&output, "User.g.cs"), "User_update");
+        assert!(
+            user_update.contains("public NxOptional<string> Name { get; set; }"),
+            "{user_update}"
+        );
+        assert!(
+            user_update.contains("public NxOptional<string> Email { get; set; }"),
+            "{user_update}"
+        );
     }
 
     #[test]

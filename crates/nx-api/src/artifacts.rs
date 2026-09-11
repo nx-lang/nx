@@ -2680,6 +2680,65 @@ mod tests {
         );
     }
 
+    /// The checker reads `User.Update` against the effective shape of `User`, base included, when
+    /// the base comes from a library the module imports.
+    #[test]
+    fn update_record_of_a_record_extending_a_library_base_checks_inherited_fields() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        let named_dir = temp.path().join("named");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&named_dir).expect("named dir");
+        fs::write(
+            named_dir.join("Named.nx"),
+            r#"export abstract type Named = { name:string }"#,
+        )
+        .expect("named file");
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&named_dir)
+            .expect("Expected named registry load");
+        let build_context = registry.build_context();
+
+        let inherited_path = app_dir.join("inherited.nx");
+        let inherited_source = r#"import { Named } from "../named"
+type User extends Named = { email:string }
+let patch = <User.Update name="x" />"#;
+        fs::write(&inherited_path, inherited_source).expect("inherited file");
+        let inherited = build_program_artifact_from_source(
+            inherited_source,
+            &inherited_path.display().to_string(),
+            &build_context,
+        )
+        .expect("Expected inherited program artifact");
+        assert!(
+            !has_error_diagnostics(&inherited.diagnostics),
+            "Expected an inherited field from a library base to be accepted on the update record: {:?}",
+            inherited.diagnostics
+        );
+
+        let unknown_path = app_dir.join("unknown.nx");
+        let unknown_source = r#"import { Named } from "../named"
+type User extends Named = { email:string }
+let patch = <User.Update nickname="x" />"#;
+        fs::write(&unknown_path, unknown_source).expect("unknown file");
+        let unknown = build_program_artifact_from_source(
+            unknown_source,
+            &unknown_path.display().to_string(),
+            &build_context,
+        )
+        .expect("Expected unknown-field program artifact with diagnostics");
+        assert!(
+            unknown.diagnostics.iter().any(|diagnostic| {
+                diagnostic.severity() == Severity::Error
+                    && diagnostic.message().contains("nickname")
+            }),
+            "Expected a field the base does not declare to be rejected: {:?}",
+            unknown.diagnostics
+        );
+    }
+
     #[test]
     fn library_artifact_private_items_stay_file_local() {
         let temp = TempDir::new().expect("temp dir");

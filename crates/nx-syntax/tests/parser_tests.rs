@@ -3251,8 +3251,11 @@ fn test_parse_element_with_empty_body() {
         render_diagnostics_cli(&result.errors, &HashMap::new())
     );
 
-    let element = find_first_kind(&result.root().expect("Should have root node"), SyntaxKind::ELEMENT)
-        .expect("Expected element");
+    let element = find_first_kind(
+        &result.root().expect("Should have root node"),
+        SyntaxKind::ELEMENT,
+    )
+    .expect("Expected element");
     assert!(
         element.child_by_field("content").is_none(),
         "An empty body should expose no content field"
@@ -3278,8 +3281,11 @@ fn test_parse_element_with_empty_body_across_lines() {
         render_diagnostics_cli(&result.errors, &HashMap::new())
     );
 
-    let element = find_first_kind(&result.root().expect("Should have root node"), SyntaxKind::ELEMENT)
-        .expect("Expected element");
+    let element = find_first_kind(
+        &result.root().expect("Should have root node"),
+        SyntaxKind::ELEMENT,
+    )
+    .expect("Expected element");
     assert!(
         element.child_by_field("content").is_none(),
         "A whitespace-only body should expose no content field"
@@ -3302,7 +3308,10 @@ fn test_parse_top_level_element_with_empty_body() {
         render_diagnostics_cli(&result.errors, &HashMap::new())
     );
     assert!(
-        contains_kind(&result.root().expect("Should have root node"), SyntaxKind::ELEMENT),
+        contains_kind(
+            &result.root().expect("Should have root node"),
+            SyntaxKind::ELEMENT
+        ),
         "Expected a top-level element"
     );
 }
@@ -3328,7 +3337,13 @@ fn test_scan_delimiter_at_end_of_file_terminates() {
     // rewinds the lookahead character but not the position. At end of input, where `advance` has
     // nothing left to consume, the restored character came back forever and the parse never
     // returned. Each of these is a syntax error; the point is that saying so takes finite time.
-    for source in ["@", "let x = @", "<Doc:string>text@", "<Doc:string>text&", "<Doc>text&"] {
+    for source in [
+        "@",
+        "let x = @",
+        "<Doc:string>text@",
+        "<Doc:string>text&",
+        "<Doc>text&",
+    ] {
         let outcome = parse_within(source, Duration::from_secs(10));
         assert_eq!(
             outcome,
@@ -3351,8 +3366,17 @@ fn test_scan_lone_at_in_embedded_text_is_literal() {
         render_diagnostics_cli(&result.errors, &HashMap::new())
     );
 
-    let element = find_first_kind(&result.root().expect("Should have root node"), SyntaxKind::ELEMENT)
-        .expect("Expected element");
-    let content = element.child_by_field("content").expect("Expected embedded text content");
-    assert_eq!(content.text(), "a@b", "The '@' and the character after it are both text");
+    let element = find_first_kind(
+        &result.root().expect("Should have root node"),
+        SyntaxKind::ELEMENT,
+    )
+    .expect("Expected element");
+    let content = element
+        .child_by_field("content")
+        .expect("Expected embedded text content");
+    assert_eq!(
+        content.text(),
+        "a@b",
+        "The '@' and the character after it are both text"
+    );
 }

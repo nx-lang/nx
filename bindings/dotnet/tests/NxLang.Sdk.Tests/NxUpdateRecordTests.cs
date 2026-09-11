@@ -346,6 +346,76 @@ public class NxUpdateRecordTests
             error.Diagnostics,
             diagnostic => diagnostic.Message.Contains("nick", StringComparison.Ordinal));
     }
+
+    /// <summary>
+    /// A handler bound at the root belongs to no component, so a bare update record it returns is the host's to
+    /// apply: it arrives as an effect with only the discriminator and the fields that were set.
+    /// </summary>
+    [Fact]
+    public void BareUpdateRecord_FromARootBoundHandler_ReachesTheHostAsAnEffect()
+    {
+        string source = """
+            type User = { name:string email:string? }
+            external component <Button emits { Tapped { } } />
+            let saveButton() = <Button onTapped=<User.Update name="Ada" /> />
+            component <Form /> = { <Panel>{saveButton()}</Panel> }
+            """;
+
+        NxComponentInitResult<JsonElement> init = NxRuntime.InitializeComponentJson(source, "Form");
+        string token = Assert.Single(HandlerTokens(init.Rendered));
+
+        NxComponentDispatchResult<JsonElement, JsonElement> dispatched =
+            NxRuntime.DispatchComponentActionsJson(
+                source,
+                init.StateSnapshot,
+                new[] { new NxHandlerInvocation<ButtonTapped>(token, new ButtonTapped()) });
+
+        JsonElement effect = Assert.Single(dispatched.Effects);
+        string[] keys = effect.EnumerateObject().Select(property => property.Name).ToArray();
+        Assert.Equal(new[] { "$type", "name" }, keys);
+        Assert.Equal("User.Update", effect.GetProperty("$type").GetString());
+        Assert.Equal("Ada", effect.GetProperty("name").GetString());
+    }
+
+    /// <summary>
+    /// Collects the token of every action handler reference in a rendered JSON tree.
+    /// </summary>
+    private static List<string> HandlerTokens(JsonElement element)
+    {
+        List<string> tokens = new();
+        CollectHandlerTokens(element, tokens);
+        return tokens;
+    }
+
+    private static void CollectHandlerTokens(JsonElement element, List<string> tokens)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                if (element.TryGetProperty("$type", out JsonElement type)
+                    && type.ValueKind == JsonValueKind.String
+                    && type.GetString() == "ActionHandler"
+                    && element.TryGetProperty("token", out JsonElement token)
+                    && token.ValueKind == JsonValueKind.String)
+                {
+                    tokens.Add(token.GetString()!);
+                }
+
+                foreach (JsonProperty property in element.EnumerateObject())
+                {
+                    CollectHandlerTokens(property.Value, tokens);
+                }
+
+                break;
+            case JsonValueKind.Array:
+                foreach (JsonElement item in element.EnumerateArray())
+                {
+                    CollectHandlerTokens(item, tokens);
+                }
+
+                break;
+        }
+    }
 }
 
 [MessagePackObject]

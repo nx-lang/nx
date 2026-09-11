@@ -3,15 +3,16 @@ use nx_api::{
 };
 use nx_hir::{
     ast::{Expr, Literal, OrderedFloat, TypeRef},
-    Component, ImportKind, InterfaceItemKind, Item, LoweredModule, PreparedItemKind,
-    PreparedModule, RecordDef, RecordField, RecordKind, SelectiveImport, TypeAlias, UnionCaseDef,
-    UnionCaseField, UnionDef, Visibility,
+    Component, ImportKind, InterfaceItemKind, Item, LocalDefinitionId, LoweredModule,
+    ModuleNamespace, PreparedItemKind, PreparedModule, PreparedNamespace, RecordDef, RecordField,
+    RecordKind, SelectiveImport, TypeAlias, UnionCaseDef, UnionCaseField, UnionDef, Visibility,
 };
 use nx_types::ModuleArtifact;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExportedAlias {
@@ -24,6 +25,13 @@ pub struct ExportedRecordField {
     pub name: String,
     pub ty: TypeRef,
     pub default_value: Option<ExportedFieldDefault>,
+    /// Identity of the module that declared the field, when it is not the module that owns the
+    /// exported declaration carrying it.
+    ///
+    /// <para>Only an update companion copies fields from another module, so only its fields ever
+    /// carry one. The field's type was written in that module's namespace, which is where it has
+    /// to be resolved.</para>
+    pub declaring_module: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -108,11 +116,6 @@ pub struct ExportedUpdate {
     pub name: String,
     pub discriminator: String,
     pub fields: Vec<ExportedRecordField>,
-    /// Names of the fields the target inherits from a base declared in another module.
-    ///
-    /// <para>Their types were written in that module's namespace, so a name among them that this
-    /// module neither declares nor imports will not resolve in the generated code.</para>
-    pub inherited_from_other_modules: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -226,7 +229,17 @@ struct ImportedTypeCollector {
     /// Loads and caches every imported library, so the same registry can back the build context
     /// the source module is prepared against.
     registry: LibraryRegistry,
-    dependency_cache: FxHashMap<PathBuf, Result<CachedImportedLibrary, String>>,
+    dependency_cache: FxHashMap<PathBuf, Result<Arc<CachedImportedLibrary>, String>>,
+    /// The canonical root of the library each loaded module identity belongs to.
+    ///
+    /// <para>Membership in a library's namespaces decides ownership, so the mapping does not
+    /// depend on how canonical paths are spelled.</para>
+    library_roots_by_module_identity: FxHashMap<String, PathBuf>,
+    /// The canonical root of the library being generated, in library mode.
+    ///
+    /// <para>A declaration this library owns is a peer the graph already declares, so a reference
+    /// to it needs no imported type.</para>
+    generating_library_root: Option<PathBuf>,
 }
 
 struct ImportedTypesBuild {
@@ -242,6 +255,19 @@ struct CachedImportedLibrary {
     constant_unions: FxHashSet<String>,
     alias_targets: FxHashMap<String, TypeRef>,
     wildcard_importable_export_names: Vec<String>,
+    /// The namespace each of the library's modules resolves type names in, keyed by module
+    /// identity.
+    namespaces: FxHashMap<String, Arc<ModuleNamespace>>,
+    /// Every interface item of the library, keyed by the origin a namespace entry resolves to.
+    items_by_origin: FxHashMap<(String, LocalDefinitionId), CachedInterfaceItem>,
+}
+
+/// What origin lookup needs to know about one declaration of a loaded library.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CachedInterfaceItem {
+    name: String,
+    visibility: Visibility,
+    kind: PreparedItemKind,
 }
 
 #[derive(Clone)]
@@ -278,7 +304,12 @@ impl ExportedTypeGraph {
             .into_iter()
             .next()
             .ok_or_else(|| format!("Analysis of '{}' produced no module", file_name))?;
-        Self::from_artifact_with_warnings(&artifact, source_path, imported_build)
+        Self::from_artifact_with_warnings(
+            &artifact,
+            source_path,
+            imported_build,
+            &imported_type_collector,
+        )
     }
 
     #[allow(dead_code)]
@@ -299,24 +330,33 @@ impl ExportedTypeGraph {
                 warnings: Vec::new(),
             },
         };
-        Self::from_artifact_with_warnings(module, source_path, imported_build)
+        Self::from_artifact_with_warnings(
+            module,
+            source_path,
+            imported_build,
+            &imported_type_collector,
+        )
     }
 
     fn from_artifact_with_warnings(
         module: &ModuleArtifact,
         source_path: &Path,
         imported_build: ImportedTypesBuild,
+        imported_type_collector: &ImportedTypeCollector,
     ) -> Result<ExportedTypeGraphBuild, String> {
         let file_name = source_path
             .file_name()
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("types.nx"));
         let module_path = module_output_stem(&file_name)?;
-        let mut build = Self::build_from_exported_modules(vec![ExportedModule {
+        let mut modules = vec![ExportedModule {
             module_path: module_path.clone(),
             imported_types: imported_build.imported_types.clone(),
             declarations: collect_exported_declarations(module),
-        }])?;
+        }];
+        let mut warnings = Vec::new();
+        imported_type_collector.resolve_inherited_field_types(&mut modules, &mut warnings);
+        let mut build = Self::build_from_exported_modules(modules)?;
 
         if build.graph.modules.is_empty() {
             build.graph.modules.push(ExportedModule {
@@ -327,6 +367,7 @@ impl ExportedTypeGraph {
         }
 
         build.warnings.extend(imported_build.warnings);
+        build.warnings.extend(warnings);
         Ok(build)
     }
 
@@ -339,6 +380,7 @@ impl ExportedTypeGraph {
         library: &LibraryArtifact,
     ) -> Result<ExportedTypeGraphBuild, String> {
         let mut imported_type_collector = ImportedTypeCollector::default();
+        imported_type_collector.register_generating_library(library)?;
         let mut modules = Vec::new();
         let mut warnings = Vec::new();
 
@@ -371,6 +413,7 @@ impl ExportedTypeGraph {
         }
 
         modules.sort_by(|left, right| left.module_path.cmp(&right.module_path));
+        imported_type_collector.resolve_inherited_field_types(&mut modules, &mut warnings);
         let mut build = Self::build_from_exported_modules(modules)?;
         build.warnings.extend(warnings);
         Ok(build)
@@ -555,52 +598,7 @@ impl ExportedTypeGraph {
             owners,
         };
         graph.rewrite_update_type_references(&mut warnings);
-        graph.warn_about_unresolvable_inherited_fields(&mut warnings);
         Ok(ExportedTypeGraphBuild { graph, warnings })
-    }
-
-    /// Warns for every companion field, inherited from a base in another module, whose type this
-    /// module cannot name.
-    ///
-    /// <para>A companion copies its target's inherited fields, and their types were written in the
-    /// base's module. A plain record never has this problem, because it inherits in the target
-    /// language and the base's own generated file resolves the name. Until typegen resolves such a
-    /// type in the module that wrote it, the author has to import it here; the warning says which
-    /// one.</para>
-    fn warn_about_unresolvable_inherited_fields(&self, warnings: &mut Vec<String>) {
-        for module in &self.modules {
-            let imported_names = module
-                .imported_types
-                .iter()
-                .map(|imported| imported.visible_name.as_str())
-                .collect::<FxHashSet<_>>();
-            for declaration in &module.declarations {
-                let ExportedType::Update(update) = &declaration.item else {
-                    continue;
-                };
-                for field in &update.fields {
-                    if !update.inherited_from_other_modules.contains(&field.name) {
-                        continue;
-                    }
-                    let mut names = BTreeSet::new();
-                    collect_type_ref_names(&field.ty, &mut names);
-                    for name in names {
-                        // An unresolved `X.Update` was already reported by the companion rewrite.
-                        if is_primitive_type_name(&name)
-                            || nx_hir::is_update_record_name(&name)
-                            || self.declaration(&name).is_some()
-                            || imported_names.contains(name.as_str())
-                        {
-                            continue;
-                        }
-                        warnings.push(format!(
-                            "Update companion '{}' inherits field '{}' typed '{}' from a base declared in another module, and this module does not import '{}'; the generated code will not resolve it until '{}' is imported here",
-                            update.name, field.name, name, name, name
-                        ));
-                    }
-                }
-            }
-        }
     }
 
     /// Points every `<T>.Update` type reference at the `<T>_update` companion that stands for it.
@@ -930,7 +928,14 @@ impl ImportedTypeCollector {
         }
     }
 
-    fn load_dependency(&mut self, dependency_root: &Path) -> Result<CachedImportedLibrary, String> {
+    /// Loads a library and, through the registry, everything it depends on.
+    ///
+    /// <para>The transitive dependencies are cached too, since a base declared in a dependency may
+    /// type a field by something *its* dependency exports.</para>
+    fn load_dependency(
+        &mut self,
+        dependency_root: &Path,
+    ) -> Result<Arc<CachedImportedLibrary>, String> {
         if let Some(cached) = self.dependency_cache.get(dependency_root) {
             return cached.clone();
         }
@@ -944,11 +949,241 @@ impl ImportedTypeCollector {
                     dependency_root.display(),
                     error
                 )
-            })
-            .and_then(|dependency| build_cached_imported_library(&dependency, dependency_root));
+            });
+        let cached = loaded
+            .as_ref()
+            .map_err(Clone::clone)
+            .and_then(|dependency| self.cache_library(dependency, dependency_root));
         self.dependency_cache
-            .insert(dependency_root.to_path_buf(), loaded.clone());
-        loaded
+            .insert(dependency_root.to_path_buf(), cached.clone());
+
+        if let Ok(dependency) = &loaded {
+            for transitive_root in &dependency.dependency_roots {
+                // A dependency that fails to load reports where it is imported, not here.
+                let _ = self.load_dependency(transitive_root);
+            }
+        }
+
+        cached
+    }
+
+    /// Indexes a library's modules so a declaring module identity maps back to it.
+    fn cache_library(
+        &mut self,
+        library: &LibraryArtifact,
+        library_root: &Path,
+    ) -> Result<Arc<CachedImportedLibrary>, String> {
+        let cached = Arc::new(build_cached_imported_library(library, library_root)?);
+        for module_identity in cached.namespaces.keys() {
+            self.library_roots_by_module_identity
+                .insert(module_identity.clone(), library_root.to_path_buf());
+        }
+        Ok(cached)
+    }
+
+    /// Returns the cached library that owns `module_identity`, if one was loaded.
+    fn library_for_module(&self, module_identity: &str) -> Option<(&Path, &CachedImportedLibrary)> {
+        let root = self.library_roots_by_module_identity.get(module_identity)?;
+        let cached = self.dependency_cache.get(root)?.as_ref().ok()?;
+        Some((root.as_path(), cached))
+    }
+
+    /// Indexes the library being generated so its own module identities resolve as peers, through
+    /// the same lookup a dependency's identities take.
+    fn register_generating_library(&mut self, library: &LibraryArtifact) -> Result<(), String> {
+        let cached = self.cache_library(library, &library.root_path)?;
+        self.dependency_cache
+            .insert(library.root_path.clone(), Ok(cached));
+        self.generating_library_root = Some(library.root_path.clone());
+        Ok(())
+    }
+
+    /// Resolves the type of every companion field inherited from another module in the namespace
+    /// of the module that declared it.
+    ///
+    /// <para>An update companion copies its target's inherited fields, and their types were
+    /// written in the base's module. A name that resolves to a peer of the generating library is
+    /// rewritten to the peer's exported name, which the graph already declares. A name that
+    /// resolves to a dependency's export gets an [`ImportedType`] on the generating module — the
+    /// same one an explicit import would have produced — and is rewritten to its visible name. A
+    /// name that resolves to nothing typegen can reference is left as written, with a warning
+    /// that says why.</para>
+    fn resolve_inherited_field_types(
+        &self,
+        modules: &mut [ExportedModule],
+        warnings: &mut Vec<String>,
+    ) {
+        let declared_names = modules
+            .iter()
+            .flat_map(|module| module.declarations.iter())
+            .map(|declaration| declaration.name().to_string())
+            .collect::<FxHashSet<_>>();
+
+        for module in modules.iter_mut() {
+            let imported_types = &mut module.imported_types;
+            for declaration in &mut module.declarations {
+                let ExportedType::Update(update) = &mut declaration.item else {
+                    continue;
+                };
+                let companion_name = update.name.clone();
+                for field in &mut update.fields {
+                    let Some(declaring_module) = field.declaring_module.as_deref() else {
+                        continue;
+                    };
+                    let mut names = BTreeSet::new();
+                    collect_type_ref_names(&field.ty, &mut names);
+                    let mut renames = FxHashMap::default();
+                    for name in names {
+                        // An unresolved `X.Update` is reported by the companion rewrite instead.
+                        if is_primitive_type_name(&name) || nx_hir::is_update_record_name(&name) {
+                            continue;
+                        }
+                        match self.resolve_inherited_type_name(
+                            declaring_module,
+                            &name,
+                            &declared_names,
+                            imported_types,
+                        ) {
+                            Ok(resolved) => {
+                                if resolved != name {
+                                    renames.insert(name, resolved);
+                                }
+                            }
+                            Err(reason) => warnings.push(format!(
+                                "Update companion '{}' inherits field '{}' typed '{}' from a base declared in another module, and {}",
+                                companion_name, field.name, name, reason
+                            )),
+                        }
+                    }
+                    if !renames.is_empty() {
+                        rewrite_type_ref_names(&mut field.ty, &mut |name| {
+                            renames.get(name).cloned()
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /// Resolves one type name written in `declaring_module` to the name the generating module
+    /// should use for it, adding an imported type when the origin is a dependency's export.
+    ///
+    /// <para>The error is the reason the name cannot be resolved, phrased to follow "and", ending
+    /// with what the author can do about it where there is something.</para>
+    fn resolve_inherited_type_name(
+        &self,
+        declaring_module: &str,
+        name: &str,
+        declared_names: &FxHashSet<String>,
+        imported_types: &mut Vec<ImportedType>,
+    ) -> Result<String, String> {
+        let namespace = self
+            .library_for_module(declaring_module)
+            .and_then(|(_, library)| library.namespaces.get(declaring_module))
+            .ok_or_else(|| {
+                format!(
+                    "the declaring module '{}' belongs to no loaded library; the generated code will not resolve it",
+                    declaring_module
+                )
+            })?;
+        let type_name = nx_hir::Name::new(name);
+        let origin = namespace
+            .entry(PreparedNamespace::Type, &type_name)
+            .or_else(|| namespace.entry(PreparedNamespace::Element, &type_name))
+            .ok_or_else(|| {
+                format!(
+                    "it does not resolve in '{}'; the generated code will not resolve it either",
+                    declaring_module
+                )
+            })?;
+        let (origin_root, origin_library) = self
+            .library_for_module(origin.module_identity())
+            .ok_or_else(|| {
+                format!(
+                    "it resolves to a declaration in '{}', which belongs to no loaded library; the generated code will not resolve it",
+                    origin.module_identity()
+                )
+            })?;
+        let item = origin_library
+            .items_by_origin
+            .get(&(origin.module_identity().to_string(), origin.definition_id()))
+            .ok_or_else(|| {
+                format!(
+                    "it resolves to a declaration in '{}' that library '{}' has no interface item for; the generated code will not resolve it",
+                    origin.module_identity(),
+                    origin_library.library_name
+                )
+            })?;
+
+        if item.visibility != Visibility::Export {
+            let library_name = &origin_library.library_name;
+            return Err(if item.name == name {
+                format!(
+                    "library '{}' does not export '{}'; export it from '{}' so the generated code can reference it",
+                    library_name, name, library_name
+                )
+            } else {
+                format!(
+                    "it resolves to '{}', which library '{}' does not export; export '{}' from '{}' so the generated code can reference it",
+                    item.name, library_name, item.name, library_name
+                )
+            });
+        }
+
+        let is_peer = self.generating_library_root.as_deref() == Some(origin_root);
+        if is_peer {
+            if !matches!(
+                item.kind,
+                PreparedItemKind::TypeAlias
+                    | PreparedItemKind::Union
+                    | PreparedItemKind::Record
+                    | PreparedItemKind::Component
+            ) {
+                return Err(format!(
+                    "it resolves to '{}', whose kind '{:?}' has no generated representation; the generated code will not resolve it",
+                    item.name, item.kind
+                ));
+            }
+            // The graph declares the peer under its exported name, but an import of that name
+            // wins over the graph in the emitters, so the bare name would mean the import.
+            if let Some(shadowing) = imported_types
+                .iter()
+                .find(|imported| imported.visible_name == item.name)
+            {
+                return Err(format!(
+                    "the import of '{}' from '{}' shadows the peer declaration '{}' it resolves to; import '{}' under a qualifier so the generated code can reference both",
+                    shadowing.visible_name, shadowing.library_name, item.name, shadowing.exported_name
+                ));
+            }
+            return Ok(item.name.clone());
+        }
+
+        if let Some(existing) = imported_types.iter().find(|imported| {
+            imported.library_name == origin_library.library_name
+                && imported.exported_name == item.name
+        }) {
+            return Ok(existing.visible_name.clone());
+        }
+
+        let name_is_taken = declared_names.contains(&item.name)
+            || imported_types
+                .iter()
+                .any(|imported| imported.visible_name == item.name);
+        let visible_name = if name_is_taken {
+            format!("{}.{}", origin_library.library_name, item.name)
+        } else {
+            item.name.clone()
+        };
+        let imported_type = origin_library
+            .imported_type(&visible_name, &item.name)
+            .ok_or_else(|| {
+                format!(
+                    "it resolves to '{}' in library '{}', whose kind '{:?}' has no generated cross-library representation; the generated code will not resolve it",
+                    item.name, origin_library.library_name, item.kind
+                )
+            })?;
+        imported_types.push(imported_type);
+        Ok(visible_name)
     }
 }
 
@@ -1120,6 +1355,20 @@ fn build_cached_imported_library(
     let mut constant_unions = FxHashSet::default();
     let mut alias_targets = FxHashMap::default();
     let mut wildcard_importable_export_names = Vec::new();
+    let items_by_origin = dependency
+        .interface_items
+        .iter()
+        .map(|item| {
+            (
+                (item.module_identity.clone(), item.definition_id),
+                CachedInterfaceItem {
+                    name: item.item_name.clone(),
+                    visibility: item.visibility,
+                    kind: item.item.kind(),
+                },
+            )
+        })
+        .collect();
 
     for (exported_name, item_indices) in &dependency.exported_items {
         let Some(index) = item_indices.first() else {
@@ -1176,6 +1425,8 @@ fn build_cached_imported_library(
         constant_unions,
         alias_targets,
         wildcard_importable_export_names,
+        namespaces: dependency.namespaces.clone(),
+        items_by_origin,
     })
 }
 
@@ -1307,7 +1558,6 @@ fn export_update(
     record: &RecordDef,
     target: &nx_hir::Name,
 ) -> ExportedUpdate {
-    let mut inherited_from_other_modules = Vec::new();
     let fields = prepared
         .and_then(|prepared| {
             nx_hir::effective_record_shape(prepared, record)
@@ -1318,15 +1568,12 @@ fn export_update(
             shape
                 .fields
                 .into_iter()
-                .map(|field| {
-                    if field.module_identity != module_identity {
-                        inherited_from_other_modules.push(field.name.as_str().to_string());
-                    }
-                    ExportedRecordField {
-                        name: field.name.as_str().to_string(),
-                        ty: field.ty,
-                        default_value: None,
-                    }
+                .map(|field| ExportedRecordField {
+                    name: field.name.as_str().to_string(),
+                    ty: field.ty,
+                    default_value: None,
+                    declaring_module: (field.module_identity != module_identity)
+                        .then_some(field.module_identity),
                 })
                 .collect()
         })
@@ -1338,6 +1585,7 @@ fn export_update(
                     name: field.name.as_str().to_string(),
                     ty: field.ty.clone(),
                     default_value: None,
+                    declaring_module: None,
                 })
                 .collect()
         });
@@ -1346,7 +1594,6 @@ fn export_update(
         name: format!("{}_update", target.as_str()),
         discriminator: record.name.as_str().to_string(),
         fields,
-        inherited_from_other_modules,
     }
 }
 
@@ -1365,6 +1612,7 @@ fn export_external_state(component: &Component) -> Option<ExportedExternalState>
                 name: field.name.as_str().to_string(),
                 ty: field.ty.clone(),
                 default_value: None,
+                declaring_module: None,
             })
             .collect(),
     })
@@ -1375,6 +1623,7 @@ fn export_record_field(module: &LoweredModule, field: &RecordField) -> ExportedR
         name: field.name.as_str().to_string(),
         ty: field.ty.clone(),
         default_value: export_field_default(module, field.default),
+        declaring_module: None,
     }
 }
 
@@ -1383,6 +1632,7 @@ fn export_union_case_field(module: &LoweredModule, field: &UnionCaseField) -> Ex
         name: field.name.as_str().to_string(),
         ty: field.ty.clone(),
         default_value: export_field_default(module, field.default),
+        declaring_module: None,
     }
 }
 
@@ -1424,6 +1674,7 @@ fn module_output_stem(path: &Path) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::typegen::test_support::write_library;
     use nx_api::build_library_artifact_from_directory;
     use nx_hir::{lower, LoweredModule, SourceId};
     use nx_syntax::parse_str;
@@ -1711,6 +1962,59 @@ export type QuestionFlowInitialExperience = {
     }
 
     #[test]
+    fn loads_transitive_dependencies_and_maps_their_module_identities() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let tags_dir = temp_dir.path().join("tags");
+        let named_dir = temp_dir.path().join("named");
+        fs::create_dir_all(&tags_dir).expect("tags dir");
+        fs::create_dir_all(&named_dir).expect("named dir");
+        fs::write(tags_dir.join("Tag.nx"), "export type Tag = a | b").expect("tags file");
+        fs::write(
+            named_dir.join("Named.nx"),
+            r#"import { Tag } from "../tags"
+
+export abstract type Named = { name:string tag:Tag }
+"#,
+        )
+        .expect("named file");
+        let source_path = temp_dir.path().join("people.nx");
+        let module = lower_module(
+            r#"import { Named } from "./named"
+
+export type User extends Named = { email:string }
+"#,
+            source_path.to_str().expect("source path"),
+        );
+        let mut collector = ImportedTypeCollector::default();
+
+        let build = collector.collect_for_module(&module, &source_path);
+
+        assert!(build.warnings.is_empty(), "{:?}", build.warnings);
+        assert_eq!(collector.dependency_cache.len(), 2);
+        let named_identity = fs::canonicalize(named_dir.join("Named.nx"))
+            .expect("named identity")
+            .display()
+            .to_string();
+        let tags_identity = fs::canonicalize(tags_dir.join("Tag.nx"))
+            .expect("tags identity")
+            .display()
+            .to_string();
+        let (named_root, named) = collector
+            .library_for_module(&named_identity)
+            .expect("named module resolves to its library");
+        assert_eq!(
+            named_root,
+            fs::canonicalize(&named_dir).expect("named root")
+        );
+        assert_eq!(named.library_name, "named");
+        let (tags_root, tags) = collector
+            .library_for_module(&tags_identity)
+            .expect("transitive module resolves to its library");
+        assert_eq!(tags_root, fs::canonicalize(&tags_dir).expect("tags root"));
+        assert_eq!(tags.library_name, "tags");
+    }
+
+    #[test]
     fn warns_when_wildcard_imports_collide_on_visible_name() {
         let temp_dir = TempDir::new().expect("temp dir");
         let first_dependency_dir = temp_dir.path().join("question-flow");
@@ -1854,6 +2158,218 @@ export type ChatLink = string
             field_names(&update_companion(&graph, "Named_update").fields),
             vec!["name"]
         );
+    }
+
+    fn field_type<'a>(update: &'a ExportedUpdate, name: &str) -> &'a TypeRef {
+        &update
+            .fields
+            .iter()
+            .find(|field| field.name == name)
+            .unwrap_or_else(|| panic!("field '{name}' on '{}'", update.name))
+            .ty
+    }
+
+    #[test]
+    fn inherited_companion_field_typed_by_a_peer_resolves_without_an_import() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let library_dir = temp_dir.path().join("ui");
+        write_library(
+            &library_dir,
+            &[
+                ("tag.nx", "export type Tag = a | b"),
+                (
+                    "named.nx",
+                    "export abstract type Named = { name:string tag:Tag }",
+                ),
+                (
+                    "user.nx",
+                    "export type User extends Named = { email:string }",
+                ),
+            ],
+        );
+
+        let artifact = build_library_artifact_from_directory(&library_dir).expect("library build");
+        let build = ExportedTypeGraph::from_library_with_warnings(&artifact).expect("graph build");
+
+        assert!(build.warnings.is_empty(), "{:?}", build.warnings);
+        let user = update_companion(&build.graph, "User_update");
+        assert_eq!(
+            field_type(user, "tag"),
+            &TypeRef::Name(nx_hir::Name::new("Tag"))
+        );
+        let user_module = build
+            .graph
+            .modules
+            .iter()
+            .find(|module| module.module_path == Path::new("user"))
+            .expect("user module");
+        assert!(user_module.imported_types.is_empty());
+    }
+
+    #[test]
+    fn inherited_companion_field_typed_through_a_peer_alias_resolves_to_the_origin() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let tags_dir = temp_dir.path().join("tags");
+        let library_dir = temp_dir.path().join("people");
+        write_library(&tags_dir, &[("tag.nx", "export type Tag = a | b")]);
+        write_library(
+            &library_dir,
+            &[
+                (
+                    "named.nx",
+                    r#"import { Tag as t.Tag } from "../tags"
+
+export abstract type Named = { name:string tag:t.Tag }
+"#,
+                ),
+                (
+                    "user.nx",
+                    "export type User extends Named = { email:string }",
+                ),
+            ],
+        );
+
+        let artifact = build_library_artifact_from_directory(&library_dir).expect("library build");
+        let build = ExportedTypeGraph::from_library_with_warnings(&artifact).expect("graph build");
+
+        assert!(build.warnings.is_empty(), "{:?}", build.warnings);
+        let user = update_companion(&build.graph, "User_update");
+        assert_eq!(
+            field_type(user, "tag"),
+            &TypeRef::Name(nx_hir::Name::new("Tag"))
+        );
+        let user_module = build
+            .graph
+            .modules
+            .iter()
+            .find(|module| module.module_path == Path::new("user"))
+            .expect("user module");
+        assert_eq!(
+            user_module.imported_types,
+            vec![ImportedType {
+                visible_name: "Tag".to_string(),
+                exported_name: "Tag".to_string(),
+                library_name: "tags".to_string(),
+                kind: ImportedTypeKind::Union { is_constant: true },
+            }]
+        );
+    }
+
+    #[test]
+    fn inherited_companion_field_typed_by_a_dependency_export_synthesizes_an_import() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        write_library(
+            &temp_dir.path().join("named"),
+            &[(
+                "Named.nx",
+                "export type Tag = a | b
+export abstract type Named = { name:string tag:Tag }",
+            )],
+        );
+        let source_path = temp_dir.path().join("people.nx");
+        let source = r#"import { Named } from "./named"
+
+export type User extends Named = { email:string }
+"#;
+
+        let build = ExportedTypeGraph::from_source_with_warnings(source, &source_path)
+            .expect("graph build");
+
+        assert!(build.warnings.is_empty(), "{:?}", build.warnings);
+        let user = update_companion(&build.graph, "User_update");
+        assert_eq!(
+            field_type(user, "tag"),
+            &TypeRef::Name(nx_hir::Name::new("Tag"))
+        );
+        assert_eq!(
+            build.graph.modules[0].imported_types,
+            vec![
+                ImportedType {
+                    visible_name: "Named".to_string(),
+                    exported_name: "Named".to_string(),
+                    library_name: "named".to_string(),
+                    kind: ImportedTypeKind::Record,
+                },
+                ImportedType {
+                    visible_name: "Tag".to_string(),
+                    exported_name: "Tag".to_string(),
+                    library_name: "named".to_string(),
+                    kind: ImportedTypeKind::Union { is_constant: true },
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn synthesized_import_is_qualified_when_the_module_declares_the_same_name() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        write_library(
+            &temp_dir.path().join("named"),
+            &[(
+                "Named.nx",
+                "export type Tag = a | b
+export abstract type Named = { name:string tag:Tag }",
+            )],
+        );
+        let source_path = temp_dir.path().join("people.nx");
+        let source = r#"import { Named } from "./named"
+
+export type Tag = { label:string }
+export type User extends Named = { email:string }
+"#;
+
+        let build = ExportedTypeGraph::from_source_with_warnings(source, &source_path)
+            .expect("graph build");
+
+        assert!(build.warnings.is_empty(), "{:?}", build.warnings);
+        let user = update_companion(&build.graph, "User_update");
+        assert_eq!(
+            field_type(user, "tag"),
+            &TypeRef::Name(nx_hir::Name::new("named.Tag"))
+        );
+        let synthesized = build.graph.modules[0]
+            .imported_types
+            .iter()
+            .find(|imported| imported.exported_name == "Tag")
+            .expect("synthesized import");
+        assert_eq!(synthesized.visible_name, "named.Tag");
+        assert_eq!(synthesized.library_name, "named");
+    }
+
+    #[test]
+    fn inherited_companion_field_typed_by_an_unexported_dependency_type_warns() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        write_library(
+            &temp_dir.path().join("named"),
+            &[(
+                "Named.nx",
+                "type Tag = a | b
+export abstract type Named = { name:string tag:Tag }",
+            )],
+        );
+        let source_path = temp_dir.path().join("people.nx");
+        let source = r#"import { Named } from "./named"
+
+export type User extends Named = { email:string }
+"#;
+
+        let build = ExportedTypeGraph::from_source_with_warnings(source, &source_path)
+            .expect("graph build");
+
+        assert_eq!(build.warnings.len(), 1, "{:?}", build.warnings);
+        assert!(
+            build.warnings[0].contains("'User_update' inherits field 'tag' typed 'Tag'")
+                && build.warnings[0].contains("does not export 'Tag'")
+                && build.warnings[0].contains("export it from 'named'"),
+            "{}",
+            build.warnings[0]
+        );
+        let user = update_companion(&build.graph, "User_update");
+        assert_eq!(
+            field_type(user, "tag"),
+            &TypeRef::Name(nx_hir::Name::new("Tag"))
+        );
+        assert_eq!(build.graph.modules[0].imported_types.len(), 1);
     }
 
     #[test]
