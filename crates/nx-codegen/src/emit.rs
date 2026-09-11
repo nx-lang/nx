@@ -2867,10 +2867,12 @@ fn emit_expression(
             properties,
             content_field,
             content,
+            is_update,
         } => emit_record_object(
             current_module_id,
             name,
-            fields,
+            // An update record keeps absent fields absent, so only what was supplied is emitted.
+            if *is_update { &[] } else { fields },
             properties,
             content_field.as_deref(),
             content,

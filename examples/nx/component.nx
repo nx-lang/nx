@@ -44,6 +44,23 @@ let renderNotice(state:LoadState, compact:boolean) = {
   />
 }
 
+// A component changes its own state by returning its update record from a handler. Inside the
+// component, `<Update ... />` names `Counter.Update`, and it lists only the fields that change.
+// An action the component emits goes to its parent instead.
+action Reset = { }
+
+external component <Button label:string emits { Tapped { } } />
+
+component <Counter step:int = 1 emits { Reset } /> = {
+  state { count:int = 0 }
+
+  <Row>
+    <Label text={count} />
+    <Button label="Add" onTapped=<Update count={count + step} /> />
+    <Button label="Reset" onTapped={<Update count=0 /> <Reset />} />
+  </Row>
+}
+
 let makeValueChanged(value:string): SearchBox.ValueChanged = {
   <SearchBox.ValueChanged value={value} />
 }

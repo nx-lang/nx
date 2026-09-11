@@ -1468,6 +1468,7 @@ fn materialized_record_iife_uses_collision_free_field_temps() {
                         span: TextSpan::default(),
                         ty: None,
                         kind: CodegenExpressionKind::Record {
+                            is_update: false,
                             name: "CollisionRecord".to_string(),
                             fields: vec![
                                 int_field_with_default("my-field", 1),
@@ -2696,7 +2697,7 @@ fn component_action_handler_bindings_fail_before_emission() {
         r#"
 external component <TextInput />
 component <SearchBox emits { SearchSubmitted { query:string } } /> = { <TextInput /> }
-let DoSearch(query:string) = { query }
+action DoSearch = { query:string }
 let root() = { <SearchBox onSearchSubmitted=<DoSearch query={action.query} /> /> }
 "#,
     );
@@ -2778,4 +2779,160 @@ fn both_case_list_spellings_generate_identical_javascript_typescript_ir_and_sche
     assert_eq!(bare_js, piped_js, "generated JavaScript and its schema");
     assert_eq!(bare_ts, piped_ts, "generated TypeScript and its schema");
     assert_eq!(bare_ir, piped_ir, "generated NX IR");
+}
+
+// ------------------------------------------------------------------------------------------------
+// Derived update records
+// ------------------------------------------------------------------------------------------------
+
+fn ir_declaration_names(document: &Value) -> Vec<String> {
+    document["modules"]
+        .as_array()
+        .expect("modules")
+        .iter()
+        .flat_map(|module| module["declarations"].as_array().expect("declarations"))
+        .map(|declaration| {
+            declaration["reference"]["name"]
+                .as_str()
+                .expect("declaration name")
+                .to_string()
+        })
+        .collect()
+}
+
+/// Finds the first IR expression op anywhere in `value` whose tag and name match.
+fn find_ir_op<'a>(value: &'a Value, tag: &str, name: &str) -> Option<&'a Value> {
+    match value {
+        Value::Object(object) => {
+            if object.get("tag").and_then(Value::as_str) == Some(tag)
+                && object.get("name").and_then(Value::as_str) == Some(name)
+            {
+                return Some(value);
+            }
+            object
+                .values()
+                .find_map(|child| find_ir_op(child, tag, name))
+        }
+        Value::Array(items) => items.iter().find_map(|child| find_ir_op(child, tag, name)),
+        _ => None,
+    }
+}
+
+#[test]
+fn nx_ir_declares_a_referenced_update_record_with_its_own_schema() {
+    let artifact = artifact_from_source(
+        r#"
+type User = { name:string = "anon" email:string? }
+let patch() = <User.Update email={null} />
+"#,
+    );
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+
+    let update = ir_declaration(&document, "User.Update");
+    assert_eq!(update["kind"]["tag"], "record");
+    assert_eq!(update["kind"]["updateTarget"]["name"], "User");
+    assert_eq!(update["kind"]["updateTarget"]["kind"], "record");
+
+    let fields = update["kind"]["fields"].as_array().expect("update fields");
+    let names = fields
+        .iter()
+        .map(|field| field["name"].as_str().expect("field name"))
+        .collect::<Vec<_>>();
+    assert_eq!(names, vec!["name", "email"]);
+    for field in fields {
+        assert_eq!(field["isRequired"], false, "every update field is optional");
+        assert!(
+            field.get("default").is_none(),
+            "no update field has a default"
+        );
+    }
+    assert_eq!(ir_record_field_type(update, "email")["kind"], "nullable");
+    assert_eq!(ir_record_field_type(update, "name")["kind"], "primitive");
+
+    assert!(generated
+        .metadata
+        .required_features
+        .iter()
+        .any(|feature| feature == crate::NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1));
+    assert_eq!(
+        document["requiredFeatures"],
+        serde_json::json!(generated.metadata.required_features)
+    );
+}
+
+#[test]
+fn nx_ir_omits_update_records_a_program_never_references() {
+    let artifact = artifact_from_source(
+        r#"
+type User = { name:string }
+let user() = <User name="Ada" />
+"#,
+    );
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+
+    assert_eq!(ir_declaration_names(&document), vec!["User", "user"]);
+    assert_eq!(
+        generated.metadata.required_features,
+        vec![crate::NX_IR_REQUIRED_FEATURE_EAGER_V1.to_string()]
+    );
+    let user = ir_declaration(&document, "User");
+    assert!(
+        user["kind"].get("updateTarget").is_none(),
+        "an ordinary record's declaration is unchanged"
+    );
+    assert_eq!(
+        user["reference"]["declaration"], "m0:d0",
+        "the update record is declared after every written item, so ids do not shift"
+    );
+}
+
+#[test]
+fn nx_ir_encodes_update_construction_as_record_construction() {
+    let artifact = artifact_from_source(
+        r#"
+component <Counter /> = { state { count:int = 0 label:string = "x" } <Label /> }
+let reset() = <Counter.Update count=1 />
+"#,
+    );
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+
+    let update = ir_declaration(&document, "Counter.Update");
+    assert_eq!(update["kind"]["updateTarget"]["kind"], "component");
+
+    let reset = ir_declaration(&document, "reset");
+    let construction =
+        find_ir_op(reset, "record", "Counter.Update").expect("record construction op");
+    assert_eq!(construction["isUpdate"], true);
+    let properties = construction["properties"].as_array().expect("properties");
+    assert_eq!(properties.len(), 1);
+    assert_eq!(properties[0]["name"], "count");
+
+    // Ordinary record construction carries no update flag at all.
+    let plain = artifact_from_source(
+        r#"
+type User = { name:string }
+let user() = <User name="Ada" />
+"#,
+    );
+    let plain: Value =
+        serde_json::from_str(&emit_nx_ir(&plain).expect("nx ir").json).expect("nx ir json");
+    let construction = find_ir_op(&plain, "record", "User").expect("record op");
+    assert!(construction.get("isUpdate").is_none());
+}
+
+#[test]
+fn generated_javascript_keeps_absent_update_fields_absent() {
+    let Some(output) = execute_generated_javascript_root(
+        r#"
+type User = { name:string = "anon" email:string? }
+let root() = <User.Update email={null} />
+"#,
+    ) else {
+        return;
+    };
+
+    assert_json_values_eq(&output, r#"{ "$type": "User.Update", "email": null }"#);
 }

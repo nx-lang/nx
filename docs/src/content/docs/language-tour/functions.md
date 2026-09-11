@@ -66,7 +66,24 @@ let makeValueChanged(value:string): SearchBox.ValueChanged =
 - Inline emitted actions become public action names such as `SearchBox.ValueChanged`.
 - Component invocation sites can bind emitted actions through `on<ActionName>` properties with an implicit `action` value inside the handler body.
 - Hosts initialize components by name, receive the rendered output plus an opaque state snapshot, and later dispatch ordered action batches with that saved snapshot.
-- State defaults run only during initialization. Declarative state-update actions still land in a follow-up change, so dispatch currently returns effect actions plus the next snapshot without mutating state.
+- State defaults run only during initialization. After that a handler changes state by returning the component's update record, written `<Update ... />` inside the component; it names only the fields that change.
+- Inside a component a handler may return its own `Update` or an action the component `emits`; at the root any action or update record goes to the host.
+
+```nx
+external component <Button label:string emits { Tapped { } } />
+
+component <Counter /> = {
+  state { count:int = 0 }
+  <Row>
+    <Label text={count} />
+    <Button label="Add" onTapped=<Update count={count + 1} /> />
+  </Row>
+}
+```
+
+Every record also has an update record, so the same patch shape works outside components:
+`<User.Update email={null} />` sets `email` to null and leaves every other field alone. See
+[Updating state](/reference/syntax/functions#updating-state).
 
 ## Paren-style functions
 

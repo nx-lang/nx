@@ -743,7 +743,7 @@ pub fn interface_record(item: &InterfaceItem) -> Option<crate::RecordDef> {
         } => Some(crate::RecordDef {
             name: Name::new(item.item_name.as_str()),
             visibility: item.visibility,
-            kind: *kind,
+            kind: kind.clone(),
             is_abstract: *is_abstract,
             base: base.clone(),
             properties: properties

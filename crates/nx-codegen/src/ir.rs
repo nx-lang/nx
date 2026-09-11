@@ -19,6 +19,9 @@ pub const NX_IR_FORMAT_ID: &str = "nx-ir-json";
 pub const NX_IR_SCHEMA_VERSION: u32 = 2;
 pub const NX_IR_RUNTIME_ABI: &str = "nx-ir-runtime-v1";
 pub const NX_IR_REQUIRED_FEATURE_EAGER_V1: &str = "eager-v1";
+/// Required by a program that declares a derived update record, so a runtime that predates them
+/// refuses the program rather than normalizing a patch as a whole record.
+pub const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1: &str = "update-records-v1";
 
 mod u64_decimal_string {
     use serde::{Deserialize, Deserializer, Serializer};
@@ -37,6 +40,29 @@ mod u64_decimal_string {
         let value = String::deserialize(deserializer)?;
         value.parse().map_err(serde::de::Error::custom)
     }
+}
+
+/// The features a runtime must support to run `program`.
+///
+/// <para>Update-record support is required only by a program that declares one, so a program that
+/// never uses a patch lists exactly what it did before update records existed.</para>
+fn required_features(program: &CodegenProgram) -> Vec<String> {
+    let mut features = vec![NX_IR_REQUIRED_FEATURE_EAGER_V1.to_string()];
+    let declares_update_record = program.modules.iter().any(|module| {
+        module.declarations.iter().any(|declaration| {
+            matches!(
+                &declaration.kind,
+                CodegenDeclarationKind::Record {
+                    update_target: Some(_),
+                    ..
+                }
+            )
+        })
+    });
+    if declares_update_record {
+        features.push(NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1.to_string());
+    }
+    features
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,6 +176,12 @@ pub enum NxIrDeclarationKind {
         /// one. Analysis holds that line for NX source; this is how a runtime holds it for host
         /// input.
         is_abstract: bool,
+        /// The record or component a derived `<Target>.Update` record patches.
+        ///
+        /// Present only on update records: every field is optional, none has a default, and a
+        /// value keeps an absent field absent.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        update_target: Option<NxIrReference>,
     },
     Component(NxIrComponent),
     Union {
@@ -302,6 +334,10 @@ pub enum NxIrExpressionOp {
         properties: Vec<NxIrProperty>,
         content_field: Option<String>,
         content: Vec<NxIrExpression>,
+        /// Present and true when this constructs a derived update record, whose absent fields
+        /// stay absent instead of taking a default or `null`.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        is_update: bool,
     },
     UnionCase {
         union: NxIrReference,
@@ -504,7 +540,7 @@ impl NxIrProgram {
             schema_version: NX_IR_SCHEMA_VERSION,
             runtime_abi: NX_IR_RUNTIME_ABI.to_string(),
             program_fingerprint: program.fingerprint,
-            required_features: vec![NX_IR_REQUIRED_FEATURE_EAGER_V1.to_string()],
+            required_features: required_features(program),
             function_entrypoints,
             component_entrypoints,
             modules,
@@ -893,6 +929,7 @@ fn ir_declaration(
             fields,
             bases,
             is_abstract,
+            update_target,
         } => {
             let scope = SlotScope::new();
             NxIrDeclarationKind::Record {
@@ -906,6 +943,7 @@ fn ir_declaration(
                 ),
                 bases: bases.iter().map(ir_reference).collect(),
                 is_abstract: *is_abstract,
+                update_target: update_target.as_ref().map(ir_reference),
             }
         }
         CodegenDeclarationKind::Component(component) => {
@@ -1430,7 +1468,9 @@ fn ir_expression(
             properties,
             content_field,
             content,
+            is_update,
         } => NxIrExpressionOp::Record {
+            is_update: *is_update,
             name: name.clone(),
             fields: ir_record_fields(module_id_value, source.clone(), &id, "field", fields, scope),
             properties: ir_properties(

@@ -35,6 +35,12 @@ pub struct ModuleArtifact {
     pub imports: Vec<Import>,
     /// Prepared semantic bindings used during analysis.
     pub prepared_bindings: Vec<PreparedBinding>,
+    /// The prepared module analysis ran against, with its imports resolved, if parsing succeeded.
+    ///
+    /// <para>A consumer that needs a declaration's effective shape across modules — a record's
+    /// inherited fields from a library base, say — resolves through this rather than through a
+    /// parallel resolver of its own.</para>
+    pub prepared_module: Option<Arc<PreparedModule>>,
 }
 
 impl ModuleArtifact {
@@ -258,6 +264,7 @@ pub fn analyze_prepared_module(
         diagnostics,
         imports,
         prepared_bindings,
+        prepared_module: Some(Arc::new(prepared_module)),
     }
 }
 
@@ -370,6 +377,7 @@ fn module_artifact(
         diagnostics,
         imports,
         prepared_bindings: Vec::new(),
+        prepared_module: None,
     }
 }
 

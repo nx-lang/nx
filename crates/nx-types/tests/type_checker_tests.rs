@@ -2051,6 +2051,30 @@ fn test_readme_example() {
     assert!(result.lowered_module.is_some());
 }
 
+#[test]
+fn test_component_example_with_update_records() {
+    let source = include_str!("../../../examples/nx/component.nx");
+
+    let result = check_str(source, "component.nx");
+    assert!(
+        result.errors().is_empty(),
+        "Expected examples/nx/component.nx to type check, got {:?}",
+        result
+            .diagnostics
+            .iter()
+            .map(|diag| (diag.code(), diag.message()))
+            .collect::<Vec<_>>()
+    );
+    let module = result.lowered_module.expect("lowered module");
+    assert!(
+        matches!(
+            module.find_item("Counter.Update"),
+            Some(nx_hir::Item::Record(_))
+        ),
+        "Expected the Counter example to have an update record"
+    );
+}
+
 // ============================================================================
 // Former primitive spellings
 // ============================================================================

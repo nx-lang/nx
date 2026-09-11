@@ -161,6 +161,18 @@ impl LibraryRegistry {
         Ok(artifact)
     }
 
+    /// Loads a library into this registry and returns its artifact, diagnostics and all.
+    ///
+    /// <para>Unlike [`load_library_from_directory`](Self::load_library_from_directory) this does
+    /// not refuse a library whose analysis reported errors: a tool that reads declarations, such
+    /// as type generation, still wants what the library declares.</para>
+    pub fn load_library_artifact(
+        &self,
+        root_path: impl AsRef<Path>,
+    ) -> io::Result<Arc<LibraryArtifact>> {
+        self.load_library_from_directory_internal(root_path.as_ref())
+    }
+
     pub fn build_context(&self) -> ProgramBuildContext {
         ProgramBuildContext {
             registry: self.clone(),
@@ -1406,6 +1418,7 @@ fn parse_failure_artifact(
         diagnostics,
         imports: Vec::new(),
         prepared_bindings: Vec::new(),
+        prepared_module: None,
     }
 }
 
@@ -2175,7 +2188,7 @@ fn build_interface_item(
             span: union_def.span,
         },
         Item::Record(record_def) => LibraryInterfaceKind::Record {
-            kind: record_def.kind,
+            kind: record_def.kind.clone(),
             is_abstract: record_def.is_abstract,
             base: record_def.base.clone(),
             properties: record_def

@@ -27,7 +27,10 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-const COMPONENT_SNAPSHOT_VERSION: u32 = 1;
+const COMPONENT_SNAPSHOT_VERSION: u32 = 2;
+
+/// Record type name of a dispatch batch entry that invokes a rendered handler by token.
+pub const HANDLER_INVOCATION_TYPE_NAME: &str = "ActionHandlerInvocation";
 
 /// Tree-walking interpreter for NX HIR
 #[derive(Debug)]
@@ -55,6 +58,8 @@ pub struct ComponentEvaluateResult {
 /// Result of component action dispatch.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComponentDispatchResult {
+    /// Component body rendered once against the state the whole batch produced
+    pub rendered: Value,
     /// Effect actions returned by bound handlers in dispatch order
     pub effects: Vec<Value>,
     /// Opaque serialized component state snapshot owned by the host
@@ -69,6 +74,15 @@ struct SerializedComponentSnapshot {
     component: String,
     props: BTreeMap<String, SerializedValue>,
     state: BTreeMap<String, SerializedValue>,
+    /// Which render this snapshot was returned with; tokens are minted from it.
+    ///
+    /// <para>Defaulted, with `handlers`, so a snapshot from before they existed decodes far enough
+    /// to be refused by its version rather than by a missing field.</para>
+    #[serde(default)]
+    render_generation: u64,
+    /// Handlers in the rendered output returned with this snapshot, by dispatch token.
+    #[serde(default)]
+    handlers: BTreeMap<String, SerializedValue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -97,6 +111,8 @@ enum SerializedValue {
         action_module_identity: String,
         body: u32,
         captured: BTreeMap<String, SerializedValue>,
+        owner: Option<String>,
+        owner_state: Vec<String>,
     },
 }
 
@@ -107,6 +123,7 @@ struct ActionHandlerParts<'a> {
     action_name: &'a Name,
     /// `None` when the emit is declared in the same module as the handler.
     action_module_identity: Option<&'a str>,
+    owner: Option<&'a Name>,
     body: ExprId,
 }
 
@@ -116,10 +133,76 @@ struct DecodedComponentSnapshot {
     component: Name,
     props: FxHashMap<SmolStr, Value>,
     state: FxHashMap<SmolStr, Value>,
+    render_generation: u64,
+    handlers: FxHashMap<SmolStr, Value>,
+}
+
+/// Handlers a lifecycle render found in its output, keyed by the token each was given.
+struct RenderedHandlers {
+    generation: u64,
+    handlers: BTreeMap<SmolStr, Value>,
+}
+
+impl RenderedHandlers {
+    fn new(generation: u64) -> Self {
+        Self {
+            generation,
+            handlers: BTreeMap::new(),
+        }
+    }
+
+    /// Gives every handler in `value` a token and records it under that token.
+    ///
+    /// <para>The token is written onto the handler in the rendered output, and the handler itself
+    /// is kept for the snapshot. Tokens carry the render generation, so a token read from an
+    /// earlier render never names a handler in a later snapshot. Record fields are visited in name
+    /// order, which keeps tokens stable for the same output.</para>
+    fn assign_tokens(&mut self, value: &mut Value) {
+        match value {
+            Value::ActionHandler { token, .. } => {
+                let assigned =
+                    SmolStr::new(format!("h{}-{}", self.generation, self.handlers.len() + 1));
+                *token = None;
+                self.handlers.insert(assigned.clone(), value.clone());
+                if let Value::ActionHandler { token, .. } = value {
+                    *token = Some(assigned);
+                }
+            }
+            Value::Array(values) => {
+                for value in values {
+                    self.assign_tokens(value);
+                }
+            }
+            Value::Record { fields, .. } => {
+                let mut names = fields.keys().cloned().collect::<Vec<_>>();
+                names.sort();
+                for name in names {
+                    if let Some(field) = fields.get_mut(&name) {
+                        self.assign_tokens(field);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Where a value being coerced came from, which decides how deeply it is checked.
+///
+/// <para>A value the interpreter produced was built against its declaration when it was created, so
+/// a record inside it is accepted by type name alone. A value the host supplied is a bag of fields
+/// static analysis never saw: every record in it, at any depth, is constructed from those fields
+/// against the declared type, so an unknown field, a `null` in a non-nullable slot, or a missing
+/// required field is reported at the boundary rather than carried into evaluation.</para>
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ValueOrigin {
+    /// Produced by evaluation; nested records are already well formed.
+    Internal,
+    /// Supplied by the host through props, explicit state, or a dispatch batch.
+    Host,
 }
 
 impl Interpreter {
-    /// Create a new interpreter
     pub fn new() -> Self {
         Self {
             program: None,
@@ -829,6 +912,9 @@ impl Interpreter {
     }
 
     /// Invoke a lowered component action handler with custom resource limits.
+    ///
+    /// <para>The body sees exactly what the handler captured when it was created. Only dispatch
+    /// replaces the owner's state with the state current at that point in the batch.</para>
     pub fn invoke_action_handler_with_limits(
         &self,
         module: &LoweredModule,
@@ -836,41 +922,37 @@ impl Interpreter {
         action: Value,
         limits: ResourceLimits,
     ) -> Result<Vec<Value>, RuntimeError> {
-        let (
-            handler_module_id,
+        self.invoke_action_handler_in(module, handler, action, None, limits)
+    }
+
+    /// Invokes a handler, reading the owner's state from `live_state` when one is given.
+    fn invoke_action_handler_in(
+        &self,
+        module: &LoweredModule,
+        handler: &Value,
+        action: Value,
+        live_state: Option<&FxHashMap<SmolStr, Value>>,
+        limits: ResourceLimits,
+    ) -> Result<Vec<Value>, RuntimeError> {
+        let Value::ActionHandler {
+            module_id,
             component,
             emit,
             action_name,
             action_module_identity,
             body,
             captured,
-        ) = match handler {
-            Value::ActionHandler {
-                module_id,
-                component,
-                emit,
-                action_name,
-                action_module_identity,
-                body,
-                captured,
-            } => (
-                *module_id,
-                component,
-                emit,
-                action_name,
-                action_module_identity.as_str(),
-                *body,
-                captured,
-            ),
-            other => {
-                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                    expected: "action handler".to_string(),
-                    actual: other.type_name().to_string(),
-                    operation: "action handler invocation".to_string(),
-                }))
-            }
+            owner_state,
+            ..
+        } = handler
+        else {
+            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: "action handler".to_string(),
+                actual: handler.type_name().to_string(),
+                operation: "action handler invocation".to_string(),
+            }));
         };
-        let handler_module = self.module_for_id(module, handler_module_id)?;
+        let handler_module = self.module_for_id(module, *module_id)?;
 
         let action = self.validate_handler_input(
             handler_module,
@@ -886,9 +968,16 @@ impl Interpreter {
         for (name, value) in captured {
             ctx.define_variable(name.clone(), value.clone());
         }
+        if let Some(live_state) = live_state {
+            for name in owner_state {
+                if let Some(value) = live_state.get(name) {
+                    ctx.define_variable(name.clone(), value.clone());
+                }
+            }
+        }
         ctx.define_variable(SmolStr::new("action"), action);
 
-        let result = self.eval_expr(handler_module, &mut ctx, body)?;
+        let result = self.eval_expr(handler_module, &mut ctx, *body)?;
         self.normalize_handler_result(handler_module, result, component, emit)
     }
 
@@ -909,41 +998,35 @@ impl Interpreter {
         self.bind_top_level_values(module, &mut ctx)?;
         let normalized_props =
             self.normalize_component_props(module, &mut ctx, component, &contract, props)?;
-        let (normalized_state, rendered) = if component.is_external {
-            (
-                FxHashMap::default(),
-                Value::Record {
-                    type_name: component.name.clone(),
-                    fields: normalized_props.clone(),
-                },
-            )
+        let normalized_state = if component.is_external {
+            FxHashMap::default()
         } else {
             let mut visible_fields = normalized_props.clone();
-            let normalized_state = self.materialize_component_state(
+            self.materialize_component_state(
                 module,
                 &mut ctx,
                 component,
                 FxHashMap::default(),
                 &mut visible_fields,
-            )?;
-            let rendered = if let Some(body) = component.body {
-                self.eval_expr(module, &mut ctx, body)?
-            } else {
-                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                    expected: "component body".to_string(),
-                    actual: "missing".to_string(),
-                    operation: format!("component initialization for '{}'", component.name),
-                }));
-            };
-            (normalized_state, rendered)
+            )?
         };
+        let mut rendered = self.render_component_body(
+            module,
+            &mut ctx,
+            component,
+            &normalized_props,
+            "component initialization",
+        )?;
         let component_module_id =
             self.require_current_module_id(module, "component state snapshot creation")?;
+        let mut handlers = RenderedHandlers::new(1);
+        handlers.assign_tokens(&mut rendered);
         let state_snapshot = self.encode_component_snapshot(
             component_module_id,
             &component.name,
             &normalized_props,
             &normalized_state,
+            &handlers,
         )?;
 
         Ok(ComponentInitResult {
@@ -971,30 +1054,32 @@ impl Interpreter {
         let normalized_props =
             self.normalize_component_props(module, &mut ctx, component, &contract, props)?;
         self.normalize_explicit_component_state(module, &mut ctx, component, state)?;
-
-        if component.is_external {
-            return Ok(ComponentEvaluateResult {
-                rendered: Value::Record {
-                    type_name: component.name.clone(),
-                    fields: normalized_props,
-                },
-            });
-        }
-
-        let rendered = if let Some(body) = component.body {
-            self.eval_expr(module, &mut ctx, body)?
-        } else {
-            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                expected: "component body".to_string(),
-                actual: "missing".to_string(),
-                operation: format!("component evaluation for '{}'", component.name),
-            }));
-        };
+        let rendered = self.render_component_body(
+            module,
+            &mut ctx,
+            component,
+            &normalized_props,
+            "component evaluation",
+        )?;
 
         Ok(ComponentEvaluateResult { rendered })
     }
 
     /// Dispatch a batch of actions against an opaque component state snapshot with custom limits.
+    ///
+    /// <para>Each entry is either an action the component emits, which runs the handler its parent
+    /// bound (and contributes nothing when there is none, though it is still checked against its
+    /// declaration), or a [`HANDLER_INVOCATION_TYPE_NAME`] record naming a handler from the
+    /// snapshot's rendered output by token, together with the action to feed it. Entries run in
+    /// order. A handler bound inside this component reads its state live, and an update record it
+    /// returns for this component patches the working state, so later entries see it. A handler
+    /// bound anywhere else — at the root, or in another component whose output this one renders —
+    /// sees only its captures, and everything it returns is an effect for the host, as it is for
+    /// the parent-bound handler an action entry runs. The body is rendered once against the final
+    /// state.</para>
+    ///
+    /// <para>The batch is atomic: any failure returns an error before a snapshot is encoded, so
+    /// the snapshot the host supplied stays the authoritative state.</para>
     pub fn dispatch_component_actions_with_limits(
         &self,
         module: &LoweredModule,
@@ -1007,19 +1092,63 @@ impl Interpreter {
         let (component_module, component) =
             self.find_component(component_module, decoded_snapshot.component.as_str())?;
         let contract = self.effective_component_contract(component_module, component);
+        let mut state = decoded_snapshot.state.clone();
         let mut effects = Vec::new();
 
-        for action in actions {
-            let emit = self.validate_component_action(&contract, &action)?;
+        for entry in actions {
+            if let Some((token, action)) = Self::handler_invocation_parts(&entry)? {
+                let handler = decoded_snapshot.handlers.get(&token).ok_or_else(|| {
+                    RuntimeError::new(RuntimeErrorKind::UnknownHandlerToken {
+                        token: token.clone(),
+                    })
+                })?;
+                let owned = Self::handler_is_owned_by(handler, &component.name);
+                let results = self.invoke_action_handler_in(
+                    component_module,
+                    handler,
+                    action,
+                    owned.then_some(&state),
+                    limits,
+                )?;
+                for result in results {
+                    if owned
+                        && self.is_update_record_for(component_module, &result, &component.name)
+                    {
+                        self.apply_component_update(
+                            component_module,
+                            component,
+                            &mut state,
+                            result,
+                        )?;
+                    } else {
+                        effects.push(result);
+                    }
+                }
+                continue;
+            }
+
+            let emit = self.validate_component_action(&contract, &entry)?;
+            // The entry is host input, so it is constructed against the emitted action before the
+            // handler is looked up: a malformed payload fails whether or not a parent bound one.
+            let entry = self.validate_handler_input(
+                component_module,
+                entry,
+                &emit.emit.action_name,
+                &emit.module_identity,
+                &component.name,
+                &emit.emit.name,
+            )?;
             let handler_name = Self::component_handler_prop_name(emit.emit.name.as_str());
 
             if let Some(handler) = decoded_snapshot.props.get(handler_name.as_str()) {
                 match handler {
+                    // The parent bound this handler, so everything it returns — an update
+                    // record for the parent included — belongs to the parent, via the host.
                     Value::ActionHandler { .. } => {
                         effects.extend(self.invoke_action_handler_with_limits(
                             component_module,
                             handler,
-                            action,
+                            entry,
                             limits,
                         )?);
                     }
@@ -1037,17 +1166,169 @@ impl Interpreter {
             }
         }
 
+        let mut ctx = ExecutionContext::with_limits(limits);
+        self.bind_top_level_values(component_module, &mut ctx)?;
+        // The body sees the declared props and the state, as it did at initialization. Handler
+        // props the parent bound are carried in the snapshot but were never in scope.
+        for field in &contract.props {
+            if let Some(value) = decoded_snapshot.props.get(field.name.as_str()) {
+                ctx.define_variable(SmolStr::new(field.name.as_str()), value.clone());
+            }
+        }
+        for (name, value) in &state {
+            ctx.define_variable(name.clone(), value.clone());
+        }
+        let mut rendered = self.render_component_body(
+            component_module,
+            &mut ctx,
+            component,
+            &decoded_snapshot.props,
+            "component dispatch",
+        )?;
+        let mut handlers = RenderedHandlers::new(decoded_snapshot.render_generation + 1);
+        handlers.assign_tokens(&mut rendered);
         let next_state_snapshot = self.encode_component_snapshot(
             decoded_snapshot.component_module_id,
             &decoded_snapshot.component,
             &decoded_snapshot.props,
-            &decoded_snapshot.state,
+            &state,
+            &handlers,
         )?;
 
         Ok(ComponentDispatchResult {
+            rendered,
             effects,
             state_snapshot: next_state_snapshot,
         })
+    }
+
+    /// Reads a batch entry as a handler invocation, or returns `None` for an ordinary action.
+    fn handler_invocation_parts(entry: &Value) -> Result<Option<(SmolStr, Value)>, RuntimeError> {
+        let Value::Record { type_name, fields } = entry else {
+            return Ok(None);
+        };
+        if type_name.as_str() != HANDLER_INVOCATION_TYPE_NAME {
+            return Ok(None);
+        }
+        let operation = "component dispatch handler invocation".to_string();
+        let token = match fields.get("token") {
+            Some(Value::String(token)) => token.clone(),
+            other => {
+                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                    expected: "string token".to_string(),
+                    actual: other.map_or("missing", Value::type_name).to_string(),
+                    operation,
+                }))
+            }
+        };
+        let action = match fields.get("action") {
+            Some(action @ Value::Record { .. }) => action.clone(),
+            other => {
+                return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                    expected: "action record".to_string(),
+                    actual: other.map_or("missing", Value::type_name).to_string(),
+                    operation,
+                }))
+            }
+        };
+        Ok(Some((token, action)))
+    }
+
+    /// Returns true when the handler was bound inside `component`'s own body.
+    ///
+    /// <para>Only such a handler reads this component's state live and patches it with its update
+    /// records; any other handler in the rendered output belongs to whoever bound it.</para>
+    fn handler_is_owned_by(handler: &Value, component: &Name) -> bool {
+        matches!(
+            handler,
+            Value::ActionHandler {
+                owner: Some(owner),
+                ..
+            } if owner == component
+        )
+    }
+
+    /// Returns true when `value` is the update record of `component`.
+    fn is_update_record_for(
+        &self,
+        module: &LoweredModule,
+        value: &Value,
+        component: &Name,
+    ) -> bool {
+        let Value::Record { type_name, .. } = value else {
+            return false;
+        };
+        self.resolve_record_definition(module, type_name.as_str())
+            .is_some_and(|record| record.update_target() == Some(component))
+    }
+
+    /// Applies one update record to the working state: present fields replace, absent ones stay.
+    ///
+    /// <para>Every present field is validated against the state field's declared type again, since
+    /// a patch is where the state changes and a value that bypassed static analysis must not reach
+    /// a snapshot.</para>
+    fn apply_component_update(
+        &self,
+        module: &LoweredModule,
+        component: &nx_hir::Component,
+        state: &mut FxHashMap<SmolStr, Value>,
+        update: Value,
+    ) -> Result<(), RuntimeError> {
+        let Value::Record { type_name, fields } = update else {
+            return Ok(());
+        };
+        let state_fields = self.component_state_fields(module, component);
+        for (name, value) in fields {
+            let Some(field) = state_fields
+                .iter()
+                .find(|field| field.name.as_str() == name.as_str())
+            else {
+                return Err(self.unknown_record_field_error(
+                    &type_name,
+                    name.as_str(),
+                    "component state update",
+                ));
+            };
+            let operation = format!("component state update '{}.{}'", component.name, field.name);
+            let value = self.coerce_update_field_value(
+                module,
+                field,
+                value,
+                &operation,
+                ValueOrigin::Internal,
+            )?;
+            state.insert(name, value);
+        }
+        Ok(())
+    }
+
+    /// Renders a component body in a context that already binds its props and state.
+    ///
+    /// <para>An external component has no body; its rendered value is its props record, which is
+    /// what a host sees of it. `operation` names the lifecycle step for the missing-body
+    /// error.</para>
+    fn render_component_body(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        component: &nx_hir::Component,
+        props: &FxHashMap<SmolStr, Value>,
+        operation: &str,
+    ) -> Result<Value, RuntimeError> {
+        if component.is_external {
+            return Ok(Value::Record {
+                type_name: component.name.clone(),
+                fields: props.clone(),
+            });
+        }
+        let Some(body) = component.body else {
+            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: "component body".to_string(),
+                actual: "missing".to_string(),
+                operation: format!("{} for '{}'", operation, component.name),
+            }));
+        };
+        self.eval_expr(module, ctx, body)
     }
 
     /// Find a function by name in the module
@@ -1276,10 +1557,11 @@ impl Interpreter {
         let mut normalized = FxHashMap::default();
 
         for field in fields {
-            let value = if let Some(value) = overrides.remove(field.name.as_str()) {
-                value
+            // An override is host input; a default is evaluated here.
+            let (value, origin) = if let Some(value) = overrides.remove(field.name.as_str()) {
+                (value, ValueOrigin::Host)
             } else if field.default.is_some() {
-                self.eval_effective_field_default(
+                let value = self.eval_effective_field_default(
                     module,
                     ctx,
                     field,
@@ -1290,9 +1572,10 @@ impl Interpreter {
                         component.name.as_str(),
                         field.name.as_str()
                     ),
-                )?
+                )?;
+                (value, ValueOrigin::Internal)
             } else if matches!(&field.ty, ast::TypeRef::Nullable(_)) {
-                Value::Null
+                (Value::Null, ValueOrigin::Internal)
             } else if !field.is_required {
                 return Err(self.unavailable_effective_field_default_error(
                     &field.name,
@@ -1321,7 +1604,7 @@ impl Interpreter {
                     field.name.as_str()
                 ),
             )?;
-            let value = self.coerce_value_to_type(
+            let value = self.coerce_value_to_type_from(
                 owner_module,
                 value,
                 &field.ty,
@@ -1331,6 +1614,7 @@ impl Interpreter {
                     component.name.as_str(),
                     field.name.as_str()
                 ),
+                origin,
             )?;
             ctx.define_variable(SmolStr::new(field.name.as_str()), value.clone());
             visible_fields.insert(SmolStr::new(field.name.as_str()), value.clone());
@@ -1485,7 +1769,7 @@ impl Interpreter {
                     field.name.as_str()
                 ),
             )?;
-            let value = self.coerce_value_to_type(
+            let value = self.coerce_value_to_type_from(
                 owner_module,
                 value,
                 &field.ty,
@@ -1494,6 +1778,7 @@ impl Interpreter {
                     component.name.as_str(),
                     field.name.as_str()
                 ),
+                ValueOrigin::Host,
             )?;
             ctx.define_variable(SmolStr::new(field.name.as_str()), value.clone());
         }
@@ -1546,6 +1831,7 @@ impl Interpreter {
         component_name: &Name,
         props: &FxHashMap<SmolStr, Value>,
         state: &FxHashMap<SmolStr, Value>,
+        handlers: &RenderedHandlers,
     ) -> Result<Vec<u8>, RuntimeError> {
         let snapshot = SerializedComponentSnapshot {
             version: COMPONENT_SNAPSHOT_VERSION,
@@ -1559,6 +1845,12 @@ impl Interpreter {
             state: state
                 .iter()
                 .map(|(name, value)| (name.to_string(), Self::serialize_runtime_value(value)))
+                .collect(),
+            render_generation: handlers.generation,
+            handlers: handlers
+                .handlers
+                .iter()
+                .map(|(token, handler)| (token.to_string(), Self::serialize_runtime_value(handler)))
                 .collect(),
         };
 
@@ -1637,12 +1929,24 @@ impl Interpreter {
                 ))
             })
             .collect::<Result<FxHashMap<_, _>, RuntimeError>>()?;
+        let handlers = snapshot
+            .handlers
+            .into_iter()
+            .map(|(token, value)| {
+                Ok((
+                    SmolStr::new(token.as_str()),
+                    self.deserialize_runtime_value(module, value)?,
+                ))
+            })
+            .collect::<Result<FxHashMap<_, _>, RuntimeError>>()?;
 
         Ok(DecodedComponentSnapshot {
             component_module_id: RuntimeModuleId::new(snapshot.component_module_id),
             component: Name::new(&snapshot.component),
             props,
             state,
+            render_generation: snapshot.render_generation,
+            handlers,
         })
     }
 
@@ -1677,6 +1981,9 @@ impl Interpreter {
                 action_module_identity,
                 body,
                 captured,
+                owner,
+                owner_state,
+                token: _,
             } => SerializedValue::ActionHandler {
                 module_id: module_id.as_u32(),
                 component: component.as_str().to_string(),
@@ -1688,6 +1995,8 @@ impl Interpreter {
                     .iter()
                     .map(|(name, value)| (name.to_string(), Self::serialize_runtime_value(value)))
                     .collect(),
+                owner: owner.as_ref().map(|owner| owner.as_str().to_string()),
+                owner_state: owner_state.iter().map(|name| name.to_string()).collect(),
             },
         }
     }
@@ -1735,6 +2044,8 @@ impl Interpreter {
                 action_module_identity,
                 body,
                 captured,
+                owner,
+                owner_state,
             } => {
                 let handler_module_id = RuntimeModuleId::new(module_id);
                 let handler_module = self.module_for_id(module, handler_module_id)?;
@@ -1770,6 +2081,12 @@ impl Interpreter {
                             ))
                         })
                         .collect::<Result<FxHashMap<_, _>, RuntimeError>>()?,
+                    owner: owner.as_deref().map(Name::new),
+                    owner_state: owner_state
+                        .iter()
+                        .map(|name| SmolStr::new(name.as_str()))
+                        .collect(),
+                    token: None,
                 })
             }
         }
@@ -1831,6 +2148,7 @@ impl Interpreter {
                 emit,
                 action_name,
                 action_module_identity,
+                owner,
                 body,
                 ..
             } => self.eval_action_handler_expr(
@@ -1841,6 +2159,7 @@ impl Interpreter {
                     emit,
                     action_name,
                     action_module_identity: action_module_identity.as_deref(),
+                    owner: owner.as_ref(),
                     body: *body,
                 },
             ),
@@ -1887,6 +2206,7 @@ impl Interpreter {
             emit,
             action_name,
             action_module_identity,
+            owner,
             body,
         } = parts;
         let mut captured = ctx.snapshot_visible_variables();
@@ -1903,6 +2223,22 @@ impl Interpreter {
                 .to_string(),
         };
 
+        // The owner is declared in the module that wrote the binding, so its state is read here.
+        // Only a name that still reaches the state binding is live: a loop variable or `let` that
+        // shadows a state field keeps its captured value, as the checker bound it.
+        let owner_state = owner
+            .and_then(|owner| match self.resolve_item(module, owner.as_str()) {
+                Some((_, Item::Component(component))) => Some(
+                    self.component_state_fields(module, component)
+                        .iter()
+                        .map(|field| SmolStr::new(field.name.as_str()))
+                        .filter(|name| ctx.is_bound_in_outermost_scope(name))
+                        .collect(),
+                ),
+                _ => None,
+            })
+            .unwrap_or_default();
+
         Ok(Value::ActionHandler {
             module_id,
             component: component.clone(),
@@ -1911,6 +2247,9 @@ impl Interpreter {
             action_module_identity,
             body,
             captured,
+            owner: owner.cloned(),
+            owner_state,
+            token: None,
         })
     }
 
@@ -2353,7 +2692,14 @@ impl Interpreter {
             overrides.insert(SmolStr::new(field.name.as_str()), value);
         }
 
-        self.build_record_value_from_shape(module, ctx, record_shape, overrides, None)
+        self.build_record_value_from_shape(
+            module,
+            ctx,
+            record_shape,
+            overrides,
+            None,
+            ValueOrigin::Internal,
+        )
     }
 
     fn eval_element_expr(
@@ -2398,6 +2744,7 @@ impl Interpreter {
                 Name::new(tag_name),
                 fields,
                 normalized_content,
+                ValueOrigin::Internal,
             );
         }
 
@@ -2505,7 +2852,14 @@ impl Interpreter {
                 "element record call",
             )?;
 
-            return self.build_record_value_from_shape(module, ctx, record_shape, fields, None);
+            return self.build_record_value_from_shape(
+                module,
+                ctx,
+                record_shape,
+                fields,
+                None,
+                ValueOrigin::Internal,
+            );
         }
 
         self.inject_element_content_field(
@@ -2717,6 +3071,7 @@ impl Interpreter {
         Ok(coerced)
     }
 
+    /// Coerces a value the interpreter itself produced; see [`ValueOrigin::Internal`].
     fn coerce_value_to_type(
         &self,
         module: &LoweredModule,
@@ -2724,8 +3079,19 @@ impl Interpreter {
         expected: &ast::TypeRef,
         operation: &str,
     ) -> Result<Value, RuntimeError> {
+        self.coerce_value_to_type_from(module, value, expected, operation, ValueOrigin::Internal)
+    }
+
+    fn coerce_value_to_type_from(
+        &self,
+        module: &LoweredModule,
+        value: Value,
+        expected: &ast::TypeRef,
+        operation: &str,
+        origin: ValueOrigin,
+    ) -> Result<Value, RuntimeError> {
         let expected_ty = self.runtime_type_from_type_ref(module, expected);
-        self.coerce_value_to_resolved_type(module, value, &expected_ty, operation)
+        self.coerce_value_to_resolved_type(module, value, &expected_ty, operation, origin)
     }
 
     fn coerce_value_to_resolved_type(
@@ -2734,13 +3100,18 @@ impl Interpreter {
         value: Value,
         expected: &Type,
         operation: &str,
+        origin: ValueOrigin,
     ) -> Result<Value, RuntimeError> {
         if let Type::Nullable(expected_inner) = expected {
             return match value {
                 Value::Null => Ok(Value::Null),
-                other => {
-                    self.coerce_value_to_resolved_type(module, other, expected_inner, operation)
-                }
+                other => self.coerce_value_to_resolved_type(
+                    module,
+                    other,
+                    expected_inner,
+                    operation,
+                    origin,
+                ),
             };
         }
 
@@ -2754,6 +3125,7 @@ impl Interpreter {
                             item,
                             expected_item,
                             operation,
+                            origin,
                         )?);
                     }
                     Ok(Value::Array(coerced))
@@ -2763,6 +3135,7 @@ impl Interpreter {
                     other,
                     expected_item,
                     operation,
+                    origin,
                 )?])),
             };
         }
@@ -2802,19 +3175,24 @@ impl Interpreter {
             }
         }
 
-        // Ordinary record-typed parameters preserve the caller-supplied object shape. Typed record
-        // construction is reserved for explicit external input boundaries such as handler
-        // invocation so defaults and required-field validation do not run on every function call.
+        // A record the interpreter built keeps its shape: it was constructed against its
+        // declaration already, so re-checking it on every function call would only cost time. A
+        // record the host supplied is rebuilt from its fields, which is where unknown fields,
+        // missing required fields, and `null` in a non-nullable slot are caught at any depth.
         match value {
             Value::Record { type_name, fields } => {
-                if self.record_value_matches_expected_type(module, &type_name, expected) {
-                    Ok(Value::Record { type_name, fields })
-                } else {
-                    Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                if !self.record_value_matches_expected_type(module, &type_name, expected) {
+                    return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
                         expected: expected.to_string(),
                         actual: type_name.as_str().to_string(),
                         operation: operation.to_string(),
-                    }))
+                    }));
+                }
+                match origin {
+                    ValueOrigin::Internal => Ok(Value::Record { type_name, fields }),
+                    ValueOrigin::Host => {
+                        self.construct_host_record_value(module, type_name, fields, operation)
+                    }
                 }
             }
             // A constant case is a scalar, but it is still a union case, and satisfies an
@@ -2973,6 +3351,7 @@ impl Interpreter {
                     Name::new(&qualified_case_name),
                     FxHashMap::default(),
                     None,
+                    ValueOrigin::Internal,
                 );
             }
 
@@ -3221,6 +3600,7 @@ impl Interpreter {
             Name::new(&format!("{}.{}", union, case)),
             FxHashMap::default(),
             None,
+            ValueOrigin::Internal,
         )
     }
 
@@ -3447,9 +3827,66 @@ impl Interpreter {
             }));
         }
 
+        self.construct_host_record_value(module, actual_def.name, fields, operation)
+    }
+
+    /// Constructs a record the host supplied from its fields, against the declaration `type_name`
+    /// reaches; a payload union case is built the same way against its case, and a component
+    /// element against the component's props, as an element tag would be.
+    ///
+    /// <para>A name that reaches none of them, such as `object`, has no declared shape to check, so
+    /// the fields are kept as supplied. Every nested record is constructed the same way.</para>
+    fn construct_host_record_value(
+        &self,
+        module: &LoweredModule,
+        type_name: Name,
+        fields: FxHashMap<SmolStr, Value>,
+        operation: &str,
+    ) -> Result<Value, RuntimeError> {
         let mut ctx = ExecutionContext::new();
-        let actual_shape = self.effective_record_shape(module, &actual_def.name)?;
-        self.build_record_value_from_shape(module, &mut ctx, actual_shape, fields, Some(operation))
+        if let Some(record_def) = self.resolve_record_definition(module, type_name.as_str()) {
+            let shape = self.effective_record_shape(module, &record_def.name)?;
+            return self.build_record_value_from_shape(
+                module,
+                &mut ctx,
+                shape,
+                fields,
+                Some(operation),
+                ValueOrigin::Host,
+            );
+        }
+        if let Some((target_module, union_def, case)) =
+            self.resolve_union_case_definition(module, type_name.as_str())
+        {
+            return self.build_union_case_value(
+                target_module,
+                &mut ctx,
+                union_def,
+                case,
+                type_name,
+                fields,
+                None,
+                ValueOrigin::Host,
+            );
+        }
+        if let Some((target_module, Item::Component(component))) =
+            self.resolve_item(module, type_name.as_str())
+        {
+            let contract = self.effective_component_contract(target_module, component);
+            self.ensure_concrete_component(&contract, operation)?;
+            let props = self.normalize_component_props(
+                target_module,
+                &mut ctx,
+                component,
+                &contract,
+                Value::Record { type_name, fields },
+            )?;
+            return Ok(Value::Record {
+                type_name: component.name.clone(),
+                fields: props,
+            });
+        }
+        Ok(Value::Record { type_name, fields })
     }
 
     fn missing_required_record_field_error(
@@ -3538,7 +3975,7 @@ impl Interpreter {
             Value::Array(values) => {
                 if values.is_empty() {
                     return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                        expected: "one or more actions".to_string(),
+                        expected: "one or more actions or update records".to_string(),
                         actual: "empty array".to_string(),
                         operation: format!(
                             "action handler result for {}.{}",
@@ -3555,7 +3992,7 @@ impl Interpreter {
                 Ok(values)
             }
             other => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                expected: "action or action array".to_string(),
+                expected: "action, update record, or a list of them".to_string(),
                 actual: other.type_name().to_string(),
                 operation: format!(
                     "action handler result for {}.{}",
@@ -3575,16 +4012,18 @@ impl Interpreter {
     ) -> Result<(), RuntimeError> {
         match value {
             Value::Record { type_name, .. } => {
-                let is_action = self
+                let is_action_or_update = self
                     .resolve_record_definition(module, type_name.as_str())
-                    .map(|record| record.kind == RecordKind::Action)
+                    .map(|record| {
+                        record.kind == RecordKind::Action || record.update_target().is_some()
+                    })
                     .unwrap_or(false);
 
-                if is_action {
+                if is_action_or_update {
                     Ok(())
                 } else {
                     Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                        expected: "action".to_string(),
+                        expected: "action or update record".to_string(),
                         actual: type_name.as_str().to_string(),
                         operation: format!(
                             "action handler result for {}.{}",
@@ -3595,7 +4034,7 @@ impl Interpreter {
                 }
             }
             other => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
-                expected: "action".to_string(),
+                expected: "action or update record".to_string(),
                 actual: other.type_name().to_string(),
                 operation: format!(
                     "action handler result for {}.{}",
@@ -3644,6 +4083,7 @@ impl Interpreter {
         discriminator: Name,
         mut overrides: FxHashMap<SmolStr, Value>,
         normalized_content: Option<Value>,
+        origin: ValueOrigin,
     ) -> Result<Value, RuntimeError> {
         let base_shape = if let Some(base) = union_def.base.as_ref() {
             Some(self.effective_record_shape(module, base)?)
@@ -3674,18 +4114,21 @@ impl Interpreter {
 
         if let Some(base_shape) = base_shape {
             for field in &base_shape.fields {
-                let value = if let Some(value) = overrides.remove(field.name.as_str()) {
-                    value
+                let (value, value_origin) = if let Some(value) =
+                    overrides.remove(field.name.as_str())
+                {
+                    (value, origin)
                 } else if field.default.is_some() {
-                    self.eval_effective_field_default(
+                    let value = self.eval_effective_field_default(
                         module,
                         ctx,
                         field,
                         &materialized,
                         &format!("union case field '{}.{}'", discriminator, field.name),
-                    )?
+                    )?;
+                    (value, ValueOrigin::Internal)
                 } else if matches!(&field.ty, ast::TypeRef::Nullable(_)) {
-                    Value::Null
+                    (Value::Null, ValueOrigin::Internal)
                 } else if !field.is_required {
                     return Err(self.unavailable_effective_field_default_error(
                         &field.name,
@@ -3704,29 +4147,31 @@ impl Interpreter {
                     field,
                     &format!("union case field '{}.{}'", discriminator, field.name),
                 )?;
-                let value = self.coerce_value_to_type(
+                let value = self.coerce_value_to_type_from(
                     owner_module,
                     value,
                     &field.ty,
                     &format!("union case field '{}.{}'", discriminator, field.name),
+                    value_origin,
                 )?;
                 materialized.insert(SmolStr::new(field.name.as_str()), value);
             }
         }
 
         for field in &case.fields {
-            let value = if let Some(value) = overrides.remove(field.name.as_str()) {
-                value
+            let (value, value_origin) = if let Some(value) = overrides.remove(field.name.as_str()) {
+                (value, origin)
             } else if field.default.is_some() {
-                self.eval_union_case_field_default(
+                let value = self.eval_union_case_field_default(
                     module,
                     ctx,
                     field,
                     &materialized,
                     &format!("union case field '{}.{}'", discriminator, field.name),
-                )?
+                )?;
+                (value, ValueOrigin::Internal)
             } else if matches!(&field.ty, ast::TypeRef::Nullable(_)) {
-                Value::Null
+                (Value::Null, ValueOrigin::Internal)
             } else {
                 return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
                     expected: format!("union case field '{}.{}'", discriminator, field.name),
@@ -3735,11 +4180,12 @@ impl Interpreter {
                 }));
             };
 
-            let value = self.coerce_value_to_type(
+            let value = self.coerce_value_to_type_from(
                 module,
                 value,
                 &field.ty,
                 &format!("union case field '{}.{}'", discriminator, field.name),
+                value_origin,
             )?;
             materialized.insert(SmolStr::new(field.name.as_str()), value);
         }
@@ -3798,9 +4244,20 @@ impl Interpreter {
         overrides: FxHashMap<SmolStr, Value>,
     ) -> Result<Value, RuntimeError> {
         let record_shape = self.effective_record_shape(module, &Name::new(record_name))?;
-        self.build_record_value_from_shape(module, ctx, record_shape, overrides, None)
+        self.build_record_value_from_shape(
+            module,
+            ctx,
+            record_shape,
+            overrides,
+            None,
+            ValueOrigin::Internal,
+        )
     }
 
+    /// Builds a record from `overrides`, filling the rest from defaults.
+    ///
+    /// <para>`origin` says where the overrides came from; a default is always evaluated here and
+    /// so is always [`ValueOrigin::Internal`].</para>
     fn build_record_value_from_shape(
         &self,
         module: &LoweredModule,
@@ -3808,6 +4265,7 @@ impl Interpreter {
         record_shape: nx_hir::EffectiveRecordShape,
         mut overrides: FxHashMap<SmolStr, Value>,
         missing_operation: Option<&str>,
+        origin: ValueOrigin,
     ) -> Result<Value, RuntimeError> {
         let record_def = &record_shape.record;
 
@@ -3832,12 +4290,16 @@ impl Interpreter {
             }
         }
 
+        if record_def.update_target().is_some() {
+            return self.build_update_record_value(module, record_shape, overrides, origin);
+        }
+
         let mut materialized = FxHashMap::default();
         for prop in &record_shape.fields {
-            let value = if let Some(value) = overrides.remove(prop.name.as_str()) {
-                value
+            let (value, value_origin) = if let Some(value) = overrides.remove(prop.name.as_str()) {
+                (value, origin)
             } else if prop.default.is_some() {
-                self.eval_effective_field_default(
+                let value = self.eval_effective_field_default(
                     module,
                     ctx,
                     prop,
@@ -3846,9 +4308,10 @@ impl Interpreter {
                         "record field '{}.{}' default evaluation",
                         record_def.name, prop.name
                     ),
-                )?
+                )?;
+                (value, ValueOrigin::Internal)
             } else if matches!(&prop.ty, ast::TypeRef::Nullable(_)) {
-                Value::Null
+                (Value::Null, ValueOrigin::Internal)
             } else if !prop.is_required {
                 return Err(self.unavailable_effective_field_default_error(
                     &prop.name,
@@ -3861,7 +4324,7 @@ impl Interpreter {
                     operation,
                 ));
             } else {
-                Value::Null
+                (Value::Null, ValueOrigin::Internal)
             };
 
             let owner_module = self.owner_module_for_effective_field(
@@ -3872,11 +4335,12 @@ impl Interpreter {
                     record_def.name, prop.name
                 ),
             )?;
-            let value = self.coerce_value_to_type(
+            let value = self.coerce_value_to_type_from(
                 owner_module,
                 value,
                 &prop.ty,
                 &format!("record field '{}'", prop.name.as_str()),
+                value_origin,
             )?;
             materialized.insert(SmolStr::new(prop.name.as_str()), value);
         }
@@ -3885,6 +4349,56 @@ impl Interpreter {
             type_name: record_shape.record.name,
             fields: materialized,
         })
+    }
+
+    /// Builds an update record from the fields supplied, and only those.
+    ///
+    /// <para>An absent field means "unchanged", so it stays absent: no default is evaluated and
+    /// nothing is required. A present `null` is kept only where the target field is nullable, and
+    /// every present value is checked against the target field's type. The caller has already
+    /// rejected fields the target does not declare.</para>
+    fn build_update_record_value(
+        &self,
+        module: &LoweredModule,
+        record_shape: nx_hir::EffectiveRecordShape,
+        mut overrides: FxHashMap<SmolStr, Value>,
+        origin: ValueOrigin,
+    ) -> Result<Value, RuntimeError> {
+        let record_name = &record_shape.record.name;
+        let mut present = FxHashMap::default();
+        for field in &record_shape.fields {
+            let Some(value) = overrides.remove(field.name.as_str()) else {
+                continue;
+            };
+            let operation = format!("update record field '{}.{}'", record_name, field.name);
+            let value = self.coerce_update_field_value(module, field, value, &operation, origin)?;
+            present.insert(SmolStr::new(field.name.as_str()), value);
+        }
+
+        Ok(Value::Record {
+            type_name: record_name.clone(),
+            fields: present,
+        })
+    }
+
+    /// Checks one present update-record field value against the target field's declared type.
+    fn coerce_update_field_value(
+        &self,
+        module: &LoweredModule,
+        field: &EffectiveField,
+        value: Value,
+        operation: &str,
+        origin: ValueOrigin,
+    ) -> Result<Value, RuntimeError> {
+        if value.is_null() && !matches!(&field.ty, ast::TypeRef::Nullable(_)) {
+            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: format!("non-null value for '{}'", field.name),
+                actual: "null".to_string(),
+                operation: operation.to_string(),
+            }));
+        }
+        let owner_module = self.owner_module_for_effective_field(module, field, operation)?;
+        self.coerce_value_to_type_from(owner_module, value, &field.ty, operation, origin)
     }
 }
 
@@ -4275,6 +4789,7 @@ mod tests {
             emit: Name::new("SearchSubmitted"),
             action_name: Name::new("SearchSubmitted"),
             action_module_identity: None,
+            owner: None,
             body,
             span: span(0, 0),
         });
@@ -4658,7 +5173,7 @@ mod tests {
         assert!(matches!(
             empty_error.kind(),
             RuntimeErrorKind::TypeMismatch { expected, actual, .. }
-                if expected == "one or more actions" && actual == "empty array"
+                if expected == "one or more actions or update records" && actual == "empty array"
         ));
 
         let mut wrong_input_fields = FxHashMap::default();
@@ -4677,7 +5192,7 @@ mod tests {
         assert!(matches!(
             wrong_error.kind(),
             RuntimeErrorKind::TypeMismatch { expected, actual, .. }
-                if expected == "action or action array" && actual == "string"
+                if expected == "action, update record, or a list of them" && actual == "string"
         ));
     }
 
@@ -4762,7 +5277,7 @@ mod tests {
         assert!(matches!(
             error.kind(),
             RuntimeErrorKind::TypeMismatch { expected, actual, .. }
-                if expected == "action" && actual == "SearchResult"
+                if expected == "action or update record" && actual == "SearchResult"
         ));
     }
 
@@ -5581,6 +6096,7 @@ mod tests {
                 &snapshot.component,
                 &snapshot.props,
                 &snapshot.state,
+                &RenderedHandlers::new(snapshot.render_generation),
             )
             .expect("Expected snapshot to encode");
 
@@ -5816,5 +6332,664 @@ mod tests {
             RuntimeErrorKind::InvalidComponentStateSnapshot { reason }
                 if reason.contains("snapshot fingerprint")
         ));
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // Update records and handler dispatch
+    // ------------------------------------------------------------------------------------------
+
+    fn record(type_name: &str, fields: &[(&str, Value)]) -> Value {
+        Value::Record {
+            type_name: Name::new(type_name),
+            fields: fields
+                .iter()
+                .map(|(name, value)| (SmolStr::new(*name), value.clone()))
+                .collect(),
+        }
+    }
+
+    fn string(value: &str) -> Value {
+        Value::String(SmolStr::new(value))
+    }
+
+    fn no_props() -> Value {
+        record("object", &[])
+    }
+
+    fn invocation(token: &SmolStr, action: Value) -> Value {
+        record(
+            HANDLER_INVOCATION_TYPE_NAME,
+            &[("token", Value::String(token.clone())), ("action", action)],
+        )
+    }
+
+    /// Returns the token lifecycle rendering gave the handler bound to `property` on `value`.
+    fn handler_token(value: &Value, property: &str) -> SmolStr {
+        match extract_handler(value, property) {
+            Value::ActionHandler {
+                token: Some(token), ..
+            } => token.clone(),
+            other => panic!(
+                "Expected a tokened handler on '{}', got {:?}",
+                property, other
+            ),
+        }
+    }
+
+    fn snapshot_state(
+        interpreter: &Interpreter,
+        module: &LoweredModule,
+        bytes: &[u8],
+    ) -> FxHashMap<SmolStr, Value> {
+        interpreter
+            .decode_component_snapshot(module, bytes)
+            .expect("Expected snapshot to decode")
+            .state
+    }
+
+    const COUNTER_SOURCE: &str = r#"
+        action Saved = { }
+        external component <Button value:int = 0 emits { Tapped { } } />
+        component <Counter emits { Saved } /> = {
+          state { count:int = 0 label:string = "x" }
+          <Button value={count} onTapped=<Update count={count + 1} /> />
+        }
+    "#;
+
+    #[test]
+    fn update_record_construction_keeps_only_the_supplied_fields() {
+        let (module, interpreter) = lower_module_runtime(
+            r#"
+            type User = { name:string = "anon" email:string? }
+            let clearEmail() = <User.Update email={null} />
+            let rename() = <User.Update name="Ada" />
+            let none() = <User.Update />
+            "#,
+        );
+
+        let clear = interpreter
+            .execute_function(module.as_ref(), "clearEmail", vec![])
+            .expect("Expected update construction to succeed");
+        assert_eq!(clear, record("User.Update", &[("email", Value::Null)]));
+
+        let rename = interpreter
+            .execute_function(module.as_ref(), "rename", vec![])
+            .expect("Expected update construction to succeed");
+        assert_eq!(
+            rename,
+            record("User.Update", &[("name", string("Ada"))]),
+            "A default must not fill an absent field"
+        );
+
+        let none = interpreter
+            .execute_function(module.as_ref(), "none", vec![])
+            .expect("Expected an empty update to construct");
+        assert_eq!(none, record("User.Update", &[]));
+    }
+
+    #[test]
+    fn update_record_construction_rejects_unknown_fields_and_null_for_non_nullable_fields() {
+        let (module, interpreter) = lower_module_runtime(
+            r#"
+            type User = { name:string email:string? }
+            let nickname() = <User.Update nickname="A" />
+            let nullName() = <User.Update name={null} />
+            let wrongType() = <User.Update name=3 />
+            "#,
+        );
+
+        let unknown = interpreter
+            .execute_function(module.as_ref(), "nickname", vec![])
+            .expect_err("Expected an unknown field to fail");
+        assert!(
+            matches!(unknown.kind(), RuntimeErrorKind::UnknownRecordField { field, .. } if field == "nickname"),
+            "got {:?}",
+            unknown
+        );
+
+        let null_name = interpreter
+            .execute_function(module.as_ref(), "nullName", vec![])
+            .expect_err("Expected null for a non-nullable field to fail");
+        assert!(
+            null_name.to_string().contains("User.Update.name"),
+            "got {}",
+            null_name
+        );
+
+        let wrong_type = interpreter
+            .execute_function(module.as_ref(), "wrongType", vec![])
+            .expect_err("Expected a mistyped field to fail");
+        assert!(
+            wrong_type.to_string().contains("User.Update.name"),
+            "got {}",
+            wrong_type
+        );
+
+        // Host-supplied fields take the external construction path and meet the same rules.
+        let host_unknown = interpreter
+            .construct_external_record_value(
+                module.as_ref(),
+                &Name::new("User.Update"),
+                FxHashMap::from_iter([(SmolStr::new("nickname"), string("A"))]),
+                &Name::new("User.Update"),
+                "host input",
+            )
+            .expect_err("Expected an unknown host field to fail");
+        assert!(
+            host_unknown.to_string().contains("nickname"),
+            "got {}",
+            host_unknown
+        );
+
+        let host_null = interpreter
+            .construct_external_record_value(
+                module.as_ref(),
+                &Name::new("User.Update"),
+                FxHashMap::from_iter([(SmolStr::new("name"), Value::Null)]),
+                &Name::new("User.Update"),
+                "host input",
+            )
+            .expect_err("Expected null for a non-nullable host field to fail");
+        assert!(host_null.to_string().contains("name"), "got {}", host_null);
+
+        let host_absent = interpreter
+            .construct_external_record_value(
+                module.as_ref(),
+                &Name::new("User.Update"),
+                FxHashMap::from_iter([(SmolStr::new("name"), string("Ada"))]),
+                &Name::new("User.Update"),
+                "host input",
+            )
+            .expect("Expected a host update with an absent field to construct");
+        assert_eq!(
+            host_absent,
+            record("User.Update", &[("name", string("Ada"))])
+        );
+    }
+
+    #[test]
+    fn handlers_carry_their_owner_and_its_state_names() {
+        let (module, interpreter) = lower_module_runtime(COUNTER_SOURCE);
+        let init = interpreter
+            .initialize_component(module.as_ref(), "Counter", no_props())
+            .expect("Expected initialization to succeed");
+
+        match extract_handler(&init.rendered, "onTapped") {
+            Value::ActionHandler {
+                owner, owner_state, ..
+            } => {
+                assert_eq!(owner.as_ref().map(Name::as_str), Some("Counter"));
+                assert_eq!(
+                    owner_state,
+                    &vec![SmolStr::new("count"), SmolStr::new("label")]
+                );
+            }
+            other => panic!("Expected an action handler, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn a_snapshot_from_before_the_handler_table_is_rejected() {
+        /// The snapshot shape before `render_generation` and `handlers` existed.
+        #[derive(Serialize)]
+        struct SnapshotBeforeHandlers {
+            version: u32,
+            program_fingerprint: Option<u64>,
+            component_module_id: u32,
+            component: String,
+            props: BTreeMap<String, SerializedValue>,
+            state: BTreeMap<String, SerializedValue>,
+        }
+
+        let (module, interpreter) = lower_module_runtime(COUNTER_SOURCE);
+        let init = interpreter
+            .initialize_component(module.as_ref(), "Counter", no_props())
+            .expect("Expected initialization to succeed");
+        let snapshot: SerializedComponentSnapshot =
+            rmp_serde::from_slice(&init.state_snapshot).expect("snapshot decodes");
+        let old = rmp_serde::to_vec_named(&SnapshotBeforeHandlers {
+            version: 1,
+            program_fingerprint: snapshot.program_fingerprint,
+            component_module_id: snapshot.component_module_id,
+            component: snapshot.component,
+            props: snapshot.props,
+            state: snapshot.state,
+        })
+        .expect("snapshot encodes");
+
+        let error = interpreter
+            .dispatch_component_actions(module.as_ref(), &old, vec![])
+            .expect_err("Expected an old snapshot to be rejected");
+        assert!(
+            matches!(
+                error.kind(),
+                RuntimeErrorKind::InvalidComponentStateSnapshot { reason }
+                    if reason.contains("unsupported snapshot version 1")
+            ),
+            "got {:?}",
+            error
+        );
+    }
+
+    #[test]
+    fn handler_results_may_mix_update_records_and_actions() {
+        let (module, interpreter) = lower_module_runtime(
+            r#"
+            action Saved = { }
+            external component <Button emits { Tapped { } } />
+            component <Counter emits { Saved } /> = {
+              state { count:int = 0 }
+              <Button onTapped={<Update count={count + 1} /> <Saved />} />
+            }
+            "#,
+        );
+        let init = interpreter
+            .initialize_component(module.as_ref(), "Counter", no_props())
+            .expect("Expected initialization to succeed");
+        let results = interpreter
+            .invoke_action_handler(
+                module.as_ref(),
+                extract_handler(&init.rendered, "onTapped"),
+                record("Button.Tapped", &[]),
+            )
+            .expect("Expected the handler to run");
+
+        assert_eq!(
+            results,
+            vec![
+                record("Counter.Update", &[("count", Value::Int(1))]),
+                record("Saved", &[]),
+            ]
+        );
+    }
+
+    #[test]
+    fn lifecycle_output_carries_handler_tokens_and_pure_evaluation_does_not() {
+        let (module, interpreter) = lower_module_runtime(COUNTER_SOURCE);
+        let init = interpreter
+            .initialize_component(module.as_ref(), "Counter", no_props())
+            .expect("Expected initialization to succeed");
+        let token = handler_token(&init.rendered, "onTapped");
+        assert!(!token.is_empty());
+        let decoded = interpreter
+            .decode_component_snapshot(module.as_ref(), &init.state_snapshot)
+            .expect("snapshot decodes");
+        assert!(decoded.handlers.contains_key(&token));
+
+        let evaluated = interpreter
+            .evaluate_component(
+                module.as_ref(),
+                "Counter",
+                no_props(),
+                record(
+                    "object",
+                    &[("count", Value::Int(3)), ("label", string("x"))],
+                ),
+            )
+            .expect("Expected evaluation to succeed");
+        assert!(matches!(
+            extract_handler(&evaluated.rendered, "onTapped"),
+            Value::ActionHandler { token: None, .. }
+        ));
+    }
+
+    #[test]
+    fn dispatching_a_handler_token_patches_state_and_re_renders() {
+        let (module, interpreter) = lower_module_runtime(COUNTER_SOURCE);
+        let init = interpreter
+            .initialize_component(module.as_ref(), "Counter", no_props())
+            .expect("Expected initialization to succeed");
+        let token = handler_token(&init.rendered, "onTapped");
+
+        let dispatch = interpreter
+            .dispatch_component_actions(
+                module.as_ref(),
+                &init.state_snapshot,
+                vec![invocation(&token, record("Button.Tapped", &[]))],
+            )
+            .expect("Expected dispatch to succeed");
+
+        assert!(dispatch.effects.is_empty());
+        assert_eq!(
+            extract_record_field(&dispatch.rendered, "value"),
+            &Value::Int(1)
+        );
+        let state = snapshot_state(&interpreter, module.as_ref(), &dispatch.state_snapshot);
+        assert_eq!(state.get("count"), Some(&Value::Int(1)));
+        assert_eq!(
+            state.get("label"),
+            Some(&string("x")),
+            "An absent field keeps its value"
+        );
+
+        // The next render's token drives the next dispatch.
+        let next_token = handler_token(&dispatch.rendered, "onTapped");
+        let again = interpreter
+            .dispatch_component_actions(
+                module.as_ref(),
+                &dispatch.state_snapshot,
+                vec![invocation(&next_token, record("Button.Tapped", &[]))],
+            )
+            .expect("Expected the second dispatch to succeed");
+        assert_eq!(
+            extract_record_field(&again.rendered, "value"),
+            &Value::Int(2)
+        );
+    }
+
+    #[test]
+    fn two_increments_in_one_batch_move_twice() {
+        let (module, interpreter) = lower_module_runtime(COUNTER_SOURCE);
+        let init = interpreter
+            .initialize_component(module.as_ref(), "Counter", no_props())
+            .expect("Expected initialization to succeed");
+        let token = handler_token(&init.rendered, "onTapped");
+
+        let dispatch = interpreter
+            .dispatch_component_actions(
+                module.as_ref(),
+                &init.state_snapshot,
+                vec![
+                    invocation(&token, record("Button.Tapped", &[])),
+                    invocation(&token, record("Button.Tapped", &[])),
+                ],
+            )
+            .expect("Expected dispatch to succeed");
+        let state = snapshot_state(&interpreter, module.as_ref(), &dispatch.state_snapshot);
+        assert_eq!(state.get("count"), Some(&Value::Int(2)));
+    }
+
+    #[test]
+    fn a_later_handler_sees_an_earlier_patch() {
+        let (module, interpreter) = lower_module_runtime(
+            r#"
+            external component <Button emits { Tapped { } } />
+            component <Counter /> = {
+              state { count:int = 0 }
+              <Row>
+                <Button onTapped=<Update count=10 /> />
+                <Button onTapped=<Update count={count * 2} /> />
+              </Row>
+            }
+            "#,
+        );
+        let init = interpreter
+            .initialize_component(module.as_ref(), "Counter", no_props())
+            .expect("Expected initialization to succeed");
+        let Value::Array(buttons) = extract_record_field(&init.rendered, "content") else {
+            panic!("Expected two buttons, got {:?}", init.rendered);
+        };
+        let set = handler_token(&buttons[0], "onTapped");
+        let double = handler_token(&buttons[1], "onTapped");
+
+        let dispatch = interpreter
+            .dispatch_component_actions(
+                module.as_ref(),
+                &init.state_snapshot,
+                vec![
+                    invocation(&set, record("Button.Tapped", &[])),
+                    invocation(&double, record("Button.Tapped", &[])),
+                ],
+            )
+            .expect("Expected dispatch to succeed");
+        let state = snapshot_state(&interpreter, module.as_ref(), &dispatch.state_snapshot);
+        assert_eq!(state.get("count"), Some(&Value::Int(20)));
+    }
+
+    #[test]
+    fn captured_loop_variables_keep_their_snapshot() {
+        let (module, interpreter) = lower_module_runtime(
+            r#"
+            external component <Row emits { Tapped { } } />
+            component <Picker /> = {
+              state { items:string[] = {"a" "b"} selected:string = "" }
+              <Column>
+                {for item in items { <Row onTapped={<Update items={"x" "y"} /> <Update selected={item} />} /> }}
+              </Column>
+            }
+            "#,
+        );
+        let init = interpreter
+            .initialize_component(module.as_ref(), "Picker", no_props())
+            .expect("Expected initialization to succeed");
+        let Value::Array(rows) = extract_record_field(&init.rendered, "content") else {
+            panic!("Expected rows, got {:?}", init.rendered);
+        };
+        let first = handler_token(&rows[0], "onTapped");
+        let second = handler_token(&rows[1], "onTapped");
+
+        let dispatch = interpreter
+            .dispatch_component_actions(
+                module.as_ref(),
+                &init.state_snapshot,
+                vec![
+                    invocation(&first, record("Row.Tapped", &[])),
+                    invocation(&second, record("Row.Tapped", &[])),
+                ],
+            )
+            .expect("Expected dispatch to succeed");
+        let state = snapshot_state(&interpreter, module.as_ref(), &dispatch.state_snapshot);
+        assert_eq!(
+            state.get("items"),
+            Some(&Value::Array(vec![string("x"), string("y")]))
+        );
+        assert_eq!(
+            state.get("selected"),
+            Some(&string("b")),
+            "The second row's handler keeps the item it was created for"
+        );
+    }
+
+    #[test]
+    fn mixed_handler_results_route_item_by_item() {
+        let (module, interpreter) = lower_module_runtime(
+            r#"
+            action Saved = { }
+            external component <Button emits { Tapped { } } />
+            component <Form emits { Saved } /> = {
+              state { dirty:boolean = true }
+              <Button onTapped={<Update dirty=false /> <Saved />} />
+            }
+            "#,
+        );
+        let init = interpreter
+            .initialize_component(module.as_ref(), "Form", no_props())
+            .expect("Expected initialization to succeed");
+        let token = handler_token(&init.rendered, "onTapped");
+
+        let dispatch = interpreter
+            .dispatch_component_actions(
+                module.as_ref(),
+                &init.state_snapshot,
+                vec![invocation(&token, record("Button.Tapped", &[]))],
+            )
+            .expect("Expected dispatch to succeed");
+        assert_eq!(dispatch.effects, vec![record("Saved", &[])]);
+        let state = snapshot_state(&interpreter, module.as_ref(), &dispatch.state_snapshot);
+        assert_eq!(state.get("dirty"), Some(&Value::Boolean(false)));
+    }
+
+    #[test]
+    fn update_records_from_a_parent_bound_handler_are_effects() {
+        let (module, interpreter) = lower_module_runtime(
+            r#"
+            component <SearchBox emits { SearchSubmitted { searchString:string } } /> = {
+              state { query:string = "" }
+              <TextInput value={query} />
+            }
+            component <Page /> = {
+              state { query:string = "" }
+              <SearchBox onSearchSubmitted=<Update query={action.searchString} /> />
+            }
+            "#,
+        );
+        let page = interpreter
+            .initialize_component(module.as_ref(), "Page", no_props())
+            .expect("Expected the parent to initialize");
+        let search_box = interpreter
+            .initialize_component(module.as_ref(), "SearchBox", page.rendered.clone())
+            .expect("Expected the child to initialize with its parent's props");
+
+        let dispatch = interpreter
+            .dispatch_component_actions(
+                module.as_ref(),
+                &search_box.state_snapshot,
+                vec![record(
+                    "SearchBox.SearchSubmitted",
+                    &[("searchString", string("docs"))],
+                )],
+            )
+            .expect("Expected dispatch to succeed");
+        assert_eq!(
+            dispatch.effects,
+            vec![record("Page.Update", &[("query", string("docs"))])]
+        );
+        let state = snapshot_state(&interpreter, module.as_ref(), &dispatch.state_snapshot);
+        assert_eq!(
+            state.get("query"),
+            Some(&string("")),
+            "The child's state is untouched"
+        );
+    }
+
+    #[test]
+    fn a_failing_entry_fails_the_whole_batch() {
+        let (module, interpreter) = lower_module_runtime(COUNTER_SOURCE);
+        let init = interpreter
+            .initialize_component(module.as_ref(), "Counter", no_props())
+            .expect("Expected initialization to succeed");
+        let token = handler_token(&init.rendered, "onTapped");
+
+        let error = interpreter
+            .dispatch_component_actions(
+                module.as_ref(),
+                &init.state_snapshot,
+                vec![
+                    invocation(&token, record("Button.Tapped", &[])),
+                    invocation(&SmolStr::new("h9-9"), record("Button.Tapped", &[])),
+                ],
+            )
+            .expect_err("Expected an unknown token to fail the batch");
+        assert!(
+            matches!(error.kind(), RuntimeErrorKind::UnknownHandlerToken { token } if token == "h9-9"),
+            "got {:?}",
+            error
+        );
+
+        // The supplied snapshot is still the state of record.
+        let retry = interpreter
+            .dispatch_component_actions(module.as_ref(), &init.state_snapshot, vec![])
+            .expect("Expected the original snapshot to stay usable");
+        let state = snapshot_state(&interpreter, module.as_ref(), &retry.state_snapshot);
+        assert_eq!(state.get("count"), Some(&Value::Int(0)));
+    }
+
+    #[test]
+    fn a_stale_token_is_rejected() {
+        let (module, interpreter) = lower_module_runtime(COUNTER_SOURCE);
+        let init = interpreter
+            .initialize_component(module.as_ref(), "Counter", no_props())
+            .expect("Expected initialization to succeed");
+        let stale = handler_token(&init.rendered, "onTapped");
+        let dispatch = interpreter
+            .dispatch_component_actions(
+                module.as_ref(),
+                &init.state_snapshot,
+                vec![invocation(&stale, record("Button.Tapped", &[]))],
+            )
+            .expect("Expected dispatch to succeed");
+
+        let error = interpreter
+            .dispatch_component_actions(
+                module.as_ref(),
+                &dispatch.state_snapshot,
+                vec![invocation(&stale, record("Button.Tapped", &[]))],
+            )
+            .expect_err("Expected a token from an earlier render to be rejected");
+        assert!(matches!(
+            error.kind(),
+            RuntimeErrorKind::UnknownHandlerToken { .. }
+        ));
+    }
+
+    #[test]
+    fn an_invocation_with_the_wrong_action_type_is_rejected() {
+        let (module, interpreter) = lower_module_runtime(
+            r#"
+            external component <Button emits { Tapped { } } />
+            external component <Slider emits { EndChanged { value:float64 } } />
+            component <Counter /> = {
+              state { count:int = 0 }
+              <Button onTapped=<Update count={count + 1} /> />
+            }
+            "#,
+        );
+        let init = interpreter
+            .initialize_component(module.as_ref(), "Counter", no_props())
+            .expect("Expected initialization to succeed");
+        let token = handler_token(&init.rendered, "onTapped");
+
+        let error = interpreter
+            .dispatch_component_actions(
+                module.as_ref(),
+                &init.state_snapshot,
+                vec![invocation(
+                    &token,
+                    record("Slider.EndChanged", &[("value", Value::Float(1.0))]),
+                )],
+            )
+            .expect_err("Expected the wrong action type to be rejected");
+        assert!(
+            matches!(error.kind(), RuntimeErrorKind::TypeMismatch { expected, .. } if expected == "Button.Tapped"),
+            "got {:?}",
+            error
+        );
+    }
+
+    #[test]
+    fn a_mistyped_update_aborts_the_batch() {
+        // Lowered without type checking, so nothing stops the mistyped field before runtime.
+        let (module, interpreter) = lower_module_runtime(
+            r#"
+            external component <Button emits { Tapped { } } />
+            component <Counter /> = {
+              state { count:int = 0 }
+              <Button onTapped=<Update count="one" /> />
+            }
+            "#,
+        );
+        let init = interpreter
+            .initialize_component(module.as_ref(), "Counter", no_props())
+            .expect("Expected initialization to succeed");
+        let token = handler_token(&init.rendered, "onTapped");
+
+        let error = interpreter
+            .dispatch_component_actions(
+                module.as_ref(),
+                &init.state_snapshot,
+                vec![invocation(&token, record("Button.Tapped", &[]))],
+            )
+            .expect_err("Expected a mistyped update to fail the batch");
+        assert!(error.to_string().contains("count"), "got {}", error);
+    }
+
+    #[test]
+    fn a_patch_with_a_mistyped_field_is_refused_when_applied() {
+        let (module, interpreter) = lower_module_runtime(COUNTER_SOURCE);
+        let (module, component) = interpreter
+            .find_component(module.as_ref(), "Counter")
+            .expect("component");
+        let mut state = FxHashMap::from_iter([(SmolStr::new("count"), Value::Int(0))]);
+
+        let error = interpreter
+            .apply_component_update(
+                module,
+                component,
+                &mut state,
+                record("Counter.Update", &[("count", string("one"))]),
+            )
+            .expect_err("Expected a mistyped patch to be refused");
+        assert!(error.to_string().contains("Counter.count"), "got {}", error);
+        assert_eq!(state.get("count"), Some(&Value::Int(0)));
     }
 }

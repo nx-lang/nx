@@ -155,6 +155,24 @@ let root() = { <Shape shadows={ <Shadow Y=6.0 /> } sizes={3.0} /> }
 
 withSource(
   `
+type User = { name:string = "anon" email:string? }
+let root(): User.Update = { <User.Update email={null} /> }
+`,
+  (dir, sourcePath) => {
+    const ir = emitIr(dir, sourcePath);
+    if (!ir.requiredFeatures.includes("update-records-v1")) {
+      throw new Error(`Expected the update-record feature, got ${JSON.stringify(ir.requiredFeatures)}`);
+    }
+    const prepared = prepareNxIrProgram(ir);
+    const expected = { $type: "User.Update", email: null };
+    assertEqual(evaluateFunction(prepared, "root"), expected);
+    assertEqual(nativeJson(sourcePath), expected);
+    console.log("ok - an emitted update record keeps absent fields absent like the native interpreter");
+  },
+);
+
+withSource(
+  `
 abstract type Base = { name:string = "anon" }
 type User extends Base = { role:string }
 let root() = { <User role="admin" /> }

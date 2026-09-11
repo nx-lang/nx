@@ -5,7 +5,7 @@ use crate::eval::{
 };
 use crate::value::{from_nx_value, to_nx_value};
 use crate::{NxDiagnostic, NxSeverity};
-use nx_interpreter::Interpreter;
+use nx_interpreter::{Interpreter, HANDLER_INVOCATION_TYPE_NAME};
 use nx_value::NxValue;
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +39,10 @@ pub struct ComponentEvaluateResult {
 /// The result of dispatching actions against a component state snapshot.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ComponentDispatchResult {
+    /// Component body re-rendered against the state the whole batch produced.
+    ///
+    /// Handlers in it carry the tokens valid with `state_snapshot`.
+    pub rendered: NxValue,
     /// Effect actions returned in dispatch order.
     pub effects: Vec<NxValue>,
     /// Opaque host-owned component state snapshot.
@@ -274,6 +278,7 @@ fn dispatch_component_actions_program_artifact_with_source(
 
     match interpreter.dispatch_resolved_component_actions(state_snapshot, actions) {
         Ok(result) => ComponentDispatchEvalResult::Ok(ComponentDispatchResult {
+            rendered: to_nx_value(&result.rendered),
             effects: result.effects.iter().map(to_nx_value).collect(),
             state_snapshot: result.state_snapshot,
         }),
@@ -301,11 +306,31 @@ fn validate_dispatch_action_input(
     value: &NxValue,
     path: &str,
 ) -> Result<(), String> {
-    if let NxValue::Record {
-        type_name: None, ..
+    let NxValue::Record {
+        type_name,
+        properties,
     } = value
-    {
+    else {
+        return validate_host_input_value_at_path(lookup, value, path);
+    };
+    let Some(type_name) = type_name else {
         return Err(format!("action record at {path} must have a '$type' field"));
+    };
+
+    // A handler invocation names a handler from the rendered output by token and carries the
+    // action to feed it, which must itself be a typed action record.
+    if type_name == HANDLER_INVOCATION_TYPE_NAME {
+        if !matches!(properties.get("token"), Some(NxValue::String(_))) {
+            return Err(format!(
+                "handler invocation at {path} must have a string 'token' read from rendered output"
+            ));
+        }
+        let Some(action) = properties.get("action") else {
+            return Err(format!(
+                "handler invocation at {path} must have an 'action' record"
+            ));
+        };
+        return validate_dispatch_action_input(lookup, action, &format!("{path}.action"));
     }
 
     validate_host_input_value_at_path(lookup, value, path)
@@ -882,6 +907,206 @@ let root() = { 0 }"#;
             }
         );
         assert!(!result.state_snapshot.is_empty());
+    }
+
+    const COUNTER_SOURCE: &str = r#"
+        action Saved = { }
+        external component <Button value:int = 0 emits { Tapped { } } />
+        component <Counter emits { Saved } /> = {
+          state { count:int = 0 }
+          <Button value={count} onTapped={<Update count={count + 1} /> <Saved />} />
+        }
+    "#;
+
+    fn property<'a>(value: &'a NxValue, name: &str) -> &'a NxValue {
+        let NxValue::Record { properties, .. } = value else {
+            panic!("Expected a record, got {:?}", value);
+        };
+        properties
+            .get(name)
+            .unwrap_or_else(|| panic!("Expected property '{}' on {:?}", name, value))
+    }
+
+    fn handler_token(rendered: &NxValue, handler_property: &str) -> String {
+        let handler = property(rendered, handler_property);
+        assert_eq!(
+            handler,
+            &NxValue::Record {
+                type_name: Some("ActionHandler".to_string()),
+                properties: BTreeMap::from([
+                    (
+                        "action".to_string(),
+                        NxValue::String("Button.Tapped".to_string())
+                    ),
+                    ("token".to_string(), property(handler, "token").clone()),
+                ]),
+            }
+        );
+        match property(handler, "token") {
+            NxValue::String(token) if !token.is_empty() => token.clone(),
+            other => panic!("Expected a non-empty token, got {:?}", other),
+        }
+    }
+
+    fn handler_invocation(token: &str, action: NxValue) -> NxValue {
+        NxValue::Record {
+            type_name: Some(HANDLER_INVOCATION_TYPE_NAME.to_string()),
+            properties: BTreeMap::from([
+                ("token".to_string(), NxValue::String(token.to_string())),
+                ("action".to_string(), action),
+            ]),
+        }
+    }
+
+    fn tapped() -> NxValue {
+        NxValue::Record {
+            type_name: Some("Button.Tapped".to_string()),
+            properties: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn dispatching_a_rendered_handler_token_returns_rendered_effects_and_snapshot() {
+        let context = ProgramBuildContext::empty();
+        let ComponentInitEvalResult::Ok(init) = initialize_component_source(
+            COUNTER_SOURCE,
+            "counter.nx",
+            &context,
+            "Counter",
+            &empty_record(),
+        ) else {
+            panic!("Expected initialization to succeed");
+        };
+        let token = handler_token(&init.rendered, "onTapped");
+
+        let ComponentDispatchEvalResult::Ok(result) = dispatch_component_actions_source(
+            COUNTER_SOURCE,
+            "counter.nx",
+            &context,
+            &init.state_snapshot,
+            &[handler_invocation(&token, tapped())],
+        ) else {
+            panic!("Expected dispatch to succeed");
+        };
+
+        assert_eq!(property(&result.rendered, "value"), &NxValue::Int(1));
+        assert_eq!(
+            result.effects,
+            vec![NxValue::Record {
+                type_name: Some("Saved".to_string()),
+                properties: BTreeMap::new(),
+            }]
+        );
+        assert!(!result.state_snapshot.is_empty());
+
+        // The JSON form of the result carries all three parts.
+        let json = serde_json::to_value(&result).expect("dispatch result serializes");
+        let keys = json
+            .as_object()
+            .expect("an object")
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(keys, vec!["effects", "rendered", "state_snapshot"]);
+
+        // The re-rendered output's token drives the next dispatch.
+        let next_token = handler_token(&result.rendered, "onTapped");
+        let ComponentDispatchEvalResult::Ok(again) = dispatch_component_actions_source(
+            COUNTER_SOURCE,
+            "counter.nx",
+            &context,
+            &result.state_snapshot,
+            &[handler_invocation(&next_token, tapped())],
+        ) else {
+            panic!("Expected the second dispatch to succeed");
+        };
+        assert_eq!(property(&again.rendered, "value"), &NxValue::Int(2));
+    }
+
+    #[test]
+    fn a_stale_handler_token_fails_dispatch_with_a_diagnostic() {
+        let context = ProgramBuildContext::empty();
+        let ComponentInitEvalResult::Ok(init) = initialize_component_source(
+            COUNTER_SOURCE,
+            "counter.nx",
+            &context,
+            "Counter",
+            &empty_record(),
+        ) else {
+            panic!("Expected initialization to succeed");
+        };
+        let stale = handler_token(&init.rendered, "onTapped");
+        let ComponentDispatchEvalResult::Ok(first) = dispatch_component_actions_source(
+            COUNTER_SOURCE,
+            "counter.nx",
+            &context,
+            &init.state_snapshot,
+            &[handler_invocation(&stale, tapped())],
+        ) else {
+            panic!("Expected dispatch to succeed");
+        };
+
+        let ComponentDispatchEvalResult::Err(diagnostics) = dispatch_component_actions_source(
+            COUNTER_SOURCE,
+            "counter.nx",
+            &context,
+            &first.state_snapshot,
+            &[handler_invocation(&stale, tapped())],
+        ) else {
+            panic!("Expected a stale token to fail dispatch");
+        };
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains(&format!("'{}'", stale))),
+            "Expected the diagnostic to name the token, got {:?}",
+            diagnostics
+        );
+    }
+
+    #[test]
+    fn a_malformed_handler_invocation_is_rejected_as_invalid_input() {
+        let context = ProgramBuildContext::empty();
+        let ComponentInitEvalResult::Ok(init) = initialize_component_source(
+            COUNTER_SOURCE,
+            "counter.nx",
+            &context,
+            "Counter",
+            &empty_record(),
+        ) else {
+            panic!("Expected initialization to succeed");
+        };
+
+        let missing_token = NxValue::Record {
+            type_name: Some(HANDLER_INVOCATION_TYPE_NAME.to_string()),
+            properties: BTreeMap::from([("action".to_string(), tapped())]),
+        };
+        let untyped_action = handler_invocation("h1-1", empty_record());
+        for (entry, expected) in [
+            (missing_token, "string 'token'"),
+            (untyped_action, "must have a '$type' field"),
+        ] {
+            let ComponentDispatchEvalResult::Err(diagnostics) = dispatch_component_actions_source(
+                COUNTER_SOURCE,
+                "counter.nx",
+                &context,
+                &init.state_snapshot,
+                &[entry],
+            ) else {
+                panic!("Expected a malformed invocation to be rejected");
+            };
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(
+                        |diagnostic| diagnostic.code.as_deref() == Some("invalid-input")
+                            && diagnostic.message.contains(expected)
+                    ),
+                "Expected {:?}, got {:?}",
+                expected,
+                diagnostics
+            );
+        }
     }
 
     #[test]

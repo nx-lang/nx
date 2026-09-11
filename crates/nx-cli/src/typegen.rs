@@ -6,7 +6,6 @@ mod writer;
 
 use crate::typegen::options::FormatOptions;
 use nx_api::LibraryArtifact;
-use nx_hir::LoweredModule;
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,19 +71,20 @@ pub fn default_library_target_name(language: TargetLanguage) -> &'static str {
 
 #[allow(dead_code)]
 pub fn generate_types(
-    module: &LoweredModule,
+    source: &str,
     source_path: &Path,
     opts: &GenerateTypesOptions,
 ) -> Result<String, String> {
-    Ok(generate_types_with_warnings(module, source_path, opts)?.value)
+    Ok(generate_types_with_warnings(source, source_path, opts)?.value)
 }
 
+/// Generates types for one source file, resolving the libraries it imports from `source_path`.
 pub fn generate_types_with_warnings(
-    module: &LoweredModule,
+    source: &str,
     source_path: &Path,
     opts: &GenerateTypesOptions,
 ) -> Result<GeneratedOutput<String>, String> {
-    let build = model::ExportedTypeGraph::from_module_with_warnings(module, source_path)?;
+    let build = model::ExportedTypeGraph::from_source_with_warnings(source, source_path)?;
     let graph = &build.graph;
 
     let value = match opts.language {
@@ -149,19 +149,16 @@ fn collect_language_warnings(
 mod tests {
     use super::*;
     use nx_api::build_library_artifact_from_directory;
-    use nx_hir::{lower, SourceId};
-    use nx_syntax::parse_str;
     use std::fs;
     use tempfile::TempDir;
 
-    fn lower_module(source: &str, file_name: &str) -> LoweredModule {
-        let parse_result = parse_str(source, file_name);
-        let tree = parse_result.tree.expect("expected parse tree");
-        lower(tree.root(), SourceId::new(0))
+    /// The source a test generates from; generation lowers and analyzes it itself.
+    fn source_module(source: &str, _file_name: &str) -> String {
+        source.to_string()
     }
 
     fn generate_for(source: &str, language: TargetLanguage) -> String {
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language,
             csharp_namespace: None,
@@ -261,7 +258,7 @@ mod tests {
             export type Direction = north | south
             export action SearchRequested = { query:string }
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
@@ -286,7 +283,7 @@ mod tests {
               state { query:string }
             }
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
@@ -313,7 +310,7 @@ mod tests {
             export abstract external component <Question label:string />
             export external component <ShortTextQuestion extends Question placeholder:string? />
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
@@ -336,7 +333,7 @@ mod tests {
         let source = r#"
             export type Payload = { data:string }
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
@@ -362,7 +359,7 @@ mod tests {
               matrix:string[][]
             }
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
@@ -386,7 +383,7 @@ mod tests {
             export type ShortTextQuestion extends Question = { placeholder:string? }
             export type LongTextQuestion extends Question = { wordLimit:int? }
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
@@ -411,7 +408,7 @@ mod tests {
             export action SearchRequested extends SearchAction = { query:string }
             export action SearchSubmitted extends SearchAction = { submittedAt:string }
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
@@ -440,7 +437,7 @@ mod tests {
               | clicked { x:int }
               | closed
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
@@ -482,7 +479,7 @@ mod tests {
             export abstract type EventBase = { source:string }
             export type UiEvent extends EventBase = clicked { x:int } | closed
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let output = generate_types(
             &module,
             Path::new("types.nx"),
@@ -509,7 +506,7 @@ mod tests {
     /// closed set of constants is declared.
     fn constant_set_types(declaration: &str) -> (String, String) {
         let source = format!("{declaration}\nexport type Settings = {{ fit: Fit }}\n");
-        let module = lower_module(&source, "types.nx");
+        let module = source_module(&source, "types.nx");
         let csharp = generate_types(
             &module,
             Path::new("types.nx"),
@@ -605,7 +602,7 @@ mod tests {
             export type Count = int
             export type Name = string
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
@@ -625,7 +622,7 @@ mod tests {
             export type Count = int
             export type Payload = { count: Count }
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
@@ -646,7 +643,7 @@ mod tests {
               state { query:string }
             }
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
@@ -664,7 +661,7 @@ mod tests {
         let source = r#"
             external component <SearchBox placeholder:string />
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
@@ -799,7 +796,13 @@ mod tests {
             .content
             .contains("export interface SearchBox_state"));
         assert!(search_box.content.contains("theme: ThemeMode;"));
-        assert!(!search_box.content.contains("$type"));
+        let (state, update) = search_box
+            .content
+            .split_once("export interface SearchBox_update")
+            .expect("the state contract and its update companion");
+        assert!(!state.contains("$type"));
+        assert!(update.contains("$type: \"SearchBox.Update\";"));
+        assert!(update.contains("theme?: ThemeMode;"));
     }
 
     #[test]
@@ -861,7 +864,7 @@ mod tests {
             export abstract external component <Question label:string />
             export external component <ShortTextQuestion extends Question placeholder:string? />
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
@@ -891,7 +894,7 @@ mod tests {
               c:String
             }
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
@@ -917,7 +920,7 @@ mod tests {
               precise:float64
             }
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
@@ -966,7 +969,7 @@ mod tests {
               precise:float64
             }
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
@@ -1001,7 +1004,7 @@ mod tests {
               maybeSmall:float32? = 0.5
             }
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
@@ -1028,7 +1031,7 @@ mod tests {
               | failed { retryable:boolean = true }
             export external component <Toggle selected:boolean = true label:string = "On" />
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
@@ -1054,7 +1057,7 @@ mod tests {
               title:string = { "hello" + "world" }
             }
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
@@ -1081,7 +1084,7 @@ mod tests {
         let source = r#"
             export type DealStage = draft | pending_review | closed_won
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
@@ -1117,7 +1120,7 @@ mod tests {
         let source = r#"
             export type BuildTarget = web_api | ios_app
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
@@ -1147,7 +1150,7 @@ mod tests {
               | clicked { x:int }
               | closed
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
@@ -1484,7 +1487,7 @@ mod tests {
               state { query:string theme:string? }
             }
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
@@ -1527,7 +1530,7 @@ mod tests {
         let source = r#"
             export type Payload = { nx_type: string }
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
@@ -1536,11 +1539,17 @@ mod tests {
         };
 
         let output = generate_types(&module, Path::new("types.nx"), &opts).unwrap();
+        let (record, update) = output
+            .split_once("[MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter")
+            .expect("the record and its update companion");
 
-        assert!(!output.contains("[JsonPropertyName(\"$type\")]"));
+        assert!(!record.contains("[JsonPropertyName(\"$type\")]"));
         assert!(!output.contains("__NxType"));
-        assert!(output.contains("[JsonPropertyName(\"nx_type\")]"));
-        assert!(output.contains("public string NxType { get; set; } = default!;"));
+        assert!(record.contains("[JsonPropertyName(\"nx_type\")]"));
+        assert!(record.contains("public string NxType { get; set; } = default!;"));
+        // The companion's own discriminator steps around the field it would collide with.
+        assert!(update.contains("public string NxType_ => \"Payload.Update\";"));
+        assert!(update.contains("public NxOptional<string> NxType { get; set; }"));
     }
 
     #[test]
@@ -1548,7 +1557,7 @@ mod tests {
         let source = r#"
             export type ShortTextQuestion = { label:string }
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
@@ -1569,10 +1578,15 @@ mod tests {
         ]
         .join(nl);
 
+        let record = output
+            .split("[MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter")
+            .next()
+            .expect("the record");
+
         assert!(output.contains(&expected));
         assert!(!output.contains("__NxType"));
-        assert!(!output.contains("[Key(\"$type\")]"));
-        assert!(!output.contains("[JsonPropertyName(\"$type\")]"));
+        assert!(!record.contains("[Key(\"$type\")]"));
+        assert!(!record.contains("[JsonPropertyName(\"$type\")]"));
     }
 
     #[test]
@@ -1581,7 +1595,7 @@ mod tests {
             export type ShortTextQuestion = { label:string placeholder:string? }
             export action SearchRequested = { query:string }
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
@@ -1623,7 +1637,7 @@ mod tests {
               state { query:string }
             }
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::TypeScript,
             csharp_namespace: None,
@@ -1647,7 +1661,7 @@ mod tests {
         let source = r#"
             export abstract type Question = { label:string }
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
@@ -1682,7 +1696,7 @@ mod tests {
     fn generate_types_warns_when_imported_library_cannot_be_resolved() {
         let temp_dir = TempDir::new().expect("temp dir");
         let source_path = temp_dir.path().join("chat-link.nx");
-        let module = lower_module(
+        let module = source_module(
             r#"import "../question-flow"
 
 export type QuestionFlowInitialExperience = {
@@ -1714,7 +1728,7 @@ export type QuestionFlowInitialExperience = {
             export abstract type Question = { label:string }
             export type ShortTextQuestion extends Question = { placeholder:string? }
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
@@ -1746,7 +1760,7 @@ export type QuestionFlowInitialExperience = {
             export abstract action SearchAction = { source:string }
             export action SearchRequested extends SearchAction = { query:string }
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
@@ -1781,7 +1795,7 @@ export type QuestionFlowInitialExperience = {
               aliases:string?[]
             }
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
@@ -1803,7 +1817,7 @@ export type QuestionFlowInitialExperience = {
             export abstract type TextQuestion extends Question = { placeholder:string? }
             export type ShortTextQuestion extends TextQuestion = { maxLength:int? }
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = source_module(source, "types.nx");
         let opts = GenerateTypesOptions {
             language: TargetLanguage::CSharp,
             csharp_namespace: Some("Test.Models".to_string()),
@@ -2385,5 +2399,343 @@ export type QuestionFlowInitialExperience = {
         assert!(chat_link.content.contains(&format!(
             "public global::{expected_namespace}.QuestionFlow QuestionFlow {{ get; set; }} = default!;"
         )));
+    }
+
+    #[test]
+    fn generates_typescript_update_companions_with_optional_properties() {
+        let output = generate_for(
+            r#"
+            export type User = { name:string email:string? }
+            export component <Counter step:int /> = { state { count:int = 0 } <Label /> }
+            "#,
+            TargetLanguage::TypeScript,
+        );
+
+        let (_, user_update) = output
+            .split_once("export interface User_update {")
+            .expect("User_update companion");
+        let user_update = user_update.split('}').next().expect("companion body");
+        assert!(user_update.contains("$type: \"User.Update\";"));
+        assert!(user_update.contains("name?: string;"));
+        assert!(user_update.contains("email?: string | null;"));
+        assert!(!user_update.contains("name: string;"));
+        assert!(!user_update.contains("email: string | null;"));
+
+        let (_, counter_update) = output
+            .split_once("export interface Counter_update {")
+            .expect("Counter_update companion");
+        let counter_update = counter_update.split('}').next().expect("companion body");
+        assert!(counter_update.contains("count?: number;"));
+        assert!(!counter_update.contains("step"));
+    }
+
+    #[test]
+    fn typescript_update_companion_yields_to_an_explicit_declaration() {
+        let module = source_module(
+            r#"
+            export type User_update = string
+            export type User = { name:string }
+            "#,
+            "types.nx",
+        );
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+        let generated =
+            generate_types_with_warnings(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(generated
+            .value
+            .contains("export type User_update = string;"));
+        assert!(!generated.value.contains("export interface User_update"));
+        assert!(generated
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("User_update")));
+    }
+
+    #[test]
+    fn generates_csharp_update_companions_with_optional_properties() {
+        let output = generate_for(
+            r#"
+            export type User = { name:string email:string? }
+            export action Saved = { note:string }
+            export component <Counter step:int /> = { state { count:int = 0 } <Label /> }
+            "#,
+            TargetLanguage::CSharp,
+        );
+
+        let (_, counter) = output
+            .split_once("public sealed class Counter_update")
+            .expect("Counter_update companion");
+        let counter = counter.split("public sealed class").next().expect("companion body");
+        assert!(counter.contains("public string NxType => \"Counter.Update\";"), "{counter}");
+        assert!(counter.contains("public NxOptional<long> Count { get; set; }"), "{counter}");
+        assert!(!counter.contains("Step"), "{counter}");
+
+        let (_, saved) = output
+            .split_once("public sealed class Saved_update")
+            .expect("Saved_update companion");
+        let saved = saved.split("public sealed class").next().expect("companion body");
+        assert!(saved.contains("public string NxType => \"Saved.Update\";"), "{saved}");
+        assert!(saved.contains("public NxOptional<string> Note { get; set; }"), "{saved}");
+
+        let (_, update) = output
+            .split_once(
+                "[MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<User_update>))]",
+            )
+            .expect("User_update companion");
+        let nl = options::FormatOptions::defaults_for(TargetLanguage::CSharp).newline_str();
+        let expected_name = [
+            "        [Key(\"name\")]",
+            "        [JsonPropertyName(\"name\")]",
+            "        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]",
+            "        public NxOptional<string> Name { get; set; }",
+        ]
+        .join(nl);
+        let expected_email = [
+            "        [Key(\"email\")]",
+            "        [JsonPropertyName(\"email\")]",
+            "        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]",
+            "        public NxOptional<string?> Email { get; set; }",
+        ]
+        .join(nl);
+        assert!(update.contains("public sealed class User_update"));
+        assert!(update.contains("public string NxType => \"User.Update\";"));
+        assert!(update.contains(&expected_name), "{update}");
+        assert!(update.contains(&expected_email), "{update}");
+        assert!(output.contains("using NxLang.Nx;"));
+        assert!(output.contains("using NxLang.Nx.Serialization;"));
+    }
+
+    #[test]
+    fn update_typed_fields_generate_as_the_companion_in_typescript() {
+        let output = generate_for(
+            r#"
+            export type User = { name:string email:string? }
+            export type Form = { pending:User.Update? drafts:User.Update[] }
+            "#,
+            TargetLanguage::TypeScript,
+        );
+
+        let (_, form) = output
+            .split_once("export interface Form extends NxRecord<\"Form\"> {")
+            .expect("Form record");
+        let form = form.split('}').next().expect("record body");
+        assert!(form.contains("pending: User_update | null;"), "{form}");
+        assert!(form.contains("drafts: User_update[];"), "{form}");
+        assert!(!output.contains("User_Update"), "{output}");
+    }
+
+    #[test]
+    fn update_typed_fields_generate_as_the_companion_in_csharp() {
+        let output = generate_for(
+            r#"
+            export type User = { name:string email:string? }
+            export type Form = { pending:User.Update? drafts:User.Update[] }
+            "#,
+            TargetLanguage::CSharp,
+        );
+
+        let (_, form) = output
+            .split_once("public sealed class Form")
+            .expect("Form record");
+        let form = form.split("public sealed class").next().expect("record body");
+        assert!(form.contains("public User_update? Pending { get; set; }"), "{form}");
+        assert!(form.contains("public User_update[] Drafts { get; set; }"), "{form}");
+        assert!(!output.contains("User.Update?"), "{output}");
+    }
+
+    /// The companion has to carry the base's fields even when the base lives in another library,
+    /// which only the compiler's own resolution knows.
+    #[test]
+    fn update_companion_carries_fields_inherited_from_an_imported_base() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let named_dir = temp_dir.path().join("named");
+        fs::create_dir_all(&named_dir).expect("named dir");
+        fs::write(
+            named_dir.join("Named.nx"),
+            "export abstract type Named = { name:string }",
+        )
+        .expect("named file");
+        let source_path = temp_dir.path().join("types.nx");
+        let source = r#"import "./named"
+
+export type User extends Named = { email:string }
+"#;
+        fs::write(&source_path, source).expect("source file");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let generated = generate_types_with_warnings(source, &source_path, &opts).unwrap();
+
+        let (_, user_update) = generated
+            .value
+            .split_once("export interface User_update {")
+            .expect("User_update companion");
+        let user_update = user_update.split('}').next().expect("companion body");
+        assert!(user_update.contains("name?: string;"), "{user_update}");
+        assert!(user_update.contains("email?: string;"), "{user_update}");
+        assert!(
+            !generated
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("User")),
+            "{:?}",
+            generated.warnings
+        );
+    }
+
+    /// A copied field's type was written in the base's module; when this module cannot name it,
+    /// the generated companion cannot either, and generation says so instead of miscompiling
+    /// silently.
+    #[test]
+    fn update_companion_warns_when_an_inherited_field_type_is_not_imported() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let named_dir = temp_dir.path().join("named");
+        fs::create_dir_all(&named_dir).expect("named dir");
+        fs::write(
+            named_dir.join("Named.nx"),
+            "export type Tag = a | b\nexport abstract type Named = { name:string tag:Tag }",
+        )
+        .expect("named file");
+        let source_path = temp_dir.path().join("types.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let selective = r#"import { Named } from "./named"
+
+export type User extends Named = { email:string }
+"#;
+        fs::write(&source_path, selective).expect("source file");
+        let generated = generate_types_with_warnings(selective, &source_path, &opts).unwrap();
+        assert!(
+            generated.warnings.iter().any(|warning| {
+                warning.contains("'User_update' inherits field 'tag' typed 'Tag'")
+                    && warning.contains("does not import 'Tag'")
+            }),
+            "{:?}",
+            generated.warnings
+        );
+
+        let wildcard = r#"import "./named"
+
+export type User extends Named = { email:string }
+"#;
+        fs::write(&source_path, wildcard).expect("source file");
+        let generated = generate_types_with_warnings(wildcard, &source_path, &opts).unwrap();
+        assert!(
+            !generated
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("User_update")),
+            "{:?}",
+            generated.warnings
+        );
+        assert!(generated.value.contains("tag?: Tag;"), "{}", generated.value);
+    }
+
+    /// The same holds for a library whose module extends a base from a library it imports.
+    #[test]
+    fn library_update_companion_carries_fields_inherited_from_a_dependency_base() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let named_dir = temp_dir.path().join("named");
+        let people_dir = temp_dir.path().join("people");
+        fs::create_dir_all(&named_dir).expect("named dir");
+        fs::create_dir_all(&people_dir).expect("people dir");
+        fs::write(
+            named_dir.join("Named.nx"),
+            "export abstract type Named = { name:string }",
+        )
+        .expect("named file");
+        fs::write(
+            people_dir.join("User.nx"),
+            r#"import "../named"
+
+export type User extends Named = { email:string }
+"#,
+        )
+        .expect("people file");
+
+        let artifact = build_library_artifact_from_directory(&people_dir).expect("library build");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("Test.People".to_string()),
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+
+        let output = generate_library_types_with_warnings(&artifact, &opts).unwrap();
+        let user = output
+            .value
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("User.g.cs"))
+            .expect("User.g.cs");
+        let (_, user_update) = user
+            .content
+            .split_once("public sealed class User_update")
+            .expect("User_update companion");
+        let user_update = user_update.split("public sealed class").next().expect("body");
+        assert!(user_update.contains("public NxOptional<string> Name { get; set; }"), "{user_update}");
+        assert!(user_update.contains("public NxOptional<string> Email { get; set; }"), "{user_update}");
+    }
+
+    #[test]
+    fn update_typed_field_without_a_companion_warns() {
+        let module = source_module(
+            r#"
+            export type User_update = string
+            export type User = { name:string }
+            export type Form = { pending:User.Update }
+            "#,
+            "types.nx",
+        );
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+        let generated =
+            generate_types_with_warnings(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(generated.warnings.iter().any(|warning| {
+            warning.contains("'User.Update' has no generated companion 'User_update'")
+        }));
+    }
+
+    /// The .NET tests compile and exercise this generated file, so it has to be what typegen emits.
+    #[test]
+    fn checked_in_dotnet_update_record_fixture_matches_typegen_output() {
+        let fixture_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../bindings/dotnet/tests/NxLang.Sdk.Tests/Generated");
+        let source_path = fixture_dir.join("update-records.nx");
+        let source = fs::read_to_string(&source_path).expect("fixture source");
+        let module = source_module(&source, "update-records.nx");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: Some("NxLang.Sdk.Tests.Generated".to_string()),
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+        let generated = generate_types(&module, &source_path, &opts).unwrap();
+        let checked_in =
+            fs::read_to_string(fixture_dir.join("UpdateRecords.g.cs")).expect("fixture output");
+
+        assert_eq!(
+            checked_in, generated,
+            "Regenerate UpdateRecords.g.cs with the command in update-records.nx"
+        );
     }
 }

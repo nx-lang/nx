@@ -1,10 +1,13 @@
-use nx_api::{build_library_artifact_from_directory, LibraryArtifact};
+use nx_api::{
+    build_program_artifact_from_source, LibraryArtifact, LibraryRegistry, ProgramBuildContext,
+};
 use nx_hir::{
     ast::{Expr, Literal, OrderedFloat, TypeRef},
-    Component, ImportKind, InterfaceItemKind, Item, LoweredModule, PreparedItemKind, RecordDef,
-    RecordField, RecordKind, SelectiveImport, TypeAlias, UnionCaseDef, UnionCaseField, UnionDef,
-    Visibility,
+    Component, ImportKind, InterfaceItemKind, Item, LoweredModule, PreparedItemKind,
+    PreparedModule, RecordDef, RecordField, RecordKind, SelectiveImport, TypeAlias, UnionCaseDef,
+    UnionCaseField, UnionDef, Visibility,
 };
+use nx_types::ModuleArtifact;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeSet;
 use std::fs;
@@ -94,6 +97,24 @@ pub struct ExportedExternalState {
     pub fields: Vec<ExportedRecordField>,
 }
 
+/// The generated `<Target>_update` companion of an exported record, action, or stateful component.
+///
+/// <para>It has the target's effective fields — a component's state fields — every one optional,
+/// and carries the `<Target>.Update` discriminator. An absent field means "unchanged" and a present
+/// `null` means "set to null", so each host surface keeps the two apart.</para>
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExportedUpdate {
+    pub target_name: String,
+    pub name: String,
+    pub discriminator: String,
+    pub fields: Vec<ExportedRecordField>,
+    /// Names of the fields the target inherits from a base declared in another module.
+    ///
+    /// <para>Their types were written in that module's namespace, so a name among them that this
+    /// module neither declares nor imports will not resolve in the generated code.</para>
+    pub inherited_from_other_modules: Vec<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ImportedTypeKind {
     Alias {
@@ -135,6 +156,7 @@ pub enum ExportedType {
     Union(ExportedUnion),
     Record(ExportedRecord),
     ExternalState(ExportedExternalState),
+    Update(ExportedUpdate),
 }
 
 impl ExportedType {
@@ -144,6 +166,26 @@ impl ExportedType {
             Self::Union(union_def) => &union_def.name,
             Self::Record(record) => &record.name,
             Self::ExternalState(state) => &state.name,
+            Self::Update(update) => &update.name,
+        }
+    }
+
+    /// Returns the warning subject for a companion typegen generates rather than the author
+    /// declared, or `None` for a declared item.
+    ///
+    /// <para>A generated companion yields to a declaration of the same name, and two companions
+    /// that would share a name are both skipped, so neither silently shadows the other.</para>
+    fn generated_companion(&self) -> Option<String> {
+        match self {
+            Self::ExternalState(state) => Some(format!(
+                "component state contract '{}' for external component '{}'",
+                state.name, state.component_name
+            )),
+            Self::Update(update) => Some(format!(
+                "update record '{}' for '{}'",
+                update.name, update.target_name
+            )),
+            Self::Alias(_) | Self::Union(_) | Self::Record(_) => None,
         }
     }
 }
@@ -181,6 +223,9 @@ pub struct ExportedTypeGraphBuild {
 
 #[derive(Default)]
 struct ImportedTypeCollector {
+    /// Loads and caches every imported library, so the same registry can back the build context
+    /// the source module is prepared against.
+    registry: LibraryRegistry,
     dependency_cache: FxHashMap<PathBuf, Result<CachedImportedLibrary, String>>,
 }
 
@@ -206,17 +251,62 @@ struct ImportedVisibleNameOrigin {
 }
 
 impl ExportedTypeGraph {
+    /// Builds the graph for one source file, resolving its imports the way the compiler does.
+    ///
+    /// <para>The file is analyzed against a build context holding every library it imports, so
+    /// the prepared module on the resulting artifact resolves cross-library references — a
+    /// record's inherited fields from a library base, say — exactly as the checker sees them.</para>
+    pub fn from_source_with_warnings(
+        source: &str,
+        source_path: &Path,
+    ) -> Result<ExportedTypeGraphBuild, String> {
+        let file_name = source_path.display().to_string();
+        let module = nx_hir::lower_source_module(source, &file_name).map_err(|diagnostics| {
+            let messages = diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.message().to_string())
+                .collect::<Vec<_>>();
+            format!("Failed to lower '{}': {}", file_name, messages.join("; "))
+        })?;
+        let mut imported_type_collector = ImportedTypeCollector::default();
+        let imported_build = imported_type_collector.collect_for_module(&module, source_path);
+        let build_context = ProgramBuildContext::from_registry(&imported_type_collector.registry);
+        let program = build_program_artifact_from_source(source, &file_name, &build_context)
+            .map_err(|error| format!("Failed to analyze '{}': {}", file_name, error))?;
+        let artifact = program
+            .root_modules
+            .into_iter()
+            .next()
+            .ok_or_else(|| format!("Analysis of '{}' produced no module", file_name))?;
+        Self::from_artifact_with_warnings(&artifact, source_path, imported_build)
+    }
+
     #[allow(dead_code)]
-    pub fn from_module(module: &LoweredModule, source_path: &Path) -> Result<Self, String> {
+    pub fn from_module(module: &ModuleArtifact, source_path: &Path) -> Result<Self, String> {
         Ok(Self::from_module_with_warnings(module, source_path)?.graph)
     }
 
+    /// Builds the graph for an already analyzed module, loading its imports for their names only.
     pub fn from_module_with_warnings(
-        module: &LoweredModule,
+        module: &ModuleArtifact,
         source_path: &Path,
     ) -> Result<ExportedTypeGraphBuild, String> {
         let mut imported_type_collector = ImportedTypeCollector::default();
-        let imported_build = imported_type_collector.collect_for_module(module, source_path);
+        let imported_build = match module.lowered_module.as_deref() {
+            Some(lowered) => imported_type_collector.collect_for_module(lowered, source_path),
+            None => ImportedTypesBuild {
+                imported_types: Vec::new(),
+                warnings: Vec::new(),
+            },
+        };
+        Self::from_artifact_with_warnings(module, source_path, imported_build)
+    }
+
+    fn from_artifact_with_warnings(
+        module: &ModuleArtifact,
+        source_path: &Path,
+        imported_build: ImportedTypesBuild,
+    ) -> Result<ExportedTypeGraphBuild, String> {
         let file_name = source_path
             .file_name()
             .map(PathBuf::from)
@@ -257,7 +347,7 @@ impl ExportedTypeGraph {
                 continue;
             };
 
-            let declarations = collect_exported_declarations(module);
+            let declarations = collect_exported_declarations(artifact);
             if declarations.is_empty() {
                 continue;
             }
@@ -379,57 +469,42 @@ impl ExportedTypeGraph {
         for (module_index, module) in modules.iter().enumerate() {
             for (declaration_index, declaration) in module.declarations.iter().enumerate() {
                 let name = declaration.name().to_string();
-                match &declaration.item {
-                    ExportedType::ExternalState(_) => {
-                        generated_candidates
-                            .entry(name)
-                            .or_default()
-                            .push((module_index, declaration_index));
-                    }
-                    _ => {
-                        explicit_owners
-                            .entry(name)
-                            .or_insert_with(|| module.module_path.clone());
-                    }
+                if declaration.item.generated_companion().is_some() {
+                    generated_candidates
+                        .entry(name)
+                        .or_default()
+                        .push((module_index, declaration_index));
+                } else {
+                    explicit_owners
+                        .entry(name)
+                        .or_insert_with(|| module.module_path.clone());
                 }
             }
         }
 
         let mut generated_names_to_skip = FxHashSet::default();
-        for (name, candidates) in &generated_candidates {
-            if explicit_owners.contains_key(name) {
-                generated_names_to_skip.insert(name.clone());
-                for (module_index, declaration_index) in candidates {
-                    let Some(ExportedType::ExternalState(state)) = modules[*module_index]
-                        .declarations
-                        .get(*declaration_index)
-                        .map(|declaration| &declaration.item)
-                    else {
-                        continue;
-                    };
-                    warnings.push(format!(
-                        "Skipping generated component state contract '{}' for external component '{}' because it conflicts with exported declaration '{}'",
-                        state.name, state.component_name, state.name
-                    ));
-                }
+        let mut candidate_names = generated_candidates.keys().cloned().collect::<Vec<_>>();
+        candidate_names.sort();
+        for name in candidate_names {
+            let candidates = &generated_candidates[&name];
+            let reason = if explicit_owners.contains_key(&name) {
+                format!("it conflicts with exported declaration '{}'", name)
+            } else if candidates.len() > 1 {
+                "another exported declaration would generate the same companion name".to_string()
+            } else {
                 continue;
-            }
+            };
 
-            if candidates.len() > 1 {
-                generated_names_to_skip.insert(name.clone());
-                for (module_index, declaration_index) in candidates {
-                    let Some(ExportedType::ExternalState(state)) = modules[*module_index]
-                        .declarations
-                        .get(*declaration_index)
-                        .map(|declaration| &declaration.item)
-                    else {
-                        continue;
-                    };
-                    warnings.push(format!(
-                        "Skipping generated component state contract '{}' for external component '{}' because another exported external component would generate the same companion name",
-                        state.name, state.component_name
-                    ));
-                }
+            generated_names_to_skip.insert(name.clone());
+            for (module_index, declaration_index) in candidates {
+                let Some(subject) = modules[*module_index]
+                    .declarations
+                    .get(*declaration_index)
+                    .and_then(|declaration| declaration.item.generated_companion())
+                else {
+                    continue;
+                };
+                warnings.push(format!("Skipping generated {} because {}", subject, reason));
             }
         }
 
@@ -440,11 +515,9 @@ impl ExportedTypeGraph {
             let declarations = module
                 .declarations
                 .into_iter()
-                .filter(|declaration| match &declaration.item {
-                    ExportedType::ExternalState(state) => {
-                        !generated_names_to_skip.contains(&state.name)
-                    }
-                    _ => true,
+                .filter(|declaration| {
+                    declaration.item.generated_companion().is_none()
+                        || !generated_names_to_skip.contains(declaration.name())
                 })
                 .collect::<Vec<_>>();
 
@@ -453,7 +526,7 @@ impl ExportedTypeGraph {
             }
 
             for declaration in &declarations {
-                if !matches!(declaration.item, ExportedType::ExternalState(_)) {
+                if declaration.item.generated_companion().is_none() {
                     owners
                         .entry(declaration.name().to_string())
                         .or_insert_with(|| module.module_path.clone());
@@ -469,7 +542,7 @@ impl ExportedTypeGraph {
 
         for module in &filtered_modules {
             for declaration in &module.declarations {
-                if matches!(declaration.item, ExportedType::ExternalState(_)) {
+                if declaration.item.generated_companion().is_some() {
                     owners
                         .entry(declaration.name().to_string())
                         .or_insert_with(|| module.module_path.clone());
@@ -477,13 +550,134 @@ impl ExportedTypeGraph {
             }
         }
 
-        Ok(ExportedTypeGraphBuild {
-            graph: Self {
-                modules: filtered_modules,
-                owners,
-            },
-            warnings,
-        })
+        let mut graph = Self {
+            modules: filtered_modules,
+            owners,
+        };
+        graph.rewrite_update_type_references(&mut warnings);
+        graph.warn_about_unresolvable_inherited_fields(&mut warnings);
+        Ok(ExportedTypeGraphBuild { graph, warnings })
+    }
+
+    /// Warns for every companion field, inherited from a base in another module, whose type this
+    /// module cannot name.
+    ///
+    /// <para>A companion copies its target's inherited fields, and their types were written in the
+    /// base's module. A plain record never has this problem, because it inherits in the target
+    /// language and the base's own generated file resolves the name. Until typegen resolves such a
+    /// type in the module that wrote it, the author has to import it here; the warning says which
+    /// one.</para>
+    fn warn_about_unresolvable_inherited_fields(&self, warnings: &mut Vec<String>) {
+        for module in &self.modules {
+            let imported_names = module
+                .imported_types
+                .iter()
+                .map(|imported| imported.visible_name.as_str())
+                .collect::<FxHashSet<_>>();
+            for declaration in &module.declarations {
+                let ExportedType::Update(update) = &declaration.item else {
+                    continue;
+                };
+                for field in &update.fields {
+                    if !update.inherited_from_other_modules.contains(&field.name) {
+                        continue;
+                    }
+                    let mut names = BTreeSet::new();
+                    collect_type_ref_names(&field.ty, &mut names);
+                    for name in names {
+                        // An unresolved `X.Update` was already reported by the companion rewrite.
+                        if is_primitive_type_name(&name)
+                            || nx_hir::is_update_record_name(&name)
+                            || self.declaration(&name).is_some()
+                            || imported_names.contains(name.as_str())
+                        {
+                            continue;
+                        }
+                        warnings.push(format!(
+                            "Update companion '{}' inherits field '{}' typed '{}' from a base declared in another module, and this module does not import '{}'; the generated code will not resolve it until '{}' is imported here",
+                            update.name, field.name, name, name, name
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Points every `<T>.Update` type reference at the `<T>_update` companion that stands for it.
+    ///
+    /// <para>A field typed `User.Update` must generate as the companion, since that is the only
+    /// declaration of the patch either language sees. Where no companion exists — the target is not
+    /// exported, or the companion name was taken by an explicit declaration — the reference is left
+    /// as written and a warning says why the generated code will not resolve it.</para>
+    fn rewrite_update_type_references(&mut self, warnings: &mut Vec<String>) {
+        let companions = self
+            .modules
+            .iter()
+            .flat_map(|module| module.declarations.iter())
+            .filter_map(|declaration| match &declaration.item {
+                ExportedType::Update(update) => {
+                    Some((update.discriminator.clone(), update.name.clone()))
+                }
+                _ => None,
+            })
+            .collect::<FxHashMap<_, _>>();
+
+        let mut unresolved = BTreeSet::new();
+        let mut rename = |ty: &mut TypeRef| {
+            rewrite_type_ref_names(ty, &mut |name| {
+                if !nx_hir::is_update_record_name(name) {
+                    return None;
+                }
+                match companions.get(name) {
+                    Some(companion) => Some(companion.clone()),
+                    None => {
+                        unresolved.insert(name.to_string());
+                        None
+                    }
+                }
+            });
+        };
+
+        for module in &mut self.modules {
+            for declaration in &mut module.declarations {
+                match &mut declaration.item {
+                    ExportedType::Alias(alias) => rename(&mut alias.target),
+                    ExportedType::Union(union_def) => {
+                        for case in &mut union_def.cases {
+                            for field in &mut case.fields {
+                                rename(&mut field.ty);
+                            }
+                        }
+                    }
+                    ExportedType::Record(record) => {
+                        for field in &mut record.fields {
+                            rename(&mut field.ty);
+                        }
+                    }
+                    ExportedType::ExternalState(state) => {
+                        for field in &mut state.fields {
+                            rename(&mut field.ty);
+                        }
+                    }
+                    ExportedType::Update(update) => {
+                        for field in &mut update.fields {
+                            rename(&mut field.ty);
+                        }
+                    }
+                }
+            }
+        }
+
+        for name in unresolved {
+            let target = name
+                .strip_suffix(nx_hir::UPDATE_RECORD_SUFFIX)
+                .and_then(|prefix| prefix.strip_suffix('.'))
+                .unwrap_or(&name);
+            warnings.push(format!(
+                "Type reference '{}' has no generated companion '{}_update' to resolve to; the generated code will not compile until '{}' is exported and the companion name is free",
+                name, target, target
+            ));
+        }
     }
 
     fn resolve_named_type_declaration<'a>(
@@ -570,8 +764,12 @@ impl ExportedTypeGraph {
     }
 }
 
-fn collect_exported_declarations(module: &LoweredModule) -> Vec<ExportedTypeDecl> {
+fn collect_exported_declarations(artifact: &ModuleArtifact) -> Vec<ExportedTypeDecl> {
     let mut declarations = Vec::new();
+    let Some(module) = artifact.lowered_module.as_deref() else {
+        return declarations;
+    };
+    let prepared = artifact.prepared_module.as_deref();
 
     for item in module.items() {
         if item.visibility() != Visibility::Export {
@@ -587,10 +785,18 @@ fn collect_exported_declarations(module: &LoweredModule) -> Vec<ExportedTypeDecl
                 visibility: union_def.visibility,
                 item: ExportedType::Union(export_union(module, union_def)),
             }),
-            Item::Record(record) => declarations.push(ExportedTypeDecl {
-                visibility: record.visibility,
-                item: ExportedType::Record(export_record(module, record)),
-            }),
+            // A derived update record is exported as its `<Target>_update` companion, never under
+            // its own dotted name.
+            Item::Record(record) => match record.update_target() {
+                Some(target) => declarations.push(ExportedTypeDecl {
+                    visibility: record.visibility,
+                    item: ExportedType::Update(export_update(prepared, record, target)),
+                }),
+                None => declarations.push(ExportedTypeDecl {
+                    visibility: record.visibility,
+                    item: ExportedType::Record(export_record(module, record)),
+                }),
+            },
             Item::Component(component) => {
                 if let Some(record) = export_external_component_contract(module, component) {
                     declarations.push(ExportedTypeDecl {
@@ -729,7 +935,17 @@ impl ImportedTypeCollector {
             return cached.clone();
         }
 
-        let loaded = build_cached_imported_library(dependency_root);
+        let loaded = self
+            .registry
+            .load_library_artifact(dependency_root)
+            .map_err(|error| {
+                format!(
+                    "failed to build library artifact for '{}': {}",
+                    dependency_root.display(),
+                    error
+                )
+            })
+            .and_then(|dependency| build_cached_imported_library(&dependency, dependency_root));
         self.dependency_cache
             .insert(dependency_root.to_path_buf(), loaded.clone());
         loaded
@@ -886,14 +1102,10 @@ impl CachedImportedLibrary {
     }
 }
 
-fn build_cached_imported_library(dependency_root: &Path) -> Result<CachedImportedLibrary, String> {
-    let dependency = build_library_artifact_from_directory(dependency_root).map_err(|error| {
-        format!(
-            "failed to build library artifact for '{}': {}",
-            dependency_root.display(),
-            error
-        )
-    })?;
+fn build_cached_imported_library(
+    dependency: &LibraryArtifact,
+    dependency_root: &Path,
+) -> Result<CachedImportedLibrary, String> {
     let library_name = dependency_root
         .file_name()
         .and_then(|name| name.to_str())
@@ -916,6 +1128,18 @@ fn build_cached_imported_library(dependency_root: &Path) -> Result<CachedImporte
         let Some(interface_item) = dependency.interface_items.get(*index) else {
             continue;
         };
+
+        // A derived update record is generated as its target's `_update` companion; it is never a
+        // type a consumer names by its dotted NX name.
+        if matches!(
+            &interface_item.item,
+            InterfaceItemKind::Record {
+                kind: RecordKind::Update { .. },
+                ..
+            }
+        ) {
+            continue;
+        }
 
         let kind = interface_item.item.kind();
         // Wildcard imports intentionally collect only the exports codegen can resolve as
@@ -965,7 +1189,7 @@ fn export_alias(def: &TypeAlias) -> ExportedAlias {
 fn export_record(module: &LoweredModule, def: &RecordDef) -> ExportedRecord {
     ExportedRecord {
         name: def.name.as_str().to_string(),
-        kind: def.kind,
+        kind: def.kind.clone(),
         is_abstract: def.is_abstract,
         base: def.base.as_ref().map(|name| name.as_str().to_string()),
         fields: def
@@ -1021,6 +1245,109 @@ fn export_external_component_contract(
             .map(|field| export_record_field(module, field))
             .collect(),
     })
+}
+
+/// Returns true for a type name both emitters map to a host primitive rather than a declaration.
+fn is_primitive_type_name(name: &str) -> bool {
+    matches!(
+        name,
+        "string" | "int" | "int32" | "int64" | "float32" | "float64" | "boolean" | "object"
+    )
+}
+
+/// Collects every type name `ty` mentions.
+fn collect_type_ref_names(ty: &TypeRef, out: &mut BTreeSet<String>) {
+    match ty {
+        TypeRef::Name(name) => {
+            out.insert(name.as_str().to_string());
+        }
+        TypeRef::Array(inner) | TypeRef::Nullable(inner) => collect_type_ref_names(inner, out),
+        TypeRef::Function {
+            params,
+            return_type,
+        } => {
+            for param in params {
+                collect_type_ref_names(param, out);
+            }
+            collect_type_ref_names(return_type, out);
+        }
+    }
+}
+
+/// Replaces every named type in `ty` for which `rename` returns a new name.
+fn rewrite_type_ref_names(ty: &mut TypeRef, rename: &mut impl FnMut(&str) -> Option<String>) {
+    match ty {
+        TypeRef::Name(name) => {
+            if let Some(renamed) = rename(name.as_str()) {
+                *name = nx_hir::Name::new(&renamed);
+            }
+        }
+        TypeRef::Array(inner) | TypeRef::Nullable(inner) => rewrite_type_ref_names(inner, rename),
+        TypeRef::Function {
+            params,
+            return_type,
+        } => {
+            for param in params {
+                rewrite_type_ref_names(param, rename);
+            }
+            rewrite_type_ref_names(return_type, rename);
+        }
+    }
+}
+
+/// Exports the `<Target>_update` companion with the target's effective fields.
+///
+/// <para>An update companion extends nothing — a patch of `User` is not a patch of its base — so
+/// the inherited fields are written on the companion itself. They come from the prepared module,
+/// which resolves the target's base chain the way the checker does, across libraries included.
+/// Without a prepared module, or when the chain does not resolve, the declared fields are all
+/// there is.</para>
+fn export_update(
+    prepared: Option<&PreparedModule>,
+    record: &RecordDef,
+    target: &nx_hir::Name,
+) -> ExportedUpdate {
+    let mut inherited_from_other_modules = Vec::new();
+    let fields = prepared
+        .and_then(|prepared| {
+            nx_hir::effective_record_shape(prepared, record)
+                .ok()
+                .map(|shape| (prepared.module_identity(), shape))
+        })
+        .map(|(module_identity, shape)| {
+            shape
+                .fields
+                .into_iter()
+                .map(|field| {
+                    if field.module_identity != module_identity {
+                        inherited_from_other_modules.push(field.name.as_str().to_string());
+                    }
+                    ExportedRecordField {
+                        name: field.name.as_str().to_string(),
+                        ty: field.ty,
+                        default_value: None,
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_else(|| {
+            record
+                .properties
+                .iter()
+                .map(|field| ExportedRecordField {
+                    name: field.name.as_str().to_string(),
+                    ty: field.ty.clone(),
+                    default_value: None,
+                })
+                .collect()
+        });
+    ExportedUpdate {
+        target_name: target.as_str().to_string(),
+        name: format!("{}_update", target.as_str()),
+        discriminator: record.name.as_str().to_string(),
+        fields,
+        inherited_from_other_modules,
+    }
 }
 
 fn export_external_state(component: &Component) -> Option<ExportedExternalState> {
@@ -1109,6 +1436,10 @@ mod tests {
         lower(tree.root(), SourceId::new(0))
     }
 
+    fn analyze_module(source: &str, file_name: &str) -> ModuleArtifact {
+        nx_types::analyze_str(source, file_name)
+    }
+
     #[test]
     fn resolves_abstract_record_alias_bases() {
         let source = r#"
@@ -1116,7 +1447,7 @@ mod tests {
             export type QuestionBaseAlias = Question
             export type ShortTextQuestion extends QuestionBaseAlias = { placeholder:string? }
         "#;
-        let module = lower_module(source, "types.nx");
+        let module = analyze_module(source, "types.nx");
         let graph = ExportedTypeGraph::from_module(&module, Path::new("types.nx")).unwrap();
 
         let short_text = graph
@@ -1174,7 +1505,7 @@ mod tests {
               state { query:string = "docs" }
             }
         "#;
-        let module = lower_module(source, "components.nx");
+        let module = analyze_module(source, "components.nx");
         let graph = ExportedTypeGraph::from_module(&module, Path::new("components.nx")).unwrap();
 
         let declaration = graph
@@ -1199,7 +1530,7 @@ mod tests {
               state { query:string }
             }
         "#;
-        let module = lower_module(source, "components.nx");
+        let module = analyze_module(source, "components.nx");
         let build =
             ExportedTypeGraph::from_module_with_warnings(&module, Path::new("components.nx"))
                 .expect("graph build");
@@ -1313,11 +1644,15 @@ mod tests {
         let build = ExportedTypeGraph::from_library_with_warnings(&artifact).expect("graph build");
 
         assert!(build.graph.declaration("SearchBox_state").is_none());
-        assert_eq!(build.warnings.len(), 2);
-        assert!(build
+        // Both components would also generate `SearchBox_update`, which is skipped the same way.
+        let state_warnings = build
             .warnings
             .iter()
-            .all(|warning| warning.contains("SearchBox_state")));
+            .filter(|warning| warning.contains("SearchBox_state"))
+            .count();
+        assert_eq!(state_warnings, 2);
+        assert!(build.graph.declaration("SearchBox_update").is_none());
+        assert_eq!(build.warnings.len(), 4);
     }
 
     #[test]
@@ -1443,5 +1778,105 @@ export type ChatLink = string
         assert!(build.warnings[0].contains("./question-flow"));
         assert!(build.warnings[0].contains("Function"));
         assert!(build.warnings[0].contains("not supported"));
+    }
+
+    fn update_companion<'a>(graph: &'a ExportedTypeGraph, name: &str) -> &'a ExportedUpdate {
+        match graph.declaration(name).map(|declaration| &declaration.item) {
+            Some(ExportedType::Update(update)) => update,
+            other => panic!("Expected update companion '{name}', got {other:?}"),
+        }
+    }
+
+    fn field_names(fields: &[ExportedRecordField]) -> Vec<&str> {
+        fields.iter().map(|field| field.name.as_str()).collect()
+    }
+
+    #[test]
+    fn exports_update_companions_for_records_actions_and_stateful_components() {
+        let module = analyze_module(
+            r#"
+            export type User = { name:string = "anon" email:string? }
+            export action Saved = { id:int }
+            export component <Counter step:int = 1 /> = { state { count:int = 0 } <Label /> }
+            export component <Plain /> = { <Label /> }
+            type Hidden = { secret:string }
+            "#,
+            "types.nx",
+        );
+        let build = ExportedTypeGraph::from_module_with_warnings(&module, Path::new("types.nx"))
+            .expect("graph build");
+        assert!(build.warnings.is_empty(), "{:?}", build.warnings);
+
+        let user = update_companion(&build.graph, "User_update");
+        assert_eq!(user.discriminator, "User.Update");
+        assert_eq!(field_names(&user.fields), vec!["name", "email"]);
+        assert!(user
+            .fields
+            .iter()
+            .all(|field| field.default_value.is_none()));
+
+        assert_eq!(
+            update_companion(&build.graph, "Saved_update").discriminator,
+            "Saved.Update"
+        );
+
+        let counter = update_companion(&build.graph, "Counter_update");
+        assert_eq!(
+            field_names(&counter.fields),
+            vec!["count"],
+            "a component's companion carries its state and none of its props"
+        );
+
+        assert!(build.graph.declaration("Plain_update").is_none());
+        assert!(build.graph.declaration("Hidden_update").is_none());
+        assert!(
+            build.graph.declaration("User.Update").is_none(),
+            "an update record is never exported under its dotted name"
+        );
+    }
+
+    #[test]
+    fn update_companions_flatten_inherited_fields() {
+        let module = analyze_module(
+            r#"
+            export abstract type Named = { name:string }
+            export type User extends Named = { email:string }
+            "#,
+            "types.nx",
+        );
+        let graph = ExportedTypeGraph::from_module(&module, Path::new("types.nx")).expect("graph");
+
+        assert_eq!(
+            field_names(&update_companion(&graph, "User_update").fields),
+            vec!["name", "email"]
+        );
+        assert_eq!(
+            field_names(&update_companion(&graph, "Named_update").fields),
+            vec!["name"]
+        );
+    }
+
+    #[test]
+    fn update_companion_name_collision_warns_and_skips() {
+        let module = analyze_module(
+            r#"
+            export type User_update = string
+            export type User = { name:string }
+            "#,
+            "types.nx",
+        );
+        let build = ExportedTypeGraph::from_module_with_warnings(&module, Path::new("types.nx"))
+            .expect("graph build");
+
+        assert!(matches!(
+            build
+                .graph
+                .declaration("User_update")
+                .map(|declaration| &declaration.item),
+            Some(ExportedType::Alias(_))
+        ));
+        assert_eq!(build.warnings.len(), 1, "{:?}", build.warnings);
+        assert!(build.warnings[0].contains("User_update"));
+        assert!(build.warnings[0].contains("conflicts with exported declaration"));
     }
 }

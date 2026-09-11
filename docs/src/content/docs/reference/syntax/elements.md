@@ -139,6 +139,16 @@ property during invocation.
 Attributes may receive typed objects or sequences when the signature permits. A single object
 stands on its own; a sequence goes in braces.
 
+Element-shaped construction also builds patches. Every record `T` has an update record `T.Update`
+whose fields are all optional, so the element names only the fields that change:
+
+```nx
+<ProfileEditor changes=<User.Update email={null} /> />
+```
+
+Here `email` is set to null and every other `User` field is left as it was; the value carries only
+the `email` key. See [Updating state](/reference/syntax/functions#updating-state).
+
 ## See also
 - Language Tour: [Elements](/language-tour/elements)
 - Grammar: [nx-grammar.md – Elements](https://github.com/nx-lang/nx/blob/main/nx-grammar.md#elements)

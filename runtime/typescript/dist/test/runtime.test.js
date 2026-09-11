@@ -1456,6 +1456,144 @@ test("binds list-typed content as a list whatever the child count", () => {
         body: ["first", "second"],
     });
 });
+function updateField(name, slotId, ty) {
+    return { name, slot: slotId, ty, isContent: false, isRequired: false, span: sourceSpan };
+}
+const updateUserFields = [
+    updateField("name", "User.Update:field:0", stringType),
+    updateField("email", "User.Update:field:1", { kind: "nullable", inner: stringType }),
+];
+const updateProgram = {
+    format: "nx-ir-json",
+    schemaVersion: 2,
+    runtimeAbi: "nx-ir-runtime-v1",
+    programFingerprint: "7",
+    requiredFeatures: ["eager-v1", "update-records-v1"],
+    functionEntrypoints: [{ name: "clearEmail", reference: ref("clearEmail", "m0:d2", "function") }],
+    componentEntrypoints: [
+        { name: "Editor", reference: ref("Editor", "m0:d3", "component") },
+        { name: "Counter", reference: ref("Counter", "m0:d4", "component") },
+    ],
+    sources: [{ identity: "test.nx", source: "" }],
+    modules: [
+        {
+            id: "m0",
+            runtimeId: 0,
+            provenance: { kind: "sourceProvider", identity: "test.nx" },
+            imports: [],
+            declarations: [
+                {
+                    id: "m0:d0",
+                    reference: ref("User", "m0:d0", "record"),
+                    span: sourceSpan,
+                    kind: {
+                        tag: "record",
+                        fields: [
+                            { ...updateField("name", "User:field:0", stringType), default: lit("anon") },
+                            updateField("email", "User:field:1", { kind: "nullable", inner: stringType }),
+                        ],
+                    },
+                },
+                {
+                    id: "m0:d1",
+                    reference: ref("User.Update", "m0:d1", "record"),
+                    span: sourceSpan,
+                    kind: { tag: "record", fields: updateUserFields, updateTarget: ref("User", "m0:d0", "record") },
+                },
+                {
+                    id: "m0:d2",
+                    reference: ref("clearEmail", "m0:d2", "function"),
+                    span: sourceSpan,
+                    kind: {
+                        tag: "function",
+                        params: [],
+                        body: expr({
+                            tag: "record",
+                            name: "User.Update",
+                            fields: updateUserFields,
+                            properties: [{ name: "email", value: lit(null), span: sourceSpan }],
+                            contentField: null,
+                            content: [],
+                            isUpdate: true,
+                        }),
+                    },
+                },
+                {
+                    id: "m0:d3",
+                    reference: ref("Editor", "m0:d3", "component"),
+                    span: sourceSpan,
+                    kind: {
+                        tag: "component",
+                        isAbstract: false,
+                        isExternal: true,
+                        props: [
+                            {
+                                ...updateField("patch", "Editor:prop:0", nominal(ref("User.Update", "m0:d1", "record"))),
+                                isRequired: true,
+                                ownerModule: "m0",
+                            },
+                        ],
+                        state: [],
+                    },
+                },
+                {
+                    id: "m0:d4",
+                    reference: ref("Counter", "m0:d4", "component"),
+                    span: sourceSpan,
+                    kind: {
+                        tag: "component",
+                        isAbstract: false,
+                        isExternal: false,
+                        props: [],
+                        state: [
+                            { ...updateField("count", "Counter:state:0", intType), default: lit(0), ownerModule: "m0" },
+                            { ...updateField("label", "Counter:state:1", stringType), default: lit("x"), ownerModule: "m0" },
+                        ],
+                        body: expr({ tag: "intrinsicElement", elementId: "e", tagName: "Label", properties: [], content: [] }),
+                    },
+                },
+            ],
+        },
+    ],
+};
+test("an evaluated update record omits the fields it was not given", () => {
+    const prepared = prepareNxIrProgram(updateProgram);
+    assertEqual(evaluateFunction(prepared, "clearEmail"), { $type: "User.Update", email: null });
+});
+test("host input for an update record keeps absent fields absent", () => {
+    const prepared = prepareNxIrProgram(updateProgram);
+    assertEqual(constructComponentDescriptor(prepared, "Editor", { patch: { $type: "User.Update", name: "Ada" } }), { $type: "Editor", patch: { $type: "User.Update", name: "Ada" } });
+    assertEqual(constructComponentDescriptor(prepared, "Editor", { patch: {} }), {
+        $type: "Editor",
+        patch: { $type: "User.Update" },
+    });
+});
+test("null for a non-nullable update field is rejected by name", () => {
+    const prepared = prepareNxIrProgram(updateProgram);
+    assertThrows(() => constructComponentDescriptor(prepared, "Editor", { patch: { $type: "User.Update", name: null } }), "Editor props.patch.name to be non-null");
+    assertThrows(() => constructComponentDescriptor(prepared, "Editor", { patch: { $type: "User.Update", nickname: "A" } }), "Unknown Editor props.patch field 'nickname'");
+    assertThrows(() => constructComponentDescriptor(prepared, "Editor", { patch: { $type: "User", name: "Ada" } }), "Expected Editor props.patch to be a User.Update, got 'User'");
+});
+test("a program that uses update records requires and names the feature", () => {
+    const prepared = tryPrepareNxIrProgram(updateProgram);
+    assertEqual(prepared.ok, true);
+    const future = tryPrepareNxIrProgram({ ...updateProgram, requiredFeatures: ["eager-v1", "update-records-v2"] });
+    if (future.ok) {
+        throw new Error("Expected an unknown feature to be refused");
+    }
+    if (!future.diagnostics.some((item) => item.message.includes("'update-records-v2'"))) {
+        throw new Error(`Expected the feature to be named, got ${JSON.stringify(future.diagnostics)}`);
+    }
+});
+test("a component's update record patches its state", () => {
+    const prepared = prepareNxIrProgram(updateProgram);
+    assertEqual(applyComponentStatePatch(prepared, "Counter", { count: 1, label: "x" }, { $type: "Counter.Update", count: 3 }), { count: 3, label: "x" });
+    assertEqual(applyComponentStatePatch(prepared, "Counter", { count: 1, label: "x" }, { label: "y" }), {
+        count: 1,
+        label: "y",
+    });
+    assertThrows(() => applyComponentStatePatch(prepared, "Counter", { count: 1, label: "x" }, { $type: "Other.Update", count: 3 }), "Cannot apply 'Other.Update' to Counter state");
+});
 for (const [name, run] of tests) {
     run();
     console.log(`ok - ${name}`);

@@ -50,6 +50,8 @@ pub enum InvalidBaseReason {
     NotRecord,
     AliasCycle,
     ConcreteRecord,
+    /// The base is a derived `<Target>.Update` record, which can never be extended.
+    UpdateRecord,
     KindMismatch {
         expected: RecordKind,
         found: RecordKind,
@@ -93,6 +95,7 @@ impl RecordResolutionError {
                 InvalidBaseReason::NotRecord => "record-base-not-record",
                 InvalidBaseReason::AliasCycle => "record-base-alias-cycle",
                 InvalidBaseReason::ConcreteRecord => "record-base-not-abstract",
+                InvalidBaseReason::UpdateRecord => "record-base-update-record",
                 InvalidBaseReason::KindMismatch { .. } => "record-base-kind-mismatch",
             },
             RecordResolutionError::InheritanceCycle { .. } => "record-inheritance-cycle",
@@ -114,10 +117,7 @@ impl RecordResolutionError {
                 reason,
                 ..
             } => {
-                let (kind_label, kind_singular, kind_plural) = match record_kind {
-                    RecordKind::Plain => ("Record", "record", "records"),
-                    RecordKind::Action => ("Action", "action", "actions"),
-                };
+                let (kind_label, kind_singular, kind_plural) = record_kind.labels();
 
                 match reason {
                     InvalidBaseReason::NotFound => format!(
@@ -136,15 +136,13 @@ impl RecordResolutionError {
                         "{} '{}' extends '{}', but only abstract {} may be extended",
                         kind_label, record, base, kind_plural
                     ),
+                    InvalidBaseReason::UpdateRecord => format!(
+                        "{} '{}' extends '{}', but '{}' is a derived update record and cannot be extended",
+                        kind_label, record, base, base
+                    ),
                     InvalidBaseReason::KindMismatch { expected, found } => {
-                        let (_, _, expected_plural) = match expected {
-                            RecordKind::Plain => ("Record", "record", "records"),
-                            RecordKind::Action => ("Action", "action", "actions"),
-                        };
-                        let (_, _, found_plural) = match found {
-                            RecordKind::Plain => ("Record", "record", "records"),
-                            RecordKind::Action => ("Action", "action", "actions"),
-                        };
+                        let (_, _, expected_plural) = expected.labels();
+                        let (_, _, found_plural) = found.labels();
                         format!(
                             "{} '{}' extends '{}', but {} cannot be used as base {}",
                             kind_label, record, base, found_plural, expected_plural
@@ -242,6 +240,15 @@ impl ResolvedRecordDefinition {
     }
 
     fn declared_fields(&self) -> Vec<EffectiveField> {
+        let fields = self.declared_fields_as_written();
+        if self.record.update_target().is_some() {
+            fields.into_iter().map(into_update_field).collect()
+        } else {
+            fields
+        }
+    }
+
+    fn declared_fields_as_written(&self) -> Vec<EffectiveField> {
         match &self.field_source {
             RecordFieldSource::Raw => self
                 .record
@@ -281,6 +288,14 @@ pub fn resolve_record_definition_with_module(
 ) -> Option<(String, RecordDef)> {
     resolve_record_definition_with_identity(module, module.module_identity(), name)
         .map(|resolved| (resolved.module_identity, resolved.record))
+}
+
+/// Returns the record declared at `origin`, read straight out of the module that declares it.
+pub fn resolve_record_definition_at(
+    module: &PreparedModule,
+    origin: &DeclaringOrigin,
+) -> Option<RecordDef> {
+    record_definition_at(module, origin).map(|resolved| resolved.record)
 }
 
 /// Returns the declaration a record name reaches, where one exists.
@@ -674,6 +689,23 @@ fn resolve_record_shape_inner(
 
     stack.push((key, record.record.name.clone()));
 
+    if let Some(target_shape) = resolve_update_target_shape(module, record, stack) {
+        stack.pop();
+        let target_shape = target_shape?;
+        return Ok(ResolvedRecordShape {
+            record: record.record.clone(),
+            fields: target_shape
+                .fields
+                .into_iter()
+                .map(|owned| OwnedRecordField {
+                    field: into_update_field(owned.field),
+                    owner: owned.owner,
+                })
+                .collect(),
+            ancestors: Vec::new(),
+        });
+    }
+
     let result = if let Some(base_record) =
         resolve_base_record(module, &record.module_identity, &record.record)?
     {
@@ -745,6 +777,39 @@ fn resolve_record_shape_inner(
     Ok(result)
 }
 
+/// Resolves the effective shape of the record an update record patches, when it patches one.
+///
+/// <para>`User.Update` for `User extends Named` carries `Named`'s fields too, so its fields come
+/// from the target's resolved inheritance chain rather than from the fields synthesized beside it,
+/// which only mirror what the target itself declares. The target is resolved where the update
+/// record was declared, which is where the target was.</para>
+///
+/// <para>Returns `None` when this is not an update record, or when its target is not a record — a
+/// component's update record is derived from state fields, which are never inherited, so the
+/// synthesized fields are already complete.</para>
+fn resolve_update_target_shape(
+    module: &PreparedModule,
+    record: &ResolvedRecordDefinition,
+    stack: &mut Vec<(DeclarationKey, Name)>,
+) -> Option<Result<ResolvedRecordShape, RecordResolutionError>> {
+    let target = record.record.update_target()?;
+    let target_record =
+        resolve_record_definition_with_identity(module, &record.module_identity, target)?;
+    if target_record.record.update_target().is_some() {
+        return None;
+    }
+    Some(resolve_record_shape_inner(module, &target_record, stack))
+}
+
+/// Converts one target field into the matching update-record field: optional and without default.
+fn into_update_field(field: EffectiveField) -> EffectiveField {
+    EffectiveField {
+        default: None,
+        is_required: false,
+        ..field
+    }
+}
+
 /// Resolves a record's base in the namespace of the module that wrote the `extends` clause.
 ///
 /// `type Circle = Shape { .. }` in a library means that library's `Shape`. Resolving `Shape` in the
@@ -772,7 +837,7 @@ fn resolve_base_record_inner(
     if !seen.insert(base_name.clone()) {
         return Err(RecordResolutionError::InvalidBase {
             record: record.name.clone(),
-            record_kind: record.kind,
+            record_kind: record.kind.clone(),
             base: record.base.clone().unwrap_or_else(|| base_name.clone()),
             span: record.span,
             reason: InvalidBaseReason::AliasCycle,
@@ -810,7 +875,7 @@ fn invalid_base(
 ) -> RecordResolutionError {
     RecordResolutionError::InvalidBase {
         record: record.name.clone(),
-        record_kind: record.kind,
+        record_kind: record.kind.clone(),
         base: record.base.clone().unwrap_or_else(|| base_name.clone()),
         span: record.span,
         reason,
@@ -822,13 +887,21 @@ fn validate_base_record(
     base_name: &Name,
     base_record: &ResolvedRecordDefinition,
 ) -> Result<ResolvedRecordDefinition, RecordResolutionError> {
+    if base_record.record.update_target().is_some() {
+        return Err(invalid_base(
+            record,
+            base_name,
+            InvalidBaseReason::UpdateRecord,
+        ));
+    }
+
     if base_record.record.kind != record.kind {
         return Err(invalid_base(
             record,
             base_name,
             InvalidBaseReason::KindMismatch {
-                expected: record.kind,
-                found: base_record.record.kind,
+                expected: record.kind.clone(),
+                found: base_record.record.kind.clone(),
             },
         ));
     }

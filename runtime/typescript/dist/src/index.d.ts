@@ -84,6 +84,11 @@ export interface NxIrRecordDeclaration {
      * A base-typed site accepts a value of a record that extends this one, never one of this one.
      */
     readonly isAbstract?: boolean;
+    /**
+     * The record or component a derived `<Target>.Update` record patches. Present only on update
+     * records, whose fields are all optional with no defaults: an absent field stays absent.
+     */
+    readonly updateTarget?: NxIrReference;
 }
 export interface NxIrComponentDeclaration {
     readonly tag: "component";
@@ -218,6 +223,7 @@ export declare class NxIrRuntimeError extends Error {
     readonly diagnostics: readonly NxIrDiagnostic[];
     constructor(diagnostics: readonly NxIrDiagnostic[]);
 }
+export declare const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1 = "update-records-v1";
 export declare function prepareNxIrProgram(input: string | NxIrProgram): NxPreparedProgram;
 export declare function tryPrepareNxIrProgram(input: string | NxIrProgram): NxResult<NxPreparedProgram>;
 export declare function evaluateFunction(program: NxPreparedProgram, name: string, args?: readonly NxCanonicalValue[], options?: NxRuntimeOptions): NxCanonicalValue;
@@ -225,4 +231,11 @@ export declare function constructComponentDescriptor(program: NxPreparedProgram,
 export declare function initializeComponent(program: NxPreparedProgram, name: string, props?: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): ComponentInitResult;
 export declare function evaluateComponent(program: NxPreparedProgram, name: string, props: Record<string, NxCanonicalValue>, state: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): ComponentEvaluateResult;
 export declare function normalizeComponentState(program: NxPreparedProgram, name: string, state: Record<string, NxCanonicalValue>): Record<string, NxCanonicalValue>;
+/**
+ * Applies a patch to host-owned component state and returns the validated next state.
+ *
+ * The patch is either a plain partial state object or the component's own update record,
+ * `{ $type: "<Component>.Update", ... }`. Either way a present field replaces the current value, an
+ * absent one keeps it, and a present `null` sets a nullable field to `null`.
+ */
 export declare function applyComponentStatePatch(program: NxPreparedProgram, name: string, currentState: Record<string, NxCanonicalValue>, patch: Record<string, NxCanonicalValue>): Record<string, NxCanonicalValue>;

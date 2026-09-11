@@ -213,6 +213,12 @@ they can also declare emitted action payloads in `emits` and persistent local st
 identifier, and each emit/state field uses the same `PropertyDefinition` shape as other record-like
 members. Inline emitted actions may optionally include an `extends` clause but remain concrete.
 
+`Update` and `<Name>.Update` are derived names, not grammar productions. Every record, action,
+inline emitted action, and component with `state` has an update record `<Name>.Update`, and inside a
+component body a bare `Update` element tag names that component's own. Both are ordinary
+`ElementName`s to the parser; analysis gives them their meaning. Because `<Component>.Update` is
+taken, an `EmitDefinition` or emit reference may not use the name `Update`.
+
 Inline emitted action inheritance example:
 
 ```nx

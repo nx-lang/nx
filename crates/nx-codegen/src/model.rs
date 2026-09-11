@@ -115,6 +115,11 @@ pub enum CodegenDeclarationKind {
         /// itself. A runtime taking host input needs this to hold that line, the way analysis holds
         /// it for NX source.
         is_abstract: bool,
+        /// The record or component this derived `<Target>.Update` record patches, if it is one.
+        ///
+        /// <para>An update record's fields are all optional and carry no defaults, so a runtime
+        /// normalizing one keeps an absent field absent rather than filling it.</para>
+        update_target: Option<CodegenReference>,
     },
     Component(CodegenComponent),
     Union {
@@ -293,6 +298,11 @@ pub enum CodegenExpressionKind {
         properties: Vec<CodegenProperty>,
         content_field: Option<String>,
         content: Vec<CodegenExpression>,
+        /// Whether this constructs a derived update record, whose absent fields stay absent.
+        ///
+        /// <para>Every other record fills an absent field from its default or with `null`; a patch
+        /// must not, because an absent field means "unchanged".</para>
+        is_update: bool,
     },
     ComponentDescriptor(CodegenComponentDescriptor),
     Element(CodegenElement),

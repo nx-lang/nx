@@ -32,8 +32,15 @@ pub fn build_codegen_program(artifact: &ProgramArtifact) -> Result<CodegenProgra
     let mut diagnostics = Vec::new();
     let mut modules = Vec::new();
     let mut prepared_cache = PreparedModuleCache::default();
+    let referenced_updates = referenced_update_records(artifact);
     for module in artifact.resolved_program.modules() {
-        match build_module(artifact, module, &mut prepared_cache, &mut diagnostics) {
+        match build_module(
+            artifact,
+            module,
+            &mut prepared_cache,
+            &referenced_updates,
+            &mut diagnostics,
+        ) {
             Some(module) => modules.push(module),
             None => {}
         }
@@ -95,10 +102,118 @@ pub fn build_codegen_program(artifact: &ProgramArtifact) -> Result<CodegenProgra
     })
 }
 
+/// Where one update record is declared: its module and definition.
+type UpdateRecordKey = (u32, LocalDefinitionId);
+
+/// The update records the program references anywhere, by the declaration each reference reaches.
+///
+/// <para>Every record, action, and stateful component has an update record, and most programs
+/// never use one. Emitting only the referenced ones keeps a program that never writes a patch the
+/// same program it was before update records existed. A reference is a construction — a record
+/// literal or an element tag — or a type annotation naming one; a reference from another module
+/// counts, since the declaring module is where the declaration is emitted.</para>
+fn referenced_update_records(artifact: &ProgramArtifact) -> FxHashSet<UpdateRecordKey> {
+    let mut referenced = FxHashSet::default();
+    for module in artifact.resolved_program.modules() {
+        let Some(lowered_module) = module_artifact_for(artifact, module)
+            .and_then(|artifact| artifact.lowered_module.as_ref())
+        else {
+            continue;
+        };
+        let mut names = Vec::new();
+        for (_, expr) in lowered_module.exprs() {
+            match expr {
+                ast::Expr::RecordLiteral { record, .. } => names.push(record.clone()),
+                ast::Expr::Element { element, .. } => {
+                    names.push(lowered_module.element(*element).tag.clone())
+                }
+                _ => {}
+            }
+        }
+        for item in lowered_module.items() {
+            for ty in item_type_refs(item) {
+                collect_type_ref_names(ty, &mut names);
+            }
+        }
+
+        for name in names {
+            let Some(reference) = resolve_visible_reference(artifact, module.id, name.as_str())
+            else {
+                continue;
+            };
+            if reference.kind == ResolvedItemKind::Record
+                && is_update_record(artifact, reference.module_id, reference.definition_id)
+            {
+                referenced.insert((reference.module_id.as_u32(), reference.definition_id));
+            }
+        }
+    }
+    referenced
+}
+
+fn is_update_record(
+    artifact: &ProgramArtifact,
+    module_id: RuntimeModuleId,
+    definition_id: LocalDefinitionId,
+) -> bool {
+    artifact
+        .resolved_program
+        .module(module_id)
+        .and_then(|module| module.lowered_module.item_by_definition(definition_id))
+        .is_some_and(
+            |item| matches!(item, Item::Record(record) if record.update_target().is_some()),
+        )
+}
+
+/// Every type annotation one declaration writes.
+fn item_type_refs(item: &Item) -> Vec<&ast::TypeRef> {
+    match item {
+        Item::Function(function) => function
+            .params
+            .iter()
+            .map(|param| &param.ty)
+            .chain(function.return_type.as_ref())
+            .collect(),
+        Item::Value(value) => value.ty.iter().collect(),
+        Item::Component(component) => component
+            .props
+            .iter()
+            .chain(component.state.iter())
+            .map(|field| &field.ty)
+            .collect(),
+        Item::TypeAlias(alias) => vec![&alias.ty],
+        Item::Union(union_def) => union_def
+            .cases
+            .iter()
+            .flat_map(|case| case.fields.iter().map(|field| &field.ty))
+            .collect(),
+        Item::Record(record) => record.properties.iter().map(|field| &field.ty).collect(),
+    }
+}
+
+fn collect_type_ref_names(ty: &ast::TypeRef, names: &mut Vec<Name>) {
+    match ty {
+        ast::TypeRef::Name(name) => names.push(name.clone()),
+        ast::TypeRef::Array(inner) | ast::TypeRef::Nullable(inner) => {
+            collect_type_ref_names(inner, names)
+        }
+        ast::TypeRef::Function {
+            params,
+            return_type,
+        } => {
+            for param in params {
+                collect_type_ref_names(param, names);
+            }
+            collect_type_ref_names(return_type, names);
+        }
+    }
+}
+
 fn build_module(
     artifact: &ProgramArtifact,
     module: &ResolvedModule,
     prepared_cache: &mut PreparedModuleCache,
+    referenced_updates: &FxHashSet<UpdateRecordKey>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<CodegenModule> {
     let Some(module_artifact) = module_artifact_for(artifact, module) else {
@@ -121,6 +236,11 @@ fn build_module(
     let mut declarations = Vec::new();
     for (index, item) in lowered_module.items().iter().enumerate() {
         let definition_id = LocalDefinitionId::new(index as u32);
+        if matches!(item, Item::Record(record) if record.update_target().is_some())
+            && !referenced_updates.contains(&(module.id.as_u32(), definition_id))
+        {
+            continue;
+        }
         let reference = reference_from_item(module.id, definition_id, item);
         if let Some(declaration) = build_declaration(
             artifact,
@@ -310,6 +430,10 @@ fn build_declaration(
                     diagnostics,
                 )?,
                 is_abstract: record.is_abstract,
+                // The target is declared beside its update record, so it resolves here.
+                update_target: record.update_target().and_then(|target| {
+                    resolve_visible_reference(artifact, resolved_module.id, target.as_str())
+                }),
             }
         }
         Item::Union(union_def) => {
@@ -1376,7 +1500,7 @@ fn build_expression(
                     span: property.span,
                 });
             }
-            let (record_name, fields) = record_literal_shape(
+            let (record_name, fields, is_update) = record_literal_shape(
                 artifact,
                 resolved_module.id,
                 prepared_cache,
@@ -1389,6 +1513,7 @@ fn build_expression(
                 properties: mapped_properties,
                 content_field: None,
                 content: Vec::new(),
+                is_update,
             }
         }
         ast::Expr::Element { element, .. } => {
@@ -1554,7 +1679,7 @@ fn build_element_expression(
                     diagnostics,
                 ),
                 ResolvedItemKind::Record => {
-                    let (record_name, fields) = record_literal_shape(
+                    let (record_name, fields, is_update) = record_literal_shape(
                         artifact,
                         resolved_module.id,
                         prepared_cache,
@@ -1571,6 +1696,7 @@ fn build_element_expression(
                         properties: mapped.properties,
                         content_field,
                         content: mapped.content,
+                        is_update,
                     })
                 }
                 _ => Some(CodegenExpressionKind::Element(mapped)),
@@ -2000,16 +2126,16 @@ fn record_literal_shape(
     prepared_cache: &mut PreparedModuleCache,
     record_name: &str,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Option<(String, Vec<CodegenRecordField>)> {
+) -> Option<(String, Vec<CodegenRecordField>, bool)> {
     let Some(reference) = resolve_visible_reference(artifact, module_id, record_name) else {
-        return Some((record_name.to_string(), Vec::new()));
+        return Some((record_name.to_string(), Vec::new(), false));
     };
     if reference.kind != nx_interpreter::ResolvedItemKind::Record {
-        return Some((record_name.to_string(), Vec::new()));
+        return Some((record_name.to_string(), Vec::new(), false));
     }
 
     let Some(target_module) = artifact.resolved_program.module(reference.module_id) else {
-        return Some((record_name.to_string(), Vec::new()));
+        return Some((record_name.to_string(), Vec::new(), false));
     };
     let Some(module_artifact) = module_artifact_for(artifact, target_module) else {
         diagnostics.push(missing_semantic_data_diagnostic(
@@ -2029,7 +2155,7 @@ fn record_literal_shape(
     };
     let Some(Item::Record(record_def)) = lowered_module.item_by_definition(reference.definition_id)
     else {
-        return Some((record_name.to_string(), Vec::new()));
+        return Some((record_name.to_string(), Vec::new(), false));
     };
     let shape = effective_record_shape_of(
         artifact,
@@ -2045,7 +2171,11 @@ fn record_literal_shape(
         &shape.fields,
         diagnostics,
     )?;
-    Some((record_def.name.as_str().to_string(), fields))
+    Some((
+        record_def.name.as_str().to_string(),
+        fields,
+        record_def.update_target().is_some(),
+    ))
 }
 
 fn build_type_ref(
@@ -2101,7 +2231,9 @@ fn build_type_ref_resolving_aliases(
                     .or_else(|| prepared.resolve_binding(PreparedNamespace::Element, name));
                 binding.map(|binding| {
                     (
-                        binding.module_identity(&current_module_identity).to_string(),
+                        binding
+                            .module_identity(&current_module_identity)
+                            .to_string(),
                         binding.definition_id(),
                         binding.kind,
                     )
@@ -2138,7 +2270,8 @@ fn build_type_ref_resolving_aliases(
                 if !aliases.contains(&alias) {
                     // An alias declared by a module compiled to an interface alone has no target to
                     // read here, and stays the nominal reference it was before.
-                    if let Some(target) = type_alias_target(artifact, target_module, definition_id) {
+                    if let Some(target) = type_alias_target(artifact, target_module, definition_id)
+                    {
                         aliases.push(alias);
                         let resolved = build_type_ref_resolving_aliases(
                             artifact,

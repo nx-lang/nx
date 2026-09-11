@@ -15,6 +15,7 @@ mod tests {
     use nx_interpreter::RuntimeModuleId;
     use nx_value::NxValue;
     use rustc_hash::FxHashMap;
+    use smol_str::SmolStr;
     use std::collections::BTreeMap;
 
     #[test]
@@ -29,6 +30,9 @@ mod tests {
             action_module_identity: "json-test.nx".to_string(),
             body,
             captured: FxHashMap::default(),
+            owner: None,
+            owner_state: Vec::new(),
+            token: Some(SmolStr::new("h1-1")),
         };
 
         let formatted = format_value_json_pretty(&value).expect("Action handler should serialize");
@@ -43,14 +47,7 @@ mod tests {
                         "action".to_string(),
                         NxValue::String("SearchSubmitted".to_string()),
                     ),
-                    (
-                        "component".to_string(),
-                        NxValue::String("SearchBox".to_string()),
-                    ),
-                    (
-                        "emit".to_string(),
-                        NxValue::String("SearchSubmitted".to_string()),
-                    ),
+                    ("token".to_string(), NxValue::String("h1-1".to_string())),
                 ]),
             }
         );

@@ -62,8 +62,9 @@ pub use db::{DatabaseImpl, NxDatabase};
 pub use records::{
     effective_record_shape, effective_record_shape_at, effective_record_shape_for_name,
     effective_record_shape_for_name_in, is_record_subtype, record_declaration_origin,
-    resolve_record_definition, resolve_record_definition_with_module, validate_record_definitions,
-    EffectiveRecordShape, InvalidBaseReason, RecordAncestor, RecordResolutionError,
+    resolve_record_definition, resolve_record_definition_at, resolve_record_definition_with_module,
+    validate_record_definitions, EffectiveRecordShape, InvalidBaseReason, RecordAncestor,
+    RecordResolutionError,
 };
 pub use scope::{
     build_scopes, check_undefined_identifiers, Scope, ScopeId, ScopeManager, Symbol, SymbolKind,
@@ -492,13 +493,48 @@ pub struct EffectiveEmit {
     pub module_identity: String,
 }
 
-/// Distinguishes ordinary records from action records.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Distinguishes ordinary records from action records and derived update records.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecordKind {
     /// Standard `type Name = { ... }` record declaration.
     Plain,
     /// `action Name = { ... }` declaration.
     Action,
+    /// Derived `<Target>.Update` patch record, synthesized for every record, action, and
+    /// stateful component.
+    ///
+    /// <para>An update record has the target's effective fields (a component's state fields), every
+    /// one optional and none carrying a default. An absent field means "unchanged"; a present
+    /// `null` means "set to null".</para>
+    Update {
+        /// Name of the record, action, or component this update record patches.
+        target: Name,
+    },
+}
+
+impl RecordKind {
+    /// Returns the `(Label, singular, plural)` wording diagnostics use for this kind.
+    pub fn labels(&self) -> (&'static str, &'static str, &'static str) {
+        match self {
+            RecordKind::Plain => ("Record", "record", "records"),
+            RecordKind::Action => ("Action", "action", "actions"),
+            RecordKind::Update { .. } => ("Update record", "update record", "update records"),
+        }
+    }
+}
+
+/// Suffix of the derived update record name: `<Target>.Update`.
+pub const UPDATE_RECORD_SUFFIX: &str = "Update";
+
+/// Returns the name of the derived update record for `target`.
+pub fn update_record_name(target: &str) -> Name {
+    Name::new(&format!("{}.{}", target, UPDATE_RECORD_SUFFIX))
+}
+
+/// Returns true when `name` is spelled like a derived update record, `<Target>.Update`.
+pub fn is_update_record_name(name: &str) -> bool {
+    name.strip_suffix(UPDATE_RECORD_SUFFIX)
+        .is_some_and(|prefix| prefix.ends_with('.'))
 }
 
 /// Record type definition.
@@ -524,6 +560,14 @@ impl RecordDef {
     /// Returns true when this record was declared with the `action` keyword.
     pub fn is_action(&self) -> bool {
         self.kind == RecordKind::Action
+    }
+
+    /// Returns the patched target's name when this is a derived update record.
+    pub fn update_target(&self) -> Option<&Name> {
+        match &self.kind {
+            RecordKind::Update { target } => Some(target),
+            _ => None,
+        }
     }
 
     /// Returns true when this record is declared as abstract.

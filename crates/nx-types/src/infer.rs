@@ -74,6 +74,14 @@ impl UnionEntry {
     }
 }
 
+/// One value an action handler's body can return, as the routing check sees it.
+enum HandlerResultItem {
+    /// A value of this type, written at this span.
+    Value(Type, TextSpan),
+    /// An empty list, which a handler may never return.
+    EmptyList(TextSpan),
+}
+
 struct ElementBindingSpec {
     content_property: Option<Name>,
     properties: FxHashMap<Name, ElementPropertySpec>,
@@ -416,9 +424,18 @@ impl<'a> InferenceContext<'a> {
                 properties,
                 span,
             } => self.infer_record_literal(record, properties, *span),
-            // TODO: Action handlers are lowered as lazy runtime callbacks. Wire them into
-            // expression-level type inference once the language has a first-class handler type.
-            ast::Expr::ActionHandler { .. } => Type::Error,
+            ast::Expr::ActionHandler {
+                action_name,
+                action_module_identity,
+                owner,
+                body,
+                ..
+            } => self.infer_action_handler(
+                action_name,
+                action_module_identity.as_deref(),
+                owner.as_ref(),
+                *body,
+            ),
 
             // Block expressions
             ast::Expr::Block { stmts: _, expr, .. } => {
@@ -614,6 +631,217 @@ impl<'a> InferenceContext<'a> {
         }
 
         self.env.pop_scope();
+    }
+
+    /// Infers a handler body where it is bound, then checks where each of its results can go.
+    ///
+    /// <para>The body sees what its binding site sees — the owner's props and state, enclosing
+    /// `let` bindings and loop variables, all already in the environment — plus `action`, typed by
+    /// the action the component emits. That action is resolved in the module that declared the
+    /// emit, since that is where its name was written.</para>
+    ///
+    /// <para>The handler value itself has no first-class type, so the expression stays
+    /// `Type::Error`, which no binding site reports. A handler property has no declared type to
+    /// check against; the body is what gets checked, here.</para>
+    fn infer_action_handler(
+        &mut self,
+        action_name: &Name,
+        action_module_identity: Option<&str>,
+        owner: Option<&Name>,
+        body: ExprId,
+    ) -> Type {
+        let action_ty = self.type_from_type_ref_in(
+            action_module_identity,
+            &ast::TypeRef::name(action_name.as_str()),
+        );
+        self.env.push_scope();
+        self.env.bind(Name::new("action"), action_ty);
+        self.infer_expr(body);
+        self.env.pop_scope();
+
+        let mut items = Vec::new();
+        self.collect_handler_result_items(body, &mut items);
+        for item in items {
+            match item {
+                HandlerResultItem::EmptyList(span) => self.error(
+                    "handler-result-empty",
+                    "Action handler must return at least one action or update record; found an empty list"
+                        .to_string(),
+                    span,
+                ),
+                HandlerResultItem::Value(ty, span) => {
+                    self.check_handler_result_item(owner, &ty, span)
+                }
+            }
+        }
+
+        Type::Error
+    }
+
+    /// Splits a handler body's result into the values it returns, each with where it was written.
+    ///
+    /// <para>A list literal is split by element, and each branch of an `if` and each arm of a
+    /// match separately, so each value is judged on its own type rather than on a join of
+    /// unrelated records. Anything else is judged by its type, a list type by its element
+    /// type.</para>
+    fn collect_handler_result_items(&self, expr_id: ExprId, items: &mut Vec<HandlerResultItem>) {
+        let raw_module = self.module.raw_module();
+        let span = raw_module.expr_span(expr_id);
+        match raw_module.expr(expr_id) {
+            ast::Expr::Array { elements, .. } if !elements.is_empty() => {
+                for element in elements {
+                    let ty = self
+                        .env
+                        .get_expr_type(*element)
+                        .cloned()
+                        .unwrap_or(Type::Error);
+                    items.push(HandlerResultItem::Value(ty, raw_module.expr_span(*element)));
+                }
+            }
+            ast::Expr::If {
+                then_branch,
+                else_branch: Some(else_branch),
+                ..
+            } => {
+                self.collect_handler_result_items(*then_branch, items);
+                self.collect_handler_result_items(*else_branch, items);
+            }
+            ast::Expr::Match {
+                arms, else_branch, ..
+            } => {
+                for arm in arms {
+                    self.collect_handler_result_items(arm.body, items);
+                }
+                if let Some(else_branch) = else_branch {
+                    self.collect_handler_result_items(*else_branch, items);
+                }
+            }
+            _ => match self
+                .env
+                .get_expr_type(expr_id)
+                .cloned()
+                .unwrap_or(Type::Error)
+            {
+                ty if Self::is_empty_list_type(&ty) => {
+                    items.push(HandlerResultItem::EmptyList(span))
+                }
+                Type::Array(inner) => items.push(HandlerResultItem::Value(*inner, span)),
+                ty => items.push(HandlerResultItem::Value(ty, span)),
+            },
+        }
+    }
+
+    /// Checks one handler result against where a handler bound at this site may send it.
+    ///
+    /// <para>Inside a component a result either patches that component's state — its own update
+    /// record — or goes to its parent, which only an action the component emits may do. At the root
+    /// there is no component to patch or parent to reach, so any action or update record is an
+    /// effect for the host.</para>
+    fn check_handler_result_item(&mut self, owner: Option<&Name>, ty: &Type, span: TextSpan) {
+        let named = match ty {
+            Type::Error => return,
+            Type::Named(named) => named,
+            other => {
+                self.report_handler_result_not_action(&other.to_string(), span);
+                return;
+            }
+        };
+        let Some(record) = self.record_definition_for(named) else {
+            // An unresolved `X.Update` was already reported where it was written, so a second
+            // diagnostic here would only repeat that the record does not exist.
+            if !nx_hir::is_update_record_name(named.name.as_str()) {
+                self.report_handler_result_not_action(named.name.as_str(), span);
+            }
+            return;
+        };
+        let Some(owner) = owner else {
+            if record.kind == nx_hir::RecordKind::Plain {
+                self.report_handler_result_not_action(named.name.as_str(), span);
+            }
+            return;
+        };
+
+        match &record.kind {
+            nx_hir::RecordKind::Plain => {
+                self.report_handler_result_not_action(named.name.as_str(), span)
+            }
+            nx_hir::RecordKind::Update { .. } => {
+                let own_update = nx_hir::update_record_name(owner.as_str());
+                let expected = match self.nominal_named_type(&own_update) {
+                    Type::Named(expected) if expected.origin().is_some() => Some(expected),
+                    _ => None,
+                };
+                match expected {
+                    Some(expected) if named.is_same_declaration_as(&expected) => {}
+                    Some(_) => self.error(
+                        "handler-update-wrong-target",
+                        format!(
+                            "Action handler inside component '{}' returns '{}', but only '{}' can change this component's state",
+                            owner, named.name, own_update
+                        ),
+                        span,
+                    ),
+                    // A component without state has no update record, so there is nothing to
+                    // change and no own record to name.
+                    None => self.error(
+                        "handler-update-wrong-target",
+                        format!(
+                            "Action handler inside component '{}' returns '{}', but '{}' declares no state to change",
+                            owner, named.name, owner
+                        ),
+                        span,
+                    ),
+                }
+            }
+            nx_hir::RecordKind::Action => {
+                if !self.component_emits_action(owner, named) {
+                    self.error(
+                        "handler-action-not-emitted",
+                        format!(
+                            "Action handler inside component '{}' returns action '{}', which '{}' does not emit; add '{}' to the component's emits to send it to the parent",
+                            owner, named.name, owner, named.name
+                        ),
+                        span,
+                    );
+                }
+            }
+        }
+    }
+
+    fn report_handler_result_not_action(&mut self, found: &str, span: TextSpan) {
+        self.error(
+            "handler-result-not-action",
+            format!(
+                "Action handler must return an action, an update record, or a non-empty list of those; found '{}'",
+                found
+            ),
+            span,
+        );
+    }
+
+    /// The record a named type denotes, read from its declaration where the type reached one.
+    fn record_definition_for(&self, named: &NamedType) -> Option<nx_hir::RecordDef> {
+        match named.origin() {
+            Some(origin) => nx_hir::resolve_record_definition_at(self.module, origin),
+            None => self.resolve_record_definition(&named.name),
+        }
+    }
+
+    /// Returns true when `component` declares or inherits an emit of exactly this action.
+    ///
+    /// <para>Each emit's action is resolved in the module that wrote the `emits` clause, and
+    /// compared by declaration, so a same-named action elsewhere does not count.</para>
+    fn component_emits_action(&mut self, component: &Name, action: &NamedType) -> bool {
+        let Some(contract) = self.effective_component_contract(component).ok().flatten() else {
+            return false;
+        };
+        contract.emits.iter().any(|emit| {
+            let emit_ty = self.type_from_type_ref_in(
+                Some(emit.module_identity.as_str()),
+                &ast::TypeRef::name(emit.emit.action_name.as_str()),
+            );
+            matches!(&emit_ty, Type::Named(emitted) if emitted.is_same_declaration_as(action))
+        })
     }
 
     /// Checks the default this component declares for one of its fields, where it declares one.
@@ -1456,6 +1684,8 @@ impl<'a> InferenceContext<'a> {
             return entry.case_type(case.name);
         }
 
+        self.report_unresolved_update_tag(&element.tag, span);
+
         // A tag that resolves to nothing has no binding contract, so there is nothing to check the
         // element's properties and content against. Every expression written inside it is still an
         // expression, though, and the four resolved paths above infer theirs as a side effect of
@@ -1472,6 +1702,55 @@ impl<'a> InferenceContext<'a> {
         }
 
         self.nominal_named_type(&element.tag)
+    }
+
+    /// Reports an unresolved tag spelled like an update record, which is never a host element.
+    ///
+    /// <para>Inside a component, lowering already rewrote a bare `Update` to the component's own
+    /// record, so a bare one that reaches here was written outside any component. `X.Update` that
+    /// did not resolve names a declaration with no update record: a component without state, an
+    /// update record itself, since update records have none of their own, or nothing at all. A
+    /// bare `Update` inside a component without state arrives here as that component's qualified
+    /// name, so this is the one diagnostic it gets.</para>
+    fn report_unresolved_update_tag(&mut self, tag: &Name, span: TextSpan) {
+        let suffix = nx_hir::UPDATE_RECORD_SUFFIX;
+        if tag.as_str() == suffix {
+            self.error(
+                "bare-update-outside-component",
+                "A bare 'Update' names the enclosing component's update record, and there is no enclosing component here; write the qualified form for the record to patch, as in '<Type.Update ... />'"
+                    .to_string(),
+                span,
+            );
+            return;
+        }
+        let Some(target) = tag
+            .as_str()
+            .strip_suffix(suffix)
+            .and_then(|prefix| prefix.strip_suffix('.'))
+        else {
+            return;
+        };
+        let target = Name::new(target);
+        let message = if self
+            .resolve_record_definition(&target)
+            .is_some_and(|record| record.update_target().is_some())
+        {
+            format!(
+                "Unknown type '{}': '{}' is an update record, and update records have no update record of their own",
+                tag, target
+            )
+        } else if self.resolve_component_definition(&target).is_some() {
+            format!(
+                "Unknown type '{}': component '{}' declares no state, so it has no update record",
+                tag, target
+            )
+        } else {
+            format!(
+                "Unknown type '{}': '{}' is not a record, action, or component with state",
+                tag, target
+            )
+        };
+        self.error("unknown-update-record", message, span);
     }
 
     fn check_element_bindings_against_function(

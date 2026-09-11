@@ -41,6 +41,7 @@ struct PendingHandlerRewrite {
     emit: Name,
     action_name: Name,
     action_module_identity: String,
+    owner: Option<Name>,
     span: TextSpan,
     body: ExprId,
 }
@@ -619,6 +620,7 @@ pub fn promote_component_handler_bindings(module: &mut PreparedModule) {
             emit: rewrite.emit.clone(),
             action_name: rewrite.action_name.clone(),
             action_module_identity: Some(rewrite.action_module_identity.clone()),
+            owner: rewrite.owner.clone(),
             body: rewrite.body,
             span: rewrite.span,
         });
@@ -650,30 +652,38 @@ fn collect_handler_rewrites_in_item(
     item: &Item,
     rewrites: &mut Vec<PendingHandlerRewrite>,
 ) {
+    // A handler written inside a component declaration is owned by that component; anywhere else
+    // it is bound at the root.
+    let owner = match item {
+        Item::Component(component) => Some(&component.name),
+        _ => None,
+    };
     match item {
         Item::Function(function) => {
-            collect_handler_rewrites_in_expr(module, function.body, rewrites)
+            collect_handler_rewrites_in_expr(module, function.body, owner, rewrites)
         }
-        Item::Value(value) => collect_handler_rewrites_in_expr(module, value.value, rewrites),
+        Item::Value(value) => {
+            collect_handler_rewrites_in_expr(module, value.value, owner, rewrites)
+        }
         Item::Component(component) => {
             for field in &component.props {
                 if let Some(default) = field.default {
-                    collect_handler_rewrites_in_expr(module, default, rewrites);
+                    collect_handler_rewrites_in_expr(module, default, owner, rewrites);
                 }
             }
             for field in &component.state {
                 if let Some(default) = field.default {
-                    collect_handler_rewrites_in_expr(module, default, rewrites);
+                    collect_handler_rewrites_in_expr(module, default, owner, rewrites);
                 }
             }
             if let Some(body) = component.body {
-                collect_handler_rewrites_in_expr(module, body, rewrites);
+                collect_handler_rewrites_in_expr(module, body, owner, rewrites);
             }
         }
         Item::Record(record) => {
             for field in &record.properties {
                 if let Some(default) = field.default {
-                    collect_handler_rewrites_in_expr(module, default, rewrites);
+                    collect_handler_rewrites_in_expr(module, default, owner, rewrites);
                 }
             }
         }
@@ -681,7 +691,7 @@ fn collect_handler_rewrites_in_item(
             for case in &union_def.cases {
                 for field in &case.fields {
                     if let Some(default) = field.default {
-                        collect_handler_rewrites_in_expr(module, default, rewrites);
+                        collect_handler_rewrites_in_expr(module, default, owner, rewrites);
                     }
                 }
             }
@@ -693,6 +703,7 @@ fn collect_handler_rewrites_in_item(
 fn collect_handler_rewrites_in_expr(
     module: &PreparedModule,
     expr_id: ExprId,
+    owner: Option<&Name>,
     rewrites: &mut Vec<PendingHandlerRewrite>,
 ) {
     match module.raw_module().expr(expr_id) {
@@ -704,16 +715,16 @@ fn collect_handler_rewrites_in_expr(
         | ast::Expr::ResolvedUnionCase { .. }
         | ast::Expr::Error(_) => {}
         ast::Expr::BinaryOp { lhs, rhs, .. } => {
-            collect_handler_rewrites_in_expr(module, *lhs, rewrites);
-            collect_handler_rewrites_in_expr(module, *rhs, rewrites);
+            collect_handler_rewrites_in_expr(module, *lhs, owner, rewrites);
+            collect_handler_rewrites_in_expr(module, *rhs, owner, rewrites);
         }
         ast::Expr::UnaryOp { expr, .. } => {
-            collect_handler_rewrites_in_expr(module, *expr, rewrites);
+            collect_handler_rewrites_in_expr(module, *expr, owner, rewrites);
         }
         ast::Expr::Call { func, args, .. } => {
-            collect_handler_rewrites_in_expr(module, *func, rewrites);
+            collect_handler_rewrites_in_expr(module, *func, owner, rewrites);
             for arg in args {
-                collect_handler_rewrites_in_expr(module, *arg, rewrites);
+                collect_handler_rewrites_in_expr(module, *arg, owner, rewrites);
             }
         }
         ast::Expr::If {
@@ -722,10 +733,10 @@ fn collect_handler_rewrites_in_expr(
             else_branch,
             ..
         } => {
-            collect_handler_rewrites_in_expr(module, *condition, rewrites);
-            collect_handler_rewrites_in_expr(module, *then_branch, rewrites);
+            collect_handler_rewrites_in_expr(module, *condition, owner, rewrites);
+            collect_handler_rewrites_in_expr(module, *then_branch, owner, rewrites);
             if let Some(else_branch) = else_branch {
-                collect_handler_rewrites_in_expr(module, *else_branch, rewrites);
+                collect_handler_rewrites_in_expr(module, *else_branch, owner, rewrites);
             }
         }
         ast::Expr::Match {
@@ -734,62 +745,62 @@ fn collect_handler_rewrites_in_expr(
             else_branch,
             ..
         } => {
-            collect_handler_rewrites_in_expr(module, *scrutinee, rewrites);
+            collect_handler_rewrites_in_expr(module, *scrutinee, owner, rewrites);
             for arm in arms {
                 for pattern in &arm.patterns {
-                    collect_handler_rewrites_in_expr(module, *pattern, rewrites);
+                    collect_handler_rewrites_in_expr(module, *pattern, owner, rewrites);
                 }
-                collect_handler_rewrites_in_expr(module, arm.body, rewrites);
+                collect_handler_rewrites_in_expr(module, arm.body, owner, rewrites);
             }
             if let Some(else_branch) = else_branch {
-                collect_handler_rewrites_in_expr(module, *else_branch, rewrites);
+                collect_handler_rewrites_in_expr(module, *else_branch, owner, rewrites);
             }
         }
         ast::Expr::Let { value, body, .. } => {
-            collect_handler_rewrites_in_expr(module, *value, rewrites);
-            collect_handler_rewrites_in_expr(module, *body, rewrites);
+            collect_handler_rewrites_in_expr(module, *value, owner, rewrites);
+            collect_handler_rewrites_in_expr(module, *body, owner, rewrites);
         }
         ast::Expr::Block { stmts, expr, .. } => {
             for stmt in stmts {
                 match stmt {
                     ast::Stmt::Let { init, .. } => {
-                        collect_handler_rewrites_in_expr(module, *init, rewrites);
+                        collect_handler_rewrites_in_expr(module, *init, owner, rewrites);
                     }
                     ast::Stmt::Expr(expr, _) => {
-                        collect_handler_rewrites_in_expr(module, *expr, rewrites);
+                        collect_handler_rewrites_in_expr(module, *expr, owner, rewrites);
                     }
                 }
             }
             if let Some(expr) = expr {
-                collect_handler_rewrites_in_expr(module, *expr, rewrites);
+                collect_handler_rewrites_in_expr(module, *expr, owner, rewrites);
             }
         }
         ast::Expr::Array { elements, .. } => {
             for element in elements {
-                collect_handler_rewrites_in_expr(module, *element, rewrites);
+                collect_handler_rewrites_in_expr(module, *element, owner, rewrites);
             }
         }
         ast::Expr::Index { base, index, .. } => {
-            collect_handler_rewrites_in_expr(module, *base, rewrites);
-            collect_handler_rewrites_in_expr(module, *index, rewrites);
+            collect_handler_rewrites_in_expr(module, *base, owner, rewrites);
+            collect_handler_rewrites_in_expr(module, *index, owner, rewrites);
         }
         ast::Expr::Member { base, .. } => {
-            collect_handler_rewrites_in_expr(module, *base, rewrites);
+            collect_handler_rewrites_in_expr(module, *base, owner, rewrites);
         }
         ast::Expr::RecordLiteral { properties, .. } => {
             for property in properties {
-                collect_handler_rewrites_in_expr(module, property.value, rewrites);
+                collect_handler_rewrites_in_expr(module, property.value, owner, rewrites);
             }
         }
         ast::Expr::Element { element, .. } => {
-            collect_handler_rewrites_in_element(module, *element, rewrites);
+            collect_handler_rewrites_in_element(module, *element, owner, rewrites);
         }
         ast::Expr::ActionHandler { body, .. } => {
-            collect_handler_rewrites_in_expr(module, *body, rewrites);
+            collect_handler_rewrites_in_expr(module, *body, owner, rewrites);
         }
         ast::Expr::For { iterable, body, .. } => {
-            collect_handler_rewrites_in_expr(module, *iterable, rewrites);
-            collect_handler_rewrites_in_expr(module, *body, rewrites);
+            collect_handler_rewrites_in_expr(module, *iterable, owner, rewrites);
+            collect_handler_rewrites_in_expr(module, *body, owner, rewrites);
         }
     }
 }
@@ -797,6 +808,7 @@ fn collect_handler_rewrites_in_expr(
 fn collect_handler_rewrites_in_element(
     module: &PreparedModule,
     element_id: ElementId,
+    owner: Option<&Name>,
     rewrites: &mut Vec<PendingHandlerRewrite>,
 ) {
     let element = module.raw_module().element(element_id);
@@ -807,12 +819,13 @@ fn collect_handler_rewrites_in_element(
             element_id,
             element.property_entries(),
             &contract,
+            owner,
             rewrites,
         );
     }
 
     for content in &element.content {
-        collect_handler_rewrites_in_expr(module, *content, rewrites);
+        collect_handler_rewrites_in_expr(module, *content, owner, rewrites);
     }
 }
 
@@ -821,6 +834,7 @@ fn collect_handler_rewrites_in_property_entries(
     element_id: ElementId,
     entries: &[PropertyEntry],
     contract: &EffectiveComponentContract,
+    owner: Option<&Name>,
     rewrites: &mut Vec<PendingHandlerRewrite>,
 ) {
     for entry in entries {
@@ -849,6 +863,7 @@ fn collect_handler_rewrites_in_property_entries(
                                     emit: emit.emit.name.clone(),
                                     action_name: emit.emit.action_name.clone(),
                                     action_module_identity: emit.module_identity.clone(),
+                                    owner: owner.cloned(),
                                     span: property.span,
                                     body: property.value,
                                 });
@@ -857,7 +872,7 @@ fn collect_handler_rewrites_in_property_entries(
                     }
                 }
 
-                collect_handler_rewrites_in_expr(module, property.value, rewrites);
+                collect_handler_rewrites_in_expr(module, property.value, owner, rewrites);
             }
             PropertyEntry::If {
                 condition,
@@ -865,12 +880,13 @@ fn collect_handler_rewrites_in_property_entries(
                 else_entries,
                 ..
             } => {
-                collect_handler_rewrites_in_expr(module, *condition, rewrites);
+                collect_handler_rewrites_in_expr(module, *condition, owner, rewrites);
                 collect_handler_rewrites_in_property_entries(
                     module,
                     element_id,
                     then_entries,
                     contract,
+                    owner,
                     rewrites,
                 );
                 collect_handler_rewrites_in_property_entries(
@@ -878,6 +894,7 @@ fn collect_handler_rewrites_in_property_entries(
                     element_id,
                     else_entries,
                     contract,
+                    owner,
                     rewrites,
                 );
             }
@@ -885,12 +902,13 @@ fn collect_handler_rewrites_in_property_entries(
                 arms, else_entries, ..
             } => {
                 for arm in arms {
-                    collect_handler_rewrites_in_expr(module, arm.condition, rewrites);
+                    collect_handler_rewrites_in_expr(module, arm.condition, owner, rewrites);
                     collect_handler_rewrites_in_property_entries(
                         module,
                         element_id,
                         &arm.entries,
                         contract,
+                        owner,
                         rewrites,
                     );
                 }
@@ -899,6 +917,7 @@ fn collect_handler_rewrites_in_property_entries(
                     element_id,
                     else_entries,
                     contract,
+                    owner,
                     rewrites,
                 );
             }
@@ -908,16 +927,17 @@ fn collect_handler_rewrites_in_property_entries(
                 else_entries,
                 ..
             } => {
-                collect_handler_rewrites_in_expr(module, *scrutinee, rewrites);
+                collect_handler_rewrites_in_expr(module, *scrutinee, owner, rewrites);
                 for arm in arms {
                     for pattern in &arm.patterns {
-                        collect_handler_rewrites_in_expr(module, *pattern, rewrites);
+                        collect_handler_rewrites_in_expr(module, *pattern, owner, rewrites);
                     }
                     collect_handler_rewrites_in_property_entries(
                         module,
                         element_id,
                         &arm.entries,
                         contract,
+                        owner,
                         rewrites,
                     );
                 }
@@ -926,6 +946,7 @@ fn collect_handler_rewrites_in_property_entries(
                     element_id,
                     else_entries,
                     contract,
+                    owner,
                     rewrites,
                 );
             }

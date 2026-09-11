@@ -9,7 +9,8 @@ export class NxIrRuntimeError extends Error {
         this.diagnostics = diagnostics;
     }
 }
-const knownFeatures = new Set(["eager-v1"]);
+export const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1 = "update-records-v1";
+const knownFeatures = new Set(["eager-v1", NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1]);
 const knownExpressionTags = new Set([
     "literal",
     "slot",
@@ -235,9 +236,22 @@ export function normalizeComponentState(program, name, state) {
     const component = prepared.declaration.kind;
     return normalizeFields(program, component.state, state, new Map(), `${name} state`, true);
 }
+/**
+ * Applies a patch to host-owned component state and returns the validated next state.
+ *
+ * The patch is either a plain partial state object or the component's own update record,
+ * `{ $type: "<Component>.Update", ... }`. Either way a present field replaces the current value, an
+ * absent one keeps it, and a present `null` sets a nullable field to `null`.
+ */
 export function applyComponentStatePatch(program, name, currentState, patch) {
     const prepared = componentDeclaration(program, name);
     const component = prepared.declaration.kind;
+    const { $type: discriminator, ...fields } = patch;
+    const expectedUpdate = `${prepared.declaration.reference.name}.Update`;
+    if (discriminator !== undefined && discriminator !== expectedUpdate) {
+        fail("nx-ir-state-patch", `Cannot apply '${String(discriminator)}' to ${name} state; only '${expectedUpdate}' patches it.`);
+    }
+    patch = fields;
     const known = new Set(component.state.map((field) => field.name));
     for (const key of Object.keys(patch)) {
         if (!known.has(key)) {
@@ -409,7 +423,9 @@ function evalRecord(op, context) {
     const content = (op.content ?? []).map((item) => evalExpression(item, context));
     const fields = op.fields ?? [];
     applyContentBinding(properties, op.contentField, fields, content, String(op.name));
-    const normalized = normalizeFields(context.program, fields, properties, new Map(context.env), String(op.name), false);
+    const normalized = op.isUpdate === true
+        ? normalizePatchFields(context.program, fields, properties, String(op.name))
+        : normalizeFields(context.program, fields, properties, new Map(context.env), String(op.name), false);
     return { $type: String(op.name), ...normalized };
 }
 function evalUnionCase(op, context) {
@@ -508,6 +524,33 @@ function normalizeFields(program, fields, input, env, path, requireExplicit) {
     }
     return output;
 }
+/**
+ * Normalizes the fields of an update record: only the fields supplied, each checked against its
+ * declared type.
+ *
+ * An absent field means "unchanged", so it stays absent — no default is evaluated and nothing is
+ * required. A present `null` is accepted only where the field is nullable.
+ */
+function normalizePatchFields(program, fields, input, path) {
+    const byName = new Map(fields.map((field) => [field.name, field]));
+    for (const key of Object.keys(input)) {
+        if (!byName.has(key)) {
+            fail("nx-ir-boundary-field", `Unknown ${path} field '${key}'.`);
+        }
+    }
+    const output = {};
+    for (const field of fields) {
+        if (!Object.prototype.hasOwnProperty.call(input, field.name)) {
+            continue;
+        }
+        const value = input[field.name];
+        if (value === null && field.ty.kind !== "nullable") {
+            fail("nx-ir-boundary-type", `Expected ${path}.${field.name} to be non-null; an update record sets a field to null only where the field is nullable.`);
+        }
+        output[field.name] = normalizeValue(program, field.ty, value, `${path}.${field.name}`);
+    }
+    return output;
+}
 function normalizeValue(program, ty, value, path) {
     switch (ty.kind) {
         case "primitive":
@@ -565,6 +608,15 @@ function normalizeNominalValue(program, reference, display, value, path) {
         fail("nx-ir-schema", `Missing nominal type declaration '${reference.declaration}'.`);
     }
     const kind = prepared.declaration.kind;
+    if (kind.tag === "record" && kind.updateTarget !== undefined) {
+        // An update record has no subtypes, so a discriminator must name it exactly.
+        const object = requireObject(value, path);
+        const { $type: discriminator, ...rest } = object;
+        if (discriminator !== undefined && discriminator !== display) {
+            fail("nx-ir-boundary-type", `Expected ${path} to be a ${display}, got '${String(discriminator)}'.`);
+        }
+        return { $type: display, ...normalizePatchFields(program, kind.fields, rest, path) };
+    }
     if (kind.tag === "record") {
         const object = requireObject(value, path);
         // The declared type supplies the field list, so a discriminator carried by the value selects
