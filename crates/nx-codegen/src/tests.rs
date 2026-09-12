@@ -21,6 +21,7 @@ use nx_types::Type;
 use serde_json::Value;
 use std::fs;
 use std::process::Command;
+use std::sync::OnceLock;
 use tempfile::TempDir;
 
 fn artifact_from_source(source: &str) -> ProgramArtifact {
@@ -61,15 +62,12 @@ fn generated_module_body(module: &str) -> &str {
         .unwrap_or(module)
 }
 
-fn execute_generated_javascript_root(source: &str) -> Option<String> {
+fn execute_generated_javascript_root(source: &str) -> String {
     let artifact = artifact_from_source(source);
     execute_generated_javascript_artifact_root(&artifact, "")
 }
 
-fn execute_generated_javascript_artifact_root(
-    artifact: &ProgramArtifact,
-    args: &str,
-) -> Option<String> {
+fn execute_generated_javascript_artifact_root(artifact: &ProgramArtifact, args: &str) -> String {
     execute_generated_javascript_artifact_script(
         artifact,
         &format!("console.log(JSON.stringify(m.root({})));", args),
@@ -79,11 +77,7 @@ fn execute_generated_javascript_artifact_root(
 fn execute_generated_javascript_artifact_script(
     artifact: &ProgramArtifact,
     script_body: &str,
-) -> Option<String> {
-    if !node_is_available() {
-        return None;
-    }
-
+) -> String {
     let output = emit_program(&artifact, &CodegenOptions::javascript()).expect("js output");
     let dir = TempDir::new().expect("temp dir");
     fs::write(dir.path().join("package.json"), r#"{ "type": "module" }"#).expect("package file");
@@ -96,7 +90,7 @@ fn execute_generated_javascript_artifact_script(
         "import({:?}).then((m) => {{ {} }});",
         index_url, script_body
     );
-    let output = Command::new("node")
+    let output = node_command()
         .arg("--input-type=module")
         .arg("-e")
         .arg(script)
@@ -108,17 +102,13 @@ fn execute_generated_javascript_artifact_script(
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
 fn execute_generated_js_program_module_script(
     artifact: &ProgramArtifact,
     script_body: &str,
-) -> Option<String> {
-    if !node_is_available() {
-        return None;
-    }
-
+) -> String {
     let options = JsProgramModuleOptions {
         runtime_import_specifier: "./nx-runtime.js".to_string(),
         ..JsProgramModuleOptions::default()
@@ -138,7 +128,7 @@ fn execute_generated_js_program_module_script(
         "import({:?}).then((m) => {{ {} }});",
         program_url, script_body
     );
-    let output = Command::new("node")
+    let output = node_command()
         .arg("--input-type=module")
         .arg("-e")
         .arg(script)
@@ -150,29 +140,27 @@ fn execute_generated_js_program_module_script(
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
 /// The TypeScript compiler, from `PATH` or from the repository's own `runtime/typescript`
-/// install; says so when neither has one, so a run that checked nothing does not pass silently.
-fn tsc_command() -> Option<Command> {
+/// install. `tsc` is a hard requirement of these tests, so a missing one fails the run instead of
+/// skipping it.
+fn tsc_command() -> Command {
     let workspace_tsc = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../runtime/typescript/node_modules/.bin/tsc");
     for program in [std::path::PathBuf::from("tsc"), workspace_tsc] {
-        if Command::new(&program).arg("--version").output().is_ok() {
-            return Some(Command::new(program));
+        let probe = Command::new(&program).arg("--version").output();
+        if probe.is_ok_and(|output| output.status.success()) {
+            return Command::new(program);
         }
     }
-    eprintln!("skipping: `tsc` is not available, so the generated TypeScript was not checked");
-    None
+    panic!("`tsc` is not available: run `pnpm install` at the repository root");
 }
 
 /// Runs an ES module script next to the emitted runtime module for `target`, returning what it
-/// printed. The TypeScript runtime is compiled with `tsc` first; `None` means a tool was missing.
-fn execute_script_against_emitted_runtime(target: CodegenTarget, script: &str) -> Option<String> {
-    if !node_is_available() {
-        return None;
-    }
+/// printed. The TypeScript runtime is compiled with `tsc` first; a missing tool fails the run.
+fn execute_script_against_emitted_runtime(target: CodegenTarget, script: &str) -> String {
     let dir = TempDir::new().expect("temp dir");
     fs::write(dir.path().join("package.json"), r#"{ "type": "module" }"#).expect("package file");
     let runtime_name = format!("nx-runtime.{}", target.extension());
@@ -182,7 +170,7 @@ fn execute_script_against_emitted_runtime(target: CodegenTarget, script: &str) -
     )
     .expect("runtime");
     if target == CodegenTarget::TypeScript {
-        let mut tsc = tsc_command()?;
+        let mut tsc = tsc_command();
         let output = tsc
             .current_dir(dir.path())
             .args([
@@ -203,7 +191,7 @@ fn execute_script_against_emitted_runtime(target: CodegenTarget, script: &str) -
         );
     }
     fs::write(dir.path().join("script.mjs"), script).expect("script");
-    let output = Command::new("node")
+    let output = node_command()
         .current_dir(dir.path())
         .arg("script.mjs")
         .output()
@@ -213,26 +201,61 @@ fn execute_script_against_emitted_runtime(target: CodegenTarget, script: &str) -
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
-/// Whether `node` can run the generated JavaScript; says so when it cannot, so a run that
-/// executed nothing does not pass silently.
-fn node_is_available() -> bool {
-    let available = Command::new("node").arg("--version").output().is_ok();
-    if !available {
-        eprintln!(
-            "skipping: `node` is not available, so the generated JavaScript was not executed"
+/// The oldest Node these tests run on, from `engines.node` in the root `package.json`.
+const MINIMUM_NODE_VERSION: (u32, u32) = (22, 18);
+
+/// What every `node` probe failure tells the developer to do. The floor is formatted from
+/// `MINIMUM_NODE_VERSION`, so raising that constant updates the advice with it. CI installs the
+/// Node pinned in `.github/actions/setup-rust-node/action.yaml`.
+fn node_requirement() -> String {
+    format!(
+        "these tests need Node >= {}.{} on `PATH`, as CI uses Node 24",
+        MINIMUM_NODE_VERSION.0, MINIMUM_NODE_VERSION.1
+    )
+}
+
+/// A `node` command for running the generated JavaScript. Node is a hard requirement of these
+/// tests, so a missing or too old one fails the run instead of skipping it. The probe runs once
+/// per test binary.
+fn node_command() -> Command {
+    static PROBE: OnceLock<()> = OnceLock::new();
+    PROBE.get_or_init(|| {
+        let probe = Command::new("node").arg("--version").output();
+        let reported = match probe {
+            Ok(output) if output.status.success() => {
+                String::from_utf8_lossy(&output.stdout).trim().to_string()
+            }
+            _ => panic!("`node` is not available: {}", node_requirement()),
+        };
+        let version = parse_node_version(&reported).unwrap_or_else(|| {
+            panic!(
+                "`node --version` printed {reported:?}: {}",
+                node_requirement()
+            )
+        });
+        assert!(
+            version >= MINIMUM_NODE_VERSION,
+            "`node` is {reported}: {}",
+            node_requirement()
         );
-    }
-    available
+    });
+    Command::new("node")
+}
+
+/// The major and minor of a `node --version` line such as `v24.1.0`.
+fn parse_node_version(reported: &str) -> Option<(u32, u32)> {
+    let mut parts = reported.trim_start_matches('v').split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    Some((major, minor))
 }
 
 fn assert_generated_typescript_artifact_type_checks(artifact: &ProgramArtifact) {
     let output = emit_program(artifact, &CodegenOptions::typescript()).expect("ts output");
-    let Some(mut tsc) = tsc_command() else {
-        return;
-    };
+    let mut tsc = tsc_command();
 
     let dir = TempDir::new().expect("temp dir");
     fs::write(dir.path().join("package.json"), r#"{ "type": "module" }"#).expect("package file");
@@ -1274,10 +1297,8 @@ fn emits_javascript_without_typescript_only_syntax() {
 }
 
 #[test]
-fn javascript_output_executes_as_esm_when_node_is_available() {
-    let Some(output) = execute_generated_javascript_root("let root() = { 1 + 2 }") else {
-        return;
-    };
+fn javascript_output_executes_as_esm() {
+    let output = execute_generated_javascript_root("let root() = { 1 + 2 }");
     assert_eq!(output, "3");
 }
 
@@ -1318,9 +1339,7 @@ let root() = { Theme.dark }
     ];
 
     for source in cases {
-        let Some(output) = execute_generated_javascript_root(source) else {
-            return;
-        };
+        let output = execute_generated_javascript_root(source);
         assert_json_values_eq(&output, &interpreter_json_root(source));
     }
 }
@@ -1351,9 +1370,7 @@ let root() = { <User name="Bob" /> }
     ];
 
     for source in cases {
-        let Some(output) = execute_generated_javascript_root(source) else {
-            return;
-        };
+        let output = execute_generated_javascript_root(source);
         assert_json_values_eq(&output, &interpreter_json_root(source));
     }
 }
@@ -1375,9 +1392,7 @@ let root(answer: int): int = { answer }"#,
     let module = generated_file(&artifact, CodegenTarget::JavaScript, "m0_main.js");
     assert!(!module.contains("m1_answer"));
 
-    let Some(output) = execute_generated_javascript_artifact_root(&artifact, "7") else {
-        return;
-    };
+    let output = execute_generated_javascript_artifact_root(&artifact, "7");
     assert_eq!(output, "7");
 }
 
@@ -1416,7 +1431,7 @@ let root(items: int[]): int[] = { for item in items { item + answer } }"#,
 }
 
 #[test]
-fn generated_typescript_type_checks_when_tsc_is_available() {
+fn generated_typescript_type_checks() {
     let artifact = artifact_from_workspace(
         &[
             (
@@ -1429,43 +1444,11 @@ let root(): User = { <User name="Ada" age={answer} /> }"#,
         ],
         "app/main.nx",
     );
-    let output = emit_program(&artifact, &CodegenOptions::typescript()).expect("ts output");
-    let Some(mut tsc) = tsc_command() else {
-        return;
-    };
-
-    let dir = TempDir::new().expect("temp dir");
-    fs::write(dir.path().join("package.json"), r#"{ "type": "module" }"#).expect("package file");
-    for file in output.files {
-        fs::write(dir.path().join(file.relative_path), file.content).expect("generated file");
-    }
-
-    let output = tsc
-        .current_dir(dir.path())
-        .args([
-            "--noEmit",
-            "--module",
-            "NodeNext",
-            "--moduleResolution",
-            "NodeNext",
-            "--target",
-            "ES2020",
-            "--strict",
-            "index.ts",
-        ])
-        .output()
-        .expect("tsc execution");
-
-    assert!(
-        output.status.success(),
-        "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_generated_typescript_artifact_type_checks(&artifact);
 }
 
 #[test]
-fn generated_component_typescript_type_checks_when_tsc_is_available() {
+fn generated_component_typescript_type_checks() {
     let artifact = artifact_from_source(
         r#"
 type Mode = exact | fuzzy
@@ -1481,39 +1464,7 @@ component <SearchBox mode:Mode user:User load:LoadState child:Question /> = {
 let root() = { 1 }
 "#,
     );
-    let output = emit_program(&artifact, &CodegenOptions::typescript()).expect("ts output");
-    let Some(mut tsc) = tsc_command() else {
-        return;
-    };
-
-    let dir = TempDir::new().expect("temp dir");
-    fs::write(dir.path().join("package.json"), r#"{ "type": "module" }"#).expect("package file");
-    for file in output.files {
-        fs::write(dir.path().join(file.relative_path), file.content).expect("generated file");
-    }
-
-    let output = tsc
-        .current_dir(dir.path())
-        .args([
-            "--noEmit",
-            "--module",
-            "NodeNext",
-            "--moduleResolution",
-            "NodeNext",
-            "--target",
-            "ES2020",
-            "--strict",
-            "index.ts",
-        ])
-        .output()
-        .expect("tsc execution");
-
-    assert!(
-        output.status.success(),
-        "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_generated_typescript_artifact_type_checks(&artifact);
 }
 
 #[test]
@@ -1911,12 +1862,10 @@ export component <SharedBox user:User theme:Theme load:LoadState /> = {
     assert!(!module.source_text.contains("from \"./m"));
     assert!(!module.source_text.contains("from \"../"));
 
-    let Some(output) = execute_generated_js_program_module_script(
+    let output = execute_generated_js_program_module_script(
         &artifact,
         "console.log(JSON.stringify(m.root()));",
-    ) else {
-        return;
-    };
+    );
     assert_json_values_eq(&output, &interpreter_json_artifact_root(&artifact));
 }
 
@@ -1951,12 +1900,10 @@ let root(): int = { One.value + Two.value }"#,
     assert!(module.source_text.contains("return (value + value_2);"));
     assert!(!module.source_text.contains(" as m"));
 
-    let Some(output) = execute_generated_js_program_module_script(
+    let output = execute_generated_js_program_module_script(
         &artifact,
         "console.log(JSON.stringify(m.root()));",
-    ) else {
-        return;
-    };
+    );
     assert_eq!(output, "3");
 }
 
@@ -1997,15 +1944,13 @@ let root() = { 1 }
         Some("renderSearchBox")
     );
 
-    let Some(output) = execute_generated_js_program_module_script(
+    let output = execute_generated_js_program_module_script(
         &artifact,
         r#"console.log(JSON.stringify({
   init: m.SearchBoxSchema.initializeJson({}),
   evaluated: m.SearchBoxSchema.evaluateJson({}, { query: "docs" })
 }));"#,
-    ) else {
-        return;
-    };
+    );
     assert_json_values_eq(
         &output,
         r#"{
@@ -2056,14 +2001,12 @@ let root() = { 1 }"#,
     );
     assert!(!module.source_text.contains("from \"./m"));
 
-    let Some(output) = execute_generated_js_program_module_script(
+    let output = execute_generated_js_program_module_script(
         &artifact,
         r#"console.log(JSON.stringify(
   m.HostSchema.evaluateJson({ child: { $type: "TextInput", value: "docs" } })
 ));"#,
-    ) else {
-        return;
-    };
+    );
     assert_json_values_eq(&output, r#"{ "$type": "TextInput", "value": "docs" }"#);
 }
 
@@ -2283,9 +2226,7 @@ fn generated_javascript_component_descriptors_match_interpreter() {
 external component <Question label:string />
 let root() = { <Question label="Name" /> }
 "#;
-    let Some(output) = execute_generated_javascript_root(source) else {
-        return;
-    };
+    let output = execute_generated_javascript_root(source);
 
     assert_json_values_eq(&output, &interpreter_json_root(source));
 }
@@ -2307,9 +2248,7 @@ let root() = { <ShortTextQuestion /> }"#,
         ],
         "app/main.nx",
     );
-    let Some(output) = execute_generated_javascript_artifact_root(&artifact, "") else {
-        return;
-    };
+    let output = execute_generated_javascript_artifact_root(&artifact, "");
 
     assert_json_values_eq(
         &output,
@@ -2323,9 +2262,7 @@ fn generated_component_descriptors_preserve_content() {
 external component <Panel content body:Element />
 let root() = { <Panel><span /></Panel> }
 "#;
-    let Some(output) = execute_generated_javascript_root(source) else {
-        return;
-    };
+    let output = execute_generated_javascript_root(source);
 
     assert_json_values_eq(
         &output,
@@ -2347,12 +2284,10 @@ let root() = { 1 }
 "#,
     );
     let ts_module = generated_file(&artifact, CodegenTarget::TypeScript, "m0_main.ts");
-    let Some(output) = execute_generated_javascript_artifact_script(
+    let output = execute_generated_javascript_artifact_script(
         &artifact,
         "console.log(JSON.stringify(m.QuestionFlowSchema.evaluateJson({})));",
-    ) else {
-        return;
-    };
+    );
 
     assert!(ts_module.contains("export type TextInputElement"));
     assert!(ts_module.contains("export type QuestionFlowElement"));
@@ -2386,7 +2321,7 @@ component <Profile user:User /> = { user }
 let root() = { 1 }
 "#,
     );
-    let Some(output) = execute_generated_javascript_artifact_script(
+    let output = execute_generated_javascript_artifact_script(
         &artifact,
         r#"console.log(JSON.stringify({
 	  externalDefault: m.TextInputSchema.fromJson({}),
@@ -2396,9 +2331,7 @@ let root() = { 1 }
   missingElementField: m.ElementHostSchema.tryEvaluateJson({ child: { $type: "TextInput" } }),
   missingState: m.SearchBoxSchema.tryEvaluateJson({}, {})
 }));"#,
-    ) else {
-        return;
-    };
+    );
     let output: Value = serde_json::from_str(&output).expect("schema boundary output");
 
     assert_eq!(
@@ -2445,15 +2378,13 @@ let root() = { 1 }
     );
     let ts_module = generated_file(&artifact, CodegenTarget::TypeScript, "m0_main.ts");
     let js_module = generated_file(&artifact, CodegenTarget::JavaScript, "m0_main.js");
-    let Some(output) = execute_generated_javascript_artifact_script(
+    let output = execute_generated_javascript_artifact_script(
         &artifact,
         r#"console.log(JSON.stringify({
   record: m.BoxSchema.evaluateJson({ p: { $type: "Pair", a: 7 } }),
   union: m.ChoiceBoxSchema.evaluateJson({ choice: { $type: "PairChoice.same", a: 3 } })
 }));"#,
-    ) else {
-        return;
-    };
+    );
 
     assert!(!ts_module.contains("defaultValue: a"));
     assert!(!js_module.contains("defaultValue: a"));
@@ -2569,9 +2500,7 @@ fn generated_normal_component_descriptor_matches_interpreter() {
 component <Child label:string /> = { "rendered child" }
 let root() = { <Child label="Name" /> }
 "#;
-    let Some(output) = execute_generated_javascript_root(source) else {
-        return;
-    };
+    let output = execute_generated_javascript_root(source);
 
     assert_json_values_eq(&output, &interpreter_json_root(source));
 }
@@ -2585,12 +2514,10 @@ component <Parent /> = { <Child label="Name" /> }
 let root() = { 1 }
 "#,
     );
-    let Some(output) = execute_generated_javascript_artifact_script(
+    let output = execute_generated_javascript_artifact_script(
         &artifact,
         "console.log(JSON.stringify(m.ParentSchema.evaluateJson({})));",
-    ) else {
-        return;
-    };
+    );
 
     assert_json_values_eq(&output, r#"{ "$type": "Child", "label": "Name" }"#);
 }
@@ -2607,15 +2534,13 @@ component <SearchBox placeholder:string = "Find docs" /> = {
 let root() = { 1 }
 "#,
     );
-    let Some(output) = execute_generated_javascript_artifact_script(
+    let output = execute_generated_javascript_artifact_script(
         &artifact,
         r#"console.log(JSON.stringify({
   init: m.SearchBoxSchema.initializeJson({}),
   evaluated: m.SearchBoxSchema.evaluateJson({}, { query: "docs" })
 }));"#,
-    ) else {
-        return;
-    };
+    );
 
     assert_json_values_eq(
         &output,
@@ -2646,7 +2571,7 @@ component <SearchBox tags:string[] mode:Mode = { Mode.exact } /> = {
 let root() = { 1 }
 "#,
     );
-    let Some(output) = execute_generated_javascript_artifact_script(
+    let output = execute_generated_javascript_artifact_script(
         &artifact,
         r#"console.log(JSON.stringify({
   omitted: m.SearchBoxSchema.evaluateJson({ tags: ["nx"] }),
@@ -2655,9 +2580,7 @@ let root() = { 1 }
     { query: "docs", tags: ["ui"], mode: "fuzzy" }
   )
 }));"#,
-    ) else {
-        return;
-    };
+    );
 
     assert_json_values_eq(
         &output,
@@ -2681,15 +2604,13 @@ component <SearchBox mode:Mode = { Mode.exact } /> = {
 let root() = { 1 }
 "#,
     );
-    let Some(output) = execute_generated_javascript_artifact_script(
+    let output = execute_generated_javascript_artifact_script(
         &artifact,
         r#"console.log(JSON.stringify({
   prop: m.SearchBoxSchema.tryEvaluateJson({ mode: "bogus" }),
   state: m.SearchBoxSchema.tryEvaluateJson({ mode: "exact" }, { mode: "bogus" })
 }));"#,
-    ) else {
-        return;
-    };
+    );
     let output: Value = serde_json::from_str(&output).expect("tryEvaluate output");
 
     assert_eq!(output["prop"]["ok"], false);
@@ -2716,7 +2637,7 @@ component <Host user:User load:LoadState child:Question /> = { "ok" }
 let root() = { 1 }
 "#,
     );
-    let Some(output) = execute_generated_javascript_artifact_script(
+    let output = execute_generated_javascript_artifact_script(
         &artifact,
         r#"const valid = {
   user: { $type: "User", name: "Ada" },
@@ -2728,9 +2649,7 @@ console.log(JSON.stringify({
   union: m.HostSchema.tryEvaluateJson({ ...valid, load: { $type: "LoadState.missing", label: "Ready" } }),
   component: m.HostSchema.tryEvaluateJson({ ...valid, child: { $type: "Question", label: "Name", extra: "nope" } })
 }));"#,
-    ) else {
-        return;
-    };
+    );
     let output: Value = serde_json::from_str(&output).expect("tryEvaluate output");
 
     assert_eq!(output["record"]["ok"], false);
@@ -2760,9 +2679,7 @@ external component <Question label:string />
 let MakeQuestion(label:string) = { <Question label={label} /> }
 let root() = { <MakeQuestion label="Name" /> }
 "#;
-    let Some(output) = execute_generated_javascript_root(source) else {
-        return;
-    };
+    let output = execute_generated_javascript_root(source);
 
     assert_json_values_eq(&output, r#"{ "$type": "Question", "label": "Name" }"#);
 }
@@ -3001,28 +2918,24 @@ let user() = <User name="Ada" />
 
 #[test]
 fn generated_javascript_keeps_absent_update_fields_absent() {
-    let Some(output) = execute_generated_javascript_root(
+    let output = execute_generated_javascript_root(
         r#"
 type User = { name:string = "anon" email:string? }
 let root() = <User.Update email={null} />
 "#,
-    ) else {
-        return;
-    };
+    );
 
     assert_json_values_eq(&output, r#"{ "$type": "User.Update", "email": null }"#);
 }
 
 #[test]
 fn generated_javascript_constructs_a_component_update_record_from_its_state() {
-    let Some(output) = execute_generated_javascript_root(
+    let output = execute_generated_javascript_root(
         r#"
 component <Counter /> = { state { count:int = 0 label:string = "x" } <Label /> }
 let root() = <Counter.Update count=1 />
 "#,
-    ) else {
-        return;
-    };
+    );
 
     assert_json_values_eq(&output, r#"{ "$type": "Counter.Update", "count": 1 }"#);
 }
@@ -3178,9 +3091,7 @@ fn generated_javascript_serializes_a_property_case_as_its_field_name() {
 type User = { name:string email:string? }
 let root() = <Box key={User.Property.email} />
 "#;
-    let Some(output) = execute_generated_javascript_root(source) else {
-        return;
-    };
+    let output = execute_generated_javascript_root(source);
     assert!(output.contains(r#""key":"email""#), "{}", output);
     assert_json_values_eq(&output, &interpreter_json_root(source));
 }
@@ -3200,9 +3111,7 @@ let root() = {apply(<User name="Ada" email="x@y" />, <User.Update email={null} /
         module
     );
 
-    let Some(output) = execute_generated_javascript_artifact_root(&artifact, "") else {
-        return;
-    };
+    let output = execute_generated_javascript_artifact_root(&artifact, "");
     assert_json_values_eq(
         &output,
         r#"{ "$type": "User", "name": "Ada", "email": null }"#,
@@ -3216,9 +3125,7 @@ fn generated_javascript_lists_changed_fields_in_declaration_order() {
 type User = { name:string email:string? age:int? }
 let root() = {changed(<User.Update age={null} name="Ada" />)}
 "#;
-    let Some(output) = execute_generated_javascript_root(source) else {
-        return;
-    };
+    let output = execute_generated_javascript_root(source);
     assert_json_values_eq(&output, r#"["name", "age"]"#);
     assert_json_values_eq(&output, &interpreter_json_root(source));
 }
@@ -3241,9 +3148,7 @@ let root() = {changed(diff(<User name="Ada" email="x@y" />, <User name="Bo" emai
 "#,
     ];
     for source in cases {
-        let Some(output) = execute_generated_javascript_root(source) else {
-            continue;
-        };
+        let output = execute_generated_javascript_root(source);
         assert_json_values_eq(&output, &interpreter_json_root(source));
     }
 }
@@ -3263,9 +3168,7 @@ let root() = <Box keys={changed(<User.Update age={null} name="Ada" />)} />
         module
     );
 
-    let Some(output) = execute_generated_javascript_artifact_root(&artifact, "") else {
-        return;
-    };
+    let output = execute_generated_javascript_artifact_root(&artifact, "");
     assert_json_values_eq(&output, r#"{ "$type": "Box", "keys": ["name", "age"] }"#);
     assert_json_values_eq(&output, &interpreter_json_artifact_root(&artifact));
 }
@@ -3305,9 +3208,7 @@ let root() = <Box first={User.Property.name} keys={changed(<User.Update age={nul
         module
     );
 
-    let Some(output) = execute_generated_javascript_artifact_root(&artifact, "") else {
-        return;
-    };
+    let output = execute_generated_javascript_artifact_root(&artifact, "");
     assert_json_values_eq(
         &output,
         r#"{ "$type": "Box", "first": "name", "keys": ["name", "age"] }"#,
@@ -3353,15 +3254,11 @@ console.log(JSON.stringify(out));
 
     let mut outputs = Vec::new();
     for target in [CodegenTarget::JavaScript, CodegenTarget::TypeScript] {
-        let Some(output) = execute_script_against_emitted_runtime(target, script) else {
-            continue;
-        };
+        let output = execute_script_against_emitted_runtime(target, script);
         assert_json_values_eq(&output, expected);
         outputs.push(output);
     }
-    if outputs.len() == 2 {
-        assert_json_values_eq(&outputs[0], &outputs[1]);
-    }
+    assert_json_values_eq(&outputs[0], &outputs[1]);
 }
 
 #[test]
