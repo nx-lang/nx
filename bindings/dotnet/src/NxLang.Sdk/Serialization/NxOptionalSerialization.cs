@@ -33,7 +33,8 @@ public sealed class NxOptionalJsonConverterFactory : JsonConverterFactory
 }
 
 /// <summary>
-/// Reads and writes the value of a set <see cref="NxOptional{T}"/>; a present <c>null</c> reads as set to null.
+/// Reads and writes the value of a set <see cref="NxOptional{T}"/>; a present <see langword="null"/> reads as set
+/// to null.
 /// </summary>
 /// <remarks>
 /// A converter cannot remove its property from the containing object, so an unset value is omitted by marking the
