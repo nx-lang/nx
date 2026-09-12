@@ -1112,7 +1112,7 @@ public static class NxRuntime
     /// <summary>
     /// Dispatches no actions against a prior component state snapshot and returns the JSON result.
     /// </summary>
-    public static NxComponentDispatchResult<JsonElement> DispatchComponentActionsJson(
+    public static NxComponentDispatchResult<JsonElement, JsonElement> DispatchComponentActionsJson(
         string source,
         byte[] stateSnapshot,
         string? fileName = null)
@@ -1127,7 +1127,7 @@ public static class NxRuntime
     /// Dispatches no actions against a prior component state snapshot using a caller-supplied build context and
     /// returns the JSON result.
     /// </summary>
-    public static NxComponentDispatchResult<JsonElement> DispatchComponentActionsJson(
+    public static NxComponentDispatchResult<JsonElement, JsonElement> DispatchComponentActionsJson(
         string source,
         byte[] stateSnapshot,
         NxProgramBuildContext buildContext,
@@ -1149,7 +1149,7 @@ public static class NxRuntime
     /// Dispatches no actions against a prior component state snapshot for a previously built program artifact and
     /// returns the JSON result.
     /// </summary>
-    public static NxComponentDispatchResult<JsonElement> DispatchComponentActionsJson(
+    public static NxComponentDispatchResult<JsonElement, JsonElement> DispatchComponentActionsJson(
         NxProgramArtifact programArtifact,
         byte[] stateSnapshot)
     {
@@ -1163,7 +1163,7 @@ public static class NxRuntime
     /// Dispatches MessagePack-serializable actions against a prior component state snapshot and returns the JSON
     /// result.
     /// </summary>
-    public static NxComponentDispatchResult<JsonElement> DispatchComponentActionsJson<TActions>(
+    public static NxComponentDispatchResult<JsonElement, JsonElement> DispatchComponentActionsJson<TActions>(
         string source,
         byte[] stateSnapshot,
         TActions actions,
@@ -1184,7 +1184,7 @@ public static class NxRuntime
     /// Dispatches MessagePack-serializable actions against source text using a caller-supplied build context and
     /// returns the JSON result.
     /// </summary>
-    public static NxComponentDispatchResult<JsonElement> DispatchComponentActionsJson<TActions>(
+    public static NxComponentDispatchResult<JsonElement, JsonElement> DispatchComponentActionsJson<TActions>(
         string source,
         byte[] stateSnapshot,
         NxProgramBuildContext buildContext,
@@ -1207,7 +1207,7 @@ public static class NxRuntime
     /// Dispatches MessagePack-serializable actions against a prior component state snapshot for a previously built
     /// program artifact and returns the JSON result.
     /// </summary>
-    public static NxComponentDispatchResult<JsonElement> DispatchComponentActionsJson<TActions>(
+    public static NxComponentDispatchResult<JsonElement, JsonElement> DispatchComponentActionsJson<TActions>(
         NxProgramArtifact programArtifact,
         byte[] stateSnapshot,
         TActions actions)
@@ -1225,13 +1225,13 @@ public static class NxRuntime
     /// <summary>
     /// Dispatches no actions against a prior component state snapshot and deserializes the result.
     /// </summary>
-    public static NxComponentDispatchResult<TEffect> DispatchComponentActions<TEffect>(
+    public static NxComponentDispatchResult<TRendered, TEffect> DispatchComponentActions<TRendered, TEffect>(
         string source,
         byte[] stateSnapshot,
         string? fileName = null)
     {
         byte[] payload = DispatchComponentActionsBytes(source, stateSnapshot, null, fileName);
-        return DeserializeMessagePackResult<NxComponentDispatchResult<TEffect>>(
+        return DeserializeMessagePackResult<NxComponentDispatchResult<TRendered, TEffect>>(
             payload,
             "NX native runtime returned an invalid component dispatch MessagePack payload.");
     }
@@ -1239,14 +1239,14 @@ public static class NxRuntime
     /// <summary>
     /// Dispatches no actions against a prior component state snapshot using a caller-supplied build context.
     /// </summary>
-    public static NxComponentDispatchResult<TEffect> DispatchComponentActions<TEffect>(
+    public static NxComponentDispatchResult<TRendered, TEffect> DispatchComponentActions<TRendered, TEffect>(
         string source,
         byte[] stateSnapshot,
         NxProgramBuildContext buildContext,
         string? fileName = null)
     {
         byte[] payload = DispatchComponentActionsBytes(source, stateSnapshot, buildContext, null, fileName);
-        return DeserializeMessagePackResult<NxComponentDispatchResult<TEffect>>(
+        return DeserializeMessagePackResult<NxComponentDispatchResult<TRendered, TEffect>>(
             payload,
             "NX native runtime returned an invalid component dispatch MessagePack payload.");
     }
@@ -1254,12 +1254,12 @@ public static class NxRuntime
     /// <summary>
     /// Dispatches no actions against a prior component state snapshot for a previously built program artifact.
     /// </summary>
-    public static NxComponentDispatchResult<TEffect> DispatchComponentActions<TEffect>(
+    public static NxComponentDispatchResult<TRendered, TEffect> DispatchComponentActions<TRendered, TEffect>(
         NxProgramArtifact programArtifact,
         byte[] stateSnapshot)
     {
         byte[] payload = DispatchComponentActionsBytes(programArtifact, stateSnapshot, null);
-        return DeserializeMessagePackResult<NxComponentDispatchResult<TEffect>>(
+        return DeserializeMessagePackResult<NxComponentDispatchResult<TRendered, TEffect>>(
             payload,
             "NX native runtime returned an invalid component dispatch MessagePack payload.");
     }
@@ -1268,7 +1268,7 @@ public static class NxRuntime
     /// Dispatches MessagePack-serializable actions against a prior component state snapshot and deserializes the
     /// result.
     /// </summary>
-    public static NxComponentDispatchResult<TEffect> DispatchComponentActions<TActions, TEffect>(
+    public static NxComponentDispatchResult<TRendered, TEffect> DispatchComponentActions<TActions, TRendered, TEffect>(
         string source,
         byte[] stateSnapshot,
         TActions actions,
@@ -1276,7 +1276,7 @@ public static class NxRuntime
     {
         byte[] actionsBytes = SerializeMessagePackInput(actions);
         byte[] payload = DispatchComponentActionsBytes(source, stateSnapshot, actionsBytes, fileName);
-        return DeserializeMessagePackResult<NxComponentDispatchResult<TEffect>>(
+        return DeserializeMessagePackResult<NxComponentDispatchResult<TRendered, TEffect>>(
             payload,
             "NX native runtime returned an invalid component dispatch MessagePack payload.");
     }
@@ -1284,7 +1284,7 @@ public static class NxRuntime
     /// <summary>
     /// Dispatches MessagePack-serializable actions against source text using a caller-supplied build context.
     /// </summary>
-    public static NxComponentDispatchResult<TEffect> DispatchComponentActions<TActions, TEffect>(
+    public static NxComponentDispatchResult<TRendered, TEffect> DispatchComponentActions<TActions, TRendered, TEffect>(
         string source,
         byte[] stateSnapshot,
         NxProgramBuildContext buildContext,
@@ -1293,7 +1293,7 @@ public static class NxRuntime
     {
         byte[] actionsBytes = SerializeMessagePackInput(actions);
         byte[] payload = DispatchComponentActionsBytes(source, stateSnapshot, buildContext, actionsBytes, fileName);
-        return DeserializeMessagePackResult<NxComponentDispatchResult<TEffect>>(
+        return DeserializeMessagePackResult<NxComponentDispatchResult<TRendered, TEffect>>(
             payload,
             "NX native runtime returned an invalid component dispatch MessagePack payload.");
     }
@@ -1301,14 +1301,14 @@ public static class NxRuntime
     /// <summary>
     /// Dispatches MessagePack-serializable actions against a prior component state snapshot for a program artifact.
     /// </summary>
-    public static NxComponentDispatchResult<TEffect> DispatchComponentActions<TActions, TEffect>(
+    public static NxComponentDispatchResult<TRendered, TEffect> DispatchComponentActions<TActions, TRendered, TEffect>(
         NxProgramArtifact programArtifact,
         byte[] stateSnapshot,
         TActions actions)
     {
         byte[] actionsBytes = SerializeMessagePackInput(actions);
         byte[] payload = DispatchComponentActionsBytes(programArtifact, stateSnapshot, actionsBytes);
-        return DeserializeMessagePackResult<NxComponentDispatchResult<TEffect>>(
+        return DeserializeMessagePackResult<NxComponentDispatchResult<TRendered, TEffect>>(
             payload,
             "NX native runtime returned an invalid component dispatch MessagePack payload.");
     }
@@ -1603,7 +1603,7 @@ public static class NxRuntime
         }
     }
 
-    private static NxComponentDispatchResult<JsonElement> DeserializeJsonComponentDispatchResult(
+    private static NxComponentDispatchResult<JsonElement, JsonElement> DeserializeJsonComponentDispatchResult(
         byte[] payload,
         string message)
     {
@@ -1611,6 +1611,11 @@ public static class NxRuntime
         {
             using JsonDocument document = JsonDocument.Parse(payload);
             JsonElement root = document.RootElement;
+            if (!root.TryGetProperty("rendered", out JsonElement rendered))
+            {
+                throw new JsonException("Expected rendered property.");
+            }
+
             if (!root.TryGetProperty("effects", out JsonElement effectsElement) ||
                 effectsElement.ValueKind is not JsonValueKind.Array)
             {
@@ -1637,8 +1642,9 @@ public static class NxRuntime
                 effects[index++] = effect.Clone();
             }
 
-            return new NxComponentDispatchResult<JsonElement>
+            return new NxComponentDispatchResult<JsonElement, JsonElement>
             {
+                Rendered = rendered.Clone(),
                 Effects = effects,
                 StateSnapshot = Convert.FromBase64String(stateSnapshotBase64),
             };

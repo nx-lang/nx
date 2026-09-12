@@ -9,7 +9,15 @@ export class NxIrRuntimeError extends Error {
         this.diagnostics = diagnostics;
     }
 }
-const knownFeatures = new Set(["eager-v1"]);
+export const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1 = "update-records-v1";
+export const NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1 = "property-unions-v1";
+export const NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1 = "update-intrinsics-v1";
+const knownFeatures = new Set([
+    "eager-v1",
+    NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
+    NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
+    NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
+]);
 const knownExpressionTags = new Set([
     "literal",
     "slot",
@@ -17,6 +25,7 @@ const knownExpressionTags = new Set([
     "binary",
     "unary",
     "call",
+    "intrinsicCall",
     "if",
     "ifIs",
     "let",
@@ -235,9 +244,22 @@ export function normalizeComponentState(program, name, state) {
     const component = prepared.declaration.kind;
     return normalizeFields(program, component.state, state, new Map(), `${name} state`, true);
 }
+/**
+ * Applies a patch to host-owned component state and returns the validated next state.
+ *
+ * The patch is either a plain partial state object or the component's own update record,
+ * `{ $type: "<Component>.Update", ... }`. Either way a present field replaces the current value, an
+ * absent one keeps it, and a present `null` sets a nullable field to `null`.
+ */
 export function applyComponentStatePatch(program, name, currentState, patch) {
     const prepared = componentDeclaration(program, name);
     const component = prepared.declaration.kind;
+    const { $type: discriminator, ...fields } = patch;
+    const expectedUpdate = `${prepared.declaration.reference.name}.Update`;
+    if (discriminator !== undefined && discriminator !== expectedUpdate) {
+        fail("nx-ir-state-patch", `Cannot apply '${String(discriminator)}' to ${name} state; only '${expectedUpdate}' patches it.`);
+    }
+    patch = fields;
     const known = new Set(component.state.map((field) => field.name));
     for (const key of Object.keys(patch)) {
         if (!known.has(key)) {
@@ -280,6 +302,8 @@ function evalExpression(expression, context) {
             return evalUnary(String(op.operator), evalExpression(op.expr, context));
         case "call":
             return evalCall(expression, context);
+        case "intrinsicCall":
+            return evalIntrinsicCall(op, context);
         case "if":
             return truthy(evalExpression(op.condition, context))
                 ? evalExpression(op.thenBranch, context)
@@ -409,7 +433,9 @@ function evalRecord(op, context) {
     const content = (op.content ?? []).map((item) => evalExpression(item, context));
     const fields = op.fields ?? [];
     applyContentBinding(properties, op.contentField, fields, content, String(op.name));
-    const normalized = normalizeFields(context.program, fields, properties, new Map(context.env), String(op.name), false);
+    const normalized = op.isUpdate === true
+        ? normalizePatchFields(context.program, fields, properties, String(op.name))
+        : normalizeFields(context.program, fields, properties, new Map(context.env), String(op.name), false);
     return { $type: String(op.name), ...normalized };
 }
 function evalUnionCase(op, context) {
@@ -425,6 +451,143 @@ function evalUnionCase(op, context) {
         return caseName;
     }
     return { $type: `${union.name}.${caseName}`, ...normalized };
+}
+function evalIntrinsicCall(op, context) {
+    const args = (op.args ?? []).map((arg) => evalExpression(arg, context));
+    const intrinsic = String(op.intrinsic);
+    const expectArity = (arity) => {
+        if (args.length !== arity) {
+            fail("nx-ir-intrinsic", `Intrinsic '${intrinsic}' expects ${arity} arguments, got ${args.length}.`);
+        }
+    };
+    switch (intrinsic) {
+        case "apply":
+            expectArity(2);
+            return applyRecordUpdate(intrinsicRecord(args[0], intrinsic), intrinsicRecord(args[1], intrinsic));
+        case "merge":
+            expectArity(2);
+            return mergeUpdateRecords(intrinsicRecord(args[0], intrinsic), intrinsicRecord(args[1], intrinsic));
+        case "diff":
+            expectArity(2);
+            return diffRecordValues(intrinsicRecord(args[0], intrinsic), intrinsicRecord(args[1], intrinsic));
+        case "changed": {
+            expectArity(1);
+            const update = intrinsicRecord(args[0], intrinsic);
+            // The IR carries the target's declared field order with the call; a program that
+            // predates that falls back to the declaration it must then contain.
+            const order = Array.isArray(op.fieldOrder)
+                ? op.fieldOrder.map((name) => String(name))
+                : declaredFieldOrder(update, context.program);
+            return changedFieldsInOrder(update, order);
+        }
+        default:
+            return fail("nx-ir-intrinsic", `Unknown intrinsic '${intrinsic}'.`);
+    }
+}
+function intrinsicRecord(value, intrinsic) {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+        fail("nx-ir-intrinsic", `Intrinsic '${intrinsic}' expects a record value, got ${JSON.stringify(value)}.`);
+    }
+    const record = value;
+    if (typeof record.$type !== "string") {
+        fail("nx-ir-intrinsic", `Intrinsic '${intrinsic}' expects a record value, got ${JSON.stringify(value)}.`);
+    }
+    return record;
+}
+/**
+ * `apply(record, update)`: the record with each field present in the update replaced, a present
+ * `null` included; every absent field keeps its value. The update must be the record's own
+ * `<Type>.Update`.
+ */
+export function applyUpdate(record, update) {
+    return applyRecordUpdate(record, update);
+}
+/** `merge(first, second)`: every field present in either update, the second winning. */
+export function mergeUpdates(first, second) {
+    return mergeUpdateRecords(first, second);
+}
+/**
+ * `diff(before, after)`: the `<Type>.Update` carrying exactly the fields whose values differ, each
+ * with its value from `after`, comparing records and lists structurally.
+ */
+export function diffRecords(before, after) {
+    return diffRecordValues(before, after);
+}
+/**
+ * `changed(update)`: the names of the fields present in the update, in the order the update
+ * record's declaration in `program` lists them. Fails when the program does not declare the
+ * update record, since the order is then unknowable from the value.
+ */
+export function changedFields(update, program) {
+    return changedFieldsInOrder(update, declaredFieldOrder(update, program));
+}
+function declaredFieldOrder(update, program) {
+    const shapes = program.nominalShapesByDiscriminator.get(update.$type);
+    if (shapes === undefined || shapes.length !== 1) {
+        fail("nx-ir-intrinsic", `Cannot order the fields of '${update.$type}': the program does not declare it.`);
+    }
+    return shapes[0].fields.map((field) => field.name);
+}
+function changedFieldsInOrder(update, order) {
+    const keys = Object.keys(update).filter((key) => key !== "$type");
+    const position = (key) => {
+        const index = order.indexOf(key);
+        return index < 0 ? order.length : index;
+    };
+    return keys.sort((left, right) => position(left) - position(right));
+}
+function applyRecordUpdate(record, update) {
+    const expected = `${record.$type}.Update`;
+    if (update.$type !== expected) {
+        fail("nx-ir-intrinsic", `Cannot apply '${update.$type}' to a '${record.$type}': only '${expected}' patches it.`);
+    }
+    const { $type: _update, ...fields } = update;
+    return { ...record, ...fields };
+}
+function mergeUpdateRecords(first, second) {
+    if (first.$type !== second.$type) {
+        fail("nx-ir-intrinsic", `Cannot merge '${first.$type}' with '${second.$type}': the updates target different records.`);
+    }
+    const { $type: _second, ...later } = second;
+    return { ...first, ...later };
+}
+function diffRecordValues(before, after) {
+    if (before.$type !== after.$type) {
+        fail("nx-ir-intrinsic", `Cannot diff '${before.$type}' against '${after.$type}': the records have different types.`);
+    }
+    const output = { $type: `${before.$type}.Update` };
+    // A field either record leaves out reads as `null`, so a field only one of them carries still
+    // compares.
+    for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+        if (key === "$type") {
+            continue;
+        }
+        const next = after[key] ?? null;
+        if (!valuesEqual(before[key] ?? null, next)) {
+            output[key] = next;
+        }
+    }
+    return output;
+}
+function valuesEqual(left, right) {
+    if (Array.isArray(left) || Array.isArray(right)) {
+        return (Array.isArray(left) &&
+            Array.isArray(right) &&
+            left.length === right.length &&
+            left.every((item, index) => valuesEqual(item, right[index] ?? null)));
+    }
+    if (left !== null && typeof left === "object") {
+        if (right === null || typeof right !== "object") {
+            return false;
+        }
+        const leftRecord = left;
+        const rightRecord = right;
+        const leftKeys = Object.keys(leftRecord);
+        const rightKeys = Object.keys(rightRecord);
+        return (leftKeys.length === rightKeys.length &&
+            leftKeys.every((key) => valuesEqual(leftRecord[key] ?? null, rightRecord[key] ?? null)));
+    }
+    return left === right;
 }
 function evalIntrinsicElement(op, context) {
     const properties = propertiesObject(op.properties, context);
@@ -508,6 +671,33 @@ function normalizeFields(program, fields, input, env, path, requireExplicit) {
     }
     return output;
 }
+/**
+ * Normalizes the fields of an update record: only the fields supplied, each checked against its
+ * declared type.
+ *
+ * An absent field means "unchanged", so it stays absent — no default is evaluated and nothing is
+ * required. A present `null` is accepted only where the field is nullable.
+ */
+function normalizePatchFields(program, fields, input, path) {
+    const byName = new Map(fields.map((field) => [field.name, field]));
+    for (const key of Object.keys(input)) {
+        if (!byName.has(key)) {
+            fail("nx-ir-boundary-field", `Unknown ${path} field '${key}'.`);
+        }
+    }
+    const output = {};
+    for (const field of fields) {
+        if (!Object.prototype.hasOwnProperty.call(input, field.name)) {
+            continue;
+        }
+        const value = input[field.name];
+        if (value === null && field.ty.kind !== "nullable") {
+            fail("nx-ir-boundary-type", `Expected ${path}.${field.name} to be non-null; an update record sets a field to null only where the field is nullable.`);
+        }
+        output[field.name] = normalizeValue(program, field.ty, value, `${path}.${field.name}`);
+    }
+    return output;
+}
 function normalizeValue(program, ty, value, path) {
     switch (ty.kind) {
         case "primitive":
@@ -565,6 +755,15 @@ function normalizeNominalValue(program, reference, display, value, path) {
         fail("nx-ir-schema", `Missing nominal type declaration '${reference.declaration}'.`);
     }
     const kind = prepared.declaration.kind;
+    if (kind.tag === "record" && kind.updateTarget !== undefined) {
+        // An update record has no subtypes, so a discriminator must name it exactly.
+        const object = requireObject(value, path);
+        const { $type: discriminator, ...rest } = object;
+        if (discriminator !== undefined && discriminator !== display) {
+            fail("nx-ir-boundary-type", `Expected ${path} to be a ${display}, got '${String(discriminator)}'.`);
+        }
+        return { $type: display, ...normalizePatchFields(program, kind.fields, rest, path) };
+    }
     if (kind.tag === "record") {
         const object = requireObject(value, path);
         // The declared type supplies the field list, so a discriminator carried by the value selects
@@ -605,7 +804,7 @@ function normalizeNominalValue(program, reference, display, value, path) {
         if (typeof value === "string") {
             const constantCase = kind.cases.find((item) => item.name === value && item.isConstant);
             if (constantCase === undefined) {
-                fail("nx-ir-boundary-type", `Invalid constant union case for ${path}: '${value}'.`);
+                fail("nx-ir-boundary-type", `Invalid constant union case for ${path}: '${value}' is not a case of ${display}.`);
             }
             return value;
         }
@@ -794,6 +993,9 @@ function childExpressions(op) {
             break;
         case "call":
             add(op.callee);
+            addMany(op.args);
+            break;
+        case "intrinsicCall":
             addMany(op.args);
             break;
         case "if":

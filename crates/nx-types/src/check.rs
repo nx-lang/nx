@@ -35,6 +35,12 @@ pub struct ModuleArtifact {
     pub imports: Vec<Import>,
     /// Prepared semantic bindings used during analysis.
     pub prepared_bindings: Vec<PreparedBinding>,
+    /// The prepared module analysis ran against, with its imports resolved, if parsing succeeded.
+    ///
+    /// <para>A consumer that needs a declaration's effective shape across modules — a record's
+    /// inherited fields from a library base, say — resolves through this rather than through a
+    /// parallel resolver of its own.</para>
+    pub prepared_module: Option<Arc<PreparedModule>>,
 }
 
 impl ModuleArtifact {
@@ -130,6 +136,11 @@ pub fn analyze_prepared_module(
     mut prepared_module: PreparedModule,
     mut diagnostics: Vec<Diagnostic>,
 ) -> ModuleArtifact {
+    // A property union's inherited cases can only be filled in once the module can reach its
+    // target's base chain, which may cross into another module. Everything below reads the
+    // complete case list from the declaration.
+    nx_hir::complete_property_unions(&mut prepared_module);
+
     for error in nx_hir::validate_record_definitions(&prepared_module) {
         prepared_module.add_diagnostic(LoweringDiagnostic {
             message: error.message(),
@@ -258,6 +269,7 @@ pub fn analyze_prepared_module(
         diagnostics,
         imports,
         prepared_bindings,
+        prepared_module: Some(Arc::new(prepared_module)),
     }
 }
 
@@ -370,6 +382,7 @@ fn module_artifact(
         diagnostics,
         imports,
         prepared_bindings: Vec::new(),
+        prepared_module: None,
     }
 }
 

@@ -39,6 +39,16 @@ host input reaches it too — without it a plain object at an abstract-typed sit
 with a type name no NX program can produce. A union is never abstract, so union declarations carry
 no such flag.
 
+A derived update record `T.Update` is a record declaration with `updateTarget`, a reference to the
+record, action, or component `T` it patches. Its fields are `T`'s effective fields (a component's
+state fields), each with `isRequired: false` and no `default`, so a runtime normalizing one keeps an
+absent field absent and accepts `null` only where the field's type is nullable. Only update records
+the program references — by construction, type annotation, or field type — are emitted, and a program
+that emits one lists `update-records-v1` in `requiredFeatures`, so a runtime that predates update
+records refuses it rather than filling a patch's absent fields. A record construction `op` for an
+update record carries `isUpdate: true`; every other construction omits the key. A program that never
+uses a patch emits exactly what it did before update records existed.
+
 Expression records use tagged `op` payloads for literals, slots, top-level references, calls,
 unary/binary operations, `if`, match-style `if is`, `let`, blocks, arrays, `for`, index/member
 access, records, union cases, intrinsic elements, and component descriptors. A union case carries

@@ -19,6 +19,15 @@ pub const NX_IR_FORMAT_ID: &str = "nx-ir-json";
 pub const NX_IR_SCHEMA_VERSION: u32 = 2;
 pub const NX_IR_RUNTIME_ABI: &str = "nx-ir-runtime-v1";
 pub const NX_IR_REQUIRED_FEATURE_EAGER_V1: &str = "eager-v1";
+/// Required by a program that declares a derived update record, so a runtime that predates them
+/// refuses the program rather than normalizing a patch as a whole record.
+pub const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1: &str = "update-records-v1";
+/// Required by a program that declares a derived property union, so a runtime that predates them
+/// rejects the program rather than misreading the declaration.
+pub const NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1: &str = "property-unions-v1";
+/// Required by a program that calls an update intrinsic, so a runtime that predates them rejects
+/// the program rather than failing on an unknown expression.
+pub const NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1: &str = "update-intrinsics-v1";
 
 mod u64_decimal_string {
     use serde::{Deserialize, Deserializer, Serializer};
@@ -36,6 +45,179 @@ mod u64_decimal_string {
     {
         let value = String::deserialize(deserializer)?;
         value.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+/// The features a runtime must support to run `program`.
+///
+/// <para>Update-record support is required only by a program that declares one, so a program that
+/// never uses a patch lists exactly what it did before update records existed.</para>
+fn required_features(program: &CodegenProgram) -> Vec<String> {
+    let mut features = vec![NX_IR_REQUIRED_FEATURE_EAGER_V1.to_string()];
+    let declares_update_record = program.modules.iter().any(|module| {
+        module.declarations.iter().any(|declaration| {
+            matches!(
+                &declaration.kind,
+                CodegenDeclarationKind::Record {
+                    update_target: Some(_),
+                    ..
+                }
+            )
+        })
+    });
+    if declares_update_record {
+        features.push(NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1.to_string());
+    }
+    let declares_property_union = program.modules.iter().any(|module| {
+        module.declarations.iter().any(|declaration| {
+            matches!(
+                &declaration.kind,
+                CodegenDeclarationKind::Union {
+                    property_target: Some(_),
+                    ..
+                }
+            )
+        })
+    });
+    if declares_property_union {
+        features.push(NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1.to_string());
+    }
+    if program
+        .modules
+        .iter()
+        .any(|module| module.declarations.iter().any(declaration_calls_intrinsic))
+    {
+        features.push(NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1.to_string());
+    }
+    features
+}
+
+/// Returns true when any expression of the declaration calls an update intrinsic.
+fn declaration_calls_intrinsic(declaration: &CodegenDeclaration) -> bool {
+    match &declaration.kind {
+        CodegenDeclarationKind::Function { body, .. } => expression_calls_intrinsic(body),
+        CodegenDeclarationKind::Value { value, .. } => expression_calls_intrinsic(value),
+        CodegenDeclarationKind::Record { fields, .. } => fields
+            .iter()
+            .filter_map(|field| field.default.as_ref())
+            .any(expression_calls_intrinsic),
+        CodegenDeclarationKind::Union { cases, .. } => cases.iter().any(|case| {
+            case.fields
+                .iter()
+                .filter_map(|field| field.default.as_ref())
+                .any(expression_calls_intrinsic)
+        }),
+        CodegenDeclarationKind::Component(component) => {
+            component
+                .props
+                .iter()
+                .chain(component.state.iter())
+                .filter_map(|field| field.default.as_ref())
+                .any(expression_calls_intrinsic)
+                || component
+                    .body
+                    .as_ref()
+                    .is_some_and(expression_calls_intrinsic)
+        }
+        CodegenDeclarationKind::TypeAlias | CodegenDeclarationKind::Unsupported(_) => false,
+    }
+}
+
+fn expression_calls_intrinsic(expression: &CodegenExpression) -> bool {
+    match &expression.kind {
+        CodegenExpressionKind::IntrinsicCall { .. } => true,
+        CodegenExpressionKind::Literal(_)
+        | CodegenExpressionKind::Identifier { .. }
+        | CodegenExpressionKind::Unsupported(_) => false,
+        CodegenExpressionKind::Binary { lhs, rhs, .. } => {
+            expression_calls_intrinsic(lhs) || expression_calls_intrinsic(rhs)
+        }
+        CodegenExpressionKind::Unary { expr, .. } => expression_calls_intrinsic(expr),
+        CodegenExpressionKind::Call { callee, args } => {
+            expression_calls_intrinsic(callee) || args.iter().any(expression_calls_intrinsic)
+        }
+        CodegenExpressionKind::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            expression_calls_intrinsic(condition)
+                || expression_calls_intrinsic(then_branch)
+                || else_branch
+                    .as_ref()
+                    .is_some_and(|e| expression_calls_intrinsic(e))
+        }
+        CodegenExpressionKind::Match {
+            scrutinee,
+            arms,
+            else_branch,
+        } => {
+            expression_calls_intrinsic(scrutinee)
+                || arms.iter().any(|arm| {
+                    arm.patterns.iter().any(expression_calls_intrinsic)
+                        || expression_calls_intrinsic(&arm.body)
+                })
+                || else_branch
+                    .as_ref()
+                    .is_some_and(|e| expression_calls_intrinsic(e))
+        }
+        CodegenExpressionKind::Let { value, body, .. } => {
+            expression_calls_intrinsic(value) || expression_calls_intrinsic(body)
+        }
+        CodegenExpressionKind::Block {
+            statements,
+            expression,
+        } => {
+            statements.iter().any(|statement| match statement {
+                CodegenStatement::Let { init, .. } => expression_calls_intrinsic(init),
+                CodegenStatement::Expr(expr) => expression_calls_intrinsic(expr),
+            }) || expression
+                .as_ref()
+                .is_some_and(|e| expression_calls_intrinsic(e))
+        }
+        CodegenExpressionKind::Array(elements) => elements.iter().any(expression_calls_intrinsic),
+        CodegenExpressionKind::For { iterable, body, .. } => {
+            expression_calls_intrinsic(iterable) || expression_calls_intrinsic(body)
+        }
+        CodegenExpressionKind::Index { base, index } => {
+            expression_calls_intrinsic(base) || expression_calls_intrinsic(index)
+        }
+        CodegenExpressionKind::Member { base, .. } => expression_calls_intrinsic(base),
+        CodegenExpressionKind::UnionCase {
+            properties,
+            content,
+            fields,
+            ..
+        }
+        | CodegenExpressionKind::Record {
+            properties,
+            content,
+            fields,
+            ..
+        } => {
+            properties
+                .iter()
+                .any(|property| expression_calls_intrinsic(&property.value))
+                || content.iter().any(expression_calls_intrinsic)
+                || fields
+                    .iter()
+                    .filter_map(|field| field.default.as_ref())
+                    .any(expression_calls_intrinsic)
+        }
+        CodegenExpressionKind::ComponentDescriptor(descriptor) => {
+            descriptor
+                .properties
+                .iter()
+                .any(|property| expression_calls_intrinsic(&property.value))
+                || descriptor.content.iter().any(expression_calls_intrinsic)
+        }
+        CodegenExpressionKind::Element(element) => {
+            element
+                .properties
+                .iter()
+                .any(|property| expression_calls_intrinsic(&property.value))
+                || element.content.iter().any(expression_calls_intrinsic)
+        }
     }
 }
 
@@ -150,12 +332,26 @@ pub enum NxIrDeclarationKind {
         /// one. Analysis holds that line for NX source; this is how a runtime holds it for host
         /// input.
         is_abstract: bool,
+        /// The record or component a derived `<Target>.Update` record patches.
+        ///
+        /// Present only on update records: every field is optional, none has a default, and a
+        /// value keeps an absent field absent.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        update_target: Option<NxIrReference>,
     },
     Component(NxIrComponent),
     Union {
         cases: Vec<NxIrUnionCase>,
         /// The union's abstract bases, nearest first, inherited by every case.
         bases: Vec<NxIrReference>,
+        /// The record, action, or component a derived `<Target>.Property` union names the fields
+        /// of.
+        ///
+        /// Present only on property unions: every case is constant and names one effective field
+        /// of the target, in `T.Property` case order, so a runtime can validate a bare-string value
+        /// without consulting the target.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        property_target: Option<NxIrReference>,
     },
     TypeAlias,
 }
@@ -256,6 +452,16 @@ pub enum NxIrExpressionOp {
         callee: Box<NxIrExpression>,
         args: Vec<NxIrExpression>,
     },
+    /// A call to one of the update intrinsics (`apply`, `merge`, `diff`, `changed`), which names
+    /// the operation rather than a declared function.
+    IntrinsicCall {
+        intrinsic: String,
+        args: Vec<NxIrExpression>,
+        /// For `changed`, the declared field order of the target record, so a runtime orders the
+        /// result without consulting the declaration.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        field_order: Option<Vec<String>>,
+    },
     If {
         condition: Box<NxIrExpression>,
         then_branch: Box<NxIrExpression>,
@@ -302,6 +508,10 @@ pub enum NxIrExpressionOp {
         properties: Vec<NxIrProperty>,
         content_field: Option<String>,
         content: Vec<NxIrExpression>,
+        /// Present and true when this constructs a derived update record, whose absent fields
+        /// stay absent instead of taking a default or `null`.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        is_update: bool,
     },
     UnionCase {
         union: NxIrReference,
@@ -310,6 +520,10 @@ pub enum NxIrExpressionOp {
         properties: Vec<NxIrProperty>,
         content_field: Option<String>,
         content: Vec<NxIrExpression>,
+        /// Whether this is a constant case — fieldless, in a union with no base — which a runtime
+        /// produces as the bare case name rather than a `$type` map.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        is_constant: bool,
     },
     IntrinsicElement {
         element_id: String,
@@ -504,7 +718,7 @@ impl NxIrProgram {
             schema_version: NX_IR_SCHEMA_VERSION,
             runtime_abi: NX_IR_RUNTIME_ABI.to_string(),
             program_fingerprint: program.fingerprint,
-            required_features: vec![NX_IR_REQUIRED_FEATURE_EAGER_V1.to_string()],
+            required_features: required_features(program),
             function_entrypoints,
             component_entrypoints,
             modules,
@@ -707,6 +921,11 @@ fn collect_ir_expression_unsupported_diagnostics(
                 collect_ir_expression_unsupported_diagnostics(module, arg, diagnostics);
             }
         }
+        CodegenExpressionKind::IntrinsicCall { args, .. } => {
+            for arg in args {
+                collect_ir_expression_unsupported_diagnostics(module, arg, diagnostics);
+            }
+        }
         CodegenExpressionKind::If {
             condition,
             then_branch,
@@ -893,6 +1112,7 @@ fn ir_declaration(
             fields,
             bases,
             is_abstract,
+            update_target,
         } => {
             let scope = SlotScope::new();
             NxIrDeclarationKind::Record {
@@ -906,6 +1126,7 @@ fn ir_declaration(
                 ),
                 bases: bases.iter().map(ir_reference).collect(),
                 is_abstract: *is_abstract,
+                update_target: update_target.as_ref().map(ir_reference),
             }
         }
         CodegenDeclarationKind::Component(component) => {
@@ -917,7 +1138,12 @@ fn ir_declaration(
                 context,
             ))
         }
-        CodegenDeclarationKind::Union { cases, bases } => NxIrDeclarationKind::Union {
+        CodegenDeclarationKind::Union {
+            cases,
+            bases,
+            property_target,
+        } => NxIrDeclarationKind::Union {
+            property_target: property_target.as_ref().map(ir_reference),
             cases: cases
                 .iter()
                 .enumerate()
@@ -1168,6 +1394,27 @@ fn ir_expression(
                 &format!("{path}:expr"),
             )),
         },
+        CodegenExpressionKind::IntrinsicCall {
+            intrinsic,
+            args,
+            field_order,
+        } => NxIrExpressionOp::IntrinsicCall {
+            intrinsic: intrinsic.name().to_string(),
+            field_order: field_order.clone(),
+            args: args
+                .iter()
+                .enumerate()
+                .map(|(index, arg)| {
+                    ir_expression(
+                        module_id_value,
+                        source.clone(),
+                        arg,
+                        scope,
+                        &format!("{path}:arg:{index}"),
+                    )
+                })
+                .collect(),
+        },
         CodegenExpressionKind::Call { callee, args } => NxIrExpressionOp::Call {
             callee: Box::new(ir_expression(
                 module_id_value,
@@ -1403,8 +1650,10 @@ fn ir_expression(
             properties,
             content_field,
             content,
+            is_constant,
             ..
         } => NxIrExpressionOp::UnionCase {
+            is_constant: *is_constant,
             union: ir_reference(union_reference),
             case_name: case_name.clone(),
             fields: ir_record_fields(module_id_value, source.clone(), &id, "field", fields, scope),
@@ -1430,7 +1679,9 @@ fn ir_expression(
             properties,
             content_field,
             content,
+            is_update,
         } => NxIrExpressionOp::Record {
+            is_update: *is_update,
             name: name.clone(),
             fields: ir_record_fields(module_id_value, source.clone(), &id, "field", fields, scope),
             properties: ir_properties(

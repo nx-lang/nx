@@ -79,12 +79,23 @@ fn as_f64(v: &Value) -> Option<f64> {
 // Comparison operators
 
 fn eval_eq(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
-    let result = match (&lhs, &rhs) {
+    Ok(Value::Boolean(values_equal(&lhs, &rhs)))
+}
+
+/// The language's equality: scalars by value, records and lists structurally, a constant case by
+/// its union and name.
+///
+/// <para>A record equals another of the same type whose every field is equal, and a list equals
+/// another of the same length whose elements are equal in order. `null` equals only `null`. This
+/// is the one equality `==`, match patterns, and `diff` share, so what an author can test by hand
+/// is what every other comparison sees.</para>
+pub fn values_equal(lhs: &Value, rhs: &Value) -> bool {
+    match (lhs, rhs) {
         (Value::Int32(_) | Value::Int(_), Value::Int32(_) | Value::Int(_)) => {
-            as_i64(&lhs).unwrap() == as_i64(&rhs).unwrap()
+            as_i64(lhs).unwrap() == as_i64(rhs).unwrap()
         }
         (Value::Float32(_) | Value::Float(_), Value::Float32(_) | Value::Float(_)) => {
-            as_f64(&lhs).unwrap() == as_f64(&rhs).unwrap()
+            as_f64(lhs).unwrap() == as_f64(rhs).unwrap()
         }
         (Value::String(a), Value::String(b)) => a == b,
         (Value::Boolean(a), Value::Boolean(b)) => a == b,
@@ -99,9 +110,27 @@ fn eval_eq(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
             },
         ) => a_union == b_union && a_case == b_case,
         (Value::Null, Value::Null) => true,
+        (Value::Array(a), Value::Array(b)) => {
+            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| values_equal(a, b))
+        }
+        (
+            Value::Record {
+                type_name: a_type,
+                fields: a_fields,
+            },
+            Value::Record {
+                type_name: b_type,
+                fields: b_fields,
+            },
+        ) => {
+            a_type == b_type
+                && a_fields.len() == b_fields.len()
+                && a_fields
+                    .iter()
+                    .all(|(name, a)| b_fields.get(name).is_some_and(|b| values_equal(a, b)))
+        }
         _ => false,
-    };
-    Ok(Value::Boolean(result))
+    }
 }
 
 fn eval_ne(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {

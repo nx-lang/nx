@@ -1,7 +1,7 @@
 use crate::typegen::model::{
     ExportedAlias, ExportedExternalState, ExportedModule, ExportedPolymorphicDescendant,
     ExportedRecord, ExportedType, ExportedTypeGraph, ExportedUnion, ExportedUnionCase,
-    ImportedType,
+    ExportedUpdate, ImportedType,
 };
 use crate::typegen::writer::CodeWriter;
 use crate::typegen::{GenerateTypesOptions, GeneratedFile};
@@ -269,6 +269,7 @@ fn emit_declaration(
         ExportedType::Union(union_def) => emit_union(writer, union_def, graph),
         ExportedType::Record(record) => emit_record(writer, record, graph),
         ExportedType::ExternalState(state) => emit_external_state(writer, state),
+        ExportedType::Update(update) => emit_update(writer, update),
     }
 }
 
@@ -465,6 +466,25 @@ fn emit_external_state(writer: &mut CodeWriter, state: &ExportedExternalState) {
     );
 }
 
+/// Emits an update companion: every property optional, so an absent key means "unchanged", and a
+/// nullable field typed `| null`, so a present `null` means "set to null".
+fn emit_update(writer: &mut CodeWriter, update: &ExportedUpdate) {
+    writer.block(
+        &format!("export interface {}", sanitize_ts_type_name(&update.name)),
+        |writer| {
+            writer.line(&format!(
+                "$type: \"{}\";",
+                escape_ts_string(&update.discriminator)
+            ));
+            for field in &update.fields {
+                let key = ts_property_key(&field.name);
+                let ty = ts_type(&field.ty);
+                writer.line(&format!("{key}?: {ty};"));
+            }
+        },
+    );
+}
+
 fn module_needs_nx_record(module: &ExportedModule) -> bool {
     module
         .declarations
@@ -546,6 +566,11 @@ fn collect_module_imports(
                     add_type_ref_imports(module, context, &field.ty, &mut imports);
                 }
             }
+            ExportedType::Update(update) => {
+                for field in &update.fields {
+                    add_type_ref_imports(module, context, &field.ty, &mut imports);
+                }
+            }
         }
     }
 
@@ -583,8 +608,10 @@ fn add_type_ref_imports(
     ty: &TypeRef,
     imports: &mut BTreeMap<String, BTreeSet<TypeScriptImportSpecifier>>,
 ) {
-    let mut names = BTreeSet::new();
-    collect_type_ref_names(ty, &mut names);
+    let names = nx_hir::type_ref_names(ty)
+        .into_iter()
+        .map(|name| name.as_str().to_string())
+        .collect::<BTreeSet<_>>();
     for name in names {
         add_imported_symbol(
             module,
@@ -634,24 +661,6 @@ fn add_imported_symbol(
             exported_name: imported_name.clone(),
             local_name: imported_name,
         });
-}
-
-fn collect_type_ref_names(ty: &TypeRef, out: &mut BTreeSet<String>) {
-    match ty {
-        TypeRef::Name(name) => {
-            out.insert(name.as_str().to_string());
-        }
-        TypeRef::Array(inner) | TypeRef::Nullable(inner) => collect_type_ref_names(inner, out),
-        TypeRef::Function {
-            params,
-            return_type,
-        } => {
-            for param in params {
-                collect_type_ref_names(param, out);
-            }
-            collect_type_ref_names(return_type, out);
-        }
-    }
 }
 
 fn ts_base_contract_name(name: &str) -> String {

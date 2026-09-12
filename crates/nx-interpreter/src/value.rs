@@ -111,6 +111,20 @@ pub enum Value {
         body: nx_hir::ExprId,
         /// Captured lexical variables from the handler definition site
         captured: FxHashMap<SmolStr, Value>,
+        /// Component whose declaration the handler was bound in, or `None` at the root.
+        owner: Option<Name>,
+        /// The owner's state field names.
+        ///
+        /// <para>During dispatch these captures are replaced by the owner's working state before
+        /// the body runs, so a state read sees every patch applied earlier in the batch. Every
+        /// other capture keeps the value it had when the handler was created.</para>
+        owner_state: Vec<SmolStr>,
+        /// Dispatch token a lifecycle render assigned this handler, if any.
+        ///
+        /// <para>Set only on handlers in the rendered output of component initialization and
+        /// dispatch, where the returned snapshot holds the handler under this token. It is output
+        /// annotation: snapshots do not store it.</para>
+        token: Option<SmolStr>,
     },
 }
 

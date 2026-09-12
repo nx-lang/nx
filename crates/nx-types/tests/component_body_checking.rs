@@ -200,7 +200,9 @@ fn an_inherited_prop_at_a_matching_site_is_accepted() {
 #[test]
 fn a_default_naming_an_earlier_prop_is_checked_against_its_declared_type() {
     assert_reports(
-        &format!("{INHERIT}component <A extends Node b:int = 1 a:string = {{b}} /> = {{ <Leaf /> }}"),
+        &format!(
+            "{INHERIT}component <A extends Node b:int = 1 a:string = {{b}} /> = {{ <Leaf /> }}"
+        ),
         "Default value for 'A.a'",
     );
 }

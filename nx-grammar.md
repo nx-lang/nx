@@ -129,7 +129,8 @@ Discriminated unions use `type Name =` followed by the case list. A union may co
 cases and payload cases with the same `PropertyDefinition` shape used by records. The leading `|` is
 optional for a list of two or more cases and required for a single case, so
 `type Result = Success | Failure` declares a union while `type Result = Success` stays a type alias:
-one bare name would otherwise be ambiguous between the two.
+one bare name would otherwise be ambiguous between the two. A derived `<Name>.Property` union is a
+constant union whose cases are the effective field names of `<Name>`.
 
 Record and action declarations reserve the `abstract` and `extends` keywords. `abstract type Name = { ... }`
 declares a non-instantiable record root, `abstract type Name extends Base = { ... }` declares an
@@ -212,6 +213,16 @@ they can also declare emitted action payloads in `emits` and persistent local st
 `state`. The `emits` block must contain at least one `EmitDefinition`, each emit name is a plain
 identifier, and each emit/state field uses the same `PropertyDefinition` shape as other record-like
 members. Inline emitted actions may optionally include an `extends` clause but remain concrete.
+
+`Update`, `Property`, `<Name>.Update`, and `<Name>.Property` are derived names, not grammar
+productions. Every record, action, inline emitted action, and component with `state` has an update
+record `<Name>.Update` and a property union `<Name>.Property`; inside a component body a bare
+`Update` element tag names that component's own update record, and a bare `Property` type reference
+or member-access base names its own property union. All are ordinary names to the parser; analysis
+gives them their meaning. Because `<Component>.Update` and `<Component>.Property` are taken, an
+`EmitDefinition` or emit reference may not use the name `Update` or `Property`. The intrinsic
+function names `apply`, `merge`, `diff`, and `changed` are likewise ordinary identifiers to the
+parser that analysis reserves.
 
 Inline emitted action inheritance example:
 

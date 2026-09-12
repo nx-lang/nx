@@ -213,3 +213,18 @@ jobs:
       with:
         name: editor-assets-package
         path: src/vscode/dist/*.tgz
+
+  rust:
+    name: 🦀 Rust
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+    # The codegen tests execute generated JavaScript with `node` and check generated TypeScript
+    # with the `tsc` from the pnpm workspace this sets up.
+    - name: Set up Rust and the pnpm workspace
+      uses: ./.github/actions/setup-rust-node
+    - name: 💅🏻 Verify formatted code
+      run: cargo fmt --all --check
+    - name: 🧪 Test the Rust workspace
+      run: cargo test --workspace

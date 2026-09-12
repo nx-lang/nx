@@ -383,8 +383,8 @@ public class NxRuntimeComponentTests
                 new SearchBoxProps { Placeholder = "Find docs" });
 
         byte[] persistedSnapshot = initResult.StateSnapshot.ToArray();
-        NxComponentDispatchResult<SearchSubmitted> dispatchResult =
-            NxRuntime.DispatchComponentActions<SearchSubmitted[], SearchSubmitted>(
+        NxComponentDispatchResult<TextInputElement, SearchSubmitted> dispatchResult =
+            NxRuntime.DispatchComponentActions<SearchSubmitted[], TextInputElement, SearchSubmitted>(
                 source,
                 persistedSnapshot,
                 new[]
@@ -421,7 +421,7 @@ public class NxRuntimeComponentTests
         Assert.Equal("Find docs", initResult.Rendered.GetProperty("placeholder").GetString());
         Assert.NotEmpty(initResult.StateSnapshot);
 
-        NxComponentDispatchResult<JsonElement> dispatchResult =
+        NxComponentDispatchResult<JsonElement, JsonElement> dispatchResult =
             NxRuntime.DispatchComponentActionsJson(
                 source,
                 initResult.StateSnapshot,
@@ -457,7 +457,7 @@ public class NxRuntimeComponentTests
                 new SearchBoxProps { Placeholder = "Find docs" });
 
         NxEvaluationException error = Assert.Throws<NxEvaluationException>(
-            () => NxRuntime.DispatchComponentActions<SearchAction[], SearchAction>(
+            () => NxRuntime.DispatchComponentActions<SearchAction[], TextInputElement, SearchAction>(
                 source,
                 initResult.StateSnapshot,
                 new[]
@@ -812,8 +812,8 @@ public class NxRuntimeComponentTests
                     buildContext,
                     mainPath);
 
-            NxComponentDispatchResult<SearchSubmitted> dispatchResult =
-                NxRuntime.DispatchComponentActions<SearchSubmitted[], SearchSubmitted>(
+            NxComponentDispatchResult<TextInputElement, SearchSubmitted> dispatchResult =
+                NxRuntime.DispatchComponentActions<SearchSubmitted[], TextInputElement, SearchSubmitted>(
                     source,
                     initResult.StateSnapshot,
                     buildContext,
@@ -1135,8 +1135,8 @@ public class NxRuntimeComponentTests
                     programArtifact,
                     "SearchBox");
 
-            NxComponentDispatchResult<SearchSubmitted> dispatchResult =
-                NxRuntime.DispatchComponentActions<SearchSubmitted[], SearchSubmitted>(
+            NxComponentDispatchResult<TextInputElement, SearchSubmitted> dispatchResult =
+                NxRuntime.DispatchComponentActions<SearchSubmitted[], TextInputElement, SearchSubmitted>(
                     programArtifact,
                     initResult.StateSnapshot,
                     new[]

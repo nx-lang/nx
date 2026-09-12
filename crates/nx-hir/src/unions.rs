@@ -1,7 +1,7 @@
 use crate::{
     ast, effective_record_shape_for_name, interface_record, interface_type_alias, interface_union,
     InterfaceItem, Item, Name, PreparedModule, PreparedNamespace, RecordDef, RecordKind,
-    ResolvedPreparedItem, UnionDef,
+    ResolvedPreparedItem, UnionCaseDef, UnionDef,
 };
 use nx_diagnostics::TextSpan;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -13,6 +13,8 @@ pub enum InvalidUnionBaseReason {
     AliasCycle,
     ConcreteRecord,
     ActionRecord,
+    /// The base is a derived `<Target>.Property` union, which can never be extended.
+    PropertyUnion,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +56,7 @@ impl UnionValidationError {
                 InvalidUnionBaseReason::AliasCycle => "union-base-alias-cycle",
                 InvalidUnionBaseReason::ConcreteRecord => "union-base-not-abstract",
                 InvalidUnionBaseReason::ActionRecord => "union-base-not-record",
+                InvalidUnionBaseReason::PropertyUnion => "union-base-property-union",
             },
             Self::DuplicateInheritedField { .. } => "union-duplicate-inherited-field",
             Self::DuplicateContentProperty { .. } => "union-duplicate-content-property",
@@ -90,6 +93,10 @@ impl UnionValidationError {
                 InvalidUnionBaseReason::ActionRecord => format!(
                     "Union '{}' extends '{}', but action records cannot be used as union bases",
                     union, base
+                ),
+                InvalidUnionBaseReason::PropertyUnion => format!(
+                    "Union '{}' extends '{}', but '{}' is a derived property union and cannot be extended",
+                    union, base, base
                 ),
             },
             Self::DuplicateInheritedField {
@@ -148,6 +155,54 @@ pub fn resolve_union_definition(module: &PreparedModule, name: &Name) -> Option<
         .resolve_binding(PreparedNamespace::Type, name)
         .and_then(|binding| module.resolve_prepared_item(binding))
         .and_then(|resolved| union_definition_from_prepared_item(module, resolved))
+}
+
+/// Completes every local derived `<Target>.Property` union from its target's effective shape.
+///
+/// <para>Lowering synthesizes a property union with one case per field its target itself
+/// declares. A base may live in another module, so inherited fields are known only once the module
+/// is prepared; this fills them in, inherited first, before validation and type checking, so every
+/// later consumer reads the complete case list from the declaration itself. A component's union
+/// is already complete, since state is never inherited. A target whose shape does not resolve keeps
+/// its declared cases; record validation reports why.</para>
+pub fn complete_property_unions(module: &mut PreparedModule) {
+    let completions = module
+        .raw_module()
+        .items()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| {
+            let Item::Union(union) = item else {
+                return None;
+            };
+            let target = union.property_target()?;
+            let shape = effective_record_shape_for_name(module, target).ok()??;
+            let cases = shape
+                .fields
+                .iter()
+                .map(|field| UnionCaseDef {
+                    name: field.name.clone(),
+                    fields: Vec::new(),
+                    span: field.span,
+                })
+                .collect::<Vec<_>>();
+            Some((index, cases))
+        })
+        .collect::<Vec<_>>();
+
+    for (index, cases) in completions {
+        if let Some(Item::Union(union)) = module.raw_module_mut().items_mut().get_mut(index) {
+            union.cases = cases;
+        }
+    }
+}
+
+/// Returns the target of the derived property union `resolved` is, if it is one.
+pub(crate) fn property_union_target_from_prepared_item(
+    module: &PreparedModule,
+    resolved: ResolvedPreparedItem,
+) -> Option<Name> {
+    union_definition_from_prepared_item(module, resolved).and_then(|union| union.property_target)
 }
 
 fn validate_union_definition(
@@ -278,6 +333,8 @@ fn resolve_union_base_record(
                 Ok(record)
             } else if let Some(target) = type_alias_target_from_prepared_item(&resolved) {
                 resolve_union_base_record(module, &target, seen)
+            } else if property_union_target_from_prepared_item(module, resolved).is_some() {
+                Err(InvalidUnionBaseReason::PropertyUnion)
             } else {
                 Err(InvalidUnionBaseReason::NotRecord)
             }

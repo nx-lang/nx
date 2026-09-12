@@ -1,4 +1,5 @@
 use crate::model::{CodegenProperty, CodegenRecordField};
+use crate::runtime::runtime_helper_source;
 use crate::{
     build_codegen_program, emit_codegen_program, emit_js_program_module, emit_nx_ir, emit_program,
     javascript_runtime_helper_source, CodegenDeclaration, CodegenDeclarationKind,
@@ -20,6 +21,7 @@ use nx_types::Type;
 use serde_json::Value;
 use std::fs;
 use std::process::Command;
+use std::sync::OnceLock;
 use tempfile::TempDir;
 
 fn artifact_from_source(source: &str) -> ProgramArtifact {
@@ -60,15 +62,12 @@ fn generated_module_body(module: &str) -> &str {
         .unwrap_or(module)
 }
 
-fn execute_generated_javascript_root(source: &str) -> Option<String> {
+fn execute_generated_javascript_root(source: &str) -> String {
     let artifact = artifact_from_source(source);
     execute_generated_javascript_artifact_root(&artifact, "")
 }
 
-fn execute_generated_javascript_artifact_root(
-    artifact: &ProgramArtifact,
-    args: &str,
-) -> Option<String> {
+fn execute_generated_javascript_artifact_root(artifact: &ProgramArtifact, args: &str) -> String {
     execute_generated_javascript_artifact_script(
         artifact,
         &format!("console.log(JSON.stringify(m.root({})));", args),
@@ -78,11 +77,7 @@ fn execute_generated_javascript_artifact_root(
 fn execute_generated_javascript_artifact_script(
     artifact: &ProgramArtifact,
     script_body: &str,
-) -> Option<String> {
-    if Command::new("node").arg("--version").output().is_err() {
-        return None;
-    }
-
+) -> String {
     let output = emit_program(&artifact, &CodegenOptions::javascript()).expect("js output");
     let dir = TempDir::new().expect("temp dir");
     fs::write(dir.path().join("package.json"), r#"{ "type": "module" }"#).expect("package file");
@@ -95,7 +90,7 @@ fn execute_generated_javascript_artifact_script(
         "import({:?}).then((m) => {{ {} }});",
         index_url, script_body
     );
-    let output = Command::new("node")
+    let output = node_command()
         .arg("--input-type=module")
         .arg("-e")
         .arg(script)
@@ -107,17 +102,13 @@ fn execute_generated_javascript_artifact_script(
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
 fn execute_generated_js_program_module_script(
     artifact: &ProgramArtifact,
     script_body: &str,
-) -> Option<String> {
-    if Command::new("node").arg("--version").output().is_err() {
-        return None;
-    }
-
+) -> String {
     let options = JsProgramModuleOptions {
         runtime_import_specifier: "./nx-runtime.js".to_string(),
         ..JsProgramModuleOptions::default()
@@ -137,7 +128,7 @@ fn execute_generated_js_program_module_script(
         "import({:?}).then((m) => {{ {} }});",
         program_url, script_body
     );
-    let output = Command::new("node")
+    let output = node_command()
         .arg("--input-type=module")
         .arg("-e")
         .arg(script)
@@ -149,14 +140,122 @@ fn execute_generated_js_program_module_script(
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+/// The TypeScript compiler, from `PATH` or from the repository's own `runtime/typescript`
+/// install. `tsc` is a hard requirement of these tests, so a missing one fails the run instead of
+/// skipping it.
+fn tsc_command() -> Command {
+    let workspace_tsc = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../runtime/typescript/node_modules/.bin/tsc");
+    for program in [std::path::PathBuf::from("tsc"), workspace_tsc] {
+        let probe = Command::new(&program).arg("--version").output();
+        if probe.is_ok_and(|output| output.status.success()) {
+            return Command::new(program);
+        }
+    }
+    panic!("`tsc` is not available: run `pnpm install` at the repository root");
+}
+
+/// Runs an ES module script next to the emitted runtime module for `target`, returning what it
+/// printed. The TypeScript runtime is compiled with `tsc` first; a missing tool fails the run.
+fn execute_script_against_emitted_runtime(target: CodegenTarget, script: &str) -> String {
+    let dir = TempDir::new().expect("temp dir");
+    fs::write(dir.path().join("package.json"), r#"{ "type": "module" }"#).expect("package file");
+    let runtime_name = format!("nx-runtime.{}", target.extension());
+    fs::write(
+        dir.path().join(&runtime_name),
+        runtime_helper_source(target),
+    )
+    .expect("runtime");
+    if target == CodegenTarget::TypeScript {
+        let mut tsc = tsc_command();
+        let output = tsc
+            .current_dir(dir.path())
+            .args([
+                "--module",
+                "ES2020",
+                "--target",
+                "ES2020",
+                "--strict",
+                &runtime_name,
+            ])
+            .output()
+            .expect("tsc execution");
+        assert!(
+            output.status.success(),
+            "stdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    fs::write(dir.path().join("script.mjs"), script).expect("script");
+    let output = node_command()
+        .current_dir(dir.path())
+        .arg("script.mjs")
+        .output()
+        .expect("node execution");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+/// The oldest Node these tests run on, from `engines.node` in the root `package.json`.
+const MINIMUM_NODE_VERSION: (u32, u32) = (22, 18);
+
+/// What every `node` probe failure tells the developer to do. The floor is formatted from
+/// `MINIMUM_NODE_VERSION`, so raising that constant updates the advice with it. CI installs the
+/// Node pinned in `.github/actions/setup-rust-node/action.yaml`.
+fn node_requirement() -> String {
+    format!(
+        "these tests need Node >= {}.{} on `PATH`, as CI uses Node 24",
+        MINIMUM_NODE_VERSION.0, MINIMUM_NODE_VERSION.1
+    )
+}
+
+/// A `node` command for running the generated JavaScript. Node is a hard requirement of these
+/// tests, so a missing or too old one fails the run instead of skipping it. The probe runs once
+/// per test binary.
+fn node_command() -> Command {
+    static PROBE: OnceLock<()> = OnceLock::new();
+    PROBE.get_or_init(|| {
+        let probe = Command::new("node").arg("--version").output();
+        let reported = match probe {
+            Ok(output) if output.status.success() => {
+                String::from_utf8_lossy(&output.stdout).trim().to_string()
+            }
+            _ => panic!("`node` is not available: {}", node_requirement()),
+        };
+        let version = parse_node_version(&reported).unwrap_or_else(|| {
+            panic!(
+                "`node --version` printed {reported:?}: {}",
+                node_requirement()
+            )
+        });
+        assert!(
+            version >= MINIMUM_NODE_VERSION,
+            "`node` is {reported}: {}",
+            node_requirement()
+        );
+    });
+    Command::new("node")
+}
+
+/// The major and minor of a `node --version` line such as `v24.1.0`.
+fn parse_node_version(reported: &str) -> Option<(u32, u32)> {
+    let mut parts = reported.trim_start_matches('v').split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    Some((major, minor))
 }
 
 fn assert_generated_typescript_artifact_type_checks(artifact: &ProgramArtifact) {
     let output = emit_program(artifact, &CodegenOptions::typescript()).expect("ts output");
-    if Command::new("tsc").arg("--version").output().is_err() {
-        return;
-    }
+    let mut tsc = tsc_command();
 
     let dir = TempDir::new().expect("temp dir");
     fs::write(dir.path().join("package.json"), r#"{ "type": "module" }"#).expect("package file");
@@ -164,7 +263,7 @@ fn assert_generated_typescript_artifact_type_checks(artifact: &ProgramArtifact) 
         fs::write(dir.path().join(file.relative_path), file.content).expect("generated file");
     }
 
-    let output = Command::new("tsc")
+    let output = tsc
         .current_dir(dir.path())
         .args([
             "--noEmit",
@@ -1198,10 +1297,8 @@ fn emits_javascript_without_typescript_only_syntax() {
 }
 
 #[test]
-fn javascript_output_executes_as_esm_when_node_is_available() {
-    let Some(output) = execute_generated_javascript_root("let root() = { 1 + 2 }") else {
-        return;
-    };
+fn javascript_output_executes_as_esm() {
+    let output = execute_generated_javascript_root("let root() = { 1 + 2 }");
     assert_eq!(output, "3");
 }
 
@@ -1242,9 +1339,7 @@ let root() = { Theme.dark }
     ];
 
     for source in cases {
-        let Some(output) = execute_generated_javascript_root(source) else {
-            return;
-        };
+        let output = execute_generated_javascript_root(source);
         assert_json_values_eq(&output, &interpreter_json_root(source));
     }
 }
@@ -1275,9 +1370,7 @@ let root() = { <User name="Bob" /> }
     ];
 
     for source in cases {
-        let Some(output) = execute_generated_javascript_root(source) else {
-            return;
-        };
+        let output = execute_generated_javascript_root(source);
         assert_json_values_eq(&output, &interpreter_json_root(source));
     }
 }
@@ -1299,9 +1392,7 @@ let root(answer: int): int = { answer }"#,
     let module = generated_file(&artifact, CodegenTarget::JavaScript, "m0_main.js");
     assert!(!module.contains("m1_answer"));
 
-    let Some(output) = execute_generated_javascript_artifact_root(&artifact, "7") else {
-        return;
-    };
+    let output = execute_generated_javascript_artifact_root(&artifact, "7");
     assert_eq!(output, "7");
 }
 
@@ -1340,7 +1431,7 @@ let root(items: int[]): int[] = { for item in items { item + answer } }"#,
 }
 
 #[test]
-fn generated_typescript_type_checks_when_tsc_is_available() {
+fn generated_typescript_type_checks() {
     let artifact = artifact_from_workspace(
         &[
             (
@@ -1353,43 +1444,11 @@ let root(): User = { <User name="Ada" age={answer} /> }"#,
         ],
         "app/main.nx",
     );
-    let output = emit_program(&artifact, &CodegenOptions::typescript()).expect("ts output");
-    if Command::new("tsc").arg("--version").output().is_err() {
-        return;
-    }
-
-    let dir = TempDir::new().expect("temp dir");
-    fs::write(dir.path().join("package.json"), r#"{ "type": "module" }"#).expect("package file");
-    for file in output.files {
-        fs::write(dir.path().join(file.relative_path), file.content).expect("generated file");
-    }
-
-    let output = Command::new("tsc")
-        .current_dir(dir.path())
-        .args([
-            "--noEmit",
-            "--module",
-            "NodeNext",
-            "--moduleResolution",
-            "NodeNext",
-            "--target",
-            "ES2020",
-            "--strict",
-            "index.ts",
-        ])
-        .output()
-        .expect("tsc execution");
-
-    assert!(
-        output.status.success(),
-        "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_generated_typescript_artifact_type_checks(&artifact);
 }
 
 #[test]
-fn generated_component_typescript_type_checks_when_tsc_is_available() {
+fn generated_component_typescript_type_checks() {
     let artifact = artifact_from_source(
         r#"
 type Mode = exact | fuzzy
@@ -1405,39 +1464,7 @@ component <SearchBox mode:Mode user:User load:LoadState child:Question /> = {
 let root() = { 1 }
 "#,
     );
-    let output = emit_program(&artifact, &CodegenOptions::typescript()).expect("ts output");
-    if Command::new("tsc").arg("--version").output().is_err() {
-        return;
-    }
-
-    let dir = TempDir::new().expect("temp dir");
-    fs::write(dir.path().join("package.json"), r#"{ "type": "module" }"#).expect("package file");
-    for file in output.files {
-        fs::write(dir.path().join(file.relative_path), file.content).expect("generated file");
-    }
-
-    let output = Command::new("tsc")
-        .current_dir(dir.path())
-        .args([
-            "--noEmit",
-            "--module",
-            "NodeNext",
-            "--moduleResolution",
-            "NodeNext",
-            "--target",
-            "ES2020",
-            "--strict",
-            "index.ts",
-        ])
-        .output()
-        .expect("tsc execution");
-
-    assert!(
-        output.status.success(),
-        "stdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    assert_generated_typescript_artifact_type_checks(&artifact);
 }
 
 #[test]
@@ -1468,6 +1495,7 @@ fn materialized_record_iife_uses_collision_free_field_temps() {
                         span: TextSpan::default(),
                         ty: None,
                         kind: CodegenExpressionKind::Record {
+                            is_update: false,
                             name: "CollisionRecord".to_string(),
                             fields: vec![
                                 int_field_with_default("my-field", 1),
@@ -1834,12 +1862,10 @@ export component <SharedBox user:User theme:Theme load:LoadState /> = {
     assert!(!module.source_text.contains("from \"./m"));
     assert!(!module.source_text.contains("from \"../"));
 
-    let Some(output) = execute_generated_js_program_module_script(
+    let output = execute_generated_js_program_module_script(
         &artifact,
         "console.log(JSON.stringify(m.root()));",
-    ) else {
-        return;
-    };
+    );
     assert_json_values_eq(&output, &interpreter_json_artifact_root(&artifact));
 }
 
@@ -1874,12 +1900,10 @@ let root(): int = { One.value + Two.value }"#,
     assert!(module.source_text.contains("return (value + value_2);"));
     assert!(!module.source_text.contains(" as m"));
 
-    let Some(output) = execute_generated_js_program_module_script(
+    let output = execute_generated_js_program_module_script(
         &artifact,
         "console.log(JSON.stringify(m.root()));",
-    ) else {
-        return;
-    };
+    );
     assert_eq!(output, "3");
 }
 
@@ -1920,15 +1944,13 @@ let root() = { 1 }
         Some("renderSearchBox")
     );
 
-    let Some(output) = execute_generated_js_program_module_script(
+    let output = execute_generated_js_program_module_script(
         &artifact,
         r#"console.log(JSON.stringify({
   init: m.SearchBoxSchema.initializeJson({}),
   evaluated: m.SearchBoxSchema.evaluateJson({}, { query: "docs" })
 }));"#,
-    ) else {
-        return;
-    };
+    );
     assert_json_values_eq(
         &output,
         r#"{
@@ -1979,14 +2001,12 @@ let root() = { 1 }"#,
     );
     assert!(!module.source_text.contains("from \"./m"));
 
-    let Some(output) = execute_generated_js_program_module_script(
+    let output = execute_generated_js_program_module_script(
         &artifact,
         r#"console.log(JSON.stringify(
   m.HostSchema.evaluateJson({ child: { $type: "TextInput", value: "docs" } })
 ));"#,
-    ) else {
-        return;
-    };
+    );
     assert_json_values_eq(&output, r#"{ "$type": "TextInput", "value": "docs" }"#);
 }
 
@@ -2206,9 +2226,7 @@ fn generated_javascript_component_descriptors_match_interpreter() {
 external component <Question label:string />
 let root() = { <Question label="Name" /> }
 "#;
-    let Some(output) = execute_generated_javascript_root(source) else {
-        return;
-    };
+    let output = execute_generated_javascript_root(source);
 
     assert_json_values_eq(&output, &interpreter_json_root(source));
 }
@@ -2230,9 +2248,7 @@ let root() = { <ShortTextQuestion /> }"#,
         ],
         "app/main.nx",
     );
-    let Some(output) = execute_generated_javascript_artifact_root(&artifact, "") else {
-        return;
-    };
+    let output = execute_generated_javascript_artifact_root(&artifact, "");
 
     assert_json_values_eq(
         &output,
@@ -2246,9 +2262,7 @@ fn generated_component_descriptors_preserve_content() {
 external component <Panel content body:Element />
 let root() = { <Panel><span /></Panel> }
 "#;
-    let Some(output) = execute_generated_javascript_root(source) else {
-        return;
-    };
+    let output = execute_generated_javascript_root(source);
 
     assert_json_values_eq(
         &output,
@@ -2270,12 +2284,10 @@ let root() = { 1 }
 "#,
     );
     let ts_module = generated_file(&artifact, CodegenTarget::TypeScript, "m0_main.ts");
-    let Some(output) = execute_generated_javascript_artifact_script(
+    let output = execute_generated_javascript_artifact_script(
         &artifact,
         "console.log(JSON.stringify(m.QuestionFlowSchema.evaluateJson({})));",
-    ) else {
-        return;
-    };
+    );
 
     assert!(ts_module.contains("export type TextInputElement"));
     assert!(ts_module.contains("export type QuestionFlowElement"));
@@ -2309,7 +2321,7 @@ component <Profile user:User /> = { user }
 let root() = { 1 }
 "#,
     );
-    let Some(output) = execute_generated_javascript_artifact_script(
+    let output = execute_generated_javascript_artifact_script(
         &artifact,
         r#"console.log(JSON.stringify({
 	  externalDefault: m.TextInputSchema.fromJson({}),
@@ -2319,9 +2331,7 @@ let root() = { 1 }
   missingElementField: m.ElementHostSchema.tryEvaluateJson({ child: { $type: "TextInput" } }),
   missingState: m.SearchBoxSchema.tryEvaluateJson({}, {})
 }));"#,
-    ) else {
-        return;
-    };
+    );
     let output: Value = serde_json::from_str(&output).expect("schema boundary output");
 
     assert_eq!(
@@ -2368,15 +2378,13 @@ let root() = { 1 }
     );
     let ts_module = generated_file(&artifact, CodegenTarget::TypeScript, "m0_main.ts");
     let js_module = generated_file(&artifact, CodegenTarget::JavaScript, "m0_main.js");
-    let Some(output) = execute_generated_javascript_artifact_script(
+    let output = execute_generated_javascript_artifact_script(
         &artifact,
         r#"console.log(JSON.stringify({
   record: m.BoxSchema.evaluateJson({ p: { $type: "Pair", a: 7 } }),
   union: m.ChoiceBoxSchema.evaluateJson({ choice: { $type: "PairChoice.same", a: 3 } })
 }));"#,
-    ) else {
-        return;
-    };
+    );
 
     assert!(!ts_module.contains("defaultValue: a"));
     assert!(!js_module.contains("defaultValue: a"));
@@ -2492,9 +2500,7 @@ fn generated_normal_component_descriptor_matches_interpreter() {
 component <Child label:string /> = { "rendered child" }
 let root() = { <Child label="Name" /> }
 "#;
-    let Some(output) = execute_generated_javascript_root(source) else {
-        return;
-    };
+    let output = execute_generated_javascript_root(source);
 
     assert_json_values_eq(&output, &interpreter_json_root(source));
 }
@@ -2508,12 +2514,10 @@ component <Parent /> = { <Child label="Name" /> }
 let root() = { 1 }
 "#,
     );
-    let Some(output) = execute_generated_javascript_artifact_script(
+    let output = execute_generated_javascript_artifact_script(
         &artifact,
         "console.log(JSON.stringify(m.ParentSchema.evaluateJson({})));",
-    ) else {
-        return;
-    };
+    );
 
     assert_json_values_eq(&output, r#"{ "$type": "Child", "label": "Name" }"#);
 }
@@ -2530,15 +2534,13 @@ component <SearchBox placeholder:string = "Find docs" /> = {
 let root() = { 1 }
 "#,
     );
-    let Some(output) = execute_generated_javascript_artifact_script(
+    let output = execute_generated_javascript_artifact_script(
         &artifact,
         r#"console.log(JSON.stringify({
   init: m.SearchBoxSchema.initializeJson({}),
   evaluated: m.SearchBoxSchema.evaluateJson({}, { query: "docs" })
 }));"#,
-    ) else {
-        return;
-    };
+    );
 
     assert_json_values_eq(
         &output,
@@ -2569,7 +2571,7 @@ component <SearchBox tags:string[] mode:Mode = { Mode.exact } /> = {
 let root() = { 1 }
 "#,
     );
-    let Some(output) = execute_generated_javascript_artifact_script(
+    let output = execute_generated_javascript_artifact_script(
         &artifact,
         r#"console.log(JSON.stringify({
   omitted: m.SearchBoxSchema.evaluateJson({ tags: ["nx"] }),
@@ -2578,9 +2580,7 @@ let root() = { 1 }
     { query: "docs", tags: ["ui"], mode: "fuzzy" }
   )
 }));"#,
-    ) else {
-        return;
-    };
+    );
 
     assert_json_values_eq(
         &output,
@@ -2604,15 +2604,13 @@ component <SearchBox mode:Mode = { Mode.exact } /> = {
 let root() = { 1 }
 "#,
     );
-    let Some(output) = execute_generated_javascript_artifact_script(
+    let output = execute_generated_javascript_artifact_script(
         &artifact,
         r#"console.log(JSON.stringify({
   prop: m.SearchBoxSchema.tryEvaluateJson({ mode: "bogus" }),
   state: m.SearchBoxSchema.tryEvaluateJson({ mode: "exact" }, { mode: "bogus" })
 }));"#,
-    ) else {
-        return;
-    };
+    );
     let output: Value = serde_json::from_str(&output).expect("tryEvaluate output");
 
     assert_eq!(output["prop"]["ok"], false);
@@ -2639,7 +2637,7 @@ component <Host user:User load:LoadState child:Question /> = { "ok" }
 let root() = { 1 }
 "#,
     );
-    let Some(output) = execute_generated_javascript_artifact_script(
+    let output = execute_generated_javascript_artifact_script(
         &artifact,
         r#"const valid = {
   user: { $type: "User", name: "Ada" },
@@ -2651,9 +2649,7 @@ console.log(JSON.stringify({
   union: m.HostSchema.tryEvaluateJson({ ...valid, load: { $type: "LoadState.missing", label: "Ready" } }),
   component: m.HostSchema.tryEvaluateJson({ ...valid, child: { $type: "Question", label: "Name", extra: "nope" } })
 }));"#,
-    ) else {
-        return;
-    };
+    );
     let output: Value = serde_json::from_str(&output).expect("tryEvaluate output");
 
     assert_eq!(output["record"]["ok"], false);
@@ -2683,9 +2679,7 @@ external component <Question label:string />
 let MakeQuestion(label:string) = { <Question label={label} /> }
 let root() = { <MakeQuestion label="Name" /> }
 "#;
-    let Some(output) = execute_generated_javascript_root(source) else {
-        return;
-    };
+    let output = execute_generated_javascript_root(source);
 
     assert_json_values_eq(&output, r#"{ "$type": "Question", "label": "Name" }"#);
 }
@@ -2696,7 +2690,7 @@ fn component_action_handler_bindings_fail_before_emission() {
         r#"
 external component <TextInput />
 component <SearchBox emits { SearchSubmitted { query:string } } /> = { <TextInput /> }
-let DoSearch(query:string) = { query }
+action DoSearch = { query:string }
 let root() = { <SearchBox onSearchSubmitted=<DoSearch query={action.query} /> /> }
 "#,
     );
@@ -2778,4 +2772,507 @@ fn both_case_list_spellings_generate_identical_javascript_typescript_ir_and_sche
     assert_eq!(bare_js, piped_js, "generated JavaScript and its schema");
     assert_eq!(bare_ts, piped_ts, "generated TypeScript and its schema");
     assert_eq!(bare_ir, piped_ir, "generated NX IR");
+}
+
+// ------------------------------------------------------------------------------------------------
+// Derived update records
+// ------------------------------------------------------------------------------------------------
+
+fn ir_declaration_names(document: &Value) -> Vec<String> {
+    document["modules"]
+        .as_array()
+        .expect("modules")
+        .iter()
+        .flat_map(|module| module["declarations"].as_array().expect("declarations"))
+        .map(|declaration| {
+            declaration["reference"]["name"]
+                .as_str()
+                .expect("declaration name")
+                .to_string()
+        })
+        .collect()
+}
+
+/// Finds the first IR expression op anywhere in `value` whose tag and name match.
+fn find_ir_op<'a>(value: &'a Value, tag: &str, name: &str) -> Option<&'a Value> {
+    match value {
+        Value::Object(object) => {
+            if object.get("tag").and_then(Value::as_str) == Some(tag)
+                && object.get("name").and_then(Value::as_str) == Some(name)
+            {
+                return Some(value);
+            }
+            object
+                .values()
+                .find_map(|child| find_ir_op(child, tag, name))
+        }
+        Value::Array(items) => items.iter().find_map(|child| find_ir_op(child, tag, name)),
+        _ => None,
+    }
+}
+
+#[test]
+fn nx_ir_declares_a_referenced_update_record_with_its_own_schema() {
+    let artifact = artifact_from_source(
+        r#"
+type User = { name:string = "anon" email:string? }
+let patch() = <User.Update email={null} />
+"#,
+    );
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+
+    let update = ir_declaration(&document, "User.Update");
+    assert_eq!(update["kind"]["tag"], "record");
+    assert_eq!(update["kind"]["updateTarget"]["name"], "User");
+    assert_eq!(update["kind"]["updateTarget"]["kind"], "record");
+
+    let fields = update["kind"]["fields"].as_array().expect("update fields");
+    let names = fields
+        .iter()
+        .map(|field| field["name"].as_str().expect("field name"))
+        .collect::<Vec<_>>();
+    assert_eq!(names, vec!["name", "email"]);
+    for field in fields {
+        assert_eq!(field["isRequired"], false, "every update field is optional");
+        assert!(
+            field.get("default").is_none(),
+            "no update field has a default"
+        );
+    }
+    assert_eq!(ir_record_field_type(update, "email")["kind"], "nullable");
+    assert_eq!(ir_record_field_type(update, "name")["kind"], "primitive");
+
+    assert!(generated
+        .metadata
+        .required_features
+        .iter()
+        .any(|feature| feature == crate::NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1));
+    assert_eq!(
+        document["requiredFeatures"],
+        serde_json::json!(generated.metadata.required_features)
+    );
+}
+
+#[test]
+fn nx_ir_omits_update_records_a_program_never_references() {
+    let artifact = artifact_from_source(
+        r#"
+type User = { name:string }
+let user() = <User name="Ada" />
+"#,
+    );
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+
+    assert_eq!(ir_declaration_names(&document), vec!["User", "user"]);
+    assert_eq!(
+        generated.metadata.required_features,
+        vec![crate::NX_IR_REQUIRED_FEATURE_EAGER_V1.to_string()]
+    );
+    let user = ir_declaration(&document, "User");
+    assert!(
+        user["kind"].get("updateTarget").is_none(),
+        "an ordinary record's declaration is unchanged"
+    );
+    assert_eq!(
+        user["reference"]["declaration"], "m0:d0",
+        "the update record is declared after every written item, so ids do not shift"
+    );
+}
+
+#[test]
+fn nx_ir_encodes_update_construction_as_record_construction() {
+    let artifact = artifact_from_source(
+        r#"
+component <Counter /> = { state { count:int = 0 label:string = "x" } <Label /> }
+let reset() = <Counter.Update count=1 />
+"#,
+    );
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+
+    let update = ir_declaration(&document, "Counter.Update");
+    assert_eq!(update["kind"]["updateTarget"]["kind"], "component");
+
+    let reset = ir_declaration(&document, "reset");
+    let construction =
+        find_ir_op(reset, "record", "Counter.Update").expect("record construction op");
+    assert_eq!(construction["isUpdate"], true);
+    let properties = construction["properties"].as_array().expect("properties");
+    assert_eq!(properties.len(), 1);
+    assert_eq!(properties[0]["name"], "count");
+
+    // Ordinary record construction carries no update flag at all.
+    let plain = artifact_from_source(
+        r#"
+type User = { name:string }
+let user() = <User name="Ada" />
+"#,
+    );
+    let plain: Value =
+        serde_json::from_str(&emit_nx_ir(&plain).expect("nx ir").json).expect("nx ir json");
+    let construction = find_ir_op(&plain, "record", "User").expect("record op");
+    assert!(construction.get("isUpdate").is_none());
+}
+
+#[test]
+fn generated_javascript_keeps_absent_update_fields_absent() {
+    let output = execute_generated_javascript_root(
+        r#"
+type User = { name:string = "anon" email:string? }
+let root() = <User.Update email={null} />
+"#,
+    );
+
+    assert_json_values_eq(&output, r#"{ "$type": "User.Update", "email": null }"#);
+}
+
+#[test]
+fn generated_javascript_constructs_a_component_update_record_from_its_state() {
+    let output = execute_generated_javascript_root(
+        r#"
+component <Counter /> = { state { count:int = 0 label:string = "x" } <Label /> }
+let root() = <Counter.Update count=1 />
+"#,
+    );
+
+    assert_json_values_eq(&output, r#"{ "$type": "Counter.Update", "count": 1 }"#);
+}
+
+// ------------------------------------------------------------------------------------------------
+// Derived property unions and update intrinsics
+// ------------------------------------------------------------------------------------------------
+
+/// Finds the first IR expression op anywhere in `value` with the given tag that `matches`.
+fn find_ir_op_where<'a>(
+    value: &'a Value,
+    tag: &str,
+    matches: &dyn Fn(&Value) -> bool,
+) -> Option<&'a Value> {
+    match value {
+        Value::Object(object) => {
+            if object.get("tag").and_then(Value::as_str) == Some(tag) && matches(value) {
+                return Some(value);
+            }
+            object
+                .values()
+                .find_map(|child| find_ir_op_where(child, tag, matches))
+        }
+        Value::Array(items) => items
+            .iter()
+            .find_map(|child| find_ir_op_where(child, tag, matches)),
+        _ => None,
+    }
+}
+
+#[test]
+fn nx_ir_declares_a_referenced_property_union_with_its_target_and_cases() {
+    let artifact = artifact_from_source(
+        r#"
+abstract type Named = { name:string }
+type User extends Named = { email:string? }
+let key() = {User.Property.email}
+"#,
+    );
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+
+    let union = ir_declaration(&document, "User.Property");
+    assert_eq!(union["kind"]["tag"], "union");
+    assert_eq!(union["kind"]["propertyTarget"]["name"], "User");
+    assert_eq!(union["kind"]["propertyTarget"]["kind"], "record");
+    assert_eq!(union["kind"]["bases"].as_array().map(Vec::len), Some(0));
+    let cases = union["kind"]["cases"].as_array().expect("cases");
+    assert_eq!(
+        cases
+            .iter()
+            .map(|case| case["name"].as_str().expect("case name"))
+            .collect::<Vec<_>>(),
+        ["name", "email"],
+        "inherited fields first, in declaration order"
+    );
+    assert!(cases.iter().all(|case| case["isConstant"] == true));
+
+    let features = document["requiredFeatures"].as_array().expect("features");
+    assert!(features.contains(&Value::from("property-unions-v1")));
+    assert!(
+        !features.contains(&Value::from("update-intrinsics-v1")),
+        "naming a field is not calling an intrinsic"
+    );
+}
+
+#[test]
+fn nx_ir_omits_property_unions_a_program_never_references() {
+    let artifact = artifact_from_source(
+        r#"
+type User = { name:string }
+let user() = <User name="Ada" />
+"#,
+    );
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+
+    let names = ir_declaration_names(&document);
+    assert!(!names.iter().any(|name| name == "User.Property"));
+    assert!(!names.iter().any(|name| name == "User.Update"));
+    assert_eq!(
+        document["requiredFeatures"],
+        serde_json::json!(["eager-v1"]),
+        "a program without property references lists what it did before they existed"
+    );
+    let user = ir_declaration(&document, "User");
+    assert!(user["kind"].get("propertyTarget").is_none());
+}
+
+#[test]
+fn nx_ir_encodes_a_property_case_as_a_constant_union_case() {
+    let artifact = artifact_from_source(
+        r#"
+type User = { name:string }
+let key() = {User.Property.name}
+"#,
+    );
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+
+    let key = ir_declaration(&document, "key");
+    let case = find_ir_op_where(key, "unionCase", &|op| {
+        op["union"]["name"] == "User.Property"
+    })
+    .expect("union case op");
+    assert_eq!(case["caseName"], "name");
+    assert_eq!(case["isConstant"], true);
+    assert_eq!(
+        ir_declaration(&document, "User.Property")["id"],
+        case["union"]["declaration"]
+    );
+}
+
+#[test]
+fn nx_ir_encodes_an_intrinsic_call_distinctly_from_a_function_call() {
+    let artifact = artifact_from_source(
+        r#"
+type User = { name:string }
+let same(user:User) = {user}
+let v() = {apply(<User name="Ada" />, <User.Update name="Bo" />)}
+let w() = {same(<User name="Ada" />)}
+let c() = {changed(<User.Update name="Bo" />)}
+"#,
+    );
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+
+    let v = ir_declaration(&document, "v");
+    let call = find_ir_op_where(v, "intrinsicCall", &|_| true).expect("intrinsic call op");
+    assert_eq!(call["intrinsic"], "apply");
+    assert_eq!(call["args"].as_array().map(Vec::len), Some(2));
+    assert!(call.get("fieldOrder").is_none());
+    assert!(find_ir_op_where(v, "call", &|_| true).is_none());
+
+    // `changed` carries the target's declared field order with it.
+    let c = ir_declaration(&document, "c");
+    let call = find_ir_op_where(c, "intrinsicCall", &|_| true).expect("changed call op");
+    assert_eq!(call["intrinsic"], "changed");
+    assert_eq!(call["fieldOrder"], Value::Array(vec![Value::from("name")]));
+
+    let w = ir_declaration(&document, "w");
+    assert!(find_ir_op_where(w, "call", &|_| true).is_some());
+    assert!(find_ir_op_where(w, "intrinsicCall", &|_| true).is_none());
+
+    let features = document["requiredFeatures"].as_array().expect("features");
+    assert!(features.contains(&Value::from("update-intrinsics-v1")));
+    assert!(features.contains(&Value::from("update-records-v1")));
+}
+
+#[test]
+fn generated_javascript_serializes_a_property_case_as_its_field_name() {
+    let source = r#"
+type User = { name:string email:string? }
+let root() = <Box key={User.Property.email} />
+"#;
+    let output = execute_generated_javascript_root(source);
+    assert!(output.contains(r#""key":"email""#), "{}", output);
+    assert_json_values_eq(&output, &interpreter_json_root(source));
+}
+
+#[test]
+fn generated_javascript_applies_an_update_through_the_runtime() {
+    let source = r#"
+type User = { name:string email:string? }
+let root() = {apply(<User name="Ada" email="x@y" />, <User.Update email={null} />)}
+"#;
+    let artifact = artifact_from_source(source);
+    let module = generated_file(&artifact, CodegenTarget::JavaScript, "m0_main.js");
+    assert!(module.contains("nxApplyUpdate("), "{}", module);
+    assert!(
+        module.contains("nxApplyUpdate") && module.contains("./nx-runtime.js"),
+        "the operation is reached through the supplied runtime: {}",
+        module
+    );
+
+    let output = execute_generated_javascript_artifact_root(&artifact, "");
+    assert_json_values_eq(
+        &output,
+        r#"{ "$type": "User", "name": "Ada", "email": null }"#,
+    );
+    assert_json_values_eq(&output, &interpreter_json_root(source));
+}
+
+#[test]
+fn generated_javascript_lists_changed_fields_in_declaration_order() {
+    let source = r#"
+type User = { name:string email:string? age:int? }
+let root() = {changed(<User.Update age={null} name="Ada" />)}
+"#;
+    let output = execute_generated_javascript_root(source);
+    assert_json_values_eq(&output, r#"["name", "age"]"#);
+    assert_json_values_eq(&output, &interpreter_json_root(source));
+}
+
+#[test]
+fn generated_javascript_merges_and_diffs_like_the_interpreter() {
+    let cases = [
+        r#"
+type User = { name:string email:string? age:int? }
+let root() = {changed(merge(<User.Update age={null} />, <User.Update name="Ada" />))}
+"#,
+        r#"
+type Address = { city:string }
+type User = { name:string tags:string[] home:Address }
+let root() = {diff(<User name="Ada" tags={ "x" "y" } home=<Address city="Paris" /> />, <User name="Ada" tags={ "y" "x" } home=<Address city="Rome" /> />)}
+"#,
+        r#"
+type User = { name:string email:string? }
+let root() = {changed(diff(<User name="Ada" email="x@y" />, <User name="Bo" email="x@y" />))}
+"#,
+    ];
+    for source in cases {
+        let output = execute_generated_javascript_root(source);
+        assert_json_values_eq(&output, &interpreter_json_root(source));
+    }
+}
+
+/// An intrinsic call nested in an element property still imports its runtime helper.
+#[test]
+fn generated_javascript_calls_an_intrinsic_inside_an_element_property() {
+    let source = r#"
+type User = { name:string email:string? age:int? }
+let root() = <Box keys={changed(<User.Update age={null} name="Ada" />)} />
+"#;
+    let artifact = artifact_from_source(source);
+    let module = generated_file(&artifact, CodegenTarget::JavaScript, "m0_main.js");
+    assert!(
+        module.contains("import { nxChangedFields, nxElement }"),
+        "{}",
+        module
+    );
+
+    let output = execute_generated_javascript_artifact_root(&artifact, "");
+    assert_json_values_eq(&output, r#"{ "$type": "Box", "keys": ["name", "age"] }"#);
+    assert_json_values_eq(&output, &interpreter_json_artifact_root(&artifact));
+}
+
+/// A property union and an update record reached through a workspace import resolve to the
+/// declaring module's declarations, and `changed` carries the target's field order with it.
+#[test]
+fn generated_javascript_reaches_property_unions_and_intrinsics_across_workspace_modules() {
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "data.nx",
+                r#"
+export abstract type Named = { name:string }
+export type User extends Named = { email:string? age:int? }
+"#,
+            ),
+            (
+                "main.nx",
+                r#"
+import { User } from "./data.nx"
+let root() = <Box first={User.Property.name} keys={changed(<User.Update age={null} name="Ada" />)} />
+"#,
+            ),
+        ],
+        "main.nx",
+    );
+    let module = generated_file(&artifact, CodegenTarget::JavaScript, "m1_main.js");
+    assert!(
+        module.contains(r#"["name", "email", "age"]"#),
+        "the declared field order travels with the call: {}",
+        module
+    );
+    assert!(
+        module.contains("import { User_Property as m0_User_Property }"),
+        "{}",
+        module
+    );
+
+    let output = execute_generated_javascript_artifact_root(&artifact, "");
+    assert_json_values_eq(
+        &output,
+        r#"{ "$type": "Box", "first": "name", "keys": ["name", "age"] }"#,
+    );
+    assert_json_values_eq(&output, &interpreter_json_artifact_root(&artifact));
+}
+
+/// The JavaScript and TypeScript runtime modules are two hand-maintained copies, and nothing in
+/// generated-program execution reaches every branch of their intrinsic helpers. One script run
+/// against both pins each helper to the interpreter's answer for the same values — a record
+/// missing an optional field, a merged `null`, an order-less `changed` — and fails the moment the
+/// copies disagree.
+#[test]
+fn emitted_runtime_intrinsic_helpers_agree_across_targets() {
+    let script = r#"
+import * as rt from "./nx-runtime.js";
+const user = { $type: "User", name: "Ada", email: "x@y" };
+const partial = { $type: "User", name: "Ada" };
+const out = [];
+out.push(rt.nxApplyUpdate(user, { $type: "User.Update", email: null }));
+out.push(rt.nxMergeUpdates({ $type: "User.Update", name: "Ada", email: "x@y" }, { $type: "User.Update", email: null }));
+out.push(rt.nxDiffRecords(user, partial));
+out.push(rt.nxDiffRecords(partial, user));
+out.push(rt.nxDiffRecords(user, { $type: "User", name: "Ada", email: "x@y" }));
+out.push(rt.nxChangedFields({ $type: "User.Update", email: null, name: "Ada" }, ["name", "email", "age"]));
+try {
+  rt.nxChangedFields({ $type: "User.Update", name: "Ada" });
+  out.push("no error");
+} catch (error) {
+  out.push(error instanceof rt.NxRuntimeError ? error.message : String(error));
+}
+console.log(JSON.stringify(out));
+"#;
+    let expected = r#"[
+        { "$type": "User", "name": "Ada", "email": null },
+        { "$type": "User.Update", "name": "Ada", "email": null },
+        { "$type": "User.Update", "email": null },
+        { "$type": "User.Update", "email": "x@y" },
+        { "$type": "User.Update" },
+        ["name", "email"],
+        "nxChangedFields needs the update record's declared field order"
+    ]"#;
+
+    let mut outputs = Vec::new();
+    for target in [CodegenTarget::JavaScript, CodegenTarget::TypeScript] {
+        let output = execute_script_against_emitted_runtime(target, script);
+        assert_json_values_eq(&output, expected);
+        outputs.push(output);
+    }
+    assert_json_values_eq(&outputs[0], &outputs[1]);
+}
+
+#[test]
+fn generated_typescript_with_property_references_and_intrinsics_type_checks() {
+    let artifact = artifact_from_source(
+        r#"
+type User = { name:string email:string? age:int? }
+let key(): User.Property = {User.Property.email}
+let applied(): User = {apply(<User name="Ada" />, <User.Update email={null} />)}
+let merged(): User.Update = {merge(<User.Update name="Ada" />, <User.Update age=1 />)}
+let changedKeys(): User.Property[] = {changed(diff(<User name="Ada" />, <User name="Bo" />))}
+"#,
+    );
+    let module = generated_file(&artifact, CodegenTarget::TypeScript, "m0_main.ts");
+    assert!(module.contains("nxChangedFields("), "{}", module);
+    assert_generated_typescript_artifact_type_checks(&artifact);
 }

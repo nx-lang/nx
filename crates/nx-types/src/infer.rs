@@ -12,7 +12,7 @@ use nx_hir::{
     interface_component, interface_function_signature, interface_type_alias, interface_union,
     is_record_subtype, ExprId, InterfaceItemKind, Item, Name, PreparedBindingOrigin,
     PreparedItemKind, PreparedModule, PreparedNamespace, PropertyEntry, ResolvedPreparedItem,
-    UnionCaseDef, UnionDef,
+    UnionCaseDef, UnionDef, UpdateIntrinsic,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -72,6 +72,14 @@ impl UnionEntry {
     fn case_type(&self, case: Name) -> Type {
         Type::union_case_type(self.def.name.clone(), case, self.origin.clone())
     }
+}
+
+/// One value an action handler's body can return, as the routing check sees it.
+enum HandlerResultItem {
+    /// A value of this type, written at this span.
+    Value(Type, TextSpan),
+    /// An empty list, which a handler may never return.
+    EmptyList(TextSpan),
 }
 
 struct ElementBindingSpec {
@@ -280,12 +288,18 @@ impl<'a> InferenceContext<'a> {
 
             // Function calls
             ast::Expr::Call { func, args, span } => {
-                let func_ty = self.infer_expr(*func);
+                // An intrinsic resolves before anything in scope, so the callee is never looked
+                // up: a parameter or local named `merge` is invisible at a call.
+                if let Some(intrinsic) = self.intrinsic_callee(*func) {
+                    self.infer_intrinsic_call(intrinsic, args, *span)
+                } else {
+                    let func_ty = self.infer_expr(*func);
 
-                // Infer argument types
-                let arg_tys: Vec<_> = args.iter().map(|arg| self.infer_expr(*arg)).collect();
+                    // Infer argument types
+                    let arg_tys: Vec<_> = args.iter().map(|arg| self.infer_expr(*arg)).collect();
 
-                self.infer_call(&func_ty, args, &arg_tys, *span)
+                    self.infer_call(&func_ty, args, &arg_tys, *span)
+                }
             }
 
             // If expressions
@@ -374,6 +388,8 @@ impl<'a> InferenceContext<'a> {
                 if let Some(name) = self.flattened_expr_name(expr_id) {
                     if let Some(ty) = self.env.lookup(&name) {
                         ty.clone()
+                    } else if self.report_unresolved_property_reference(&name, *span) {
+                        Type::Error
                     } else if let Some((entry, case)) = self.union_case_from_qualified_name(&name) {
                         let union_name = entry.def.name.clone();
                         let case_name = case.name.clone();
@@ -416,9 +432,18 @@ impl<'a> InferenceContext<'a> {
                 properties,
                 span,
             } => self.infer_record_literal(record, properties, *span),
-            // TODO: Action handlers are lowered as lazy runtime callbacks. Wire them into
-            // expression-level type inference once the language has a first-class handler type.
-            ast::Expr::ActionHandler { .. } => Type::Error,
+            ast::Expr::ActionHandler {
+                action_name,
+                action_module_identity,
+                owner,
+                body,
+                ..
+            } => self.infer_action_handler(
+                action_name,
+                action_module_identity.as_deref(),
+                owner.as_ref(),
+                *body,
+            ),
 
             // Block expressions
             ast::Expr::Block { stmts: _, expr, .. } => {
@@ -614,6 +639,217 @@ impl<'a> InferenceContext<'a> {
         }
 
         self.env.pop_scope();
+    }
+
+    /// Infers a handler body where it is bound, then checks where each of its results can go.
+    ///
+    /// <para>The body sees what its binding site sees — the owner's props and state, enclosing
+    /// `let` bindings and loop variables, all already in the environment — plus `action`, typed by
+    /// the action the component emits. That action is resolved in the module that declared the
+    /// emit, since that is where its name was written.</para>
+    ///
+    /// <para>The handler value itself has no first-class type, so the expression stays
+    /// `Type::Error`, which no binding site reports. A handler property has no declared type to
+    /// check against; the body is what gets checked, here.</para>
+    fn infer_action_handler(
+        &mut self,
+        action_name: &Name,
+        action_module_identity: Option<&str>,
+        owner: Option<&Name>,
+        body: ExprId,
+    ) -> Type {
+        let action_ty = self.type_from_type_ref_in(
+            action_module_identity,
+            &ast::TypeRef::name(action_name.as_str()),
+        );
+        self.env.push_scope();
+        self.env.bind(Name::new("action"), action_ty);
+        self.infer_expr(body);
+        self.env.pop_scope();
+
+        let mut items = Vec::new();
+        self.collect_handler_result_items(body, &mut items);
+        for item in items {
+            match item {
+                HandlerResultItem::EmptyList(span) => self.error(
+                    "handler-result-empty",
+                    "Action handler must return at least one action or update record; found an empty list"
+                        .to_string(),
+                    span,
+                ),
+                HandlerResultItem::Value(ty, span) => {
+                    self.check_handler_result_item(owner, &ty, span)
+                }
+            }
+        }
+
+        Type::Error
+    }
+
+    /// Splits a handler body's result into the values it returns, each with where it was written.
+    ///
+    /// <para>A list literal is split by element, and each branch of an `if` and each arm of a
+    /// match separately, so each value is judged on its own type rather than on a join of
+    /// unrelated records. Anything else is judged by its type, a list type by its element
+    /// type.</para>
+    fn collect_handler_result_items(&self, expr_id: ExprId, items: &mut Vec<HandlerResultItem>) {
+        let raw_module = self.module.raw_module();
+        let span = raw_module.expr_span(expr_id);
+        match raw_module.expr(expr_id) {
+            ast::Expr::Array { elements, .. } if !elements.is_empty() => {
+                for element in elements {
+                    let ty = self
+                        .env
+                        .get_expr_type(*element)
+                        .cloned()
+                        .unwrap_or(Type::Error);
+                    items.push(HandlerResultItem::Value(ty, raw_module.expr_span(*element)));
+                }
+            }
+            ast::Expr::If {
+                then_branch,
+                else_branch: Some(else_branch),
+                ..
+            } => {
+                self.collect_handler_result_items(*then_branch, items);
+                self.collect_handler_result_items(*else_branch, items);
+            }
+            ast::Expr::Match {
+                arms, else_branch, ..
+            } => {
+                for arm in arms {
+                    self.collect_handler_result_items(arm.body, items);
+                }
+                if let Some(else_branch) = else_branch {
+                    self.collect_handler_result_items(*else_branch, items);
+                }
+            }
+            _ => match self
+                .env
+                .get_expr_type(expr_id)
+                .cloned()
+                .unwrap_or(Type::Error)
+            {
+                ty if Self::is_empty_list_type(&ty) => {
+                    items.push(HandlerResultItem::EmptyList(span))
+                }
+                Type::Array(inner) => items.push(HandlerResultItem::Value(*inner, span)),
+                ty => items.push(HandlerResultItem::Value(ty, span)),
+            },
+        }
+    }
+
+    /// Checks one handler result against where a handler bound at this site may send it.
+    ///
+    /// <para>Inside a component a result either patches that component's state — its own update
+    /// record — or goes to its parent, which only an action the component emits may do. At the root
+    /// there is no component to patch or parent to reach, so any action or update record is an
+    /// effect for the host.</para>
+    fn check_handler_result_item(&mut self, owner: Option<&Name>, ty: &Type, span: TextSpan) {
+        let named = match ty {
+            Type::Error => return,
+            Type::Named(named) => named,
+            other => {
+                self.report_handler_result_not_action(&other.to_string(), span);
+                return;
+            }
+        };
+        let Some(record) = self.record_definition_for(named) else {
+            // An unresolved `X.Update` was already reported where it was written, so a second
+            // diagnostic here would only repeat that the record does not exist.
+            if !nx_hir::is_update_record_name(named.name.as_str()) {
+                self.report_handler_result_not_action(named.name.as_str(), span);
+            }
+            return;
+        };
+        let Some(owner) = owner else {
+            if record.kind == nx_hir::RecordKind::Plain {
+                self.report_handler_result_not_action(named.name.as_str(), span);
+            }
+            return;
+        };
+
+        match &record.kind {
+            nx_hir::RecordKind::Plain => {
+                self.report_handler_result_not_action(named.name.as_str(), span)
+            }
+            nx_hir::RecordKind::Update { .. } => {
+                let own_update = nx_hir::update_record_name(owner.as_str());
+                let expected = match self.nominal_named_type(&own_update) {
+                    Type::Named(expected) if expected.origin().is_some() => Some(expected),
+                    _ => None,
+                };
+                match expected {
+                    Some(expected) if named.is_same_declaration_as(&expected) => {}
+                    Some(_) => self.error(
+                        "handler-update-wrong-target",
+                        format!(
+                            "Action handler inside component '{}' returns '{}', but only '{}' can change this component's state",
+                            owner, named.name, own_update
+                        ),
+                        span,
+                    ),
+                    // A component without state has no update record, so there is nothing to
+                    // change and no own record to name.
+                    None => self.error(
+                        "handler-update-wrong-target",
+                        format!(
+                            "Action handler inside component '{}' returns '{}', but '{}' declares no state to change",
+                            owner, named.name, owner
+                        ),
+                        span,
+                    ),
+                }
+            }
+            nx_hir::RecordKind::Action => {
+                if !self.component_emits_action(owner, named) {
+                    self.error(
+                        "handler-action-not-emitted",
+                        format!(
+                            "Action handler inside component '{}' returns action '{}', which '{}' does not emit; add '{}' to the component's emits to send it to the parent",
+                            owner, named.name, owner, named.name
+                        ),
+                        span,
+                    );
+                }
+            }
+        }
+    }
+
+    fn report_handler_result_not_action(&mut self, found: &str, span: TextSpan) {
+        self.error(
+            "handler-result-not-action",
+            format!(
+                "Action handler must return an action, an update record, or a non-empty list of those; found '{}'",
+                found
+            ),
+            span,
+        );
+    }
+
+    /// The record a named type denotes, read from its declaration where the type reached one.
+    fn record_definition_for(&self, named: &NamedType) -> Option<nx_hir::RecordDef> {
+        match named.origin() {
+            Some(origin) => nx_hir::resolve_record_definition_at(self.module, origin),
+            None => self.resolve_record_definition(&named.name),
+        }
+    }
+
+    /// Returns true when `component` declares or inherits an emit of exactly this action.
+    ///
+    /// <para>Each emit's action is resolved in the module that wrote the `emits` clause, and
+    /// compared by declaration, so a same-named action elsewhere does not count.</para>
+    fn component_emits_action(&mut self, component: &Name, action: &NamedType) -> bool {
+        let Some(contract) = self.effective_component_contract(component).ok().flatten() else {
+            return false;
+        };
+        contract.emits.iter().any(|emit| {
+            let emit_ty = self.type_from_type_ref_in(
+                Some(emit.module_identity.as_str()),
+                &ast::TypeRef::name(emit.emit.action_name.as_str()),
+            );
+            matches!(&emit_ty, Type::Named(emitted) if emitted.is_same_declaration_as(action))
+        })
     }
 
     /// Checks the default this component declares for one of its fields, where it declares one.
@@ -909,9 +1145,19 @@ impl<'a> InferenceContext<'a> {
                 }
             }
 
-            // Comparison: T × T → bool (where T supports comparison)
+            // Comparison: T × T → bool (where T supports comparison). Two cases of one union are
+            // comparable for equality with each other, since a value of that union is either of
+            // them; union cases have no order, so the relational operators stay rejected.
             Eq | Ne | Lt | Le | Gt | Ge => {
-                if self.type_satisfies_expected(lhs, rhs) || self.type_satisfies_expected(rhs, lhs)
+                let sibling_cases = matches!(op, Eq | Ne)
+                    && matches!(
+                        (lhs, rhs),
+                        (Type::UnionCase(lhs_case), Type::UnionCase(rhs_case))
+                            if lhs_case.shares_union_with(rhs_case)
+                    );
+                if sibling_cases
+                    || self.type_satisfies_expected(lhs, rhs)
+                    || self.type_satisfies_expected(rhs, lhs)
                 {
                     Type::boolean()
                 } else {
@@ -1456,6 +1702,8 @@ impl<'a> InferenceContext<'a> {
             return entry.case_type(case.name);
         }
 
+        self.report_unresolved_update_tag(&element.tag, span);
+
         // A tag that resolves to nothing has no binding contract, so there is nothing to check the
         // element's properties and content against. Every expression written inside it is still an
         // expression, though, and the four resolved paths above infer theirs as a side effect of
@@ -1472,6 +1720,386 @@ impl<'a> InferenceContext<'a> {
         }
 
         self.nominal_named_type(&element.tag)
+    }
+
+    /// Reports an unresolved tag spelled like an update record, which is never a host element.
+    ///
+    /// <para>Inside a component, lowering already rewrote a bare `Update` to the component's own
+    /// record, so a bare one that reaches here was written outside any component. `X.Update` that
+    /// did not resolve names a declaration with no update record: a component without state, an
+    /// update record itself, since update records have none of their own, or nothing at all. A
+    /// bare `Update` inside a component without state arrives here as that component's qualified
+    /// name, so this is the one diagnostic it gets.</para>
+    fn report_unresolved_update_tag(&mut self, tag: &Name, span: TextSpan) {
+        let suffix = nx_hir::UPDATE_RECORD_SUFFIX;
+        if tag.as_str() == suffix {
+            self.error(
+                "bare-update-outside-component",
+                "A bare 'Update' names the enclosing component's update record, and there is no enclosing component here; write the qualified form for the record to patch, as in '<Type.Update ... />'"
+                    .to_string(),
+                span,
+            );
+            return;
+        }
+        let Some(target) = tag
+            .as_str()
+            .strip_suffix(suffix)
+            .and_then(|prefix| prefix.strip_suffix('.'))
+        else {
+            return;
+        };
+        let target = Name::new(target);
+        let message = if self
+            .resolve_record_definition(&target)
+            .is_some_and(|record| record.update_target().is_some())
+        {
+            format!(
+                "Unknown type '{}': '{}' is an update record, and update records have no update record of their own",
+                tag, target
+            )
+        } else if self.is_property_union(&target) {
+            format!(
+                "Unknown type '{}': '{}' is a property union, and property unions have no update record",
+                tag, target
+            )
+        } else if self.resolve_component_definition(&target).is_some() {
+            format!(
+                "Unknown type '{}': component '{}' declares no state, so it has no update record",
+                tag, target
+            )
+        } else {
+            format!(
+                "Unknown type '{}': '{}' is not a record, action, or component with state",
+                tag, target
+            )
+        };
+        self.error("unknown-update-record", message, span);
+    }
+
+    /// Returns true when `name` reaches a derived property union here.
+    fn is_property_union(&self, name: &Name) -> bool {
+        self.union_defs
+            .get(name)
+            .is_some_and(|entry| entry.def.property_target().is_some())
+    }
+
+    /// Reports a member access whose base is spelled like a property union that resolves to
+    /// nothing, and returns whether it did.
+    ///
+    /// <para>Inside a component, lowering already rewrote a bare `Property` to the component's own
+    /// union, so a bare one that reaches here was written outside any component — unless something
+    /// declared here is actually named `Property`, in which case the access means that. `X.Property`
+    /// that did not resolve names a declaration with no property union: a component without state,
+    /// a derived declaration, since derived declarations have none of their own, or nothing at
+    /// all. Reporting here, at the first member access on the missing union, is what keeps the
+    /// access from cascading into a diagnostic about every segment after it.</para>
+    fn report_unresolved_property_reference(&mut self, name: &Name, span: TextSpan) -> bool {
+        let Some((base, _member)) = name.as_str().rsplit_once('.') else {
+            return false;
+        };
+        let suffix = nx_hir::PROPERTY_UNION_SUFFIX;
+        if base == suffix {
+            let base_name = Name::new(base);
+            if self.env.lookup(&base_name).is_some()
+                || self.union_defs.contains_key(&base_name)
+                || self.type_aliases.contains_key(&base_name)
+                || self.resolve_record_definition(&base_name).is_some()
+                || self.resolve_component_definition(&base_name).is_some()
+            {
+                return false;
+            }
+            self.error(
+                "bare-property-outside-component",
+                "A bare 'Property' names the enclosing component's property union, and there is no enclosing component here; write the qualified form for the declaration whose fields to name, as in 'Type.Property.field'"
+                    .to_string(),
+                span,
+            );
+            return true;
+        }
+        if !nx_hir::is_property_union_name(base) || self.union_defs.contains_key(&Name::new(base)) {
+            return false;
+        }
+        let target = Name::new(
+            base.strip_suffix(suffix)
+                .and_then(|prefix| prefix.strip_suffix('.'))
+                .unwrap_or(base),
+        );
+        let message = if self
+            .resolve_record_definition(&target)
+            .is_some_and(|record| record.update_target().is_some())
+        {
+            format!(
+                "Unknown type '{}': '{}' is an update record, and update records have no property union",
+                base, target
+            )
+        } else if self.is_property_union(&target) {
+            format!(
+                "Unknown type '{}': '{}' is a property union, and property unions have no property union of their own",
+                base, target
+            )
+        } else if self.resolve_component_definition(&target).is_some() {
+            format!(
+                "Unknown type '{}': component '{}' declares no state, so it has no property union",
+                base, target
+            )
+        } else {
+            format!(
+                "Unknown type '{}': '{}' is not a record, action, or component with state",
+                base, target
+            )
+        };
+        self.error("unknown-property-union", message, span);
+        true
+    }
+
+    /// The intrinsic a call's callee names, when the callee is a bare identifier naming one.
+    fn intrinsic_callee(&self, func: ExprId) -> Option<UpdateIntrinsic> {
+        match self.module.raw_module().expr(func) {
+            ast::Expr::Ident(name) => UpdateIntrinsic::from_name(name.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Types a call to one of the update intrinsics by rule.
+    ///
+    /// <para>These are the typing rules the four prelude signatures would state if the language
+    /// had generics — `apply<T>(record:T, update:T.Update): T` and its siblings — and nothing
+    /// else, so that the day they become declared signatures this is a deletion. "Same `T`" is
+    /// decided by declaring origin: `Named.Update` is not `User.Update` even though `User` extends
+    /// `Named`, and a same-named record in another module is not this one.</para>
+    fn infer_intrinsic_call(
+        &mut self,
+        intrinsic: UpdateIntrinsic,
+        args: &[ExprId],
+        span: TextSpan,
+    ) -> Type {
+        let arg_tys: Vec<_> = args.iter().map(|arg| self.infer_expr(*arg)).collect();
+        if arg_tys.len() != intrinsic.arity() {
+            self.error(
+                "intrinsic-arg-count",
+                format!(
+                    "Intrinsic '{}' expects {} argument{}, got {}",
+                    intrinsic.name(),
+                    intrinsic.arity(),
+                    if intrinsic.arity() == 1 { "" } else { "s" },
+                    arg_tys.len()
+                ),
+                span,
+            );
+            return Type::Error;
+        }
+        if arg_tys.iter().any(Type::is_error) {
+            return Type::Error;
+        }
+
+        match intrinsic {
+            UpdateIntrinsic::Apply => {
+                let record = self.intrinsic_record_argument(intrinsic, 0, &arg_tys[0], span);
+                let update = self.intrinsic_update_argument(intrinsic, 1, &arg_tys[1], span);
+                let (Some(record), Some((update, target))) = (record, update) else {
+                    return Type::Error;
+                };
+                if !self.update_patches_record(&update, &target, &record) {
+                    self.error(
+                        "intrinsic-target-mismatch",
+                        format!(
+                            "Intrinsic 'apply' takes a record and its own update record: '{}' is not '{}'",
+                            update.name,
+                            nx_hir::update_record_name(record.name.as_str())
+                        ),
+                        span,
+                    );
+                    return Type::Error;
+                }
+                Type::Named(record)
+            }
+            UpdateIntrinsic::Merge => {
+                let first = self.intrinsic_update_argument(intrinsic, 0, &arg_tys[0], span);
+                let second = self.intrinsic_update_argument(intrinsic, 1, &arg_tys[1], span);
+                let (Some((first, _)), Some((second, _))) = (first, second) else {
+                    return Type::Error;
+                };
+                if !first.is_same_declaration_as(&second) {
+                    self.error(
+                        "intrinsic-target-mismatch",
+                        format!(
+                            "Intrinsic 'merge' takes two updates of one record: '{}' and '{}' target different records",
+                            first.name, second.name
+                        ),
+                        span,
+                    );
+                    return Type::Error;
+                }
+                Type::Named(first)
+            }
+            UpdateIntrinsic::Diff => {
+                let before = self.intrinsic_record_argument(intrinsic, 0, &arg_tys[0], span);
+                let after = self.intrinsic_record_argument(intrinsic, 1, &arg_tys[1], span);
+                let (Some(before), Some(after)) = (before, after) else {
+                    return Type::Error;
+                };
+                if !before.is_same_declaration_as(&after) {
+                    self.error(
+                        "intrinsic-target-mismatch",
+                        format!(
+                            "Intrinsic 'diff' takes two records of one type: '{}' is not '{}'",
+                            after.name, before.name
+                        ),
+                        span,
+                    );
+                    return Type::Error;
+                }
+                if self
+                    .record_definition_for(&before)
+                    .is_some_and(|record| record.is_abstract)
+                {
+                    self.error(
+                        "intrinsic-argument-type",
+                        format!(
+                            "Intrinsic 'diff' takes concrete records, and '{}' is abstract",
+                            before.name
+                        ),
+                        span,
+                    );
+                    return Type::Error;
+                }
+                self.derived_type_of(&before, nx_hir::update_record_name)
+            }
+            UpdateIntrinsic::Changed => {
+                let Some((update, target)) =
+                    self.intrinsic_update_argument(intrinsic, 0, &arg_tys[0], span)
+                else {
+                    return Type::Error;
+                };
+                let property_union = self.property_union_of_update(&update, &target);
+                if property_union.is_error() {
+                    self.error(
+                        "unknown-property-union",
+                        format!(
+                            "Intrinsic 'changed' yields '{}' cases, but that property union could not be reached from here",
+                            nx_hir::property_union_name(target.as_str())
+                        ),
+                        span,
+                    );
+                    return Type::Error;
+                }
+                Type::array(property_union)
+            }
+        }
+    }
+
+    /// The record-shaped, non-derived type an intrinsic argument must have, or a diagnostic.
+    fn intrinsic_record_argument(
+        &mut self,
+        intrinsic: UpdateIntrinsic,
+        index: usize,
+        ty: &Type,
+        span: TextSpan,
+    ) -> Option<NamedType> {
+        if let Type::Named(named) = ty {
+            if let Some(record) = self.record_definition_for(named) {
+                if record.update_target().is_none() {
+                    return Some(named.clone());
+                }
+            }
+        }
+        self.error(
+            "intrinsic-argument-type",
+            format!(
+                "Argument {} to intrinsic '{}' must be a record or action; found '{}'",
+                index + 1,
+                intrinsic.name(),
+                ty
+            ),
+            span,
+        );
+        None
+    }
+
+    /// The update-record type an intrinsic argument must have, with the name of the declaration
+    /// it patches, or a diagnostic.
+    fn intrinsic_update_argument(
+        &mut self,
+        intrinsic: UpdateIntrinsic,
+        index: usize,
+        ty: &Type,
+        span: TextSpan,
+    ) -> Option<(NamedType, Name)> {
+        if let Type::Named(named) = ty {
+            if let Some(target) = self
+                .record_definition_for(named)
+                .and_then(|record| record.update_target().cloned())
+            {
+                return Some((named.clone(), target));
+            }
+        }
+        self.error(
+            "intrinsic-argument-type",
+            format!(
+                "Argument {} to intrinsic '{}' must be an update record; found '{}'",
+                index + 1,
+                intrinsic.name(),
+                ty
+            ),
+            span,
+        );
+        None
+    }
+
+    /// Returns true when `update` is the update record of exactly the declaration `record` is.
+    ///
+    /// <para>The update record's target is a name its own module wrote, so it is resolved there
+    /// and compared to the record by declaration rather than by spelling.</para>
+    fn update_patches_record(&self, update: &NamedType, target: &Name, record: &NamedType) -> bool {
+        let Some(update_origin) = update.origin() else {
+            return update.name.as_str()
+                == nx_hir::update_record_name(record.name.as_str()).as_str();
+        };
+        let target_origin = self
+            .module
+            .resolve_in_module(
+                PreparedNamespace::Type,
+                update_origin.module_identity(),
+                target,
+            )
+            .map(|resolved| resolved.declaring_origin());
+        nx_hir::same_declaration(
+            target_origin.as_ref(),
+            target,
+            record.origin(),
+            &record.name,
+        )
+    }
+
+    /// The type of a declaration derived from `record` — its update record or property union —
+    /// reached through the module that declared the record, so it resolves whether or not this
+    /// module can spell it.
+    fn derived_type_of(&mut self, record: &NamedType, derive: fn(&str) -> Name) -> Type {
+        let derived = derive(record.name.as_str());
+        if let Some(origin) = record.origin() {
+            let module_identity = origin.module_identity().to_string();
+            if let Some(ty) = self.nominal_type_in_module(&module_identity, &derived) {
+                return ty;
+            }
+        }
+        let mut seen = FxHashSet::default();
+        self.resolve_named_type(&derived, &mut seen)
+    }
+
+    /// The property union of the declaration `update` patches, resolved in the update record's
+    /// own module.
+    fn property_union_of_update(&mut self, update: &NamedType, target: &Name) -> Type {
+        let property_union = nx_hir::property_union_name(target.as_str());
+        if let Some(origin) = update.origin() {
+            let module_identity = origin.module_identity().to_string();
+            if let Some(ty) = self.nominal_type_in_module(&module_identity, &property_union) {
+                return ty;
+            }
+        }
+        match self.union_defs.get(&property_union) {
+            Some(entry) => Type::Union(entry.shape()),
+            None => Type::Error,
+        }
     }
 
     fn check_element_bindings_against_function(
@@ -2900,6 +3528,9 @@ impl<'a> InferenceContext<'a> {
                     origin,
                     ..
                 } => {
+                    if matches!(origin, PreparedBindingOrigin::Local) {
+                        self.reject_reserved_intrinsic_name(&func.name, "function", func.span);
+                    }
                     let return_type = if let Some(ty) = func.return_type.as_ref() {
                         self.type_from_type_ref_in(Some(&declaring_module), ty)
                     } else {
@@ -2941,12 +3572,36 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
+    /// Rejects a top-level declaration that would bind an intrinsic's name.
+    ///
+    /// <para>The intrinsic resolves first at every call, so the declaration could never be reached
+    /// through that name; saying so here is what keeps the author from writing it and wondering
+    /// why it does nothing.</para>
+    fn reject_reserved_intrinsic_name(&mut self, name: &Name, kind: &str, span: TextSpan) {
+        if nx_hir::is_update_intrinsic(name.as_str()) {
+            self.error(
+                "intrinsic-name-reserved",
+                format!(
+                    "'{}' is an intrinsic function and cannot be declared as a {}",
+                    name, kind
+                ),
+                span,
+            );
+        }
+    }
+
     fn register_value_bindings(&mut self) {
-        let bindings = self
+        let mut bindings = self
             .module
             .bindings(PreparedNamespace::Value)
             .cloned()
             .collect::<Vec<_>>();
+        // A local value's initializer may read a value declared before it, so local values are
+        // inferred in declaration order; everything reached from elsewhere carries its own type.
+        bindings.sort_by_key(|binding| match &binding.target {
+            nx_hir::PreparedBindingTarget::Local { definition_id } => (0, definition_id.index()),
+            _ => (1, 0),
+        });
 
         for binding in bindings {
             let Some(resolved) = self.module.resolve_prepared_item(&binding) else {
@@ -2965,6 +3620,7 @@ impl<'a> InferenceContext<'a> {
                     ..
                 } => {
                     let binding_ty = if module_identity == self.module.module_identity() {
+                        self.reject_reserved_intrinsic_name(&value.name, "value", value.span);
                         let actual = self.infer_expr(value.value);
                         if let Some(ty_ref) = value.ty.as_ref() {
                             let expected = self.type_from_type_ref(ty_ref);
@@ -3072,14 +3728,12 @@ impl<'a> InferenceContext<'a> {
         nx_hir::resolve_record_definition_with_module(self.module, name)
     }
 
+    /// The union an expression names, when it is a bare or dotted type name such as `Status` or
+    /// `User.Property`.
     fn union_info_for_expr(&self, expr_id: ExprId) -> Option<UnionType> {
-        match self.module.raw_module().expr(expr_id) {
-            ast::Expr::Ident(name) => {
-                let mut seen = FxHashSet::default();
-                self.union_info_from_name(name, &mut seen)
-            }
-            _ => None,
-        }
+        let name = self.flattened_expr_name(expr_id)?;
+        let mut seen = FxHashSet::default();
+        self.union_info_from_name(&name, &mut seen)
     }
 
     /// The union a type name denotes here, following type aliases.
@@ -3875,6 +4529,7 @@ mod tests {
                     span,
                 },
             ],
+            property_target: None,
             span,
         };
         module.add_item(Item::Union(union_def));
@@ -3916,6 +4571,7 @@ mod tests {
                 fields: Vec::new(),
                 span,
             }],
+            property_target: None,
             span,
         };
         module.add_item(Item::Union(union_def));
@@ -3948,6 +4604,7 @@ mod tests {
                 fields: Vec::new(),
                 span,
             }],
+            property_target: None,
             span,
         };
         module.add_item(Item::Union(union_def));
@@ -3990,6 +4647,7 @@ mod tests {
                 fields: Vec::new(),
                 span,
             }],
+            property_target: None,
             span,
         };
         module.add_item(Item::Union(union_def));

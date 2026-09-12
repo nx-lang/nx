@@ -1,5 +1,5 @@
 use nx_diagnostics::TextSpan;
-use nx_hir::{ast, ElementId, ExprId, LocalDefinitionId, Name};
+use nx_hir::{ast, ElementId, ExprId, LocalDefinitionId, Name, UpdateIntrinsic};
 use nx_interpreter::{ModuleQualifiedItemRef, ResolvedItemKind, RuntimeModuleId};
 use nx_types::Type;
 use std::path::PathBuf;
@@ -115,12 +115,20 @@ pub enum CodegenDeclarationKind {
         /// itself. A runtime taking host input needs this to hold that line, the way analysis holds
         /// it for NX source.
         is_abstract: bool,
+        /// The record or component this derived `<Target>.Update` record patches, if it is one.
+        ///
+        /// <para>An update record's fields are all optional and carry no defaults, so a runtime
+        /// normalizing one keeps an absent field absent rather than filling it.</para>
+        update_target: Option<CodegenReference>,
     },
     Component(CodegenComponent),
     Union {
         cases: Vec<CodegenUnionCase>,
         /// The union's abstract bases, nearest first, inherited by every case.
         bases: Vec<CodegenReference>,
+        /// The record, action, or component a derived `<Target>.Property` union names the fields
+        /// of. Present only on property unions, whose cases are all constant.
+        property_target: Option<CodegenReference>,
     },
     TypeAlias,
     Unsupported(CodegenUnsupportedConstruct),
@@ -237,6 +245,15 @@ pub enum CodegenExpressionKind {
         callee: Box<CodegenExpression>,
         args: Vec<CodegenExpression>,
     },
+    /// A call to one of the update intrinsics, which has no callee declaration: the checker
+    /// resolved the name before any binding, and a runtime supplies the operation.
+    IntrinsicCall {
+        intrinsic: UpdateIntrinsic,
+        args: Vec<CodegenExpression>,
+        /// For `changed`, the declared field order of the update record its argument is typed
+        /// as, which the result is sorted by; `None` for the other intrinsics.
+        field_order: Option<Vec<String>>,
+    },
     If {
         condition: Box<CodegenExpression>,
         then_branch: Box<CodegenExpression>,
@@ -293,6 +310,11 @@ pub enum CodegenExpressionKind {
         properties: Vec<CodegenProperty>,
         content_field: Option<String>,
         content: Vec<CodegenExpression>,
+        /// Whether this constructs a derived update record, whose absent fields stay absent.
+        ///
+        /// <para>Every other record fills an absent field from its default or with `null`; a patch
+        /// must not, because an absent field means "unchanged".</para>
+        is_update: bool,
     },
     ComponentDescriptor(CodegenComponentDescriptor),
     Element(CodegenElement),

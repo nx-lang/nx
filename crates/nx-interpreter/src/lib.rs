@@ -17,6 +17,7 @@ pub use context::{ExecutionContext, ResourceLimits};
 pub use error::{RuntimeError, RuntimeErrorKind};
 pub use interpreter::{
     ComponentDispatchResult, ComponentEvaluateResult, ComponentInitResult, Interpreter,
+    HANDLER_INVOCATION_TYPE_NAME,
 };
 pub use resolved_program::{
     ModuleQualifiedExprRef, ModuleQualifiedItemRef, ResolvedItemKind, ResolvedModule,

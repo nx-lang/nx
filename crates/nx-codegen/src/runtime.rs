@@ -42,7 +42,7 @@ export type NxSchema =
   | { readonly nullable: NxSchema }
   | { readonly enum: readonly string[] }
   | NxRecordSchema
-  | { readonly union: readonly NxRecordSchema[] };
+  | { readonly union: readonly NxSchema[] };
 
 export type NxFieldSchema = {
   readonly name: string;
@@ -301,7 +301,12 @@ export function nxNormalizeValue(value: NxValue, schema: NxSchema, path: string)
   if (typeof schema === "object" && "union" in schema) {
     const input = nxAssertRecord(value, path);
     const typeName = nxRequireRecordType(input, path);
-    const caseSchema = schema.union.find((candidate) => candidate.record === typeName);
+    // A mixed union also lists its constant cases as enum schemas; only a record case can
+    // match a `$type`.
+    const caseSchema = schema.union.find(
+      (candidate): candidate is NxRecordSchema =>
+        typeof candidate === "object" && "record" in candidate && candidate.record === typeName,
+    );
     if (caseSchema == null) {
       throw new NxRuntimeError([
         {
@@ -407,6 +412,71 @@ export function nxDiagnosticsFromError(error: unknown): readonly NxDiagnostic[] 
 
 export function nxRuntimeError(message: string): never {
   throw new NxRuntimeError([{ code: "runtime-error", message }]);
+}
+
+export function nxApplyUpdate<T>(record: T, update: unknown): T {
+  const { $type: _update, ...fields } = update as Record<string, NxValue>;
+  return { ...(record as Record<string, NxValue>), ...fields } as T;
+}
+
+export function nxMergeUpdates<T>(first: T, second: T): T {
+  const { $type: _second, ...later } = second as Record<string, NxValue>;
+  return { ...(first as Record<string, NxValue>), ...later } as T;
+}
+
+export function nxDiffRecords(before: unknown, after: unknown): any {
+  const beforeRecord = before as Record<string, NxValue>;
+  const afterRecord = after as Record<string, NxValue>;
+  const output: Record<string, NxValue> = { $type: `${String(beforeRecord.$type)}.Update` };
+  // A field either record leaves out reads as `null`, so a field only one of them carries
+  // still compares.
+  for (const key of new Set([...Object.keys(beforeRecord), ...Object.keys(afterRecord)])) {
+    if (key === "$type") {
+      continue;
+    }
+    const next = afterRecord[key] ?? null;
+    if (!nxValuesEqual(beforeRecord[key] ?? null, next)) {
+      output[key] = next;
+    }
+  }
+  return output;
+}
+
+export function nxChangedFields(update: unknown, order: readonly string[]): any[] {
+  if (!Array.isArray(order)) {
+    nxRuntimeError("nxChangedFields needs the update record's declared field order");
+  }
+  const keys = Object.keys(update as Record<string, NxValue>).filter((key) => key !== "$type");
+  const position = (key: string): number => {
+    const index = order.indexOf(key);
+    return index < 0 ? order.length : index;
+  };
+  return keys.sort((left, right) => position(left) - position(right));
+}
+
+function nxValuesEqual(left: NxValue, right: NxValue): boolean {
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((item, index) => nxValuesEqual(item, right[index] ?? null))
+    );
+  }
+  if (left !== null && typeof left === "object") {
+    if (right === null || typeof right !== "object") {
+      return false;
+    }
+    const leftRecord = left as Record<string, NxValue>;
+    const rightRecord = right as Record<string, NxValue>;
+    const leftKeys = Object.keys(leftRecord);
+    const rightKeys = Object.keys(rightRecord);
+    return (
+      leftKeys.length === rightKeys.length &&
+      leftKeys.every((key) => nxValuesEqual(leftRecord[key] ?? null, rightRecord[key] ?? null))
+    );
+  }
+  return left === right;
 }
 "#
     .to_string()
@@ -610,7 +680,12 @@ export function nxNormalizeValue(value, schema, path) {
   if (typeof schema === "object" && Object.prototype.hasOwnProperty.call(schema, "union")) {
     const input = nxAssertRecord(value, path);
     const typeName = nxRequireRecordType(input, path);
-    const caseSchema = schema.union.find((candidate) => candidate.record === typeName);
+    // A mixed union also lists its constant cases as enum schemas; only a record case can
+    // match a `$type`.
+    const caseSchema = schema.union.find(
+      (candidate) =>
+        typeof candidate === "object" && "record" in candidate && candidate.record === typeName,
+    );
     if (caseSchema == null) {
       throw new NxRuntimeError([
         {
@@ -712,6 +787,67 @@ export function nxDiagnosticsFromError(error) {
 
 export function nxRuntimeError(message) {
   throw new NxRuntimeError([{ code: "runtime-error", message }]);
+}
+
+export function nxApplyUpdate(record, update) {
+  const { $type: _update, ...fields } = update;
+  return { ...record, ...fields };
+}
+
+export function nxMergeUpdates(first, second) {
+  const { $type: _second, ...later } = second;
+  return { ...first, ...later };
+}
+
+export function nxDiffRecords(before, after) {
+  const output = { $type: `${String(before.$type)}.Update` };
+  // A field either record leaves out reads as `null`, so a field only one of them carries
+  // still compares.
+  for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (key === "$type") {
+      continue;
+    }
+    const next = after[key] ?? null;
+    if (!nxValuesEqual(before[key] ?? null, next)) {
+      output[key] = next;
+    }
+  }
+  return output;
+}
+
+export function nxChangedFields(update, order) {
+  if (!Array.isArray(order)) {
+    nxRuntimeError("nxChangedFields needs the update record's declared field order");
+  }
+  const keys = Object.keys(update).filter((key) => key !== "$type");
+  const position = (key) => {
+    const index = order.indexOf(key);
+    return index < 0 ? order.length : index;
+  };
+  return keys.sort((left, right) => position(left) - position(right));
+}
+
+function nxValuesEqual(left, right) {
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((item, index) => nxValuesEqual(item, right[index] ?? null))
+    );
+  }
+  if (left !== null && typeof left === "object") {
+    if (right === null || typeof right !== "object") {
+      return false;
+    }
+    const leftKeys = Object.keys(left);
+    const rightKeys = Object.keys(right);
+    return (
+      leftKeys.length === rightKeys.length &&
+      leftKeys.every((key) => nxValuesEqual(left[key] ?? null, right[key] ?? null))
+    );
+  }
+  return left === right;
 }
 "#
     .to_string()

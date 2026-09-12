@@ -125,6 +125,9 @@ pub enum RuntimeErrorKind {
 
     /// Dispatched action is not declared by the target component
     UnsupportedComponentAction { component: SmolStr, action: SmolStr },
+
+    /// A dispatched handler invocation names a token the snapshot does not hold.
+    UnknownHandlerToken { token: SmolStr },
 }
 
 impl fmt::Display for RuntimeErrorKind {
@@ -242,6 +245,11 @@ impl fmt::Display for RuntimeErrorKind {
                 f,
                 "Component '{}' does not declare emitted action '{}'",
                 component, action
+            ),
+            RuntimeErrorKind::UnknownHandlerToken { token } => write!(
+                f,
+                "Unknown handler token '{}': handler tokens are valid only with the snapshot returned alongside the rendered output they were read from",
+                token
             ),
         }
     }

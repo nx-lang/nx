@@ -203,7 +203,7 @@ public class NxEndToEndTests
             """
             external component <TextInput />
             component <SearchBox emits { SearchSubmitted { query:string } } /> = { <TextInput /> }
-            let DoSearch(query:string) = { query }
+            action DoSearch = { query:string }
             let root() = { <SearchBox onSearchSubmitted=<DoSearch query={action.query} /> /> }
             """);
 
@@ -253,7 +253,7 @@ public class NxEndToEndTests
             """
             external component <TextInput />
             component <SearchBox emits { SearchSubmitted { query:string } } /> = { <TextInput /> }
-            let DoSearch(query:string) = { query }
+            action DoSearch = { query:string }
             let root() = { <SearchBox onSearchSubmitted=<DoSearch query={action.query} /> /> }
             """);
 

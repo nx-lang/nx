@@ -328,26 +328,24 @@ impl<'a> UndefinedIdentifierChecker<'a> {
                 }
                 Item::Component(component) => {
                     let scope = self.scope_manager.create_child(self.scope_manager.root());
-                    let props = crate::effective_component_contract_for_name(
-                        self.module,
-                        &component.name,
-                    )
-                    .ok()
-                    .flatten()
-                    .map(|contract| {
-                        contract
-                            .props
-                            .into_iter()
-                            .map(|field| (field.name, field.span))
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_else(|| {
-                        component
-                            .props
-                            .iter()
-                            .map(|field| (field.name.clone(), field.span))
-                            .collect::<Vec<_>>()
-                    });
+                    let props =
+                        crate::effective_component_contract_for_name(self.module, &component.name)
+                            .ok()
+                            .flatten()
+                            .map(|contract| {
+                                contract
+                                    .props
+                                    .into_iter()
+                                    .map(|field| (field.name, field.span))
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_else(|| {
+                                component
+                                    .props
+                                    .iter()
+                                    .map(|field| (field.name.clone(), field.span))
+                                    .collect::<Vec<_>>()
+                            });
 
                     // A default is built where the field it defaults is materialized: the props in
                     // order, then the state. So a default sees the fields before it and nothing
@@ -448,7 +446,15 @@ impl<'a> UndefinedIdentifierChecker<'a> {
                 self.check_expr(*expr, scope);
             }
             ast::Expr::Call { func, args, .. } => {
-                self.check_expr(*func, scope);
+                // An intrinsic resolves before any lexical binding, so its name is never undefined
+                // and never looked up in scope.
+                let is_intrinsic = matches!(
+                    self.module.raw_module().expr(*func),
+                    ast::Expr::Ident(name) if crate::is_update_intrinsic(name.as_str())
+                );
+                if !is_intrinsic {
+                    self.check_expr(*func, scope);
+                }
                 for arg in args {
                     self.check_expr(*arg, scope);
                 }
@@ -492,12 +498,18 @@ impl<'a> UndefinedIdentifierChecker<'a> {
                 self.check_expr(*index, scope);
             }
             ast::Expr::Member { base, .. } => {
-                let is_prepared_top_level = self
-                    .flattened_expr_name(expr_id)
+                let flattened = self.flattened_expr_name(expr_id);
+                let is_prepared_top_level = flattened
                     .as_ref()
                     .is_some_and(|name| self.resolves_prepared_binding(name));
+                // A bare `Property` heading a member access outside a component is the checker's
+                // diagnostic, which names the qualified spelling; calling it undefined here as
+                // well would only repeat that less usefully.
+                let is_bare_property = flattened.as_ref().is_some_and(|name| {
+                    name.as_str().split('.').next() == Some(crate::PROPERTY_UNION_SUFFIX)
+                });
 
-                if !is_prepared_top_level {
+                if !is_prepared_top_level && !is_bare_property {
                     self.check_expr(*base, scope);
                 }
             }

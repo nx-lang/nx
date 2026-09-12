@@ -1,7 +1,8 @@
 use crate::typegen::model::{
     ExportedExternalState, ExportedFieldDefault, ExportedLiteralDefault, ExportedModule,
     ExportedPolymorphicDescendant, ExportedRecord, ExportedRecordField, ExportedType,
-    ExportedTypeGraph, ExportedUnion, ExportedUnionCase, ImportedType, ImportedTypeKind,
+    ExportedTypeGraph, ExportedUnion, ExportedUnionCase, ExportedUpdate, ImportedType,
+    ImportedTypeKind,
 };
 use crate::typegen::writer::CodeWriter;
 use crate::typegen::{GenerateTypesOptions, GeneratedFile};
@@ -174,10 +175,21 @@ fn render_module(
             }
     });
 
+    let needs_update_helpers = module
+        .declarations
+        .iter()
+        .any(|declaration| matches!(&declaration.item, ExportedType::Update(_)));
+
     writer.line("using System;");
     writer.line("using System.Text.Json.Serialization;");
     writer.line("using MessagePack;");
-    if needs_enum_serialization_helpers || needs_polymorphic_serialization_helpers {
+    if needs_update_helpers {
+        writer.line("using NxLang.Nx;");
+    }
+    if needs_enum_serialization_helpers
+        || needs_polymorphic_serialization_helpers
+        || needs_update_helpers
+    {
         writer.line("using NxLang.Nx.Serialization;");
     }
 
@@ -223,7 +235,55 @@ fn emit_declaration(
         ExportedType::Union(union_def) => emit_union(writer, union_def, context),
         ExportedType::Record(record) => emit_record(writer, record, context),
         ExportedType::ExternalState(state) => emit_external_state(writer, state, context),
+        ExportedType::Update(update) => emit_update(writer, update, context),
     }
+}
+
+/// Emits an update companion whose properties are `NxOptional<T>`.
+///
+/// <para>An unset property is omitted on write and a missing key reads back unset, in JSON through
+/// `WhenWritingDefault` (unset is the struct's default) and in MessagePack through
+/// `NxUpdateRecordMessagePackFormatter`. A property set to `null` is written as `null`. The
+/// `$type` discriminator is always written, since a patch names the record it patches.</para>
+fn emit_update(
+    writer: &mut CodeWriter,
+    update: &ExportedUpdate,
+    context: &CSharpRenderContext<'_>,
+) {
+    let class_name = sanitize_csharp_identifier(&update.name);
+    writer.line(&format!(
+        "[MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<{class_name}>))]"
+    ));
+    // The discriminator member is named so no field of the record can collide with it.
+    let field_members = update
+        .fields
+        .iter()
+        .map(|field| sanitize_csharp_member_name(&field.name))
+        .collect::<BTreeSet<_>>();
+    let mut discriminator_member = "NxType".to_string();
+    while field_members.contains(&discriminator_member) || discriminator_member == class_name {
+        discriminator_member.push('_');
+    }
+    writer.block(&format!("public sealed class {class_name}"), |writer| {
+        emit_dual_wire_name_attributes(writer, "$type");
+        writer.line(&format!(
+            "public string {} => \"{}\";",
+            discriminator_member,
+            escape_csharp_string_literal(&update.discriminator)
+        ));
+
+        for field in &update.fields {
+            let field_type = csharp_type(&field.ty, context);
+            writer.blank_line();
+            emit_dual_wire_name_attributes(writer, &field.name);
+            writer.line("[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]");
+            writer.line(&format!(
+                "public NxOptional<{}> {} {{ get; set; }}",
+                field_type.text,
+                sanitize_csharp_member_name(&field.name)
+            ));
+        }
+    });
 }
 
 /// Emits a constant union as a CLR `enum` with its authored-string wire format (design D4).
@@ -813,7 +873,7 @@ fn csharp_type_name_inner(
                         is_reference: true,
                         is_nullable: false,
                     },
-                    ExportedType::ExternalState(_) => CSharpType {
+                    ExportedType::ExternalState(_) | ExportedType::Update(_) => CSharpType {
                         text: generated_type_name(
                             other,
                             context.namespace,

@@ -431,6 +431,9 @@ mod tests {
             action_module_identity: "format-test.nx".to_string(),
             body,
             captured: FxHashMap::default(),
+            owner: None,
+            owner_state: Vec::new(),
+            token: None,
         };
 
         // `<ActionHandler ... />` is not a real element, so printing one produced output that
@@ -592,6 +595,9 @@ mod tests {
             action_module_identity: "test.nx".to_string(),
             body,
             captured: FxHashMap::default(),
+            owner: None,
+            owner_state: Vec::new(),
+            token: None,
         };
 
         let error = format_value(&value).expect_err("an action handler has no NX spelling");

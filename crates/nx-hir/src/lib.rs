@@ -62,15 +62,16 @@ pub use db::{DatabaseImpl, NxDatabase};
 pub use records::{
     effective_record_shape, effective_record_shape_at, effective_record_shape_for_name,
     effective_record_shape_for_name_in, is_record_subtype, record_declaration_origin,
-    resolve_record_definition, resolve_record_definition_with_module, validate_record_definitions,
-    EffectiveRecordShape, InvalidBaseReason, RecordAncestor, RecordResolutionError,
+    resolve_record_definition, resolve_record_definition_at, resolve_record_definition_with_module,
+    validate_record_definitions, EffectiveRecordShape, InvalidBaseReason, RecordAncestor,
+    RecordResolutionError,
 };
 pub use scope::{
     build_scopes, check_undefined_identifiers, Scope, ScopeId, ScopeManager, Symbol, SymbolKind,
 };
 pub use unions::{
-    resolve_union_definition, validate_union_definitions, InvalidUnionBaseReason,
-    UnionValidationError,
+    complete_property_unions, resolve_union_definition, validate_union_definitions,
+    InvalidUnionBaseReason, UnionValidationError,
 };
 
 /// Parses, lowers, and validates a module from source text.
@@ -353,6 +354,12 @@ impl UnionDef {
     pub fn is_constant_union(&self) -> bool {
         self.base.is_none() && self.cases.iter().all(UnionCaseDef::is_fieldless)
     }
+
+    /// Returns the name of the record, action, or component whose fields this union names, when
+    /// this is a derived `<Target>.Property` union.
+    pub fn property_target(&self) -> Option<&Name> {
+        self.property_target.as_ref()
+    }
 }
 
 /// Discriminated union definition.
@@ -366,8 +373,136 @@ pub struct UnionDef {
     pub base: Option<Name>,
     /// Cases in source order.
     pub cases: Vec<UnionCaseDef>,
+    /// The record, action, or component this union is the derived `<Target>.Property` of.
+    ///
+    /// <para>A property union has one constant case per effective field of its target (a
+    /// component's state fields), in declaration order with inherited fields first. It has no
+    /// base, cannot be extended, and has no derived declarations of its own.</para>
+    pub property_target: Option<Name>,
     /// Source span
     pub span: TextSpan,
+}
+
+/// Suffix of the derived property union name: `<Target>.Property`.
+pub const PROPERTY_UNION_SUFFIX: &str = "Property";
+
+/// Returns the name of the derived property union for `target`.
+pub fn property_union_name(target: &str) -> Name {
+    Name::new(&format!("{}.{}", target, PROPERTY_UNION_SUFFIX))
+}
+
+/// Returns true when `name` is spelled like a derived property union, `<Target>.Property`.
+pub fn is_property_union_name(name: &str) -> bool {
+    name.strip_suffix(PROPERTY_UNION_SUFFIX)
+        .is_some_and(|prefix| prefix.ends_with('.'))
+}
+
+/// The intrinsic functions over update records.
+///
+/// <para>An intrinsic is typed by rule from its arguments rather than by a declared signature, and
+/// its name resolves before any lexical binding: a parameter, `let`, loop variable, or import
+/// cannot shadow one, and a top-level declaration cannot take one of the names.</para>
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UpdateIntrinsic {
+    /// `apply(record, update): T` — the record with each present field of the update replaced.
+    Apply,
+    /// `merge(first, second): T.Update` — every present field of either, the second winning.
+    Merge,
+    /// `diff(before, after): T.Update` — the fields whose values differ, taken from `after`.
+    Diff,
+    /// `changed(update): T.Property[]` — the present fields, in declaration order.
+    Changed,
+}
+
+impl UpdateIntrinsic {
+    /// Every intrinsic, in the order the language reference lists them.
+    pub const ALL: [UpdateIntrinsic; 4] = [
+        UpdateIntrinsic::Apply,
+        UpdateIntrinsic::Merge,
+        UpdateIntrinsic::Diff,
+        UpdateIntrinsic::Changed,
+    ];
+
+    /// Returns the intrinsic `name` denotes, if it is one of the reserved names.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|intrinsic| intrinsic.name() == name)
+    }
+
+    /// The reserved name this intrinsic is called by.
+    pub fn name(self) -> &'static str {
+        match self {
+            UpdateIntrinsic::Apply => "apply",
+            UpdateIntrinsic::Merge => "merge",
+            UpdateIntrinsic::Diff => "diff",
+            UpdateIntrinsic::Changed => "changed",
+        }
+    }
+
+    /// The number of arguments this intrinsic takes.
+    pub fn arity(self) -> usize {
+        match self {
+            UpdateIntrinsic::Apply | UpdateIntrinsic::Merge | UpdateIntrinsic::Diff => 2,
+            UpdateIntrinsic::Changed => 1,
+        }
+    }
+}
+
+/// Returns true when `name` is one of the reserved intrinsic function names.
+pub fn is_update_intrinsic(name: &str) -> bool {
+    UpdateIntrinsic::from_name(name).is_some()
+}
+
+/// Every type annotation one declaration writes.
+///
+/// This is the definition of which annotations count as a reference to a declaration — the one
+/// IR emission and typegen both use to find the derived declarations a program names.
+pub fn item_type_refs(item: &Item) -> Vec<&ast::TypeRef> {
+    match item {
+        Item::Function(function) => function
+            .params
+            .iter()
+            .map(|param| &param.ty)
+            .chain(function.return_type.as_ref())
+            .collect(),
+        Item::Value(value) => value.ty.iter().collect(),
+        Item::Component(component) => component
+            .props
+            .iter()
+            .chain(component.state.iter())
+            .map(|field| &field.ty)
+            .collect(),
+        Item::TypeAlias(alias) => vec![&alias.ty],
+        Item::Union(union_def) => union_def
+            .cases
+            .iter()
+            .flat_map(|case| case.fields.iter().map(|field| &field.ty))
+            .collect(),
+        Item::Record(record) => record.properties.iter().map(|field| &field.ty).collect(),
+    }
+}
+
+/// Every type name `ty` mentions, in the order written.
+pub fn type_ref_names(ty: &ast::TypeRef) -> Vec<&Name> {
+    fn collect<'a>(ty: &'a ast::TypeRef, names: &mut Vec<&'a Name>) {
+        match ty {
+            ast::TypeRef::Name(name) => names.push(name),
+            ast::TypeRef::Array(inner) | ast::TypeRef::Nullable(inner) => collect(inner, names),
+            ast::TypeRef::Function {
+                params,
+                return_type,
+            } => {
+                for param in params {
+                    collect(param, names);
+                }
+                collect(return_type, names);
+            }
+        }
+    }
+    let mut names = Vec::new();
+    collect(ty, &mut names);
+    names
 }
 
 /// Record field definition.
@@ -492,13 +627,48 @@ pub struct EffectiveEmit {
     pub module_identity: String,
 }
 
-/// Distinguishes ordinary records from action records.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Distinguishes ordinary records from action records and derived update records.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecordKind {
     /// Standard `type Name = { ... }` record declaration.
     Plain,
     /// `action Name = { ... }` declaration.
     Action,
+    /// Derived `<Target>.Update` patch record, synthesized for every record, action, and
+    /// stateful component.
+    ///
+    /// <para>An update record has the target's effective fields (a component's state fields), every
+    /// one optional and none carrying a default. An absent field means "unchanged"; a present
+    /// `null` means "set to null".</para>
+    Update {
+        /// Name of the record, action, or component this update record patches.
+        target: Name,
+    },
+}
+
+impl RecordKind {
+    /// Returns the `(Label, singular, plural)` wording diagnostics use for this kind.
+    pub fn labels(&self) -> (&'static str, &'static str, &'static str) {
+        match self {
+            RecordKind::Plain => ("Record", "record", "records"),
+            RecordKind::Action => ("Action", "action", "actions"),
+            RecordKind::Update { .. } => ("Update record", "update record", "update records"),
+        }
+    }
+}
+
+/// Suffix of the derived update record name: `<Target>.Update`.
+pub const UPDATE_RECORD_SUFFIX: &str = "Update";
+
+/// Returns the name of the derived update record for `target`.
+pub fn update_record_name(target: &str) -> Name {
+    Name::new(&format!("{}.{}", target, UPDATE_RECORD_SUFFIX))
+}
+
+/// Returns true when `name` is spelled like a derived update record, `<Target>.Update`.
+pub fn is_update_record_name(name: &str) -> bool {
+    name.strip_suffix(UPDATE_RECORD_SUFFIX)
+        .is_some_and(|prefix| prefix.ends_with('.'))
 }
 
 /// Record type definition.
@@ -524,6 +694,14 @@ impl RecordDef {
     /// Returns true when this record was declared with the `action` keyword.
     pub fn is_action(&self) -> bool {
         self.kind == RecordKind::Action
+    }
+
+    /// Returns the patched target's name when this is a derived update record.
+    pub fn update_target(&self) -> Option<&Name> {
+        match &self.kind {
+            RecordKind::Update { target } => Some(target),
+            _ => None,
+        }
     }
 
     /// Returns true when this record is declared as abstract.

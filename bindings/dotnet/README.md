@@ -462,8 +462,8 @@ NxComponentInitResult<TextInputElement> init =
 
 byte[] savedSnapshot = init.StateSnapshot;
 
-NxComponentDispatchResult<SearchSubmittedAction> dispatch =
-    NxRuntime.DispatchComponentActions<SearchSubmittedAction[], SearchSubmittedAction>(
+NxComponentDispatchResult<TextInputElement, SearchSubmittedAction> dispatch =
+    NxRuntime.DispatchComponentActions<SearchSubmittedAction[], TextInputElement, SearchSubmittedAction>(
         source,
         savedSnapshot,
         new[]
@@ -475,6 +475,69 @@ NxComponentDispatchResult<SearchSubmittedAction> dispatch =
         });
 ```
 
+A dispatch result carries the body re-rendered against the new state (`Rendered`), the effects for the host in
+order (`Effects`), and the snapshot to pass to the next call (`StateSnapshot`). A failing batch throws
+`NxEvaluationException` and leaves the snapshot you passed in as the current state.
+
+### Handlers in Rendered Output
+
+Rendered output from initialization and dispatch represents each bound handler as an `ActionHandler` record with the
+action it accepts and a `token`. Type the property as `NxActionHandlerRef` to read it, and dispatch a
+`NxHandlerInvocation<TAction>` to run the handler. An update record it returns patches the component's state:
+
+```csharp
+string source = """
+    external component <Button value:int = 0 emits { Tapped { } } />
+    component <Counter /> = {
+      state { count:int = 0 }
+      <Button value={count} onTapped=<Update count={count + 1} /> />
+    }
+    """;
+
+[MessagePackObject]
+public sealed class ButtonElement
+{
+    [Key("value")] public int Value { get; set; }
+    [Key("onTapped")] public NxActionHandlerRef OnTapped { get; set; } = new();
+}
+
+[MessagePackObject]
+public sealed class ButtonTapped
+{
+    [Key("$type")] public string Type { get; set; } = "Button.Tapped";
+}
+
+NxComponentInitResult<ButtonElement> init = NxRuntime.InitializeComponent<ButtonElement>(source, "Counter");
+
+NxComponentDispatchResult<ButtonElement, object> tapped =
+    NxRuntime.DispatchComponentActions<NxHandlerInvocation<ButtonTapped>[], ButtonElement, object>(
+        source,
+        init.StateSnapshot,
+        new[] { init.Rendered.OnTapped.Invoke(new ButtonTapped()) });
+
+// tapped.Rendered.Value == 1; use tapped.Rendered.OnTapped for the next dispatch.
+```
+
+A token is valid only with the snapshot returned by the same call: every dispatch, even one with an empty batch,
+returns fresh tokens and retires the previous ones. Pure evaluation output carries no tokens. A batch that mixes
+emitted actions and handler invocations can be passed as an `object[]`.
+
+### Update Records and `NxOptional<T>`
+
+Generated `<Name>_update` DTOs type every property as `NxOptional<T>`, which tells an unset property ("leave this
+field unchanged") apart from one set to `null`. Unset properties are omitted from both JSON and MessagePack, and a
+missing key reads back as unset:
+
+```csharp
+User_update patch = new() { Email = null };   // Name stays unset
+string json = JsonSerializer.Serialize(patch); // {"$type":"User.Update","email":null}
+```
+
+The runtime checks every record a host passes in — as a prop, in explicit state, or inside an action (even one with
+no bound handler), at any nesting depth — against its NX declaration. A property the NX type does not declare, or `null` for a
+non-nullable one, fails the call with an `NxEvaluationException` naming the field, so a DTO that has drifted from
+the NX source cannot turn "unchanged" into "set to null".
+
 If the host wants JSON results instead of typed MessagePack models:
 
 ```csharp
@@ -484,7 +547,7 @@ NxComponentInitResult<JsonElement> initJson =
         "SearchBox",
         new SearchBoxProps { Placeholder = "Find docs" });
 
-NxComponentDispatchResult<JsonElement> dispatchJson =
+NxComponentDispatchResult<JsonElement, JsonElement> dispatchJson =
     NxRuntime.DispatchComponentActionsJson(
         source,
         initJson.StateSnapshot,
