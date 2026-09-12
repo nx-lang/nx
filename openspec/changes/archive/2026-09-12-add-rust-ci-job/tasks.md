@@ -8,7 +8,7 @@
 ## 2. Add the Rust job to the build workflow
 
 - [x] 2.1 Add a `rust` job (`name: 🦀 Rust`) to `.github/workflows/build.yml` on `ubuntu-latest` with `timeout-minutes: 30`: checkout (same pinned `actions/checkout` SHA as the other jobs), `pnpm/action-setup@v4`, `actions/setup-node@v4` with `node-version: '24'` and `cache: 'pnpm'`, `Swatinem/rust-cache@v2`, `pnpm install --frozen-lockfile`, `cargo fmt --all --check`, and `cargo test --workspace`; include the same "rustup picks the toolchain from rust-toolchain.toml" comment `deploy-playground.yml` carries. Verify `actionlint` (if installed) or a YAML parse reports no errors, and that the job has no `needs`.
-- [ ] 2.2 Push the branch and open or update the pull request. Verify the `🦀 Rust` job runs, that its log shows `node --version` reporting 24 and the codegen JavaScript and TypeScript tests executing rather than skipping, and that it finishes green.
+- [x] 2.2 Push the branch and open or update the pull request. Verify the `🦀 Rust` job runs, that its log shows `node --version` reporting 24 and the codegen JavaScript and TypeScript tests executing rather than skipping, and that it finishes green.
 - [x] 2.3 Extract the job's pnpm, Node, Rust-cache, and `pnpm install` steps into
   `.github/actions/setup-rust-node/action.yaml`, call it from both the `rust` job and
   `deploy-playground.yml`'s `validate` job, and add the action's path to that workflow's `paths`

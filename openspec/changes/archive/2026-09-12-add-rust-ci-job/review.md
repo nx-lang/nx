@@ -35,7 +35,7 @@ spec deltas to review)
 
 ## Findings
 
-### 🔴 Open - RF1 Task 2.2 is unfinished: the `🦀 Rust` job has never actually run, and nothing is committed
+### ✅ Verified - RF1 Task 2.2 is unfinished: the `🦀 Rust` job has never actually run, and nothing is committed
 - **Severity:** Medium
 - **Evidence:** `tasks.md` item 2.2 ("Push the branch and open or update the pull request. Verify the
   `🦀 Rust` job runs... and that it finishes green") is the one unchecked task, and `git status` shows
@@ -55,6 +55,24 @@ spec deltas to review)
   directories), so how to commit is the user's call. Everything locally verifiable still passes
   after this fix pass: `cargo fmt --all --check` clean, `cargo test --workspace` green,
   `actionlint` clean, `openspec validate --strict` valid. Task 2.2 stays unchecked.
+- **Verification:** Verified against a real CI run. The branch is committed and pushed (`934cfe6`
+  for this change, `aed9a9b` for an unrelated .NET doc-comment fix) and PR
+  [#23](https://github.com/nx-lang/nx/pull/23) is open, so task 2.2 is now marked done. In run
+  [34715125679](https://github.com/nx-lang/nx/actions/runs/34715125679) the `🦀 Rust` job
+  **succeeded**, and its log satisfies each of 2.2's checks:
+  `node: v24.20.0` from the setup step; `test result: ok. 89 passed; 0 failed` for nx-codegen; and
+  `javascript_output_executes_as_esm`, `generated_typescript_type_checks`, and
+  `generated_component_typescript_type_checks` each reported `... ok`, so the tests that used to
+  skip executed. `grep -ci skipping` over the whole job log returns 0. The preconditions I could
+  only infer locally all held on the runner: `pnpm install --frozen-lockfile` resolved against the
+  root lockfile on a clean checkout, `runtime/typescript`'s `tsc` was present for the TypeScript
+  tests, and `cargo test --workspace` compiled `bindings/node/native` with no `Cargo.lock` and no
+  exclusion needed. The one failure in that run was `🏭 Build (ubuntu-latest)`'s
+  `dotnet format --verify-no-changes` step on a pre-existing DOC104 warning in
+  `NxOptionalSerialization.cs`, unrelated to this change and fixed in `aed9a9b`; every other job
+  (all three `🏭 Build` OSes, `📦 Editor assets`, and the VS Code Extension workflow) was green.
+  The branch-protection question under Questions is still open — the job is green but gates nothing
+  until it is a required check.
 
 ### ✅ Verified - RF2 Two `tsc` tests inline ~30 lines each that are byte-identical to `assert_generated_typescript_artifact_type_checks`
 - **Severity:** Medium
