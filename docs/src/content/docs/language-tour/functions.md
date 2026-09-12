@@ -85,6 +85,13 @@ Every record also has an update record, so the same patch shape works outside co
 `<User.Update email={null} />` sets `email` to null and leaves every other field alone. See
 [Updating state](/reference/syntax/functions#updating-state).
 
+A field can also be named as a value. `User.Property.email` is a case of the derived constant union
+`User.Property`, so a sort key or a column list is typed by the fields that exist, and inside a
+component a bare `Property` names the component's own. Four intrinsics work on any update record:
+`apply(record, update)`, `merge(first, second)`, `diff(before, after)`, and `changed(update)`, which
+lists the present fields as `User.Property` cases. See
+[Property references](/reference/syntax/functions#property-references).
+
 ## Paren-style functions
 
 ```nx

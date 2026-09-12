@@ -124,6 +124,8 @@ pub enum InterfaceItemKind {
     Union {
         base: Option<Name>,
         cases: Vec<InterfaceUnionCase>,
+        /// The target of a derived `<Target>.Property` union, when this is one.
+        property_target: Option<Name>,
         span: TextSpan,
     },
     Record {
@@ -810,10 +812,16 @@ pub fn interface_component(item: &InterfaceItem) -> Option<Component> {
 /// Converts imported interface metadata into union-like view when possible.
 pub fn interface_union(item: &InterfaceItem) -> Option<UnionDef> {
     match &item.item {
-        InterfaceItemKind::Union { base, cases, span } => Some(UnionDef {
+        InterfaceItemKind::Union {
+            base,
+            cases,
+            property_target,
+            span,
+        } => Some(UnionDef {
             name: Name::new(item.item_name.as_str()),
             visibility: item.visibility,
             base: base.clone(),
+            property_target: property_target.clone(),
             cases: cases
                 .iter()
                 .map(|case| UnionCaseDef {

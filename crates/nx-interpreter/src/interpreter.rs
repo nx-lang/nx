@@ -13,7 +13,7 @@ use nx_hir::{
     EffectiveField, ElementId, ExprId, Function, Item, LocalDefinitionId, LoweredModule,
     ModuleNamespace, Name, PreparedBinding, PreparedBindingOrigin, PreparedBindingTarget,
     PreparedItemKind, PreparedModule, PropertyEntry, RecordKind, UnionCaseDef, UnionCaseField,
-    UnionDef,
+    UnionDef, UpdateIntrinsic,
 };
 use nx_types::{
     common_supertype, is_object_type, resolve_type_ref_with, resolve_type_ref_with_seen,
@@ -2576,6 +2576,11 @@ impl Interpreter {
             arg_values.push(self.eval_expr(module, ctx, *arg_expr)?);
         }
 
+        // An intrinsic resolves before any declaration, exactly as the checker resolved it.
+        if let Some(intrinsic) = UpdateIntrinsic::from_name(func_name.as_str()) {
+            return self.eval_update_intrinsic(module, intrinsic, arg_values);
+        }
+
         match self.resolve_item(module, func_name.as_str()) {
             Some((target_module, Item::Function(function))) => self.eval_function_call(
                 target_module,
@@ -2611,6 +2616,185 @@ impl Interpreter {
                 name: SmolStr::new(func_name.as_str()),
             })),
         }
+    }
+
+    /// Evaluates one of the update intrinsics on already-evaluated arguments.
+    fn eval_update_intrinsic(
+        &self,
+        module: &LoweredModule,
+        intrinsic: UpdateIntrinsic,
+        mut args: Vec<Value>,
+    ) -> Result<Value, RuntimeError> {
+        if args.len() != intrinsic.arity() {
+            return Err(RuntimeError::new(
+                RuntimeErrorKind::ParameterCountMismatch {
+                    expected: intrinsic.arity(),
+                    actual: args.len(),
+                    function: SmolStr::new(intrinsic.name()),
+                },
+            ));
+        }
+        let second = if intrinsic.arity() == 2 {
+            args.pop()
+        } else {
+            None
+        };
+        let first = args.pop().expect("arity checked");
+        match intrinsic {
+            UpdateIntrinsic::Apply => {
+                self.apply_update_record(module, first, second.expect("arity checked"))
+            }
+            UpdateIntrinsic::Merge => {
+                Self::merge_update_records(first, second.expect("arity checked"))
+            }
+            UpdateIntrinsic::Diff => {
+                self.diff_records(module, first, second.expect("arity checked"))
+            }
+            UpdateIntrinsic::Changed => self.changed_fields(module, first),
+        }
+    }
+
+    /// Reads a record value's name and fields, or reports what the intrinsic got instead.
+    fn record_parts(
+        value: Value,
+        intrinsic: UpdateIntrinsic,
+        expected: &str,
+    ) -> Result<(Name, FxHashMap<SmolStr, Value>), RuntimeError> {
+        match value {
+            Value::Record { type_name, fields } => Ok((type_name, fields)),
+            other => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: expected.to_string(),
+                actual: other.type_name().to_string(),
+                operation: format!("intrinsic '{}'", intrinsic.name()),
+            })),
+        }
+    }
+
+    /// `apply(record, update)`: every present field of the update replaces the record's, a present
+    /// `null` included, after the same validation a dispatched patch gets; every other field keeps
+    /// its value, and no default is re-evaluated.
+    fn apply_update_record(
+        &self,
+        module: &LoweredModule,
+        record: Value,
+        update: Value,
+    ) -> Result<Value, RuntimeError> {
+        let (type_name, mut fields) = Self::record_parts(record, UpdateIntrinsic::Apply, "record")?;
+        let (update_name, patch) =
+            Self::record_parts(update, UpdateIntrinsic::Apply, "update record")?;
+        let shape = self.effective_record_shape(module, &type_name)?;
+        for (name, value) in patch {
+            let Some(field) = shape
+                .fields
+                .iter()
+                .find(|field| field.name.as_str() == name.as_str())
+            else {
+                return Err(self.unknown_record_field_error(
+                    &update_name,
+                    name.as_str(),
+                    "intrinsic 'apply'",
+                ));
+            };
+            let operation = format!("intrinsic 'apply' field '{}.{}'", type_name, field.name);
+            let value = self.coerce_update_field_value(
+                module,
+                field,
+                value,
+                &operation,
+                ValueOrigin::Internal,
+            )?;
+            fields.insert(name, value);
+        }
+        Ok(Value::Record { type_name, fields })
+    }
+
+    /// Rejects a pair of records an intrinsic requires to share one declaration.
+    fn require_same_record_type(
+        intrinsic: UpdateIntrinsic,
+        first: &Name,
+        second: &Name,
+    ) -> Result<(), RuntimeError> {
+        if first == second {
+            return Ok(());
+        }
+        Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+            expected: format!("record '{}'", first),
+            actual: format!("record '{}'", second),
+            operation: format!("intrinsic '{}'", intrinsic.name()),
+        }))
+    }
+
+    /// `merge(first, second)`: every field present in either, the second winning where both are.
+    fn merge_update_records(first: Value, second: Value) -> Result<Value, RuntimeError> {
+        let (type_name, mut fields) =
+            Self::record_parts(first, UpdateIntrinsic::Merge, "update record")?;
+        let (later_name, later) =
+            Self::record_parts(second, UpdateIntrinsic::Merge, "update record")?;
+        Self::require_same_record_type(UpdateIntrinsic::Merge, &type_name, &later_name)?;
+        fields.extend(later);
+        Ok(Value::Record { type_name, fields })
+    }
+
+    /// `diff(before, after)`: the update carrying exactly the fields whose values differ, each
+    /// with its value from `after`, compared with the equality `==` uses.
+    fn diff_records(
+        &self,
+        module: &LoweredModule,
+        before: Value,
+        after: Value,
+    ) -> Result<Value, RuntimeError> {
+        let (type_name, before_fields) =
+            Self::record_parts(before, UpdateIntrinsic::Diff, "record")?;
+        let (after_name, after_fields) =
+            Self::record_parts(after, UpdateIntrinsic::Diff, "record")?;
+        Self::require_same_record_type(UpdateIntrinsic::Diff, &type_name, &after_name)?;
+        let shape = self.effective_record_shape(module, &type_name)?;
+        let mut changed = FxHashMap::default();
+        for field in &shape.fields {
+            let before_value = before_fields
+                .get(field.name.as_str())
+                .unwrap_or(&Value::Null);
+            let after_value = after_fields
+                .get(field.name.as_str())
+                .unwrap_or(&Value::Null);
+            if !crate::eval::logical::values_equal(before_value, after_value) {
+                changed.insert(SmolStr::new(field.name.as_str()), after_value.clone());
+            }
+        }
+        Ok(Value::Record {
+            type_name: nx_hir::update_record_name(type_name.as_str()),
+            fields: changed,
+        })
+    }
+
+    /// `changed(update)`: one `T.Property` case per present field, in the order the update
+    /// record's shape declares them rather than the order the update was written.
+    fn changed_fields(&self, module: &LoweredModule, update: Value) -> Result<Value, RuntimeError> {
+        let (type_name, fields) =
+            Self::record_parts(update, UpdateIntrinsic::Changed, "update record")?;
+        let Some(target) = self
+            .resolve_record_definition(module, type_name.as_str())
+            .and_then(|record| record.update_target().cloned())
+        else {
+            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: "update record".to_string(),
+                actual: format!("record '{}'", type_name),
+                operation: "intrinsic 'changed'".to_string(),
+            }));
+        };
+        let shape = self.effective_record_shape(module, &type_name)?;
+        let union = nx_hir::property_union_name(target.as_str());
+        Ok(Value::Array(
+            shape
+                .fields
+                .iter()
+                .filter(|field| fields.contains_key(field.name.as_str()))
+                .map(|field| Value::UnionCase {
+                    union: union.clone(),
+                    case: SmolStr::new(field.name.as_str()),
+                })
+                .collect(),
+        ))
     }
 
     fn eval_function_call(
@@ -3338,8 +3522,12 @@ impl Interpreter {
             if let Some(var_value) = ctx.try_lookup_variable(base_name.as_str()) {
                 return self.project_member(var_value, member, Some(base_name.as_str()));
             }
+        }
 
-            let qualified_case_name = format!("{}.{}", base_name.as_str(), member.as_str());
+        // A union named by a bare or dotted type name — `Status`, `ui.Fit`, `User.Property` —
+        // yields its case, or reports that the case does not exist on it.
+        if let Some(base_name) = self.flattened_expr_name(module, base_expr) {
+            let qualified_case_name = format!("{}.{}", base_name, member.as_str());
             if let Some((target_module, union_def, case)) =
                 self.resolve_union_case_definition(module, &qualified_case_name)
             {
@@ -3355,17 +3543,6 @@ impl Interpreter {
                 );
             }
 
-            // The union's own name reaches here only when the case above did not match, so the
-            // case does not exist on it.
-            if let Some(union_def) = self.resolve_union_definition(module, base_name) {
-                return Err(RuntimeError::new(RuntimeErrorKind::UnionCaseNotFound {
-                    union: SmolStr::new(union_def.name.as_str()),
-                    case: SmolStr::new(member.as_str()),
-                }));
-            }
-        }
-
-        if let Some(base_name) = self.flattened_expr_name(module, base_expr) {
             let base_name = Name::new(&base_name);
             if let Some(union_def) = self.resolve_union_definition(module, &base_name) {
                 return Err(RuntimeError::new(RuntimeErrorKind::UnionCaseNotFound {
@@ -5871,6 +6048,41 @@ mod tests {
             RuntimeErrorKind::TypeMismatch { actual, .. }
                 if actual == "unknown union case 'sparkly'"
         ));
+    }
+
+    /// The checker keeps typed source from reaching here with two targets; an ill-formed pair
+    /// of values still fails the same way the TypeScript runtime does.
+    #[test]
+    fn merge_and_diff_reject_records_of_different_types() {
+        let update = |type_name: &str| Value::Record {
+            type_name: Name::new(type_name),
+            fields: FxHashMap::default(),
+        };
+        let error = Interpreter::merge_update_records(update("User.Update"), update("Team.Update"))
+            .expect_err("merge of two targets");
+        let message = format!("{:?}", error);
+        assert!(
+            message.contains("User.Update") && message.contains("Team.Update"),
+            "{}",
+            message
+        );
+
+        let (module, interpreter) = lower_module_runtime(
+            r#"
+            type User = { name:string }
+            type Team = { name:string }
+            let render() = { 1 }
+            "#,
+        );
+        let error = interpreter
+            .diff_records(module.as_ref(), update("User"), update("Team"))
+            .expect_err("diff of two targets");
+        let message = format!("{:?}", error);
+        assert!(
+            message.contains("User") && message.contains("Team"),
+            "{}",
+            message
+        );
     }
 
     #[test]

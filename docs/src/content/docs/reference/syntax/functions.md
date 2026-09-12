@@ -110,7 +110,7 @@ component <SearchBox
 - State defaults are evaluated once during initialization. After that, state changes only through the component's update record (see [Updating state](#updating-state)).
 - Hosts own the serialized snapshot returned by initialization and must pass it back into later dispatch calls.
 - Dispatch preserves host action order and returns effect actions in the same order handlers produce them.
-- `Update` is reserved: a component cannot emit an action named `Update`, because `<Component>.Update` is its update record.
+- `Update` and `Property` are reserved: a component cannot emit an action named `Update` or `Property`, because `<Component>.Update` is its update record and `<Component>.Property` is its property union.
 
 ```nx
 action DoSearch = {
@@ -204,6 +204,61 @@ state. Everything the host passes in — props, explicit state, and the actions 
 or not a handler is bound for them — is checked against its declaration at every depth, so an
 update record nested in a prop, a component value, an array, or an action payload meets the same
 unknown-field and `null` rules as one the type checker saw.
+
+## Property references
+
+Every record, action, and component with `state` also has a derived **property union**,
+`T.Property`: a constant union with one case per field of `T` (a component's state fields, never
+its props), inherited fields first. A case names a field as a value, so a sort key, a column list,
+or a validation rule is typed by the fields that exist rather than by `string`.
+
+```nx
+type Contact = { title:string subtitle:string }
+
+external component <Table sortBy:Contact.Property columns:Contact.Property[] />
+
+let table = <Table sortBy=subtitle columns={ Contact.Property.title Contact.Property.subtitle } />
+let key: Contact.Property = {Contact.Property.title}
+```
+
+- `T.Property` behaves as any constant union: a bare case resolves at a site typed `T.Property`,
+  `if key is { title => "Title" subtitle => "Subtitle" }` is checked for exhaustiveness, and on the
+  wire a case is the bare field name, `"subtitle"`.
+- `T.Property` includes the fields `T` inherits, cannot be extended, and has no derived declarations
+  of its own; nor does `T.Update`. Two property unions are distinct types even when their cases
+  share names.
+- Inside a component, a bare `Property` names that component's own property union, as a bare
+  `Update` names its update record. Outside a component, write the qualified form.
+
+Four intrinsic functions work on update records without naming a record type. Their names are
+reserved: they resolve before anything in scope, cannot be shadowed, and a declaration named
+`apply`, `merge`, `diff`, or `changed` is rejected.
+
+| Call | Result |
+| --- | --- |
+| `apply(record, update)` | `T`: the record with each present field of the update replaced. |
+| `merge(first, second)` | `T.Update`: every field present in either, the later one winning. |
+| `diff(before, after)` | `T.Update`: exactly the fields whose values differ, taken from `after`. |
+| `changed(update)` | `T.Property[]`: the present fields, in declaration order. |
+
+Every intrinsic keeps the absent-versus-null rule: a present `null` is carried and an absent field
+is never invented, so `apply(u, merge(a, b))` equals `apply(apply(u, a), b)` and
+`apply(a, diff(a, b))` equals `b`.
+
+```nx
+external component <Button label:string emits { Tapped { } } />
+
+component <Counter step:int = 1 /> = {
+  state { count:int = 0 last:Counter.Property = {Property.count} }
+
+  <Row>
+    <Label text={count} />
+    <Button label="Add" onTapped=<Update count={count + step} last={Property.count} /> />
+  </Row>
+}
+
+let touched(patch:Counter.Update): Counter.Property[] = {changed(patch)}
+```
 
 ## Paren-style Functions
 

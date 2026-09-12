@@ -33,6 +33,10 @@ namespace NxLang.Sdk.Tests.Generated
         [Key("drafts")]
         [JsonPropertyName("drafts")]
         public User_update[] Drafts { get; set; } = default!;
+
+        [Key("sortBy")]
+        [JsonPropertyName("sortBy")]
+        public User_property? SortBy { get; set; }
     }
 
     [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<User_update>))]
@@ -69,5 +73,67 @@ namespace NxLang.Sdk.Tests.Generated
         [JsonPropertyName("drafts")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
         public NxOptional<User_update[]> Drafts { get; set; }
+
+        [Key("sortBy")]
+        [JsonPropertyName("sortBy")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public NxOptional<User_property?> SortBy { get; set; }
+    }
+
+    [JsonConverter(typeof(NxEnumJsonConverter<User_property, User_propertyWireFormat>))]
+    [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<User_property, User_propertyWireFormat>))]
+    public enum User_property
+    {
+        Name,
+        Email
+    }
+
+    internal sealed class User_propertyWireFormat : INxEnumWireFormat<User_property>
+    {
+        public static string Format(User_property value) =>
+            value switch
+            {
+                User_property.Name => "name",
+                User_property.Email => "email",
+                _ => throw new FormatException("Unknown NX enum value."),
+            };
+
+        public static User_property Parse(string value) =>
+            value switch
+            {
+                "name" => User_property.Name,
+                "email" => User_property.Email,
+                _ => throw new FormatException("Unknown NX enum member."),
+            };
+    }
+
+    [JsonConverter(typeof(NxEnumJsonConverter<Form_property, Form_propertyWireFormat>))]
+    [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<Form_property, Form_propertyWireFormat>))]
+    public enum Form_property
+    {
+        Pending,
+        Drafts,
+        SortBy
+    }
+
+    internal sealed class Form_propertyWireFormat : INxEnumWireFormat<Form_property>
+    {
+        public static string Format(Form_property value) =>
+            value switch
+            {
+                Form_property.Pending => "pending",
+                Form_property.Drafts => "drafts",
+                Form_property.SortBy => "sortBy",
+                _ => throw new FormatException("Unknown NX enum value."),
+            };
+
+        public static Form_property Parse(string value) =>
+            value switch
+            {
+                "pending" => Form_property.Pending,
+                "drafts" => Form_property.Drafts,
+                "sortBy" => Form_property.SortBy,
+                _ => throw new FormatException("Unknown NX enum member."),
+            };
     }
 }

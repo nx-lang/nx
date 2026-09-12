@@ -15,6 +15,7 @@ use crate::runtime::runtime_helper_source;
 use nx_api::ProgramArtifact;
 use nx_diagnostics::{Diagnostic, Label};
 use nx_hir::ast::{BinOp, Literal, TypeRef, UnOp};
+use nx_hir::UpdateIntrinsic;
 use nx_interpreter::{ResolvedItemKind, RuntimeModuleId};
 use nx_types::{Primitive, Type};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -24,16 +25,20 @@ const JS_PROGRAM_MODULE_MANIFEST_EXPORT_NAME: &str = "nxProgramModuleManifest";
 const JS_PROGRAM_MODULE_RESERVED_RUNTIME_NAMES: &[&str] = &[
     "NxResult",
     "NxValue",
+    "nxApplyUpdate",
     "nxAssertRecord",
     "nxAnySchema",
     "nxArraySchema",
     "nxBooleanSchema",
+    "nxChangedFields",
     "nxComponentSchema",
     "nxDiagnosticsFromError",
+    "nxDiffRecords",
     "nxElement",
     "nxEnumSchema",
     "nxExternalComponentSchema",
     "nxField",
+    "nxMergeUpdates",
     "nxMissingField",
     "nxNamedRecordSchema",
     "nxNormalizeValue",
@@ -219,6 +224,11 @@ fn collect_expression_source_codegen_diagnostics(
         }
         CodegenExpressionKind::Call { callee, args } => {
             collect_expression_source_codegen_diagnostics(module, callee, diagnostics);
+            for arg in args {
+                collect_expression_source_codegen_diagnostics(module, arg, diagnostics);
+            }
+        }
+        CodegenExpressionKind::IntrinsicCall { args, .. } => {
             for arg in args {
                 collect_expression_source_codegen_diagnostics(module, arg, diagnostics);
             }
@@ -1947,6 +1957,10 @@ fn expression_render_return_type(
         CodegenExpressionKind::Call { .. } => referenced_function_return_type(expression, context)
             .as_ref()
             .and_then(|ty| emit_known_type(current_module_id, ty, module, context)),
+        CodegenExpressionKind::IntrinsicCall { .. } => expression
+            .ty
+            .as_ref()
+            .and_then(|ty| emit_known_type(current_module_id, ty, module, context)),
         CodegenExpressionKind::If {
             then_branch,
             else_branch: Some(else_branch),
@@ -2042,6 +2056,16 @@ fn component_descriptor_render_return_type(
                 ComponentNameRole::Element,
             ))
         }
+    }
+}
+
+/// The runtime helper that implements one update intrinsic in generated code.
+fn intrinsic_runtime_helper(intrinsic: UpdateIntrinsic) -> &'static str {
+    match intrinsic {
+        UpdateIntrinsic::Apply => "nxApplyUpdate",
+        UpdateIntrinsic::Merge => "nxMergeUpdates",
+        UpdateIntrinsic::Diff => "nxDiffRecords",
+        UpdateIntrinsic::Changed => "nxChangedFields",
     }
 }
 
@@ -2755,6 +2779,29 @@ fn emit_expression(
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
+        CodegenExpressionKind::IntrinsicCall {
+            intrinsic,
+            args,
+            field_order,
+        } => {
+            let mut emitted_args = args
+                .iter()
+                .map(|arg| emit_expression(current_module_id, arg, context))
+                .collect::<Vec<_>>();
+            // `changed` lists fields in declaration order, which the runtime helper cannot know
+            // from the value alone once updates have been merged, so the order is passed along.
+            if let Some(order) = field_order {
+                emitted_args.push(format!(
+                    "[{}]",
+                    order.iter().map(|name| js_string(name)).collect::<Vec<_>>().join(", ")
+                ));
+            }
+            format!(
+                "{}({})",
+                intrinsic_runtime_helper(*intrinsic),
+                emitted_args.join(", ")
+            )
+        }
         CodegenExpressionKind::If {
             condition,
             then_branch,
@@ -3619,6 +3666,11 @@ fn collect_expression_value_references(
                 collect_expression_value_references(current_module_id, arg, output);
             }
         }
+        CodegenExpressionKind::IntrinsicCall { args, .. } => {
+            for arg in args {
+                collect_expression_value_references(current_module_id, arg, output);
+            }
+        }
         CodegenExpressionKind::If {
             condition,
             then_branch,
@@ -3889,8 +3941,14 @@ fn collect_expression_runtime_helpers(
             collect_expression_runtime_helpers(iterable, output);
             collect_expression_runtime_helpers(body, output);
         }
-        CodegenExpressionKind::Element(_) => {
+        CodegenExpressionKind::Element(element) => {
             output.insert("nxElement");
+            for property in &element.properties {
+                collect_expression_runtime_helpers(&property.value, output);
+            }
+            for content in &element.content {
+                collect_expression_runtime_helpers(content, output);
+            }
         }
         CodegenExpressionKind::Unsupported(_) => {
             output.insert("nxRuntimeError");
@@ -3905,6 +3963,14 @@ fn collect_expression_runtime_helpers(
         }
         CodegenExpressionKind::Call { callee, args } => {
             collect_expression_runtime_helpers(callee, output);
+            for arg in args {
+                collect_expression_runtime_helpers(arg, output);
+            }
+        }
+        CodegenExpressionKind::IntrinsicCall {
+            intrinsic, args, ..
+        } => {
+            output.insert(intrinsic_runtime_helper(*intrinsic));
             for arg in args {
                 collect_expression_runtime_helpers(arg, output);
             }

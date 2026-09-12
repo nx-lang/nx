@@ -46,20 +46,24 @@ let renderNotice(state:LoadState, compact:boolean) = {
 
 // A component changes its own state by returning its update record from a handler. Inside the
 // component, `<Update ... />` names `Counter.Update`, and it lists only the fields that change.
-// An action the component emits goes to its parent instead.
+// An action the component emits goes to its parent instead. `Property.count` names the `count`
+// state field as a value: a case of the derived constant union `Counter.Property`.
 action Reset = { }
 
 external component <Button label:string emits { Tapped { } } />
 
 component <Counter step:int = 1 emits { Reset } /> = {
-  state { count:int = 0 }
+  state { count:int = 0 last:Counter.Property = {Property.count} }
 
   <Row>
     <Label text={count} />
-    <Button label="Add" onTapped=<Update count={count + step} /> />
+    <Button label="Add" onTapped=<Update count={count + step} last={Property.count} /> />
     <Button label="Reset" onTapped={<Update count=0 /> <Reset />} />
   </Row>
 }
+
+// `changed` lists the fields an update record carries, in declaration order.
+let touched(patch:Counter.Update): Counter.Property[] = {changed(patch)}
 
 let makeValueChanged(value:string): SearchBox.ValueChanged = {
   <SearchBox.ValueChanged value={value} />

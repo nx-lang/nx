@@ -603,31 +603,25 @@ fn build_library_artifact_with_registry(
 
     // As in the workspace graph: a library module's contract has to be resolved in that module's
     // namespace, which is only known once every module has been prepared.
-    let prepared_files = (0..source_files.len())
+    let mut prepared_files = (0..source_files.len())
         .map(|index| {
             prepare_library_source_file(&root_path, &source_files, &dependency_context, index)
         })
         .collect::<Vec<_>>();
-    let namespaces = graph_namespaces(&prepared_files)
+    let namespaces = share_graph_namespaces(&mut prepared_files)
         .into_iter()
         .collect::<FxHashMap<_, _>>();
+    complete_graph_property_unions(&mut prepared_files);
 
     for prepared in prepared_files {
         let artifact = match prepared {
             PreparedSourceFile::ParseFailed(artifact) => artifact,
             PreparedSourceFile::Prepared {
                 identity,
-                mut module,
+                module,
                 diagnostics,
                 ..
-            } => {
-                for (peer_identity, namespace) in &namespaces {
-                    if peer_identity != &identity {
-                        module.add_peer_namespace(peer_identity.clone(), namespace.clone());
-                    }
-                }
-                finalize_module_artifact(&identity, *module, diagnostics)
-            }
+            } => finalize_module_artifact(&identity, *module, diagnostics),
         };
         diagnostics.extend(artifact.diagnostics.iter().cloned());
 
@@ -894,26 +888,22 @@ fn analyze_logical_module_graph(
     // reference written by a peer in *that* peer's namespace. A peer's namespace is only known once
     // its own imports have been applied, so it cannot be built while analyzing the module that
     // needs it.
-    let prepared_files = (0..source_files.len())
+    let mut prepared_files = (0..source_files.len())
         .map(|index| prepare_logical_source_file(&source_files, build_context, index))
         .collect::<Vec<_>>();
-    let namespaces = graph_namespaces(&prepared_files);
+    share_graph_namespaces(&mut prepared_files);
+    complete_graph_property_unions(&mut prepared_files);
 
     for prepared in prepared_files {
         let artifact = match prepared {
             PreparedSourceFile::ParseFailed(artifact) => artifact,
             PreparedSourceFile::Prepared {
                 identity,
-                mut module,
+                module,
                 diagnostics,
                 libraries,
                 selection_diagnostics,
             } => {
-                for (peer_identity, namespace) in &namespaces {
-                    if peer_identity != &identity {
-                        module.add_peer_namespace(peer_identity.clone(), namespace.clone());
-                    }
-                }
                 for library in libraries {
                     libraries_by_root
                         .entry(library.root_path.clone())
@@ -973,7 +963,65 @@ enum PreparedSourceFile {
     ParseFailed(ModuleArtifact),
 }
 
-/// The namespace each prepared module resolves in, keyed by module identity.
+/// Registers every prepared module's namespace with every other prepared module, and returns the
+/// namespaces keyed by module identity.
+fn share_graph_namespaces(
+    prepared_files: &mut [PreparedSourceFile],
+) -> Vec<(String, Arc<ModuleNamespace>)> {
+    let namespaces = graph_namespaces(prepared_files);
+    for prepared in prepared_files.iter_mut() {
+        let PreparedSourceFile::Prepared {
+            identity, module, ..
+        } = prepared
+        else {
+            continue;
+        };
+        for (peer_identity, namespace) in &namespaces {
+            if peer_identity != identity {
+                module.add_peer_namespace(peer_identity.clone(), namespace.clone());
+            }
+        }
+    }
+    namespaces
+}
+
+/// Completes every prepared module's property unions and shares the completed modules as peers.
+///
+/// <para>Lowering leaves a property union with the fields its target declares itself; the
+/// inherited ones come from the base chain, which may cross into another module and so is only
+/// reachable once imports and peer namespaces are in place. A module that reads a peer's
+/// `T.Property` through an import reads the peer's raw module, so the peers have to be the
+/// completed modules rather than the ones lowering produced.</para>
+fn complete_graph_property_unions(prepared_files: &mut [PreparedSourceFile]) {
+    for prepared in prepared_files.iter_mut() {
+        if let PreparedSourceFile::Prepared { module, .. } = prepared {
+            nx_hir::complete_property_unions(module);
+        }
+    }
+    let completed = prepared_files
+        .iter()
+        .filter_map(|prepared| match prepared {
+            PreparedSourceFile::Prepared {
+                identity, module, ..
+            } => Some((identity.clone(), Arc::new(module.raw_module().clone()))),
+            PreparedSourceFile::ParseFailed(_) => None,
+        })
+        .collect::<Vec<_>>();
+    for prepared in prepared_files.iter_mut() {
+        let PreparedSourceFile::Prepared {
+            identity, module, ..
+        } = prepared
+        else {
+            continue;
+        };
+        for (peer_identity, peer_module) in &completed {
+            if peer_identity != identity {
+                module.add_peer_module(peer_identity.clone(), peer_module.clone());
+            }
+        }
+    }
+}
+
 /// The namespace each prepared module resolves in, shared rather than copied into every peer.
 ///
 /// Every module registers every other module's namespace, so copying the maps would cost a clone
@@ -1196,6 +1244,24 @@ fn apply_graph_imports(
                                 item_indices,
                                 &mut imported_visible_names,
                             );
+                            // A declaration's derived `<Name>.Update` and `<Name>.Property`
+                            // travel with it: they are reachable through the name the author
+                            // imported, not exported names of their own.
+                            for suffix in DERIVED_DECLARATION_SUFFIXES {
+                                let derived = format!("{}.{}", entry.name.as_str(), suffix);
+                                let Some(derived_indices) = library.exported_items.get(&derived)
+                                else {
+                                    continue;
+                                };
+                                add_imported_interface_bindings(
+                                    module,
+                                    &format!("{}.{}", visible_name, suffix),
+                                    entry.span,
+                                    &library,
+                                    derived_indices,
+                                    &mut imported_visible_names,
+                                );
+                            }
                         }
                     }
                 }
@@ -1295,10 +1361,36 @@ fn add_workspace_import_bindings(
                     entry.span,
                     imported_visible_names,
                 );
+                // As for a library import: the derived declarations come along with their target.
+                for suffix in DERIVED_DECLARATION_SUFFIXES {
+                    let derived = format!("{}.{}", entry.name.as_str(), suffix);
+                    let Some((derived_index, derived_item)) =
+                        target_module.items().iter().enumerate().find(|(_, item)| {
+                            item.visibility() == Visibility::Export
+                                && item.name().as_str() == derived
+                        })
+                    else {
+                        continue;
+                    };
+                    add_workspace_item_bindings(
+                        module,
+                        &target_source_file.identity,
+                        derived_index,
+                        derived_item,
+                        &format!("{}.{}", visible_name, suffix),
+                        entry.span,
+                        imported_visible_names,
+                    );
+                }
             }
         }
     }
 }
+
+/// The suffixes of the declarations derived from a record, action, or stateful component, which an
+/// import of the target brings into scope with it.
+const DERIVED_DECLARATION_SUFFIXES: [&str; 2] =
+    [nx_hir::UPDATE_RECORD_SUFFIX, nx_hir::PROPERTY_UNION_SUFFIX];
 
 fn add_workspace_item_bindings(
     module: &mut PreparedModule,
@@ -1941,20 +2033,36 @@ fn build_resolved_program(
                 }
                 ImportKind::Selective { entries } => {
                     for entry in entries {
-                        let Some(export) = library.exports.get(entry.name.as_str()) else {
-                            continue;
-                        };
-                        let Some(&target_module_id) = module_ids.get(&export.module_file) else {
-                            continue;
-                        };
+                        let visible_name = visible_name_for_selective(entry);
+                        // As for a workspace import: the derived declarations come along with
+                        // their target.
+                        let names = std::iter::once((
+                            entry.name.as_str().to_string(),
+                            visible_name.clone(),
+                        ))
+                        .chain(DERIVED_DECLARATION_SUFFIXES.iter().map(|suffix| {
+                            (
+                                format!("{}.{}", entry.name.as_str(), suffix),
+                                format!("{}.{}", visible_name, suffix),
+                            )
+                        }));
+                        for (export_name, visible_name) in names {
+                            let Some(export) = library.exports.get(&export_name) else {
+                                continue;
+                            };
+                            let Some(&target_module_id) = module_ids.get(&export.module_file)
+                            else {
+                                continue;
+                            };
 
-                        visible_imports
-                            .entry(visible_name_for_selective(entry))
-                            .or_insert_with(|| ModuleQualifiedItemRef {
-                                module_id: target_module_id,
-                                definition_id: export.definition_id,
-                                kind: export.kind,
+                            visible_imports.entry(visible_name).or_insert_with(|| {
+                                ModuleQualifiedItemRef {
+                                    module_id: target_module_id,
+                                    definition_id: export.definition_id,
+                                    kind: export.kind,
+                                }
                             });
+                        }
                     }
                 }
             }
@@ -2059,22 +2167,36 @@ fn add_graph_resolved_imports(
         }
         ImportKind::Selective { entries } => {
             for entry in entries {
-                let Some((item_index, item)) =
-                    target_module.items().iter().enumerate().find(|(_, item)| {
-                        item.visibility() == Visibility::Export
-                            && item.name().as_str() == entry.name.as_str()
-                    })
-                else {
-                    continue;
-                };
+                let visible_name = visible_name_for_selective(entry);
+                // The derived declarations come along with their target, as they do in the
+                // prepared bindings the checker resolves through.
+                let names =
+                    std::iter::once((entry.name.as_str().to_string(), visible_name.clone())).chain(
+                        DERIVED_DECLARATION_SUFFIXES.iter().map(|suffix| {
+                            (
+                                format!("{}.{}", entry.name.as_str(), suffix),
+                                format!("{}.{}", visible_name, suffix),
+                            )
+                        }),
+                    );
+                for (item_name, visible_name) in names {
+                    let Some((item_index, item)) =
+                        target_module.items().iter().enumerate().find(|(_, item)| {
+                            item.visibility() == Visibility::Export
+                                && item.name().as_str() == item_name
+                        })
+                    else {
+                        continue;
+                    };
 
-                visible_imports
-                    .entry(visible_name_for_selective(entry))
-                    .or_insert_with(|| ModuleQualifiedItemRef {
-                        module_id: target_module_id,
-                        definition_id: local_definition_id(item_index),
-                        kind: resolved_item_kind(item),
-                    });
+                    visible_imports
+                        .entry(visible_name)
+                        .or_insert_with(|| ModuleQualifiedItemRef {
+                            module_id: target_module_id,
+                            definition_id: local_definition_id(item_index),
+                            kind: resolved_item_kind(item),
+                        });
+                }
             }
         }
     }
@@ -2172,6 +2294,7 @@ fn build_interface_item(
         },
         Item::Union(union_def) => LibraryInterfaceKind::Union {
             base: union_def.base.clone(),
+            property_target: union_def.property_target.clone(),
             cases: union_def
                 .cases
                 .iter()
@@ -2558,6 +2681,7 @@ mod tests {
     use crate::eval::eval_program_artifact;
     use crate::EvalResult;
     use crate::NxWorkspaceModule;
+    use nx_value::NxValue;
     use tempfile::TempDir;
 
     fn workspace_module(identity: &str, source: impl Into<Vec<u8>>) -> NxWorkspaceModule {
@@ -2677,6 +2801,108 @@ mod tests {
         assert_eq!(
             artifact.exported_items.get("TextField").map(Vec::len),
             Some(1)
+        );
+    }
+
+    /// A record's derived declarations travel with it: importing `User` makes `User.Property` and
+    /// `User.Update` reachable without the library exporting anything by those names.
+    #[test]
+    fn property_union_of_an_imported_record_is_available_through_the_import() {
+        let temp = TempDir::new().expect("temp dir");
+        let app_dir = temp.path().join("app");
+        let people_dir = temp.path().join("people");
+        fs::create_dir_all(&app_dir).expect("app dir");
+        fs::create_dir_all(&people_dir).expect("people dir");
+        fs::write(
+            people_dir.join("User.nx"),
+            r#"export abstract type Named = { name:string }
+export type User extends Named = { email:string? }"#,
+        )
+        .expect("people file");
+
+        let registry = LibraryRegistry::new();
+        registry
+            .load_library_from_directory(&people_dir)
+            .expect("Expected people registry load");
+        let build_context = registry.build_context();
+
+        let path = app_dir.join("keys.nx");
+        let source = r#"import { User } from "../people"
+let key: User.Property = {User.Property.email}
+let keys = {changed(<User.Update name="Ada" />)}
+let patch = <User.Update email={null} />"#;
+        fs::write(&path, source).expect("keys file");
+        let artifact =
+            build_program_artifact_from_source(source, &path.display().to_string(), &build_context)
+                .expect("Expected program artifact");
+        assert!(
+            !has_error_diagnostics(&artifact.diagnostics),
+            "Expected the imported record's property union to resolve: {:?}",
+            artifact.diagnostics
+        );
+
+        let unknown_path = app_dir.join("unknown.nx");
+        let unknown_source = r#"import { User } from "../people"
+let key = {User.Property.nickname}"#;
+        fs::write(&unknown_path, unknown_source).expect("unknown file");
+        let unknown = build_program_artifact_from_source(
+            unknown_source,
+            &unknown_path.display().to_string(),
+            &build_context,
+        )
+        .expect("Expected program artifact with diagnostics");
+        assert!(
+            unknown.diagnostics.iter().any(|diagnostic| {
+                diagnostic.severity() == Severity::Error
+                    && diagnostic.message().contains("nickname")
+                    && diagnostic.message().contains("name")
+                    && diagnostic.message().contains("email")
+            }),
+            "Expected an unknown case to be rejected with the candidates: {:?}",
+            unknown.diagnostics
+        );
+    }
+
+    /// A property union reached through a workspace import carries its inherited cases: the peer
+    /// module's unions are completed before its items are bound into the importer. The derived
+    /// declarations also resolve at runtime, so `changed` on the imported update record orders by
+    /// the target's effective shape.
+    #[test]
+    fn property_union_of_a_workspace_import_includes_inherited_fields() {
+        let workspace = workspace(vec![
+            workspace_module(
+                "data.nx",
+                r#"export abstract type Named = { name:string }
+export type User extends Named = { email:string? }"#,
+            ),
+            workspace_module(
+                "main.nx",
+                r#"import { User } from "./data.nx"
+let root() = <Box a={User.Property.name} b={User.Property.email} keys={changed(<User.Update email={null} name="Ada" />)} />"#,
+            ),
+        ]);
+        let artifact =
+            build_workspace_program_artifact(&workspace, "main.nx", &ProgramBuildContext::empty())
+                .expect("Expected workspace artifact");
+        assert!(
+            !has_error_diagnostics(&artifact.diagnostics),
+            "Expected the imported property union to carry its inherited case: {:?}",
+            artifact.diagnostics
+        );
+
+        let value = match eval_program_artifact(&artifact) {
+            EvalResult::Ok(value) => value,
+            EvalResult::Err(diagnostics) => panic!("interpreter diagnostics: {:?}", diagnostics),
+        };
+        let NxValue::Record { properties, .. } = value else {
+            panic!("Expected a record value");
+        };
+        let bare = |name: &str| NxValue::String(name.to_string());
+        assert_eq!(properties.get("a"), Some(&bare("name")));
+        assert_eq!(properties.get("b"), Some(&bare("email")));
+        assert_eq!(
+            properties.get("keys"),
+            Some(&NxValue::Array(vec![bare("name"), bare("email")]))
         );
     }
 

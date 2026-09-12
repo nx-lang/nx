@@ -3671,12 +3671,10 @@ component <SearchBox placeholder:string /> = {
             ("let value = {1 2⟨cursor⟩}\n", nx("int")),
             ("let value = {\"a⟨cursor⟩b\" \"c\"}\n", nx("string")),
             ("let value = {1 -4⟨cursor⟩2}\n", nx("int")),
-            // A reference that reaches no expression type still reports its declaration, and an
-            // unannotated one reports the type analysis inferred for it — design D5.
-            (
-                "let ab = 1\nlet value = {a⟨cursor⟩b 2}\n",
-                nx("let ab: int"),
-            ),
+            // A reference to a value declared earlier reaches the expression type analysis
+            // recorded for it, and reports that, as a parameter reference does. The declaration
+            // is the answer only where the name reaches no expression.
+            ("let ab = 1\nlet value = {a⟨cursor⟩b 2}\n", nx("int")),
         ] {
             let hover = hover_at(fixture).unwrap_or_else(|| panic!("no hover for: {fixture:?}"));
 
@@ -4005,9 +4003,9 @@ component <SearchBox placeholder:string /> = {
         ))
         .expect("hover content");
 
-        // The declaration it resolves to, reported as a declaration — and in particular not as
-        // `(case) Role.admin`, which would say the value *is* the case rather than has its type.
-        assert_eq!(hover.contents, nx("let chosen: Role.admin"));
+        // The type the read has — and in particular not `(case) Role.admin`, which would say the
+        // value *is* the case rather than has its type.
+        assert_eq!(hover.contents, nx("Role.admin"));
         assert!(
             !hover.contents.contains("(case)"),
             "got: {}",

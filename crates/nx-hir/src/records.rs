@@ -52,6 +52,8 @@ pub enum InvalidBaseReason {
     ConcreteRecord,
     /// The base is a derived `<Target>.Update` record, which can never be extended.
     UpdateRecord,
+    /// The base is a derived `<Target>.Property` union, which can never be extended.
+    PropertyUnion,
     KindMismatch {
         expected: RecordKind,
         found: RecordKind,
@@ -96,6 +98,7 @@ impl RecordResolutionError {
                 InvalidBaseReason::AliasCycle => "record-base-alias-cycle",
                 InvalidBaseReason::ConcreteRecord => "record-base-not-abstract",
                 InvalidBaseReason::UpdateRecord => "record-base-update-record",
+                InvalidBaseReason::PropertyUnion => "record-base-property-union",
                 InvalidBaseReason::KindMismatch { .. } => "record-base-kind-mismatch",
             },
             RecordResolutionError::InheritanceCycle { .. } => "record-inheritance-cycle",
@@ -138,6 +141,10 @@ impl RecordResolutionError {
                     ),
                     InvalidBaseReason::UpdateRecord => format!(
                         "{} '{}' extends '{}', but '{}' is a derived update record and cannot be extended",
+                        kind_label, record, base, base
+                    ),
+                    InvalidBaseReason::PropertyUnion => format!(
+                        "{} '{}' extends '{}', but '{}' is a derived property union and cannot be extended",
                         kind_label, record, base, base
                     ),
                     InvalidBaseReason::KindMismatch { expected, found } => {
@@ -853,6 +860,14 @@ fn resolve_base_record_inner(
                     validate_base_record(record, base_name, &base_record)
                 } else if let Some(target) = type_alias_target_from_prepared_item(&resolved) {
                     resolve_base_record_inner(module, namespace_module, record, &target, seen)
+                } else if crate::unions::property_union_target_from_prepared_item(module, resolved)
+                    .is_some()
+                {
+                    Err(invalid_base(
+                        record,
+                        base_name,
+                        InvalidBaseReason::PropertyUnion,
+                    ))
                 } else {
                     Err(invalid_base(
                         record,

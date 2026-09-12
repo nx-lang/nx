@@ -182,6 +182,38 @@ mod tests {
         assert_eq!(to_nx_value(&runtime), NxValue::String("active".to_string()));
     }
 
+    /// The list `changed` produces is a list of constant cases, so it encodes as bare strings.
+    #[test]
+    fn a_list_of_property_cases_lowers_to_bare_field_names() {
+        let runtime = Value::Array(vec![
+            Value::UnionCase {
+                union: Name::new("User.Property"),
+                case: SmolStr::new("name"),
+            },
+            Value::UnionCase {
+                union: Name::new("User.Property"),
+                case: SmolStr::new("age"),
+            },
+        ]);
+        let value = to_nx_value(&runtime);
+        assert_eq!(
+            value,
+            NxValue::Array(vec![
+                NxValue::String("name".to_string()),
+                NxValue::String("age".to_string()),
+            ])
+        );
+        assert_eq!(
+            value.to_json_string().expect("JSON encodes"),
+            r#"["name","age"]"#
+        );
+        let bytes = value.to_msgpack_vec().expect("MessagePack encodes");
+        assert_eq!(
+            NxValue::from_msgpack_slice(&bytes).expect("MessagePack decodes"),
+            value
+        );
+    }
+
     #[test]
     fn from_nx_value_rejects_action_handler_records() {
         let value = NxValue::Record {

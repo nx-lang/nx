@@ -136,6 +136,11 @@ pub fn analyze_prepared_module(
     mut prepared_module: PreparedModule,
     mut diagnostics: Vec<Diagnostic>,
 ) -> ModuleArtifact {
+    // A property union's inherited cases can only be filled in once the module can reach its
+    // target's base chain, which may cross into another module. Everything below reads the
+    // complete case list from the declaration.
+    nx_hir::complete_property_unions(&mut prepared_module);
+
     for error in nx_hir::validate_record_definitions(&prepared_module) {
         prepared_module.add_diagnostic(LoweringDiagnostic {
             message: error.message(),

@@ -608,8 +608,10 @@ fn add_type_ref_imports(
     ty: &TypeRef,
     imports: &mut BTreeMap<String, BTreeSet<TypeScriptImportSpecifier>>,
 ) {
-    let mut names = BTreeSet::new();
-    collect_type_ref_names(ty, &mut names);
+    let names = nx_hir::type_ref_names(ty)
+        .into_iter()
+        .map(|name| name.as_str().to_string())
+        .collect::<BTreeSet<_>>();
     for name in names {
         add_imported_symbol(
             module,
@@ -659,24 +661,6 @@ fn add_imported_symbol(
             exported_name: imported_name.clone(),
             local_name: imported_name,
         });
-}
-
-fn collect_type_ref_names(ty: &TypeRef, out: &mut BTreeSet<String>) {
-    match ty {
-        TypeRef::Name(name) => {
-            out.insert(name.as_str().to_string());
-        }
-        TypeRef::Array(inner) | TypeRef::Nullable(inner) => collect_type_ref_names(inner, out),
-        TypeRef::Function {
-            params,
-            return_type,
-        } => {
-            for param in params {
-                collect_type_ref_names(param, out);
-            }
-            collect_type_ref_names(return_type, out);
-        }
-    }
 }
 
 fn ts_base_contract_name(name: &str) -> String {

@@ -2073,6 +2073,13 @@ fn test_component_example_with_update_records() {
         ),
         "Expected the Counter example to have an update record"
     );
+    assert!(
+        matches!(
+            module.find_item("Counter.Property"),
+            Some(nx_hir::Item::Union(union_def)) if union_def.property_target().is_some()
+        ),
+        "Expected the Counter example to have a property union"
+    );
 }
 
 // ============================================================================
@@ -2225,4 +2232,32 @@ fn test_int_is_a_primitive_and_is_not_displaced_by_a_user_declaration() {
         !result.errors().is_empty(),
         "Expected `n:int` to resolve to the primitive and reject a string binding"
     );
+}
+
+/// Top-level values are inferred in declaration order, so an initializer can read a value declared
+/// before it whatever order the prepared bindings happen to iterate in.
+#[test]
+fn top_level_values_are_inferred_in_declaration_order() {
+    let result = check_str(
+        r#"
+        let a = 1
+        let b = {a + 1}
+        let c = {b + 1}
+        let d = {c + 1}
+        let e = {d + 1}
+        "#,
+        "value-order.nx",
+    );
+    assert!(result.errors().is_empty(), "{:?}", result.diagnostics);
+    for name in ["b", "c", "d", "e"] {
+        assert_eq!(
+            result
+                .type_env
+                .lookup(&nx_hir::Name::new(name))
+                .map(|ty| ty.to_string()),
+            Some("int".to_string()),
+            "value '{}'",
+            name
+        );
+    }
 }

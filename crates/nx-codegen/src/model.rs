@@ -1,5 +1,5 @@
 use nx_diagnostics::TextSpan;
-use nx_hir::{ast, ElementId, ExprId, LocalDefinitionId, Name};
+use nx_hir::{ast, ElementId, ExprId, LocalDefinitionId, Name, UpdateIntrinsic};
 use nx_interpreter::{ModuleQualifiedItemRef, ResolvedItemKind, RuntimeModuleId};
 use nx_types::Type;
 use std::path::PathBuf;
@@ -126,6 +126,9 @@ pub enum CodegenDeclarationKind {
         cases: Vec<CodegenUnionCase>,
         /// The union's abstract bases, nearest first, inherited by every case.
         bases: Vec<CodegenReference>,
+        /// The record, action, or component a derived `<Target>.Property` union names the fields
+        /// of. Present only on property unions, whose cases are all constant.
+        property_target: Option<CodegenReference>,
     },
     TypeAlias,
     Unsupported(CodegenUnsupportedConstruct),
@@ -241,6 +244,15 @@ pub enum CodegenExpressionKind {
     Call {
         callee: Box<CodegenExpression>,
         args: Vec<CodegenExpression>,
+    },
+    /// A call to one of the update intrinsics, which has no callee declaration: the checker
+    /// resolved the name before any binding, and a runtime supplies the operation.
+    IntrinsicCall {
+        intrinsic: UpdateIntrinsic,
+        args: Vec<CodegenExpression>,
+        /// For `changed`, the declared field order of the update record its argument is typed
+        /// as, which the result is sorted by; `None` for the other intrinsics.
+        field_order: Option<Vec<String>>,
     },
     If {
         condition: Box<CodegenExpression>,

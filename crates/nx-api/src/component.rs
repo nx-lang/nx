@@ -1149,6 +1149,114 @@ let root() = { 0 }"#;
         assert!(!result.state_snapshot.is_empty());
     }
 
+    const PROPERTY_TABLE: &str = r#"
+        type Contact = { title:string subtitle:string }
+
+        external component <Table sortBy:Contact.Property />
+
+        component <Sorted /> = {
+          <Table sortBy={Contact.Property.subtitle} />
+        }
+    "#;
+
+    fn table_props(sort_by: &str) -> NxValue {
+        NxValue::Record {
+            type_name: None,
+            properties: BTreeMap::from([(
+                "sortBy".to_string(),
+                NxValue::String(sort_by.to_string()),
+            )]),
+        }
+    }
+
+    /// A `T.Property` case is a constant case on the wire: the bare field name, with no
+    /// discriminator, in JSON and MessagePack alike.
+    #[test]
+    fn a_property_union_case_encodes_as_the_bare_field_name() {
+        let result = initialize_component_source(
+            PROPERTY_TABLE,
+            "property-wire-json.nx",
+            &ProgramBuildContext::empty(),
+            "Sorted",
+            &empty_record(),
+        );
+        let ComponentInitEvalResult::Ok(result) = result else {
+            panic!("Expected the sorted table to initialize");
+        };
+        assert_eq!(
+            result.rendered,
+            NxValue::Record {
+                type_name: Some("Table".to_string()),
+                properties: BTreeMap::from([(
+                    "sortBy".to_string(),
+                    NxValue::String("subtitle".to_string()),
+                )]),
+            }
+        );
+        let json = result
+            .rendered
+            .to_json_string()
+            .expect("Expected rendered value to serialize as JSON");
+        assert!(json.contains(r#""sortBy":"subtitle""#), "{}", json);
+        let bytes = result
+            .rendered
+            .to_msgpack_vec()
+            .expect("MessagePack encodes");
+        assert_eq!(
+            NxValue::from_msgpack_slice(&bytes).expect("MessagePack decodes"),
+            result.rendered
+        );
+    }
+
+    #[test]
+    fn host_input_with_a_valid_property_case_decodes() {
+        let result = initialize_component_source(
+            PROPERTY_TABLE,
+            "property-wire-valid.nx",
+            &ProgramBuildContext::empty(),
+            "Table",
+            &table_props("title"),
+        );
+        let ComponentInitEvalResult::Ok(result) = result else {
+            panic!("Expected a valid property case to be accepted");
+        };
+        assert_eq!(
+            result.rendered,
+            NxValue::Record {
+                type_name: Some("Table".to_string()),
+                properties: BTreeMap::from([(
+                    "sortBy".to_string(),
+                    NxValue::String("title".to_string()),
+                )]),
+            }
+        );
+    }
+
+    #[test]
+    fn host_input_with_an_unknown_property_case_is_rejected() {
+        let result = initialize_component_source(
+            PROPERTY_TABLE,
+            "property-wire-unknown.nx",
+            &ProgramBuildContext::empty(),
+            "Table",
+            &table_props("nickname"),
+        );
+        let ComponentInitEvalResult::Err(diagnostics) = result else {
+            panic!("Expected an unknown property case to be rejected");
+        };
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.message.contains("Contact.Property")
+                    && diagnostic.message.contains("unknown union case 'nickname'")
+            }),
+            "Expected a diagnostic naming the union and the field, got {:?}",
+            diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.message.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
     #[test]
     fn initialize_component_source_rejects_unknown_union_case_in_prop() {
         let source = r#"

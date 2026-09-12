@@ -3167,4 +3167,180 @@ export type User extends Named = { email:string }
             "Regenerate UpdateRecords.g.cs with the command in update-records.nx"
         );
     }
+
+    #[test]
+    fn generates_typescript_property_companions_as_string_literal_unions() {
+        let output = generate_for(
+            r#"
+            export abstract type Named = { name:string }
+            export type User extends Named = { email:string? }
+            export component <Counter step:int /> = { state { count:int = 0 } <Label /> }
+            "#,
+            TargetLanguage::TypeScript,
+        );
+        assert!(
+            output.contains("export type User_property = \"name\" | \"email\";"),
+            "{}",
+            output
+        );
+        assert!(
+            output.contains("export type Counter_property = \"count\";"),
+            "{}",
+            output
+        );
+        assert!(
+            !output.contains("User_property = {"),
+            "a property companion is a type, never a runtime value: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn typescript_property_companion_yields_to_an_explicit_declaration() {
+        let module = source_module(
+            r#"
+            export type User_property = string
+            export type User = { name:string }
+            "#,
+            "types.nx",
+        );
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+        let generated =
+            generate_types_with_warnings(&module, Path::new("types.nx"), &opts).unwrap();
+        assert!(generated
+            .value
+            .contains("export type User_property = string;"));
+        assert!(!generated.value.contains("\"name\""));
+        assert!(generated
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("User_property")));
+    }
+
+    #[test]
+    fn generates_csharp_property_companions_as_enums_with_the_wire_format() {
+        let output = generate_for(
+            r#"
+            export type User = { name:string email:string? }
+            "#,
+            TargetLanguage::CSharp,
+        );
+        assert!(
+            output.contains("[JsonConverter(typeof(NxEnumJsonConverter<User_property, User_propertyWireFormat>))]"),
+            "{}",
+            output
+        );
+        assert!(
+            output.contains("[MessagePackFormatter(typeof(NxEnumMessagePackFormatter<User_property, User_propertyWireFormat>))]"),
+            "{}",
+            output
+        );
+        assert!(output.contains("public enum User_property"), "{}", output);
+        assert!(output.contains("User_propertyWireFormat"), "{}", output);
+    }
+
+    #[test]
+    fn property_typed_props_reference_the_companion_in_both_languages() {
+        let source = r#"
+            export type Contact = { title:string }
+            export external component <Table sortBy:Contact.Property? columns:Contact.Property[] />
+        "#;
+        let typescript = generate_for(source, TargetLanguage::TypeScript);
+        assert!(
+            typescript.contains("sortBy: Contact_property | null;"),
+            "{}",
+            typescript
+        );
+        assert!(
+            typescript.contains("columns: Contact_property[];"),
+            "{}",
+            typescript
+        );
+
+        let csharp = generate_for(source, TargetLanguage::CSharp);
+        assert!(
+            csharp.contains("public Contact_property? SortBy { get; set; }"),
+            "{}",
+            csharp
+        );
+        assert!(
+            csharp.contains("public Contact_property[] Columns { get; set; } = default!;"),
+            "{}",
+            csharp
+        );
+    }
+
+    #[test]
+    fn generates_typescript_property_companion_imports_for_a_dependency_record() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let people_dir = temp_dir.path().join("people");
+        let app_dir = temp_dir.path().join("app");
+        fs::create_dir_all(&people_dir).expect("people dir");
+        fs::create_dir_all(&app_dir).expect("app dir");
+
+        fs::write(
+            people_dir.join("User.nx"),
+            "export type User = { name:string email:string? }",
+        )
+        .expect("people file");
+        fs::write(
+            app_dir.join("Table.nx"),
+            r#"import { User } from "../people"
+
+export external component <Table sortBy:User.Property? columns:User.Property[] patch:User.Update? />
+"#,
+        )
+        .expect("app file");
+
+        let artifact = build_library_artifact_from_directory(&app_dir).expect("library build");
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::TypeScript,
+            csharp_namespace: None,
+            typescript_package_prefix: Some("@org/nx-".to_string()),
+            format: options::FormatOptions::defaults_for(TargetLanguage::TypeScript),
+        };
+
+        let output = generate_library_types_with_warnings(&artifact, &opts).unwrap();
+        let table = output
+            .value
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("Table.ts"))
+            .expect("Table.ts");
+        assert!(
+            !output
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("no generated companion")),
+            "{:?}",
+            output.warnings
+        );
+        // A dotted visible name is imported under a local alias, as every qualified import is.
+        assert!(
+            table.content.contains(
+                "import type { User_property as User_Property, User_update as User_Update } from \"@org/nx-people\";"
+            ),
+            "{}",
+            table.content
+        );
+        assert!(
+            table.content.contains("sortBy: User_Property | null;"),
+            "{}",
+            table.content
+        );
+        assert!(
+            table.content.contains("columns: User_Property[];"),
+            "{}",
+            table.content
+        );
+        assert!(
+            table.content.contains("patch: User_Update | null;"),
+            "{}",
+            table.content
+        );
+    }
 }

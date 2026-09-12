@@ -2,14 +2,19 @@ import {
   NxIrProgram,
   NxIrExpression,
   NxIrRecordField,
+  NxRecordObject,
   NxIrRuntimeError,
   NxIrSemanticType,
   NxIrTypeRef,
   applyComponentStatePatch,
+  applyUpdate,
+  changedFields,
   constructComponentDescriptor,
+  diffRecords,
   evaluateComponent,
   evaluateFunction,
   initializeComponent,
+  mergeUpdates,
   prepareNxIrProgram,
   tryPrepareNxIrProgram,
 } from "../src/index.js";
@@ -1736,6 +1741,193 @@ test("a component's update record patches its state", () => {
   assertThrows(
     () => applyComponentStatePatch(prepared, "Counter", { count: 1, label: "x" }, { $type: "Other.Update", count: 3 }),
     "Cannot apply 'Other.Update' to Counter state",
+  );
+});
+
+// ------------------------------------------------------------------------------------------------
+// Property unions and update intrinsics
+// ------------------------------------------------------------------------------------------------
+
+function userRecord(name: string, email: string | null) {
+  return expr({
+    tag: "record",
+    name: "User",
+    fields: [
+      { ...updateField("name", "User:field:0", stringType), isRequired: true },
+      updateField("email", "User:field:1", { kind: "nullable", inner: stringType }),
+    ],
+    properties: [
+      { name: "name", value: lit(name), span: sourceSpan },
+      { name: "email", value: lit(email), span: sourceSpan },
+    ],
+    contentField: null,
+    content: [],
+  });
+}
+
+function userUpdate(properties: readonly { readonly name: string; readonly value: NxIrExpression }[]) {
+  return expr({
+    tag: "record",
+    name: "User.Update",
+    fields: updateUserFields,
+    properties: properties.map((property) => ({ ...property, span: sourceSpan })),
+    contentField: null,
+    content: [],
+    isUpdate: true,
+  });
+}
+
+function intrinsic(name: string, args: readonly NxIrExpression[]) {
+  return expr({ tag: "intrinsicCall", intrinsic: name, args });
+}
+
+const userPropertyRef = ref("User.Property", "m0:d5", "union");
+
+const propertyProgram: NxIrProgram = {
+  ...updateProgram,
+  requiredFeatures: ["eager-v1", "update-records-v1", "property-unions-v1", "update-intrinsics-v1"],
+  functionEntrypoints: [
+    { name: "propertyKey", reference: ref("propertyKey", "m0:d6", "function") },
+    { name: "applied", reference: ref("applied", "m0:d7", "function") },
+    { name: "agree", reference: ref("agree", "m0:d8", "function") },
+  ],
+  componentEntrypoints: [{ name: "Table", reference: ref("Table", "m0:d9", "component") }],
+  modules: [
+    {
+      ...updateProgram.modules[0]!,
+      declarations: [
+        ...updateProgram.modules[0]!.declarations,
+        {
+          id: "m0:d5",
+          reference: userPropertyRef,
+          span: sourceSpan,
+          kind: {
+            tag: "union",
+            propertyTarget: ref("User", "m0:d0", "record"),
+            cases: [
+              { name: "name", fields: [], isConstant: true, span: sourceSpan },
+              { name: "email", fields: [], isConstant: true, span: sourceSpan },
+            ],
+          },
+        },
+        {
+          id: "m0:d6",
+          reference: ref("propertyKey", "m0:d6", "function"),
+          span: sourceSpan,
+          kind: {
+            tag: "function",
+            params: [],
+            body: expr({
+              tag: "unionCase",
+              union: userPropertyRef,
+              caseName: "email",
+              fields: [],
+              properties: [],
+              contentField: null,
+              content: [],
+              isConstant: true,
+            }),
+          },
+        },
+        {
+          id: "m0:d7",
+          reference: ref("applied", "m0:d7", "function"),
+          span: sourceSpan,
+          kind: {
+            tag: "function",
+            params: [],
+            body: intrinsic("apply", [userRecord("Ada", "x@y"), userUpdate([{ name: "email", value: lit(null) }])]),
+          },
+        },
+        {
+          id: "m0:d8",
+          reference: ref("agree", "m0:d8", "function"),
+          span: sourceSpan,
+          kind: {
+            tag: "function",
+            params: [],
+            body: intrinsic("changed", [intrinsic("diff", [userRecord("Ada", "x@y"), userRecord("Bo", "x@y")])]),
+          },
+        },
+        {
+          id: "m0:d9",
+          reference: ref("Table", "m0:d9", "component"),
+          span: sourceSpan,
+          kind: {
+            tag: "component",
+            isAbstract: false,
+            isExternal: true,
+            props: [
+              {
+                ...updateField("sortBy", "Table:prop:0", nominal(userPropertyRef)),
+                isRequired: true,
+                ownerModule: "m0",
+              },
+            ],
+            state: [],
+          },
+        },
+      ],
+    },
+  ],
+};
+
+test("a prepared program listing the property-union and intrinsic features is accepted", () => {
+  const result = tryPrepareNxIrProgram(propertyProgram);
+  if (!result.ok) {
+    throw new Error(`Expected the program to prepare, got ${JSON.stringify(result.diagnostics)}`);
+  }
+});
+
+test("an evaluated property union case is the bare field name", () => {
+  const prepared = prepareNxIrProgram(propertyProgram);
+  assertEqual(evaluateFunction(prepared, "propertyKey"), "email");
+});
+
+test("host input for a property union is validated against the cases", () => {
+  const prepared = prepareNxIrProgram(propertyProgram);
+  assertEqual(constructComponentDescriptor(prepared, "Table", { sortBy: "name" }), {
+    $type: "Table",
+    sortBy: "name",
+  });
+  assertThrows(
+    () => constructComponentDescriptor(prepared, "Table", { sortBy: "nickname" }),
+    "'nickname' is not a case of User.Property",
+  );
+});
+
+test("an evaluated apply replaces present fields only", () => {
+  const prepared = prepareNxIrProgram(propertyProgram);
+  assertEqual(evaluateFunction(prepared, "applied"), { $type: "User", name: "Ada", email: null });
+});
+
+test("evaluated diff and changed agree", () => {
+  const prepared = prepareNxIrProgram(propertyProgram);
+  assertEqual(evaluateFunction(prepared, "agree"), ["name"]);
+});
+
+test("the exported helpers apply, merge, diff, and list changed fields on host-held values", () => {
+  const prepared = prepareNxIrProgram(propertyProgram);
+  const user: NxRecordObject = { $type: "User", name: "Ada", email: "x@y" };
+  assertEqual(applyUpdate(user, { $type: "User.Update", email: null }), { $type: "User", name: "Ada", email: null });
+  assertEqual(mergeUpdates({ $type: "User.Update", name: "Ada" }, { $type: "User.Update", name: "Bo" }), {
+    $type: "User.Update",
+    name: "Bo",
+  });
+  assertEqual(diffRecords(user, { $type: "User", name: "Ada", email: null }), { $type: "User.Update", email: null });
+  assertEqual(changedFields({ $type: "User.Update", email: null, name: "Ada" }, prepared), ["name", "email"]);
+  assertEqual(changedFields({ $type: "User.Update" }, prepared), []);
+});
+
+test("the exported helpers reject mismatched targets", () => {
+  const user: NxRecordObject = { $type: "User", name: "Ada", email: null };
+  assertThrows(
+    () => applyUpdate(user, { $type: "Team.Update", name: "Core" }),
+    "Cannot apply 'Team.Update' to a 'User'",
+  );
+  assertThrows(
+    () => mergeUpdates({ $type: "User.Update" }, { $type: "Team.Update" }),
+    "'User.Update' with 'Team.Update'",
   );
 });
 

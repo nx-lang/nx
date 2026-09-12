@@ -69,6 +69,12 @@ pub struct ExportedUnion {
     pub name: String,
     pub base: Option<String>,
     pub cases: Vec<ExportedUnionCase>,
+    /// The record, action, or component this is the generated `<Target>_property` companion of.
+    ///
+    /// <para>A property companion is the derived `<Target>.Property` union under its generated
+    /// name: one constant case per effective field, so it generates exactly what a constant union
+    /// generates.</para>
+    pub property_target: Option<String>,
 }
 
 impl ExportedUnion {
@@ -188,7 +194,11 @@ impl ExportedType {
                 "update record '{}' for '{}'",
                 update.name, update.target_name
             )),
-            Self::Alias(_) | Self::Union(_) | Self::Record(_) => None,
+            Self::Union(union_def) => union_def
+                .property_target
+                .as_ref()
+                .map(|target| format!("property union '{}' for '{}'", union_def.name, target)),
+            Self::Alias(_) | Self::Record(_) => None,
         }
     }
 }
@@ -251,6 +261,9 @@ struct ImportedTypesBuild {
 struct CachedImportedLibrary {
     library_name: String,
     export_kinds: FxHashMap<String, PreparedItemKind>,
+    /// Exported derived declarations — `<Target>.Update` and `<Target>.Property` — which the
+    /// dependency generates as companions and an import of the target brings along.
+    derived_exports: FxHashSet<String>,
     /// Exported names whose union declares no base and no case fields.
     constant_unions: FxHashSet<String>,
     alias_targets: FxHashMap<String, TypeRef>,
@@ -601,12 +614,15 @@ impl ExportedTypeGraph {
         Ok(ExportedTypeGraphBuild { graph, warnings })
     }
 
-    /// Points every `<T>.Update` type reference at the `<T>_update` companion that stands for it.
+    /// Points every `<T>.Update` and `<T>.Property` type reference at the `<T>_update` or
+    /// `<T>_property` companion that stands for it.
     ///
     /// <para>A field typed `User.Update` must generate as the companion, since that is the only
-    /// declaration of the patch either language sees. Where no companion exists — the target is not
-    /// exported, or the companion name was taken by an explicit declaration — the reference is left
-    /// as written and a warning says why the generated code will not resolve it.</para>
+    /// declaration of the patch either language sees, and a field typed `User.Property` likewise.
+    /// A derived name reached through an import is left for the emitters, which import the
+    /// dependency's companion. Where no companion exists — the target is not exported, or the
+    /// companion name was taken by an explicit declaration — the reference is left as written and a
+    /// warning says why the generated code will not resolve it.</para>
     fn rewrite_update_type_references(&mut self, warnings: &mut Vec<String>) {
         let companions = self
             .modules
@@ -616,18 +632,33 @@ impl ExportedTypeGraph {
                 ExportedType::Update(update) => {
                     Some((update.discriminator.clone(), update.name.clone()))
                 }
+                ExportedType::Union(union_def) => {
+                    union_def.property_target.as_ref().map(|target| {
+                        (
+                            nx_hir::property_union_name(target).as_str().to_string(),
+                            union_def.name.clone(),
+                        )
+                    })
+                }
                 _ => None,
             })
             .collect::<FxHashMap<_, _>>();
+        let imported = self
+            .modules
+            .iter()
+            .flat_map(|module| module.imported_types.iter())
+            .map(|imported_type| imported_type.visible_name.clone())
+            .collect::<FxHashSet<_>>();
 
         let mut unresolved = BTreeSet::new();
         let mut rename = |ty: &mut TypeRef| {
             rewrite_type_ref_names(ty, &mut |name| {
-                if !nx_hir::is_update_record_name(name) {
+                if !nx_hir::is_update_record_name(name) && !nx_hir::is_property_union_name(name) {
                     return None;
                 }
                 match companions.get(name) {
                     Some(companion) => Some(companion.clone()),
+                    None if imported.contains(name) => None,
                     None => {
                         unresolved.insert(name.to_string());
                         None
@@ -667,13 +698,13 @@ impl ExportedTypeGraph {
         }
 
         for name in unresolved {
-            let target = name
-                .strip_suffix(nx_hir::UPDATE_RECORD_SUFFIX)
-                .and_then(|prefix| prefix.strip_suffix('.'))
-                .unwrap_or(&name);
+            let (target, suffix) = name
+                .rsplit_once('.')
+                .map(|(target, suffix)| (target, suffix.to_ascii_lowercase()))
+                .unwrap_or((&name, String::new()));
             warnings.push(format!(
-                "Type reference '{}' has no generated companion '{}_update' to resolve to; the generated code will not compile until '{}' is exported and the companion name is free",
-                name, target, target
+                "Type reference '{}' has no generated companion '{}_{}' to resolve to; the generated code will not compile until '{}' is exported and the companion name is free",
+                name, target, suffix, target
             ));
         }
     }
@@ -779,9 +810,14 @@ fn collect_exported_declarations(artifact: &ModuleArtifact) -> Vec<ExportedTypeD
                 visibility: alias.visibility,
                 item: ExportedType::Alias(export_alias(alias)),
             }),
+            // A derived property union is exported as its `<Target>_property` companion, never
+            // under its own dotted name.
             Item::Union(union_def) => declarations.push(ExportedTypeDecl {
                 visibility: union_def.visibility,
-                item: ExportedType::Union(export_union(module, union_def)),
+                item: ExportedType::Union(match union_def.property_target() {
+                    Some(target) => export_property_union(union_def, target),
+                    None => export_union(module, union_def),
+                }),
             }),
             // A derived update record is exported as its `<Target>_update` companion, never under
             // its own dotted name.
@@ -826,6 +862,8 @@ impl ImportedTypeCollector {
         let mut imported_types = Vec::new();
         let mut warnings = Vec::new();
         let mut seen_visible_names = FxHashMap::<String, ImportedVisibleNameOrigin>::default();
+        let mut dependencies_by_visible_name =
+            FxHashMap::<String, Arc<CachedImportedLibrary>>::default();
 
         for import in &module.imports {
             let dependency_root = match resolve_dependency_root(source_path, &import.library_path) {
@@ -883,6 +921,8 @@ impl ImportedTypeCollector {
                             dependency.imported_type(&visible_name, exported_name)
                         {
                             imported_types.push(imported_type);
+                            dependencies_by_visible_name
+                                .insert(visible_name.clone(), dependency.clone());
                         }
                     }
                 }
@@ -910,7 +950,11 @@ impl ImportedTypeCollector {
                         );
 
                         match dependency.imported_type(&visible_name, &exported_name) {
-                            Some(imported_type) => imported_types.push(imported_type),
+                            Some(imported_type) => {
+                                imported_types.push(imported_type);
+                                dependencies_by_visible_name
+                                    .insert(visible_name.clone(), dependency.clone());
+                            }
                             None => warnings.push(dependency.unsupported_import_warning(
                                 source_path,
                                 &import.library_path,
@@ -918,6 +962,41 @@ impl ImportedTypeCollector {
                             )),
                         }
                     }
+                }
+            }
+        }
+
+        // A derived name on an imported declaration — `User.Update`, `User.Property` — names
+        // the dependency's companion. Only the ones the module actually references are imported,
+        // so a module that imports `User` and never patches it imports exactly what it did before.
+        let mut referenced_names = BTreeSet::new();
+        for item in module.items() {
+            for ty in nx_hir::item_type_refs(item) {
+                referenced_names.extend(type_ref_name_strings(ty));
+            }
+        }
+        for name in referenced_names {
+            let Some((visible_name, suffix)) = name.rsplit_once('.') else {
+                continue;
+            };
+            let Some(dependency) = dependencies_by_visible_name.get(visible_name) else {
+                continue;
+            };
+            let Some(exported_name) = imported_types
+                .iter()
+                .find(|imported_type| imported_type.visible_name == visible_name)
+                .map(|imported_type| imported_type.exported_name.clone())
+            else {
+                continue;
+            };
+            if let Some(derived) =
+                dependency.derived_imported_type(visible_name, &exported_name, suffix)
+            {
+                if !imported_types
+                    .iter()
+                    .any(|imported_type| imported_type.visible_name == derived.visible_name)
+                {
+                    imported_types.push(derived);
                 }
             }
         }
@@ -1030,8 +1109,7 @@ impl ImportedTypeCollector {
                     let Some(declaring_module) = field.declaring_module.as_deref() else {
                         continue;
                     };
-                    let mut names = BTreeSet::new();
-                    collect_type_ref_names(&field.ty, &mut names);
+                    let names = type_ref_name_strings(&field.ty).collect::<BTreeSet<_>>();
                     let mut renames = FxHashMap::default();
                     for name in names {
                         // An unresolved `X.Update` is reported by the companion rewrite instead.
@@ -1252,6 +1330,35 @@ impl CachedImportedLibrary {
         })
     }
 
+    /// The companion a derived name on an imported declaration reaches: `<visible>.Update` names
+    /// the dependency's `<exported>_update`, and `<visible>.Property` its `<exported>_property`.
+    fn derived_imported_type(
+        &self,
+        visible_name: &str,
+        exported_name: &str,
+        suffix: &str,
+    ) -> Option<ImportedType> {
+        let (companion_suffix, kind) = match suffix {
+            nx_hir::UPDATE_RECORD_SUFFIX => ("_update", ImportedTypeKind::Record),
+            nx_hir::PROPERTY_UNION_SUFFIX => {
+                ("_property", ImportedTypeKind::Union { is_constant: true })
+            }
+            _ => return None,
+        };
+        if !self
+            .derived_exports
+            .contains(&format!("{}.{}", exported_name, suffix))
+        {
+            return None;
+        }
+        Some(ImportedType {
+            visible_name: format!("{}.{}", visible_name, suffix),
+            exported_name: format!("{}{}", exported_name, companion_suffix),
+            library_name: self.library_name.clone(),
+            kind,
+        })
+    }
+
     fn resolve_alias_target(
         &self,
         exported_name: &str,
@@ -1352,6 +1459,7 @@ fn build_cached_imported_library(
         })?
         .to_string();
     let mut export_kinds = FxHashMap::default();
+    let mut derived_exports = FxHashSet::default();
     let mut constant_unions = FxHashSet::default();
     let mut alias_targets = FxHashMap::default();
     let mut wildcard_importable_export_names = Vec::new();
@@ -1378,15 +1486,19 @@ fn build_cached_imported_library(
             continue;
         };
 
-        // A derived update record is generated as its target's `_update` companion; it is never a
-        // type a consumer names by its dotted NX name.
+        // A derived update record or property union is generated as its target's `_update` or
+        // `_property` companion; it is never a type a consumer names by its dotted NX name.
         if matches!(
             &interface_item.item,
             InterfaceItemKind::Record {
                 kind: RecordKind::Update { .. },
                 ..
+            } | InterfaceItemKind::Union {
+                property_target: Some(_),
+                ..
             }
         ) {
+            derived_exports.insert(exported_name.clone());
             continue;
         }
 
@@ -1422,6 +1534,7 @@ fn build_cached_imported_library(
     Ok(CachedImportedLibrary {
         library_name,
         export_kinds,
+        derived_exports,
         constant_unions,
         alias_targets,
         wildcard_importable_export_names,
@@ -1460,6 +1573,25 @@ fn export_union(module: &LoweredModule, def: &UnionDef) -> ExportedUnion {
             .iter()
             .map(|case| export_union_case(module, case))
             .collect(),
+        property_target: None,
+    }
+}
+
+/// Exports the `<Target>_property` companion: the derived property union's cases, which analysis
+/// has already completed with the target's inherited fields, in `T.Property` case order.
+fn export_property_union(def: &UnionDef, target: &nx_hir::Name) -> ExportedUnion {
+    ExportedUnion {
+        name: format!("{}_property", target.as_str()),
+        base: None,
+        cases: def
+            .cases
+            .iter()
+            .map(|case| ExportedUnionCase {
+                name: case.name.as_str().to_string(),
+                fields: Vec::new(),
+            })
+            .collect(),
+        property_target: Some(target.as_str().to_string()),
     }
 }
 
@@ -1506,23 +1638,11 @@ fn is_primitive_type_name(name: &str) -> bool {
     )
 }
 
-/// Collects every type name `ty` mentions.
-fn collect_type_ref_names(ty: &TypeRef, out: &mut BTreeSet<String>) {
-    match ty {
-        TypeRef::Name(name) => {
-            out.insert(name.as_str().to_string());
-        }
-        TypeRef::Array(inner) | TypeRef::Nullable(inner) => collect_type_ref_names(inner, out),
-        TypeRef::Function {
-            params,
-            return_type,
-        } => {
-            for param in params {
-                collect_type_ref_names(param, out);
-            }
-            collect_type_ref_names(return_type, out);
-        }
-    }
+/// Every type name `ty` mentions, as owned strings.
+fn type_ref_name_strings(ty: &TypeRef) -> impl Iterator<Item = String> + '_ {
+    nx_hir::type_ref_names(ty)
+        .into_iter()
+        .map(|name| name.as_str().to_string())
 }
 
 /// Replaces every named type in `ty` for which `rename` returns a new name.
@@ -1895,7 +2015,8 @@ mod tests {
         let build = ExportedTypeGraph::from_library_with_warnings(&artifact).expect("graph build");
 
         assert!(build.graph.declaration("SearchBox_state").is_none());
-        // Both components would also generate `SearchBox_update`, which is skipped the same way.
+        // Both components would also generate `SearchBox_update` and `SearchBox_property`, which
+        // are skipped the same way.
         let state_warnings = build
             .warnings
             .iter()
@@ -1903,7 +2024,8 @@ mod tests {
             .count();
         assert_eq!(state_warnings, 2);
         assert!(build.graph.declaration("SearchBox_update").is_none());
-        assert_eq!(build.warnings.len(), 4);
+        assert!(build.graph.declaration("SearchBox_property").is_none());
+        assert_eq!(build.warnings.len(), 6);
     }
 
     #[test]
@@ -2394,5 +2516,149 @@ export type User extends Named = { email:string }
         assert_eq!(build.warnings.len(), 1, "{:?}", build.warnings);
         assert!(build.warnings[0].contains("User_update"));
         assert!(build.warnings[0].contains("conflicts with exported declaration"));
+    }
+
+    fn property_companion<'a>(graph: &'a ExportedTypeGraph, name: &str) -> &'a ExportedUnion {
+        match &graph
+            .declaration(name)
+            .unwrap_or_else(|| panic!("expected {} companion", name))
+            .item
+        {
+            ExportedType::Union(union_def) => union_def,
+            other => panic!("expected {} to be a union companion, got {:?}", name, other),
+        }
+    }
+
+    fn case_names(union_def: &ExportedUnion) -> Vec<&str> {
+        union_def
+            .cases
+            .iter()
+            .map(|case| case.name.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn exports_property_companions_for_records_actions_and_stateful_components() {
+        let module = analyze_module(
+            r#"
+            export type User = { name:string = "anon" email:string? }
+            export action Saved = { id:int }
+            export component <Counter step:int = 1 /> = { state { count:int = 0 } <Label /> }
+            export component <Plain /> = { <Label /> }
+            type Hidden = { secret:string }
+            "#,
+            "types.nx",
+        );
+        let build = ExportedTypeGraph::from_module_with_warnings(&module, Path::new("types.nx"))
+            .expect("graph build");
+        assert!(build.warnings.is_empty(), "{:?}", build.warnings);
+
+        let user = property_companion(&build.graph, "User_property");
+        assert_eq!(user.property_target.as_deref(), Some("User"));
+        assert_eq!(case_names(user), vec!["name", "email"]);
+        assert!(
+            user.is_constant(),
+            "a property companion is a constant union"
+        );
+
+        assert_eq!(
+            case_names(property_companion(&build.graph, "Saved_property")),
+            vec!["id"]
+        );
+        assert_eq!(
+            case_names(property_companion(&build.graph, "Counter_property")),
+            vec!["count"],
+            "a component's companion names its state and none of its props"
+        );
+
+        assert!(build.graph.declaration("Plain_property").is_none());
+        assert!(build.graph.declaration("Hidden_property").is_none());
+        assert!(
+            build.graph.declaration("User.Property").is_none(),
+            "a property union is never exported under its dotted name"
+        );
+    }
+
+    #[test]
+    fn property_companions_list_inherited_fields_first() {
+        let module = analyze_module(
+            r#"
+            export abstract type Named = { name:string }
+            export type User extends Named = { email:string }
+            "#,
+            "types.nx",
+        );
+        let build = ExportedTypeGraph::from_module_with_warnings(&module, Path::new("types.nx"))
+            .expect("graph build");
+        assert_eq!(
+            case_names(property_companion(&build.graph, "User_property")),
+            vec!["name", "email"]
+        );
+        assert_eq!(
+            case_names(property_companion(&build.graph, "Named_property")),
+            vec!["name"]
+        );
+    }
+
+    #[test]
+    fn property_typed_fields_are_rewritten_to_the_companion() {
+        let module = analyze_module(
+            r#"
+            export type Contact = { title:string }
+            export external component <Table sortBy:Contact.Property? columns:Contact.Property[] />
+            "#,
+            "types.nx",
+        );
+        let build = ExportedTypeGraph::from_module_with_warnings(&module, Path::new("types.nx"))
+            .expect("graph build");
+        assert!(build.warnings.is_empty(), "{:?}", build.warnings);
+        let ExportedType::Record(table) = &build.graph.declaration("Table").expect("Table").item
+        else {
+            panic!("expected the Table contract");
+        };
+        let record_field_type = |name: &str| {
+            &table
+                .fields
+                .iter()
+                .find(|field| field.name == name)
+                .unwrap_or_else(|| panic!("expected field {}", name))
+                .ty
+        };
+        assert_eq!(
+            record_field_type("sortBy"),
+            &TypeRef::nullable(TypeRef::Name(nx_hir::Name::new("Contact_property")))
+        );
+        assert_eq!(
+            record_field_type("columns"),
+            &TypeRef::array(TypeRef::Name(nx_hir::Name::new("Contact_property")))
+        );
+    }
+
+    #[test]
+    fn property_companion_name_collision_warns_and_skips() {
+        let module = analyze_module(
+            r#"
+            export type User_property = string
+            export type User = { name:string }
+            "#,
+            "types.nx",
+        );
+        let build = ExportedTypeGraph::from_module_with_warnings(&module, Path::new("types.nx"))
+            .expect("graph build");
+        assert!(matches!(
+            build
+                .graph
+                .declaration("User_property")
+                .map(|declaration| &declaration.item),
+            Some(ExportedType::Alias(_))
+        ));
+        assert!(
+            build
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("property union 'User_property' for 'User'")),
+            "{:?}",
+            build.warnings
+        );
     }
 }
