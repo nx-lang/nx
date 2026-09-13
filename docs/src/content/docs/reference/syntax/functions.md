@@ -130,6 +130,53 @@ let makeValueChanged(value:string): SearchBox.ValueChanged =
   <SearchBox.ValueChanged value={value} />
 ```
 
+## Type parameters
+
+A component that draws a collection through a template needs to say that its items and its
+template agree on one item type without fixing what that type is. A **type parameter** does that.
+It is declared with the same `name:type` syntax as a prop, using the keyword `type` as the type,
+and it must come first in the signature, after `extends` and before every prop:
+
+```nx
+type Contact = { name:string }
+
+external component <SkiaLayout
+  TItem:type
+  itemsSource:TItem[]?
+  content children:object[]?
+/>
+
+let contacts:Contact[] = {}
+
+<SkiaLayout TItem=Contact itemsSource={contacts} />
+```
+
+- Inside the signature and the body, `TItem` is a type like any other: `itemsSource:TItem[]?`
+  and a state field `first:TItem? = null` both work. It is distinct from every other type,
+  including a same-named type declared outside the component, which it shadows.
+- A use site supplies the type by name, as a bare type name: `TItem=Contact`. Any visible type
+  qualifies — a record, a union, an alias, a primitive, or a type parameter of the enclosing
+  component (`TItem=TItem` forwards it). Braced, quoted, and conditional forms are rejected.
+- Leave it out when nothing needs it. A use site that binds only `children` writes
+  `<SkiaLayout>...</SkiaLayout>` and no argument. A prop typed by an unspecified parameter
+  accepts only an empty list or `null`; binding anything else reports that `TItem` was not
+  specified and shows the `TItem=` form to add.
+- A type parameter is not a prop. It carries no value, has no default, is never required, is
+  not a field of the runtime record, and is not a case of the component's property union.
+  Once type checking has consumed a `TItem=Contact` binding, nothing below the checker sees it.
+- An emitted action's payload cannot be typed by a type parameter. `emits { pick { item:TItem } }`
+  is rejected: the action is a record of its own, usable outside the component, where `TItem` is
+  not a type.
+- A derived component inherits its abstract base's type parameters open, ahead of its own, and
+  cannot redeclare one. `<ContactList extends ItemsBase />` supplies `TItem` exactly as
+  `<ItemsBase />` would.
+- Name a type parameter `T` or a `T`-prefixed PascalCase name: `TItem`, `TKey`, `TValue`. A
+  primitive type name such as `string` or `object`, and the built-in `Element`, are rejected;
+  any other name is allowed and shadows a same-named declared type inside the component.
+
+Type parameters are supported on component signatures only; a record, action, state group, or
+function parameter list cannot declare one.
+
 ## Updating state
 
 Every record, action, and component with `state` has a derived **update record**, `T.Update`, with

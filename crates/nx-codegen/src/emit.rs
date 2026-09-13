@@ -1414,6 +1414,99 @@ fn emit_component_declaration(
     );
 }
 
+/// The generic parameter list a component's `Props` type and factory declare, and the argument
+/// list that names one instantiation of them.
+///
+/// <para>A TypeScript caller invokes the factory statically, so it can carry each NX type parameter
+/// as a generic parameter at no runtime cost, inferred from the props it passes; `unknown` is the
+/// default so a caller that names nothing gets the erased contract. Empty for a component without
+/// type parameters, so nothing else in the output changes for one.</para>
+struct ComponentGenerics {
+    declaration: String,
+    arguments: String,
+}
+
+fn component_generics(component: &CodegenComponent) -> ComponentGenerics {
+    if component.type_params.is_empty() {
+        return ComponentGenerics {
+            declaration: String::new(),
+            arguments: String::new(),
+        };
+    }
+    ComponentGenerics {
+        declaration: format!(
+            "<{}>",
+            component
+                .type_params
+                .iter()
+                .map(|param| format!("{} = unknown", param))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        arguments: format!("<{}>", component.type_params.join(", ")),
+    }
+}
+
+/// Emits a prop's declared type with the component's type parameters spelled as themselves, for a
+/// surface that declares them generically.
+fn emit_generic_prop_type(
+    module: &CodegenModule,
+    ty: &TypeRef,
+    component: &CodegenComponent,
+    context: &EmitContext,
+) -> String {
+    match ty {
+        TypeRef::Name(name)
+            if component
+                .type_params
+                .iter()
+                .any(|param| param == name.as_str()) =>
+        {
+            name.as_str().to_string()
+        }
+        TypeRef::Name(_) => emit_type_ref(module.id, ty, module, context),
+        TypeRef::Array(inner) => {
+            emit_array_type(emit_generic_prop_type(module, inner, component, context))
+        }
+        TypeRef::Nullable(inner) => format!(
+            "{} | null",
+            emit_generic_prop_type(module, inner, component, context)
+        ),
+        TypeRef::Function { .. } => emit_type_ref(module.id, ty, module, context),
+    }
+}
+
+/// Emits a prop or state field's declared type with the component's type parameters erased to
+/// `unknown`, for a surface the host holds as data rather than names an instantiation of: the
+/// serializable element type, which the wire carries no type argument for, and the state snapshot,
+/// whose instantiation was fixed at an NX use site the host never sees.
+fn emit_erased_field_type(
+    module: &CodegenModule,
+    ty: &TypeRef,
+    component: &CodegenComponent,
+    context: &EmitContext,
+) -> String {
+    match ty {
+        TypeRef::Name(name)
+            if component
+                .type_params
+                .iter()
+                .any(|param| param == name.as_str()) =>
+        {
+            "unknown".to_string()
+        }
+        TypeRef::Name(_) => emit_type_ref(module.id, ty, module, context),
+        TypeRef::Array(inner) => {
+            emit_array_type(emit_erased_field_type(module, inner, component, context))
+        }
+        TypeRef::Nullable(inner) => format!(
+            "{} | null",
+            emit_erased_field_type(module, inner, component, context)
+        ),
+        TypeRef::Function { .. } => emit_type_ref(module.id, ty, module, context),
+    }
+}
+
 fn emit_component_props_type(
     module: &CodegenModule,
     reference: &CodegenReference,
@@ -1426,22 +1519,26 @@ fn emit_component_props_type(
         .component_names(reference)
         .name(ComponentNameRole::Props);
     let export_prefix = export_policy.prefix(props_type);
+    let generics = component_generics(component);
     if component.props.is_empty() {
         out.push_str(&format!(
-            "{}type {} = Record<string, never>;\n",
-            export_prefix, props_type
+            "{}type {}{} = Record<string, never>;\n",
+            export_prefix, props_type, generics.declaration
         ));
         return;
     }
 
-    out.push_str(&format!("{}type {} = {{\n", export_prefix, props_type));
+    out.push_str(&format!(
+        "{}type {}{} = {{\n",
+        export_prefix, props_type, generics.declaration
+    ));
     for field in &component.props {
         let optional = if field.is_required { "" } else { "?" };
         out.push_str(&format!(
             "  {}{}: {};\n",
             safe_object_key(&field.name),
             optional,
-            emit_type_ref(module.id, &field.ty, module, context)
+            emit_generic_prop_type(module, &field.ty, component, context)
         ));
     }
     out.push_str("};\n");
@@ -1457,20 +1554,24 @@ fn emit_component_resolved_props_type(
     let resolved_props_type = context
         .component_names(reference)
         .name(ComponentNameRole::ResolvedProps);
+    let generics = component_generics(component);
     if component.props.is_empty() {
         out.push_str(&format!(
-            "type {} = Record<string, never>;\n",
-            resolved_props_type
+            "type {}{} = Record<string, never>;\n",
+            resolved_props_type, generics.declaration
         ));
         return;
     }
 
-    out.push_str(&format!("type {} = {{\n", resolved_props_type));
+    out.push_str(&format!(
+        "type {}{} = {{\n",
+        resolved_props_type, generics.declaration
+    ));
     for field in &component.props {
         out.push_str(&format!(
             "  readonly {}: {};\n",
             safe_object_key(&field.name),
-            emit_type_ref(module.id, &field.ty, module, context)
+            emit_generic_prop_type(module, &field.ty, component, context)
         ));
     }
     out.push_str("};\n");
@@ -1498,7 +1599,7 @@ fn emit_component_element_type(
         out.push_str(&format!(
             "  readonly {}: {};\n",
             safe_object_key(&field.name),
-            emit_type_ref(module.id, &field.ty, module, context)
+            emit_erased_field_type(module, &field.ty, component, context)
         ));
     }
     out.push_str("};\n");
@@ -1524,7 +1625,7 @@ fn emit_component_state_type(
         out.push_str(&format!(
             "  readonly {}: {};\n",
             safe_object_key(&field.name),
-            emit_type_ref(module.id, &field.ty, module, context)
+            emit_erased_field_type(module, &field.ty, component, context)
         ));
     }
     out.push_str("};\n");
@@ -1543,12 +1644,16 @@ fn emit_component_props_resolver(
         .then_some(" = {}")
         .unwrap_or("");
     if target.is_typescript() {
+        let generics = component_generics(component);
         out.push_str(&format!(
-            "function {}(props: {}{}): {} {{\n",
+            "function {}{}(props: {}{}{}): {}{} {{\n",
             names.resolve_props_function,
+            generics.declaration,
             names.name(ComponentNameRole::Props),
+            generics.arguments,
             default_value,
-            names.name(ComponentNameRole::ResolvedProps)
+            names.name(ComponentNameRole::ResolvedProps),
+            generics.arguments
         ));
     } else {
         out.push_str(&format!(
@@ -1586,11 +1691,14 @@ fn emit_component_descriptor_factory(
         .unwrap_or("");
     let export_prefix = export_policy.prefix(name);
     if target.is_typescript() {
+        let generics = component_generics(component);
         out.push_str(&format!(
-            "{}function {}(props: {}{}): {} {{\n",
+            "{}function {}{}(props: {}{}{}): {} {{\n",
             export_prefix,
             name,
+            generics.declaration,
             names.name(ComponentNameRole::Props),
+            generics.arguments,
             default_value,
             names.name(ComponentNameRole::Element)
         ));
@@ -2117,13 +2225,16 @@ fn emit_typed_field_initializers(
             js_string(&field.name)
         ));
         let fallback = typed_field_fallback(current_module_id, field, context);
+        // An optional nullable prop is `T | null | undefined` on the input and `T | null` once
+        // resolved: a key present with no value resolves to `null`, the same as an absent one.
+        let present = if field.default.is_none() && is_nullable_type(&field.ty) {
+            format!("{}{} ?? null", input_name, member_access(&field.name))
+        } else {
+            format!("{}{}", input_name, member_access(&field.name))
+        };
         out.push_str(&format!(
-            "  const {} = {} ? {}{} : {};\n",
-            field_name,
-            has_name,
-            input_name,
-            member_access(&field.name),
-            fallback
+            "  const {} = {} ? {} : {};\n",
+            field_name, has_name, present, fallback
         ));
         let local_name = safe_identifier(&field.name);
         if predeclared_locals.contains(&local_name) {
@@ -2679,6 +2790,10 @@ fn emit_type(
             }
             union_case_type_name(&union_name, case_ty.case.as_str())
         }
+        // A component type parameter is a type only inside the declaring component. Emitted
+        // code receives the component's values dynamically and has nothing to bind it to, so
+        // it is erased to the host's top type.
+        Type::Parameter(_) => "unknown".to_string(),
         Type::ContextualName(_) | Type::Variable(_) | Type::Unknown | Type::Error => {
             "unknown".to_string()
         }
@@ -3559,6 +3674,7 @@ fn collect_type_references(module: &CodegenModule, ty: &Type, output: &mut Vec<C
             collect_named_type_reference(module, case_ty.union.as_str(), output);
         }
         Type::Primitive(_)
+        | Type::Parameter(_)
         | Type::ContextualName(_)
         | Type::Variable(_)
         | Type::Unknown

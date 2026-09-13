@@ -9,6 +9,7 @@ use nx_hir::{
 };
 use nx_types::ModuleArtifact;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -56,6 +57,10 @@ pub struct ExportedRecord {
     pub is_abstract: bool,
     pub base: Option<String>,
     pub fields: Vec<ExportedRecordField>,
+    /// The type parameters of the external component this record is the contract of, inherited
+    /// first. Field types are kept as written and may name them; the C# emitter erases each to
+    /// `object`, the TypeScript emitter declares each as a generic parameter. Empty for a record.
+    pub type_params: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -109,6 +114,9 @@ pub struct ExportedExternalState {
     pub component_name: String,
     pub name: String,
     pub fields: Vec<ExportedRecordField>,
+    /// The component's effective type parameters, inherited first. A state field may name one,
+    /// and both emitters erase it: the host holds state as data and never names its instantiation.
+    pub type_params: Vec<String>,
 }
 
 /// The generated `<Target>_update` companion of an exported record, action, or stateful component.
@@ -126,6 +134,34 @@ pub struct ExportedUpdate {
     pub name: String,
     pub discriminator: String,
     pub fields: Vec<ExportedRecordField>,
+    /// The effective type parameters of the component the companion patches, inherited first;
+    /// empty for a record or action target. A state-derived field may name one, and both emitters
+    /// erase it: the instantiation was fixed at an NX use site the host never sees.
+    pub type_params: Vec<String>,
+}
+
+/// `fields` with every reference to one of `type_params` replaced by `object`, which each emitter
+/// already maps to its host's top type; `fields` itself when there is nothing to erase.
+pub fn erase_field_type_parameters<'a>(
+    fields: &'a [ExportedRecordField],
+    type_params: &[String],
+) -> Cow<'a, [ExportedRecordField]> {
+    if type_params.is_empty() {
+        return Cow::Borrowed(fields);
+    }
+    let params: Vec<nx_hir::Name> = type_params
+        .iter()
+        .map(|param| nx_hir::Name::new(param))
+        .collect();
+    Cow::Owned(
+        fields
+            .iter()
+            .map(|field| ExportedRecordField {
+                ty: nx_hir::erase_type_parameters(&field.ty, &params),
+                ..field.clone()
+            })
+            .collect(),
+    )
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -836,14 +872,16 @@ fn collect_exported_declarations(artifact: &ModuleArtifact) -> Vec<ExportedTypeD
                 }),
             },
             Item::Component(component) => {
-                if let Some(record) = export_external_component_contract(module, component) {
+                if let Some(record) =
+                    export_external_component_contract(module, prepared, component)
+                {
                     declarations.push(ExportedTypeDecl {
                         visibility: component.visibility,
                         item: ExportedType::Record(record),
                     });
                 }
 
-                if let Some(state) = export_external_state(component) {
+                if let Some(state) = export_external_state(module, prepared, component) {
                     declarations.push(ExportedTypeDecl {
                         visibility: component.visibility,
                         item: ExportedType::ExternalState(state),
@@ -1556,6 +1594,7 @@ fn export_alias(def: &TypeAlias) -> ExportedAlias {
 
 fn export_record(module: &LoweredModule, def: &RecordDef) -> ExportedRecord {
     ExportedRecord {
+        type_params: Vec::new(),
         name: def.name.as_str().to_string(),
         kind: def.kind.clone(),
         is_abstract: def.is_abstract,
@@ -1612,6 +1651,7 @@ fn export_union_case(module: &LoweredModule, case: &UnionCaseDef) -> ExportedUni
 
 fn export_external_component_contract(
     module: &LoweredModule,
+    prepared: Option<&PreparedModule>,
     component: &Component,
 ) -> Option<ExportedRecord> {
     if !component.is_external {
@@ -1631,15 +1671,58 @@ fn export_external_component_contract(
             .iter()
             .map(|field| export_record_field(module, field))
             .collect(),
+        type_params: effective_component_type_params(module, prepared, component),
     })
+}
+
+/// The type parameters a component's props and state may name: its abstract base chain's,
+/// inherited first, then its own.
+///
+/// <para>The prepared module resolves the base chain the way the checker does, across libraries
+/// included, which is also how far the emitted base reference reaches. Without a prepared module,
+/// or when the chain does not resolve, the walk stays within this module and a base declared
+/// elsewhere contributes nothing.</para>
+fn effective_component_type_params(
+    module: &LoweredModule,
+    prepared: Option<&PreparedModule>,
+    component: &Component,
+) -> Vec<String> {
+    if let Some(contract) =
+        prepared.and_then(|prepared| nx_hir::effective_component_contract(prepared, component).ok())
+    {
+        return contract
+            .type_params
+            .iter()
+            .map(|param| param.name.as_str().to_string())
+            .collect();
+    }
+    let mut chain = Vec::new();
+    let mut current = Some(component);
+    let mut seen = FxHashSet::default();
+    while let Some(component) = current {
+        if !seen.insert(component.name.clone()) {
+            break;
+        }
+        chain.push(component);
+        current = component
+            .base
+            .as_ref()
+            .and_then(|base| match module.find_item(base.as_str()) {
+                Some(Item::Component(base)) => Some(base),
+                _ => None,
+            });
+    }
+    chain
+        .iter()
+        .rev()
+        .flat_map(|component| component.type_params.iter())
+        .map(|param| param.name.as_str().to_string())
+        .collect()
 }
 
 /// Returns true for a type name both emitters map to a host primitive rather than a declaration.
 fn is_primitive_type_name(name: &str) -> bool {
-    matches!(
-        name,
-        "string" | "int" | "int32" | "int64" | "float32" | "float64" | "boolean" | "object"
-    )
+    nx_syntax::PRIMITIVE_TYPE_NAMES.contains(&name)
 }
 
 /// Every type name `ty` mentions, as owned strings.
@@ -1714,16 +1797,27 @@ fn export_update(
                 })
                 .collect()
         });
+    let target_component = match module.find_item(target.as_str()) {
+        Some(Item::Component(component)) => Some(component),
+        _ => None,
+    };
     ExportedUpdate {
         target_name: target.as_str().to_string(),
-        target_is_component: matches!(module.find_item(target.as_str()), Some(Item::Component(_))),
+        target_is_component: target_component.is_some(),
         name: format!("{}_update", target.as_str()),
         discriminator: record.name.as_str().to_string(),
         fields,
+        type_params: target_component
+            .map(|component| effective_component_type_params(module, prepared, component))
+            .unwrap_or_default(),
     }
 }
 
-fn export_external_state(component: &Component) -> Option<ExportedExternalState> {
+fn export_external_state(
+    module: &LoweredModule,
+    prepared: Option<&PreparedModule>,
+    component: &Component,
+) -> Option<ExportedExternalState> {
     if !component.is_external || component.state.is_empty() {
         return None;
     }
@@ -1741,6 +1835,7 @@ fn export_external_state(component: &Component) -> Option<ExportedExternalState>
                 declaring_module: None,
             })
             .collect(),
+        type_params: effective_component_type_params(module, prepared, component),
     })
 }
 

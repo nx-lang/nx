@@ -350,11 +350,14 @@ module.exports = grammar({
     // stream tree-sitter produces in component signatures and nested emits/state
     // blocks. Using the shared property_definition rule directly regresses plain
     // identifier props like `text:string` under `component`.
+    // The `type` keyword in type position declares a component type parameter (`TItem:type`).
+    // The grammar accepts it in every property list; validation restricts it to leading
+    // definitions of a component signature so the rejection can name the definition.
     _component_property_definition: $ => choice(
       seq(
         field('name', alias($._component_field_name, $.markup_identifier)),
         ':',
-        field('type', $.type),
+        field('type', $._property_type),
         optional(seq(
           '=',
           field('default', $.rhs_expression),
@@ -364,12 +367,17 @@ module.exports = grammar({
         field('modifier', alias($._component_field_name, $.markup_identifier)),
         field('name', alias($._component_field_name, $.markup_identifier)),
         ':',
-        field('type', $.type),
+        field('type', $._property_type),
         optional(seq(
           '=',
           field('default', $.rhs_expression),
         )),
       ),
+    ),
+
+    _property_type: $ => choice(
+      $.type,
+      'type',
     ),
 
     _component_field_name: $ => choice(
@@ -381,7 +389,7 @@ module.exports = grammar({
       seq(
         field('name', $.markup_identifier),
         ':',
-        field('type', $.type),
+        field('type', $._property_type),
         optional(seq(
           '=',
           field('default', $.rhs_expression),
@@ -391,7 +399,7 @@ module.exports = grammar({
         field('modifier', $.markup_identifier),
         field('name', $.markup_identifier),
         ':',
-        field('type', $.type),
+        field('type', $._property_type),
         optional(seq(
           '=',
           field('default', $.rhs_expression),

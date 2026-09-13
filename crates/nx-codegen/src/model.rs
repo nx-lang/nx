@@ -183,6 +183,9 @@ pub struct CodegenRecordField {
 pub struct CodegenComponent {
     pub is_abstract: bool,
     pub is_external: bool,
+    /// The component's effective type parameters, inherited first. Prop types in `props` are
+    /// unerased and may name these; each emitter decides whether to carry or erase them.
+    pub type_params: Vec<String>,
     pub props: Vec<CodegenComponentField>,
     pub state: Vec<CodegenComponentField>,
     pub body: Option<CodegenExpression>,

@@ -1,13 +1,14 @@
 use crate::typegen::model::{
-    ExportedExternalState, ExportedFieldDefault, ExportedLiteralDefault, ExportedModule,
-    ExportedPolymorphicDescendant, ExportedRecord, ExportedRecordField, ExportedType,
-    ExportedTypeGraph, ExportedUnion, ExportedUnionCase, ExportedUpdate, ImportedType,
-    ImportedTypeKind,
+    erase_field_type_parameters, ExportedExternalState, ExportedFieldDefault,
+    ExportedLiteralDefault, ExportedModule, ExportedPolymorphicDescendant, ExportedRecord,
+    ExportedRecordField, ExportedType, ExportedTypeGraph, ExportedUnion, ExportedUnionCase,
+    ExportedUpdate, ImportedType, ImportedTypeKind,
 };
 use crate::typegen::writer::CodeWriter;
 use crate::typegen::{GenerateTypesOptions, GeneratedFile};
 use nx_hir::ast::TypeRef;
 use rustc_hash::FxHashMap;
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -268,6 +269,19 @@ fn emit_update(
     update: &ExportedUpdate,
     context: &CSharpRenderContext<'_>,
 ) {
+    // A state field typed by the component's type parameter erases to `object`: the host patches
+    // state as data and never names the instantiation, which an NX use site fixed.
+    let erased;
+    let update = match erase_field_type_parameters(&update.fields, &update.type_params) {
+        Cow::Borrowed(_) => update,
+        Cow::Owned(fields) => {
+            erased = ExportedUpdate {
+                fields,
+                ..update.clone()
+            };
+            &erased
+        }
+    };
     let class_name = sanitize_csharp_identifier(&update.name);
     let plain_target = update_plain_target(update, context);
     let property_enum = update_property_enum(update, context);
@@ -655,6 +669,21 @@ fn emit_record(
     record: &ExportedRecord,
     context: &CSharpRenderContext<'_>,
 ) {
+    // A C# host receives a component value by its discriminator and cannot pick a generic
+    // instantiation from data, so a type parameter is erased to `object` and the record declares
+    // no generic parameter of its own.
+    let erased;
+    let record = match erase_field_type_parameters(&record.fields, &record.type_params) {
+        Cow::Borrowed(_) => record,
+        Cow::Owned(fields) => {
+            erased = ExportedRecord {
+                fields,
+                ..record.clone()
+            };
+            &erased
+        }
+    };
+
     emit_record_json_polymorphism_attributes(writer, record, context);
 
     let polymorphic_root = polymorphic_message_pack_root_name(record, context);
@@ -819,7 +848,11 @@ fn emit_external_state(
             sanitize_csharp_identifier(&state.name)
         ),
         |writer| {
-            emit_record_fields(writer, &state.fields, context);
+            emit_record_fields(
+                writer,
+                &erase_field_type_parameters(&state.fields, &state.type_params),
+                context,
+            );
         },
     );
 }

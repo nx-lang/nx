@@ -43,12 +43,10 @@ const KEYWORD_COMPLETIONS: &[&str] = &[
     "null",
 ];
 
-const PRIMITIVE_TYPE_COMPLETIONS: &[&str] = &[
-    "string", "int", "int32", "int64", "float32", "float64", "boolean", "object",
-];
+const PRIMITIVE_TYPE_COMPLETIONS: &[&str] = &nx_syntax::PRIMITIVE_TYPE_NAMES;
 
 /// Built-in type names that are valid in type position but are not primitives.
-const BUILTIN_TYPE_COMPLETIONS: &[&str] = &["Element"];
+const BUILTIN_TYPE_COMPLETIONS: &[&str] = &nx_syntax::BUILTIN_TYPE_NAMES;
 
 /// Client-owned document URI.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1773,7 +1771,8 @@ fn is_unresolved_type(ty: &nx_types::Type) -> bool {
         nx_types::Type::Primitive(_)
         | nx_types::Type::Named(_)
         | nx_types::Type::Union(_)
-        | nx_types::Type::UnionCase(_) => false,
+        | nx_types::Type::UnionCase(_)
+        | nx_types::Type::Parameter(_) => false,
     }
 }
 
@@ -3052,6 +3051,43 @@ component <SearchBox placeholder:string /> = {
         let labels = completion_labels(&snapshot, FORM_URI, position);
 
         assert!(labels.contains(&"Button".to_string()), "got: {labels:?}");
+    }
+
+    /// A generic component and its use site flow through diagnostics, hover, and completions
+    /// without a panic, and a type parameter renders under its own name.
+    #[test]
+    fn a_generic_component_does_not_regress_diagnostics_hover_or_completions() {
+        const GENERIC: &str = "type Contact = { name:string }\n\
+            external component <SkiaLayout TItem:type itemsSource:TItem[]? />\n\
+            component <Section TItem:type items:TItem[] /> = { <SkiaLayout TItem=TItem itemsSource={items} /> }\n\
+            let contacts:Contact[] = {}\n\
+            <Section TItem=Contact items={contacts} />\n";
+
+        let snapshot = snapshot_for("nx://tenant/form.nx", GENERIC, 1);
+        let diagnostics = snapshot.diagnostics().expect("diagnostics");
+        assert!(
+            diagnostics[0].diagnostics.is_empty(),
+            "expected a clean generic program, got: {:#?}",
+            diagnostics[0].diagnostics
+        );
+
+        // Hover over a prop typed by the parameter renders the parameter as `TItem`.
+        let hover = hover_at(&GENERIC.replace("items:TItem[] />", "it⟨cursor⟩ems:TItem[] />"))
+            .expect("hover over the prop name");
+        assert!(hover.contents.contains("TItem"), "got: {}", hover.contents);
+
+        // Hover over the parameter's own declaration and over the argument must not panic; what
+        // they answer is a follow-up.
+        let _ = hover_at(&GENERIC.replace("<Section TItem:type", "<Section TI⟨cursor⟩tem:type"));
+        let _ = hover_at(&GENERIC.replace("TItem=Contact", "TItem=Con⟨cursor⟩tact"));
+
+        // Completions inside the body and at the use site must not panic.
+        let _ = labels_at_incomplete(
+            &GENERIC.replace("itemsSource={items} />", "itemsSource={items} ⟨cursor⟩/>"),
+        );
+        let _ = labels_at_incomplete(
+            &GENERIC.replace("items={contacts} />", "items={contacts} ⟨cursor⟩/>"),
+        );
     }
 
     /// Spec: "Completions offer library declarations" — the properties, and their values.

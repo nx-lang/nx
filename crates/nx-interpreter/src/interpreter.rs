@@ -1374,6 +1374,17 @@ impl Interpreter {
         effective_component_contract(prepared.as_ref(), component).unwrap_or_else(|_| {
             nx_hir::EffectiveComponentContract {
                 component: component.clone(),
+                type_params: component
+                    .type_params
+                    .iter()
+                    .cloned()
+                    .map(|param| {
+                        nx_hir::EffectiveTypeParameter::from_type_parameter(
+                            param,
+                            module_identity.clone(),
+                        )
+                    })
+                    .collect(),
                 props: component
                     .props
                     .iter()

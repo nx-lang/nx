@@ -1,7 +1,7 @@
 use crate::{
     ast, Component, ComponentEmit, Item, LoweredModule, LoweringDiagnostic, Name, Param,
-    RecordField, RecordKind, SourceId, TypeAlias, UnionCaseDef, UnionCaseField, UnionDef,
-    Visibility,
+    RecordField, RecordKind, SourceId, TypeAlias, TypeParameter, UnionCaseDef, UnionCaseField,
+    UnionDef, Visibility,
 };
 use nx_diagnostics::TextSpan;
 use rustc_hash::FxHashMap;
@@ -112,6 +112,7 @@ pub enum InterfaceItemKind {
         is_abstract: bool,
         is_external: bool,
         base: Option<Name>,
+        type_params: Vec<TypeParameter>,
         props: Vec<InterfaceField>,
         emits: Vec<ComponentEmit>,
         state: Vec<InterfaceField>,
@@ -771,6 +772,7 @@ pub fn interface_component(item: &InterfaceItem) -> Option<Component> {
             is_abstract,
             is_external,
             base,
+            type_params,
             props,
             emits,
             state,
@@ -781,6 +783,7 @@ pub fn interface_component(item: &InterfaceItem) -> Option<Component> {
             is_abstract: *is_abstract,
             is_external: *is_external,
             base: base.clone(),
+            type_params: type_params.clone(),
             props: props
                 .iter()
                 .map(|field| RecordField {

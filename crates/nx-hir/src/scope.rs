@@ -829,6 +829,7 @@ mod tests {
             is_abstract: false,
             is_external: false,
             base: None,
+            type_params: Vec::new(),
             props: Vec::new(),
             emits: Vec::new(),
             state: Vec::new(),

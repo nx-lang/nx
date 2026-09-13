@@ -421,12 +421,19 @@ fn build_declaration(
                 record,
                 diagnostics,
             )?;
+            let type_params = update_record_type_params(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                lowered_module,
+                record,
+            );
             CodegenDeclarationKind::Record {
                 fields: build_effective_record_fields(
                     artifact,
                     resolved_module,
                     prepared_cache,
-                    &shape.fields,
+                    &erase_effective_field_type_parameters(&shape.fields, &type_params),
                     diagnostics,
                 )?,
                 bases: record_ancestor_references(
@@ -519,12 +526,23 @@ fn build_component(
         }
     };
 
+    // A type parameter is a type only inside the declaring component, and the resolved IR type of
+    // a prop or state field is what a host reads to normalize a value. There is nothing to bind
+    // the parameter to there, so the resolved type carries the top type in its place; the declared
+    // type is kept as written for the emitters that can carry the parameter.
+    let type_params: Vec<Name> = contract
+        .type_params
+        .iter()
+        .map(|param| param.name.clone())
+        .collect();
+
     let mut prop_scope = LexicalScope::new();
     let props = build_effective_component_fields(
         artifact,
         resolved_module,
         prepared_cache,
         &contract.props,
+        &type_params,
         &mut prop_scope,
         diagnostics,
     )?;
@@ -540,6 +558,7 @@ fn build_component(
         lowered_module,
         type_env,
         &component.state,
+        &type_params,
         &mut state_scope,
         diagnostics,
     )?;
@@ -570,6 +589,10 @@ fn build_component(
     Some(CodegenComponent {
         is_abstract: component.is_abstract,
         is_external: component.is_external,
+        type_params: type_params
+            .iter()
+            .map(|name| name.as_str().to_string())
+            .collect(),
         props,
         state,
         body,
@@ -608,6 +631,7 @@ fn build_effective_component_fields(
     resolved_module: &ResolvedModule,
     prepared_cache: &mut PreparedModuleCache,
     fields: &[EffectiveField],
+    type_params: &[Name],
     scope: &mut LexicalScope,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Vec<CodegenComponentField>> {
@@ -643,7 +667,7 @@ fn build_effective_component_fields(
                 artifact,
                 owner_module,
                 prepared_cache,
-                &field.ty,
+                &nx_hir::erase_type_parameters(&field.ty, type_params),
                 diagnostics,
             )?,
             is_content: field.is_content,
@@ -664,6 +688,7 @@ fn build_declared_component_fields(
     lowered_module: &LoweredModule,
     type_env: &TypeEnvironment,
     fields: &[RecordField],
+    type_params: &[Name],
     scope: &mut LexicalScope,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Vec<CodegenComponentField>> {
@@ -689,7 +714,7 @@ fn build_declared_component_fields(
                 artifact,
                 resolved_module,
                 prepared_cache,
-                &field.ty,
+                &nx_hir::erase_type_parameters(&field.ty, type_params),
                 diagnostics,
             )?,
             is_content: field.is_content,
@@ -2244,11 +2269,18 @@ fn record_literal_shape(
         &record_def,
         diagnostics,
     )?;
+    let type_params = update_record_type_params(
+        artifact,
+        target_module,
+        prepared_cache,
+        lowered_module,
+        record_def,
+    );
     let fields = build_effective_record_fields(
         artifact,
         target_module,
         prepared_cache,
-        &shape.fields,
+        &erase_effective_field_type_parameters(&shape.fields, &type_params),
         diagnostics,
     )?;
     Some((
@@ -2256,6 +2288,57 @@ fn record_literal_shape(
         fields,
         record_def.update_target().is_some(),
     ))
+}
+
+/// The type parameters of the component whose state `record` patches, when it is the derived
+/// update record of a generic component; empty for every other record.
+///
+/// <para>The update record copies its target's state annotations, and a state field may be typed
+/// by a type parameter. Outside the component that parameter is not a type, and no host names the
+/// instantiation of an update — it was fixed at an NX use site — so the record's fields erase it
+/// the way the component's own state schema does.</para>
+fn update_record_type_params(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    prepared_cache: &mut PreparedModuleCache,
+    lowered_module: &LoweredModule,
+    record: &nx_hir::RecordDef,
+) -> Vec<Name> {
+    let Some(target) = record.update_target() else {
+        return Vec::new();
+    };
+    let Some(Item::Component(component)) = lowered_module.find_item(target.as_str()) else {
+        return Vec::new();
+    };
+    if component.type_params.is_empty() && component.base.is_none() {
+        return Vec::new();
+    }
+    let prepared = prepared_cache.get(artifact, resolved_module);
+    // A contract that fails to resolve is reported where the component itself is built.
+    nx_hir::effective_component_contract(prepared, component)
+        .map(|contract| {
+            contract
+                .type_params
+                .into_iter()
+                .map(|param| param.name)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `fields` with every reference to one of `type_params` erased to the top type, or a copy of
+/// `fields` when there is nothing to erase.
+fn erase_effective_field_type_parameters(
+    fields: &[EffectiveField],
+    type_params: &[Name],
+) -> Vec<EffectiveField> {
+    fields
+        .iter()
+        .map(|field| EffectiveField {
+            ty: nx_hir::erase_type_parameters(&field.ty, type_params),
+            ..field.clone()
+        })
+        .collect()
 }
 
 fn build_type_ref(

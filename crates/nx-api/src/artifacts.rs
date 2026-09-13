@@ -1510,6 +1510,7 @@ fn parse_failure_artifact(
         diagnostics,
         imports: Vec::new(),
         prepared_bindings: Vec::new(),
+        element_type_arguments: FxHashMap::default(),
         prepared_module: None,
     }
 }
@@ -2275,6 +2276,7 @@ fn build_interface_item(
             is_abstract: component.is_abstract,
             is_external: component.is_external,
             base: component.base.clone(),
+            type_params: component.type_params.clone(),
             props: component
                 .props
                 .iter()
@@ -2377,6 +2379,9 @@ fn type_to_type_ref(ty: &Type) -> Option<TypeRef> {
             let qualified_name = format!("{}.{}", case_type.union, case_type.case);
             Some(TypeRef::name(qualified_name))
         }
+        // A type parameter is a type only inside its component, and nothing published crosses
+        // that boundary; a value typed by one has no interface type to publish.
+        Type::Parameter(_) => None,
         // A pending contextual name is resolved (or reported) at its binding site, so it never
         // reaches a published artifact type.
         Type::ContextualName(_) | Type::Variable(_) | Type::Unknown | Type::Error => None,
@@ -4004,6 +4009,77 @@ export let <Img fit: Fit = {Fit.fill}  state: LoadState = {LoadState.idle} /> = 
             .iter()
             .map(|diagnostic| diagnostic.message.clone())
             .collect()
+    }
+
+    /// The type argument is consumed by the checker, so the evaluated record and its JSON carry
+    /// the prop and nothing for the parameter.
+    #[test]
+    fn an_evaluated_generic_component_record_serializes_without_its_type_argument() {
+        let artifact = build_program_artifact_from_source(
+            "type Contact = { name:string }\n\
+             external component <SkiaLayout TItem:type itemsSource:TItem[]? />\n\
+             let root() = { <SkiaLayout TItem=Contact itemsSource={} /> }",
+            "main.nx",
+            &ProgramBuildContext::empty(),
+        )
+        .expect("program artifact should build");
+
+        let json = match eval_program_artifact(&artifact) {
+            EvalResult::Ok(value) => value.to_json_string().expect("json"),
+            EvalResult::Err(diagnostics) => panic!("interpreter diagnostics: {diagnostics:?}"),
+        };
+        assert!(json.contains("itemsSource"), "got: {json}");
+        assert!(!json.contains("TItem"), "got: {json}");
+    }
+
+    /// An inherited type parameter is resolved by name from the effective contract, so a base
+    /// declared in another module contributes its parameter to a derived component here exactly
+    /// as a local base would.
+    #[test]
+    fn inherited_type_parameter_from_another_module_resolves_in_the_derived_component() {
+        let ws = workspace(vec![
+            workspace_module(
+                "app.nx",
+                br#"import { ItemsBase } from "./base.nx"
+type Contact = { name:string }
+component <ContactList extends ItemsBase spacing:int? /> = { state { first:TItem? = null } <Label /> }
+let contacts:Contact[] = {}
+let root() = { <ContactList TItem=Contact items={contacts} spacing=4 /> }"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "base.nx",
+                br#"export abstract component <ItemsBase TItem:type items:TItem[]? />"#.to_vec(),
+            ),
+        ]);
+
+        let diagnostics = validate_workspace(&ws, &ProgramBuildContext::empty());
+        assert_eq!(diagnostics, Vec::<NxDiagnostic>::new());
+
+        let ws = workspace(vec![
+            workspace_module(
+                "app.nx",
+                br#"import { ItemsBase } from "./base.nx"
+component <ContactList extends ItemsBase /> = { <Label /> }
+let root() = { <ContactList items={ "a" } /> }"#
+                    .to_vec(),
+            ),
+            workspace_module(
+                "base.nx",
+                br#"export abstract component <ItemsBase TItem:type items:TItem[]? />"#.to_vec(),
+            ),
+        ]);
+
+        let messages: Vec<String> = validate_workspace(&ws, &ProgramBuildContext::empty())
+            .iter()
+            .map(|diagnostic| diagnostic.message.clone())
+            .collect();
+        assert!(
+            messages.iter().any(|message| message.contains(
+                "Property 'items' on 'ContactList' is typed by 'TItem', which was not specified"
+            )),
+            "expected the inherited parameter to be named, got: {messages:?}"
+        );
     }
 
     #[test]

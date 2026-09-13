@@ -182,3 +182,34 @@ fn negative_match_pattern_is_accepted() {
 fn binary_subtraction_is_unaffected() {
     assert_clean("let a = {10}\nlet r1 = {a-1}\nlet r2 = {a - 1}\nlet r3 = {-90 + a}");
 }
+
+// ---------------------------------------------------------------------------------------------
+// A type-parameter site resolves a bare name against the visible type names
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn bare_name_resolves_to_a_visible_type_at_a_type_parameter_site() {
+    assert_clean(
+        "type Contact = { name:string }\n\
+         external component <List TItem:type items:TItem[]? />\n\
+         let Contact = \"shadow\"\n\
+         let v = <List TItem=Contact />",
+    );
+}
+
+#[test]
+fn unknown_type_name_at_a_type_parameter_site_suggests_a_near_match() {
+    let errors = errors(
+        "type Contact = { name:string }\n\
+         external component <List TItem:type />\n\
+         let v = <List TItem=Contatc />",
+    );
+    assert!(
+        errors.iter().any(|message| {
+            message.contains("'TItem'")
+                && message.contains("expects a type name")
+                && message.contains("did you mean `Contact`")
+        }),
+        "expected the type-name diagnostic with a suggestion, got: {errors:?}"
+    );
+}

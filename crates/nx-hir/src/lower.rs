@@ -10,11 +10,11 @@ use crate::{
     property_union_name, update_record_name, Component, ComponentEmit, ComponentEmitKind, Element,
     ExprId, Function, Import, ImportKind, Item, LoweredModule, LoweringDiagnostic, Name, Param,
     Property, PropertyConditionArm, PropertyEntry, PropertyMatchArm, RecordDef, RecordField,
-    RecordKind, SelectiveImport, SourceId, TypeAlias, UnionCaseDef, UnionCaseField, UnionDef,
-    ValueDef, Visibility, PROPERTY_UNION_SUFFIX, UPDATE_RECORD_SUFFIX,
+    RecordKind, SelectiveImport, SourceId, TypeAlias, TypeParameter, UnionCaseDef, UnionCaseField,
+    UnionDef, ValueDef, Visibility, PROPERTY_UNION_SUFFIX, UPDATE_RECORD_SUFFIX,
 };
 use nx_diagnostics::{TextSize, TextSpan};
-use nx_syntax::{SyntaxKind, SyntaxNode};
+use nx_syntax::{property_definition_is_type_parameter, SyntaxKind, SyntaxNode};
 use rustc_hash::FxHashMap;
 use smol_str::SmolStr;
 
@@ -90,6 +90,7 @@ struct PredeclaredComponent {
     is_abstract: bool,
     is_external: bool,
     base: Option<Name>,
+    type_params: Vec<TypeParameter>,
     declared_props: Vec<RecordField>,
     declared_emits: Vec<ComponentEmit>,
     effective_props: Vec<RecordField>,
@@ -643,6 +644,7 @@ impl LoweringContext {
     fn lower_field_signatures(&self, node: SyntaxNode) -> Vec<RecordField> {
         node.children()
             .filter(|child| child.kind() == SyntaxKind::PROPERTY_DEFINITION)
+            .filter(|prop| !property_definition_is_type_parameter(prop))
             .map(|prop| {
                 let ty_node = prop.child_by_field("type").unwrap_or(prop);
                 RecordField::with_content(
@@ -785,6 +787,36 @@ impl LoweringContext {
         (field_name, ty, default, is_content)
     }
 
+    /// Reads the type parameters of a component signature: the `Name:type` definitions that
+    /// syntax validation has already required to lead the property list.
+    ///
+    /// <para>A name declared twice is reported here, on the second declaration, because the
+    /// effective-contract walk only sees names across an inheritance chain.</para>
+    fn lower_type_parameters(&mut self, signature: SyntaxNode) -> Vec<TypeParameter> {
+        let mut params: Vec<TypeParameter> = Vec::new();
+        for prop in signature
+            .children()
+            .filter(|child| property_definition_is_type_parameter(child))
+        {
+            let name = Self::property_definition_name(prop);
+            if params.iter().any(|param| param.name == name) {
+                self.add_diagnostic(
+                    format!(
+                        "Type parameter '{}' is declared more than once",
+                        name.as_str()
+                    ),
+                    prop.span(),
+                );
+                continue;
+            }
+            params.push(TypeParameter {
+                name,
+                span: prop.span(),
+            });
+        }
+        params
+    }
+
     fn lower_record_fields_from_node(
         &mut self,
         node: SyntaxNode,
@@ -795,6 +827,7 @@ impl LoweringContext {
         for prop in node
             .children()
             .filter(|child| child.kind() == SyntaxKind::PROPERTY_DEFINITION)
+            .filter(|prop| !property_definition_is_type_parameter(prop))
         {
             let (field_name, ty, default, is_content) = self.lower_property_definition(prop);
 
@@ -859,7 +892,20 @@ impl LoweringContext {
             self.predeclare_update_record(&name, visibility, &state_fields, node.span());
         }
 
+        let type_params = self.lower_type_parameters(signature);
         let props = self.lower_record_fields_from_node(signature, false);
+        for prop in &props {
+            if type_params.iter().any(|param| param.name == prop.name) {
+                self.add_diagnostic(
+                    format!(
+                        "Prop '{}' has the same name as a type parameter of component '{}'",
+                        prop.name.as_str(),
+                        name.as_str()
+                    ),
+                    prop.span,
+                );
+            }
+        }
 
         let mut emits = Vec::new();
         let mut inline_records = Vec::new();
@@ -976,6 +1022,7 @@ impl LoweringContext {
                 is_abstract,
                 is_external,
                 base,
+                type_params,
                 declared_props: props.clone(),
                 declared_emits: emits.clone(),
                 effective_props: props,
@@ -1014,31 +1061,34 @@ impl LoweringContext {
 
         let body_node = node.child_by_field("body");
         let predeclared = self.predeclared_components.get(&name).cloned();
-        let (visibility, is_abstract, is_external, base, props, emits, span) = predeclared
-            .map(|component| {
-                (
-                    component.visibility,
-                    component.is_abstract,
-                    component.is_external,
-                    component.base,
-                    component.declared_props,
-                    component.declared_emits,
-                    component.span,
-                )
-            })
-            .unwrap_or_else(|| {
-                (
-                    Self::lower_visibility(node),
-                    node.child_by_field("abstract").is_some(),
-                    node.child_by_field("external").is_some(),
-                    node.child_by_field("signature")
-                        .and_then(|signature| signature.child_by_field("base"))
-                        .map(|base| Name::new(base.text())),
-                    Vec::new(),
-                    Vec::new(),
-                    node.span(),
-                )
-            });
+        let (visibility, is_abstract, is_external, base, type_params, props, emits, span) =
+            predeclared
+                .map(|component| {
+                    (
+                        component.visibility,
+                        component.is_abstract,
+                        component.is_external,
+                        component.base,
+                        component.type_params,
+                        component.declared_props,
+                        component.declared_emits,
+                        component.span,
+                    )
+                })
+                .unwrap_or_else(|| {
+                    (
+                        Self::lower_visibility(node),
+                        node.child_by_field("abstract").is_some(),
+                        node.child_by_field("external").is_some(),
+                        node.child_by_field("signature")
+                            .and_then(|signature| signature.child_by_field("base"))
+                            .map(|base| Name::new(base.text())),
+                        Vec::new(),
+                        Vec::new(),
+                        Vec::new(),
+                        node.span(),
+                    )
+                });
 
         self.push_scope();
         for prop in &props {
@@ -1062,6 +1112,7 @@ impl LoweringContext {
             is_abstract,
             is_external,
             base,
+            type_params,
             props,
             emits,
             state,
@@ -5829,5 +5880,66 @@ type Mode = light | dark"#;
             panic!("Expected note function");
         };
         assert_eq!(dotted_name(&module, note.body), "Property.note");
+    }
+
+    #[test]
+    fn test_lower_component_type_parameters_are_separate_from_props() {
+        let module = lower_source(
+            "external component <SkiaLayout TItem:type itemsSource:TItem[]? />",
+            "type-params.nx",
+        );
+        assert!(
+            module.diagnostics.is_empty(),
+            "Expected no lowering diagnostics, got {:?}",
+            module.diagnostics
+        );
+        let component = match module.find_item("SkiaLayout") {
+            Some(Item::Component(component)) => component,
+            other => panic!("Expected component, got {:?}", other),
+        };
+        assert_eq!(
+            component
+                .type_params
+                .iter()
+                .map(|param| param.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["TItem"]
+        );
+        assert_eq!(field_names(&component.props), vec!["itemsSource"]);
+        assert_eq!(
+            component.props[0].ty,
+            TypeRef::nullable(TypeRef::array(TypeRef::name("TItem")))
+        );
+    }
+
+    #[test]
+    fn test_lower_component_rejects_duplicate_type_parameter_names() {
+        let module = lower_source(
+            "component <Bad TItem:type TItem:type /> = { <Label /> }",
+            "type-params-duplicate.nx",
+        );
+        assert!(
+            module
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message
+                    == "Type parameter 'TItem' is declared more than once"),
+            "Expected duplicate type parameter diagnostic, got {:?}",
+            module.diagnostics
+        );
+
+        let module = lower_source(
+            "component <Worse TItem:type TItem:string /> = { <Label /> }",
+            "type-params-prop-collision.nx",
+        );
+        assert!(
+            module
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message
+                    == "Prop 'TItem' has the same name as a type parameter of component 'Worse'"),
+            "Expected prop/type parameter collision diagnostic, got {:?}",
+            module.diagnostics
+        );
     }
 }

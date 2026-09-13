@@ -180,6 +180,14 @@ pub enum Type {
     /// Discriminated union case type scoped to an owning union.
     UnionCase(UnionCaseType),
 
+    /// A component type parameter, rigid within the declaration that introduced it.
+    ///
+    /// Satisfied only by itself and the bottom type; satisfies itself and `object`. Identified by
+    /// the declaring component and the parameter's position there, so two parameters spelled alike
+    /// on two components are two types. Never reaches a value: a use site replaces it with the
+    /// argument it bound, or with the bottom type when it bound none.
+    Parameter(TypeParameterRef),
+
     /// Type variable for inference (e.g., T0, T1, T2)
     ///
     /// Used during type inference before the concrete type is known.
@@ -242,6 +250,57 @@ impl Type {
     /// Creates the bottom type, which is below every type and which no value inhabits.
     pub fn never() -> Self {
         Type::Primitive(Primitive::Never)
+    }
+
+    /// Creates the rigid type of a component type parameter.
+    pub fn parameter(
+        name: impl Into<Name>,
+        owner: Option<DeclaringOrigin>,
+        ordinal: usize,
+    ) -> Self {
+        Type::Parameter(TypeParameterRef {
+            name: name.into(),
+            owner,
+            ordinal,
+        })
+    }
+
+    /// The first type parameter in this type that `matches`, looking through lists, nullables,
+    /// and function signatures.
+    pub fn find_parameter(
+        &self,
+        matches: &impl Fn(&TypeParameterRef) -> bool,
+    ) -> Option<&TypeParameterRef> {
+        match self {
+            Type::Parameter(param) if matches(param) => Some(param),
+            Type::Array(inner) | Type::Nullable(inner) => inner.find_parameter(matches),
+            Type::Function { params, ret } => params
+                .iter()
+                .find_map(|param| param.find_parameter(matches))
+                .or_else(|| ret.find_parameter(matches)),
+            _ => None,
+        }
+    }
+
+    /// Replaces each type parameter `substitute` answers for, keeping every list, nullable, and
+    /// function layer around it. A parameter it answers `None` for is left as it is.
+    pub fn substitute_parameters(
+        &self,
+        substitute: &impl Fn(&TypeParameterRef) -> Option<Type>,
+    ) -> Type {
+        match self {
+            Type::Parameter(param) => substitute(param).unwrap_or_else(|| self.clone()),
+            Type::Array(inner) => Type::array(inner.substitute_parameters(substitute)),
+            Type::Nullable(inner) => Type::nullable(inner.substitute_parameters(substitute)),
+            Type::Function { params, ret } => Type::function(
+                params
+                    .iter()
+                    .map(|param| param.substitute_parameters(substitute))
+                    .collect(),
+                ret.substitute_parameters(substitute),
+            ),
+            _ => self.clone(),
+        }
     }
 
     /// Creates a primitive void type.
@@ -359,6 +418,11 @@ impl Type {
             return true;
         }
 
+        // A type parameter is rigid: exact equality above is the only way to satisfy one, and
+        // the only thing it satisfies besides itself is `object`, which the callers that admit the
+        // top type handle. It is also the only way a value of parameter type can arise, so no
+        // other case below needs to know the variant exists.
+        //
         // The bottom type is below every type, so it satisfies every expectation. Nothing is below
         // it, so the relation deliberately does not run the other way.
         //
@@ -452,6 +516,7 @@ impl fmt::Display for Type {
             Type::Named(named) => write!(f, "{}", named.name),
             Type::Union(union_ty) => write!(f, "{}", union_ty.name),
             Type::UnionCase(case_ty) => write!(f, "{}.{}", case_ty.union, case_ty.case),
+            Type::Parameter(param) => write!(f, "{}", param.name),
             Type::Variable(id) => write!(f, "T{}", id),
             Type::ContextualName(name) => write!(f, "{}", name),
             Type::Unknown => write!(f, "?"),
@@ -559,6 +624,20 @@ fn hash_declaration<H: Hasher>(origin: Option<&DeclaringOrigin>, name: &Name, st
         Some(origin) => origin.hash(state),
         None => name.hash(state),
     }
+}
+
+/// One component type parameter, as a type.
+///
+/// Equality is what makes the parameter rigid: it is equal only to itself, which is the same
+/// name at the same position on the same declaring component.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TypeParameterRef {
+    /// The name, as the signature declares it.
+    pub name: Name,
+    /// The component whose signature declares it, where the resolving context reached one.
+    pub owner: Option<DeclaringOrigin>,
+    /// Its position among the component's effective type parameters.
+    pub ordinal: usize,
 }
 
 /// A nominal type reached by name, with the declaration that name reached.
@@ -1049,5 +1128,54 @@ mod tests {
 
         let nullable_func = Type::nullable(Type::function(vec![Type::int()], Type::string()));
         assert_eq!(nullable_func.to_string(), "((int) => string)?");
+    }
+
+    #[test]
+    fn a_type_parameter_is_rigid() {
+        let param = Type::parameter("TItem", None, 0);
+        let other = Type::parameter("TOther", None, 1);
+
+        assert!(param.is_compatible_with(&param));
+        assert!(Type::never().is_compatible_with(&param));
+        assert!(crate::type_satisfies_expected(
+            &param,
+            &Type::named("object")
+        ));
+        assert!(!Type::string().is_compatible_with(&param));
+        assert!(!param.is_compatible_with(&Type::string()));
+        assert!(!param.is_compatible_with(&other));
+        assert!(!Type::named("TItem").is_compatible_with(&param));
+
+        // Composes under `?` and `[]` like any other type.
+        assert!(param.is_compatible_with(&Type::nullable(param.clone())));
+        assert!(Type::array(Type::never()).is_compatible_with(&Type::array(param.clone())));
+        assert!(!Type::array(Type::int()).is_compatible_with(&Type::array(param.clone())));
+
+        // Joining with anything else is a mismatch: the join is the top type.
+        assert_eq!(
+            crate::common_supertype(&param, &Type::string()),
+            Type::named("object")
+        );
+        assert_eq!(crate::common_supertype(&param, &param), param);
+    }
+
+    #[test]
+    fn a_type_parameter_renders_as_its_name_and_substitutes_under_wrappers() {
+        let param = Type::parameter("TItem", None, 0);
+        let ty = Type::nullable(Type::array(param.clone()));
+        assert_eq!(ty.to_string(), "TItem[]?");
+
+        let found = ty.find_parameter(&|candidate| candidate.name.as_str() == "TItem");
+        assert_eq!(found.map(|candidate| candidate.ordinal), Some(0));
+        assert!(ty
+            .find_parameter(&|candidate| candidate.name.as_str() == "TOther")
+            .is_none());
+
+        let substituted = ty.substitute_parameters(&|candidate| {
+            (candidate.name.as_str() == "TItem").then(Type::string)
+        });
+        assert_eq!(substituted, Type::nullable(Type::array(Type::string())));
+        let untouched = ty.substitute_parameters(&|_| None);
+        assert_eq!(untouched, ty);
     }
 }

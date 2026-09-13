@@ -208,6 +208,154 @@ mod tests {
         );
     }
 
+    /// A C# host receives a component value by its discriminator and cannot pick a generic
+    /// instantiation from data, so the contract erases the parameter; a TypeScript caller names
+    /// the instantiation statically, so the contract carries it as a generic parameter.
+    #[test]
+    fn a_component_type_parameter_is_erased_in_csharp_and_generic_in_typescript() {
+        let source = "export external component <SkiaLayout TItem:type itemsSource:TItem[]? />\n";
+
+        let csharp = generate_for(source, TargetLanguage::CSharp);
+        assert!(
+            csharp.contains("class SkiaLayout\n"),
+            "the record declares no generic parameter:\n{csharp}"
+        );
+        let items_line = csharp
+            .lines()
+            .find(|line| line.contains("ItemsSource"))
+            .unwrap_or_else(|| panic!("expected an ItemsSource property:\n{csharp}"));
+        assert!(
+            items_line.contains("object") && items_line.contains('?'),
+            "the property should be a nullable list of object: {items_line}"
+        );
+        assert!(!csharp.contains("TItem"), "no TItem member:\n{csharp}");
+
+        let typescript = generate_for(source, TargetLanguage::TypeScript);
+        assert!(
+            typescript.contains(
+                "export interface SkiaLayout<TItem = unknown> extends NxRecord<\"SkiaLayout\">"
+            ),
+            "the contract should be generic with an unknown default:\n{typescript}"
+        );
+        assert!(
+            typescript.contains("itemsSource: TItem[] | null;"),
+            "the field should be typed by the parameter:\n{typescript}"
+        );
+        assert!(
+            !typescript
+                .lines()
+                .any(|line| line.contains("TItem:") || line.contains("TItem?:")),
+            "no TItem member:\n{typescript}"
+        );
+    }
+
+    /// An inherited parameter is the base's, so a derived contract passes it through to the base
+    /// contract it extends and declares it alongside its own.
+    #[test]
+    fn a_derived_component_contract_carries_inherited_type_parameters() {
+        let source = "export abstract external component <ItemsBase TItem:type items:TItem[]? />\n\
+                      export external component <Keyed extends ItemsBase TKey:type keys:TKey[]? />\n";
+
+        let typescript = generate_for(source, TargetLanguage::TypeScript);
+        assert!(
+            typescript.contains("export interface Keyed<TItem = unknown, TKey = unknown> extends ItemsBaseBase<TItem>, NxRecord<\"Keyed\">"),
+            "{typescript}"
+        );
+
+        let csharp = generate_for(source, TargetLanguage::CSharp);
+        assert!(csharp.contains("class Keyed : ItemsBase"), "{csharp}");
+        assert!(
+            !csharp.contains("TItem") && !csharp.contains("TKey"),
+            "{csharp}"
+        );
+    }
+
+    /// A state field typed by the component's type parameter reaches the update companion and,
+    /// for an external component, the state record. Neither host names that instantiation — an
+    /// NX use site fixed it — so both surfaces erase the parameter to the host's top type.
+    #[test]
+    fn a_generic_component_state_and_update_companion_erase_the_parameter() {
+        let source = "export external component <Picker TItem:type items:TItem[]? /> = { state { sel:TItem? } }\n";
+
+        let typescript = generate_for(source, TargetLanguage::TypeScript);
+        let state = typescript
+            .split("export interface Picker_state")
+            .nth(1)
+            .and_then(|tail| tail.split('}').next())
+            .unwrap_or_else(|| panic!("Picker_state block:\n{typescript}"));
+        assert!(state.contains("sel: unknown | null;"), "{state}");
+        let update = typescript
+            .split("export interface Picker_update")
+            .nth(1)
+            .and_then(|tail| tail.split('}').next())
+            .unwrap_or_else(|| panic!("Picker_update block:\n{typescript}"));
+        assert!(update.contains("sel?: unknown | null;"), "{update}");
+        assert!(
+            !state.contains("TItem") && !update.contains("TItem"),
+            "{typescript}"
+        );
+
+        let csharp = generate_for(source, TargetLanguage::CSharp);
+        assert!(!csharp.contains("TItem"), "{csharp}");
+        let state = csharp_companion_body(&csharp, "Picker_state");
+        assert!(state.contains("public object? Sel"), "{state}");
+        let update = csharp_companion_body(&csharp, "Picker_update");
+        assert!(update.contains("NxOptional<object?> Sel"), "{update}");
+    }
+
+    /// The base chain resolves through the prepared module, so a base declared in another module
+    /// of the library contributes its parameters to the derived contract, which declares them and
+    /// passes them on to the base contract it extends.
+    #[test]
+    fn a_derived_contract_carries_type_parameters_inherited_across_modules() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let ui_dir = temp_dir.path().join("ui");
+        write_library(
+            &ui_dir,
+            &[
+                (
+                    "base.nx",
+                    "export abstract external component <ItemsBase TItem:type items:TItem[]? />",
+                ),
+                (
+                    "derived.nx",
+                    "export external component <ContactList extends ItemsBase extra:TItem[]? />",
+                ),
+            ],
+        );
+        let artifact = build_library_artifact_from_directory(&ui_dir).expect("library build");
+
+        let typescript = generate_library_types_with_warnings(
+            &artifact,
+            &library_options(TargetLanguage::TypeScript),
+        )
+        .unwrap();
+        let derived = generated_file(&typescript, "derived.ts");
+        assert!(
+            derived.contains("export interface ContactList<TItem = unknown> extends ItemsBaseBase<TItem>, NxRecord<\"ContactList\">"),
+            "{derived}"
+        );
+        assert!(derived.contains("extra: TItem[] | null;"), "{derived}");
+        assert!(typescript.warnings.is_empty(), "{:?}", typescript.warnings);
+
+        let csharp = generate_library_types_with_warnings(
+            &artifact,
+            &library_options(TargetLanguage::CSharp),
+        )
+        .unwrap();
+        let derived = generated_file(&csharp, "derived.g.cs");
+        assert!(!derived.contains("TItem"), "{derived}");
+        let extra_line = derived
+            .lines()
+            .find(|line| line.contains("Extra"))
+            .unwrap_or_else(|| panic!("expected an Extra property:\n{derived}"));
+        assert!(
+            extra_line.contains("object") && extra_line.contains('?'),
+            "the property should be a nullable list of object: {extra_line}"
+        );
+        assert!(csharp.warnings.is_empty(), "{:?}", csharp.warnings);
+    }
+
     #[test]
     fn generates_the_same_defaults_for_both_spellings_of_a_whole_float() {
         // This path reads a lowered module and never type checks, so the HIR conversion has not

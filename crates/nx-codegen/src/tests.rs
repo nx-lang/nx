@@ -3276,3 +3276,193 @@ let changedKeys(): User.Property[] = {changed(diff(<User name="Ada" />, <User na
     assert!(module.contains("nxChangedFields("), "{}", module);
     assert_generated_typescript_artifact_type_checks(&artifact);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Component type parameters
+// ---------------------------------------------------------------------------------------------
+
+const GENERIC_LAYOUT: &str = "type Contact = { name:string }\n\
+    external component <SkiaLayout TItem:type itemsSource:TItem[]? />\n\
+    let v = <SkiaLayout TItem=Contact itemsSource={} />\n\
+    let root() = { v }";
+
+/// NX IR carries no component type parameters: the prop schema is erased to the top type, and
+/// the descriptor carries no property for the argument the source bound.
+#[test]
+fn nx_ir_erases_a_component_type_parameter() {
+    let artifact = artifact_from_source(GENERIC_LAYOUT);
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+
+    let layout = ir_declaration(&document, "SkiaLayout");
+    let props = layout["kind"]["props"].as_array().expect("props");
+    assert_eq!(props.len(), 1, "{layout}");
+    assert_eq!(props[0]["name"], "itemsSource");
+    let ty = props[0]["ty"].to_string();
+    assert_eq!(props[0]["ty"]["kind"], "nullable", "{ty}");
+    assert_eq!(props[0]["ty"]["inner"]["kind"], "array", "{ty}");
+    assert_eq!(props[0]["ty"]["inner"]["element"]["name"], "object", "{ty}");
+    assert!(!layout.to_string().contains("TItem"), "{layout}");
+
+    let descriptor = ir_declaration(&document, "v").to_string();
+    assert!(descriptor.contains("itemsSource"), "{descriptor}");
+    assert!(!descriptor.contains("TItem"), "{descriptor}");
+}
+
+/// The executable TypeScript carries the parameter where a caller names the instantiation — the
+/// `Props` type and the factory — and erases it on the serializable element type.
+#[test]
+fn generated_typescript_carries_a_type_parameter_generically_and_erases_it_on_the_element() {
+    let artifact = artifact_from_source(GENERIC_LAYOUT);
+    let module = generated_file(&artifact, CodegenTarget::TypeScript, "m0_main.ts");
+
+    assert!(
+        module.contains("type SkiaLayoutProps<TItem = unknown> = {\n  itemsSource?: readonly TItem[] | null;\n};"),
+        "{module}"
+    );
+    assert!(
+        module.contains("function SkiaLayout<TItem = unknown>(props: SkiaLayoutProps<TItem> = {}): SkiaLayoutElement {"),
+        "{module}"
+    );
+    assert!(
+        module.contains("type SkiaLayoutElement = {\n  readonly $type: \"SkiaLayout\";\n  readonly itemsSource: readonly unknown[] | null;\n};"),
+        "{module}"
+    );
+    assert!(
+        !module
+            .lines()
+            .any(|line| line.contains("TItem:") || line.contains("TItem?:")),
+        "neither type may have a member for the parameter:\n{module}"
+    );
+
+    assert_generated_typescript_artifact_type_checks(&artifact);
+}
+
+/// A TypeScript caller gets the parameter inferred from the props it passes, and pays nothing at
+/// runtime: the factory returns the erased element.
+#[test]
+fn generated_typescript_infers_a_type_argument_from_the_factory_call() {
+    let artifact = artifact_from_source(GENERIC_LAYOUT);
+    let output = emit_program(&artifact, &CodegenOptions::typescript()).expect("ts output");
+    let dir = TempDir::new().expect("temp dir");
+    fs::write(dir.path().join("package.json"), r#"{ "type": "module" }"#).expect("package file");
+    for file in output.files {
+        fs::write(dir.path().join(file.relative_path), file.content).expect("generated file");
+    }
+    fs::write(
+        dir.path().join("usage.ts"),
+        r#"import { SkiaLayout, type SkiaLayoutProps } from "./m0_main.js";
+
+const props: SkiaLayoutProps<{ name: string }> = { itemsSource: [{ name: "a" }] };
+const typed = SkiaLayout(props);
+const inferred = SkiaLayout({ itemsSource: [{ name: "a" }] });
+const bare = SkiaLayout({});
+const erasedProps: SkiaLayoutProps = { itemsSource: [1, "two"] };
+const types: ["SkiaLayout", "SkiaLayout", "SkiaLayout"] = [typed.$type, inferred.$type, bare.$type];
+const items: readonly unknown[] | null = inferred.itemsSource;
+// A wrong item type does not fit the named instantiation.
+// @ts-expect-error
+const mismatched: SkiaLayoutProps<{ name: string }> = { itemsSource: [1] };
+export { types, items, erasedProps, mismatched };
+"#,
+    )
+    .expect("usage file");
+
+    let output = tsc_command()
+        .current_dir(dir.path())
+        .args([
+            "--noEmit",
+            "--module",
+            "NodeNext",
+            "--moduleResolution",
+            "NodeNext",
+            "--target",
+            "ES2020",
+            "--strict",
+            "usage.ts",
+        ])
+        .output()
+        .expect("tsc execution");
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let rendered = execute_generated_javascript_artifact_script(
+        &artifact,
+        "console.log(JSON.stringify([m.SkiaLayout({}).$type, m.root()]));",
+    );
+    assert_json_values_eq(
+        &rendered,
+        r#"["SkiaLayout", { "$type": "SkiaLayout", "itemsSource": [] }]"#,
+    );
+}
+
+const GENERIC_STATEFUL_LIST: &str = "external component <Label text:string? />\n\
+    component <List TItem:type items:TItem[]? /> = { state { sel:TItem? = null } <Label /> }\n";
+
+/// State is a snapshot the host holds as data, and its instantiation was fixed at an NX use site
+/// the host never sees, so the state type erases the parameter the way the element type does.
+#[test]
+fn generated_typescript_erases_a_type_parameter_on_the_state_type() {
+    let artifact = artifact_from_source(&format!(
+        "{GENERIC_STATEFUL_LIST}let root() = {{ <List items={{}} /> }}"
+    ));
+    let module = generated_file(&artifact, CodegenTarget::TypeScript, "m0_main.ts");
+
+    assert!(
+        module.contains("type ListState = {\n  readonly sel: unknown | null;\n};"),
+        "{module}"
+    );
+    assert!(
+        !module
+            .lines()
+            .any(|line| line.contains("TItem:") || line.contains("TItem?:")),
+        "no type may have a member for the parameter:\n{module}"
+    );
+
+    assert_generated_typescript_artifact_type_checks(&artifact);
+}
+
+/// The update record copies the state annotations, and outside the component the parameter is not
+/// a type, so the record erases it to the top type in every target rather than failing to build.
+#[test]
+fn an_update_record_of_a_generic_component_erases_the_parameter() {
+    let artifact = artifact_from_source(&format!(
+        "{GENERIC_STATEFUL_LIST}let u = <List.Update sel=null />\nlet root() = {{ u }}"
+    ));
+    let module = generated_file(&artifact, CodegenTarget::TypeScript, "m0_main.ts");
+
+    assert!(
+        module.contains(
+            "type List_Update = {\n  readonly $type: \"List.Update\";\n  readonly sel?: object | null;\n};"
+        ),
+        "{module}"
+    );
+    assert_generated_typescript_artifact_type_checks(&artifact);
+
+    let generated = emit_nx_ir(&artifact).expect("nx ir output");
+    let document: Value = serde_json::from_str(&generated.json).expect("nx ir json");
+    let update = ir_declaration(&document, "List.Update").to_string();
+    assert!(update.contains("\"object\""), "{update}");
+    assert!(!update.contains("TItem"), "{update}");
+}
+
+/// An optional nullable prop is `T | null | undefined` on the input and `T | null` once resolved:
+/// a key present with no value resolves to `null`, the same as an absent key. The rule is the
+/// resolver's, not a generic component's, so it is pinned on an ordinary component.
+#[test]
+fn a_nullable_prop_present_with_no_value_resolves_to_null() {
+    let artifact =
+        artifact_from_source("external component <Box label:string? />\nlet root() = { <Box /> }");
+    let rendered = execute_generated_javascript_artifact_script(
+        &artifact,
+        "console.log(JSON.stringify([m.Box({ label: undefined }), m.Box({})]));",
+    );
+    assert_json_values_eq(
+        &rendered,
+        r#"[{ "$type": "Box", "label": null }, { "$type": "Box", "label": null }]"#,
+    );
+}

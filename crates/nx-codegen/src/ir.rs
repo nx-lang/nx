@@ -1970,9 +1970,12 @@ fn ir_type_ref(ty: &CodegenTypeRef) -> NxIrTypeRef {
 }
 
 fn ir_semantic_type(ty: &Type) -> NxIrSemanticType {
+    // NX IR carries no component type parameters: a host receiving a value by `$type` has
+    // nothing to bind one to, so a parameter is erased to the top type before it is rendered.
+    let erased = ty.substitute_parameters(&|_| Some(Type::named("object")));
     NxIrSemanticType {
-        display: ty.to_string(),
-        shape: ir_semantic_type_shape(ty),
+        display: erased.to_string(),
+        shape: ir_semantic_type_shape(&erased),
     }
 }
 
@@ -2008,6 +2011,10 @@ fn ir_semantic_type_shape(ty: &Type) -> NxIrSemanticTypeShape {
             case_name: case_ty.case.as_str().to_string(),
         },
         Type::Variable(id) => NxIrSemanticTypeShape::Variable { id: *id },
+        // Erased by `ir_semantic_type` before this is reached; kept total for the same reason.
+        Type::Parameter(_) => NxIrSemanticTypeShape::Named {
+            name: "object".to_string(),
+        },
         // Never survives type analysis; treated as unknown if it somehow reaches IR.
         Type::ContextualName(_) | Type::Unknown => NxIrSemanticTypeShape::Unknown,
         Type::Error => NxIrSemanticTypeShape::Error,

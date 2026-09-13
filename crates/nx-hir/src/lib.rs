@@ -49,8 +49,8 @@ pub use prepared::{
 pub use components::{
     apply_contextual_name_resolutions, apply_int_literal_conversions, component_declaration_origin,
     effective_component_contract, effective_component_contract_at,
-    effective_component_contract_for_name, is_component_subtype,
-    promote_component_handler_bindings, resolve_component_definition,
+    effective_component_contract_for_name, erase_type_parameters, is_component_subtype,
+    promote_component_handler_bindings, remove_property_entries, resolve_component_definition,
     validate_component_definitions, ComponentAncestor, ComponentResolutionError, ContextualRewrite,
     EffectiveComponentContract, InvalidComponentBaseReason,
 };
@@ -558,6 +558,41 @@ impl QualifiedExprRef {
     }
 }
 
+/// One type parameter declared on a component signature (`TItem:type`).
+///
+/// <para>A type parameter is not a prop: it carries no value, no default, and no modifier, and it
+/// is kept apart from [`Component::props`] so that every consumer of props — binding checks, the
+/// runtime record, generated contracts — excludes it by construction.</para>
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeParameter {
+    /// Parameter name
+    pub name: Name,
+    /// Source span of the declaration
+    pub span: TextSpan,
+}
+
+/// One type parameter on a resolved component contract, with the module that declared it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectiveTypeParameter {
+    /// Parameter name
+    pub name: Name,
+    /// Stable identity of the module that declared the parameter.
+    pub module_identity: String,
+    /// Source span of the declaration
+    pub span: TextSpan,
+}
+
+impl EffectiveTypeParameter {
+    /// Converts one declared type parameter into its effective inherited form.
+    pub fn from_type_parameter(param: TypeParameter, module_identity: impl Into<String>) -> Self {
+        Self {
+            name: param.name,
+            module_identity: module_identity.into(),
+            span: param.span,
+        }
+    }
+}
+
 /// Effective inherited field metadata used after prepared-module resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectiveField {
@@ -750,6 +785,8 @@ pub struct Component {
     pub is_external: bool,
     /// Optional base component name.
     pub base: Option<Name>,
+    /// Declared type parameters, in declaration order. Never part of `props`.
+    pub type_params: Vec<TypeParameter>,
     /// Declared props, including optional default expressions
     pub props: Vec<RecordField>,
     /// Declared emitted actions
@@ -1147,6 +1184,11 @@ impl LoweredModule {
     /// Get mutable access to an element by ID.
     pub fn element_mut(&mut self, id: ElementId) -> &mut Element {
         &mut self.elements[id]
+    }
+
+    /// Mutable access to every element in the arena, in allocation order.
+    pub fn elements_mut(&mut self) -> impl Iterator<Item = (ElementId, &mut Element)> + '_ {
+        self.elements.iter_mut()
     }
 }
 

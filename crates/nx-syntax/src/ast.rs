@@ -31,6 +31,18 @@ impl<'tree> SyntaxNodeExt<'tree> for SyntaxNode<'tree> {
     }
 }
 
+/// True when a PROPERTY_DEFINITION declares a component type parameter: its type is the `type`
+/// keyword (`TItem:type`) rather than a type reference.
+///
+/// The keyword token and the `type` rule share the kind `TYPE`; only the rule produces a named
+/// node, which is what tells them apart.
+pub fn property_definition_is_type_parameter(prop: &SyntaxNode<'_>) -> bool {
+    prop.kind() == SyntaxKind::PROPERTY_DEFINITION
+        && prop
+            .child_by_field("type")
+            .is_some_and(|ty| ty.kind() == SyntaxKind::TYPE && !ty.raw().is_named())
+}
+
 // Example AST node implementations
 
 /// Represents a function definition in the AST.
