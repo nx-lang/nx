@@ -3,9 +3,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Text.Json.Serialization;
-using MessagePack;
-using NxLang.Nx.Serialization;
 
 namespace NxLang.Nx;
 
@@ -13,19 +10,13 @@ namespace NxLang.Nx;
 /// A value that may be unset, which is different from being set to <see langword="null"/>.
 /// </summary>
 /// <remarks>
-/// <para>Generated update record DTOs type every property with this struct. In an update record an unset
-/// property means "leave this field unchanged" and a property set to <see langword="null"/> means "set this field
-/// to null", so the two must stay distinct on the wire.</para>
-/// <para><c>default</c> is unset. Mark a property
-/// <c>[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]</c> to omit it from JSON when unset, and
-/// give the containing type <see cref="NxUpdateRecordMessagePackFormatter{TRecord}"/> to omit it from MessagePack.
-/// A key missing on read leaves the property unset in both formats. Those are the only supported positions:
-/// serializing an unset value anywhere else, such as in a list or an unannotated property, throws rather than
-/// writing a <see langword="null"/> that would mean "set to null".</para>
+/// <para>Generated update record DTOs expose every field through this struct. In an update record an unset field
+/// means "leave this field unchanged" and a field set to <see langword="null"/> means "set this field to null", so
+/// the two stay distinct: the DTO stores only its set fields, and serialization writes only those.</para>
+/// <para><c>default</c> is unset. The struct is an in-memory value only and is never serialized itself; a DTO's
+/// fields travel through the map <see cref="NxUpdateRecord"/> keeps.</para>
 /// </remarks>
 /// <typeparam name="T">The type of the value when set.</typeparam>
-[JsonConverter(typeof(NxOptionalJsonConverterFactory))]
-[MessagePackFormatter(typeof(NxOptionalMessagePackFormatter<>))]
 public readonly struct NxOptional<T> : IEquatable<NxOptional<T>>
 {
     private readonly T _value;

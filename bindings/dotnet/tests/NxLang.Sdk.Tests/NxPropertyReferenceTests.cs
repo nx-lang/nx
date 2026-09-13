@@ -3,6 +3,7 @@
 
 using System.Text.Json;
 using MessagePack;
+using NxLang.Nx;
 using NxLang.Sdk.Tests.Generated;
 using Xunit;
 
@@ -63,5 +64,58 @@ public class NxPropertyReferenceTests
             payload,
             cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(User_property.Name, decoded.SortBy);
+    }
+
+    [Fact]
+    public void PropertyKey_ReadsAndWritesTheFieldOfARecord()
+    {
+        User user = new() { Name = "Ada" };
+
+        UserProperties.Email.Set(user, "x@y");
+
+        Assert.Equal("x@y", user.Email);
+        Assert.Equal("x@y", UserProperties.Email.Get(user));
+        Assert.Equal("Ada", UserProperties.Name.GetValue(user));
+        UserProperties.Name.SetValue(user, "Grace");
+        Assert.Equal("Grace", user.Name);
+        Assert.Equal("email", UserProperties.Email.Name);
+        Assert.Equal(typeof(string), UserProperties.Email.ValueType);
+    }
+
+    /// <summary>
+    /// The key carries the field's value type, so reading and writing through it needs no cast and a mistyped
+    /// value does not compile: <c>update.Set(UserProperties.Name, 42)</c> is rejected by the compiler.
+    /// </summary>
+    [Fact]
+    public void IndexingAPatchByATypedKey_PreservesTheFieldType()
+    {
+        User_update update = new();
+
+        update.Set(UserProperties.Name, "Ada");
+        NxOptional<string?> email = update.Get(UserProperties.Email);
+        NxOptional<string> name = update.Get(UserProperties.Name);
+
+        Assert.False(email.HasValue);
+        Assert.Equal("Ada", name.Value);
+        Assert.Equal(new[] { "name" }, update.Fields.Keys);
+        Assert.True(update.IsSet(UserProperties.Name));
+        Assert.False(update.IsSet(UserProperties.Email));
+
+        update.Unset(UserProperties.Name);
+        Assert.Empty(update.Fields);
+    }
+
+    [Fact]
+    public void PropertyCompanionValue_ResolvesToItsKey()
+    {
+        User_property decoded = JsonSerializer.Deserialize<User_property>("\"email\"");
+        User_update update = new() { Email = null };
+
+        NxProperty<User> key = UserProperties.Of(decoded);
+
+        Assert.Same(UserProperties.Email, key);
+        Assert.True(update.IsSet(key));
+        Assert.True(update.IsSet(decoded));
+        Assert.False(update.IsSet(UserProperties.Of(User_property.Name)));
     }
 }

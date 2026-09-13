@@ -39,45 +39,606 @@ namespace NxLang.Sdk.Tests.Generated
         public User_property? SortBy { get; set; }
     }
 
-    [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<User_update>))]
-    public sealed class User_update
+    [MessagePackObject]
+    public sealed class Clash
     {
-        [Key("$type")]
-        [JsonPropertyName("$type")]
-        public string NxType => "User.Update";
+        [Key("changed")]
+        [JsonPropertyName("changed")]
+        public bool Changed { get; set; }
 
-        [Key("name")]
-        [JsonPropertyName("name")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        public NxOptional<string> Name { get; set; }
+        [Key("isSet")]
+        [JsonPropertyName("isSet")]
+        public bool IsSet { get; set; }
 
-        [Key("email")]
-        [JsonPropertyName("email")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        public NxOptional<string?> Email { get; set; }
+        [Key("unset")]
+        [JsonPropertyName("unset")]
+        public bool Unset { get; set; }
+
+        [Key("diff")]
+        [JsonPropertyName("diff")]
+        public string Diff { get; set; } = default!;
+
+        [Key("fields")]
+        [JsonPropertyName("fields")]
+        public string Fields { get; set; } = default!;
+
+        [Key("schema")]
+        [JsonPropertyName("schema")]
+        public string Schema { get; set; } = default!;
+
+        [Key("nxType")]
+        [JsonPropertyName("nxType")]
+        public string NxType { get; set; } = default!;
     }
 
-    [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<Form_update>))]
-    public sealed class Form_update
+    [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
+    [JsonDerivedType(typeof(Circle), "Circle")]
+    [JsonDerivedType(typeof(Square), "Square")]
+    [MessagePackFormatter(typeof(NxPolymorphicMessagePackFormatter<Shape>))]
+    public abstract class Shape
     {
-        [Key("$type")]
-        [JsonPropertyName("$type")]
+        [Key("id")]
+        [JsonPropertyName("id")]
+        public string Id { get; set; } = default!;
+    }
+
+    [MessagePackFormatter(typeof(NxPolymorphicConcreteMessagePackFormatter<Shape, Circle>))]
+    public sealed class Circle : Shape
+    {
+    }
+
+    [MessagePackFormatter(typeof(NxPolymorphicConcreteMessagePackFormatter<Shape, Square>))]
+    public sealed class Square : Shape
+    {
+    }
+
+    [MessagePackObject]
+    public sealed class Doc
+    {
+        [Key("shape")]
+        [JsonPropertyName("shape")]
+        public Shape Shape { get; set; } = default!;
+    }
+
+    [MessagePackObject]
+    public sealed class Ticker
+    {
+        [Key("step")]
+        [JsonPropertyName("step")]
+        public long Step { get; set; }
+    }
+
+    [MessagePackObject]
+    public sealed class Ticker_state
+    {
+        [Key("count")]
+        [JsonPropertyName("count")]
+        public long Count { get; set; }
+    }
+
+    [JsonConverter(typeof(NxUpdateRecordJsonConverter<User_update>))]
+    [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<User_update>))]
+    public sealed class User_update : NxUpdate<User>
+    {
+        private static readonly NxUpdateSchema FieldSchema = new(
+            "User.Update",
+            UserProperties.Name,
+            UserProperties.Email);
+
+        public User_update()
+            : base(FieldSchema)
+        {
+        }
+
+        public string NxType => "User.Update";
+
+        public NxOptional<string> Name
+        {
+            get => base.Get<string>("name");
+            set => base.Set("name", value);
+        }
+
+        public NxOptional<string?> Email
+        {
+            get => base.Get<string?>("email");
+            set => base.Set("email", value);
+        }
+
+        public bool IsSet(User_property property) => base.IsSet(User_propertyWireFormat.Format(property));
+
+        public void Unset(User_property property) => base.Unset(User_propertyWireFormat.Format(property));
+
+        public User_property[] Changed() => Array.ConvertAll(base.ChangedNames(), User_propertyWireFormat.Parse);
+
+        public static User_update Diff(User before, User after) => NxUpdate<User>.Diff<User_update>(before, after);
+    }
+
+    public static class UserProperties
+    {
+        public static readonly NxProperty<User, string> Name = new(
+            User_propertyWireFormat.Format(User_property.Name),
+            record => record.Name,
+            (record, value) => record.Name = value);
+
+        public static readonly NxProperty<User, string?> Email = new(
+            User_propertyWireFormat.Format(User_property.Email),
+            record => record.Email,
+            (record, value) => record.Email = value);
+
+        public static NxProperty<User> Of(User_property property)
+        {
+            switch (property)
+            {
+                case User_property.Name:
+                    return Name;
+                case User_property.Email:
+                    return Email;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(property));
+            }
+        }
+    }
+
+    [JsonConverter(typeof(NxUpdateRecordJsonConverter<Form_update>))]
+    [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<Form_update>))]
+    public sealed class Form_update : NxUpdate<Form>
+    {
+        private static readonly NxUpdateSchema FieldSchema = new(
+            "Form.Update",
+            FormProperties.Pending,
+            FormProperties.Drafts,
+            FormProperties.SortBy);
+
+        public Form_update()
+            : base(FieldSchema)
+        {
+        }
+
         public string NxType => "Form.Update";
 
-        [Key("pending")]
-        [JsonPropertyName("pending")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        public NxOptional<User_update?> Pending { get; set; }
+        public NxOptional<User_update?> Pending
+        {
+            get => base.Get<User_update?>("pending");
+            set => base.Set("pending", value);
+        }
 
-        [Key("drafts")]
-        [JsonPropertyName("drafts")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        public NxOptional<User_update[]> Drafts { get; set; }
+        public NxOptional<User_update[]> Drafts
+        {
+            get => base.Get<User_update[]>("drafts");
+            set => base.Set("drafts", value);
+        }
 
-        [Key("sortBy")]
-        [JsonPropertyName("sortBy")]
-        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        public NxOptional<User_property?> SortBy { get; set; }
+        public NxOptional<User_property?> SortBy
+        {
+            get => base.Get<User_property?>("sortBy");
+            set => base.Set("sortBy", value);
+        }
+
+        public bool IsSet(Form_property property) => base.IsSet(Form_propertyWireFormat.Format(property));
+
+        public void Unset(Form_property property) => base.Unset(Form_propertyWireFormat.Format(property));
+
+        public Form_property[] Changed() => Array.ConvertAll(base.ChangedNames(), Form_propertyWireFormat.Parse);
+
+        public static Form_update Diff(Form before, Form after) => NxUpdate<Form>.Diff<Form_update>(before, after);
+    }
+
+    public static class FormProperties
+    {
+        public static readonly NxProperty<Form, User_update?> Pending = new(
+            Form_propertyWireFormat.Format(Form_property.Pending),
+            record => record.Pending,
+            (record, value) => record.Pending = value);
+
+        public static readonly NxProperty<Form, User_update[]> Drafts = new(
+            Form_propertyWireFormat.Format(Form_property.Drafts),
+            record => record.Drafts,
+            (record, value) => record.Drafts = value);
+
+        public static readonly NxProperty<Form, User_property?> SortBy = new(
+            Form_propertyWireFormat.Format(Form_property.SortBy),
+            record => record.SortBy,
+            (record, value) => record.SortBy = value);
+
+        public static NxProperty<Form> Of(Form_property property)
+        {
+            switch (property)
+            {
+                case Form_property.Pending:
+                    return Pending;
+                case Form_property.Drafts:
+                    return Drafts;
+                case Form_property.SortBy:
+                    return SortBy;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(property));
+            }
+        }
+    }
+
+    [JsonConverter(typeof(NxUpdateRecordJsonConverter<Counter_update>))]
+    [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<Counter_update>))]
+    public sealed class Counter_update : NxUpdateRecord
+    {
+        private static readonly NxUpdateSchema FieldSchema = new(
+            "Counter.Update",
+            new NxField("count", typeof(long)));
+
+        public Counter_update()
+            : base(FieldSchema)
+        {
+        }
+
+        public string NxType => "Counter.Update";
+
+        public NxOptional<long> Count
+        {
+            get => base.Get<long>("count");
+            set => base.Set("count", value);
+        }
+
+        public bool IsSet(Counter_property property) => base.IsSet(Counter_propertyWireFormat.Format(property));
+
+        public void Unset(Counter_property property) => base.Unset(Counter_propertyWireFormat.Format(property));
+
+        public Counter_property[] Changed() => Array.ConvertAll(base.ChangedNames(), Counter_propertyWireFormat.Parse);
+    }
+
+    [JsonConverter(typeof(NxUpdateRecordJsonConverter<Clash_update>))]
+    [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<Clash_update>))]
+    public sealed class Clash_update : NxUpdate<Clash>
+    {
+        private static readonly NxUpdateSchema FieldSchema = new(
+            "Clash.Update",
+            ClashProperties.Changed,
+            ClashProperties.IsSet,
+            ClashProperties.Unset,
+            ClashProperties.Diff,
+            ClashProperties.Fields,
+            ClashProperties.Schema,
+            ClashProperties.NxType);
+
+        public Clash_update()
+            : base(FieldSchema)
+        {
+        }
+
+        public string NxType_ => "Clash.Update";
+
+        public NxOptional<bool> Changed
+        {
+            get => base.Get<bool>("changed");
+            set => base.Set("changed", value);
+        }
+
+        public new NxOptional<bool> IsSet
+        {
+            get => base.Get<bool>("isSet");
+            set => base.Set("isSet", value);
+        }
+
+        public new NxOptional<bool> Unset
+        {
+            get => base.Get<bool>("unset");
+            set => base.Set("unset", value);
+        }
+
+        public NxOptional<string> Diff
+        {
+            get => base.Get<string>("diff");
+            set => base.Set("diff", value);
+        }
+
+        public new NxOptional<string> Fields
+        {
+            get => base.Get<string>("fields");
+            set => base.Set("fields", value);
+        }
+
+        public new NxOptional<string> Schema
+        {
+            get => base.Get<string>("schema");
+            set => base.Set("schema", value);
+        }
+
+        public NxOptional<string> NxType
+        {
+            get => base.Get<string>("nxType");
+            set => base.Set("nxType", value);
+        }
+
+        public bool IsSet_(Clash_property property) => base.IsSet(Clash_propertyWireFormat.Format(property));
+
+        public void Unset_(Clash_property property) => base.Unset(Clash_propertyWireFormat.Format(property));
+
+        public Clash_property[] Changed_() => Array.ConvertAll(base.ChangedNames(), Clash_propertyWireFormat.Parse);
+
+        public static Clash_update Diff_(Clash before, Clash after) => NxUpdate<Clash>.Diff<Clash_update>(before, after);
+    }
+
+    public static class ClashProperties
+    {
+        public static readonly NxProperty<Clash, bool> Changed = new(
+            Clash_propertyWireFormat.Format(Clash_property.Changed),
+            record => record.Changed,
+            (record, value) => record.Changed = value);
+
+        public static readonly NxProperty<Clash, bool> IsSet = new(
+            Clash_propertyWireFormat.Format(Clash_property.IsSet),
+            record => record.IsSet,
+            (record, value) => record.IsSet = value);
+
+        public static readonly NxProperty<Clash, bool> Unset = new(
+            Clash_propertyWireFormat.Format(Clash_property.Unset),
+            record => record.Unset,
+            (record, value) => record.Unset = value);
+
+        public static readonly NxProperty<Clash, string> Diff = new(
+            Clash_propertyWireFormat.Format(Clash_property.Diff),
+            record => record.Diff,
+            (record, value) => record.Diff = value);
+
+        public static readonly NxProperty<Clash, string> Fields = new(
+            Clash_propertyWireFormat.Format(Clash_property.Fields),
+            record => record.Fields,
+            (record, value) => record.Fields = value);
+
+        public static readonly NxProperty<Clash, string> Schema = new(
+            Clash_propertyWireFormat.Format(Clash_property.Schema),
+            record => record.Schema,
+            (record, value) => record.Schema = value);
+
+        public static readonly NxProperty<Clash, string> NxType = new(
+            Clash_propertyWireFormat.Format(Clash_property.NxType),
+            record => record.NxType,
+            (record, value) => record.NxType = value);
+
+        public static NxProperty<Clash> Of(Clash_property property)
+        {
+            switch (property)
+            {
+                case Clash_property.Changed:
+                    return Changed;
+                case Clash_property.IsSet:
+                    return IsSet;
+                case Clash_property.Unset:
+                    return Unset;
+                case Clash_property.Diff:
+                    return Diff;
+                case Clash_property.Fields:
+                    return Fields;
+                case Clash_property.Schema:
+                    return Schema;
+                case Clash_property.NxType:
+                    return NxType;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(property));
+            }
+        }
+    }
+
+    [JsonConverter(typeof(NxUpdateRecordJsonConverter<Shape_update>))]
+    [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<Shape_update>))]
+    public sealed class Shape_update : NxUpdateRecord
+    {
+        private static readonly NxUpdateSchema FieldSchema = new(
+            "Shape.Update",
+            new NxField("id", typeof(string)));
+
+        public Shape_update()
+            : base(FieldSchema)
+        {
+        }
+
+        public string NxType => "Shape.Update";
+
+        public NxOptional<string> Id
+        {
+            get => base.Get<string>("id");
+            set => base.Set("id", value);
+        }
+
+        public bool IsSet(Shape_property property) => base.IsSet(Shape_propertyWireFormat.Format(property));
+
+        public void Unset(Shape_property property) => base.Unset(Shape_propertyWireFormat.Format(property));
+
+        public Shape_property[] Changed() => Array.ConvertAll(base.ChangedNames(), Shape_propertyWireFormat.Parse);
+    }
+
+    [JsonConverter(typeof(NxUpdateRecordJsonConverter<Circle_update>))]
+    [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<Circle_update>))]
+    public sealed class Circle_update : NxUpdate<Circle>
+    {
+        private static readonly NxUpdateSchema FieldSchema = new(
+            "Circle.Update",
+            CircleProperties.Id);
+
+        public Circle_update()
+            : base(FieldSchema)
+        {
+        }
+
+        public string NxType => "Circle.Update";
+
+        public NxOptional<string> Id
+        {
+            get => base.Get<string>("id");
+            set => base.Set("id", value);
+        }
+
+        public bool IsSet(Circle_property property) => base.IsSet(Circle_propertyWireFormat.Format(property));
+
+        public void Unset(Circle_property property) => base.Unset(Circle_propertyWireFormat.Format(property));
+
+        public Circle_property[] Changed() => Array.ConvertAll(base.ChangedNames(), Circle_propertyWireFormat.Parse);
+
+        public static Circle_update Diff(Circle before, Circle after) => NxUpdate<Circle>.Diff<Circle_update>(before, after);
+    }
+
+    public static class CircleProperties
+    {
+        public static readonly NxProperty<Circle, string> Id = new(
+            Circle_propertyWireFormat.Format(Circle_property.Id),
+            record => record.Id,
+            (record, value) => record.Id = value);
+
+        public static NxProperty<Circle> Of(Circle_property property)
+        {
+            switch (property)
+            {
+                case Circle_property.Id:
+                    return Id;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(property));
+            }
+        }
+    }
+
+    [JsonConverter(typeof(NxUpdateRecordJsonConverter<Square_update>))]
+    [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<Square_update>))]
+    public sealed class Square_update : NxUpdate<Square>
+    {
+        private static readonly NxUpdateSchema FieldSchema = new(
+            "Square.Update",
+            SquareProperties.Id);
+
+        public Square_update()
+            : base(FieldSchema)
+        {
+        }
+
+        public string NxType => "Square.Update";
+
+        public NxOptional<string> Id
+        {
+            get => base.Get<string>("id");
+            set => base.Set("id", value);
+        }
+
+        public bool IsSet(Square_property property) => base.IsSet(Square_propertyWireFormat.Format(property));
+
+        public void Unset(Square_property property) => base.Unset(Square_propertyWireFormat.Format(property));
+
+        public Square_property[] Changed() => Array.ConvertAll(base.ChangedNames(), Square_propertyWireFormat.Parse);
+
+        public static Square_update Diff(Square before, Square after) => NxUpdate<Square>.Diff<Square_update>(before, after);
+    }
+
+    public static class SquareProperties
+    {
+        public static readonly NxProperty<Square, string> Id = new(
+            Square_propertyWireFormat.Format(Square_property.Id),
+            record => record.Id,
+            (record, value) => record.Id = value);
+
+        public static NxProperty<Square> Of(Square_property property)
+        {
+            switch (property)
+            {
+                case Square_property.Id:
+                    return Id;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(property));
+            }
+        }
+    }
+
+    [JsonConverter(typeof(NxUpdateRecordJsonConverter<Doc_update>))]
+    [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<Doc_update>))]
+    public sealed class Doc_update : NxUpdate<Doc>
+    {
+        private static readonly NxUpdateSchema FieldSchema = new(
+            "Doc.Update",
+            DocProperties.Shape);
+
+        public Doc_update()
+            : base(FieldSchema)
+        {
+        }
+
+        public string NxType => "Doc.Update";
+
+        public NxOptional<Shape> Shape
+        {
+            get => base.Get<Shape>("shape");
+            set => base.Set("shape", value);
+        }
+
+        public bool IsSet(Doc_property property) => base.IsSet(Doc_propertyWireFormat.Format(property));
+
+        public void Unset(Doc_property property) => base.Unset(Doc_propertyWireFormat.Format(property));
+
+        public Doc_property[] Changed() => Array.ConvertAll(base.ChangedNames(), Doc_propertyWireFormat.Parse);
+
+        public static Doc_update Diff(Doc before, Doc after) => NxUpdate<Doc>.Diff<Doc_update>(before, after);
+    }
+
+    public static class DocProperties
+    {
+        public static readonly NxProperty<Doc, Shape> Shape = new(
+            Doc_propertyWireFormat.Format(Doc_property.Shape),
+            record => record.Shape,
+            (record, value) => record.Shape = value);
+
+        public static NxProperty<Doc> Of(Doc_property property)
+        {
+            switch (property)
+            {
+                case Doc_property.Shape:
+                    return Shape;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(property));
+            }
+        }
+    }
+
+    [JsonConverter(typeof(NxUpdateRecordJsonConverter<Ticker_update>))]
+    [MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<Ticker_update>))]
+    public sealed class Ticker_update : NxUpdate<Ticker_state>
+    {
+        private static readonly NxUpdateSchema FieldSchema = new(
+            "Ticker.Update",
+            Ticker_stateProperties.Count);
+
+        public Ticker_update()
+            : base(FieldSchema)
+        {
+        }
+
+        public string NxType => "Ticker.Update";
+
+        public NxOptional<long> Count
+        {
+            get => base.Get<long>("count");
+            set => base.Set("count", value);
+        }
+
+        public bool IsSet(Ticker_property property) => base.IsSet(Ticker_propertyWireFormat.Format(property));
+
+        public void Unset(Ticker_property property) => base.Unset(Ticker_propertyWireFormat.Format(property));
+
+        public Ticker_property[] Changed() => Array.ConvertAll(base.ChangedNames(), Ticker_propertyWireFormat.Parse);
+
+        public static Ticker_update Diff(Ticker_state before, Ticker_state after) => NxUpdate<Ticker_state>.Diff<Ticker_update>(before, after);
+    }
+
+    public static class Ticker_stateProperties
+    {
+        public static readonly NxProperty<Ticker_state, long> Count = new(
+            Ticker_propertyWireFormat.Format(Ticker_property.Count),
+            record => record.Count,
+            (record, value) => record.Count = value);
+
+        public static NxProperty<Ticker_state> Of(Ticker_property property)
+        {
+            switch (property)
+            {
+                case Ticker_property.Count:
+                    return Count;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(property));
+            }
+        }
     }
 
     [JsonConverter(typeof(NxEnumJsonConverter<User_property, User_propertyWireFormat>))]
@@ -133,6 +694,192 @@ namespace NxLang.Sdk.Tests.Generated
                 "pending" => Form_property.Pending,
                 "drafts" => Form_property.Drafts,
                 "sortBy" => Form_property.SortBy,
+                _ => throw new FormatException("Unknown NX enum member."),
+            };
+    }
+
+    [JsonConverter(typeof(NxEnumJsonConverter<Counter_property, Counter_propertyWireFormat>))]
+    [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<Counter_property, Counter_propertyWireFormat>))]
+    public enum Counter_property
+    {
+        Count
+    }
+
+    internal sealed class Counter_propertyWireFormat : INxEnumWireFormat<Counter_property>
+    {
+        public static string Format(Counter_property value) =>
+            value switch
+            {
+                Counter_property.Count => "count",
+                _ => throw new FormatException("Unknown NX enum value."),
+            };
+
+        public static Counter_property Parse(string value) =>
+            value switch
+            {
+                "count" => Counter_property.Count,
+                _ => throw new FormatException("Unknown NX enum member."),
+            };
+    }
+
+    [JsonConverter(typeof(NxEnumJsonConverter<Clash_property, Clash_propertyWireFormat>))]
+    [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<Clash_property, Clash_propertyWireFormat>))]
+    public enum Clash_property
+    {
+        Changed,
+        IsSet,
+        Unset,
+        Diff,
+        Fields,
+        Schema,
+        NxType
+    }
+
+    internal sealed class Clash_propertyWireFormat : INxEnumWireFormat<Clash_property>
+    {
+        public static string Format(Clash_property value) =>
+            value switch
+            {
+                Clash_property.Changed => "changed",
+                Clash_property.IsSet => "isSet",
+                Clash_property.Unset => "unset",
+                Clash_property.Diff => "diff",
+                Clash_property.Fields => "fields",
+                Clash_property.Schema => "schema",
+                Clash_property.NxType => "nxType",
+                _ => throw new FormatException("Unknown NX enum value."),
+            };
+
+        public static Clash_property Parse(string value) =>
+            value switch
+            {
+                "changed" => Clash_property.Changed,
+                "isSet" => Clash_property.IsSet,
+                "unset" => Clash_property.Unset,
+                "diff" => Clash_property.Diff,
+                "fields" => Clash_property.Fields,
+                "schema" => Clash_property.Schema,
+                "nxType" => Clash_property.NxType,
+                _ => throw new FormatException("Unknown NX enum member."),
+            };
+    }
+
+    [JsonConverter(typeof(NxEnumJsonConverter<Shape_property, Shape_propertyWireFormat>))]
+    [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<Shape_property, Shape_propertyWireFormat>))]
+    public enum Shape_property
+    {
+        Id
+    }
+
+    internal sealed class Shape_propertyWireFormat : INxEnumWireFormat<Shape_property>
+    {
+        public static string Format(Shape_property value) =>
+            value switch
+            {
+                Shape_property.Id => "id",
+                _ => throw new FormatException("Unknown NX enum value."),
+            };
+
+        public static Shape_property Parse(string value) =>
+            value switch
+            {
+                "id" => Shape_property.Id,
+                _ => throw new FormatException("Unknown NX enum member."),
+            };
+    }
+
+    [JsonConverter(typeof(NxEnumJsonConverter<Circle_property, Circle_propertyWireFormat>))]
+    [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<Circle_property, Circle_propertyWireFormat>))]
+    public enum Circle_property
+    {
+        Id
+    }
+
+    internal sealed class Circle_propertyWireFormat : INxEnumWireFormat<Circle_property>
+    {
+        public static string Format(Circle_property value) =>
+            value switch
+            {
+                Circle_property.Id => "id",
+                _ => throw new FormatException("Unknown NX enum value."),
+            };
+
+        public static Circle_property Parse(string value) =>
+            value switch
+            {
+                "id" => Circle_property.Id,
+                _ => throw new FormatException("Unknown NX enum member."),
+            };
+    }
+
+    [JsonConverter(typeof(NxEnumJsonConverter<Square_property, Square_propertyWireFormat>))]
+    [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<Square_property, Square_propertyWireFormat>))]
+    public enum Square_property
+    {
+        Id
+    }
+
+    internal sealed class Square_propertyWireFormat : INxEnumWireFormat<Square_property>
+    {
+        public static string Format(Square_property value) =>
+            value switch
+            {
+                Square_property.Id => "id",
+                _ => throw new FormatException("Unknown NX enum value."),
+            };
+
+        public static Square_property Parse(string value) =>
+            value switch
+            {
+                "id" => Square_property.Id,
+                _ => throw new FormatException("Unknown NX enum member."),
+            };
+    }
+
+    [JsonConverter(typeof(NxEnumJsonConverter<Doc_property, Doc_propertyWireFormat>))]
+    [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<Doc_property, Doc_propertyWireFormat>))]
+    public enum Doc_property
+    {
+        Shape
+    }
+
+    internal sealed class Doc_propertyWireFormat : INxEnumWireFormat<Doc_property>
+    {
+        public static string Format(Doc_property value) =>
+            value switch
+            {
+                Doc_property.Shape => "shape",
+                _ => throw new FormatException("Unknown NX enum value."),
+            };
+
+        public static Doc_property Parse(string value) =>
+            value switch
+            {
+                "shape" => Doc_property.Shape,
+                _ => throw new FormatException("Unknown NX enum member."),
+            };
+    }
+
+    [JsonConverter(typeof(NxEnumJsonConverter<Ticker_property, Ticker_propertyWireFormat>))]
+    [MessagePackFormatter(typeof(NxEnumMessagePackFormatter<Ticker_property, Ticker_propertyWireFormat>))]
+    public enum Ticker_property
+    {
+        Count
+    }
+
+    internal sealed class Ticker_propertyWireFormat : INxEnumWireFormat<Ticker_property>
+    {
+        public static string Format(Ticker_property value) =>
+            value switch
+            {
+                Ticker_property.Count => "count",
+                _ => throw new FormatException("Unknown NX enum value."),
+            };
+
+        public static Ticker_property Parse(string value) =>
+            value switch
+            {
+                "count" => Ticker_property.Count,
                 _ => throw new FormatException("Unknown NX enum member."),
             };
     }

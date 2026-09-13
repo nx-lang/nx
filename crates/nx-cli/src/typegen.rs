@@ -1552,7 +1552,7 @@ mod tests {
         assert!(record.contains("public string NxType { get; set; } = default!;"));
         // The companion's own discriminator steps around the field it would collide with.
         assert!(update.contains("public string NxType_ => \"Payload.Update\";"));
-        assert!(update.contains("public NxOptional<string> NxType { get; set; }"));
+        assert!(update.contains("public NxOptional<string> NxType"));
     }
 
     #[test]
@@ -2461,7 +2461,7 @@ export type QuestionFlowInitialExperience = {
     }
 
     #[test]
-    fn generates_csharp_update_companions_with_optional_properties() {
+    fn generates_csharp_update_companions_as_map_backed_dtos() {
         let output = generate_for(
             r#"
             export type User = { name:string email:string? }
@@ -2470,54 +2470,269 @@ export type QuestionFlowInitialExperience = {
             "#,
             TargetLanguage::CSharp,
         );
+        let nl = options::FormatOptions::defaults_for(TargetLanguage::CSharp).newline_str();
 
-        let counter = csharp_companion_body(&output, "Counter_update");
+        // A component's companion has no plain type to apply to, so it derives from the untyped
+        // base and carries a name→type schema.
+        let counter = csharp_companion_body(&output, "Counter_update : NxUpdateRecord");
         assert!(
             counter.contains("public string NxType => \"Counter.Update\";"),
             "{counter}"
         );
-        assert!(
-            counter.contains("public NxOptional<long> Count { get; set; }"),
-            "{counter}"
-        );
+        let expected_counter_schema = [
+            "        private static readonly NxUpdateSchema FieldSchema = new(",
+            "            \"Counter.Update\",",
+            "            new NxField(\"count\", typeof(long)));",
+        ]
+        .join(nl);
+        assert!(counter.contains(&expected_counter_schema), "{counter}");
+        let expected_count = [
+            "        public NxOptional<long> Count",
+            "        {",
+            "            get => base.Get<long>(\"count\");",
+            "            set => base.Set(\"count\", value);",
+            "        }",
+        ]
+        .join(nl);
+        assert!(counter.contains(&expected_count), "{counter}");
         assert!(!counter.contains("Step"), "{counter}");
+        assert!(!counter.contains("Diff("), "{counter}");
+        assert!(!output.contains("CounterProperties"), "{output}");
 
-        let saved = csharp_companion_body(&output, "Saved_update");
+        // An action's companion, like a record's, applies to the plain type typegen emits for it.
+        let saved = csharp_companion_body(&output, "Saved_update : NxUpdate<Saved>");
         assert!(
             saved.contains("public string NxType => \"Saved.Update\";"),
             "{saved}"
         );
         assert!(
-            saved.contains("public NxOptional<string> Note { get; set; }"),
+            saved.contains("public static Saved_update Diff(Saved before, Saved after) => NxUpdate<Saved>.Diff<Saved_update>(before, after);"),
             "{saved}"
         );
 
-        let (_, update) = output
-            .split_once(
-                "[MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<User_update>))]",
-            )
-            .expect("User_update companion");
-        let nl = options::FormatOptions::defaults_for(TargetLanguage::CSharp).newline_str();
-        let expected_name = [
-            "        [Key(\"name\")]",
-            "        [JsonPropertyName(\"name\")]",
-            "        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]",
-            "        public NxOptional<string> Name { get; set; }",
+        assert!(
+            output.contains("[JsonConverter(typeof(NxUpdateRecordJsonConverter<User_update>))]")
+        );
+        assert!(output.contains(
+            "[MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<User_update>))]"
+        ));
+        let update = csharp_companion_body(&output, "User_update : NxUpdate<User>");
+        let expected_schema = [
+            "        private static readonly NxUpdateSchema FieldSchema = new(",
+            "            \"User.Update\",",
+            "            UserProperties.Name,",
+            "            UserProperties.Email);",
+            "",
+            "        public User_update()",
+            "            : base(FieldSchema)",
+            "        {",
+            "        }",
         ]
         .join(nl);
-        let expected_email = [
-            "        [Key(\"email\")]",
-            "        [JsonPropertyName(\"email\")]",
-            "        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]",
-            "        public NxOptional<string?> Email { get; set; }",
-        ]
-        .join(nl);
-        assert!(update.contains("public sealed class User_update"));
+        assert!(update.contains(&expected_schema), "{update}");
         assert!(update.contains("public string NxType => \"User.Update\";"));
-        assert!(update.contains(&expected_name), "{update}");
+        let expected_email = [
+            "        public NxOptional<string?> Email",
+            "        {",
+            "            get => base.Get<string?>(\"email\");",
+            "            set => base.Set(\"email\", value);",
+            "        }",
+        ]
+        .join(nl);
         assert!(update.contains(&expected_email), "{update}");
+        assert!(
+            update.contains("public bool IsSet(User_property property) => base.IsSet(User_propertyWireFormat.Format(property));"),
+            "{update}"
+        );
+        assert!(
+            update.contains("public User_property[] Changed() => Array.ConvertAll(base.ChangedNames(), User_propertyWireFormat.Parse);"),
+            "{update}"
+        );
+        for attribute in ["[Key(", "[JsonPropertyName(", "[JsonIgnore("] {
+            assert!(!update.contains(attribute), "{attribute} in {update}");
+        }
         assert!(output.contains("using NxLang.Nx;"));
         assert!(output.contains("using NxLang.Nx.Serialization;"));
+    }
+
+    /// The key table names each field through the `<T>_property` wire format, so the enum stays
+    /// the only spelling of a wire name, and `Of` turns a decoded enum value into its key.
+    #[test]
+    fn generates_csharp_property_key_tables_beside_plain_types() {
+        let output = generate_for(
+            r#"
+            export abstract type Named = { name:string }
+            export type User extends Named = { email:string? }
+            export component <Counter step:int /> = { state { count:int = 0 } <Label /> }
+            "#,
+            TargetLanguage::CSharp,
+        );
+        let nl = options::FormatOptions::defaults_for(TargetLanguage::CSharp).newline_str();
+
+        let (_, table) = output
+            .split_once("public static class UserProperties")
+            .expect("UserProperties table");
+        let expected_keys = [
+            "        public static readonly NxProperty<User, string> Name = new(",
+            "            User_propertyWireFormat.Format(User_property.Name),",
+            "            record => record.Name,",
+            "            (record, value) => record.Name = value);",
+            "",
+            "        public static readonly NxProperty<User, string?> Email = new(",
+            "            User_propertyWireFormat.Format(User_property.Email),",
+            "            record => record.Email,",
+            "            (record, value) => record.Email = value);",
+        ]
+        .join(nl);
+        assert!(table.contains(&expected_keys), "{table}");
+        let expected_of = [
+            "        public static NxProperty<User> Of(User_property property)",
+            "        {",
+            "            switch (property)",
+            "            {",
+            "                case User_property.Name:",
+            "                    return Name;",
+            "                case User_property.Email:",
+            "                    return Email;",
+            "                default:",
+            "                    throw new ArgumentOutOfRangeException(nameof(property));",
+            "            }",
+            "        }",
+        ]
+        .join(nl);
+        assert!(table.contains(&expected_of), "{table}");
+
+        // An abstract record cannot be instantiated, so nothing applies a patch to it: its
+        // companion takes the untyped base and gets no key table, like a component's.
+        assert!(
+            output.contains("public sealed class Named_update : NxUpdateRecord"),
+            "{output}"
+        );
+        assert!(!output.contains("NamedProperties"), "{output}");
+        assert!(
+            output.contains("public sealed class Counter_update : NxUpdateRecord"),
+            "{output}"
+        );
+        assert!(!output.contains("CounterProperties"), "{output}");
+        assert!(output.contains("public enum Counter_property"), "{output}");
+    }
+
+    /// An external component with state gets a plain record under its own name, but that record
+    /// is its props contract, not its state; the state companion applies to `<Name>_state`, which
+    /// carries exactly its fields.
+    #[test]
+    fn csharp_external_component_update_companion_applies_to_the_state_record() {
+        let output = generate_for(
+            "export external component <Ticker step:int /> = { state { count:int = 0 } }",
+            TargetLanguage::CSharp,
+        );
+        assert!(
+            output.contains("public sealed class Ticker\n")
+                || output.contains("public sealed class Ticker\r\n"),
+            "{output}"
+        );
+        assert!(
+            output.contains("public sealed class Ticker_update : NxUpdate<Ticker_state>"),
+            "{output}"
+        );
+        assert!(
+            output.contains("public static class Ticker_stateProperties"),
+            "{output}"
+        );
+        assert!(
+            output.contains("public static readonly NxProperty<Ticker_state, long> Count = new("),
+            "{output}"
+        );
+        assert!(!output.contains("TickerProperties"), "{output}");
+    }
+
+    /// A field named after one of the companion's own members or a base-class member keeps its
+    /// accessor name, since that is the front door; the companion's members step around it and a
+    /// base member is hidden explicitly.
+    #[test]
+    fn csharp_update_companion_steps_around_field_names_it_would_collide_with() {
+        let output = generate_for(
+            "export type Clash = { changed:boolean isSet:boolean unset:boolean diff:string fields:string schema:string nxType:string }",
+            TargetLanguage::CSharp,
+        );
+        let update = csharp_companion_body(&output, "Clash_update : NxUpdate<Clash>");
+        for expected in [
+            "public string NxType_ => \"Clash.Update\";",
+            "public NxOptional<bool> Changed",
+            "public NxOptional<string> Diff",
+            "public new NxOptional<string> Fields",
+            "public new NxOptional<string> Schema",
+            "public new NxOptional<bool> IsSet",
+            "public new NxOptional<bool> Unset",
+            "public bool IsSet_(Clash_property property) => base.IsSet(Clash_propertyWireFormat.Format(property));",
+            "public void Unset_(Clash_property property) => base.Unset(Clash_propertyWireFormat.Format(property));",
+            "public Clash_property[] Changed_() => Array.ConvertAll(base.ChangedNames(), Clash_propertyWireFormat.Parse);",
+            "public static Clash_update Diff_(Clash before, Clash after) => NxUpdate<Clash>.Diff<Clash_update>(before, after);",
+        ] {
+            assert!(update.contains(expected), "{expected} in {update}");
+        }
+        assert!(
+            !update.contains("public new NxOptional<bool> Changed"),
+            "{update}"
+        );
+    }
+
+    /// The key table follows the companion collision rule: an exported declaration that already
+    /// owns the name wins, generation warns, and the companion falls back to the untyped base.
+    #[test]
+    fn csharp_property_key_table_yields_to_an_explicit_declaration() {
+        let module = source_module(
+            r#"
+            export type User = { name:string }
+            export type UserProperties = { x:string }
+            "#,
+            "types.nx",
+        );
+        let opts = GenerateTypesOptions {
+            language: TargetLanguage::CSharp,
+            csharp_namespace: None,
+            typescript_package_prefix: None,
+            format: options::FormatOptions::defaults_for(TargetLanguage::CSharp),
+        };
+        let generated =
+            generate_types_with_warnings(&module, Path::new("types.nx"), &opts).unwrap();
+
+        assert!(
+            generated.warnings.iter().any(|warning| {
+                warning.contains("'UserProperties'") && warning.contains("User_update")
+            }),
+            "{:?}",
+            generated.warnings
+        );
+        assert!(
+            generated
+                .value
+                .contains("public sealed class UserProperties"),
+            "{}",
+            generated.value
+        );
+        let nl = opts.format.newline_str();
+        assert!(
+            !generated
+                .value
+                .contains(&format!("public static class UserProperties{nl}")),
+            "{}",
+            generated.value
+        );
+        assert!(
+            generated
+                .value
+                .contains("public sealed class User_update : NxUpdateRecord"),
+            "{}",
+            generated.value
+        );
+        assert!(
+            generated
+                .value
+                .contains("new NxField(\"name\", typeof(string))"),
+            "{}",
+            generated.value
+        );
     }
 
     #[test]
@@ -2687,7 +2902,7 @@ export type User extends Named = { email:string }
         let user_update =
             csharp_companion_body(&generated_file(&csharp, "User.g.cs"), "User_update");
         assert!(
-            user_update.contains("public NxOptional<global::Test.Named.Tag> Tag { get; set; }"),
+            user_update.contains("public NxOptional<global::Test.Named.Tag> Tag"),
             "{user_update}"
         );
         assert!(
@@ -2762,7 +2977,7 @@ export type User extends Named = { email:string }
             .unwrap();
             let user_update = csharp_companion_body(&csharp.value, "User_update");
             assert!(
-                user_update.contains("public NxOptional<global::Test.Named.Tag> Tag { get; set; }"),
+                user_update.contains("public NxOptional<global::Test.Named.Tag> Tag"),
                 "{import}: {user_update}"
             );
             assert!(
@@ -2819,7 +3034,7 @@ export type User extends Named = { email:string }
         let user_update =
             csharp_companion_body(&generated_file(&csharp, "user.g.cs"), "User_update");
         assert!(
-            user_update.contains("public NxOptional<Tag> Tag { get; set; }"),
+            user_update.contains("public NxOptional<Tag> Tag"),
             "a peer in the same namespace needs no qualification: {user_update}"
         );
         assert!(csharp.warnings.is_empty(), "{:?}", csharp.warnings);
@@ -2872,11 +3087,11 @@ export type User extends Named = { email:string own:Tag }
         .unwrap();
         let user_update = csharp_companion_body(&csharp.value, "User_update");
         assert!(
-            user_update.contains("public NxOptional<global::Test.Named.Tag> Tag { get; set; }"),
+            user_update.contains("public NxOptional<global::Test.Named.Tag> Tag"),
             "{user_update}"
         );
         assert!(
-            user_update.contains("public NxOptional<Tag> Own { get; set; }"),
+            user_update.contains("public NxOptional<Tag> Own"),
             "{user_update}"
         );
     }
@@ -2932,7 +3147,7 @@ export type User extends Named = { email:string other:Tag }
                     let user_update =
                         csharp_companion_body(&generated_file(&output, "user.g.cs"), "User_update");
                     assert!(
-                        user_update.contains("public NxOptional<Tag> Tag { get; set; }"),
+                        user_update.contains("public NxOptional<Tag> Tag"),
                         "{user_update}"
                     );
                 }
@@ -3000,7 +3215,7 @@ export type User extends Named = { email:string }
         let user = generated_file(&csharp, "User.g.cs");
         let user_update = csharp_companion_body(&user, "User_update");
         assert!(
-            user_update.contains("public NxOptional<global::Test.Tags.Tag> Tag { get; set; }"),
+            user_update.contains("public NxOptional<global::Test.Tags.Tag> Tag"),
             "{user_update}"
         );
         assert!(
@@ -3072,7 +3287,7 @@ export type User extends Named = { email:string }
         let user_update =
             csharp_companion_body(&generated_file(&csharp, "User.g.cs"), "User_update");
         assert!(
-            user_update.contains("public NxOptional<Tag> Tag { get; set; }"),
+            user_update.contains("public NxOptional<Tag> Tag"),
             "{user_update}"
         );
     }
@@ -3111,11 +3326,11 @@ export type User extends Named = { email:string }
         let user_update =
             csharp_companion_body(&generated_file(&output, "User.g.cs"), "User_update");
         assert!(
-            user_update.contains("public NxOptional<string> Name { get; set; }"),
+            user_update.contains("public NxOptional<string> Name"),
             "{user_update}"
         );
         assert!(
-            user_update.contains("public NxOptional<string> Email { get; set; }"),
+            user_update.contains("public NxOptional<string> Email"),
             "{user_update}"
         );
     }

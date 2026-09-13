@@ -523,7 +523,12 @@ output.
 - **WHEN** source contains `export type User = { name:string email:string? }`
 - **THEN** C# generation SHALL emit a generated type `User_update` whose properties are typed so that an unset property serializes to no key and a property set to `null` serializes to a `null` value
 - **AND** deserializing an object without the `email` key SHALL leave that property unset rather than `null`
-- **AND** the type SHALL be annotated so both MessagePack and JSON use the wire names `name` and `email`
+- **AND** the generated type SHALL carry the wire names `name` and `email` in a form both MessagePack and JSON serialization use, without requiring a per-property attribute on each generated property
+
+#### Scenario: C# update companion carries its field schema
+- **WHEN** source contains `export type User = { name:string email:string? }`
+- **THEN** the generated `User_update` SHALL expose, to the managed SDK, each field's wire name paired with its value type
+- **AND** that schema SHALL be the only thing serialization needs to read or write the companion, so no runtime reflection over the generated type is required
 
 #### Scenario: Component update companion is derived from state
 - **WHEN** source contains `export component <Counter step:int /> = { state { count:int = 0 } <Label /> }`
@@ -598,3 +603,49 @@ with the same cross-library linkage a reference to `T` itself would produce.
 - **THEN** generation SHALL emit a warning about the `User_property` naming conflict
 - **AND** SHALL omit the generated companion
 - **AND** SHALL preserve the explicit exported declaration `User_property`
+
+### Requirement: C# generation emits typed property keys beside each property companion
+For every declaration that gets a `<Name>_property` companion and whose fields are reachable on a
+generated plain type, C# generation SHALL also emit a typed key per field. A key SHALL carry the
+field's wire name, its value type, and read and write access to that field on the plain generated
+type. Generation SHALL provide a mapping from each `<Name>_property` case to its key, so the
+property companion remains the single naming of a declaration's fields and no second spelling of
+those names is introduced.
+
+Where a declaration has a property companion but no instantiable generated plain type carrying its
+fields, such as a non-external component's state or an abstract record, generation SHALL emit the
+property companion alone and SHALL NOT emit keys. An external component's props contract is not
+the plain type of its state companion; its generated `<Name>_state` record is, so an external
+component with declared state SHALL get keys over `<Name>_state`.
+
+The key table's generated name SHALL follow the companion collision rule: when an exported
+declaration already owns that name, generation SHALL warn naming the table and the companion,
+SHALL omit the table, and SHALL emit the update companion without keys.
+
+#### Scenario: Record gets a key per field
+- **WHEN** source contains `export type User = { name:string email:string? }`
+- **THEN** C# generation SHALL emit a typed key for `name` whose value type is the C# spelling of `string`, and one for `email` whose value type is nullable
+- **AND** each key SHALL be able to read and write that field of a generated `User` instance
+- **AND** generation SHALL emit a mapping from each `User_property` case to its key
+
+#### Scenario: Abstract record gets a property companion but no keys
+- **WHEN** source contains `export abstract type Named = { name:string }`
+- **THEN** C# generation SHALL emit `Named_property` with the single case `name`
+- **AND** SHALL NOT emit keys for it, since no instance of `Named` can be constructed to apply a patch to
+
+#### Scenario: External component state gets keys over its state record
+- **WHEN** source contains `export external component <Ticker step:int /> = { state { count:int = 0 } }`
+- **THEN** C# generation SHALL emit a typed key for `count` over the generated `Ticker_state`
+- **AND** `Ticker_update` SHALL apply to and diff `Ticker_state` values
+- **AND** SHALL NOT emit keys over the `Ticker` props contract
+
+#### Scenario: Key table name collision warns and skips
+- **WHEN** source contains `export type User = { name:string }` and `export type UserProperties = { x:string }`
+- **THEN** generation SHALL emit a warning naming `UserProperties` and `User_update`
+- **AND** SHALL preserve the explicit exported declaration `UserProperties`
+- **AND** SHALL emit `User_update` without keys
+
+#### Scenario: Component state gets a property companion but no keys
+- **WHEN** source contains `export component <Counter step:int /> = { state { count:int = 0 } <Label /> }`
+- **THEN** C# generation SHALL emit `Counter_property` with the single case `count`
+- **AND** SHALL NOT emit keys for it, since no generated plain type carries the component's state

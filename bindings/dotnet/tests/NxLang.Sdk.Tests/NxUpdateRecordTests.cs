@@ -68,6 +68,19 @@ public sealed class DriftedEditorProps
     public DriftedUserPatch Patch { get; set; } = new();
 }
 
+/// <summary>
+/// A hand-written patch whose keys fit <c>User</c> but whose discriminator names another record.
+/// </summary>
+[MessagePackObject]
+public sealed class MislabeledUserPatch
+{
+    [Key("$type")]
+    public string Type { get; set; } = "Form.Update";
+
+    [Key("name")]
+    public string Name { get; set; } = "Ada";
+}
+
 /// <remarks>
 /// <c>User_update</c> is the typegen output checked in under <c>Generated/</c>, so these tests exercise the DTO
 /// shape typegen actually emits.
@@ -214,6 +227,48 @@ public class NxUpdateRecordTests
     }
 
     [Fact]
+    public void UpdateRecord_Json_WritesTypeThenFieldsInOrdinalKeyOrder()
+    {
+        User_update update = new() { Name = "Ada", Email = "x@y" };
+
+        string json = JsonSerializer.Serialize(update);
+        using JsonDocument document = JsonDocument.Parse(json);
+        string[] keys = document.RootElement.EnumerateObject().Select(property => property.Name).ToArray();
+        Assert.Equal(new[] { "$type", "email", "name" }, keys);
+    }
+
+    /// <summary>
+    /// The bytes are those the reflection-based formatter wrote before the map-backed storage landed, captured
+    /// from it for the same patches: <c>$type</c> first, then the set fields in ordinal key order.
+    /// </summary>
+    [Fact]
+    public void UpdateRecord_MessagePack_WritesTypeThenFieldsInOrdinalKeyOrder()
+    {
+        User_update user = new() { Name = "Ada", Email = "x@y" };
+        Form_update form = new()
+        {
+            Pending = null,
+            Drafts = new[] { new User_update { Name = "Ada" } },
+            SortBy = User_property.Email,
+        };
+
+        byte[] userBytes = MessagePackSerializer.Serialize(user, cancellationToken: TestContext.Current.CancellationToken);
+        byte[] formBytes = MessagePackSerializer.Serialize(form, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            "83A52474797065AB557365722E557064617465A5656D61696CA3784079A46E616D65A3416461",
+            Convert.ToHexString(userBytes));
+        Assert.Equal(
+            "84A52474797065AB466F726D2E557064617465A66472616674739182A52474797065AB557365722E557064617465"
+            + "A46E616D65A3416461A770656E64696E67C0A6736F72744279A5656D61696C",
+            Convert.ToHexString(formBytes));
+        using JsonDocument document = JsonDocument.Parse(
+            MessagePackSerializer.ConvertToJson(formBytes, cancellationToken: TestContext.Current.CancellationToken));
+        string[] keys = document.RootElement.EnumerateObject().Select(property => property.Name).ToArray();
+        Assert.Equal(new[] { "$type", "drafts", "pending", "sortBy" }, keys);
+    }
+
+    [Fact]
     public void UpdateRecord_MessagePack_OmitsUnsetAndKeepsNull()
     {
         User_update update = new() { Email = null };
@@ -268,17 +323,6 @@ public class NxUpdateRecordTests
         Assert.Equal(new[] { "$type", "token", "action" }, keys);
         Assert.Equal("ActionHandlerInvocation", document.RootElement.GetProperty("$type").GetString());
         Assert.Equal("h1-1", document.RootElement.GetProperty("token").GetString());
-    }
-
-    [Fact]
-    public void UnsetOptional_OutsideAnUpdateRecord_ThrowsInsteadOfWritingNull()
-    {
-        NxOptional<string>[] values = { NxOptional<string>.Unset };
-
-        Assert.Throws<InvalidOperationException>(() => JsonSerializer.Serialize(values));
-        MessagePackSerializationException error = Assert.Throws<MessagePackSerializationException>(
-            () => MessagePackSerializer.Serialize(values, cancellationToken: TestContext.Current.CancellationToken));
-        Assert.IsType<InvalidOperationException>(error.InnerException);
     }
 
     [Fact]
@@ -375,6 +419,270 @@ public class NxUpdateRecordTests
         Assert.Equal(new[] { "$type", "name" }, keys);
         Assert.Equal("User.Update", effect.GetProperty("$type").GetString());
         Assert.Equal("Ada", effect.GetProperty("name").GetString());
+    }
+
+    [Fact]
+    public void UpdateRecord_Fields_EnumerateOnlyTheSetFields()
+    {
+        User_update update = new() { Name = "Ada" };
+
+        KeyValuePair<string, object?> field = Assert.Single(update.Fields);
+        Assert.Equal("name", field.Key);
+        Assert.Equal("Ada", field.Value);
+        Assert.True(update.IsSet("name"));
+        Assert.False(update.IsSet("email"));
+        Assert.False(update.IsSet(User_property.Email));
+    }
+
+    [Fact]
+    public void UpdateRecord_FieldSetToNull_IsCarried()
+    {
+        User_update update = new() { Email = null };
+
+        KeyValuePair<string, object?> field = Assert.Single(update.Fields);
+        Assert.Equal("email", field.Key);
+        Assert.Null(field.Value);
+        Assert.True(update.IsSet("email"));
+        Assert.True(update.IsSet(User_property.Email));
+    }
+
+    [Fact]
+    public void UpdateRecord_Unset_RemovesTheFieldInMemoryAndOnTheWire()
+    {
+        User_update update = new() { Name = "Ada", Email = null };
+
+        update.Unset("name");
+
+        Assert.False(update.Fields.ContainsKey("name"));
+        Assert.False(update.Name.HasValue);
+        string json = JsonSerializer.Serialize(update);
+        using JsonDocument document = JsonDocument.Parse(json);
+        string[] keys = document.RootElement.EnumerateObject().Select(property => property.Name).ToArray();
+        Assert.Equal(new[] { "$type", "email" }, keys);
+
+        update.Unset(User_property.Email);
+        Assert.Empty(update.Fields);
+        Assert.Equal("{\"$type\":\"User.Update\"}", JsonSerializer.Serialize(update));
+    }
+
+    [Fact]
+    public void UpdateRecord_Json_WithAnUnknownKey_ThrowsNamingTheKey()
+    {
+        const string json = """{"$type":"User.Update","nick":"ada"}""";
+
+        JsonException error = Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<User_update>(json));
+
+        Assert.Contains("nick", error.Message, StringComparison.Ordinal);
+        Assert.Contains(nameof(User_update), error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UpdateRecord_MessagePack_WithAnUnknownKey_ThrowsNamingTheKey()
+    {
+        byte[] bytes = MessagePackSerializer.Serialize(
+            new DriftedUserPatch(),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        MessagePackSerializationException error = Assert.Throws<MessagePackSerializationException>(
+            () => MessagePackSerializer.Deserialize<User_update>(
+                bytes,
+                cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Contains("nick", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains(nameof(User_update), error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UpdateRecord_Json_WithAnotherRecordsDiscriminator_Throws()
+    {
+        const string json = """{"$type":"Form.Update","name":"Ada"}""";
+
+        JsonException error = Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<User_update>(json));
+
+        Assert.Contains("Form.Update", error.Message, StringComparison.Ordinal);
+        Assert.Contains("User.Update", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UpdateRecord_MessagePack_WithAnotherRecordsDiscriminator_Throws()
+    {
+        byte[] bytes = MessagePackSerializer.Serialize(
+            new MislabeledUserPatch(),
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        MessagePackSerializationException error = Assert.Throws<MessagePackSerializationException>(
+            () => MessagePackSerializer.Deserialize<User_update>(
+                bytes,
+                cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Contains("Form.Update", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("User.Update", error.ToString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A field named after a companion or base-class member keeps its accessor name, and the companion's own
+    /// members step around it, as the discriminator already did; the base surface stays reachable through the
+    /// base type.
+    /// </summary>
+    [Fact]
+    public void UpdateRecord_WithFieldsNamedAfterItsMembers_KeepsBothReachable()
+    {
+        Clash_update update = new() { Changed = true, Fields = "f", Diff = "d" };
+
+        Assert.Equal("Clash.Update", update.NxType_);
+        Assert.Equal(new[] { Clash_property.Changed, Clash_property.Diff, Clash_property.Fields }, update.Changed_());
+        Assert.True(update.IsSet_(Clash_property.Fields));
+        Assert.Equal("f", update.Fields.Value);
+        NxUpdateRecord asBase = update;
+        Assert.Equal(3, asBase.Fields.Count);
+        Assert.Equal("Clash.Update", asBase.Schema.NxType);
+
+        update.Unset_(Clash_property.Changed);
+        Assert.False(update.Changed.HasValue);
+
+        Clash before = new() { Diff = "a" };
+        Clash after = new() { Diff = "b" };
+        Assert.Equal(new[] { "diff" }, Clash_update.Diff_(before, after).ChangedNames());
+        Assert.Equal("d", update.Apply(after).Diff);
+    }
+
+    [Fact]
+    public void Diff_ReportsAPolymorphicFieldThatChangesType()
+    {
+        Doc circle = new() { Shape = new Circle { Id = "1" } };
+        Doc square = new() { Shape = new Square { Id = "1" } };
+
+        Assert.Equal(new[] { "shape" }, Doc_update.Diff(circle, square).ChangedNames());
+        Assert.IsType<Square>(Doc_update.Diff(circle, square).Shape.Value);
+        Assert.Empty(Doc_update.Diff(circle, new Doc { Shape = new Circle { Id = "1" } }).Fields);
+    }
+
+    /// <summary>
+    /// An external component's state does have a plain generated type, <c>Ticker_state</c>, so its companion
+    /// applies to that rather than to the props contract emitted under the component's own name.
+    /// </summary>
+    [Fact]
+    public void ExternalComponentUpdate_AppliesToTheStateRecord()
+    {
+        Ticker_state state = new() { Count = 1 };
+
+        Ticker_state applied = new Ticker_update { Count = 2 }.Apply(state);
+
+        Assert.Equal(2, applied.Count);
+        Assert.Equal(new[] { Ticker_property.Count }, Ticker_update.Diff(state, applied).Changed());
+        Assert.Same(Ticker_stateProperties.Count, Ticker_stateProperties.Of(Ticker_property.Count));
+        Assert.Equal(typeof(NxUpdate<Ticker_state>), typeof(Ticker_update).BaseType);
+    }
+
+    [Fact]
+    public void Apply_OverwritesOnlyTheCarriedFields()
+    {
+        User user = new() { Name = "Ada", Email = "x@y" };
+        User_update update = new() { Email = null };
+
+        User applied = update.Apply(user);
+
+        Assert.Equal("Ada", applied.Name);
+        Assert.Null(applied.Email);
+        Assert.Equal("x@y", user.Email);
+    }
+
+    [Fact]
+    public void Merge_LetsTheLaterPatchWin()
+    {
+        User_update merged = NxUpdateRecord.Merge(
+            new User_update { Name = "Ada" },
+            new User_update { Name = "Grace", Email = null });
+
+        Assert.Equal("Grace", merged.Name.Value);
+        Assert.True(merged.Email.HasValue);
+        Assert.Null(merged.Email.Value);
+
+        // The TypeScript runtime's own case: a later `null` replaces an earlier value.
+        User_update runtimeCase = User_update.Merge(
+            new User_update { Name = "Ada", Email = "x@y" },
+            new User_update { Email = null });
+        Assert.Equal("Ada", runtimeCase.Name.Value);
+        Assert.Null(runtimeCase.Email.Value);
+    }
+
+    [Fact]
+    public void Diff_CarriesOnlyTheDifferingFields()
+    {
+        User user = new() { Name = "Ada", Email = "x@y" };
+        User partial = new() { Name = "Ada" };
+
+        User_update forward = User_update.Diff(user, partial);
+        KeyValuePair<string, object?> field = Assert.Single(forward.Fields);
+        Assert.Equal("email", field.Key);
+        Assert.Null(field.Value);
+
+        User_update backward = User_update.Diff(partial, user);
+        Assert.Equal(new[] { "email" }, backward.ChangedNames());
+        Assert.Equal("x@y", backward.Email.Value);
+
+        Assert.Empty(User_update.Diff(user, new User { Name = "Ada", Email = "x@y" }).Fields);
+    }
+
+    /// <summary>
+    /// Arrays compare element-wise and nested patches by the fields they carry, as <c>nxValuesEqual</c> does, so
+    /// two records built separately from the same values diff to nothing.
+    /// </summary>
+    [Fact]
+    public void Diff_ComparesArraysAndNestedRecordsStructurally()
+    {
+        static Form MakeForm(NxOptional<string?> pendingEmail) => new()
+        {
+            Pending = new User_update { Email = pendingEmail },
+            Drafts = new[] { new User_update { Name = "Ada" } },
+            SortBy = User_property.Name,
+        };
+
+        Assert.Empty(Form_update.Diff(MakeForm(null), MakeForm(null)).Fields);
+
+        // An unset and a null field are different patches, so the nested record differs.
+        Form_update pending = Form_update.Diff(MakeForm(null), MakeForm(NxOptional<string?>.Unset));
+        Assert.Equal(new[] { "pending" }, pending.ChangedNames());
+
+        Form longer = MakeForm(null);
+        longer.Drafts = new[] { new User_update { Name = "Ada" }, new User_update() };
+        Form_update drafts = Form_update.Diff(MakeForm(null), longer);
+        Assert.Equal(new[] { "drafts" }, drafts.ChangedNames());
+        Assert.Equal(2, drafts.Drafts.Value.Length);
+    }
+
+    [Fact]
+    public void Changed_ReportsTheCarriedFieldsInDeclaredOrder()
+    {
+        User_update update = new() { Email = null, Name = "Ada" };
+
+        Assert.Equal(new[] { User_property.Name, User_property.Email }, update.Changed());
+        Assert.Equal(new[] { "name", "email" }, update.ChangedNames());
+        Assert.Empty(new User_update().Changed());
+    }
+
+    /// <summary>
+    /// A component's state has no plain generated type, so its companion derives from the untyped base; merge
+    /// and changed still work there, and the patch still round-trips.
+    /// </summary>
+    [Fact]
+    public void ComponentUpdate_WithNoPlainType_MergesAndReportsChanges()
+    {
+        Counter_update merged = NxUpdateRecord.Merge(
+            new Counter_update { Count = 1 },
+            new Counter_update { Count = 2 });
+
+        Assert.Equal(typeof(NxUpdateRecord), typeof(Counter_update).BaseType);
+        Assert.Equal(2, merged.Count.Value);
+        Assert.Equal(new[] { Counter_property.Count }, merged.Changed());
+        Assert.True(merged.IsSet(Counter_property.Count));
+
+        string json = JsonSerializer.Serialize(merged);
+        Assert.Equal("{\"$type\":\"Counter.Update\",\"count\":2}", json);
+        Counter_update read = MessagePackSerializer.Deserialize<Counter_update>(
+            MessagePackSerializer.Serialize(merged, cancellationToken: TestContext.Current.CancellationToken),
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(2, read.Count.Value);
     }
 
     /// <summary>

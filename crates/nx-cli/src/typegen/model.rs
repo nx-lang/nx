@@ -119,6 +119,10 @@ pub struct ExportedExternalState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExportedUpdate {
     pub target_name: String,
+    /// Whether the target is a component, whose companion patches its state. A component has no
+    /// generated plain type carrying those fields: the record emitted under a component's name,
+    /// when there is one, is an external component's props contract.
+    pub target_is_component: bool,
     pub name: String,
     pub discriminator: String,
     pub fields: Vec<ExportedRecordField>,
@@ -824,7 +828,7 @@ fn collect_exported_declarations(artifact: &ModuleArtifact) -> Vec<ExportedTypeD
             Item::Record(record) => match record.update_target() {
                 Some(target) => declarations.push(ExportedTypeDecl {
                     visibility: record.visibility,
-                    item: ExportedType::Update(export_update(prepared, record, target)),
+                    item: ExportedType::Update(export_update(module, prepared, record, target)),
                 }),
                 None => declarations.push(ExportedTypeDecl {
                     visibility: record.visibility,
@@ -1674,6 +1678,7 @@ fn rewrite_type_ref_names(ty: &mut TypeRef, rename: &mut impl FnMut(&str) -> Opt
 /// Without a prepared module, or when the chain does not resolve, the declared fields are all
 /// there is.</para>
 fn export_update(
+    module: &LoweredModule,
     prepared: Option<&PreparedModule>,
     record: &RecordDef,
     target: &nx_hir::Name,
@@ -1711,6 +1716,7 @@ fn export_update(
         });
     ExportedUpdate {
         target_name: target.as_str().to_string(),
+        target_is_component: matches!(module.find_item(target.as_str()), Some(Item::Component(_))),
         name: format!("{}_update", target.as_str()),
         discriminator: record.name.as_str().to_string(),
         fields,
