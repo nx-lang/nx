@@ -1,162 +1,19 @@
 # Follow-ups from `add-update-actions`
 
 Work identified while reviewing and fixing the `add-update-actions` change that was deliberately
-left for later. Item 1 is the design proposal for where update records and host representations
-should go next; the rest are smaller options and loose ends. Resolving inherited companion field
-types in the module that wrote them, and the test gaps the review left open, landed in
-`resolve-inherited-companion-field-types`.
+left for later.
 
-## 1. Proposal: first-class properties, and update records as property maps
+The property design this file opened with has landed in full, in three changes: the language-side
+property reference and its intrinsics, the .NET SDK's map-backed storage and typed keys, and the
+cross-module fix underneath both. Two-way binding, the one piece of that design still unbuilt, has
+no present plans — see "Not planned" below.
 
-This is the design direction the review discussion settled on. It keeps the `T.Update` type, the
-element-shaped construction syntax, and the wire format exactly as they are today, and changes what
-sits underneath them in the language, the runtime, and the generated host code.
+Open items come first; what has landed is recorded at the bottom so the history stays readable
+without getting in the way.
 
-### 1.1 What an update already is
+## Open
 
-An update record is the same value seen from two sides:
-
-- **Runtime and wire:** a sparse map. `Value::Record` holds only the present keys, construction
-  never inserts an absent field, and the encoding is `{ $type: "User.Update", email: null }`. That
-  is JSON Merge Patch: absent means unchanged, a present `null` means set to null.
-- **Static type:** a record with every field optional, which is TypeScript's `Partial<T>`, itself
-  defined as a mapped type over `keyof T`. The checker already treats `T.Update` as "a map from
-  `T`'s property names to that property's value type."
-
-What the record-shaped view gives is per-field typing at construction. What the map view gives is
-genericity: iterate the changed keys, apply, merge, diff. NX has the first and none of the second.
-
-### 1.2 Language: a first-class property reference
-
-Add a typed property reference, in the sense of Swift's `KeyPath<Root, Value>` and Kotlin's
-`KProperty1<T, V>`: a value that names one property of a record type and carries that property's
-value type. Spelling is open; `User.name` in type position, or a dedicated form, both work. Then
-define `T.Update` as a map keyed by `T`'s properties, where each key's value type is that
-property's type. The existing `<Update count={count + 1} />` syntax stays as the front door and
-type checks exactly as it does now; it is sugar over the map.
-
-Built-ins fall out generically instead of one at a time:
-
-- `apply(record, update): T` and `merge(a, b): T.Update` (both already listed as follow-ups in the
-  proposal).
-- `diff(before, after): T.Update`, which is what a form or an optimistic UI needs.
-- `changed(update): Property<T>[]`, and computed keys in construction, `<Update {prop}={value} />`.
-- Two-way binding, the case that matters most for NX's domain: `<TextInput bind={user.name} />`
-  can expand to `value={user.name}` plus `onTextChanged=<Update name={action.text} />` only if
-  `user.name` can be reified as a property rather than read as a value.
-- Table columns, sort keys, grouping, and validation rules expressed as property lists.
-
-Two constraints to hold:
-
-- **Keep per-key typing.** The key carries the value type, so the map is typed per key. A
-  `Map<string, object>` update is what every dynamic host regrets once patches cross a service
-  boundary.
-- **Update stays a merge patch.** Nested paths and list operations turn it into JSON Patch, which
-  is a different and much larger design. A property reference makes that extension possible later
-  without forcing it now.
-
-### 1.3 Runtime
-
-No change to `Value::Record` or the encoding. The property reference is a new `Value` variant
-carrying the record type, the field name, and the field's declared type; `apply`, `merge`, and
-`diff` operate on the map that update records already are. The absent-versus-null rule is enforced
-where it is today, at construction and at patch application.
-
-### 1.4 Generated C#: a map with typed accessors
-
-Today the generated `<T>_update` class stores one `NxOptional<T>` per field and needs the
-`NxOptional<T>` JSON converter, the `NxOptional<T>` MessagePack formatter, a per-property
-`[JsonIgnore(Condition = WhenWritingDefault)]`, and the reflection-based
-`NxUpdateRecordMessagePackFormatter`. Replace the storage with a map and keep the properties as
-typed accessors over it:
-
-```csharp
-public abstract class NxUpdateRecord
-{
-    private readonly Dictionary<string, object?> _fields = new(StringComparer.Ordinal);
-
-    public abstract string NxType { get; }
-    protected abstract IReadOnlyDictionary<string, Type> FieldTypes { get; }
-
-    public IReadOnlyDictionary<string, object?> Fields => _fields;
-    public bool IsSet(string name) => _fields.ContainsKey(name);
-    public void Unset(string name) => _fields.Remove(name);
-
-    protected NxOptional<T> Get<T>(string name) =>
-        _fields.TryGetValue(name, out object? value) ? new((T)value!) : default;
-
-    protected void Set<T>(string name, NxOptional<T> value)
-    {
-        if (value.HasValue) { _fields[name] = value.Value; } else { _fields.Remove(name); }
-    }
-}
-
-public sealed class User_update : NxUpdateRecord
-{
-    private static readonly IReadOnlyDictionary<string, Type> Schema = new Dictionary<string, Type>
-    {
-        ["name"] = typeof(string),
-        ["email"] = typeof(string),
-    };
-
-    public override string NxType => "User.Update";
-    protected override IReadOnlyDictionary<string, Type> FieldTypes => Schema;
-
-    public NxOptional<string> Name { get => Get<string>("name"); set => Set("name", value); }
-    public NxOptional<string?> Email { get => Get<string?>("email"); set => Set("email", value); }
-}
-```
-
-What this removes: both `NxOptional<T>` converters (the struct becomes a pure in-memory value that
-never reaches a serializer, so the misuse case that RF8 hardened cannot happen), the per-property
-wire attributes, and every use of reflection. One `NxUpdateRecord` MessagePack formatter and one
-JSON converter walk `Fields` and decode through the generated schema, which also makes the class
-NativeAOT-friendly. What it adds: the schema table per class, which lets the base reject unknown
-keys on read as NX does, and boxing of value-typed fields, which does not matter at patch sizes.
-What it gives hosts: iterate changed fields, `IsSet`, `Unset`, merge, build an update from a form's
-dirty fields, apply by name. This is the OData `Delta<T>` model with typed accessors. The public
-property surface is unchanged, so `new User_update { Email = null }` still works.
-
-Then make the schema entry a property reference, matching 1.2:
-
-```csharp
-public static class UserFields
-{
-    public static readonly NxProperty<User, string> Name = new("name");
-    public static readonly NxProperty<User, string?> Email = new("email");
-}
-
-update[UserFields.Name] = "Ada";
-NxOptional<string?> email = update[UserFields.Email];
-```
-
-With a generated getter and setter delegate on `NxProperty<TRecord, TValue>`, `Apply(user, update)`
-and `Diff(before, after)` become base-class methods, and `User_update` is little more than
-`NxUpdate<User>` plus named accessors. Composing `FieldTypes` from a dependency's companion schema
-(`NxSchema.Merge(Named_update.Schema, OwnSchema)`) also makes an imported base's fields reachable
-through their keys.
-
-### 1.5 Generated TypeScript
-
-The runtime value is already a plain object holding only present keys, and `User_update` with
-optional properties is already the typed map at the type level, so TypeScript needs no storage
-change. For symmetry with C# and with the NX property feature, generate the property keys
-(`UserFields.name: NxProperty<User, string>`) and ship `apply`, `merge`, and `diff` helpers typed by
-them in the runtime package.
-
-### 1.6 What does not change, and sequencing
-
-The `T.Update` type, the absent-versus-null rule, the `$type` discriminator, the JSON and
-MessagePack encodings, the `NxOptional<T>` accessor type on generated C#, and the dotnet-binding
-spec all stay as they are. Suggested order:
-
-1. Land `NxProperty<TRecord, TValue>` and the map-backed `NxUpdateRecord` in the .NET SDK, rebase
-   the C# emitter and the checked-in fixture on them, and delete the converters they retire.
-2. Add the property keys and helpers to the TypeScript runtime and emitter.
-3. Design the NX-side property reference and the built-ins, with the host shapes from steps 1 and
-   2 as the target for typegen.
-
-## 2. Synthesize `T.Update` on demand
+### 1. Synthesize `T.Update` on demand
 
 Lowering synthesizes an `Item::Record` named `<Name>.Update` for every record, action, inline
 emit, and component with state, appended at the end of every module. NX IR emits only the ones a
@@ -171,7 +28,7 @@ from the imported `X` instead of needing the library to export it. Worth doing o
 bloat shows up in the performance tests or the language service; the eager form is simpler to
 reason about.
 
-## 3. Host record construction runs outside the call's resource limits
+### 2. Host record construction runs outside the call's resource limits
 
 `construct_host_record_value` in `crates/nx-interpreter/src/interpreter.rs` rebuilds every
 host-supplied record from its fields, and evaluates any default a nested plain record needs in a
@@ -181,7 +38,7 @@ initialization, evaluation, or dispatch do not bound default evaluation for reco
 input. Thread the call's context (or at least its limits) into the host construction path once
 those defaults can do real work; today they are literal or near-literal.
 
-## 4. Union case payloads from the host reach the case builder by name only
+### 3. Union case payloads from the host reach the case builder by name only
 
 The same path builds a host-supplied payload union case (`{ $type: "Shape.Circle", r: 1 }`) through
 `resolve_union_case_definition`, which resolves the union by name from the field's owner module. A
@@ -190,14 +47,7 @@ knows but the module does not) is kept as supplied rather than checked. Plain re
 `resolve_record_definition` with the same limit. Resolving by declaring origin, as
 `eval_resolved_union_case` does for authored cases, would close it; no scenario needs it yet.
 
-## 5. Generated-JavaScript tests pass vacuously without `node`
-
-Every test in `crates/nx-codegen/src/tests.rs` that executes generated JavaScript returns early
-when `node` is absent, `generated_javascript_constructs_a_component_update_record_from_its_state`
-included. The pattern predates `add-update-actions`; a CI check that `node` is on the path would
-keep the whole family from passing vacuously.
-
-## 6. A transitive origin generates a reference to a library the package does not depend on
+### 4. A transitive origin generates a reference to a library the package does not depend on
 
 `resolve-inherited-companion-field-types` resolves an inherited companion field's type in the
 module that wrote it, so when `people` imports `Named` from `named`, and `named` typed the field by
@@ -208,3 +58,93 @@ The existing "assumed package" warning says the package *name* may be wrong, not
 undeclared. Either the generated package manifest and project references need the transitive
 origin added, or the warning should say the origin library is not a direct dependency when that is
 the case.
+
+### 5. Loose ends in the .NET shape
+
+- `Diff` compares nested plain records through their JSON encoding, since a generated record has
+  no structural `Equals` and the SDK does not reflect over its members. That matches
+  `nxValuesEqual`; a generated `Equals` would be the tidier long-term answer.
+- A field whose C# member name matches a base-class member (`Fields`, `Schema`, `Apply`) hides it,
+  explicitly with `new`; the base surface is still reachable through an `NxUpdateRecord`-typed
+  reference. The companion's own members step around field names with a trailing underscore.
+- Composing schemas across an inheritance edge (`NxSchema.Merge(Named_update.Schema, OwnSchema)`)
+  was never needed: a companion already carries its inherited fields with resolved types, so its
+  key table covers them directly. Noted only so the idea is not re-derived.
+
+## Not planned
+
+Named in the `add-property-references` proposal as out of scope, and recorded here so they are not
+lost. None is scheduled; each would need its own change and its own case for being worth building.
+
+- **Two-way binding**, `<TextInput bind=query />` with a component-side `binds` clause pairing a
+  prop with an emitted field. This is the piece of the original property design that was never
+  built. It remains the most interesting of these for NX's domain — it is the first real consumer
+  of a per-case field type inside the checker — but there are **no present plans to implement it**.
+  The .NET and TypeScript helper shapes that landed in `map-backed-update-records` and
+  `add-property-references` are the typegen target whenever it is picked up.
+- **Computed keys in construction**, `<Update {prop}={value} />`.
+- **A generic `get(record, property)` read**, whose result would be `object` for an open key. Note
+  that `add-component-type-parameters` does not enable this: its type parameters are scoped to a
+  component signature, and parameters on records, functions, aliases, and unions are explicitly out
+  of scope and staying out.
+- **Nested paths and list operations**, which would turn the merge-patch model into JSON Patch.
+
+## Landed
+
+### `resolve-inherited-companion-field-types` (archived 2026-09-11)
+
+Resolves an inherited companion field's type in the module that wrote it, and closes the test gaps
+the `add-update-actions` review left open. Its own loose end is item 4 above.
+
+### `add-property-references` (archived 2026-09-12)
+
+Gave the language the property half of the design this file opened with, under a different shape
+than the `KeyPath`-style reference first sketched. NX has no general-purpose generics — the type
+parameters added later are scoped to a component signature and do not extend to records — so the
+property reference is a derived **constant union** `T.Property` whose cases are `T`'s effective
+field names. It resolves bare at a typed site, matches exhaustively, and serializes as the bare
+field name.
+
+Four intrinsics operate on the map that an update record already is: `apply(record, update)`,
+`merge(first, second)`, `diff(before, after)`, and `changed(update): T.Property[]`. The TypeScript
+IR runtime exports the same four as typed helpers, and typegen emits a `<Name>_property` companion
+for every exported record, action, and stateful component: a string literal union in TypeScript,
+and a C# `enum` with the SDK's existing enum wire-format helpers.
+
+The `T.Update` type, the element-shaped construction syntax, the absent-versus-null rule, the
+`$type` discriminator, and the JSON and MessagePack encodings did not change and are not expected
+to.
+
+### `map-backed-update-records` (archived 2026-09-12)
+
+Replaced the generated .NET storage. A generated `<T>_update` derives from `NxUpdateRecord`, which
+keeps the patch as an ordinal `Dictionary<string, object?>` and exposes it through `Fields`,
+`IsSet`, and `Unset`; the generated `NxOptional<T>` properties are `Get`/`Set` accessor pairs over
+that map, so `new User_update { Email = null }` still means "set email to null". Each companion
+passes an `NxUpdateSchema` (the `$type` discriminator and its fields in declared order) to the
+base, and one `NxUpdateRecordJsonConverter<T>` and one `NxUpdateRecordMessagePackFormatter<T>`,
+named on the class, write `$type` and the set fields in ordinal key order from that schema. The
+bytes on the wire did not change. An unknown key on read now throws, naming the key and the DTO,
+where the reflection formatter used to drop it. Both `NxOptional<T>` converters, the converter
+factory, the per-property wire attributes, and the reflection-based formatter are gone;
+`NxOptional<T>` is an in-memory value only.
+
+Typed keys build on the property enum. Typegen emits a `<T>Properties` class beside each record or
+action that has a plain generated type: one `NxProperty<T, TValue>` per field, named through the
+generated `<T>_propertyWireFormat`, and `Of(<T>_property)` mapping each enum case to its key. The
+companion of such a target derives from `NxUpdate<T>`, which adds typed `Get(key)`/`Set(key, value)`
+(C# has no generic indexers, so the `update[key]` spelling first sketched became a method pair),
+`Apply(record)`, and `Diff(before, after)`; `Merge` and `ChangedNames` live on `NxUpdateRecord`, so
+a component's `Counter_update`, which has no plain type and derives from the untyped base, still
+merges and reports changes. Every companion narrows `Changed()` to its `<T>_property[]`. An
+abstract record's companion also takes the untyped base, since nothing can instantiate the record
+to apply a patch to it; an external component's companion binds to its `<Name>_state` record.
+
+### `add-rust-ci-job` (archived 2026-09-12)
+
+`build.yml` has a `🦀 Rust` job that installs pnpm and Node 24, restores the pnpm workspace so the
+repository's own `tsc` is present, caches the Cargo build, and runs `cargo fmt --all --check` and
+`cargo test --workspace` on every pull request and on the branches the rest of the workflow covers.
+The codegen tests no longer skip: `node_command` and `tsc_command` panic with a message naming
+Node 24 and `PATH`, or `pnpm install` at the repository root, so a run without either tool fails
+instead of passing while executing nothing.
