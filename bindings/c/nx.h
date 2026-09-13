@@ -161,6 +161,17 @@ NxEvalStatus nx_component_evaluate_program_artifact(const struct NxProgramArtifa
                                                     uint32_t output_format,
                                                     struct NxBuffer *out_buffer);
 
+/**
+ * Dispatches a MessagePack batch against a component snapshot from a program artifact.
+ *
+ * Each batch entry is either an action record the component emits, which runs the handler its
+ * parent bound, or an `ActionHandlerInvocation` record `{ token, action }` that runs a handler
+ * from the snapshot's rendered output, identified by the `token` its `ActionHandler` record
+ * carried. The whole batch succeeds or fails together.
+ *
+ * Successful output carries `rendered` (the body re-rendered against the final state, with fresh
+ * handler tokens), `effects`, and `state_snapshot` in the selected format.
+ */
 NX_FFI_EXPORT
 NxEvalStatus nx_component_dispatch_actions_program_artifact(const struct NxProgramArtifactHandle *program_artifact_ptr,
                                                             const uint8_t *state_snapshot_ptr,

@@ -1,0 +1,13 @@
+// Source for UpdateRecords.g.cs, which `nxlang typegen` generates from this file:
+//   nxlang typegen update-records.nx --language csharp --csharp-namespace NxLang.Sdk.Tests.Generated --output UpdateRecords.g.cs
+// The nx-cli typegen tests regenerate it and fail if the checked-in file drifts.
+export type User = { name:string email:string? }
+export type Form = { pending:User.Update? drafts:User.Update[] sortBy:User.Property? }
+export component <Counter step:int /> = { state { count:int = 0 } <Label /> }
+// A record whose fields are named after the companion's own and base-class members.
+export type Clash = { changed:boolean isSet:boolean unset:boolean diff:string fields:string schema:string nxType:string }
+export abstract type Shape = { id:string }
+export type Circle extends Shape = { }
+export type Square extends Shape = { }
+export type Doc = { shape:Shape }
+export external component <Ticker step:int /> = { state { count:int = 0 } }

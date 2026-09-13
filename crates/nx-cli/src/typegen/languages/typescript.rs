@@ -1,7 +1,7 @@
 use crate::typegen::model::{
-    ExportedAlias, ExportedExternalState, ExportedModule, ExportedPolymorphicDescendant,
-    ExportedRecord, ExportedType, ExportedTypeGraph, ExportedUnion, ExportedUnionCase,
-    ImportedType,
+    erase_field_type_parameters, ExportedAlias, ExportedExternalState, ExportedModule,
+    ExportedPolymorphicDescendant, ExportedRecord, ExportedType, ExportedTypeGraph, ExportedUnion,
+    ExportedUnionCase, ExportedUpdate, ImportedType,
 };
 use crate::typegen::writer::CodeWriter;
 use crate::typegen::{GenerateTypesOptions, GeneratedFile};
@@ -269,6 +269,7 @@ fn emit_declaration(
         ExportedType::Union(union_def) => emit_union(writer, union_def, graph),
         ExportedType::Record(record) => emit_record(writer, record, graph),
         ExportedType::ExternalState(state) => emit_external_state(writer, state),
+        ExportedType::Update(update) => emit_update(writer, update),
     }
 }
 
@@ -288,20 +289,51 @@ fn emit_record(writer: &mut CodeWriter, record: &ExportedRecord, graph: &Exporte
     }
 }
 
+/// The generic parameter list an exported contract with type parameters declares, and the
+/// argument list that passes them on to a base contract.
+///
+/// <para>A TypeScript caller names the instantiation statically, so the contract carries each NX
+/// type parameter as a generic parameter defaulting to `unknown`; a caller that names nothing
+/// gets the erased contract. Empty for a record.</para>
+fn ts_generic_declaration(record: &ExportedRecord) -> String {
+    if record.type_params.is_empty() {
+        return String::new();
+    }
+    format!(
+        "<{}>",
+        record
+            .type_params
+            .iter()
+            .map(|param| format!("{param} = unknown"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+fn ts_generic_arguments(record: &ExportedRecord) -> String {
+    if record.type_params.is_empty() {
+        return String::new();
+    }
+    format!("<{}>", record.type_params.join(", "))
+}
+
 fn emit_abstract_record(
     writer: &mut CodeWriter,
     record: &ExportedRecord,
     graph: &ExportedTypeGraph,
 ) {
     let base_contract_name = ts_base_contract_name(&record.name);
+    let generics = ts_generic_declaration(record);
     let header = if let Some(base_record) = graph.resolved_record_base(record) {
         format!(
-            "export interface {} extends {}",
+            "export interface {}{} extends {}{}",
             base_contract_name,
-            ts_base_contract_name(&base_record.name)
+            generics,
+            ts_base_contract_name(&base_record.name),
+            ts_generic_arguments(base_record)
         )
     } else {
-        format!("export interface {}", base_contract_name)
+        format!("export interface {}{}", base_contract_name, generics)
     };
 
     writer.block(&header, |writer| {
@@ -325,10 +357,17 @@ fn emit_abstract_record(
             .join(" | ")
     };
 
+    let (declaration, arguments) = if descendants.is_empty() {
+        (ts_generic_declaration(record), ts_generic_arguments(record))
+    } else {
+        (String::new(), String::new())
+    };
     writer.line(&format!(
-        "export type {} = {};",
+        "export type {}{} = {}{};",
         sanitize_ts_type_name(&record.name),
-        runtime_surface
+        declaration,
+        runtime_surface,
+        arguments
     ));
 }
 
@@ -339,13 +378,18 @@ fn emit_concrete_record(
 ) {
     let mut bases = Vec::new();
     if let Some(base_record) = graph.resolved_record_base(record) {
-        bases.push(ts_base_contract_name(&base_record.name));
+        bases.push(format!(
+            "{}{}",
+            ts_base_contract_name(&base_record.name),
+            ts_generic_arguments(base_record)
+        ));
     }
     bases.push(format!("NxRecord<\"{}\">", escape_ts_string(&record.name)));
 
     let header = format!(
-        "export interface {} extends {}",
+        "export interface {}{} extends {}",
         sanitize_ts_type_name(&record.name),
+        ts_generic_declaration(record),
         bases.join(", ")
     );
 
@@ -452,14 +496,39 @@ fn emit_union_case(
     });
 }
 
+/// Emits an external component's state record. A field typed by the component's type parameter
+/// erases to `unknown`: the host holds state as data and never names the instantiation, which an
+/// NX use site fixed.
 fn emit_external_state(writer: &mut CodeWriter, state: &ExportedExternalState) {
+    let fields = erase_field_type_parameters(&state.fields, &state.type_params);
     writer.block(
         &format!("export interface {}", sanitize_ts_type_name(&state.name)),
         |writer| {
-            for field in &state.fields {
+            for field in fields.iter() {
                 let key = ts_property_key(&field.name);
                 let ty = ts_type(&field.ty);
                 writer.line(&format!("{key}: {ty};"));
+            }
+        },
+    );
+}
+
+/// Emits an update companion: every property optional, so an absent key means "unchanged", and a
+/// nullable field typed `| null`, so a present `null` means "set to null". A state-derived field
+/// typed by the component's type parameter erases to `unknown`, as on the state record.
+fn emit_update(writer: &mut CodeWriter, update: &ExportedUpdate) {
+    let fields = erase_field_type_parameters(&update.fields, &update.type_params);
+    writer.block(
+        &format!("export interface {}", sanitize_ts_type_name(&update.name)),
+        |writer| {
+            writer.line(&format!(
+                "$type: \"{}\";",
+                escape_ts_string(&update.discriminator)
+            ));
+            for field in fields.iter() {
+                let key = ts_property_key(&field.name);
+                let ty = ts_type(&field.ty);
+                writer.line(&format!("{key}?: {ty};"));
             }
         },
     );
@@ -546,6 +615,11 @@ fn collect_module_imports(
                     add_type_ref_imports(module, context, &field.ty, &mut imports);
                 }
             }
+            ExportedType::Update(update) => {
+                for field in &update.fields {
+                    add_type_ref_imports(module, context, &field.ty, &mut imports);
+                }
+            }
         }
     }
 
@@ -583,8 +657,10 @@ fn add_type_ref_imports(
     ty: &TypeRef,
     imports: &mut BTreeMap<String, BTreeSet<TypeScriptImportSpecifier>>,
 ) {
-    let mut names = BTreeSet::new();
-    collect_type_ref_names(ty, &mut names);
+    let names = nx_hir::type_ref_names(ty)
+        .into_iter()
+        .map(|name| name.as_str().to_string())
+        .collect::<BTreeSet<_>>();
     for name in names {
         add_imported_symbol(
             module,
@@ -634,24 +710,6 @@ fn add_imported_symbol(
             exported_name: imported_name.clone(),
             local_name: imported_name,
         });
-}
-
-fn collect_type_ref_names(ty: &TypeRef, out: &mut BTreeSet<String>) {
-    match ty {
-        TypeRef::Name(name) => {
-            out.insert(name.as_str().to_string());
-        }
-        TypeRef::Array(inner) | TypeRef::Nullable(inner) => collect_type_ref_names(inner, out),
-        TypeRef::Function {
-            params,
-            return_type,
-        } => {
-            for param in params {
-                collect_type_ref_names(param, out);
-            }
-            collect_type_ref_names(return_type, out);
-        }
-    }
 }
 
 fn ts_base_contract_name(name: &str) -> String {

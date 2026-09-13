@@ -3,16 +3,17 @@
 use crate::{
     common_supertype as generic_common_supertype, float_literal_target, is_object_type,
     resolve_type_ref_with, resolve_type_ref_with_seen,
-    ty::{DeclaringOrigin, NamedType, Primitive, UnionCaseType, UnionType},
+    semantics::PRIMITIVE_TYPE_NAMES,
+    ty::{DeclaringOrigin, NamedType, Primitive, TypeParameterRef, UnionCaseType, UnionType},
     type_satisfies_expected as generic_type_satisfies_expected, Type, TypeEnvironment,
 };
 use nx_diagnostics::{Diagnostic, Label, TextSpan};
 use nx_hir::{
     ast, effective_component_contract_for_name, effective_record_shape_for_name,
     interface_component, interface_function_signature, interface_type_alias, interface_union,
-    is_record_subtype, ExprId, InterfaceItemKind, Item, Name, PreparedBindingOrigin,
+    is_record_subtype, ElementId, ExprId, InterfaceItemKind, Item, Name, PreparedBindingOrigin,
     PreparedItemKind, PreparedModule, PreparedNamespace, PropertyEntry, ResolvedPreparedItem,
-    UnionCaseDef, UnionDef,
+    UnionCaseDef, UnionDef, UpdateIntrinsic,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -74,15 +75,53 @@ impl UnionEntry {
     }
 }
 
+/// One value an action handler's body can return, as the routing check sees it.
+enum HandlerResultItem {
+    /// A value of this type, written at this span.
+    Value(Type, TextSpan),
+    /// An empty list, which a handler may never return.
+    EmptyList(TextSpan),
+}
+
 struct ElementBindingSpec {
     content_property: Option<Name>,
     properties: FxHashMap<Name, ElementPropertySpec>,
     handler_properties: FxHashSet<Name>,
+    /// The target's type parameters. A binding under one of these names is a type argument, which
+    /// is consumed (or reported) before the value bindings are checked, never a property.
+    type_parameters: FxHashSet<Name>,
 }
 
 struct ElementPropertySpec {
     ty: Type,
     is_required: bool,
+    /// The type parameter this property's declared type mentioned and the use site left
+    /// unspecified, if any. `ty` then has the bottom type in that parameter's place, and a binding
+    /// that fails against it is reported by naming the parameter rather than the bottom type.
+    unspecified_parameter: Option<Name>,
+}
+
+impl ElementPropertySpec {
+    fn new(ty: Type, is_required: bool) -> Self {
+        Self {
+            ty,
+            is_required,
+            unspecified_parameter: None,
+        }
+    }
+}
+
+/// The type arguments one use site bound, resolved and ready to instantiate the target's contract.
+struct ResolvedTypeArguments {
+    /// Every effective type parameter of the target: the argument it was bound to, or its rigid
+    /// type when the use site bound none.
+    scope: FxHashMap<Name, Type>,
+    /// The parameters the use site bound nothing to.
+    unspecified: FxHashSet<Name>,
+    /// The bindings that resolved, in declaration order of the parameters.
+    resolved: Vec<(Name, Type)>,
+    /// The value expressions of every plain type-argument binding, for removal after analysis.
+    consumed: Vec<ExprId>,
 }
 
 /// One resolved contextual name, and everything needed to rewrite it to a reference.
@@ -174,6 +213,28 @@ pub struct InferenceContext<'a> {
     /// the same reason as `resolved_contextual_names`: nothing downstream of type checking should
     /// have to know that the author wrote `24` where `24.0` was expected, or be able to tell.
     converted_int_literals: FxHashMap<ExprId, Primitive>,
+    /// The type parameters a type annotation can currently name, and what each one denotes.
+    ///
+    /// <para>While a component's signature, defaults, and body are checked, each of its effective
+    /// type parameters denotes its own rigid type. While a use site's contract is instantiated,
+    /// each of the target's parameters denotes the argument the site bound — or the rigid type,
+    /// so the parameter can be found and replaced by the bottom type afterwards. Empty everywhere
+    /// else, which is what keeps a parameter from being a type outside its declaration.</para>
+    ///
+    /// <para>Consulted only for the names a type reference spells directly. A name an alias
+    /// expands to was written where the alias was declared, outside any component, and is resolved
+    /// there.</para>
+    type_parameter_scope: FxHashMap<Name, Type>,
+    /// The value expression of every plain type-argument binding the checker consumed.
+    ///
+    /// Consumed after analysis to remove each binding from its element, on the same terms as
+    /// `resolved_contextual_names`: a type argument is a spelling only the checker understands.
+    consumed_type_arguments: FxHashSet<ExprId>,
+    /// The type each use site bound to each of its target's type parameters, by element.
+    ///
+    /// Nothing in analysis reads this back; it is kept in the analysis result so that carrying
+    /// use-site arguments into generated output later is an additive change below the checker.
+    resolved_type_arguments: FxHashMap<ElementId, Vec<(Name, Type)>>,
 }
 
 impl<'a> InferenceContext<'a> {
@@ -199,6 +260,9 @@ impl<'a> InferenceContext<'a> {
             component_origins: FxHashMap::default(),
             resolved_contextual_names: FxHashMap::default(),
             converted_int_literals: FxHashMap::default(),
+            type_parameter_scope: FxHashMap::default(),
+            consumed_type_arguments: FxHashSet::default(),
+            resolved_type_arguments: FxHashMap::default(),
         };
         ctx.register_type_definitions();
         ctx.register_function_signatures();
@@ -280,12 +344,18 @@ impl<'a> InferenceContext<'a> {
 
             // Function calls
             ast::Expr::Call { func, args, span } => {
-                let func_ty = self.infer_expr(*func);
+                // An intrinsic resolves before anything in scope, so the callee is never looked
+                // up: a parameter or local named `merge` is invisible at a call.
+                if let Some(intrinsic) = self.intrinsic_callee(*func) {
+                    self.infer_intrinsic_call(intrinsic, args, *span)
+                } else {
+                    let func_ty = self.infer_expr(*func);
 
-                // Infer argument types
-                let arg_tys: Vec<_> = args.iter().map(|arg| self.infer_expr(*arg)).collect();
+                    // Infer argument types
+                    let arg_tys: Vec<_> = args.iter().map(|arg| self.infer_expr(*arg)).collect();
 
-                self.infer_call(&func_ty, args, &arg_tys, *span)
+                    self.infer_call(&func_ty, args, &arg_tys, *span)
+                }
             }
 
             // If expressions
@@ -374,6 +444,8 @@ impl<'a> InferenceContext<'a> {
                 if let Some(name) = self.flattened_expr_name(expr_id) {
                     if let Some(ty) = self.env.lookup(&name) {
                         ty.clone()
+                    } else if self.report_unresolved_property_reference(&name, *span) {
+                        Type::Error
                     } else if let Some((entry, case)) = self.union_case_from_qualified_name(&name) {
                         let union_name = entry.def.name.clone();
                         let case_name = case.name.clone();
@@ -408,7 +480,7 @@ impl<'a> InferenceContext<'a> {
 
             ast::Expr::Element { element, span } => {
                 let element_ref = self.module.raw_module().element(*element).clone();
-                self.infer_element_expression(&element_ref, *span)
+                self.infer_element_expression(*element, &element_ref, *span)
             }
 
             ast::Expr::RecordLiteral {
@@ -416,9 +488,18 @@ impl<'a> InferenceContext<'a> {
                 properties,
                 span,
             } => self.infer_record_literal(record, properties, *span),
-            // TODO: Action handlers are lowered as lazy runtime callbacks. Wire them into
-            // expression-level type inference once the language has a first-class handler type.
-            ast::Expr::ActionHandler { .. } => Type::Error,
+            ast::Expr::ActionHandler {
+                action_name,
+                action_module_identity,
+                owner,
+                body,
+                ..
+            } => self.infer_action_handler(
+                action_name,
+                action_module_identity.as_deref(),
+                owner.as_ref(),
+                *body,
+            ),
 
             // Block expressions
             ast::Expr::Block { stmts: _, expr, .. } => {
@@ -575,11 +656,31 @@ impl<'a> InferenceContext<'a> {
     pub fn infer_component(&mut self, component: &nx_hir::Component) {
         self.env.push_scope();
 
-        let effective_props = self
+        let contract = self
             .effective_component_contract(&component.name)
             .ok()
-            .flatten()
-            .map(|contract| contract.props);
+            .flatten();
+        let type_param_names: Vec<Name> = match contract.as_ref() {
+            Some(contract) => contract
+                .type_params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect(),
+            None => component
+                .type_params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect(),
+        };
+        // Every effective type parameter is a rigid type from here to the end of the body, ahead
+        // of whatever else the name might reach. The scope is replaced rather than extended
+        // because components do not nest: nothing enclosing has parameters of its own.
+        let owner = nx_hir::component_declaration_origin(self.module, &component.name);
+        let previous_scope = std::mem::replace(
+            &mut self.type_parameter_scope,
+            Self::rigid_type_parameter_scope(&type_param_names, owner),
+        );
+        let effective_props = contract.map(|contract| contract.props);
 
         match effective_props {
             Some(props) => {
@@ -613,7 +714,236 @@ impl<'a> InferenceContext<'a> {
             self.infer_expr(body);
         }
 
+        self.type_parameter_scope = previous_scope;
         self.env.pop_scope();
+    }
+
+    /// The scope in which each of `names` denotes its own rigid type, owned by `owner`.
+    fn rigid_type_parameter_scope(
+        names: &[Name],
+        owner: Option<DeclaringOrigin>,
+    ) -> FxHashMap<Name, Type> {
+        names
+            .iter()
+            .enumerate()
+            .map(|(ordinal, name)| {
+                (
+                    name.clone(),
+                    Type::parameter(name.clone(), owner.clone(), ordinal),
+                )
+            })
+            .collect()
+    }
+
+    /// Infers a handler body where it is bound, then checks where each of its results can go.
+    ///
+    /// <para>The body sees what its binding site sees — the owner's props and state, enclosing
+    /// `let` bindings and loop variables, all already in the environment — plus `action`, typed by
+    /// the action the component emits. That action is resolved in the module that declared the
+    /// emit, since that is where its name was written.</para>
+    ///
+    /// <para>The handler value itself has no first-class type, so the expression stays
+    /// `Type::Error`, which no binding site reports. A handler property has no declared type to
+    /// check against; the body is what gets checked, here.</para>
+    fn infer_action_handler(
+        &mut self,
+        action_name: &Name,
+        action_module_identity: Option<&str>,
+        owner: Option<&Name>,
+        body: ExprId,
+    ) -> Type {
+        let action_ty = self.type_from_type_ref_in(
+            action_module_identity,
+            &ast::TypeRef::name(action_name.as_str()),
+        );
+        self.env.push_scope();
+        self.env.bind(Name::new("action"), action_ty);
+        self.infer_expr(body);
+        self.env.pop_scope();
+
+        let mut items = Vec::new();
+        self.collect_handler_result_items(body, &mut items);
+        for item in items {
+            match item {
+                HandlerResultItem::EmptyList(span) => self.error(
+                    "handler-result-empty",
+                    "Action handler must return at least one action or update record; found an empty list"
+                        .to_string(),
+                    span,
+                ),
+                HandlerResultItem::Value(ty, span) => {
+                    self.check_handler_result_item(owner, &ty, span)
+                }
+            }
+        }
+
+        Type::Error
+    }
+
+    /// Splits a handler body's result into the values it returns, each with where it was written.
+    ///
+    /// <para>A list literal is split by element, and each branch of an `if` and each arm of a
+    /// match separately, so each value is judged on its own type rather than on a join of
+    /// unrelated records. Anything else is judged by its type, a list type by its element
+    /// type.</para>
+    fn collect_handler_result_items(&self, expr_id: ExprId, items: &mut Vec<HandlerResultItem>) {
+        let raw_module = self.module.raw_module();
+        let span = raw_module.expr_span(expr_id);
+        match raw_module.expr(expr_id) {
+            ast::Expr::Array { elements, .. } if !elements.is_empty() => {
+                for element in elements {
+                    let ty = self
+                        .env
+                        .get_expr_type(*element)
+                        .cloned()
+                        .unwrap_or(Type::Error);
+                    items.push(HandlerResultItem::Value(ty, raw_module.expr_span(*element)));
+                }
+            }
+            ast::Expr::If {
+                then_branch,
+                else_branch: Some(else_branch),
+                ..
+            } => {
+                self.collect_handler_result_items(*then_branch, items);
+                self.collect_handler_result_items(*else_branch, items);
+            }
+            ast::Expr::Match {
+                arms, else_branch, ..
+            } => {
+                for arm in arms {
+                    self.collect_handler_result_items(arm.body, items);
+                }
+                if let Some(else_branch) = else_branch {
+                    self.collect_handler_result_items(*else_branch, items);
+                }
+            }
+            _ => match self
+                .env
+                .get_expr_type(expr_id)
+                .cloned()
+                .unwrap_or(Type::Error)
+            {
+                ty if Self::is_empty_list_type(&ty) => {
+                    items.push(HandlerResultItem::EmptyList(span))
+                }
+                Type::Array(inner) => items.push(HandlerResultItem::Value(*inner, span)),
+                ty => items.push(HandlerResultItem::Value(ty, span)),
+            },
+        }
+    }
+
+    /// Checks one handler result against where a handler bound at this site may send it.
+    ///
+    /// <para>Inside a component a result either patches that component's state — its own update
+    /// record — or goes to its parent, which only an action the component emits may do. At the root
+    /// there is no component to patch or parent to reach, so any action or update record is an
+    /// effect for the host.</para>
+    fn check_handler_result_item(&mut self, owner: Option<&Name>, ty: &Type, span: TextSpan) {
+        let named = match ty {
+            Type::Error => return,
+            Type::Named(named) => named,
+            other => {
+                self.report_handler_result_not_action(&other.to_string(), span);
+                return;
+            }
+        };
+        let Some(record) = self.record_definition_for(named) else {
+            // An unresolved `X.Update` was already reported where it was written, so a second
+            // diagnostic here would only repeat that the record does not exist.
+            if !nx_hir::is_update_record_name(named.name.as_str()) {
+                self.report_handler_result_not_action(named.name.as_str(), span);
+            }
+            return;
+        };
+        let Some(owner) = owner else {
+            if record.kind == nx_hir::RecordKind::Plain {
+                self.report_handler_result_not_action(named.name.as_str(), span);
+            }
+            return;
+        };
+
+        match &record.kind {
+            nx_hir::RecordKind::Plain => {
+                self.report_handler_result_not_action(named.name.as_str(), span)
+            }
+            nx_hir::RecordKind::Update { .. } => {
+                let own_update = nx_hir::update_record_name(owner.as_str());
+                let expected = match self.nominal_named_type(&own_update) {
+                    Type::Named(expected) if expected.origin().is_some() => Some(expected),
+                    _ => None,
+                };
+                match expected {
+                    Some(expected) if named.is_same_declaration_as(&expected) => {}
+                    Some(_) => self.error(
+                        "handler-update-wrong-target",
+                        format!(
+                            "Action handler inside component '{}' returns '{}', but only '{}' can change this component's state",
+                            owner, named.name, own_update
+                        ),
+                        span,
+                    ),
+                    // A component without state has no update record, so there is nothing to
+                    // change and no own record to name.
+                    None => self.error(
+                        "handler-update-wrong-target",
+                        format!(
+                            "Action handler inside component '{}' returns '{}', but '{}' declares no state to change",
+                            owner, named.name, owner
+                        ),
+                        span,
+                    ),
+                }
+            }
+            nx_hir::RecordKind::Action => {
+                if !self.component_emits_action(owner, named) {
+                    self.error(
+                        "handler-action-not-emitted",
+                        format!(
+                            "Action handler inside component '{}' returns action '{}', which '{}' does not emit; add '{}' to the component's emits to send it to the parent",
+                            owner, named.name, owner, named.name
+                        ),
+                        span,
+                    );
+                }
+            }
+        }
+    }
+
+    fn report_handler_result_not_action(&mut self, found: &str, span: TextSpan) {
+        self.error(
+            "handler-result-not-action",
+            format!(
+                "Action handler must return an action, an update record, or a non-empty list of those; found '{}'",
+                found
+            ),
+            span,
+        );
+    }
+
+    /// The record a named type denotes, read from its declaration where the type reached one.
+    fn record_definition_for(&self, named: &NamedType) -> Option<nx_hir::RecordDef> {
+        match named.origin() {
+            Some(origin) => nx_hir::resolve_record_definition_at(self.module, origin),
+            None => self.resolve_record_definition(&named.name),
+        }
+    }
+
+    /// Returns true when `component` declares or inherits an emit of exactly this action.
+    ///
+    /// <para>Each emit's action is resolved in the module that wrote the `emits` clause, and
+    /// compared by declaration, so a same-named action elsewhere does not count.</para>
+    fn component_emits_action(&mut self, component: &Name, action: &NamedType) -> bool {
+        let Some(contract) = self.effective_component_contract(component).ok().flatten() else {
+            return false;
+        };
+        contract.emits.iter().any(|emit| {
+            let emit_ty = self.type_from_type_ref_in(
+                Some(emit.module_identity.as_str()),
+                &ast::TypeRef::name(emit.emit.action_name.as_str()),
+            );
+            matches!(&emit_ty, Type::Named(emitted) if emitted.is_same_declaration_as(action))
+        })
     }
 
     /// Checks the default this component declares for one of its fields, where it declares one.
@@ -909,9 +1239,19 @@ impl<'a> InferenceContext<'a> {
                 }
             }
 
-            // Comparison: T × T → bool (where T supports comparison)
+            // Comparison: T × T → bool (where T supports comparison). Two cases of one union are
+            // comparable for equality with each other, since a value of that union is either of
+            // them; union cases have no order, so the relational operators stay rejected.
             Eq | Ne | Lt | Le | Gt | Ge => {
-                if self.type_satisfies_expected(lhs, rhs) || self.type_satisfies_expected(rhs, lhs)
+                let sibling_cases = matches!(op, Eq | Ne)
+                    && matches!(
+                        (lhs, rhs),
+                        (Type::UnionCase(lhs_case), Type::UnionCase(rhs_case))
+                            if lhs_case.shares_union_with(rhs_case)
+                    );
+                if sibling_cases
+                    || self.type_satisfies_expected(lhs, rhs)
+                    || self.type_satisfies_expected(rhs, lhs)
                 {
                     Type::boolean()
                 } else {
@@ -1329,7 +1669,12 @@ impl<'a> InferenceContext<'a> {
             .map(|field| field.ty.clone())
     }
 
-    fn infer_element_expression(&mut self, element: &nx_hir::Element, span: TextSpan) -> Type {
+    fn infer_element_expression(
+        &mut self,
+        element_id: ElementId,
+        element: &nx_hir::Element,
+        span: TextSpan,
+    ) -> Type {
         if let Some(function) = self.resolve_function_definition(&element.tag) {
             let declaring_module = function.module_identity().to_string();
             match function {
@@ -1388,6 +1733,7 @@ impl<'a> InferenceContext<'a> {
                         );
                     }
                     self.check_element_bindings_against_component(
+                        element_id,
                         element,
                         &component,
                         span,
@@ -1408,6 +1754,7 @@ impl<'a> InferenceContext<'a> {
                             );
                         }
                         self.check_element_bindings_against_component(
+                            element_id,
                             element,
                             &component,
                             span,
@@ -1456,6 +1803,8 @@ impl<'a> InferenceContext<'a> {
             return entry.case_type(case.name);
         }
 
+        self.report_unresolved_update_tag(&element.tag, span);
+
         // A tag that resolves to nothing has no binding contract, so there is nothing to check the
         // element's properties and content against. Every expression written inside it is still an
         // expression, though, and the four resolved paths above infer theirs as a side effect of
@@ -1472,6 +1821,386 @@ impl<'a> InferenceContext<'a> {
         }
 
         self.nominal_named_type(&element.tag)
+    }
+
+    /// Reports an unresolved tag spelled like an update record, which is never a host element.
+    ///
+    /// <para>Inside a component, lowering already rewrote a bare `Update` to the component's own
+    /// record, so a bare one that reaches here was written outside any component. `X.Update` that
+    /// did not resolve names a declaration with no update record: a component without state, an
+    /// update record itself, since update records have none of their own, or nothing at all. A
+    /// bare `Update` inside a component without state arrives here as that component's qualified
+    /// name, so this is the one diagnostic it gets.</para>
+    fn report_unresolved_update_tag(&mut self, tag: &Name, span: TextSpan) {
+        let suffix = nx_hir::UPDATE_RECORD_SUFFIX;
+        if tag.as_str() == suffix {
+            self.error(
+                "bare-update-outside-component",
+                "A bare 'Update' names the enclosing component's update record, and there is no enclosing component here; write the qualified form for the record to patch, as in '<Type.Update ... />'"
+                    .to_string(),
+                span,
+            );
+            return;
+        }
+        let Some(target) = tag
+            .as_str()
+            .strip_suffix(suffix)
+            .and_then(|prefix| prefix.strip_suffix('.'))
+        else {
+            return;
+        };
+        let target = Name::new(target);
+        let message = if self
+            .resolve_record_definition(&target)
+            .is_some_and(|record| record.update_target().is_some())
+        {
+            format!(
+                "Unknown type '{}': '{}' is an update record, and update records have no update record of their own",
+                tag, target
+            )
+        } else if self.is_property_union(&target) {
+            format!(
+                "Unknown type '{}': '{}' is a property union, and property unions have no update record",
+                tag, target
+            )
+        } else if self.resolve_component_definition(&target).is_some() {
+            format!(
+                "Unknown type '{}': component '{}' declares no state, so it has no update record",
+                tag, target
+            )
+        } else {
+            format!(
+                "Unknown type '{}': '{}' is not a record, action, or component with state",
+                tag, target
+            )
+        };
+        self.error("unknown-update-record", message, span);
+    }
+
+    /// Returns true when `name` reaches a derived property union here.
+    fn is_property_union(&self, name: &Name) -> bool {
+        self.union_defs
+            .get(name)
+            .is_some_and(|entry| entry.def.property_target().is_some())
+    }
+
+    /// Reports a member access whose base is spelled like a property union that resolves to
+    /// nothing, and returns whether it did.
+    ///
+    /// <para>Inside a component, lowering already rewrote a bare `Property` to the component's own
+    /// union, so a bare one that reaches here was written outside any component — unless something
+    /// declared here is actually named `Property`, in which case the access means that. `X.Property`
+    /// that did not resolve names a declaration with no property union: a component without state,
+    /// a derived declaration, since derived declarations have none of their own, or nothing at
+    /// all. Reporting here, at the first member access on the missing union, is what keeps the
+    /// access from cascading into a diagnostic about every segment after it.</para>
+    fn report_unresolved_property_reference(&mut self, name: &Name, span: TextSpan) -> bool {
+        let Some((base, _member)) = name.as_str().rsplit_once('.') else {
+            return false;
+        };
+        let suffix = nx_hir::PROPERTY_UNION_SUFFIX;
+        if base == suffix {
+            let base_name = Name::new(base);
+            if self.env.lookup(&base_name).is_some()
+                || self.union_defs.contains_key(&base_name)
+                || self.type_aliases.contains_key(&base_name)
+                || self.resolve_record_definition(&base_name).is_some()
+                || self.resolve_component_definition(&base_name).is_some()
+            {
+                return false;
+            }
+            self.error(
+                "bare-property-outside-component",
+                "A bare 'Property' names the enclosing component's property union, and there is no enclosing component here; write the qualified form for the declaration whose fields to name, as in 'Type.Property.field'"
+                    .to_string(),
+                span,
+            );
+            return true;
+        }
+        if !nx_hir::is_property_union_name(base) || self.union_defs.contains_key(&Name::new(base)) {
+            return false;
+        }
+        let target = Name::new(
+            base.strip_suffix(suffix)
+                .and_then(|prefix| prefix.strip_suffix('.'))
+                .unwrap_or(base),
+        );
+        let message = if self
+            .resolve_record_definition(&target)
+            .is_some_and(|record| record.update_target().is_some())
+        {
+            format!(
+                "Unknown type '{}': '{}' is an update record, and update records have no property union",
+                base, target
+            )
+        } else if self.is_property_union(&target) {
+            format!(
+                "Unknown type '{}': '{}' is a property union, and property unions have no property union of their own",
+                base, target
+            )
+        } else if self.resolve_component_definition(&target).is_some() {
+            format!(
+                "Unknown type '{}': component '{}' declares no state, so it has no property union",
+                base, target
+            )
+        } else {
+            format!(
+                "Unknown type '{}': '{}' is not a record, action, or component with state",
+                base, target
+            )
+        };
+        self.error("unknown-property-union", message, span);
+        true
+    }
+
+    /// The intrinsic a call's callee names, when the callee is a bare identifier naming one.
+    fn intrinsic_callee(&self, func: ExprId) -> Option<UpdateIntrinsic> {
+        match self.module.raw_module().expr(func) {
+            ast::Expr::Ident(name) => UpdateIntrinsic::from_name(name.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Types a call to one of the update intrinsics by rule.
+    ///
+    /// <para>These are the typing rules the four prelude signatures would state if the language
+    /// had generics — `apply<T>(record:T, update:T.Update): T` and its siblings — and nothing
+    /// else, so that the day they become declared signatures this is a deletion. "Same `T`" is
+    /// decided by declaring origin: `Named.Update` is not `User.Update` even though `User` extends
+    /// `Named`, and a same-named record in another module is not this one.</para>
+    fn infer_intrinsic_call(
+        &mut self,
+        intrinsic: UpdateIntrinsic,
+        args: &[ExprId],
+        span: TextSpan,
+    ) -> Type {
+        let arg_tys: Vec<_> = args.iter().map(|arg| self.infer_expr(*arg)).collect();
+        if arg_tys.len() != intrinsic.arity() {
+            self.error(
+                "intrinsic-arg-count",
+                format!(
+                    "Intrinsic '{}' expects {} argument{}, got {}",
+                    intrinsic.name(),
+                    intrinsic.arity(),
+                    if intrinsic.arity() == 1 { "" } else { "s" },
+                    arg_tys.len()
+                ),
+                span,
+            );
+            return Type::Error;
+        }
+        if arg_tys.iter().any(Type::is_error) {
+            return Type::Error;
+        }
+
+        match intrinsic {
+            UpdateIntrinsic::Apply => {
+                let record = self.intrinsic_record_argument(intrinsic, 0, &arg_tys[0], span);
+                let update = self.intrinsic_update_argument(intrinsic, 1, &arg_tys[1], span);
+                let (Some(record), Some((update, target))) = (record, update) else {
+                    return Type::Error;
+                };
+                if !self.update_patches_record(&update, &target, &record) {
+                    self.error(
+                        "intrinsic-target-mismatch",
+                        format!(
+                            "Intrinsic 'apply' takes a record and its own update record: '{}' is not '{}'",
+                            update.name,
+                            nx_hir::update_record_name(record.name.as_str())
+                        ),
+                        span,
+                    );
+                    return Type::Error;
+                }
+                Type::Named(record)
+            }
+            UpdateIntrinsic::Merge => {
+                let first = self.intrinsic_update_argument(intrinsic, 0, &arg_tys[0], span);
+                let second = self.intrinsic_update_argument(intrinsic, 1, &arg_tys[1], span);
+                let (Some((first, _)), Some((second, _))) = (first, second) else {
+                    return Type::Error;
+                };
+                if !first.is_same_declaration_as(&second) {
+                    self.error(
+                        "intrinsic-target-mismatch",
+                        format!(
+                            "Intrinsic 'merge' takes two updates of one record: '{}' and '{}' target different records",
+                            first.name, second.name
+                        ),
+                        span,
+                    );
+                    return Type::Error;
+                }
+                Type::Named(first)
+            }
+            UpdateIntrinsic::Diff => {
+                let before = self.intrinsic_record_argument(intrinsic, 0, &arg_tys[0], span);
+                let after = self.intrinsic_record_argument(intrinsic, 1, &arg_tys[1], span);
+                let (Some(before), Some(after)) = (before, after) else {
+                    return Type::Error;
+                };
+                if !before.is_same_declaration_as(&after) {
+                    self.error(
+                        "intrinsic-target-mismatch",
+                        format!(
+                            "Intrinsic 'diff' takes two records of one type: '{}' is not '{}'",
+                            after.name, before.name
+                        ),
+                        span,
+                    );
+                    return Type::Error;
+                }
+                if self
+                    .record_definition_for(&before)
+                    .is_some_and(|record| record.is_abstract)
+                {
+                    self.error(
+                        "intrinsic-argument-type",
+                        format!(
+                            "Intrinsic 'diff' takes concrete records, and '{}' is abstract",
+                            before.name
+                        ),
+                        span,
+                    );
+                    return Type::Error;
+                }
+                self.derived_type_of(&before, nx_hir::update_record_name)
+            }
+            UpdateIntrinsic::Changed => {
+                let Some((update, target)) =
+                    self.intrinsic_update_argument(intrinsic, 0, &arg_tys[0], span)
+                else {
+                    return Type::Error;
+                };
+                let property_union = self.property_union_of_update(&update, &target);
+                if property_union.is_error() {
+                    self.error(
+                        "unknown-property-union",
+                        format!(
+                            "Intrinsic 'changed' yields '{}' cases, but that property union could not be reached from here",
+                            nx_hir::property_union_name(target.as_str())
+                        ),
+                        span,
+                    );
+                    return Type::Error;
+                }
+                Type::array(property_union)
+            }
+        }
+    }
+
+    /// The record-shaped, non-derived type an intrinsic argument must have, or a diagnostic.
+    fn intrinsic_record_argument(
+        &mut self,
+        intrinsic: UpdateIntrinsic,
+        index: usize,
+        ty: &Type,
+        span: TextSpan,
+    ) -> Option<NamedType> {
+        if let Type::Named(named) = ty {
+            if let Some(record) = self.record_definition_for(named) {
+                if record.update_target().is_none() {
+                    return Some(named.clone());
+                }
+            }
+        }
+        self.error(
+            "intrinsic-argument-type",
+            format!(
+                "Argument {} to intrinsic '{}' must be a record or action; found '{}'",
+                index + 1,
+                intrinsic.name(),
+                ty
+            ),
+            span,
+        );
+        None
+    }
+
+    /// The update-record type an intrinsic argument must have, with the name of the declaration
+    /// it patches, or a diagnostic.
+    fn intrinsic_update_argument(
+        &mut self,
+        intrinsic: UpdateIntrinsic,
+        index: usize,
+        ty: &Type,
+        span: TextSpan,
+    ) -> Option<(NamedType, Name)> {
+        if let Type::Named(named) = ty {
+            if let Some(target) = self
+                .record_definition_for(named)
+                .and_then(|record| record.update_target().cloned())
+            {
+                return Some((named.clone(), target));
+            }
+        }
+        self.error(
+            "intrinsic-argument-type",
+            format!(
+                "Argument {} to intrinsic '{}' must be an update record; found '{}'",
+                index + 1,
+                intrinsic.name(),
+                ty
+            ),
+            span,
+        );
+        None
+    }
+
+    /// Returns true when `update` is the update record of exactly the declaration `record` is.
+    ///
+    /// <para>The update record's target is a name its own module wrote, so it is resolved there
+    /// and compared to the record by declaration rather than by spelling.</para>
+    fn update_patches_record(&self, update: &NamedType, target: &Name, record: &NamedType) -> bool {
+        let Some(update_origin) = update.origin() else {
+            return update.name.as_str()
+                == nx_hir::update_record_name(record.name.as_str()).as_str();
+        };
+        let target_origin = self
+            .module
+            .resolve_in_module(
+                PreparedNamespace::Type,
+                update_origin.module_identity(),
+                target,
+            )
+            .map(|resolved| resolved.declaring_origin());
+        nx_hir::same_declaration(
+            target_origin.as_ref(),
+            target,
+            record.origin(),
+            &record.name,
+        )
+    }
+
+    /// The type of a declaration derived from `record` — its update record or property union —
+    /// reached through the module that declared the record, so it resolves whether or not this
+    /// module can spell it.
+    fn derived_type_of(&mut self, record: &NamedType, derive: fn(&str) -> Name) -> Type {
+        let derived = derive(record.name.as_str());
+        if let Some(origin) = record.origin() {
+            let module_identity = origin.module_identity().to_string();
+            if let Some(ty) = self.nominal_type_in_module(&module_identity, &derived) {
+                return ty;
+            }
+        }
+        let mut seen = FxHashSet::default();
+        self.resolve_named_type(&derived, &mut seen)
+    }
+
+    /// The property union of the declaration `update` patches, resolved in the update record's
+    /// own module.
+    fn property_union_of_update(&mut self, update: &NamedType, target: &Name) -> Type {
+        let property_union = nx_hir::property_union_name(target.as_str());
+        if let Some(origin) = update.origin() {
+            let module_identity = origin.module_identity().to_string();
+            if let Some(ty) = self.nominal_type_in_module(&module_identity, &property_union) {
+                return ty;
+            }
+        }
+        match self.union_defs.get(&property_union) {
+            Some(entry) => Type::Union(entry.shape()),
+            None => Type::Error,
+        }
     }
 
     fn check_element_bindings_against_function(
@@ -1491,8 +2220,22 @@ impl<'a> InferenceContext<'a> {
         self.check_element_bindings(element, span, &spec);
     }
 
+    /// Checks a use site of a component: its type arguments first, then its value bindings
+    /// against the contract those arguments instantiate.
+    ///
+    /// <para>A type argument is a plain `Name=Type` binding under one of the target's type
+    /// parameters. Each is resolved as a type name here, and the contract's prop types are then
+    /// resolved with every parameter denoting its argument — or, for a parameter the site left
+    /// unbound, the bottom type, so that a site binding nothing typed by the parameter needs no
+    /// argument. The arguments are recorded for removal from the element afterwards; below the
+    /// checker, nothing sees them.</para>
+    ///
+    /// <para>Substituting before any binding is checked is deliberate: it is the shape inference
+    /// slots into later, by filling the gaps in the argument map from the bound values, with an
+    /// explicit argument always winning.</para>
     fn check_element_bindings_against_component(
         &mut self,
+        element_id: ElementId,
         element: &nx_hir::Element,
         component: &nx_hir::Component,
         span: TextSpan,
@@ -1502,6 +2245,25 @@ impl<'a> InferenceContext<'a> {
             .effective_component_contract(&component.name)
             .ok()
             .flatten();
+        let type_param_names: Vec<Name> = match effective_contract.as_ref() {
+            Some(contract) => contract
+                .type_params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect(),
+            None => component
+                .type_params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect(),
+        };
+        let owner = self.component_origins.get(&component.name).cloned();
+        let arguments = (!type_param_names.is_empty()).then(|| {
+            self.resolve_type_arguments(element, &component.name, &type_param_names, owner.clone())
+        });
+        let previous_scope = arguments.as_ref().map(|arguments| {
+            std::mem::replace(&mut self.type_parameter_scope, arguments.scope.clone())
+        });
         let mut spec = if let Some(contract) = effective_contract.as_ref() {
             self.build_element_binding_spec_in(
                 declaring_module,
@@ -1523,6 +2285,30 @@ impl<'a> InferenceContext<'a> {
                 }),
             )
         };
+        if let Some(previous_scope) = previous_scope {
+            self.type_parameter_scope = previous_scope;
+        }
+        if let Some(arguments) = arguments {
+            // A prop typed by a parameter the site left unbound is checked against the bottom
+            // type, and remembers the parameter so a failure can be reported by its name.
+            let unspecified = arguments.unspecified;
+            let is_unspecified = |param: &TypeParameterRef| {
+                param.owner == owner && unspecified.contains(&param.name)
+            };
+            for entry in spec.properties.values_mut() {
+                let Some(param) = entry.ty.find_parameter(&is_unspecified).cloned() else {
+                    continue;
+                };
+                entry.unspecified_parameter = Some(param.name);
+                entry.ty = entry
+                    .ty
+                    .substitute_parameters(&|param| is_unspecified(param).then(Type::never));
+            }
+            spec.type_parameters = type_param_names.iter().cloned().collect();
+            self.consumed_type_arguments.extend(arguments.consumed);
+            self.resolved_type_arguments
+                .insert(element_id, arguments.resolved);
+        }
         let emit_names: Vec<&Name> = match effective_contract.as_ref() {
             Some(contract) => contract.emits.iter().map(|emit| &emit.emit.name).collect(),
             None => component.emits.iter().map(|emit| &emit.name).collect(),
@@ -1533,6 +2319,190 @@ impl<'a> InferenceContext<'a> {
                 .map(|name| Name::new(&handler_prop_name(name.as_str()))),
         );
         self.check_element_bindings(element, span, &spec);
+    }
+
+    /// Resolves the type arguments a use site binds for `type_params`, the target's effective
+    /// type parameters, and reports every binding that is not a plain bare type name.
+    fn resolve_type_arguments(
+        &mut self,
+        element: &nx_hir::Element,
+        component_name: &Name,
+        type_params: &[Name],
+        owner: Option<DeclaringOrigin>,
+    ) -> ResolvedTypeArguments {
+        let mut bound: FxHashMap<Name, Type> = FxHashMap::default();
+        let mut consumed = Vec::new();
+
+        for entry in element.property_entries() {
+            match entry {
+                PropertyEntry::Value(property) if type_params.contains(&property.key) => {
+                    consumed.push(property.value);
+                    let Some(ty) = self.resolve_type_argument(
+                        property.value,
+                        &property.key,
+                        component_name,
+                        property.span,
+                    ) else {
+                        continue;
+                    };
+                    // A second binding of one parameter is reported as a duplicate property on the
+                    // same terms as any other; the first is the one that counts.
+                    bound.entry(property.key.clone()).or_insert(ty);
+                }
+                PropertyEntry::Value(_) => {}
+                entry => self.report_conditional_type_arguments(entry, component_name, type_params),
+            }
+        }
+
+        let mut scope = FxHashMap::default();
+        let mut unspecified = FxHashSet::default();
+        let mut resolved = Vec::new();
+        for (ordinal, name) in type_params.iter().enumerate() {
+            match bound.remove(name) {
+                Some(ty) => {
+                    resolved.push((name.clone(), ty.clone()));
+                    scope.insert(name.clone(), ty);
+                }
+                None => {
+                    unspecified.insert(name.clone());
+                    scope.insert(
+                        name.clone(),
+                        Type::parameter(name.clone(), owner.clone(), ordinal),
+                    );
+                }
+            }
+        }
+
+        ResolvedTypeArguments {
+            scope,
+            unspecified,
+            resolved,
+            consumed,
+        }
+    }
+
+    /// Resolves one type argument: a bare name, resolved against the types visible here and never
+    /// against value bindings. Anything else is reported with the bare form to write instead.
+    fn resolve_type_argument(
+        &mut self,
+        value: ExprId,
+        param: &Name,
+        component_name: &Name,
+        span: TextSpan,
+    ) -> Option<Type> {
+        let expr = self.module.raw_module().expr(value).clone();
+        let name = match &expr {
+            ast::Expr::ContextualName { name, .. } => name.clone(),
+            other => {
+                let suggested = match other {
+                    ast::Expr::Literal(ast::Literal::String(text)) => text.to_string(),
+                    _ => self
+                        .flattened_expr_name(value)
+                        .map(|name| name.as_str().to_string())
+                        .unwrap_or_else(|| "<type>".to_string()),
+                };
+                self.error(
+                    "type-argument-not-a-type-name",
+                    format!(
+                        "Type parameter '{}' on '{}' expects a bare type name; write {}={}",
+                        param, component_name, param, suggested
+                    ),
+                    span,
+                );
+                return None;
+            }
+        };
+
+        if self.is_visible_type_name(&name) {
+            return Some(self.type_from_type_ref(&ast::TypeRef::Name(name)));
+        }
+
+        let candidates = self.visible_type_names();
+        let suggestion = Self::closest_candidate(&name, &candidates)
+            .map(|candidate| format!("; did you mean `{}`?", candidate))
+            .unwrap_or_default();
+        self.error(
+            "unresolved-type-argument",
+            format!(
+                "Type parameter '{}' on '{}' expects a type name, and '{}' is not a visible type{}",
+                param, component_name, name, suggestion
+            ),
+            span,
+        );
+        None
+    }
+
+    /// Reports every type-argument binding inside a conditional property fragment.
+    fn report_conditional_type_arguments(
+        &mut self,
+        entry: &PropertyEntry,
+        component_name: &Name,
+        type_params: &[Name],
+    ) {
+        let nested: Vec<&PropertyEntry> = match entry {
+            PropertyEntry::Value(_) => Vec::new(),
+            PropertyEntry::If {
+                then_entries,
+                else_entries,
+                ..
+            } => then_entries.iter().chain(else_entries).collect(),
+            PropertyEntry::ConditionList {
+                arms, else_entries, ..
+            } => arms
+                .iter()
+                .flat_map(|arm| arm.entries.iter())
+                .chain(else_entries)
+                .collect(),
+            PropertyEntry::Match {
+                arms, else_entries, ..
+            } => arms
+                .iter()
+                .flat_map(|arm| arm.entries.iter())
+                .chain(else_entries)
+                .collect(),
+        };
+        for nested in nested {
+            match nested {
+                PropertyEntry::Value(property) if type_params.contains(&property.key) => {
+                    self.error(
+                        "conditional-type-argument",
+                        format!(
+                            "Type parameter '{}' on '{}' cannot be bound conditionally; write {}=<type> as a plain property",
+                            property.key, component_name, property.key
+                        ),
+                        property.span,
+                    );
+                }
+                PropertyEntry::Value(_) => {}
+                nested => {
+                    self.report_conditional_type_arguments(nested, component_name, type_params)
+                }
+            }
+        }
+    }
+
+    /// True when `name` denotes a type here: a primitive, an alias, a union, a record, a component,
+    /// or a type parameter in scope. Value bindings are never consulted.
+    fn is_visible_type_name(&self, name: &Name) -> bool {
+        self.type_parameter_scope.contains_key(name)
+            || PRIMITIVE_TYPE_NAMES.contains(&name.as_str())
+            || self.type_aliases.contains_key(name)
+            || self.union_defs.contains_key(name)
+            || self.record_origins.contains_key(name)
+            || self.component_origins.contains_key(name)
+    }
+
+    /// Every name `is_visible_type_name` answers for, for a did-you-mean.
+    fn visible_type_names(&self) -> Vec<Name> {
+        let mut names: Vec<Name> = PRIMITIVE_TYPE_NAMES.into_iter().map(Name::new).collect();
+        names.extend(self.type_parameter_scope.keys().cloned());
+        names.extend(self.type_aliases.keys().cloned());
+        names.extend(self.union_defs.keys().cloned());
+        names.extend(self.record_origins.keys().cloned());
+        names.extend(self.component_origins.keys().cloned());
+        names.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+        names.dedup();
+        names
     }
 
     fn check_element_bindings_against_record(
@@ -1659,13 +2629,7 @@ impl<'a> InferenceContext<'a> {
                     if field.is_content {
                         content_property = Some(field.name.clone());
                     }
-                    properties.insert(
-                        field.name,
-                        ElementPropertySpec {
-                            ty,
-                            is_required: field.is_required,
-                        },
-                    );
+                    properties.insert(field.name, ElementPropertySpec::new(ty, field.is_required));
                 }
             }
         }
@@ -1677,13 +2641,17 @@ impl<'a> InferenceContext<'a> {
             if field.is_content {
                 content_property = Some(field.name.clone());
             }
-            properties.insert(field.name.clone(), ElementPropertySpec { ty, is_required });
+            properties.insert(
+                field.name.clone(),
+                ElementPropertySpec::new(ty, is_required),
+            );
         }
 
         let spec = ElementBindingSpec {
             content_property,
             properties,
             handler_properties: FxHashSet::default(),
+            type_parameters: FxHashSet::default(),
         };
         let property_paths = self.property_paths_for_entries(element.property_entries());
         self.report_duplicate_property_paths(&property_paths, &element.tag);
@@ -1848,16 +2816,32 @@ impl<'a> InferenceContext<'a> {
         declaring_module: Option<&str>,
         type_ref: &ast::TypeRef,
     ) -> Type {
-        let Some(module_identity) = declaring_module else {
-            return self.type_from_type_ref(type_ref);
-        };
-        let module_identity = module_identity.to_string();
-        resolve_type_ref_with(type_ref, &mut |name, seen| {
-            if let Some(ty) = self.nominal_type_in_module(&module_identity, name) {
-                return ty;
+        if self.type_parameter_scope.is_empty() {
+            return self.type_from_type_ref_unscoped_in(declaring_module, type_ref);
+        }
+        match type_ref {
+            ast::TypeRef::Name(name) => match self.type_parameter_scope.get(name) {
+                Some(ty) => ty.clone(),
+                None => self.type_from_type_ref_unscoped_in(declaring_module, type_ref),
+            },
+            ast::TypeRef::Array(inner) => {
+                Type::array(self.type_from_type_ref_in(declaring_module, inner))
             }
-            self.resolve_named_type(name, seen)
-        })
+            ast::TypeRef::Nullable(inner) => {
+                Type::nullable(self.type_from_type_ref_in(declaring_module, inner))
+            }
+            ast::TypeRef::Function {
+                params,
+                return_type,
+            } => {
+                let params = params
+                    .iter()
+                    .map(|param| self.type_from_type_ref_in(declaring_module, param))
+                    .collect();
+                let ret = self.type_from_type_ref_in(declaring_module, return_type);
+                Type::function(params, ret)
+            }
+        }
     }
 
     fn build_element_binding_spec_in<'b, I>(
@@ -1876,13 +2860,14 @@ impl<'a> InferenceContext<'a> {
             if is_content {
                 content_property = Some(name.clone());
             }
-            properties.insert(name.clone(), ElementPropertySpec { ty, is_required });
+            properties.insert(name.clone(), ElementPropertySpec::new(ty, is_required));
         }
 
         ElementBindingSpec {
             content_property,
             properties,
             handler_properties: FxHashSet::default(),
+            type_parameters: FxHashSet::default(),
         }
     }
 
@@ -2154,6 +3139,23 @@ impl<'a> InferenceContext<'a> {
         for path in paths {
             for property in &path.properties {
                 if let Some(expected) = spec.properties.get(&property.key) {
+                    // A property whose type an unspecified parameter fixed is checked quietly
+                    // first: an empty list or `null` still binds. Only a failure is reported, and
+                    // it names the parameter and the form that supplies it, because `never[]?`
+                    // is not something the author can act on.
+                    if let Some(param) = expected.unspecified_parameter.as_ref() {
+                        if !self.type_satisfies_expected_with_coercion(&property.ty, &expected.ty) {
+                            self.error(
+                                "type-parameter-not-specified",
+                                format!(
+                                    "Property '{}' on '{}' is typed by '{}', which was not specified; add {}=<type>",
+                                    property.key, element_name, param, param
+                                ),
+                                property.span,
+                            );
+                            continue;
+                        }
+                    }
                     self.check_typed_binding_for(
                         Some(property.value),
                         &property.ty,
@@ -2162,7 +3164,9 @@ impl<'a> InferenceContext<'a> {
                         type_mismatch_code,
                         format!("Property '{}' on '{}'", property.key, element_name),
                     );
-                } else if spec.handler_properties.contains(&property.key) {
+                } else if spec.handler_properties.contains(&property.key)
+                    || spec.type_parameters.contains(&property.key)
+                {
                     continue;
                 } else {
                     let start: usize = property.span.start().into();
@@ -2714,6 +3718,19 @@ impl<'a> InferenceContext<'a> {
         &self.resolved_contextual_names
     }
 
+    /// The value expression of every plain type-argument binding the checker consumed.
+    ///
+    /// Read after analysis to remove each binding from its element, so nothing below the checker
+    /// sees a type argument.
+    pub fn consumed_type_arguments(&self) -> &FxHashSet<ExprId> {
+        &self.consumed_type_arguments
+    }
+
+    /// The type each use site bound to each of its target's type parameters, by element.
+    pub fn resolved_type_arguments(&self) -> &FxHashMap<ElementId, Vec<(Name, Type)>> {
+        &self.resolved_type_arguments
+    }
+
     /// Returns the integer literals that took a floating-point type from their binding site.
     pub fn converted_int_literals(&self) -> &FxHashMap<ExprId, Primitive> {
         &self.converted_int_literals
@@ -2900,6 +3917,9 @@ impl<'a> InferenceContext<'a> {
                     origin,
                     ..
                 } => {
+                    if matches!(origin, PreparedBindingOrigin::Local) {
+                        self.reject_reserved_intrinsic_name(&func.name, "function", func.span);
+                    }
                     let return_type = if let Some(ty) = func.return_type.as_ref() {
                         self.type_from_type_ref_in(Some(&declaring_module), ty)
                     } else {
@@ -2941,12 +3961,36 @@ impl<'a> InferenceContext<'a> {
         }
     }
 
+    /// Rejects a top-level declaration that would bind an intrinsic's name.
+    ///
+    /// <para>The intrinsic resolves first at every call, so the declaration could never be reached
+    /// through that name; saying so here is what keeps the author from writing it and wondering
+    /// why it does nothing.</para>
+    fn reject_reserved_intrinsic_name(&mut self, name: &Name, kind: &str, span: TextSpan) {
+        if nx_hir::is_update_intrinsic(name.as_str()) {
+            self.error(
+                "intrinsic-name-reserved",
+                format!(
+                    "'{}' is an intrinsic function and cannot be declared as a {}",
+                    name, kind
+                ),
+                span,
+            );
+        }
+    }
+
     fn register_value_bindings(&mut self) {
-        let bindings = self
+        let mut bindings = self
             .module
             .bindings(PreparedNamespace::Value)
             .cloned()
             .collect::<Vec<_>>();
+        // A local value's initializer may read a value declared before it, so local values are
+        // inferred in declaration order; everything reached from elsewhere carries its own type.
+        bindings.sort_by_key(|binding| match &binding.target {
+            nx_hir::PreparedBindingTarget::Local { definition_id } => (0, definition_id.index()),
+            _ => (1, 0),
+        });
 
         for binding in bindings {
             let Some(resolved) = self.module.resolve_prepared_item(&binding) else {
@@ -2965,6 +4009,7 @@ impl<'a> InferenceContext<'a> {
                     ..
                 } => {
                     let binding_ty = if module_identity == self.module.module_identity() {
+                        self.reject_reserved_intrinsic_name(&value.name, "value", value.span);
                         let actual = self.infer_expr(value.value);
                         if let Some(ty_ref) = value.ty.as_ref() {
                             let expected = self.type_from_type_ref(ty_ref);
@@ -3072,14 +4117,12 @@ impl<'a> InferenceContext<'a> {
         nx_hir::resolve_record_definition_with_module(self.module, name)
     }
 
+    /// The union an expression names, when it is a bare or dotted type name such as `Status` or
+    /// `User.Property`.
     fn union_info_for_expr(&self, expr_id: ExprId) -> Option<UnionType> {
-        match self.module.raw_module().expr(expr_id) {
-            ast::Expr::Ident(name) => {
-                let mut seen = FxHashSet::default();
-                self.union_info_from_name(name, &mut seen)
-            }
-            _ => None,
-        }
+        let name = self.flattened_expr_name(expr_id)?;
+        let mut seen = FxHashSet::default();
+        self.union_info_from_name(&name, &mut seen)
     }
 
     /// The union a type name denotes here, following type aliases.
@@ -3173,7 +4216,29 @@ impl<'a> InferenceContext<'a> {
     }
 
     fn type_from_type_ref(&mut self, type_ref: &ast::TypeRef) -> Type {
+        self.type_from_type_ref_in(None, type_ref)
+    }
+
+    /// Resolves a type reference's own names through the type-parameter scope first.
+    ///
+    /// <para>Only the names the reference spells directly are looked up there. Everything
+    /// else — an alias's target, a foreign declaration's own signature — goes through the ordinary
+    /// resolver, so a parameter shadows a type only where the author wrote the name.</para>
+    fn type_from_type_ref_unscoped_in(
+        &mut self,
+        declaring_module: Option<&str>,
+        type_ref: &ast::TypeRef,
+    ) -> Type {
+        let Some(module_identity) = declaring_module else {
+            return resolve_type_ref_with(type_ref, &mut |name, seen| {
+                self.resolve_named_type(name, seen)
+            });
+        };
+        let module_identity = module_identity.to_string();
         resolve_type_ref_with(type_ref, &mut |name, seen| {
+            if let Some(ty) = self.nominal_type_in_module(&module_identity, name) {
+                return ty;
+            }
             self.resolve_named_type(name, seen)
         })
     }
@@ -3875,6 +4940,7 @@ mod tests {
                     span,
                 },
             ],
+            property_target: None,
             span,
         };
         module.add_item(Item::Union(union_def));
@@ -3916,6 +4982,7 @@ mod tests {
                 fields: Vec::new(),
                 span,
             }],
+            property_target: None,
             span,
         };
         module.add_item(Item::Union(union_def));
@@ -3948,6 +5015,7 @@ mod tests {
                 fields: Vec::new(),
                 span,
             }],
+            property_target: None,
             span,
         };
         module.add_item(Item::Union(union_def));
@@ -3990,6 +5058,7 @@ mod tests {
                 fields: Vec::new(),
                 span,
             }],
+            property_target: None,
             span,
         };
         module.add_item(Item::Union(union_def));

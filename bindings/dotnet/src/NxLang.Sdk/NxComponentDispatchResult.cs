@@ -10,10 +10,21 @@ namespace NxLang.Nx;
 /// <summary>
 /// Represents the result of dispatching actions against a component instance.
 /// </summary>
+/// <typeparam name="TRendered">The managed type used for the re-rendered component body.</typeparam>
 /// <typeparam name="TEffect">The managed type used for effect action payloads.</typeparam>
 [MessagePackObject]
-public sealed class NxComponentDispatchResult<TEffect>
+public sealed class NxComponentDispatchResult<TRendered, TEffect>
 {
+    /// <summary>
+    /// Gets or sets the component body rendered once against the state the whole batch produced.
+    /// </summary>
+    /// <remarks>
+    /// Handlers in it carry the tokens that are valid with <see cref="StateSnapshot"/>.
+    /// </remarks>
+    [Key("rendered")]
+    [JsonPropertyName("rendered")]
+    public TRendered Rendered { get; set; } = default!;
+
     /// <summary>
     /// Gets or sets the effect actions returned in dispatch order.
     /// </summary>

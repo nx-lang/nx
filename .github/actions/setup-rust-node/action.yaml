@@ -1,0 +1,24 @@
+name: Set up Rust and the pnpm workspace
+description: >
+  Installs pnpm and Node, restores the Cargo build cache, and installs the root pnpm workspace, so a
+  job can build and test Rust alongside the repository's own TypeScript runtime and its `tsc`. The
+  Node version for the jobs that do that lives here, so bumping it is one edit; the `src/vscode`
+  jobs and `package-publish.yml` set up Node on their own terms and pin it themselves. Run this
+  after checking out the repository.
+
+runs:
+  using: composite
+  steps:
+  - name: Set up pnpm
+    uses: pnpm/action-setup@v4
+  - name: Set up Node.js
+    uses: actions/setup-node@v4
+    with:
+      node-version: '24'
+      cache: 'pnpm'
+  # rustup picks the toolchain from rust-toolchain.toml.
+  - name: Cache the Rust build
+    uses: Swatinem/rust-cache@v2
+  - name: Install dependencies
+    run: pnpm install --frozen-lockfile
+    shell: bash

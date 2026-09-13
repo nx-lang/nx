@@ -576,12 +576,11 @@ fn generate_types_from_file(
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("unknown");
-    let module = match load_source_module(&source, file_name, path) {
-        Ok(module) => module,
-        Err(exit_code) => return exit_code,
-    };
+    if let Err(exit_code) = load_source_module(&source, file_name, path) {
+        return exit_code;
+    }
 
-    let generated = match typegen::generate_types_with_warnings(&module, path, opts) {
+    let generated = match typegen::generate_types_with_warnings(&source, path, opts) {
         Ok(output) => output,
         Err(message) => {
             eprintln!("Error: {}", message);
@@ -2076,7 +2075,12 @@ export type QuestionFlowInitialExperience = {
         assert!(search_box.contains("import type { ThemeMode } from \"./theme\";"));
         assert!(search_box.contains("export interface SearchBox_state"));
         assert!(search_box.contains("theme: ThemeMode;"));
-        assert!(!search_box.contains("$type"));
+        let state = search_box
+            .split("export interface SearchBox_update")
+            .next()
+            .expect("the state contract");
+        assert!(!state.contains("$type"));
+        assert!(search_box.contains("export interface SearchBox_update"));
         assert!(index.contains("export * from \"./search-box\";"));
     }
 
@@ -2153,9 +2157,14 @@ export type QuestionFlowInitialExperience = {
         assert!(forms.contains("namespace MyApp.Models"));
         assert!(forms.contains("public sealed class FormState"));
         assert!(forms.contains("public ThemeMode Theme { get; set; }"));
+        let form_state = forms
+            .split("[MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter")
+            .next()
+            .expect("the record");
         assert!(!forms.contains("__NxType"));
-        assert!(!forms.contains("[Key(\"$type\")]"));
-        assert!(!forms.contains("[JsonPropertyName(\"$type\")]"));
+        assert!(!form_state.contains("[Key(\"$type\")]"));
+        assert!(!form_state.contains("[JsonPropertyName(\"$type\")]"));
+        assert!(forms.contains("public sealed class FormState_update"));
         assert!(theme.contains("namespace MyApp.Models"));
         assert!(theme.contains("public enum ThemeMode"));
     }

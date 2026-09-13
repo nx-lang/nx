@@ -3,8 +3,8 @@
 use crate::{InferenceContext, Type, TypeEnvironment};
 use nx_diagnostics::{Diagnostic, Label, Severity};
 use nx_hir::{
-    lower, ExprId, Import, LoweredModule, LoweringDiagnostic, PreparedBinding, PreparedModule,
-    PreparedNamespace, SourceId,
+    lower, ElementId, ExprId, Import, LoweredModule, LoweringDiagnostic, Name, PreparedBinding,
+    PreparedModule, PreparedNamespace, SourceId,
 };
 use nx_syntax::{parse_file as syntax_parse_file, parse_str as syntax_parse_str};
 use rustc_hash::FxHashMap;
@@ -35,6 +35,18 @@ pub struct ModuleArtifact {
     pub imports: Vec<Import>,
     /// Prepared semantic bindings used during analysis.
     pub prepared_bindings: Vec<PreparedBinding>,
+    /// The type each component use site bound to each of its target's type parameters.
+    ///
+    /// <para>The bindings themselves are removed from the lowered module once the checker has
+    /// consumed them, so this is the only record of them below type checking. Nothing reads it
+    /// yet; it is what a later change carries into generated output.</para>
+    pub element_type_arguments: FxHashMap<ElementId, Vec<(Name, Type)>>,
+    /// The prepared module analysis ran against, with its imports resolved, if parsing succeeded.
+    ///
+    /// <para>A consumer that needs a declaration's effective shape across modules — a record's
+    /// inherited fields from a library base, say — resolves through this rather than through a
+    /// parallel resolver of its own.</para>
+    pub prepared_module: Option<Arc<PreparedModule>>,
 }
 
 impl ModuleArtifact {
@@ -130,6 +142,11 @@ pub fn analyze_prepared_module(
     mut prepared_module: PreparedModule,
     mut diagnostics: Vec<Diagnostic>,
 ) -> ModuleArtifact {
+    // A property union's inherited cases can only be filled in once the module can reach its
+    // target's base chain, which may cross into another module. Everything below reads the
+    // complete case list from the declaration.
+    nx_hir::complete_property_unions(&mut prepared_module);
+
     for error in nx_hir::validate_record_definitions(&prepared_module) {
         prepared_module.add_diagnostic(LoweringDiagnostic {
             message: error.message(),
@@ -198,6 +215,8 @@ pub fn analyze_prepared_module(
     // type checking sees the qualified member access rather than the bare source spelling.
     let contextual_resolutions = ctx.resolved_contextual_names().clone();
     let converted_int_literals: Vec<_> = ctx.converted_int_literals().keys().copied().collect();
+    let consumed_type_arguments = ctx.consumed_type_arguments().clone();
+    let element_type_arguments = ctx.resolved_type_arguments().clone();
     let (type_env, type_diagnostics) = ctx.finish();
     diagnostics.extend(normalize_diagnostics_file_name(type_diagnostics, file_name));
     // A resolution reached a union declaration, so it has an origin. One without cannot be
@@ -244,6 +263,10 @@ pub fn analyze_prepared_module(
         },
     );
 
+    // A type argument is a spelling only the checker understands, removed on the same terms as
+    // the two rewrites above: below here, an element carries value bindings and nothing else.
+    nx_hir::remove_property_entries(&mut prepared_module, &consumed_type_arguments);
+
     let prepared_bindings = collect_prepared_bindings(&prepared_module);
     let preserved_module = prepared_module.raw_module().clone();
     let source_id = prepared_module.source_id();
@@ -258,6 +281,8 @@ pub fn analyze_prepared_module(
         diagnostics,
         imports,
         prepared_bindings,
+        element_type_arguments,
+        prepared_module: Some(Arc::new(prepared_module)),
     }
 }
 
@@ -370,6 +395,8 @@ fn module_artifact(
         diagnostics,
         imports,
         prepared_bindings: Vec::new(),
+        element_type_arguments: FxHashMap::default(),
+        prepared_module: None,
     }
 }
 

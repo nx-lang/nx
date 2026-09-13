@@ -113,7 +113,15 @@ where
     }
 }
 
-fn builtin_type(name: &Name) -> Option<Type> {
+/// The eight primitive type names NX source can write.
+///
+/// <para>`object` is the top type and is a `Named` type rather than a `Primitive`, so
+/// [`builtin_type`] does not answer for it. A resolver deciding whether a bare name denotes a
+/// type, or listing the type names an author could have meant, consults this list so that the
+/// two cannot disagree about `object`.</para>
+pub(crate) use nx_syntax::PRIMITIVE_TYPE_NAMES;
+
+pub(crate) fn builtin_type(name: &Name) -> Option<Type> {
     match name.as_str() {
         "string" => Some(Type::string()),
         "int" => Some(Type::int()),

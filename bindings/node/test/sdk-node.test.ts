@@ -386,7 +386,7 @@ let root(): QuestionFlow[] = { omitted() explicit() }`
   it("preserves source labels for IR generation diagnostics", () => {
     const error = captureEvaluationError(() => {
       generateNxIrFromSource(`external component <SearchBox emits { SearchRequested { query:string } } />
-let DoSearch(query:string) = { query }
+action DoSearch = { query:string }
 let root() = { <SearchBox onSearchRequested=<DoSearch query={action.query} /> /> }`);
     });
     const diagnostic = error.diagnostics.find((item) => item.code === "codegen-unsupported-construct");

@@ -43,12 +43,10 @@ const KEYWORD_COMPLETIONS: &[&str] = &[
     "null",
 ];
 
-const PRIMITIVE_TYPE_COMPLETIONS: &[&str] = &[
-    "string", "int", "int32", "int64", "float32", "float64", "boolean", "object",
-];
+const PRIMITIVE_TYPE_COMPLETIONS: &[&str] = &nx_syntax::PRIMITIVE_TYPE_NAMES;
 
 /// Built-in type names that are valid in type position but are not primitives.
-const BUILTIN_TYPE_COMPLETIONS: &[&str] = &["Element"];
+const BUILTIN_TYPE_COMPLETIONS: &[&str] = &nx_syntax::BUILTIN_TYPE_NAMES;
 
 /// Client-owned document URI.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1371,7 +1369,10 @@ impl WorkspaceDeclarations {
 
         let mut properties = own;
         for property in base_properties {
-            if !properties.iter().any(|existing| existing.name == property.name) {
+            if !properties
+                .iter()
+                .any(|existing| existing.name == property.name)
+            {
                 properties.push(property);
             }
         }
@@ -1418,7 +1419,12 @@ impl WorkspaceDeclarations {
             module
                 .prepared_bindings
                 .iter()
-                .map(|binding| (binding.visible_name.as_str().to_string(), origin_of(binding)))
+                .map(|binding| {
+                    (
+                        binding.visible_name.as_str().to_string(),
+                        origin_of(binding),
+                    )
+                })
                 .collect(),
         );
 
@@ -1428,7 +1434,12 @@ impl WorkspaceDeclarations {
                 .prepared_bindings
                 .iter()
                 .filter(|binding| binding.namespace == PreparedNamespace::Type)
-                .map(|binding| (binding.visible_name.as_str().to_string(), origin_of(binding)))
+                .map(|binding| {
+                    (
+                        binding.visible_name.as_str().to_string(),
+                        origin_of(binding),
+                    )
+                })
                 .collect(),
         );
 
@@ -1760,7 +1771,8 @@ fn is_unresolved_type(ty: &nx_types::Type) -> bool {
         nx_types::Type::Primitive(_)
         | nx_types::Type::Named(_)
         | nx_types::Type::Union(_)
-        | nx_types::Type::UnionCase(_) => false,
+        | nx_types::Type::UnionCase(_)
+        | nx_types::Type::Parameter(_) => false,
     }
 }
 
@@ -1943,7 +1955,9 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
                     function
                         .params
                         .iter()
-                        .map(|param| property_declaration(param.name.as_str(), &param.ty, &origin.0))
+                        .map(|param| {
+                            property_declaration(param.name.as_str(), &param.ty, &origin.0)
+                        })
                         .collect()
                 } else {
                     Vec::new()
@@ -1987,10 +2001,15 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
             properties: component
                 .props
                 .iter()
-                .map(|property| property_declaration(property.name.as_str(), &property.ty, &origin.0))
+                .map(|property| {
+                    property_declaration(property.name.as_str(), &property.ty, &origin.0)
+                })
                 .collect(),
             own_properties: component.props.len(),
-            base: component.base.as_ref().map(|base| base.as_str().to_string()),
+            base: component
+                .base
+                .as_ref()
+                .map(|base| base.as_str().to_string()),
             inherited_from: Vec::new(),
             members: Vec::new(),
             origin: origin.clone(),
@@ -2039,7 +2058,9 @@ fn declaration_from_item(item: &Item, source: &str, origin: DeclarationOrigin) -
             properties: record
                 .properties
                 .iter()
-                .map(|property| property_declaration(property.name.as_str(), &property.ty, &origin.0))
+                .map(|property| {
+                    property_declaration(property.name.as_str(), &property.ty, &origin.0)
+                })
                 .collect(),
             own_properties: record.properties.len(),
             base: record.base.as_ref().map(|base| base.as_str().to_string()),
@@ -2988,8 +3009,8 @@ component <SearchBox placeholder:string /> = {
     /// A single-document snapshot whose build context sees [`ui_library`].
     fn snapshot_with_library(source: &str) -> (TempDir, WorkspaceSnapshot) {
         let (temp, registry) = ui_library();
-        let snapshot =
-            snapshot_for("nx://tenant/form.nx", source, 1).with_build_context(registry.build_context());
+        let snapshot = snapshot_for("nx://tenant/form.nx", source, 1)
+            .with_build_context(registry.build_context());
         (temp, snapshot)
     }
 
@@ -2999,8 +3020,10 @@ component <SearchBox placeholder:string /> = {
     /// Spec: "Hover resolves a library component".
     #[test]
     fn hover_resolves_a_library_component_through_the_build_context() {
-        let (source, position) =
-            position_for(&format!("{IMPORT_UI}<But⟨cursor⟩ton label=\"go\" />\n"), CURSOR);
+        let (source, position) = position_for(
+            &format!("{IMPORT_UI}<But⟨cursor⟩ton label=\"go\" />\n"),
+            CURSOR,
+        );
         let (_temp, snapshot) = snapshot_with_library(&source);
 
         let hover = snapshot
@@ -3008,7 +3031,11 @@ component <SearchBox placeholder:string /> = {
             .expect("hover")
             .expect("hover content");
 
-        assert!(hover.contents.contains("<Button"), "got: {}", hover.contents);
+        assert!(
+            hover.contents.contains("<Button"),
+            "got: {}",
+            hover.contents
+        );
         assert!(hover.contents.contains("label"), "got: {}", hover.contents);
         assert!(hover.contents.contains("string"), "got: {}", hover.contents);
         assert!(hover.contents.contains("size"), "got: {}", hover.contents);
@@ -3026,11 +3053,50 @@ component <SearchBox placeholder:string /> = {
         assert!(labels.contains(&"Button".to_string()), "got: {labels:?}");
     }
 
+    /// A generic component and its use site flow through diagnostics, hover, and completions
+    /// without a panic, and a type parameter renders under its own name.
+    #[test]
+    fn a_generic_component_does_not_regress_diagnostics_hover_or_completions() {
+        const GENERIC: &str = "type Contact = { name:string }\n\
+            external component <SkiaLayout TItem:type itemsSource:TItem[]? />\n\
+            component <Section TItem:type items:TItem[] /> = { <SkiaLayout TItem=TItem itemsSource={items} /> }\n\
+            let contacts:Contact[] = {}\n\
+            <Section TItem=Contact items={contacts} />\n";
+
+        let snapshot = snapshot_for("nx://tenant/form.nx", GENERIC, 1);
+        let diagnostics = snapshot.diagnostics().expect("diagnostics");
+        assert!(
+            diagnostics[0].diagnostics.is_empty(),
+            "expected a clean generic program, got: {:#?}",
+            diagnostics[0].diagnostics
+        );
+
+        // Hover over a prop typed by the parameter renders the parameter as `TItem`.
+        let hover = hover_at(&GENERIC.replace("items:TItem[] />", "it⟨cursor⟩ems:TItem[] />"))
+            .expect("hover over the prop name");
+        assert!(hover.contents.contains("TItem"), "got: {}", hover.contents);
+
+        // Hover over the parameter's own declaration and over the argument must not panic; what
+        // they answer is a follow-up.
+        let _ = hover_at(&GENERIC.replace("<Section TItem:type", "<Section TI⟨cursor⟩tem:type"));
+        let _ = hover_at(&GENERIC.replace("TItem=Contact", "TItem=Con⟨cursor⟩tact"));
+
+        // Completions inside the body and at the use site must not panic.
+        let _ = labels_at_incomplete(
+            &GENERIC.replace("itemsSource={items} />", "itemsSource={items} ⟨cursor⟩/>"),
+        );
+        let _ = labels_at_incomplete(
+            &GENERIC.replace("items={contacts} />", "items={contacts} ⟨cursor⟩/>"),
+        );
+    }
+
     /// Spec: "Completions offer library declarations" — the properties, and their values.
     #[test]
     fn completions_offer_a_library_components_properties_and_member_values() {
-        let (source, position) =
-            position_for(&format!("{IMPORT_UI}<Button label=\"go\" ⟨cursor⟩/>\n"), CURSOR);
+        let (source, position) = position_for(
+            &format!("{IMPORT_UI}<Button label=\"go\" ⟨cursor⟩/>\n"),
+            CURSOR,
+        );
         let (_temp, snapshot) = snapshot_with_library(&source);
         let labels = completion_labels(&snapshot, FORM_URI, position);
         assert!(labels.contains(&"size".to_string()), "got: {labels:?}");
@@ -3075,8 +3141,10 @@ component <SearchBox placeholder:string /> = {
     /// Spec: "Snapshot without a context sees no libraries".
     #[test]
     fn a_snapshot_without_a_context_treats_library_names_as_unresolved() {
-        let (source, position) =
-            position_for(&format!("{IMPORT_UI}<But⟨cursor⟩ton label=\"go\" />\n"), CURSOR);
+        let (source, position) = position_for(
+            &format!("{IMPORT_UI}<But⟨cursor⟩ton label=\"go\" />\n"),
+            CURSOR,
+        );
         let snapshot = snapshot_for(FORM_URI, &source, 1);
 
         let messages = diagnostic_messages(&snapshot);
@@ -3090,7 +3158,9 @@ component <SearchBox placeholder:string /> = {
             .hover(&DocumentUri::from(FORM_URI), position)
             .expect("hover");
         assert!(
-            hover.as_ref().is_none_or(|hover| !hover.contents.contains("label")),
+            hover
+                .as_ref()
+                .is_none_or(|hover| !hover.contents.contains("label")),
             "got: {hover:?}"
         );
         let labels = completion_labels(&snapshot, FORM_URI, TextPosition::new(1, 1));
@@ -3104,7 +3174,12 @@ component <SearchBox placeholder:string /> = {
             .into_iter()
             .flat_map(|document| document.diagnostics)
             .map(|diagnostic| diagnostic.message)
-            .chain(report.workspace.into_iter().map(|diagnostic| diagnostic.message))
+            .chain(
+                report
+                    .workspace
+                    .into_iter()
+                    .map(|diagnostic| diagnostic.message),
+            )
             .collect()
     }
 
@@ -3196,7 +3271,10 @@ component <SearchBox placeholder:string /> = {
     #[test]
     fn member_completions_resolve_an_inherited_property_type_in_the_base_module() {
         let snapshot = snapshot_of(&[
-            ("nx://tenant/form.nx", &format!("{USES_LABEL}<Label mode= />\n")),
+            (
+                "nx://tenant/form.nx",
+                &format!("{USES_LABEL}<Label mode= />\n"),
+            ),
             CONTROLS,
             LABELS,
         ]);
@@ -3217,10 +3295,26 @@ component <SearchBox placeholder:string /> = {
         .expect("hover content");
 
         assert!(hover.contents.contains("<Label"), "got: {}", hover.contents);
-        assert!(hover.contents.contains("text:string"), "got: {}", hover.contents);
-        assert!(hover.contents.contains("Inherited from `Control`"), "got: {}", hover.contents);
-        assert!(hover.contents.contains("mode:Mode?"), "got: {}", hover.contents);
-        assert!(hover.contents.contains("margin:int?"), "got: {}", hover.contents);
+        assert!(
+            hover.contents.contains("text:string"),
+            "got: {}",
+            hover.contents
+        );
+        assert!(
+            hover.contents.contains("Inherited from `Control`"),
+            "got: {}",
+            hover.contents
+        );
+        assert!(
+            hover.contents.contains("mode:Mode?"),
+            "got: {}",
+            hover.contents
+        );
+        assert!(
+            hover.contents.contains("margin:int?"),
+            "got: {}",
+            hover.contents
+        );
     }
 
     #[test]
@@ -3613,12 +3707,10 @@ component <SearchBox placeholder:string /> = {
             ("let value = {1 2⟨cursor⟩}\n", nx("int")),
             ("let value = {\"a⟨cursor⟩b\" \"c\"}\n", nx("string")),
             ("let value = {1 -4⟨cursor⟩2}\n", nx("int")),
-            // A reference that reaches no expression type still reports its declaration, and an
-            // unannotated one reports the type analysis inferred for it — design D5.
-            (
-                "let ab = 1\nlet value = {a⟨cursor⟩b 2}\n",
-                nx("let ab: int"),
-            ),
+            // A reference to a value declared earlier reaches the expression type analysis
+            // recorded for it, and reports that, as a parameter reference does. The declaration
+            // is the answer only where the name reaches no expression.
+            ("let ab = 1\nlet value = {a⟨cursor⟩b 2}\n", nx("int")),
         ] {
             let hover = hover_at(fixture).unwrap_or_else(|| panic!("no hover for: {fixture:?}"));
 
@@ -3947,9 +4039,9 @@ component <SearchBox placeholder:string /> = {
         ))
         .expect("hover content");
 
-        // The declaration it resolves to, reported as a declaration — and in particular not as
-        // `(case) Role.admin`, which would say the value *is* the case rather than has its type.
-        assert_eq!(hover.contents, nx("let chosen: Role.admin"));
+        // The type the read has — and in particular not `(case) Role.admin`, which would say the
+        // value *is* the case rather than has its type.
+        assert_eq!(hover.contents, nx("Role.admin"));
         assert!(
             !hover.contents.contains("(case)"),
             "got: {}",

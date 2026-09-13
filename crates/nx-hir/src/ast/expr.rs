@@ -295,6 +295,11 @@ pub enum Expr {
         /// lowered directly from source reaches a component declared alongside it, so there is no
         /// other module to name.</para>
         action_module_identity: Option<String>,
+        /// Component whose declaration the binding was written in, or `None` at the root.
+        ///
+        /// <para>The owner decides where the handler's results go: its own update record patches
+        /// the owner's state, and an action it emits goes to the owner's parent.</para>
+        owner: Option<Name>,
         /// Handler body expression
         body: ExprId,
         /// Source span

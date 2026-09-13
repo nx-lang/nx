@@ -103,6 +103,7 @@ struct JsonComponentInitResult<'a> {
 
 #[derive(Serialize)]
 struct JsonComponentDispatchResult<'a> {
+    rendered: &'a NxValue,
     effects: &'a [NxValue],
     state_snapshot: String,
 }
@@ -392,6 +393,7 @@ fn json_component_init_payload(result: &ComponentInitResult) -> Result<String, S
 
 fn json_component_dispatch_payload(result: &ComponentDispatchResult) -> Result<String, String> {
     serde_json::to_string(&JsonComponentDispatchResult {
+        rendered: &result.rendered,
         effects: &result.effects,
         state_snapshot: BASE64_STANDARD.encode(&result.state_snapshot),
     })
@@ -1076,6 +1078,15 @@ pub extern "C" fn nx_component_evaluate_program_artifact(
     finish_output_entry(out_buffer, output_format, result)
 }
 
+/// Dispatches a MessagePack batch against a component snapshot from a program artifact.
+///
+/// Each batch entry is either an action record the component emits, which runs the handler its
+/// parent bound, or an `ActionHandlerInvocation` record `{ token, action }` that runs a handler
+/// from the snapshot's rendered output, identified by the `token` its `ActionHandler` record
+/// carried. The whole batch succeeds or fails together.
+///
+/// Successful output carries `rendered` (the body re-rendered against the final state, with fresh
+/// handler tokens), `effects`, and `state_snapshot` in the selected format.
 #[no_mangle]
 pub extern "C" fn nx_component_dispatch_actions_program_artifact(
     program_artifact_ptr: *const NxProgramArtifactHandle,

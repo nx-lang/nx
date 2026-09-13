@@ -21,8 +21,8 @@ pub use ir::{
     NxIrExpressionOp, NxIrLiteral, NxIrMatchArm, NxIrMetadata, NxIrModule, NxIrModuleProvenance,
     NxIrParam, NxIrProgram, NxIrProperty, NxIrRecordField, NxIrReference, NxIrSemanticType,
     NxIrSemanticTypeShape, NxIrSourceEntry, NxIrSourceSpan, NxIrStatement, NxIrTypeRef,
-    NxIrUnionCase, NX_IR_FORMAT_ID, NX_IR_REQUIRED_FEATURE_EAGER_V1, NX_IR_RUNTIME_ABI,
-    NX_IR_SCHEMA_VERSION,
+    NxIrUnionCase, NX_IR_FORMAT_ID, NX_IR_REQUIRED_FEATURE_EAGER_V1,
+    NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
 };
 pub use model::{
     CodegenComponent, CodegenComponentDescriptor, CodegenComponentField, CodegenDeclaration,

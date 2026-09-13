@@ -84,6 +84,11 @@ export interface NxIrRecordDeclaration {
      * A base-typed site accepts a value of a record that extends this one, never one of this one.
      */
     readonly isAbstract?: boolean;
+    /**
+     * The record or component a derived `<Target>.Update` record patches. Present only on update
+     * records, whose fields are all optional with no defaults: an absent field stays absent.
+     */
+    readonly updateTarget?: NxIrReference;
 }
 export interface NxIrComponentDeclaration {
     readonly tag: "component";
@@ -98,6 +103,12 @@ export interface NxIrUnionDeclaration {
     readonly cases: readonly NxIrUnionCase[];
     /** The union's abstract bases, nearest first, inherited by every case. */
     readonly bases?: readonly NxIrReference[];
+    /**
+     * The record, action, or component a derived `<Target>.Property` union names the fields of.
+     * Present only on property unions, whose cases are all constant and list the target's effective
+     * fields in declaration order.
+     */
+    readonly propertyTarget?: NxIrReference;
 }
 export interface NxIrTypeAliasDeclaration {
     readonly tag: "typeAlias";
@@ -218,6 +229,9 @@ export declare class NxIrRuntimeError extends Error {
     readonly diagnostics: readonly NxIrDiagnostic[];
     constructor(diagnostics: readonly NxIrDiagnostic[]);
 }
+export declare const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1 = "update-records-v1";
+export declare const NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1 = "property-unions-v1";
+export declare const NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1 = "update-intrinsics-v1";
 export declare function prepareNxIrProgram(input: string | NxIrProgram): NxPreparedProgram;
 export declare function tryPrepareNxIrProgram(input: string | NxIrProgram): NxResult<NxPreparedProgram>;
 export declare function evaluateFunction(program: NxPreparedProgram, name: string, args?: readonly NxCanonicalValue[], options?: NxRuntimeOptions): NxCanonicalValue;
@@ -225,4 +239,41 @@ export declare function constructComponentDescriptor(program: NxPreparedProgram,
 export declare function initializeComponent(program: NxPreparedProgram, name: string, props?: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): ComponentInitResult;
 export declare function evaluateComponent(program: NxPreparedProgram, name: string, props: Record<string, NxCanonicalValue>, state: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): ComponentEvaluateResult;
 export declare function normalizeComponentState(program: NxPreparedProgram, name: string, state: Record<string, NxCanonicalValue>): Record<string, NxCanonicalValue>;
+/**
+ * Applies a patch to host-owned component state and returns the validated next state.
+ *
+ * The patch is either a plain partial state object or the component's own update record,
+ * `{ $type: "<Component>.Update", ... }`. Either way a present field replaces the current value, an
+ * absent one keeps it, and a present `null` sets a nullable field to `null`.
+ */
 export declare function applyComponentStatePatch(program: NxPreparedProgram, name: string, currentState: Record<string, NxCanonicalValue>, patch: Record<string, NxCanonicalValue>): Record<string, NxCanonicalValue>;
+/** A record or update record as the runtime holds it: a `$type` and its fields. */
+export type NxRecordObject = {
+    readonly $type: string;
+    readonly [key: string]: NxCanonicalValue;
+};
+/** The update record of `T`: the same `$type` family, every field optional. */
+export type NxUpdateOf<T extends NxRecordObject> = {
+    readonly $type: string;
+} & {
+    readonly [K in keyof T as K extends "$type" ? never : K]?: T[K];
+};
+/**
+ * `apply(record, update)`: the record with each field present in the update replaced, a present
+ * `null` included; every absent field keeps its value. The update must be the record's own
+ * `<Type>.Update`.
+ */
+export declare function applyUpdate<T extends NxRecordObject>(record: T, update: NxUpdateOf<T>): T;
+/** `merge(first, second)`: every field present in either update, the second winning. */
+export declare function mergeUpdates<T extends NxRecordObject>(first: T, second: T): T;
+/**
+ * `diff(before, after)`: the `<Type>.Update` carrying exactly the fields whose values differ, each
+ * with its value from `after`, comparing records and lists structurally.
+ */
+export declare function diffRecords<T extends NxRecordObject>(before: T, after: T): NxUpdateOf<T>;
+/**
+ * `changed(update)`: the names of the fields present in the update, in the order the update
+ * record's declaration in `program` lists them. Fails when the program does not declare the
+ * update record, since the order is then unknowable from the value.
+ */
+export declare function changedFields(update: NxRecordObject, program: NxPreparedProgram): string[];

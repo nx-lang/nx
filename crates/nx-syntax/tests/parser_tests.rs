@@ -3251,8 +3251,11 @@ fn test_parse_element_with_empty_body() {
         render_diagnostics_cli(&result.errors, &HashMap::new())
     );
 
-    let element = find_first_kind(&result.root().expect("Should have root node"), SyntaxKind::ELEMENT)
-        .expect("Expected element");
+    let element = find_first_kind(
+        &result.root().expect("Should have root node"),
+        SyntaxKind::ELEMENT,
+    )
+    .expect("Expected element");
     assert!(
         element.child_by_field("content").is_none(),
         "An empty body should expose no content field"
@@ -3278,8 +3281,11 @@ fn test_parse_element_with_empty_body_across_lines() {
         render_diagnostics_cli(&result.errors, &HashMap::new())
     );
 
-    let element = find_first_kind(&result.root().expect("Should have root node"), SyntaxKind::ELEMENT)
-        .expect("Expected element");
+    let element = find_first_kind(
+        &result.root().expect("Should have root node"),
+        SyntaxKind::ELEMENT,
+    )
+    .expect("Expected element");
     assert!(
         element.child_by_field("content").is_none(),
         "A whitespace-only body should expose no content field"
@@ -3302,7 +3308,10 @@ fn test_parse_top_level_element_with_empty_body() {
         render_diagnostics_cli(&result.errors, &HashMap::new())
     );
     assert!(
-        contains_kind(&result.root().expect("Should have root node"), SyntaxKind::ELEMENT),
+        contains_kind(
+            &result.root().expect("Should have root node"),
+            SyntaxKind::ELEMENT
+        ),
         "Expected a top-level element"
     );
 }
@@ -3328,7 +3337,13 @@ fn test_scan_delimiter_at_end_of_file_terminates() {
     // rewinds the lookahead character but not the position. At end of input, where `advance` has
     // nothing left to consume, the restored character came back forever and the parse never
     // returned. Each of these is a syntax error; the point is that saying so takes finite time.
-    for source in ["@", "let x = @", "<Doc:string>text@", "<Doc:string>text&", "<Doc>text&"] {
+    for source in [
+        "@",
+        "let x = @",
+        "<Doc:string>text@",
+        "<Doc:string>text&",
+        "<Doc>text&",
+    ] {
         let outcome = parse_within(source, Duration::from_secs(10));
         assert_eq!(
             outcome,
@@ -3351,8 +3366,233 @@ fn test_scan_lone_at_in_embedded_text_is_literal() {
         render_diagnostics_cli(&result.errors, &HashMap::new())
     );
 
-    let element = find_first_kind(&result.root().expect("Should have root node"), SyntaxKind::ELEMENT)
-        .expect("Expected element");
-    let content = element.child_by_field("content").expect("Expected embedded text content");
-    assert_eq!(content.text(), "a@b", "The '@' and the character after it are both text");
+    let element = find_first_kind(
+        &result.root().expect("Should have root node"),
+        SyntaxKind::ELEMENT,
+    )
+    .expect("Expected element");
+    let content = element
+        .child_by_field("content")
+        .expect("Expected embedded text content");
+    assert_eq!(
+        content.text(),
+        "a@b",
+        "The '@' and the character after it are both text"
+    );
+}
+
+// ============================================================================
+// Component type parameters
+// ============================================================================
+
+/// Collects the PROPERTY_DEFINITION nodes of the first component signature in `source`.
+fn component_property_definitions(source: &str) -> Vec<(String, String, bool)> {
+    let result = parse_str(source, "test.nx");
+    assert!(
+        result.is_ok(),
+        "expected a clean parse, got: {}",
+        render_diagnostics_cli(&result.errors, &HashMap::new())
+    );
+    let root = result.root().expect("Should have root node");
+    let component = root
+        .children()
+        .find(|c| c.kind() == SyntaxKind::COMPONENT_DEFINITION)
+        .expect("Should find component_definition node");
+    let signature = component
+        .child_by_field("signature")
+        .expect("Component should expose signature field");
+    signature
+        .children()
+        .filter(|c| c.kind() == SyntaxKind::PROPERTY_DEFINITION)
+        .map(|prop| {
+            let name = prop
+                .child_by_field("name")
+                .expect("prop name")
+                .text()
+                .to_string();
+            let ty = prop.child_by_field("type").expect("prop type");
+            (name, ty.text().to_string(), ty.raw().is_named())
+        })
+        .collect()
+}
+
+#[test]
+fn test_parse_component_prop_named_type() {
+    let props = component_property_definitions("component <X type:string /> = { <a /> }");
+    assert_eq!(
+        props,
+        vec![("type".to_string(), "string".to_string(), true)],
+        "a prop named `type` should parse as an ordinary prop with a type reference"
+    );
+}
+
+#[test]
+fn test_parse_record_field_named_type() {
+    let result = parse_str("type X = { type:string }", "test.nx");
+    assert!(
+        result.is_ok(),
+        "a record field named `type` should parse, got: {}",
+        render_diagnostics_cli(&result.errors, &HashMap::new())
+    );
+    let root = result.root().expect("Should have root node");
+    let record = root
+        .children()
+        .find(|c| c.kind() == SyntaxKind::RECORD_DEFINITION)
+        .expect("Should find record_definition node");
+    let prop = record
+        .children()
+        .find(|c| c.kind() == SyntaxKind::PROPERTY_DEFINITION)
+        .expect("record should declare one property");
+    assert_eq!(prop.child_by_field("name").expect("name").text(), "type");
+    let ty = prop.child_by_field("type").expect("type");
+    assert_eq!(ty.kind(), SyntaxKind::TYPE);
+    assert!(
+        ty.raw().is_named(),
+        "the field type should be a type reference"
+    );
+    assert_eq!(ty.text(), "string");
+}
+
+#[test]
+fn test_parse_leading_component_type_parameter() {
+    let props = component_property_definitions(
+        "external component <SkiaLayout extends SkiaControl TItem:type layoutType:string? itemsSource:TItem[]? />",
+    );
+    assert_eq!(
+        props,
+        vec![
+            ("TItem".to_string(), "type".to_string(), false),
+            ("layoutType".to_string(), "string?".to_string(), true),
+            ("itemsSource".to_string(), "TItem[]?".to_string(), true),
+        ],
+        "the type parameter should carry the `type` keyword token; the props ordinary type references"
+    );
+}
+
+#[test]
+fn test_parse_type_parameter_rejects_suffix() {
+    for source in [
+        "component <Bad TItem:type? /> = { <Label /> }",
+        "component <Bad TItem:type[] /> = { <Label /> }",
+    ] {
+        let result = parse_str(source, "test.nx");
+        assert!(!result.is_ok(), "{source} should fail to parse");
+    }
+}
+
+/// Parses `source` and returns the messages of every `invalid-type-parameter` diagnostic.
+fn type_parameter_errors(source: &str) -> Vec<String> {
+    let result = parse_str(source, "test.nx");
+    result
+        .errors
+        .iter()
+        .filter(|diagnostic| diagnostic.code() == Some("invalid-type-parameter"))
+        .map(|diagnostic| diagnostic.message().to_string())
+        .collect()
+}
+
+#[test]
+fn test_validate_type_parameter_after_prop_is_rejected() {
+    let errors =
+        type_parameter_errors("component <Bad items:object[] TItem:type /> = { <Label /> }");
+    assert_eq!(
+        errors,
+        vec!["Type parameter 'TItem' must be declared before every prop".to_string()]
+    );
+
+    let errors = type_parameter_errors(
+        "component <Ok TKey:type TValue:type key:TKey value:TValue /> = { <Label /> }",
+    );
+    assert!(
+        errors.is_empty(),
+        "leading type parameters are valid: {errors:?}"
+    );
+}
+
+#[test]
+fn test_validate_type_parameter_with_default_is_rejected() {
+    let result = parse_str(
+        "component <Bad TItem:type = object /> = { <Label /> }",
+        "test.nx",
+    );
+    assert!(
+        !result.is_ok(),
+        "a type parameter default should be rejected"
+    );
+
+    let errors = type_parameter_errors("component <Bad TItem:type = 1 /> = { <Label /> }");
+    assert_eq!(
+        errors,
+        vec!["Type parameter 'TItem' cannot have a default value".to_string()]
+    );
+}
+
+#[test]
+fn test_validate_type_parameter_named_after_a_primitive_is_rejected() {
+    let errors = type_parameter_errors("external component <List string:type items:string[]? />");
+    assert_eq!(
+        errors,
+        vec!["Type parameter 'string' cannot take the name of a primitive type".to_string()]
+    );
+
+    // Every primitive name is refused; a declared type's name is not validation's concern.
+    for primitive in nx_syntax::PRIMITIVE_TYPE_NAMES {
+        let errors = type_parameter_errors(&format!(
+            "external component <List {primitive}:type items:{primitive}[]? />"
+        ));
+        assert_eq!(errors.len(), 1, "{primitive}: {errors:?}");
+    }
+    let errors = type_parameter_errors(
+        "type Contact = { name:string }\nexternal component <List Contact:type items:Contact[]? />",
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+
+    // `Element` is a built-in, refused on the same terms as a primitive.
+    let errors =
+        type_parameter_errors("component <List Element:type slot:Element? /> = { <Label /> }");
+    assert_eq!(
+        errors,
+        vec![
+            "Type parameter 'Element' cannot take the name of the built-in type 'Element'"
+                .to_string()
+        ]
+    );
+}
+
+#[test]
+fn test_validate_type_parameter_with_modifier_is_rejected() {
+    let errors = type_parameter_errors("component <Worse content TItem:type /> = { <Label /> }");
+    assert_eq!(
+        errors,
+        vec!["Type parameter 'TItem' cannot have the 'content' modifier".to_string()]
+    );
+}
+
+#[test]
+fn test_validate_type_parameter_outside_component_signature_is_rejected() {
+    for (source, expected) in [
+        (
+            "type Box = { T:type value:T }",
+            "Type parameter 'T' is not supported in a record",
+        ),
+        (
+            "action Select = { T:type }",
+            "Type parameter 'T' is not supported in an action",
+        ),
+        (
+            "component <C emits { click { T:type } } /> = { <Label /> }",
+            "Type parameter 'T' is not supported in an emitted action",
+        ),
+        (
+            "component <C /> = { state { T:type } <Label /> }",
+            "Type parameter 'T' is not supported in a state group",
+        ),
+        (
+            "let f(T:type) = 1",
+            "Type parameter 'T' is not supported in a function parameter list",
+        ),
+    ] {
+        let errors = type_parameter_errors(source);
+        assert_eq!(errors, vec![expected.to_string()], "for source: {source}");
+    }
 }

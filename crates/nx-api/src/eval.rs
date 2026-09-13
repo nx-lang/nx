@@ -372,20 +372,12 @@ let root() = { <Layout.Button /> }"#;
                         "onSearchRequested".to_string(),
                         NxValue::Record {
                             type_name: Some("ActionHandler".to_string()),
-                            properties: BTreeMap::from([
-                                (
-                                    "action".to_string(),
-                                    NxValue::String("SearchRequested".to_string()),
-                                ),
-                                (
-                                    "component".to_string(),
-                                    NxValue::String("SearchBox".to_string()),
-                                ),
-                                (
-                                    "emit".to_string(),
-                                    NxValue::String("SearchRequested".to_string()),
-                                ),
-                            ]),
+                            // Pure evaluation has no snapshot to dispatch against, so the
+                            // handler carries the action it accepts and no token.
+                            properties: BTreeMap::from([(
+                                "action".to_string(),
+                                NxValue::String("SearchRequested".to_string()),
+                            )]),
                         },
                     ),
                     (

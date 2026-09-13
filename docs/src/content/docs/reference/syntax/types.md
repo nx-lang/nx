@@ -89,6 +89,9 @@ let stage = DealStage.pending_review
 - A union whose cases all carry no payload is a *constant union*: it is the plain scalar-choice
   form, and it generates a C# `enum` and a TypeScript string-literal union. Give a case a payload
   when that state needs to carry data.
+- Every record, action, and component with `state` has a derived constant union of its field
+  names, `T.Property`, so `User.Property.email` names the `email` field of `User` as a value. See
+  [Property references](/reference/syntax/functions#property-references).
 
 ## Discriminated Union Types
 Discriminated unions declare a closed set of scoped cases. A union uses `type Name =` followed by a

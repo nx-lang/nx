@@ -155,6 +155,24 @@ let root() = { <Shape shadows={ <Shadow Y=6.0 /> } sizes={3.0} /> }
 
 withSource(
   `
+type User = { name:string = "anon" email:string? }
+let root(): User.Update = { <User.Update email={null} /> }
+`,
+  (dir, sourcePath) => {
+    const ir = emitIr(dir, sourcePath);
+    if (!ir.requiredFeatures.includes("update-records-v1")) {
+      throw new Error(`Expected the update-record feature, got ${JSON.stringify(ir.requiredFeatures)}`);
+    }
+    const prepared = prepareNxIrProgram(ir);
+    const expected = { $type: "User.Update", email: null };
+    assertEqual(evaluateFunction(prepared, "root"), expected);
+    assertEqual(nativeJson(sourcePath), expected);
+    console.log("ok - an emitted update record keeps absent fields absent like the native interpreter");
+  },
+);
+
+withSource(
+  `
 abstract type Base = { name:string = "anon" }
 type User extends Base = { role:string }
 let root() = { <User role="admin" /> }
@@ -278,5 +296,27 @@ console.log(JSON.stringify({
       generated,
     );
     console.log("ok - emitted component IR matches generated JavaScript behavior");
+  },
+);
+
+withSource(
+  `
+type User = { name:string email:string? age:int? }
+let key(): User.Property = { User.Property.email }
+let root(): User = { apply(<User name="Ada" email="x@y" />, <User.Update email={null} />) }
+let keys(): User.Property[] = { changed(<User.Update age={null} name="Ada" />) }
+`,
+  (dir, sourcePath) => {
+    const ir = emitIr(dir, sourcePath);
+    for (const feature of ["property-unions-v1", "update-intrinsics-v1"]) {
+      if (!ir.requiredFeatures.includes(feature)) {
+        throw new Error(`Expected the ${feature} feature, got ${JSON.stringify(ir.requiredFeatures)}`);
+      }
+    }
+    const prepared = prepareNxIrProgram(ir);
+    assertEqual(evaluateFunction(prepared, "key"), "email");
+    assertEqual(evaluateFunction(prepared, "root"), nativeJson(sourcePath));
+    assertEqual(evaluateFunction(prepared, "keys"), ["name", "age"]);
+    console.log("ok - an emitted property reference and apply match the native interpreter");
   },
 );

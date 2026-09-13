@@ -496,6 +496,7 @@ struct JsonComponentInitResult {
 
 #[derive(Deserialize)]
 struct JsonComponentDispatchResult {
+    rendered: NxValue,
     effects: Vec<NxValue>,
     state_snapshot: String,
 }
@@ -694,7 +695,7 @@ fn ffi_codegen_nx_ir_returns_json_diagnostics_for_ir_errors() {
         r#"
 external component <TextInput />
 component <SearchBox emits { SearchSubmitted { query:string } } /> = { <TextInput /> }
-let DoSearch(query:string) = { query }
+action DoSearch = { query:string }
 let root() = { <SearchBox onSearchSubmitted=<DoSearch query={action.query} /> /> }
 "#,
         "root.nx",
@@ -723,7 +724,7 @@ fn ffi_codegen_js_program_module_returns_json_diagnostics_for_codegen_errors() {
         r#"
 external component <TextInput />
 component <SearchBox emits { SearchSubmitted { query:string } } /> = { <TextInput /> }
-let DoSearch(query:string) = { query }
+action DoSearch = { query:string }
 let root() = { <SearchBox onSearchSubmitted=<DoSearch query={action.query} /> /> }
 "#,
         "root.nx",
@@ -1484,12 +1485,146 @@ fn ffi_component_dispatch_round_trips_effect_payloads_in_msgpack_and_json() {
     assert!(matches!(json_status, NxEvalStatus::Ok));
     let dispatch_result: JsonComponentDispatchResult = serde_json::from_str(&json_payload).unwrap();
     assert_eq!(dispatch_result.effects.len(), 1);
-    assert_eq!(
-        BASE64_STANDARD
-            .decode(dispatch_result.state_snapshot)
-            .unwrap(),
-        init.state_snapshot
+    assert!(matches!(dispatch_result.rendered, NxValue::Record { .. }));
+
+    // The next snapshot is a different render of the same state, so it is not byte-identical to
+    // the one supplied; it is the one to dispatch against next.
+    let next_snapshot = BASE64_STANDARD
+        .decode(dispatch_result.state_snapshot)
+        .unwrap();
+    let build_context = create_empty_build_context();
+    let (next_handle, status, _) =
+        build_program_artifact_handle(build_context, source, "ffi-dispatch.nx");
+    nx_free_program_build_context(build_context);
+    assert!(matches!(status, NxEvalStatus::Ok));
+    let (next_status, _) = component_dispatch_json_with_program_artifact(
+        next_handle,
+        &next_snapshot,
+        &actions_msgpack,
     );
+    nx_free_program_artifact(next_handle);
+    assert!(matches!(next_status, NxEvalStatus::Ok));
+}
+
+const FFI_COUNTER_SOURCE: &str = r#"
+    action Saved = { }
+    external component <Button value:int = 0 emits { Tapped { } } />
+    component <Counter emits { Saved } /> = {
+      state { count:int = 0 }
+      <Button value={count} onTapped={<Update count={count + 1} /> <Saved />} />
+    }
+"#;
+
+fn record_property<'a>(value: &'a NxValue, name: &str) -> &'a NxValue {
+    let NxValue::Record { properties, .. } = value else {
+        panic!("Expected a record, got {:?}", value);
+    };
+    properties
+        .get(name)
+        .unwrap_or_else(|| panic!("Expected '{}' on {:?}", name, value))
+}
+
+/// Reads the dispatch token off a rendered `ActionHandler` record.
+fn rendered_handler_token(rendered: &NxValue, handler_property: &str) -> String {
+    let handler = record_property(rendered, handler_property);
+    let NxValue::Record { type_name, .. } = handler else {
+        panic!("Expected a handler record, got {:?}", handler);
+    };
+    assert_eq!(type_name.as_deref(), Some("ActionHandler"));
+    assert_eq!(
+        record_property(handler, "action"),
+        &NxValue::String("Button.Tapped".to_string())
+    );
+    match record_property(handler, "token") {
+        NxValue::String(token) => token.clone(),
+        other => panic!("Expected a string token, got {:?}", other),
+    }
+}
+
+fn handler_invocation_batch(token: &str) -> Vec<u8> {
+    let invocation = NxValue::Record {
+        type_name: Some("ActionHandlerInvocation".to_string()),
+        properties: std::collections::BTreeMap::from([
+            ("token".to_string(), NxValue::String(token.to_string())),
+            (
+                "action".to_string(),
+                NxValue::Record {
+                    type_name: Some("Button.Tapped".to_string()),
+                    properties: std::collections::BTreeMap::new(),
+                },
+            ),
+        ]),
+    };
+    rmp_serde::to_vec_named(&vec![invocation]).unwrap()
+}
+
+#[test]
+fn ffi_component_dispatch_with_handler_token_returns_rendered_effects_and_snapshot() {
+    let build_context = create_empty_build_context();
+    let (handle, status, bytes) =
+        build_program_artifact_handle(build_context, FFI_COUNTER_SOURCE, "ffi-counter.nx");
+    nx_free_program_build_context(build_context);
+    assert!(
+        matches!(status, NxEvalStatus::Ok),
+        "{:?}",
+        String::from_utf8_lossy(&bytes)
+    );
+
+    // MessagePack: initialize, then dispatch the token the rendered button carries.
+    let (init_status, init_bytes) =
+        component_init_msgpack_with_program_artifact(handle, "Counter", None);
+    assert!(matches!(init_status, NxEvalStatus::Ok));
+    let init: ComponentInitResult = rmp_serde::from_slice(&init_bytes).unwrap();
+    let token = rendered_handler_token(&init.rendered, "onTapped");
+
+    let (dispatch_status, dispatch_bytes) = component_dispatch_msgpack_with_program_artifact(
+        handle,
+        &init.state_snapshot,
+        &handler_invocation_batch(&token),
+    );
+    assert!(matches!(dispatch_status, NxEvalStatus::Ok));
+    let dispatched: ComponentDispatchResult = rmp_serde::from_slice(&dispatch_bytes).unwrap();
+    assert_eq!(
+        record_property(&dispatched.rendered, "value"),
+        &NxValue::Int(1)
+    );
+    assert_eq!(
+        dispatched.effects,
+        vec![NxValue::Record {
+            type_name: Some("Saved".to_string()),
+            properties: std::collections::BTreeMap::new(),
+        }]
+    );
+    assert!(!dispatched.state_snapshot.is_empty());
+
+    // JSON: dispatch the re-rendered token against the returned snapshot.
+    let next_token = rendered_handler_token(&dispatched.rendered, "onTapped");
+    let (json_status, json_payload) = component_dispatch_json_with_program_artifact(
+        handle,
+        &dispatched.state_snapshot,
+        &handler_invocation_batch(&next_token),
+    );
+    assert!(matches!(json_status, NxEvalStatus::Ok), "{json_payload}");
+    let json_result: JsonComponentDispatchResult = serde_json::from_str(&json_payload).unwrap();
+    assert_eq!(
+        record_property(&json_result.rendered, "value"),
+        &NxValue::Int(2)
+    );
+    assert_eq!(json_result.effects.len(), 1);
+    assert!(!BASE64_STANDARD
+        .decode(json_result.state_snapshot)
+        .unwrap()
+        .is_empty());
+
+    // A token from the earlier render names nothing in the later snapshot.
+    let (stale_status, stale_payload) = component_dispatch_json_with_program_artifact(
+        handle,
+        &dispatched.state_snapshot,
+        &handler_invocation_batch(&token),
+    );
+    nx_free_program_artifact(handle);
+    assert!(!matches!(stale_status, NxEvalStatus::Ok));
+    assert!(stale_payload.contains(&token), "{stale_payload}");
 }
 
 #[test]
@@ -1657,12 +1792,10 @@ fn ffi_component_dispatch_round_trips_constant_case_effect_payloads_in_msgpack_a
             )]),
         }]
     );
-    assert_eq!(
-        BASE64_STANDARD
-            .decode(dispatch_result.state_snapshot)
-            .unwrap(),
-        init.state_snapshot
-    );
+    assert!(!BASE64_STANDARD
+        .decode(dispatch_result.state_snapshot)
+        .unwrap()
+        .is_empty());
 }
 
 #[test]

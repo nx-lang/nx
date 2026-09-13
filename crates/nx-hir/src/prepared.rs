@@ -1,7 +1,7 @@
 use crate::{
     ast, Component, ComponentEmit, Item, LoweredModule, LoweringDiagnostic, Name, Param,
-    RecordField, RecordKind, SourceId, TypeAlias, UnionCaseDef, UnionCaseField, UnionDef,
-    Visibility,
+    RecordField, RecordKind, SourceId, TypeAlias, TypeParameter, UnionCaseDef, UnionCaseField,
+    UnionDef, Visibility,
 };
 use nx_diagnostics::TextSpan;
 use rustc_hash::FxHashMap;
@@ -112,6 +112,7 @@ pub enum InterfaceItemKind {
         is_abstract: bool,
         is_external: bool,
         base: Option<Name>,
+        type_params: Vec<TypeParameter>,
         props: Vec<InterfaceField>,
         emits: Vec<ComponentEmit>,
         state: Vec<InterfaceField>,
@@ -124,6 +125,8 @@ pub enum InterfaceItemKind {
     Union {
         base: Option<Name>,
         cases: Vec<InterfaceUnionCase>,
+        /// The target of a derived `<Target>.Property` union, when this is one.
+        property_target: Option<Name>,
         span: TextSpan,
     },
     Record {
@@ -743,7 +746,7 @@ pub fn interface_record(item: &InterfaceItem) -> Option<crate::RecordDef> {
         } => Some(crate::RecordDef {
             name: Name::new(item.item_name.as_str()),
             visibility: item.visibility,
-            kind: *kind,
+            kind: kind.clone(),
             is_abstract: *is_abstract,
             base: base.clone(),
             properties: properties
@@ -769,6 +772,7 @@ pub fn interface_component(item: &InterfaceItem) -> Option<Component> {
             is_abstract,
             is_external,
             base,
+            type_params,
             props,
             emits,
             state,
@@ -779,6 +783,7 @@ pub fn interface_component(item: &InterfaceItem) -> Option<Component> {
             is_abstract: *is_abstract,
             is_external: *is_external,
             base: base.clone(),
+            type_params: type_params.clone(),
             props: props
                 .iter()
                 .map(|field| RecordField {
@@ -810,10 +815,16 @@ pub fn interface_component(item: &InterfaceItem) -> Option<Component> {
 /// Converts imported interface metadata into union-like view when possible.
 pub fn interface_union(item: &InterfaceItem) -> Option<UnionDef> {
     match &item.item {
-        InterfaceItemKind::Union { base, cases, span } => Some(UnionDef {
+        InterfaceItemKind::Union {
+            base,
+            cases,
+            property_target,
+            span,
+        } => Some(UnionDef {
             name: Name::new(item.item_name.as_str()),
             visibility: item.visibility,
             base: base.clone(),
+            property_target: property_target.clone(),
             cases: cases
                 .iter()
                 .map(|case| UnionCaseDef {

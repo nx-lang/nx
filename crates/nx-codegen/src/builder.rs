@@ -14,7 +14,7 @@ use nx_hir::{
     PreparedModule, PreparedNamespace, PropertyEntry, RecordField,
 };
 use nx_interpreter::{ResolvedItemKind, ResolvedModule, ResolvedModuleSource, RuntimeModuleId};
-use nx_types::{ModuleArtifact, TypeEnvironment};
+use nx_types::{ModuleArtifact, Type, TypeEnvironment};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Builds a target-neutral code generation program from a resolved program artifact.
@@ -32,8 +32,15 @@ pub fn build_codegen_program(artifact: &ProgramArtifact) -> Result<CodegenProgra
     let mut diagnostics = Vec::new();
     let mut modules = Vec::new();
     let mut prepared_cache = PreparedModuleCache::default();
+    let referenced_updates = referenced_derived_declarations(artifact);
     for module in artifact.resolved_program.modules() {
-        match build_module(artifact, module, &mut prepared_cache, &mut diagnostics) {
+        match build_module(
+            artifact,
+            module,
+            &mut prepared_cache,
+            &referenced_updates,
+            &mut diagnostics,
+        ) {
             Some(module) => modules.push(module),
             None => {}
         }
@@ -95,10 +102,125 @@ pub fn build_codegen_program(artifact: &ProgramArtifact) -> Result<CodegenProgra
     })
 }
 
+/// Where one derived declaration is declared: its module and definition.
+type UpdateRecordKey = (u32, LocalDefinitionId);
+
+/// The derived declarations — update records and property unions — the program references
+/// anywhere, by the declaration each reference reaches.
+///
+/// <para>Every record, action, and stateful component has an update record and a property union,
+/// and most programs never use either. Emitting only the referenced ones keeps a program that
+/// never writes a patch or names a field the same program it was before they existed. A reference
+/// is a construction — a record literal or an element tag — a type annotation naming one, or a
+/// member access reaching a property union's case; a reference from another module counts, since
+/// the declaring module is where the declaration is emitted.</para>
+fn referenced_derived_declarations(artifact: &ProgramArtifact) -> FxHashSet<UpdateRecordKey> {
+    let mut referenced = FxHashSet::default();
+    for module in artifact.resolved_program.modules() {
+        let Some(lowered_module) = module_artifact_for(artifact, module)
+            .and_then(|artifact| artifact.lowered_module.as_ref())
+        else {
+            continue;
+        };
+        let mut names = Vec::new();
+        for (expr_id, expr) in lowered_module.exprs() {
+            match expr {
+                ast::Expr::RecordLiteral { record, .. } => names.push(record.clone()),
+                ast::Expr::Element { element, .. } => {
+                    names.push(lowered_module.element(*element).tag.clone())
+                }
+                // `User.Property.name` reaches the union through its dotted name, so the access
+                // and every prefix of it are candidates.
+                ast::Expr::Member { .. } => {
+                    if let Some(name) = flattened_expr_name(lowered_module, expr_id) {
+                        let mut prefix = name.as_str();
+                        while let Some((base, _)) = prefix.rsplit_once('.') {
+                            names.push(Name::new(base));
+                            prefix = base;
+                        }
+                    }
+                }
+                // A resolved bare case carries the declaration it reached.
+                ast::Expr::ResolvedUnionCase {
+                    module_identity,
+                    definition_id,
+                    ..
+                } => {
+                    if let Some(declaring) = artifact
+                        .resolved_program
+                        .module_by_prepared_identity(module_identity)
+                    {
+                        if is_derived_declaration(artifact, declaring.id, *definition_id) {
+                            referenced.insert((declaring.id.as_u32(), *definition_id));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        for item in lowered_module.items() {
+            for ty in nx_hir::item_type_refs(item) {
+                names.extend(nx_hir::type_ref_names(ty).into_iter().cloned());
+            }
+        }
+
+        for name in names {
+            let Some(reference) = resolve_visible_reference(artifact, module.id, name.as_str())
+            else {
+                continue;
+            };
+            if matches!(
+                reference.kind,
+                ResolvedItemKind::Record | ResolvedItemKind::Union
+            ) && is_derived_declaration(artifact, reference.module_id, reference.definition_id)
+            {
+                referenced.insert((reference.module_id.as_u32(), reference.definition_id));
+            }
+        }
+    }
+    referenced
+}
+
+/// The dotted spelling of an identifier and member-access chain, if the expression is one.
+fn flattened_expr_name(lowered_module: &LoweredModule, expr_id: ExprId) -> Option<Name> {
+    match lowered_module.expr(expr_id) {
+        ast::Expr::Ident(name) => Some(name.clone()),
+        ast::Expr::Member { base, member, .. } => {
+            let base = flattened_expr_name(lowered_module, *base)?;
+            Some(Name::new(&format!("{}.{}", base.as_str(), member.as_str())))
+        }
+        _ => None,
+    }
+}
+
+/// Returns true when the item at the address is a derived update record or property union.
+fn is_derived_declaration(
+    artifact: &ProgramArtifact,
+    module_id: RuntimeModuleId,
+    definition_id: LocalDefinitionId,
+) -> bool {
+    artifact
+        .resolved_program
+        .module(module_id)
+        .and_then(|module| module.lowered_module.item_by_definition(definition_id))
+        .is_some_and(is_derived_item)
+}
+
+/// Returns true when `item` is a derived update record or property union.
+fn is_derived_item(item: &Item) -> bool {
+    match item {
+        Item::Record(record) => record.update_target().is_some(),
+        Item::Union(union_def) => union_def.property_target().is_some(),
+        _ => false,
+    }
+}
+
+/// Every type annotation one declaration writes.
 fn build_module(
     artifact: &ProgramArtifact,
     module: &ResolvedModule,
     prepared_cache: &mut PreparedModuleCache,
+    referenced_updates: &FxHashSet<UpdateRecordKey>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<CodegenModule> {
     let Some(module_artifact) = module_artifact_for(artifact, module) else {
@@ -121,6 +243,11 @@ fn build_module(
     let mut declarations = Vec::new();
     for (index, item) in lowered_module.items().iter().enumerate() {
         let definition_id = LocalDefinitionId::new(index as u32);
+        if is_derived_item(item)
+            && !referenced_updates.contains(&(module.id.as_u32(), definition_id))
+        {
+            continue;
+        }
         let reference = reference_from_item(module.id, definition_id, item);
         if let Some(declaration) = build_declaration(
             artifact,
@@ -294,12 +421,19 @@ fn build_declaration(
                 record,
                 diagnostics,
             )?;
+            let type_params = update_record_type_params(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                lowered_module,
+                record,
+            );
             CodegenDeclarationKind::Record {
                 fields: build_effective_record_fields(
                     artifact,
                     resolved_module,
                     prepared_cache,
-                    &shape.fields,
+                    &erase_effective_field_type_parameters(&shape.fields, &type_params),
                     diagnostics,
                 )?,
                 bases: record_ancestor_references(
@@ -310,6 +444,10 @@ fn build_declaration(
                     diagnostics,
                 )?,
                 is_abstract: record.is_abstract,
+                // The target is declared beside its update record, so it resolves here.
+                update_target: record.update_target().and_then(|target| {
+                    resolve_visible_reference(artifact, resolved_module.id, target.as_str())
+                }),
             }
         }
         Item::Union(union_def) => {
@@ -338,6 +476,10 @@ fn build_declaration(
             }
             CodegenDeclarationKind::Union {
                 cases,
+                // The target is declared beside its property union, so it resolves here.
+                property_target: union_def.property_target().and_then(|target| {
+                    resolve_visible_reference(artifact, resolved_module.id, target.as_str())
+                }),
                 bases: union_base_references(
                     artifact,
                     resolved_module,
@@ -384,12 +526,23 @@ fn build_component(
         }
     };
 
+    // A type parameter is a type only inside the declaring component, and the resolved IR type of
+    // a prop or state field is what a host reads to normalize a value. There is nothing to bind
+    // the parameter to there, so the resolved type carries the top type in its place; the declared
+    // type is kept as written for the emitters that can carry the parameter.
+    let type_params: Vec<Name> = contract
+        .type_params
+        .iter()
+        .map(|param| param.name.clone())
+        .collect();
+
     let mut prop_scope = LexicalScope::new();
     let props = build_effective_component_fields(
         artifact,
         resolved_module,
         prepared_cache,
         &contract.props,
+        &type_params,
         &mut prop_scope,
         diagnostics,
     )?;
@@ -405,6 +558,7 @@ fn build_component(
         lowered_module,
         type_env,
         &component.state,
+        &type_params,
         &mut state_scope,
         diagnostics,
     )?;
@@ -435,6 +589,10 @@ fn build_component(
     Some(CodegenComponent {
         is_abstract: component.is_abstract,
         is_external: component.is_external,
+        type_params: type_params
+            .iter()
+            .map(|name| name.as_str().to_string())
+            .collect(),
         props,
         state,
         body,
@@ -473,6 +631,7 @@ fn build_effective_component_fields(
     resolved_module: &ResolvedModule,
     prepared_cache: &mut PreparedModuleCache,
     fields: &[EffectiveField],
+    type_params: &[Name],
     scope: &mut LexicalScope,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Vec<CodegenComponentField>> {
@@ -508,7 +667,7 @@ fn build_effective_component_fields(
                 artifact,
                 owner_module,
                 prepared_cache,
-                &field.ty,
+                &nx_hir::erase_type_parameters(&field.ty, type_params),
                 diagnostics,
             )?,
             is_content: field.is_content,
@@ -529,6 +688,7 @@ fn build_declared_component_fields(
     lowered_module: &LoweredModule,
     type_env: &TypeEnvironment,
     fields: &[RecordField],
+    type_params: &[Name],
     scope: &mut LexicalScope,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Vec<CodegenComponentField>> {
@@ -554,7 +714,7 @@ fn build_declared_component_fields(
                 artifact,
                 resolved_module,
                 prepared_cache,
-                &field.ty,
+                &nx_hir::erase_type_parameters(&field.ty, type_params),
                 diagnostics,
             )?,
             is_content: field.is_content,
@@ -613,6 +773,27 @@ fn build_expression_for_module_identity(
         expr_id,
         scope,
         diagnostics,
+    )
+}
+
+/// The declared field order of the update record `expression` is statically typed as.
+fn update_field_order(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    prepared_cache: &mut PreparedModuleCache,
+    expression: &CodegenExpression,
+) -> Option<Vec<String>> {
+    let Some(Type::Named(named)) = expression.ty.as_ref() else {
+        return None;
+    };
+    let prepared = prepared_cache.get(artifact, resolved_module);
+    let shape = nx_hir::effective_record_shape_at(prepared, named.origin()?).ok()??;
+    Some(
+        shape
+            .fields
+            .iter()
+            .map(|field| field.name.as_str().to_string())
+            .collect(),
     )
 }
 
@@ -964,6 +1145,54 @@ fn build_expression(
             }
         }
         ast::Expr::Call { func, args, .. } => {
+            // An intrinsic has no callee declaration to build: the checker resolved the name
+            // before any binding, and a runtime supplies the operation.
+            let intrinsic = match lowered_module.expr(*func) {
+                ast::Expr::Ident(name) => nx_hir::UpdateIntrinsic::from_name(name.as_str()),
+                _ => None,
+            };
+            if let Some(intrinsic) = intrinsic {
+                let mut mapped_args = Vec::with_capacity(args.len());
+                for arg in args {
+                    mapped_args.push(build_expression(
+                        artifact,
+                        resolved_module,
+                        prepared_cache,
+                        lowered_module,
+                        type_env,
+                        *arg,
+                        scope,
+                        diagnostics,
+                    )?);
+                }
+                // `changed` sorts by declaration order, which no runtime can recover from the
+                // value once updates have been merged, so the order travels with the call.
+                let field_order = if intrinsic == nx_hir::UpdateIntrinsic::Changed {
+                    let Some(order) = mapped_args.first().and_then(|arg| {
+                        update_field_order(artifact, resolved_module, prepared_cache, arg)
+                    }) else {
+                        diagnostics.push(missing_semantic_data_diagnostic(
+                            resolved_module,
+                            "update record declaration of the 'changed' argument",
+                            span,
+                        ));
+                        return None;
+                    };
+                    Some(order)
+                } else {
+                    None
+                };
+                return Some(CodegenExpression {
+                    expr_id: expr_id_u32(expr_id),
+                    span,
+                    ty,
+                    kind: CodegenExpressionKind::IntrinsicCall {
+                        intrinsic,
+                        args: mapped_args,
+                        field_order,
+                    },
+                });
+            }
             let callee = build_expression(
                 artifact,
                 resolved_module,
@@ -1376,7 +1605,7 @@ fn build_expression(
                     span: property.span,
                 });
             }
-            let (record_name, fields) = record_literal_shape(
+            let (record_name, fields, is_update) = record_literal_shape(
                 artifact,
                 resolved_module.id,
                 prepared_cache,
@@ -1389,6 +1618,7 @@ fn build_expression(
                 properties: mapped_properties,
                 content_field: None,
                 content: Vec::new(),
+                is_update,
             }
         }
         ast::Expr::Element { element, .. } => {
@@ -1554,7 +1784,7 @@ fn build_element_expression(
                     diagnostics,
                 ),
                 ResolvedItemKind::Record => {
-                    let (record_name, fields) = record_literal_shape(
+                    let (record_name, fields, is_update) = record_literal_shape(
                         artifact,
                         resolved_module.id,
                         prepared_cache,
@@ -1571,6 +1801,7 @@ fn build_element_expression(
                         properties: mapped.properties,
                         content_field,
                         content: mapped.content,
+                        is_update,
                     })
                 }
                 _ => Some(CodegenExpressionKind::Element(mapped)),
@@ -2000,16 +2231,16 @@ fn record_literal_shape(
     prepared_cache: &mut PreparedModuleCache,
     record_name: &str,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Option<(String, Vec<CodegenRecordField>)> {
+) -> Option<(String, Vec<CodegenRecordField>, bool)> {
     let Some(reference) = resolve_visible_reference(artifact, module_id, record_name) else {
-        return Some((record_name.to_string(), Vec::new()));
+        return Some((record_name.to_string(), Vec::new(), false));
     };
     if reference.kind != nx_interpreter::ResolvedItemKind::Record {
-        return Some((record_name.to_string(), Vec::new()));
+        return Some((record_name.to_string(), Vec::new(), false));
     }
 
     let Some(target_module) = artifact.resolved_program.module(reference.module_id) else {
-        return Some((record_name.to_string(), Vec::new()));
+        return Some((record_name.to_string(), Vec::new(), false));
     };
     let Some(module_artifact) = module_artifact_for(artifact, target_module) else {
         diagnostics.push(missing_semantic_data_diagnostic(
@@ -2029,7 +2260,7 @@ fn record_literal_shape(
     };
     let Some(Item::Record(record_def)) = lowered_module.item_by_definition(reference.definition_id)
     else {
-        return Some((record_name.to_string(), Vec::new()));
+        return Some((record_name.to_string(), Vec::new(), false));
     };
     let shape = effective_record_shape_of(
         artifact,
@@ -2038,14 +2269,76 @@ fn record_literal_shape(
         &record_def,
         diagnostics,
     )?;
+    let type_params = update_record_type_params(
+        artifact,
+        target_module,
+        prepared_cache,
+        lowered_module,
+        record_def,
+    );
     let fields = build_effective_record_fields(
         artifact,
         target_module,
         prepared_cache,
-        &shape.fields,
+        &erase_effective_field_type_parameters(&shape.fields, &type_params),
         diagnostics,
     )?;
-    Some((record_def.name.as_str().to_string(), fields))
+    Some((
+        record_def.name.as_str().to_string(),
+        fields,
+        record_def.update_target().is_some(),
+    ))
+}
+
+/// The type parameters of the component whose state `record` patches, when it is the derived
+/// update record of a generic component; empty for every other record.
+///
+/// <para>The update record copies its target's state annotations, and a state field may be typed
+/// by a type parameter. Outside the component that parameter is not a type, and no host names the
+/// instantiation of an update — it was fixed at an NX use site — so the record's fields erase it
+/// the way the component's own state schema does.</para>
+fn update_record_type_params(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    prepared_cache: &mut PreparedModuleCache,
+    lowered_module: &LoweredModule,
+    record: &nx_hir::RecordDef,
+) -> Vec<Name> {
+    let Some(target) = record.update_target() else {
+        return Vec::new();
+    };
+    let Some(Item::Component(component)) = lowered_module.find_item(target.as_str()) else {
+        return Vec::new();
+    };
+    if component.type_params.is_empty() && component.base.is_none() {
+        return Vec::new();
+    }
+    let prepared = prepared_cache.get(artifact, resolved_module);
+    // A contract that fails to resolve is reported where the component itself is built.
+    nx_hir::effective_component_contract(prepared, component)
+        .map(|contract| {
+            contract
+                .type_params
+                .into_iter()
+                .map(|param| param.name)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `fields` with every reference to one of `type_params` erased to the top type, or a copy of
+/// `fields` when there is nothing to erase.
+fn erase_effective_field_type_parameters(
+    fields: &[EffectiveField],
+    type_params: &[Name],
+) -> Vec<EffectiveField> {
+    fields
+        .iter()
+        .map(|field| EffectiveField {
+            ty: nx_hir::erase_type_parameters(&field.ty, type_params),
+            ..field.clone()
+        })
+        .collect()
 }
 
 fn build_type_ref(
@@ -2101,7 +2394,9 @@ fn build_type_ref_resolving_aliases(
                     .or_else(|| prepared.resolve_binding(PreparedNamespace::Element, name));
                 binding.map(|binding| {
                     (
-                        binding.module_identity(&current_module_identity).to_string(),
+                        binding
+                            .module_identity(&current_module_identity)
+                            .to_string(),
                         binding.definition_id(),
                         binding.kind,
                     )
@@ -2138,7 +2433,8 @@ fn build_type_ref_resolving_aliases(
                 if !aliases.contains(&alias) {
                     // An alias declared by a module compiled to an interface alone has no target to
                     // read here, and stays the nominal reference it was before.
-                    if let Some(target) = type_alias_target(artifact, target_module, definition_id) {
+                    if let Some(target) = type_alias_target(artifact, target_module, definition_id)
+                    {
                         aliases.push(alias);
                         let resolved = build_type_ref_resolving_aliases(
                             artifact,

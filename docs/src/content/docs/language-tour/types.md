@@ -51,6 +51,10 @@ Case names conventionally use `snake_case`. NX serializes a constant case using 
 written, so `snake_case` keeps the source aligned with JSON or database values such as
 `"pending_review"`.
 
+Every record also has a derived constant union of its field names. For
+`type User = { name:string email:string? }` that is `User.Property`, with the cases `name` and
+`email`, and it serializes a case as the bare field name.
+
 ## Discriminated unions
 
 Use discriminated unions when each state belongs to a fixed set, but some states need their own

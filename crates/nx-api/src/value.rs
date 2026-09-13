@@ -49,7 +49,9 @@ impl Error for FromNxValueError {}
 /// declaring union type is not preserved on the wire; consumers recover it from the target
 /// schema (declared NX type, typed DTO property, or other type annotation).
 ///
-/// `Value::ActionHandler` is encoded as a record for display and inspection only. That shape is
+/// `Value::ActionHandler` is encoded as an `ActionHandler` record carrying the public name of the
+/// action it accepts and, when a lifecycle render gave it one, the `token` a host passes back in a
+/// dispatch handler invocation. That record names the handler; it is not the handler, so it is
 /// intentionally not round-trippable through [`from_nx_value`].
 pub fn to_nx_value(value: &Value) -> NxValue {
     match value {
@@ -67,27 +69,20 @@ pub fn to_nx_value(value: &Value) -> NxValue {
             properties: fields_to_properties(fields),
         },
         Value::ActionHandler {
-            component,
-            emit,
-            action_name,
-            ..
-        } => NxValue::Record {
-            type_name: Some("ActionHandler".to_string()),
-            properties: BTreeMap::from([
-                (
-                    "component".to_string(),
-                    NxValue::String(component.as_str().to_string()),
-                ),
-                (
-                    "emit".to_string(),
-                    NxValue::String(emit.as_str().to_string()),
-                ),
-                (
-                    "action".to_string(),
-                    NxValue::String(action_name.as_str().to_string()),
-                ),
-            ]),
-        },
+            action_name, token, ..
+        } => {
+            let mut properties = BTreeMap::from([(
+                "action".to_string(),
+                NxValue::String(action_name.as_str().to_string()),
+            )]);
+            if let Some(token) = token {
+                properties.insert("token".to_string(), NxValue::String(token.to_string()));
+            }
+            NxValue::Record {
+                type_name: Some("ActionHandler".to_string()),
+                properties,
+            }
+        }
     }
 }
 
@@ -187,6 +182,38 @@ mod tests {
         assert_eq!(to_nx_value(&runtime), NxValue::String("active".to_string()));
     }
 
+    /// The list `changed` produces is a list of constant cases, so it encodes as bare strings.
+    #[test]
+    fn a_list_of_property_cases_lowers_to_bare_field_names() {
+        let runtime = Value::Array(vec![
+            Value::UnionCase {
+                union: Name::new("User.Property"),
+                case: SmolStr::new("name"),
+            },
+            Value::UnionCase {
+                union: Name::new("User.Property"),
+                case: SmolStr::new("age"),
+            },
+        ]);
+        let value = to_nx_value(&runtime);
+        assert_eq!(
+            value,
+            NxValue::Array(vec![
+                NxValue::String("name".to_string()),
+                NxValue::String("age".to_string()),
+            ])
+        );
+        assert_eq!(
+            value.to_json_string().expect("JSON encodes"),
+            r#"["name","age"]"#
+        );
+        let bytes = value.to_msgpack_vec().expect("MessagePack encodes");
+        assert_eq!(
+            NxValue::from_msgpack_slice(&bytes).expect("MessagePack decodes"),
+            value
+        );
+    }
+
     #[test]
     fn from_nx_value_rejects_action_handler_records() {
         let value = NxValue::Record {
@@ -200,5 +227,37 @@ mod tests {
         let error = from_nx_value(&value).expect_err("Expected ActionHandler input to be rejected");
         assert_eq!(error.path(), "$");
         assert!(error.to_string().contains("ActionHandler"));
+    }
+
+    #[test]
+    fn update_record_absence_survives_the_public_value_model() {
+        let value = NxValue::from_json_str(r#"{ "$type": "User.Update", "name": "Ada" }"#)
+            .expect("JSON parses");
+        let runtime = from_nx_value(&value).expect("An update record with an absent field decodes");
+        let Value::Record { type_name, fields } = &runtime else {
+            panic!("Expected a record, got {:?}", runtime);
+        };
+        assert_eq!(type_name.as_str(), "User.Update");
+        assert_eq!(fields.len(), 1, "An absent field must stay absent");
+
+        let cleared = Value::Record {
+            type_name: Name::new("User.Update"),
+            fields: rustc_hash::FxHashMap::from_iter([(SmolStr::new("email"), Value::Null)]),
+        };
+        let json = to_nx_value(&cleared)
+            .to_json_string()
+            .expect("JSON encodes");
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("JSON parses");
+        assert_eq!(
+            parsed,
+            serde_json::json!({ "$type": "User.Update", "email": null }),
+            "Exactly the discriminator and the present field, with null kept"
+        );
+
+        let bytes = to_nx_value(&cleared)
+            .to_msgpack_vec()
+            .expect("MessagePack encodes");
+        let decoded = NxValue::from_msgpack_slice(&bytes).expect("MessagePack decodes");
+        assert_eq!(decoded, to_nx_value(&cleared));
     }
 }

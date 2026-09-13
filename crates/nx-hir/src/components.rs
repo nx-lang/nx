@@ -1,11 +1,12 @@
 use crate::{
-    ast, interface_component, same_declaration, Component, ComponentEmit, DeclarationKey,
-    DeclaringOrigin, EffectiveEmit, EffectiveField, Element, ElementId, ExprId, InterfaceField,
-    InterfaceItem, InterfaceItemKind, Item, LocalDefinitionId, Name, PreparedModule,
-    PreparedNamespace, PropertyEntry, ResolvedPreparedItem,
+    ast, interface_component, same_declaration, Component, ComponentEmit, ComponentEmitKind,
+    DeclarationKey, DeclaringOrigin, EffectiveEmit, EffectiveField, EffectiveTypeParameter,
+    Element, ElementId, ExprId, InterfaceField, InterfaceItem, InterfaceItemKind, Item,
+    LocalDefinitionId, Name, PreparedModule, PreparedNamespace, PropertyEntry,
+    ResolvedPreparedItem,
 };
 use nx_diagnostics::TextSpan;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// One component in another component's inheritance chain.
 ///
@@ -20,6 +21,8 @@ pub struct ComponentAncestor {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectiveComponentContract {
     pub component: Component,
+    /// Type parameters along the abstract base chain, inherited first, then the component's own.
+    pub type_params: Vec<EffectiveTypeParameter>,
     pub props: Vec<EffectiveField>,
     pub emits: Vec<EffectiveEmit>,
     pub ancestors: Vec<ComponentAncestor>,
@@ -41,6 +44,7 @@ struct PendingHandlerRewrite {
     emit: Name,
     action_name: Name,
     action_module_identity: String,
+    owner: Option<Name>,
     span: TextSpan,
     body: ExprId,
 }
@@ -71,11 +75,27 @@ pub enum ComponentResolutionError {
         inherited_from: Name,
         span: TextSpan,
     },
+    /// A derived type parameter or prop takes the name of an inherited type parameter.
+    DuplicateInheritedTypeParameter {
+        component: Name,
+        name: Name,
+        inherited_from: Name,
+        span: TextSpan,
+    },
     DuplicateContentProperty {
         component: Name,
         existing_prop: Name,
         existing_owner: Name,
         prop: Name,
+        span: TextSpan,
+    },
+    /// An inline emitted action's payload field is typed by one of the component's effective type
+    /// parameters, declared or inherited.
+    TypeParameterInEmitPayload {
+        component: Name,
+        emit: Name,
+        field: Name,
+        parameter: Name,
         span: TextSpan,
     },
     DuplicateInheritedEmit {
@@ -104,8 +124,14 @@ impl ComponentResolutionError {
             ComponentResolutionError::DuplicateInheritedProp { .. } => {
                 "component-duplicate-inherited-prop"
             }
+            ComponentResolutionError::DuplicateInheritedTypeParameter { .. } => {
+                "component-duplicate-inherited-type-parameter"
+            }
             ComponentResolutionError::DuplicateContentProperty { .. } => {
                 "component-duplicate-content-prop"
+            }
+            ComponentResolutionError::TypeParameterInEmitPayload { .. } => {
+                "component-type-parameter-in-emit-payload"
             }
             ComponentResolutionError::DuplicateInheritedEmit { .. } => {
                 "component-duplicate-inherited-emit"
@@ -154,6 +180,25 @@ impl ComponentResolutionError {
                 "Component '{}' redeclares inherited prop '{}' from '{}'",
                 component, prop, inherited_from
             ),
+            ComponentResolutionError::DuplicateInheritedTypeParameter {
+                component,
+                name,
+                inherited_from,
+                ..
+            } => format!(
+                "Component '{}' redeclares inherited type parameter '{}' from '{}'",
+                component, name, inherited_from
+            ),
+            ComponentResolutionError::TypeParameterInEmitPayload {
+                component,
+                emit,
+                field,
+                parameter,
+                ..
+            } => format!(
+                "Emitted action '{}' on component '{}' cannot type its payload field '{}' by type parameter '{}'; a type parameter is a type only in the component's props, state, and body",
+                emit, component, field, parameter
+            ),
             ComponentResolutionError::DuplicateContentProperty {
                 component,
                 existing_prop,
@@ -201,7 +246,9 @@ impl ComponentResolutionError {
             ComponentResolutionError::InvalidBase { span, .. }
             | ComponentResolutionError::InheritanceCycle { span, .. }
             | ComponentResolutionError::DuplicateInheritedProp { span, .. }
+            | ComponentResolutionError::DuplicateInheritedTypeParameter { span, .. }
             | ComponentResolutionError::DuplicateContentProperty { span, .. }
+            | ComponentResolutionError::TypeParameterInEmitPayload { span, .. }
             | ComponentResolutionError::DuplicateInheritedEmit { span, .. }
             | ComponentResolutionError::HandlerNameCollision { span, .. } => *span,
         }
@@ -222,8 +269,15 @@ struct OwnedComponentEmit {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct OwnedTypeParameter {
+    param: EffectiveTypeParameter,
+    owner: Name,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ResolvedComponentContract {
     component: Component,
+    type_params: Vec<OwnedTypeParameter>,
     props: Vec<OwnedRecordField>,
     emits: Vec<OwnedComponentEmit>,
     ancestors: Vec<ComponentAncestor>,
@@ -257,6 +311,21 @@ impl ResolvedComponentDefinition {
     fn origin(&self) -> Option<DeclaringOrigin> {
         self.definition_id
             .map(|definition_id| DeclaringOrigin::new(&self.module_identity, definition_id))
+    }
+
+    fn declared_type_params(&self) -> Vec<OwnedTypeParameter> {
+        self.component
+            .type_params
+            .iter()
+            .cloned()
+            .map(|param| OwnedTypeParameter {
+                param: EffectiveTypeParameter::from_type_parameter(
+                    param,
+                    self.module_identity.clone(),
+                ),
+                owner: self.component.name.clone(),
+            })
+            .collect()
     }
 
     fn declared_props(&self) -> Vec<EffectiveField> {
@@ -431,6 +500,11 @@ fn effective_component_contract_resolved(
     let resolved = resolve_component_contract_inner(module, component, &mut Vec::new())?;
     Ok(EffectiveComponentContract {
         component: resolved.component,
+        type_params: resolved
+            .type_params
+            .into_iter()
+            .map(|owned| owned.param)
+            .collect(),
         props: resolved
             .props
             .into_iter()
@@ -606,6 +680,51 @@ pub fn apply_int_literal_conversions(module: &mut PreparedModule, converted: &[E
     }
 }
 
+/// Replaces every reference to one of `params` in `ty` with the top type `object`, keeping the
+/// `[]` and `?` layers around it.
+///
+/// <para>This is the erasure a generated surface applies when it receives a component value
+/// dynamically and so has nothing to bind a type parameter to: the IR prop schema, the C# contract
+/// record, and the serializable TypeScript element type. Function types are left alone: a type
+/// parameter cannot appear in one, since the only place a parameter is a type is a component's
+/// own prop and state annotations.</para>
+pub fn erase_type_parameters(ty: &ast::TypeRef, params: &[Name]) -> ast::TypeRef {
+    match ty {
+        ast::TypeRef::Name(name) if params.iter().any(|param| param == name) => {
+            ast::TypeRef::name("object")
+        }
+        ast::TypeRef::Name(_) | ast::TypeRef::Function { .. } => ty.clone(),
+        ast::TypeRef::Array(inner) => ast::TypeRef::array(erase_type_parameters(inner, params)),
+        ast::TypeRef::Nullable(inner) => {
+            ast::TypeRef::nullable(erase_type_parameters(inner, params))
+        }
+    }
+}
+
+/// Removes every plain `Value` property entry whose value expression is in `consumed` from every
+/// element in the module.
+///
+/// <para>Runs on the same terms as [`apply_contextual_name_resolutions`]: a type-argument binding
+/// such as `TItem=Contact` is a spelling only the type checker understands, and once the checker
+/// has consumed it nothing below — the interpreter, the IR builder, generated code — should be
+/// able to observe that it was written. Only plain entries qualify; a type argument inside a
+/// conditional fragment is rejected by the checker and never recorded here.</para>
+pub fn remove_property_entries(module: &mut PreparedModule, consumed: &FxHashSet<ExprId>) {
+    if consumed.is_empty() {
+        return;
+    }
+
+    let raw_module = module.raw_module_mut();
+    for (_, element) in raw_module.elements_mut() {
+        element
+            .properties
+            .retain(|property| !consumed.contains(&property.value));
+        element.property_entries.retain(|entry| {
+            !matches!(entry, PropertyEntry::Value(property) if consumed.contains(&property.value))
+        });
+    }
+}
+
 pub fn promote_component_handler_bindings(module: &mut PreparedModule) {
     let rewrites = collect_component_handler_rewrites(module);
     if rewrites.is_empty() {
@@ -619,6 +738,7 @@ pub fn promote_component_handler_bindings(module: &mut PreparedModule) {
             emit: rewrite.emit.clone(),
             action_name: rewrite.action_name.clone(),
             action_module_identity: Some(rewrite.action_module_identity.clone()),
+            owner: rewrite.owner.clone(),
             body: rewrite.body,
             span: rewrite.span,
         });
@@ -650,30 +770,38 @@ fn collect_handler_rewrites_in_item(
     item: &Item,
     rewrites: &mut Vec<PendingHandlerRewrite>,
 ) {
+    // A handler written inside a component declaration is owned by that component; anywhere else
+    // it is bound at the root.
+    let owner = match item {
+        Item::Component(component) => Some(&component.name),
+        _ => None,
+    };
     match item {
         Item::Function(function) => {
-            collect_handler_rewrites_in_expr(module, function.body, rewrites)
+            collect_handler_rewrites_in_expr(module, function.body, owner, rewrites)
         }
-        Item::Value(value) => collect_handler_rewrites_in_expr(module, value.value, rewrites),
+        Item::Value(value) => {
+            collect_handler_rewrites_in_expr(module, value.value, owner, rewrites)
+        }
         Item::Component(component) => {
             for field in &component.props {
                 if let Some(default) = field.default {
-                    collect_handler_rewrites_in_expr(module, default, rewrites);
+                    collect_handler_rewrites_in_expr(module, default, owner, rewrites);
                 }
             }
             for field in &component.state {
                 if let Some(default) = field.default {
-                    collect_handler_rewrites_in_expr(module, default, rewrites);
+                    collect_handler_rewrites_in_expr(module, default, owner, rewrites);
                 }
             }
             if let Some(body) = component.body {
-                collect_handler_rewrites_in_expr(module, body, rewrites);
+                collect_handler_rewrites_in_expr(module, body, owner, rewrites);
             }
         }
         Item::Record(record) => {
             for field in &record.properties {
                 if let Some(default) = field.default {
-                    collect_handler_rewrites_in_expr(module, default, rewrites);
+                    collect_handler_rewrites_in_expr(module, default, owner, rewrites);
                 }
             }
         }
@@ -681,7 +809,7 @@ fn collect_handler_rewrites_in_item(
             for case in &union_def.cases {
                 for field in &case.fields {
                     if let Some(default) = field.default {
-                        collect_handler_rewrites_in_expr(module, default, rewrites);
+                        collect_handler_rewrites_in_expr(module, default, owner, rewrites);
                     }
                 }
             }
@@ -693,6 +821,7 @@ fn collect_handler_rewrites_in_item(
 fn collect_handler_rewrites_in_expr(
     module: &PreparedModule,
     expr_id: ExprId,
+    owner: Option<&Name>,
     rewrites: &mut Vec<PendingHandlerRewrite>,
 ) {
     match module.raw_module().expr(expr_id) {
@@ -704,16 +833,16 @@ fn collect_handler_rewrites_in_expr(
         | ast::Expr::ResolvedUnionCase { .. }
         | ast::Expr::Error(_) => {}
         ast::Expr::BinaryOp { lhs, rhs, .. } => {
-            collect_handler_rewrites_in_expr(module, *lhs, rewrites);
-            collect_handler_rewrites_in_expr(module, *rhs, rewrites);
+            collect_handler_rewrites_in_expr(module, *lhs, owner, rewrites);
+            collect_handler_rewrites_in_expr(module, *rhs, owner, rewrites);
         }
         ast::Expr::UnaryOp { expr, .. } => {
-            collect_handler_rewrites_in_expr(module, *expr, rewrites);
+            collect_handler_rewrites_in_expr(module, *expr, owner, rewrites);
         }
         ast::Expr::Call { func, args, .. } => {
-            collect_handler_rewrites_in_expr(module, *func, rewrites);
+            collect_handler_rewrites_in_expr(module, *func, owner, rewrites);
             for arg in args {
-                collect_handler_rewrites_in_expr(module, *arg, rewrites);
+                collect_handler_rewrites_in_expr(module, *arg, owner, rewrites);
             }
         }
         ast::Expr::If {
@@ -722,10 +851,10 @@ fn collect_handler_rewrites_in_expr(
             else_branch,
             ..
         } => {
-            collect_handler_rewrites_in_expr(module, *condition, rewrites);
-            collect_handler_rewrites_in_expr(module, *then_branch, rewrites);
+            collect_handler_rewrites_in_expr(module, *condition, owner, rewrites);
+            collect_handler_rewrites_in_expr(module, *then_branch, owner, rewrites);
             if let Some(else_branch) = else_branch {
-                collect_handler_rewrites_in_expr(module, *else_branch, rewrites);
+                collect_handler_rewrites_in_expr(module, *else_branch, owner, rewrites);
             }
         }
         ast::Expr::Match {
@@ -734,62 +863,62 @@ fn collect_handler_rewrites_in_expr(
             else_branch,
             ..
         } => {
-            collect_handler_rewrites_in_expr(module, *scrutinee, rewrites);
+            collect_handler_rewrites_in_expr(module, *scrutinee, owner, rewrites);
             for arm in arms {
                 for pattern in &arm.patterns {
-                    collect_handler_rewrites_in_expr(module, *pattern, rewrites);
+                    collect_handler_rewrites_in_expr(module, *pattern, owner, rewrites);
                 }
-                collect_handler_rewrites_in_expr(module, arm.body, rewrites);
+                collect_handler_rewrites_in_expr(module, arm.body, owner, rewrites);
             }
             if let Some(else_branch) = else_branch {
-                collect_handler_rewrites_in_expr(module, *else_branch, rewrites);
+                collect_handler_rewrites_in_expr(module, *else_branch, owner, rewrites);
             }
         }
         ast::Expr::Let { value, body, .. } => {
-            collect_handler_rewrites_in_expr(module, *value, rewrites);
-            collect_handler_rewrites_in_expr(module, *body, rewrites);
+            collect_handler_rewrites_in_expr(module, *value, owner, rewrites);
+            collect_handler_rewrites_in_expr(module, *body, owner, rewrites);
         }
         ast::Expr::Block { stmts, expr, .. } => {
             for stmt in stmts {
                 match stmt {
                     ast::Stmt::Let { init, .. } => {
-                        collect_handler_rewrites_in_expr(module, *init, rewrites);
+                        collect_handler_rewrites_in_expr(module, *init, owner, rewrites);
                     }
                     ast::Stmt::Expr(expr, _) => {
-                        collect_handler_rewrites_in_expr(module, *expr, rewrites);
+                        collect_handler_rewrites_in_expr(module, *expr, owner, rewrites);
                     }
                 }
             }
             if let Some(expr) = expr {
-                collect_handler_rewrites_in_expr(module, *expr, rewrites);
+                collect_handler_rewrites_in_expr(module, *expr, owner, rewrites);
             }
         }
         ast::Expr::Array { elements, .. } => {
             for element in elements {
-                collect_handler_rewrites_in_expr(module, *element, rewrites);
+                collect_handler_rewrites_in_expr(module, *element, owner, rewrites);
             }
         }
         ast::Expr::Index { base, index, .. } => {
-            collect_handler_rewrites_in_expr(module, *base, rewrites);
-            collect_handler_rewrites_in_expr(module, *index, rewrites);
+            collect_handler_rewrites_in_expr(module, *base, owner, rewrites);
+            collect_handler_rewrites_in_expr(module, *index, owner, rewrites);
         }
         ast::Expr::Member { base, .. } => {
-            collect_handler_rewrites_in_expr(module, *base, rewrites);
+            collect_handler_rewrites_in_expr(module, *base, owner, rewrites);
         }
         ast::Expr::RecordLiteral { properties, .. } => {
             for property in properties {
-                collect_handler_rewrites_in_expr(module, property.value, rewrites);
+                collect_handler_rewrites_in_expr(module, property.value, owner, rewrites);
             }
         }
         ast::Expr::Element { element, .. } => {
-            collect_handler_rewrites_in_element(module, *element, rewrites);
+            collect_handler_rewrites_in_element(module, *element, owner, rewrites);
         }
         ast::Expr::ActionHandler { body, .. } => {
-            collect_handler_rewrites_in_expr(module, *body, rewrites);
+            collect_handler_rewrites_in_expr(module, *body, owner, rewrites);
         }
         ast::Expr::For { iterable, body, .. } => {
-            collect_handler_rewrites_in_expr(module, *iterable, rewrites);
-            collect_handler_rewrites_in_expr(module, *body, rewrites);
+            collect_handler_rewrites_in_expr(module, *iterable, owner, rewrites);
+            collect_handler_rewrites_in_expr(module, *body, owner, rewrites);
         }
     }
 }
@@ -797,6 +926,7 @@ fn collect_handler_rewrites_in_expr(
 fn collect_handler_rewrites_in_element(
     module: &PreparedModule,
     element_id: ElementId,
+    owner: Option<&Name>,
     rewrites: &mut Vec<PendingHandlerRewrite>,
 ) {
     let element = module.raw_module().element(element_id);
@@ -807,12 +937,13 @@ fn collect_handler_rewrites_in_element(
             element_id,
             element.property_entries(),
             &contract,
+            owner,
             rewrites,
         );
     }
 
     for content in &element.content {
-        collect_handler_rewrites_in_expr(module, *content, rewrites);
+        collect_handler_rewrites_in_expr(module, *content, owner, rewrites);
     }
 }
 
@@ -821,6 +952,7 @@ fn collect_handler_rewrites_in_property_entries(
     element_id: ElementId,
     entries: &[PropertyEntry],
     contract: &EffectiveComponentContract,
+    owner: Option<&Name>,
     rewrites: &mut Vec<PendingHandlerRewrite>,
 ) {
     for entry in entries {
@@ -849,6 +981,7 @@ fn collect_handler_rewrites_in_property_entries(
                                     emit: emit.emit.name.clone(),
                                     action_name: emit.emit.action_name.clone(),
                                     action_module_identity: emit.module_identity.clone(),
+                                    owner: owner.cloned(),
                                     span: property.span,
                                     body: property.value,
                                 });
@@ -857,7 +990,7 @@ fn collect_handler_rewrites_in_property_entries(
                     }
                 }
 
-                collect_handler_rewrites_in_expr(module, property.value, rewrites);
+                collect_handler_rewrites_in_expr(module, property.value, owner, rewrites);
             }
             PropertyEntry::If {
                 condition,
@@ -865,12 +998,13 @@ fn collect_handler_rewrites_in_property_entries(
                 else_entries,
                 ..
             } => {
-                collect_handler_rewrites_in_expr(module, *condition, rewrites);
+                collect_handler_rewrites_in_expr(module, *condition, owner, rewrites);
                 collect_handler_rewrites_in_property_entries(
                     module,
                     element_id,
                     then_entries,
                     contract,
+                    owner,
                     rewrites,
                 );
                 collect_handler_rewrites_in_property_entries(
@@ -878,6 +1012,7 @@ fn collect_handler_rewrites_in_property_entries(
                     element_id,
                     else_entries,
                     contract,
+                    owner,
                     rewrites,
                 );
             }
@@ -885,12 +1020,13 @@ fn collect_handler_rewrites_in_property_entries(
                 arms, else_entries, ..
             } => {
                 for arm in arms {
-                    collect_handler_rewrites_in_expr(module, arm.condition, rewrites);
+                    collect_handler_rewrites_in_expr(module, arm.condition, owner, rewrites);
                     collect_handler_rewrites_in_property_entries(
                         module,
                         element_id,
                         &arm.entries,
                         contract,
+                        owner,
                         rewrites,
                     );
                 }
@@ -899,6 +1035,7 @@ fn collect_handler_rewrites_in_property_entries(
                     element_id,
                     else_entries,
                     contract,
+                    owner,
                     rewrites,
                 );
             }
@@ -908,16 +1045,17 @@ fn collect_handler_rewrites_in_property_entries(
                 else_entries,
                 ..
             } => {
-                collect_handler_rewrites_in_expr(module, *scrutinee, rewrites);
+                collect_handler_rewrites_in_expr(module, *scrutinee, owner, rewrites);
                 for arm in arms {
                     for pattern in &arm.patterns {
-                        collect_handler_rewrites_in_expr(module, *pattern, rewrites);
+                        collect_handler_rewrites_in_expr(module, *pattern, owner, rewrites);
                     }
                     collect_handler_rewrites_in_property_entries(
                         module,
                         element_id,
                         &arm.entries,
                         contract,
+                        owner,
                         rewrites,
                     );
                 }
@@ -926,6 +1064,7 @@ fn collect_handler_rewrites_in_property_entries(
                     element_id,
                     else_entries,
                     contract,
+                    owner,
                     rewrites,
                 );
             }
@@ -1107,11 +1246,53 @@ fn resolve_component_contract_inner(
         resolve_base_component(module, &component.module_identity, &component.component)?
     {
         let base_contract = resolve_component_contract_inner(module, &base_component, stack)?;
+        let mut type_params = base_contract.type_params;
         let mut props = base_contract.props;
         let mut emits = base_contract.emits;
         let declared_props = component.declared_props();
 
+        for owned in component.declared_type_params() {
+            if let Some(existing) = type_params
+                .iter()
+                .find(|existing| existing.param.name == owned.param.name)
+            {
+                stack.pop();
+                return Err(ComponentResolutionError::DuplicateInheritedTypeParameter {
+                    component: component.component.name.clone(),
+                    name: owned.param.name.clone(),
+                    inherited_from: existing.owner.clone(),
+                    span: owned.param.span,
+                });
+            }
+            if let Some(existing) = props
+                .iter()
+                .find(|existing| existing.field.name == owned.param.name)
+            {
+                stack.pop();
+                return Err(ComponentResolutionError::DuplicateInheritedProp {
+                    component: component.component.name.clone(),
+                    prop: owned.param.name.clone(),
+                    inherited_from: existing.owner.clone(),
+                    span: owned.param.span,
+                });
+            }
+            type_params.push(owned);
+        }
+
         for field in &declared_props {
+            if let Some(existing) = type_params
+                .iter()
+                .find(|existing| existing.param.name == field.name)
+            {
+                stack.pop();
+                return Err(ComponentResolutionError::DuplicateInheritedTypeParameter {
+                    component: component.component.name.clone(),
+                    name: field.name.clone(),
+                    inherited_from: existing.owner.clone(),
+                    span: field.span,
+                });
+            }
+
             if field.is_content {
                 if let Some(existing) = props.iter().find(|existing| existing.field.is_content) {
                     stack.pop();
@@ -1191,6 +1372,12 @@ fn resolve_component_contract_inner(
             });
         }
 
+        if let Err(error) = check_emit_payloads_for_type_parameters(module, component, &type_params)
+        {
+            stack.pop();
+            return Err(error);
+        }
+
         let mut ancestors = vec![ComponentAncestor {
             name: base_component.component.name.clone(),
             origin: base_component.origin(),
@@ -1199,6 +1386,7 @@ fn resolve_component_contract_inner(
 
         ResolvedComponentContract {
             component: component.component.clone(),
+            type_params,
             props,
             emits,
             ancestors,
@@ -1241,8 +1429,16 @@ fn resolve_component_contract_inner(
             }
         }
 
+        let type_params = component.declared_type_params();
+        if let Err(error) = check_emit_payloads_for_type_parameters(module, component, &type_params)
+        {
+            stack.pop();
+            return Err(error);
+        }
+
         ResolvedComponentContract {
             component: component.component.clone(),
+            type_params,
             props,
             emits,
             ancestors: Vec::new(),
@@ -1251,6 +1447,47 @@ fn resolve_component_contract_inner(
 
     stack.pop();
     Ok(result)
+}
+
+/// Rejects an inline emitted action whose payload field is typed by one of the component's
+/// effective type parameters, inherited ones included.
+///
+/// <para>The payload lowers to an action record of its own, checked and generated outside the
+/// component, where the parameter is not a type. The check runs where the component's own module
+/// is the resolving one, which is where its inline action records live; a component resolved from
+/// another module was checked when its own module was.</para>
+fn check_emit_payloads_for_type_parameters(
+    module: &PreparedModule,
+    component: &ResolvedComponentDefinition,
+    type_params: &[OwnedTypeParameter],
+) -> Result<(), ComponentResolutionError> {
+    if type_params.is_empty() || component.module_identity != module.module_identity() {
+        return Ok(());
+    }
+    for emit in &component.component.emits {
+        if emit.kind != ComponentEmitKind::Inline {
+            continue;
+        }
+        let Some(Item::Record(record)) = module.raw_module().find_item(emit.action_name.as_str())
+        else {
+            continue;
+        };
+        for field in &record.properties {
+            let parameter = crate::type_ref_names(&field.ty)
+                .into_iter()
+                .find(|named| type_params.iter().any(|param| param.param.name == **named));
+            if let Some(parameter) = parameter {
+                return Err(ComponentResolutionError::TypeParameterInEmitPayload {
+                    component: component.component.name.clone(),
+                    emit: emit.name.clone(),
+                    field: field.name.clone(),
+                    parameter: parameter.clone(),
+                    span: field.span,
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Resolves a component's base in the namespace of the module that wrote the `extends` clause.
@@ -1381,5 +1618,136 @@ mod tests {
         assert_eq!(contract.component.state.len(), 1);
         assert_eq!(contract.component.state[0].name.as_str(), "query");
         assert!(contract.component.body.is_none());
+    }
+
+    fn prepared(source: &str) -> PreparedModule {
+        let parse_result = parse_str(source, "component-contract.nx");
+        let tree = parse_result.tree.expect("Expected source to parse");
+        let lowered = lower(tree.root(), SourceId::new(0));
+        PreparedModule::standalone("component-contract.nx", lowered)
+    }
+
+    #[test]
+    fn derived_component_inherits_type_parameters_ahead_of_its_own() {
+        let prepared = prepared(
+            r#"
+            abstract component <ItemsBase TItem:type items:TItem[] />
+            component <Keyed extends ItemsBase TKey:type keys:TKey[] /> = { <Label /> }
+        "#,
+        );
+
+        let contract = effective_component_contract_for_name(&prepared, &Name::new("Keyed"))
+            .expect("Expected component contract resolution to succeed")
+            .expect("Expected resolved Keyed contract");
+
+        assert_eq!(
+            contract
+                .type_params
+                .iter()
+                .map(|param| param.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["TItem", "TKey"]
+        );
+        assert!(contract
+            .type_params
+            .iter()
+            .all(|param| param.module_identity == prepared.module_identity()));
+        assert_eq!(
+            contract
+                .props
+                .iter()
+                .map(|field| field.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["items", "keys"]
+        );
+    }
+
+    #[test]
+    fn redeclaring_an_inherited_type_parameter_is_rejected() {
+        let prepared = prepared(
+            r#"
+            abstract component <ItemsBase TItem:type />
+            component <Bad extends ItemsBase TItem:type /> = { <Label /> }
+            component <Worse extends ItemsBase TItem:string /> = { <Label /> }
+        "#,
+        );
+
+        let messages = validate_component_definitions(&prepared)
+            .into_iter()
+            .map(|error| error.message())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            messages,
+            vec![
+                "Component 'Bad' redeclares inherited type parameter 'TItem' from 'ItemsBase'"
+                    .to_string(),
+                "Component 'Worse' redeclares inherited type parameter 'TItem' from 'ItemsBase'"
+                    .to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn erase_type_parameters_replaces_parameter_names_under_suffixes() {
+        let params = [Name::new("TItem")];
+        let erased = erase_type_parameters(
+            &ast::TypeRef::nullable(ast::TypeRef::array(ast::TypeRef::name("TItem"))),
+            &params,
+        );
+        assert_eq!(
+            erased,
+            ast::TypeRef::nullable(ast::TypeRef::array(ast::TypeRef::name("object")))
+        );
+        assert_eq!(
+            erase_type_parameters(&ast::TypeRef::name("Contact"), &params),
+            ast::TypeRef::name("Contact")
+        );
+    }
+
+    #[test]
+    fn remove_property_entries_drops_plain_entries_by_value_expression() {
+        let mut prepared = prepared(
+            r#"
+            external component <List TItem:type items:string[]? />
+            let v = <List TItem=string items={} />
+        "#,
+        );
+
+        let (element_id, argument) = prepared
+            .raw_module()
+            .exprs()
+            .find_map(|(_, expr)| match expr {
+                ast::Expr::Element {
+                    element: element_id,
+                    ..
+                } => {
+                    let element = prepared.raw_module().element(*element_id);
+                    element
+                        .properties
+                        .iter()
+                        .find(|property| property.key.as_str() == "TItem")
+                        .map(|property| (*element_id, property.value))
+                }
+                _ => None,
+            })
+            .expect("Expected the List element with a TItem binding");
+
+        let consumed = FxHashSet::from_iter([argument]);
+        remove_property_entries(&mut prepared, &consumed);
+
+        let element = prepared.raw_module().element(element_id);
+        assert_eq!(
+            element
+                .properties
+                .iter()
+                .map(|property| property.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["items"]
+        );
+        assert_eq!(element.property_entries.len(), 1);
+        assert!(matches!(
+            &element.property_entries[0],
+            PropertyEntry::Value(property) if property.key.as_str() == "items"
+        ));
     }
 }

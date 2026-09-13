@@ -9,7 +9,8 @@ mod syntax_node;
 mod validation;
 
 pub use ast::{
-    AstNode, ComponentDef, Element, FunctionDef, RecordDef, SyntaxNodeExt, TypeDef, UnionDef,
+    property_definition_is_type_parameter, AstNode, ComponentDef, Element, FunctionDef, RecordDef,
+    SyntaxNodeExt, TypeDef, UnionDef,
 };
 pub use syntax_kind::{syntax_kind_from_str, SyntaxKind};
 pub use syntax_node::SyntaxNode;
@@ -26,6 +27,24 @@ use tree_sitter::{Language, Parser, Tree};
 extern "C" {
     fn tree_sitter_nx() -> Language;
 }
+
+/// The eight primitive type names NX source can write, in the order the reference lists them.
+///
+/// <para>Every crate that decides whether a bare name is a primitive reads this list, so the set
+/// has one home: validation rejects a type parameter that takes one of these names, the type
+/// checker resolves them ahead of declarations, the language service offers them as completions,
+/// and typegen maps them to host primitives.</para>
+pub const PRIMITIVE_TYPE_NAMES: [&str; 8] = [
+    "string", "int", "int32", "int64", "float32", "float64", "boolean", "object",
+];
+
+/// Built-in type names that are valid in type position but are not primitives.
+///
+/// <para>A type parameter may not take one of these names, or a primitive's. NX does let a
+/// module-level `type` declaration take them, because a declaration is a site a reader can find;
+/// a type parameter has no such site and its scope silently covers the whole component, so it is
+/// held to the stricter rule.</para>
+pub const BUILTIN_TYPE_NAMES: [&str; 1] = ["Element"];
 
 /// Maximum supported NX source size in bytes.
 ///

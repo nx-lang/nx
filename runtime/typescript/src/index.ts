@@ -100,6 +100,11 @@ export interface NxIrRecordDeclaration {
    * A base-typed site accepts a value of a record that extends this one, never one of this one.
    */
   readonly isAbstract?: boolean;
+  /**
+   * The record or component a derived `<Target>.Update` record patches. Present only on update
+   * records, whose fields are all optional with no defaults: an absent field stays absent.
+   */
+  readonly updateTarget?: NxIrReference;
 }
 
 export interface NxIrComponentDeclaration {
@@ -116,6 +121,12 @@ export interface NxIrUnionDeclaration {
   readonly cases: readonly NxIrUnionCase[];
   /** The union's abstract bases, nearest first, inherited by every case. */
   readonly bases?: readonly NxIrReference[];
+  /**
+   * The record, action, or component a derived `<Target>.Property` union names the fields of.
+   * Present only on property unions, whose cases are all constant and list the target's effective
+   * fields in declaration order.
+   */
+  readonly propertyTarget?: NxIrReference;
 }
 
 export interface NxIrTypeAliasDeclaration {
@@ -253,7 +264,16 @@ export class NxIrRuntimeError extends Error {
   }
 }
 
-const knownFeatures = new Set(["eager-v1"]);
+export const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1 = "update-records-v1";
+export const NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1 = "property-unions-v1";
+export const NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1 = "update-intrinsics-v1";
+
+const knownFeatures = new Set([
+  "eager-v1",
+  NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
+  NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
+  NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
+]);
 const knownExpressionTags = new Set([
   "literal",
   "slot",
@@ -261,6 +281,7 @@ const knownExpressionTags = new Set([
   "binary",
   "unary",
   "call",
+  "intrinsicCall",
   "if",
   "ifIs",
   "let",
@@ -551,6 +572,13 @@ export function normalizeComponentState(
   return normalizeFields(program, component.state, state, new Map(), `${name} state`, true);
 }
 
+/**
+ * Applies a patch to host-owned component state and returns the validated next state.
+ *
+ * The patch is either a plain partial state object or the component's own update record,
+ * `{ $type: "<Component>.Update", ... }`. Either way a present field replaces the current value, an
+ * absent one keeps it, and a present `null` sets a nullable field to `null`.
+ */
 export function applyComponentStatePatch(
   program: NxPreparedProgram,
   name: string,
@@ -559,6 +587,15 @@ export function applyComponentStatePatch(
 ): Record<string, NxCanonicalValue> {
   const prepared = componentDeclaration(program, name);
   const component = prepared.declaration.kind as NxIrComponentDeclaration;
+  const { $type: discriminator, ...fields } = patch;
+  const expectedUpdate = `${prepared.declaration.reference.name}.Update`;
+  if (discriminator !== undefined && discriminator !== expectedUpdate) {
+    fail(
+      "nx-ir-state-patch",
+      `Cannot apply '${String(discriminator)}' to ${name} state; only '${expectedUpdate}' patches it.`,
+    );
+  }
+  patch = fields;
   const known = new Set(component.state.map((field) => field.name));
   for (const key of Object.keys(patch)) {
     if (!known.has(key)) {
@@ -640,6 +677,8 @@ function evalExpression(expression: NxIrExpression, context: EvalContext): NxCan
       return evalUnary(String(op.operator), evalExpression(op.expr as NxIrExpression, context));
     case "call":
       return evalCall(expression, context);
+    case "intrinsicCall":
+      return evalIntrinsicCall(op, context);
     case "if":
       return truthy(evalExpression(op.condition as NxIrExpression, context))
         ? evalExpression(op.thenBranch as NxIrExpression, context)
@@ -792,7 +831,10 @@ function evalRecord(op: Record<string, unknown>, context: EvalContext): NxCanoni
   );
   const fields = (op.fields as readonly NxIrRecordField[]) ?? [];
   applyContentBinding(properties, op.contentField, fields, content, String(op.name));
-  const normalized = normalizeFields(context.program, fields, properties, new Map(context.env), String(op.name), false);
+  const normalized =
+    op.isUpdate === true
+      ? normalizePatchFields(context.program, fields, properties, String(op.name))
+      : normalizeFields(context.program, fields, properties, new Map(context.env), String(op.name), false);
   return { $type: String(op.name), ...normalized };
 }
 
@@ -820,6 +862,169 @@ function evalUnionCase(op: Record<string, unknown>, context: EvalContext): NxCan
   }
 
   return { $type: `${union.name}.${caseName}`, ...normalized };
+}
+
+/** A record or update record as the runtime holds it: a `$type` and its fields. */
+export type NxRecordObject = { readonly $type: string; readonly [key: string]: NxCanonicalValue };
+
+/** The update record of `T`: the same `$type` family, every field optional. */
+export type NxUpdateOf<T extends NxRecordObject> = { readonly $type: string } & {
+  readonly [K in keyof T as K extends "$type" ? never : K]?: T[K];
+};
+
+function evalIntrinsicCall(op: Record<string, unknown>, context: EvalContext): NxCanonicalValue {
+  const args = ((op.args as readonly NxIrExpression[]) ?? []).map((arg) =>
+    evalExpression(arg, context),
+  );
+  const intrinsic = String(op.intrinsic);
+  const expectArity = (arity: number): void => {
+    if (args.length !== arity) {
+      fail("nx-ir-intrinsic", `Intrinsic '${intrinsic}' expects ${arity} arguments, got ${args.length}.`);
+    }
+  };
+  switch (intrinsic) {
+    case "apply":
+      expectArity(2);
+      return applyRecordUpdate(intrinsicRecord(args[0]!, intrinsic), intrinsicRecord(args[1]!, intrinsic));
+    case "merge":
+      expectArity(2);
+      return mergeUpdateRecords(intrinsicRecord(args[0]!, intrinsic), intrinsicRecord(args[1]!, intrinsic));
+    case "diff":
+      expectArity(2);
+      return diffRecordValues(intrinsicRecord(args[0]!, intrinsic), intrinsicRecord(args[1]!, intrinsic));
+    case "changed": {
+      expectArity(1);
+      const update = intrinsicRecord(args[0]!, intrinsic);
+      // The IR carries the target's declared field order with the call; a program that
+      // predates that falls back to the declaration it must then contain.
+      const order = Array.isArray(op.fieldOrder)
+        ? op.fieldOrder.map((name) => String(name))
+        : declaredFieldOrder(update, context.program);
+      return changedFieldsInOrder(update, order);
+    }
+    default:
+      return fail("nx-ir-intrinsic", `Unknown intrinsic '${intrinsic}'.`);
+  }
+}
+
+function intrinsicRecord(value: NxCanonicalValue, intrinsic: string): NxRecordObject {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    fail("nx-ir-intrinsic", `Intrinsic '${intrinsic}' expects a record value, got ${JSON.stringify(value)}.`);
+  }
+  const record = value as Record<string, NxCanonicalValue>;
+  if (typeof record.$type !== "string") {
+    fail("nx-ir-intrinsic", `Intrinsic '${intrinsic}' expects a record value, got ${JSON.stringify(value)}.`);
+  }
+  return record as NxRecordObject;
+}
+
+/**
+ * `apply(record, update)`: the record with each field present in the update replaced, a present
+ * `null` included; every absent field keeps its value. The update must be the record's own
+ * `<Type>.Update`.
+ */
+export function applyUpdate<T extends NxRecordObject>(record: T, update: NxUpdateOf<T>): T {
+  return applyRecordUpdate(record, update as unknown as NxRecordObject) as T;
+}
+
+/** `merge(first, second)`: every field present in either update, the second winning. */
+export function mergeUpdates<T extends NxRecordObject>(first: T, second: T): T {
+  return mergeUpdateRecords(first, second) as T;
+}
+
+/**
+ * `diff(before, after)`: the `<Type>.Update` carrying exactly the fields whose values differ, each
+ * with its value from `after`, comparing records and lists structurally.
+ */
+export function diffRecords<T extends NxRecordObject>(before: T, after: T): NxUpdateOf<T> {
+  return diffRecordValues(before, after) as unknown as NxUpdateOf<T>;
+}
+
+/**
+ * `changed(update)`: the names of the fields present in the update, in the order the update
+ * record's declaration in `program` lists them. Fails when the program does not declare the
+ * update record, since the order is then unknowable from the value.
+ */
+export function changedFields(update: NxRecordObject, program: NxPreparedProgram): string[] {
+  return changedFieldsInOrder(update, declaredFieldOrder(update, program));
+}
+
+function declaredFieldOrder(update: NxRecordObject, program: NxPreparedProgram): string[] {
+  const shapes = program.nominalShapesByDiscriminator.get(update.$type);
+  if (shapes === undefined || shapes.length !== 1) {
+    fail("nx-ir-intrinsic", `Cannot order the fields of '${update.$type}': the program does not declare it.`);
+  }
+  return shapes[0]!.fields.map((field) => field.name);
+}
+
+function changedFieldsInOrder(update: NxRecordObject, order: readonly string[]): string[] {
+  const keys = Object.keys(update).filter((key) => key !== "$type");
+  const position = (key: string): number => {
+    const index = order.indexOf(key);
+    return index < 0 ? order.length : index;
+  };
+  return keys.sort((left, right) => position(left) - position(right));
+}
+
+function applyRecordUpdate(record: NxRecordObject, update: NxRecordObject): NxRecordObject {
+  const expected = `${record.$type}.Update`;
+  if (update.$type !== expected) {
+    fail("nx-ir-intrinsic", `Cannot apply '${update.$type}' to a '${record.$type}': only '${expected}' patches it.`);
+  }
+  const { $type: _update, ...fields } = update;
+  return { ...record, ...fields };
+}
+
+function mergeUpdateRecords(first: NxRecordObject, second: NxRecordObject): NxRecordObject {
+  if (first.$type !== second.$type) {
+    fail("nx-ir-intrinsic", `Cannot merge '${first.$type}' with '${second.$type}': the updates target different records.`);
+  }
+  const { $type: _second, ...later } = second;
+  return { ...first, ...later };
+}
+
+function diffRecordValues(before: NxRecordObject, after: NxRecordObject): NxRecordObject {
+  if (before.$type !== after.$type) {
+    fail("nx-ir-intrinsic", `Cannot diff '${before.$type}' against '${after.$type}': the records have different types.`);
+  }
+  const output: Record<string, NxCanonicalValue> = { $type: `${before.$type}.Update` };
+  // A field either record leaves out reads as `null`, so a field only one of them carries still
+  // compares.
+  for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (key === "$type") {
+      continue;
+    }
+    const next = after[key] ?? null;
+    if (!valuesEqual(before[key] ?? null, next)) {
+      output[key] = next;
+    }
+  }
+  return output as NxRecordObject;
+}
+
+function valuesEqual(left: NxCanonicalValue, right: NxCanonicalValue): boolean {
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((item, index) => valuesEqual(item, right[index] ?? null))
+    );
+  }
+  if (left !== null && typeof left === "object") {
+    if (right === null || typeof right !== "object") {
+      return false;
+    }
+    const leftRecord = left as Record<string, NxCanonicalValue>;
+    const rightRecord = right as Record<string, NxCanonicalValue>;
+    const leftKeys = Object.keys(leftRecord);
+    const rightKeys = Object.keys(rightRecord);
+    return (
+      leftKeys.length === rightKeys.length &&
+      leftKeys.every((key) => valuesEqual(leftRecord[key] ?? null, rightRecord[key] ?? null))
+    );
+  }
+  return left === right;
 }
 
 function evalIntrinsicElement(op: Record<string, unknown>, context: EvalContext): NxCanonicalValue {
@@ -928,6 +1133,44 @@ function normalizeFields(
   return output;
 }
 
+/**
+ * Normalizes the fields of an update record: only the fields supplied, each checked against its
+ * declared type.
+ *
+ * An absent field means "unchanged", so it stays absent — no default is evaluated and nothing is
+ * required. A present `null` is accepted only where the field is nullable.
+ */
+function normalizePatchFields(
+  program: NxPreparedProgram,
+  fields: readonly NxIrRecordField[],
+  input: Record<string, NxCanonicalValue>,
+  path: string,
+): Record<string, NxCanonicalValue> {
+  const byName = new Map(fields.map((field) => [field.name, field]));
+  for (const key of Object.keys(input)) {
+    if (!byName.has(key)) {
+      fail("nx-ir-boundary-field", `Unknown ${path} field '${key}'.`);
+    }
+  }
+
+  const output: Record<string, NxCanonicalValue> = {};
+  for (const field of fields) {
+    if (!Object.prototype.hasOwnProperty.call(input, field.name)) {
+      continue;
+    }
+    const value = input[field.name]!;
+    if (value === null && field.ty.kind !== "nullable") {
+      fail(
+        "nx-ir-boundary-type",
+        `Expected ${path}.${field.name} to be non-null; an update record sets a field to null only where the field is nullable.`,
+      );
+    }
+    output[field.name] = normalizeValue(program, field.ty, value, `${path}.${field.name}`);
+  }
+
+  return output;
+}
+
 function normalizeValue(
   program: NxPreparedProgram,
   ty: NxIrTypeRef,
@@ -1010,6 +1253,15 @@ function normalizeNominalValue(
     fail("nx-ir-schema", `Missing nominal type declaration '${reference.declaration}'.`);
   }
   const kind = prepared.declaration.kind;
+  if (kind.tag === "record" && kind.updateTarget !== undefined) {
+    // An update record has no subtypes, so a discriminator must name it exactly.
+    const object = requireObject(value, path);
+    const { $type: discriminator, ...rest } = object;
+    if (discriminator !== undefined && discriminator !== display) {
+      fail("nx-ir-boundary-type", `Expected ${path} to be a ${display}, got '${String(discriminator)}'.`);
+    }
+    return { $type: display, ...normalizePatchFields(program, kind.fields, rest, path) };
+  }
   if (kind.tag === "record") {
     const object = requireObject(value, path);
     // The declared type supplies the field list, so a discriminator carried by the value selects
@@ -1059,7 +1311,10 @@ function normalizeNominalValue(
     if (typeof value === "string") {
       const constantCase = kind.cases.find((item) => item.name === value && item.isConstant);
       if (constantCase === undefined) {
-        fail("nx-ir-boundary-type", `Invalid constant union case for ${path}: '${value}'.`);
+        fail(
+          "nx-ir-boundary-type",
+          `Invalid constant union case for ${path}: '${value}' is not a case of ${display}.`,
+        );
       }
       return value;
     }
@@ -1308,6 +1563,9 @@ function childExpressions(op: Record<string, unknown>): NxIrExpression[] {
       break;
     case "call":
       add(op.callee);
+      addMany(op.args);
+      break;
+    case "intrinsicCall":
       addMany(op.args);
       break;
     case "if":

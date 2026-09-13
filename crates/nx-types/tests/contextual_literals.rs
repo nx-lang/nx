@@ -30,7 +30,9 @@ const LOAD_STATE: &str = "type LoadState = idle | loading\n";
 
 #[test]
 fn bare_name_resolves_to_a_case_at_a_union_typed_property() {
-    assert_clean(&format!("{FIT}type Box = {{ fit: Fit }}\n<Box fit=cover />"));
+    assert_clean(&format!(
+        "{FIT}type Box = {{ fit: Fit }}\n<Box fit=cover />"
+    ));
 }
 
 #[test]
@@ -49,7 +51,9 @@ fn a_lexical_binding_of_the_same_name_does_not_shadow_the_member() {
 
 #[test]
 fn nullable_expected_type_accepts_a_bare_name() {
-    assert_clean(&format!("{FIT}type Box = {{ fit: Fit? }}\n<Box fit=cover />"));
+    assert_clean(&format!(
+        "{FIT}type Box = {{ fit: Fit? }}\n<Box fit=cover />"
+    ));
 }
 
 #[test]
@@ -68,7 +72,9 @@ fn qualified_member_access_inside_braces_remains_accepted() {
 
 #[test]
 fn property_and_record_defaults_accept_a_bare_name() {
-    assert_clean(&format!("{FIT}type Opts = {{ fit: Fit = contain }}\n<Opts />"));
+    assert_clean(&format!(
+        "{FIT}type Opts = {{ fit: Fit = contain }}\n<Opts />"
+    ));
     assert_clean(&format!(
         "{FIT}external component <Img fit:Fit = cover />\nlet v = 1"
     ));
@@ -149,7 +155,9 @@ fn unknown_member_suggests_a_near_match() {
 
 #[test]
 fn unknown_property_does_not_cascade_into_a_contextual_name_error() {
-    let messages = errors(&format!("{FIT}type Box = {{ fit: Fit }}\n<Box fitt=cover />"));
+    let messages = errors(&format!(
+        "{FIT}type Box = {{ fit: Fit }}\n<Box fitt=cover />"
+    ));
     assert!(
         !messages.iter().any(|message| message.contains("'cover'")),
         "the bare name should not be reported when the property is unknown: {messages:?}"
@@ -173,4 +181,35 @@ fn negative_match_pattern_is_accepted() {
 #[test]
 fn binary_subtraction_is_unaffected() {
     assert_clean("let a = {10}\nlet r1 = {a-1}\nlet r2 = {a - 1}\nlet r3 = {-90 + a}");
+}
+
+// ---------------------------------------------------------------------------------------------
+// A type-parameter site resolves a bare name against the visible type names
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn bare_name_resolves_to_a_visible_type_at_a_type_parameter_site() {
+    assert_clean(
+        "type Contact = { name:string }\n\
+         external component <List TItem:type items:TItem[]? />\n\
+         let Contact = \"shadow\"\n\
+         let v = <List TItem=Contact />",
+    );
+}
+
+#[test]
+fn unknown_type_name_at_a_type_parameter_site_suggests_a_near_match() {
+    let errors = errors(
+        "type Contact = { name:string }\n\
+         external component <List TItem:type />\n\
+         let v = <List TItem=Contatc />",
+    );
+    assert!(
+        errors.iter().any(|message| {
+            message.contains("'TItem'")
+                && message.contains("expects a type name")
+                && message.contains("did you mean `Contact`")
+        }),
+        "expected the type-name diagnostic with a suggestion, got: {errors:?}"
+    );
 }

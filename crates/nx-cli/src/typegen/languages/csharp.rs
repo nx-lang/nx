@@ -1,12 +1,14 @@
 use crate::typegen::model::{
-    ExportedExternalState, ExportedFieldDefault, ExportedLiteralDefault, ExportedModule,
-    ExportedPolymorphicDescendant, ExportedRecord, ExportedRecordField, ExportedType,
-    ExportedTypeGraph, ExportedUnion, ExportedUnionCase, ImportedType, ImportedTypeKind,
+    erase_field_type_parameters, ExportedExternalState, ExportedFieldDefault,
+    ExportedLiteralDefault, ExportedModule, ExportedPolymorphicDescendant, ExportedRecord,
+    ExportedRecordField, ExportedType, ExportedTypeGraph, ExportedUnion, ExportedUnionCase,
+    ExportedUpdate, ImportedType, ImportedTypeKind,
 };
 use crate::typegen::writer::CodeWriter;
 use crate::typegen::{GenerateTypesOptions, GeneratedFile};
 use nx_hir::ast::TypeRef;
 use rustc_hash::FxHashMap;
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -79,6 +81,21 @@ pub(crate) fn collect_warnings(graph: &ExportedTypeGraph, namespace: &str) -> Ve
                 "Generated C# abstract type '{}' has no concrete exported descendants; omitting polymorphism metadata (JSON and MessagePack) because derived type registrations are required.",
                 record.name
             ));
+        }
+
+        for declaration in &module.declarations {
+            let ExportedType::Update(update) = &declaration.item else {
+                continue;
+            };
+            let Some(candidate) = update_plain_target_candidate(update, graph) else {
+                continue;
+            };
+            if graph.declaration(&candidate.properties_table).is_some() {
+                warnings.push(format!(
+                    "Generated C# property-key table '{}' for '{}' was omitted because it conflicts with exported declaration '{}'; '{}' derives from NxUpdateRecord without keys, Apply, or Diff.",
+                    candidate.properties_table, update.target_name, candidate.properties_table, update.name
+                ));
+            }
         }
 
         for declaration in &module.declarations {
@@ -174,10 +191,21 @@ fn render_module(
             }
     });
 
+    let needs_update_helpers = module
+        .declarations
+        .iter()
+        .any(|declaration| matches!(&declaration.item, ExportedType::Update(_)));
+
     writer.line("using System;");
     writer.line("using System.Text.Json.Serialization;");
     writer.line("using MessagePack;");
-    if needs_enum_serialization_helpers || needs_polymorphic_serialization_helpers {
+    if needs_update_helpers {
+        writer.line("using NxLang.Nx;");
+    }
+    if needs_enum_serialization_helpers
+        || needs_polymorphic_serialization_helpers
+        || needs_update_helpers
+    {
         writer.line("using NxLang.Nx.Serialization;");
     }
 
@@ -223,6 +251,388 @@ fn emit_declaration(
         ExportedType::Union(union_def) => emit_union(writer, union_def, context),
         ExportedType::Record(record) => emit_record(writer, record, context),
         ExportedType::ExternalState(state) => emit_external_state(writer, state, context),
+        ExportedType::Update(update) => emit_update(writer, update, context),
+    }
+}
+
+/// Emits an update companion as a map-backed DTO over the SDK's `NxUpdateRecord`.
+///
+/// <para>The class derives from `NxUpdate<Target>` when a plain type is emitted for the target — a
+/// record or an action that is not abstract — and from `NxUpdateRecord` otherwise, which is what a
+/// component's state companion gets. Either way it passes its schema to the base: the target's
+/// property keys from the `<Target>Properties` table, or a plain name→type table. Each field is an
+/// `NxOptional<T>` accessor pair over the base's map, so `new User_update { Email = null }` still
+/// means "set email to null". The schema-driven SDK converter and formatter named on the class
+/// write `$type` and only the set fields, so no member needs a wire attribute.</para>
+fn emit_update(
+    writer: &mut CodeWriter,
+    update: &ExportedUpdate,
+    context: &CSharpRenderContext<'_>,
+) {
+    // A state field typed by the component's type parameter erases to `object`: the host patches
+    // state as data and never names the instantiation, which an NX use site fixed.
+    let erased;
+    let update = match erase_field_type_parameters(&update.fields, &update.type_params) {
+        Cow::Borrowed(_) => update,
+        Cow::Owned(fields) => {
+            erased = ExportedUpdate {
+                fields,
+                ..update.clone()
+            };
+            &erased
+        }
+    };
+    let class_name = sanitize_csharp_identifier(&update.name);
+    let plain_target = update_plain_target(update, context);
+    let property_enum = update_property_enum(update, context);
+    let field_members = update
+        .fields
+        .iter()
+        .map(|field| sanitize_csharp_member_name(&field.name))
+        .collect::<BTreeSet<_>>();
+    // A field accessor keeps the record's property name, since that is the front door a host
+    // writes. Every member the class introduces beside the accessors steps around the field names
+    // instead, and an accessor that lands on a base-class member hides it explicitly with `new`;
+    // the base surface stays reachable through an `NxUpdateRecord`-typed reference, and the
+    // generated bodies reach it through `base.` and the base type name.
+    let reserve_member = |preferred: &str| {
+        let mut member = preferred.to_string();
+        while field_members.contains(&member) || member == class_name {
+            member.push('_');
+        }
+        member
+    };
+    let discriminator_member = reserve_member("NxType");
+    let schema_member = reserve_member("FieldSchema");
+    let is_set_member = reserve_member("IsSet");
+    let unset_member = reserve_member("Unset");
+    let changed_member = reserve_member("Changed");
+    let diff_member = reserve_member("Diff");
+    let discriminator = escape_csharp_string_literal(&update.discriminator);
+
+    writer.line(&format!(
+        "[JsonConverter(typeof(NxUpdateRecordJsonConverter<{class_name}>))]"
+    ));
+    writer.line(&format!(
+        "[MessagePackFormatter(typeof(NxUpdateRecordMessagePackFormatter<{class_name}>))]"
+    ));
+    let base = match &plain_target {
+        Some(target) => format!("NxUpdate<{}>", target.type_name),
+        None => "NxUpdateRecord".to_string(),
+    };
+    writer.block(
+        &format!("public sealed class {class_name} : {base}"),
+        |writer| {
+            let mut schema_entries = vec![format!("\"{discriminator}\"")];
+            for field in &update.fields {
+                schema_entries.push(match &plain_target {
+                    Some(target) => format!(
+                        "{}.{}",
+                        target.properties_table,
+                        sanitize_csharp_member_name(&field.name)
+                    ),
+                    None => format!(
+                        "new NxField(\"{}\", typeof({}))",
+                        escape_csharp_string_literal(&field.name),
+                        csharp_typeof_operand(&csharp_type(&field.ty, context))
+                    ),
+                });
+            }
+            writer.line(&format!(
+                "private static readonly NxUpdateSchema {schema_member} = new("
+            ));
+            writer.indent();
+            for (index, entry) in schema_entries.iter().enumerate() {
+                let terminator = if index + 1 == schema_entries.len() {
+                    ");"
+                } else {
+                    ","
+                };
+                writer.line(&format!("{entry}{terminator}"));
+            }
+            writer.dedent();
+
+            writer.blank_line();
+            writer.line(&format!("public {class_name}()"));
+            writer.indent();
+            writer.line(&format!(": base({schema_member})"));
+            writer.dedent();
+            writer.line("{");
+            writer.line("}");
+
+            writer.blank_line();
+            writer.line(&format!(
+                "public string {discriminator_member} => \"{discriminator}\";"
+            ));
+
+            for field in &update.fields {
+                let field_type = csharp_type(&field.ty, context);
+                let wire_name = escape_csharp_string_literal(&field.name);
+                let member = sanitize_csharp_member_name(&field.name);
+                let hides_base_member = UPDATE_RECORD_MEMBERS.contains(&member.as_str())
+                    || (plain_target.is_some() && NX_UPDATE_MEMBERS.contains(&member.as_str()));
+                let modifier = if hides_base_member {
+                    "public new"
+                } else {
+                    "public"
+                };
+                writer.blank_line();
+                writer.block(
+                    &format!("{modifier} NxOptional<{}> {member}", field_type.text),
+                    |writer| {
+                        writer.line(&format!(
+                            "get => base.Get<{}>(\"{wire_name}\");",
+                            field_type.text
+                        ));
+                        writer.line(&format!("set => base.Set(\"{wire_name}\", value);"));
+                    },
+                );
+            }
+
+            if let Some(property_enum) = &property_enum {
+                let enum_name = &property_enum.type_name;
+                let wire_format = &property_enum.wire_format;
+                writer.blank_line();
+                writer.line(&format!(
+                    "public bool {is_set_member}({enum_name} property) => base.IsSet({wire_format}.Format(property));"
+                ));
+                writer.blank_line();
+                writer.line(&format!(
+                    "public void {unset_member}({enum_name} property) => base.Unset({wire_format}.Format(property));"
+                ));
+                writer.blank_line();
+                writer.line(&format!(
+                    "public {enum_name}[] {changed_member}() => Array.ConvertAll(base.ChangedNames(), {wire_format}.Parse);"
+                ));
+            }
+
+            if let Some(target) = &plain_target {
+                let target_type = &target.type_name;
+                writer.blank_line();
+                writer.line(&format!(
+                    "public static {class_name} {diff_member}({target_type} before, {target_type} after) => {base}.Diff<{class_name}>(before, after);"
+                ));
+            }
+        },
+    );
+
+    if let Some(target) = &plain_target {
+        writer.blank_line();
+        emit_property_table(writer, update, target, property_enum.as_ref(), context);
+    }
+}
+
+/// The non-generic members of `NxUpdateRecord`, and the one `NxUpdate<TRecord>` adds. A field
+/// accessor that takes one of these names hides the base member and says so with `new`. The
+/// generic members (`Get`, `Set`, `Merge`, `Diff`) are not hidden by a property — the compiler
+/// rejects `new` there as unneeded — and stay callable beside an accessor of the same name.
+const UPDATE_RECORD_MEMBERS: &[&str] = &["Fields", "Schema", "IsSet", "Unset", "ChangedNames"];
+const NX_UPDATE_MEMBERS: &[&str] = &["Apply"];
+
+/// The plain generated type an update companion patches, and the key table emitted beside it.
+struct UpdatePlainTarget {
+    /// The C# reference to the plain type.
+    type_name: String,
+    /// The C# reference to the key table.
+    properties_table: String,
+    /// The key table's own identifier, for its declaration.
+    properties_table_identifier: String,
+}
+
+/// The NX-level names behind an [`UpdatePlainTarget`], before the C# spelling and the collision
+/// check are applied.
+struct UpdatePlainTargetCandidate {
+    type_name: String,
+    properties_table: String,
+}
+
+/// The generated `<Target>_property` enum and its wire-format helper, when the companion exists.
+struct UpdatePropertyEnum {
+    type_name: String,
+    wire_format: String,
+    cases: Vec<String>,
+}
+
+/// Returns the instantiable plain type a companion's fields live on, when typegen emits one: the
+/// target itself for a record or an action that is not abstract, and `<Name>_state` for an
+/// external component with declared state. A non-external component's state has no plain type,
+/// and an abstract record has none a host can instantiate to apply a patch to.
+fn update_plain_target_candidate(
+    update: &ExportedUpdate,
+    graph: &ExportedTypeGraph,
+) -> Option<UpdatePlainTargetCandidate> {
+    let type_name = if update.target_is_component {
+        let state_name = format!("{}_state", update.target_name);
+        match &graph.declaration(&state_name)?.item {
+            ExportedType::ExternalState(state) if state.component_name == update.target_name => {
+                state_name
+            }
+            _ => return None,
+        }
+    } else {
+        let record = graph.record(&update.target_name)?;
+        if record.is_abstract {
+            return None;
+        }
+        update.target_name.clone()
+    };
+    Some(UpdatePlainTargetCandidate {
+        properties_table: format!("{type_name}Properties"),
+        type_name,
+    })
+}
+
+/// Returns the plain type a companion patches and its key table, unless an exported declaration
+/// already claims the table's name, in which case `collect_warnings` reports the omission and the
+/// companion falls back to the untyped base with a name→type schema.
+fn update_plain_target(
+    update: &ExportedUpdate,
+    context: &CSharpRenderContext<'_>,
+) -> Option<UpdatePlainTarget> {
+    let candidate = update_plain_target_candidate(update, context.graph)?;
+    if context
+        .graph
+        .declaration(&candidate.properties_table)
+        .is_some()
+    {
+        return None;
+    }
+    Some(UpdatePlainTarget {
+        type_name: csharp_type_name(&candidate.type_name, context).text,
+        properties_table: generated_type_name(
+            &candidate.properties_table,
+            context.namespace,
+            context.qualify_generated_types,
+        ),
+        properties_table_identifier: sanitize_csharp_identifier(&candidate.properties_table),
+    })
+}
+
+/// Returns the `<Target>_property` companion of the update's target when typegen emits it as an
+/// enum, which an explicit declaration of the same name can prevent.
+fn update_property_enum(
+    update: &ExportedUpdate,
+    context: &CSharpRenderContext<'_>,
+) -> Option<UpdatePropertyEnum> {
+    let companion_name = format!("{}_property", update.target_name);
+    let ExportedType::Union(union_def) = &context.graph.declaration(&companion_name)?.item else {
+        return None;
+    };
+    if union_def.property_target.as_deref() != Some(update.target_name.as_str())
+        || !union_def.is_constant()
+    {
+        return None;
+    }
+    Some(UpdatePropertyEnum {
+        type_name: csharp_type_name(&union_def.name, context).text,
+        wire_format: generated_type_name(
+            &format!("{}WireFormat", sanitize_csharp_identifier(&union_def.name)),
+            context.namespace,
+            context.qualify_generated_types,
+        ),
+        cases: union_def
+            .cases
+            .iter()
+            .map(|case| case.name.clone())
+            .collect(),
+    })
+}
+
+/// Emits the `<Target>Properties` key table: one `NxProperty<Target, TValue>` per field of the
+/// companion, named through the `<Target>_property` wire format so the enum stays the only
+/// spelling of a wire name, and `Of` mapping each enum case to its key.
+fn emit_property_table(
+    writer: &mut CodeWriter,
+    update: &ExportedUpdate,
+    target: &UpdatePlainTarget,
+    property_enum: Option<&UpdatePropertyEnum>,
+    context: &CSharpRenderContext<'_>,
+) {
+    let table_name = &target.properties_table_identifier;
+    let target_type = &target.type_name;
+    let field_members = update
+        .fields
+        .iter()
+        .map(|field| sanitize_csharp_member_name(&field.name))
+        .collect::<BTreeSet<_>>();
+    let mut of_member = "Of".to_string();
+    while field_members.contains(&of_member) {
+        of_member.push('_');
+    }
+    let enum_case = |field_name: &str| {
+        property_enum
+            .filter(|property_enum| property_enum.cases.iter().any(|case| case == field_name))
+    };
+
+    writer.block(&format!("public static class {table_name}"), |writer| {
+        for (index, field) in update.fields.iter().enumerate() {
+            if index > 0 {
+                writer.blank_line();
+            }
+            let member = sanitize_csharp_member_name(&field.name);
+            let field_type = csharp_type(&field.ty, context);
+            let wire_name = match enum_case(&field.name) {
+                Some(property_enum) => format!(
+                    "{}.Format({}.{})",
+                    property_enum.wire_format, property_enum.type_name, member
+                ),
+                None => format!("\"{}\"", escape_csharp_string_literal(&field.name)),
+            };
+            writer.line(&format!(
+                "public static readonly NxProperty<{target_type}, {}> {member} = new(",
+                field_type.text
+            ));
+            writer.indent();
+            writer.line(&format!("{wire_name},"));
+            writer.line(&format!("record => record.{member},"));
+            writer.line(&format!("(record, value) => record.{member} = value);"));
+            writer.dedent();
+        }
+
+        // A `switch` statement rather than a switch expression: the arms differ in nullability
+        // annotation (`NxProperty<User, string>` beside `NxProperty<User, string?>`), and the
+        // expression would infer one of them as its natural type and warn about the other.
+        if let Some(property_enum) = property_enum {
+            let enum_name = &property_enum.type_name;
+            writer.blank_line();
+            writer.block(
+                &format!(
+                    "public static NxProperty<{target_type}> {of_member}({enum_name} property)"
+                ),
+                |writer| {
+                    writer.block("switch (property)", |writer| {
+                        for field in &update.fields {
+                            if enum_case(&field.name).is_none() {
+                                continue;
+                            }
+                            let member = sanitize_csharp_member_name(&field.name);
+                            writer.line(&format!("case {enum_name}.{member}:"));
+                            writer.indent();
+                            writer.line(&format!("return {member};"));
+                            writer.dedent();
+                        }
+                        writer.line("default:");
+                        writer.indent();
+                        writer.line("throw new ArgumentOutOfRangeException(nameof(property));");
+                        writer.dedent();
+                    });
+                },
+            );
+        }
+    });
+}
+
+/// The operand `typeof` takes for a field type: a nullable reference type drops its `?`, which
+/// only annotates, while a nullable value type keeps it, since `Nullable<T>` is the runtime type.
+fn csharp_typeof_operand(field_type: &CSharpType) -> String {
+    if field_type.is_reference && field_type.is_nullable {
+        field_type
+            .text
+            .strip_suffix('?')
+            .unwrap_or(&field_type.text)
+            .to_string()
+    } else {
+        field_type.text.clone()
     }
 }
 
@@ -259,6 +669,21 @@ fn emit_record(
     record: &ExportedRecord,
     context: &CSharpRenderContext<'_>,
 ) {
+    // A C# host receives a component value by its discriminator and cannot pick a generic
+    // instantiation from data, so a type parameter is erased to `object` and the record declares
+    // no generic parameter of its own.
+    let erased;
+    let record = match erase_field_type_parameters(&record.fields, &record.type_params) {
+        Cow::Borrowed(_) => record,
+        Cow::Owned(fields) => {
+            erased = ExportedRecord {
+                fields,
+                ..record.clone()
+            };
+            &erased
+        }
+    };
+
     emit_record_json_polymorphism_attributes(writer, record, context);
 
     let polymorphic_root = polymorphic_message_pack_root_name(record, context);
@@ -423,7 +848,11 @@ fn emit_external_state(
             sanitize_csharp_identifier(&state.name)
         ),
         |writer| {
-            emit_record_fields(writer, &state.fields, context);
+            emit_record_fields(
+                writer,
+                &erase_field_type_parameters(&state.fields, &state.type_params),
+                context,
+            );
         },
     );
 }
@@ -813,7 +1242,7 @@ fn csharp_type_name_inner(
                         is_reference: true,
                         is_nullable: false,
                     },
-                    ExportedType::ExternalState(_) => CSharpType {
+                    ExportedType::ExternalState(_) | ExportedType::Update(_) => CSharpType {
                         text: generated_type_name(
                             other,
                             context.namespace,

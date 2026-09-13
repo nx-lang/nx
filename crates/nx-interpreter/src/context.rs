@@ -155,6 +155,17 @@ impl ExecutionContext {
         None
     }
 
+    /// Returns true when the visible binding of `name` is the one in the outermost scope.
+    ///
+    /// <para>A component's props and state are bound in the outermost scope, so a name whose
+    /// visible binding sits deeper — a loop variable, a `let` — is shadowing them.</para>
+    pub fn is_bound_in_outermost_scope(&self, name: &str) -> bool {
+        self.scopes
+            .iter()
+            .rposition(|scope| scope.lookup(name).is_some())
+            == Some(0)
+    }
+
     /// Snapshot all currently visible variables with lexical shadowing preserved.
     pub fn snapshot_visible_variables(&self) -> FxHashMap<SmolStr, Value> {
         let mut variables = FxHashMap::default();

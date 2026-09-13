@@ -24,6 +24,7 @@ on:
       - pnpm-workspace.yaml
       - pnpm-lock.yaml
       - .github/workflows/deploy-playground.yml
+      - .github/actions/setup-rust-node/action.yaml
   workflow_dispatch:
 
 permissions:
@@ -48,22 +49,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: 'pnpm'
-
-      # The native addon is built from source by `pnpm -r build`; rustup picks the toolchain from
-      # rust-toolchain.toml.
-      - name: Cache the Rust build
-        uses: Swatinem/rust-cache@v2
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      # The native addon is built from source by `pnpm -r build`, against the workspace this
+      # sets up.
+      - name: Set up Rust and the pnpm workspace
+        uses: ./.github/actions/setup-rust-node
 
       - name: Build the workspace
         run: pnpm -r build

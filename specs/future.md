@@ -401,6 +401,117 @@ If this is revisited in the future:
   runtimes is asserted value-for-value by `runtime/typescript/test/emitted-ir.test.mjs`, so a change
   to the stamped form in one is a change in both.
 
+## A Declaration Named After A Primitive Is Constructible But Unnameable
+
+NX lets a module declare a type whose name is a primitive's. `type string = { id:int }` parses,
+validates, and lowers with no diagnostic, and the record it declares is usable through inference —
+`let v = <string id=1 />` then `{v.id}` type-checks clean. What the declaration cannot do is be
+*named*: every type annotation spelled `string` resolves to the primitive instead, because
+`resolve_type_ref_with_seen` (`crates/nx-types/src/semantics.rs:95`) consults `builtin_type` before
+it ever reaches the declaration resolver. So `type Holder = { s:string }` gets the primitive, and
+
+```nx
+type string = { id:int }
+let x:string = <string id=1 />
+// Initializer for value 'x' expects string, found string
+```
+
+reports a mismatch that prints the same name on both sides. The annotation is the primitive, the
+element is the record, and `Display` spells both `string`.
+
+The split is the one behind RF1 in the `add-component-type-parameters` review: `object` is a
+`Type::Named`, not a `Type::Primitive`, so `builtin_type` does not answer for it and a declaration
+named `object` shadows normally — as do `Element` and `never`. Only the seven true primitives
+(`string`, `int`, `int32`, `int64`, `float32`, `float64`, `boolean`) are affected. That makes the
+language inconsistent across the eight names the reference calls primitives, in a way nothing
+currently tells the author about.
+
+Note that `primitive-type-names` already grants the general permission — "A user declaration MAY
+take the name `never`, resolved by the same rules that govern any non-primitive name" — and that
+rule does hold for `never`, `object`, and `Element`. It is the seven that do not follow it.
+
+If this is revisited in the future:
+- Decide which of the two directions is intended before touching anything. Either a declaration may
+  take these names and must then win where it is spelled (extending the `never` rule to all eight),
+  or it may not and the declaration should be rejected at validation with a diagnostic that names
+  the primitive. The current state is neither, and it is the diagnostic that makes it visible.
+- Rejecting is the smaller change and matches what `add-component-type-parameters` already did for
+  type parameters: `crates/nx-syntax/src/validation.rs` refuses a type parameter named after a
+  primitive or a built-in. Extending that to a module-level `type` declaration is the same check at
+  a different node — but it removes a permission authors have today, so it wants a deprecation pass
+  over the corpus first.
+- Letting the declaration win is the larger change: `builtin_type` would have to be consulted only
+  after declaration lookup fails, which reverses the precedence at every type annotation in the
+  language and needs measuring against the whole corpus rather than the test suite.
+- Either way, fix the same-name-twice diagnostic first. It is cheap and independent: when a mismatch
+  reports two types that render identically, disambiguate them — by origin, or by marking the
+  primitive — so the message is actionable whatever the resolution rule ends up being. The same
+  rendering collision is reachable through two same-named records from different modules, which
+  "Nominal Value Identity: `$type` Is A Name, Not An Identity" above describes from the value side.
+
+## Reconsider `Element` As A Built-In Type Name
+
+`Element` is a built-in type name that nothing declares. It is the type of any element value: an
+expected type spelled `Element` is satisfied by a component instance, an element function, or an
+HTML-style tag. The relation is one-way, so `div` satisfies `Element` but `Element` is not
+satisfied by a string or a record. It is easy to miss because it is recognized by spelling rather
+than by any declaration, and the `add-component-type-parameters` review (RF7) surfaced how many
+places quietly depend on that. Whether NX wants a built-in with this name, or a built-in here at
+all, is worth deciding on purpose rather than by inheritance from the first implementation.
+Options range from keeping it as is, to renaming it to something that reads less like a user
+record (`Node`, `Markup`, `View`, or a lowercase spelling beside the primitives), to removing it in
+favour of a declared or structural type.
+
+How it is used today:
+
+- **The checker special-cases the name.** `type_satisfies_expected`
+  (`crates/nx-types/src/infer.rs:4421`) accepts any element-like nominal type where the expected
+  type's name is `Element`, and `named_type_is_element_like` (`crates/nx-types/src/infer.rs:4392`)
+  answers true for the spelling `Element` itself and for any name that resolves in the element
+  namespace. Its unit test `test_element_supertype_requires_exact_case` pins that `div` satisfies
+  `Element` and not `element`.
+- **It has no declaration.** The name resolves to an origin-less nominal type through
+  `nominal_named_type`, on the same path as an undeclared name. Nothing marks it as reserved, and
+  the resolver has no entry for it; the special cases above are the whole of its definition.
+- **It is the standard type for content props.** `content body:Element` appears throughout the
+  docs (`reference/syntax/functions.md`, `reference/syntax/elements.md`, `language-tour/elements.md`,
+  `overview/design-goals.md`, both tutorials) and in the example library as `content:Element[]`
+  (`examples/nx/ui/components.nx`, `examples/nx/core/html.nx`). The `content-properties` spec is
+  written in terms of it, and `reference/syntax/types.md` uses it as a function return type
+  (`type ItemRenderer = (User) => Element`). Lowering keeps it as an element function's return
+  type (`crates/nx-hir/src/lower.rs`, test at line 2837).
+- **The language service treats it as a built-in.** It is offered as a completion in type position
+  from `BUILTIN_TYPE_COMPLETIONS`, which now reads `nx_syntax::BUILTIN_TYPE_NAMES`
+  (`crates/nx-syntax/src/lib.rs`), separately from the eight primitives, and hover renders it as
+  `(built-in type) Element`; the `editor-syntax-highlighting` spec has a scenario for that hover
+  line.
+- **At the host boundary it erases to the top type.** The codegen builder maps an unresolved
+  `Element` reference to `object` in the IR (`crates/nx-codegen/src/builder.rs:2406`), which is the
+  same treatment a component type parameter gets.
+- **Validation refuses it as a type parameter name.** `crates/nx-syntax/src/validation.rs` rejects
+  `Element:type` on the same terms as a primitive-named parameter, with a scenario in the
+  `add-component-type-parameters` change.
+- **It is not reserved.** A module-level `type Element = { id:int }` is accepted and shadows the
+  built-in for that module, exactly as `type object = ...` does, and as `primitive-type-names`
+  grants explicitly for `never`. That is the asymmetry recorded under RF9 in the same review, and
+  it overlaps with "A Declaration Named After A Primitive Is Constructible But Unnameable" above.
+
+If this is revisited in the future:
+- Decide the question for `Element`, `object`, and `never` together. All three are origin-less
+  names the checker knows by spelling, and a rule that reserves or renames one and not the others
+  leaves the same inconsistency the section above describes for the seven primitives.
+- If it is renamed, the checker's two spelling tests, the codegen erasure, `BUILTIN_TYPE_NAMES`, the
+  validation rule, the hover text and its highlighting scenario, and every `content body:Element`
+  in the docs, examples, and the `content-properties` spec move together. Grep for the spelling
+  rather than trusting the test suite: most of the sites above are string comparisons.
+- If it is removed, the replacement has to answer what `content body:` is typed with. The
+  candidates are a declared abstract record every element extends, which gives it an origin and
+  a declaration site, or a structural "any element" type the checker expresses without a name.
+  Either one changes what `named_type_is_element_like` means, and the second removes the only
+  spelling an author has for "a list of elements".
+- Whatever is chosen, give it a declaration site or reserve the name. The current state, where a
+  built-in has neither, is what made RF7 and RF9 a question rather than a lookup.
+
 ## Built-In Element Content And Property Values Are Never Type-Checked
 
 An element expression is type-checked only where its tag resolves to a declaration. For a tag that

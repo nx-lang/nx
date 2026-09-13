@@ -6,7 +6,10 @@
 //! - Error recovery within scopes
 //! - Enhanced error messages with suggestions
 
-use crate::{AstNode, ComponentDef, SyntaxKind, SyntaxNode, SyntaxTree, UnionDef};
+use crate::{
+    property_definition_is_type_parameter, AstNode, ComponentDef, SyntaxKind, SyntaxNode,
+    SyntaxTree, UnionDef,
+};
 use nx_diagnostics::{Diagnostic, Label, TextSpan};
 use text_size::{TextRange, TextSize};
 
@@ -22,6 +25,10 @@ const COMPONENT_DEFINITION_SYNTAX: &str =
 const DUPLICATE_NULLABLE_SUFFIX_NOTE: &str =
     "A nullable suffix can only be applied once per type layer. `string?[]?` is valid because \
      `[]` creates a new outer list layer.";
+const TYPE_PARAMETER_SYNTAX: &str =
+    "A type parameter is declared as `Name:type` at the start of a component signature, after \
+     `extends` and before every prop, with no default value, no modifier, and a name that is not \
+     a primitive or built-in type";
 const UNION_DEFINITION_SYNTAX: &str =
     "Expected: type UnionName [extends AbstractRecord] = caseName | payloadCase { prop:type } \
      (a single-case union keeps its leading `|`)";
@@ -61,6 +68,9 @@ pub fn validate(tree: &SyntaxTree, file_name: &str) -> Vec<Diagnostic> {
 
     // Validate union declarations that depend on complete case metadata.
     validate_union_definitions(&root, file_name, &mut diagnostics);
+
+    // Validate where a `Name:type` definition may declare a type parameter.
+    validate_type_parameter_definitions(&root, file_name, &mut diagnostics);
 
     // Report the removed `enum` keyword by name.
     validate_reserved_enum_keyword(tree, file_name, &mut diagnostics);
@@ -376,6 +386,111 @@ fn validate_component_definitions(
                     .build(),
             );
         }
+    }
+}
+
+/// Rejects a `Name:type` definition anywhere it does not declare a component type parameter.
+///
+/// The grammar accepts the `type` keyword as a property type in every property list so that the
+/// rejection can name the definition instead of falling to a generic parse error. A type parameter
+/// is legal only in a component signature, ahead of every prop, with no default and no modifier.
+fn validate_type_parameter_definitions(
+    node: &SyntaxNode,
+    file_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if property_definition_is_type_parameter(node) {
+        validate_type_parameter_definition(node, file_name, diagnostics);
+    }
+
+    for child in node.children() {
+        validate_type_parameter_definitions(&child, file_name, diagnostics);
+    }
+}
+
+fn validate_type_parameter_definition(
+    prop: &SyntaxNode,
+    file_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let name = prop
+        .child_by_field("name")
+        .map(|name| name.text().to_string())
+        .unwrap_or_else(|| "_".to_string());
+    let parent = prop.parent();
+    let parent_kind = parent.as_ref().map(|parent| parent.kind());
+
+    let mut reject = |message: String, label: &str| {
+        diagnostics.push(
+            Diagnostic::error("invalid-type-parameter")
+                .with_message(message)
+                .with_label(Label::primary(file_name, prop.span()).with_message(label))
+                .with_note(TYPE_PARAMETER_SYNTAX)
+                .build(),
+        );
+    };
+
+    if parent_kind != Some(SyntaxKind::COMPONENT_SIGNATURE) {
+        let context = match parent_kind {
+            Some(SyntaxKind::RECORD_DEFINITION) => "a record",
+            Some(SyntaxKind::ACTION_DEFINITION) => "an action",
+            Some(SyntaxKind::EMIT_DEFINITION) => "an emitted action",
+            Some(SyntaxKind::STATE_GROUP) => "a state group",
+            Some(SyntaxKind::FUNCTION_DEFINITION) => "a function parameter list",
+            _ => "this position",
+        };
+        reject(
+            format!("Type parameter '{name}' is not supported in {context}"),
+            "type parameters are only supported on component signatures",
+        );
+        return;
+    }
+
+    if let Some(parent) = parent.as_ref() {
+        let follows_prop = parent
+            .children()
+            .filter(|child| child.kind() == SyntaxKind::PROPERTY_DEFINITION)
+            .take_while(|child| child.span() != prop.span())
+            .any(|child| !property_definition_is_type_parameter(&child));
+        if follows_prop {
+            reject(
+                format!("Type parameter '{name}' must be declared before every prop"),
+                "move this type parameter ahead of the props",
+            );
+        }
+    }
+
+    // A parameter shadows a same-named type inside its component. NX permits a module-level
+    // `type` declaration named after a primitive or built-in, since a declaration is a site a
+    // reader can find; a type parameter has none and its scope silently covers the whole
+    // component, so it is held to the stricter rule.
+    if crate::PRIMITIVE_TYPE_NAMES.contains(&name.as_str()) {
+        reject(
+            format!("Type parameter '{name}' cannot take the name of a primitive type"),
+            "rename it, for example `TItem`",
+        );
+    } else if crate::BUILTIN_TYPE_NAMES.contains(&name.as_str()) {
+        reject(
+            format!("Type parameter '{name}' cannot take the name of the built-in type '{name}'"),
+            "rename it, for example `TItem`",
+        );
+    }
+
+    if prop.child_by_field("default").is_some() {
+        reject(
+            format!("Type parameter '{name}' cannot have a default value"),
+            "remove the default value",
+        );
+    }
+
+    if let Some(modifier) = prop.child_by_field("modifier") {
+        reject(
+            format!(
+                "Type parameter '{name}' cannot have the '{}' modifier",
+                modifier.text()
+            ),
+            "remove the modifier",
+        );
     }
 }
 
