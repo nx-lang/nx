@@ -9,9 +9,9 @@ editor. Today it draws with DrawnUI; the site is shaped so that further targets 
 ## Requirements
 
 ### Requirement: Site is served under the playground path
-Everything the site serves — the gallery, each example's editor view, the API, and every static
-asset — SHALL live under the `/playground` path prefix, so that the rest of the domain can later be
-served by something else without the playground changing.
+Everything the site serves — the gallery, each example's editor view, the health route, and every
+static asset — SHALL live under the `/playground` path prefix, so that the rest of the domain can
+later be served by something else without the playground changing.
 
 #### Scenario: Gallery address
 - **WHEN** a visitor opens `/playground` or `/playground/`
@@ -26,11 +26,14 @@ served by something else without the playground changing.
 - **THEN** the site SHALL show the gallery rather than an error page
 
 #### Scenario: API lives under the prefix
-- **WHEN** the client compiles or asks for hover, completion or diagnostics
+- **WHEN** the hosting platform checks the service's health
 - **THEN** the request SHALL go to a path under `/playground/api/`
+- **AND** no compile or language route SHALL be served under that path, since the client compiles
+  and answers language queries itself
 
 #### Scenario: Assets live under the prefix
-- **WHEN** the shell loads its scripts, styles, fonts, images and the CanvasKit binary
+- **WHEN** the shell loads its scripts, styles, fonts, images, the CanvasKit binary and the NX
+  compiler module
 - **THEN** every one of those requests SHALL be for a path under `/playground/`
 
 #### Scenario: Root redirects to the playground
@@ -256,7 +259,7 @@ editor.
   SHALL be in the visitor's own lines and columns
 
 #### Scenario: Language features degrade without breaking editing
-- **WHEN** the language route cannot be reached or fails
+- **WHEN** the compiler that answers language queries cannot be loaded or fails
 - **THEN** hover and completion SHALL silently offer nothing
 - **AND** the source pane SHALL remain editable and compilation SHALL continue to work
 
@@ -286,7 +289,7 @@ the source the visitor actually wrote.
 - **AND** the source pane SHALL mark it visibly
 
 #### Scenario: Compilation errors do not break the session
-- **WHEN** compilation fails for any reason, including a transport failure
+- **WHEN** compilation fails for any reason, including a compiler that crashed or did not load
 - **THEN** the site SHALL report the failure and remain editable
 
 ### Requirement: Catalog is available to authored source without being shown
@@ -356,14 +359,15 @@ response to visitor interaction with the drawing.
 - **THEN** compilation SHALL fail with a diagnostic naming the unknown property
 - **AND** the site's documentation SHALL state that authored interaction is not yet supported
 
-### Requirement: Compilation runs on the server behind a replaceable boundary
-The site SHALL compile NX on the server, and SHALL confine the choice of where compilation happens
-to a single seam so that moving compilation into the browser later does not disturb editing or
-drawing.
+### Requirement: Compilation and language queries run in the browser behind the same seam
+The site SHALL compile NX and answer hover, completion, diagnostics and symbol queries in the
+visitor's browser, off the main thread, and SHALL keep the choice of where that work happens
+confined to the single compile seam and the language service interface, so editing and drawing do
+not change when the implementation does.
 
-#### Scenario: The browser holds no compiler
-- **WHEN** the site is loaded
-- **THEN** the browser SHALL obtain NX IR by request rather than by compiling NX itself
+#### Scenario: The browser holds the compiler
+- **WHEN** the site is loaded and the visitor edits
+- **THEN** NX IR and language answers SHALL be produced without any request leaving the browser
 
 #### Scenario: The seam is uniform
 - **WHEN** compilation is requested
@@ -371,48 +375,68 @@ drawing.
   diagnostics
 - **AND** editing and drawing SHALL depend on that interface rather than on how it is fulfilled
 
+#### Scenario: The editor stays responsive during a compile
+- **WHEN** a compile or language query is in progress
+- **THEN** the source pane SHALL keep accepting input and painting
+
+#### Scenario: The same compiler is tested and shipped
+- **WHEN** the example check runs
+- **THEN** it SHALL compile every example through the same in-browser compiler package the site
+  ships, with the same catalog handling
+
 ### Requirement: Service reports its own health
-The service SHALL answer a health request under the API prefix, and SHALL answer it from the same
-thread that runs compilation, so that a process stuck in a native call cannot report itself
-healthy, and so that the hosting platform can tell a deployment that serves from one that does not
-before it switches traffic.
+The service SHALL answer a health request under the API prefix so that the hosting platform can
+tell a deployment that serves from one that does not before it switches traffic.
 
 #### Scenario: A healthy service answers
 - **WHEN** `GET /playground/api/health` is requested and the process is able to serve requests
 - **THEN** the service SHALL answer with a success status and a small JSON body
 
 #### Scenario: A stuck service does not answer
-- **WHEN** the process is blocked in a compile or language call that has not returned
-- **THEN** the health request SHALL NOT be answered until that call returns
+- **WHEN** the process's request thread is blocked and cannot serve files
+- **THEN** the health request SHALL NOT be answered, since it is served from that same thread
 
 #### Scenario: A deployment that cannot serve is not switched to
 - **WHEN** a new deployment starts and its health request is not answered within the platform's
   deadline
 - **THEN** the platform SHALL keep the previous deployment serving
 
-### Requirement: A stuck service ends itself
-Because compile and language calls block the service's only request thread and nothing in the
-process can interrupt a native call, the service SHALL detect a main thread that has stopped
-answering and SHALL end the process, so that the hosting platform's restart policy replaces it
-rather than leaving a process that is up and answers nothing.
+### Requirement: A failed compiler costs one request
+A compile or language call that traps or overruns its deadline SHALL cost that request only: the
+site SHALL report it as a failure, replace the compiler, and answer the next request normally.
 
-#### Scenario: A blocked main thread ends the process
-- **WHEN** the main thread has not run for longer than the watchdog's deadline
-- **THEN** the service SHALL end the process with a failure the platform's restart policy acts on
-- **AND** the platform SHALL be configured to restart a process that ends in failure
+#### Scenario: A trap is reported and recovered from
+- **WHEN** the compiler traps while handling a request
+- **THEN** that request SHALL be reported as a failure the visitor can read
+- **AND** the next compile SHALL succeed without reloading the page
 
-#### Scenario: A busy but responsive service is left alone
-- **WHEN** the main thread keeps running, however loaded
-- **THEN** the watchdog SHALL NOT end the process
-- **AND** the watchdog SHALL NOT keep the process alive once the server has stopped
+#### Scenario: An overrunning request is cut off
+- **WHEN** a request has not answered within the site's deadline
+- **THEN** it SHALL be reported as a failure
+- **AND** the compiler that was running it SHALL be discarded rather than waited on
+
+#### Scenario: A compiler that has not loaded yet is waited for
+- **WHEN** a request is made while the compiler is still being loaded
+- **THEN** the deadline SHALL measure the compiler's own work rather than the wait for the load
+- **AND** the load SHALL be waited for rather than discarded and started again
+
+#### Scenario: A load that never finishes is reported
+- **WHEN** the compiler has not arrived within the site's own budget for loading it
+- **THEN** the site SHALL report a failure the visitor can read rather than wait on it indefinitely
+
+#### Scenario: A recovered failure draws without an edit
+- **WHEN** a compile fails in a way a replaced compiler can answer, on a view that compiles once and
+  is never edited
+- **THEN** the site SHALL compile again of its own accord rather than leave the failure standing
 
 ### Requirement: Origin sets cache policy for the edge
 The service SHALL send cache headers that let an edge cache hold content-addressed assets for a long
-time and never hold the shell or an API answer, so that a deploy is visible on the next page load
-while the heavy assets are served from the edge.
+time and never hold the shell or the health answer, so that a deploy is visible on the next page
+load while the heavy assets are served from the edge.
 
 #### Scenario: Hashed assets are cacheable for a long time
-- **WHEN** a build-output asset whose file name carries a content hash is served
+- **WHEN** a build-output asset whose file name carries a content hash is served, the NX compiler
+  module included
 - **THEN** the response SHALL declare itself publicly cacheable, immutable, and valid for at least a
   year
 
@@ -425,19 +449,19 @@ while the heavy assets are served from the edge.
 - **THEN** the response SHALL require revalidation on every use
 
 #### Scenario: API answers are not cached
-- **WHEN** a compile, language or health request is answered
+- **WHEN** a health request, the only request under the API prefix, is answered
 - **THEN** the response SHALL declare itself not storable
 
 ### Requirement: Site is deployable as a single service
-The site SHALL be deployable as one service that serves both the client application and
-compilation, its build SHALL be reproducible from the repository, and the deployment's own
-configuration — how the image is built, where the health check is, how restarts happen — SHALL be
-committed in the repository rather than held only in a hosting dashboard.
+The site SHALL be deployable as one service that serves the client application, its build SHALL be
+reproducible from the repository, and the deployment's own configuration — how the image is built,
+where the health check is, how restarts happen — SHALL be committed in the repository rather than
+held only in a hosting dashboard.
 
 #### Scenario: One service serves everything
 - **WHEN** the site is deployed
-- **THEN** a single service SHALL serve the client application and answer compile, language and
-  health requests
+- **THEN** a single service SHALL serve the client application, the compiler module it loads, and
+  the health route
 
 #### Scenario: A request the service cannot understand does not end it
 - **WHEN** a request names a path the URL decoder rejects, or fails anywhere outside a handler's own
@@ -447,8 +471,9 @@ committed in the repository rather than held only in a hosting dashboard.
 
 #### Scenario: Build produces its own native dependencies
 - **WHEN** the deployment image is built from a clean checkout
-- **THEN** the build SHALL produce every native artifact compilation requires
+- **THEN** the build SHALL produce the NX compiler module the client loads
 - **AND** it SHALL NOT depend on artifacts built outside the image
+- **AND** the running service SHALL need no Rust toolchain and no native addon
 
 #### Scenario: Deployment configuration is in the repository
 - **WHEN** the hosting platform builds and runs the service
@@ -460,33 +485,31 @@ committed in the repository rather than held only in a hosting dashboard.
 - **THEN** a new deployment SHALL be built and, once its health check passes, replace the previous
   one
 
-### Requirement: Public deployment is fronted by an edge that limits abuse
-The public deployment SHALL sit behind an edge proxy that terminates TLS, limits the rate of
-requests to the API path, and caches according to the origin's cache headers, because the service
-answers compile and language requests one at a time on a single thread.
+### Requirement: Public deployment is fronted by an edge that serves assets
+The public deployment SHALL sit behind an edge proxy that terminates TLS and caches according to
+the origin's cache headers, so that the heavy assets, the compiler module among them, are served
+near the visitor. No rate limit on the service SHALL be required, since no request costs the origin
+more than a file.
 
 #### Scenario: The site is reachable at its public address
 - **WHEN** a visitor opens `https://nxlang.org/playground`
 - **THEN** the gallery SHALL be served over TLS
 - **AND** `http://nxlang.org/playground` SHALL redirect to it
 
-#### Scenario: API requests are rate limited
-- **WHEN** one client sends requests to the API path faster than the configured limit
-- **THEN** the edge SHALL refuse the excess without forwarding it to the service
-
 #### Scenario: Assets are served from the edge
-- **WHEN** a hashed asset or the CanvasKit binary is requested a second time from the same region
+- **WHEN** a hashed asset, the CanvasKit binary or the NX compiler module is requested a second
+  time from the same region
 - **THEN** it SHALL be served from the edge cache rather than from the service
 
 ### Requirement: Site documents how to run, sync and deploy it
-The site SHALL carry documentation covering how to build and run it locally, what it depends on,
-how to refresh its vendored DrawnUI copy, and how it is deployed, including the one-time edge and
-hosting setup.
+The site SHALL carry documentation covering how to build and run it locally, what it depends on
+including the wasm toolchain, how to refresh its vendored DrawnUI copy, and how it is deployed,
+including the one-time edge and hosting setup.
 
 #### Scenario: Local run is documented
 - **WHEN** a contributor reads the site's documentation
-- **THEN** it SHALL describe the prerequisites and the steps to run the site locally under the
-  `/playground` prefix
+- **THEN** it SHALL describe the prerequisites, the wasm toolchain among them, and the steps to run
+  the site locally under the `/playground` prefix with no compile server
 
 #### Scenario: Vendored source provenance is recorded
 - **WHEN** a contributor inspects the vendored DrawnUI copy
@@ -496,6 +519,7 @@ hosting setup.
 - **WHEN** a maintainer needs to deploy, roll back, or set the site up on a fresh hosting account
 - **THEN** the repository's deployment docs SHALL describe the day-to-day flow and the one-time
   setup, including every edge rule the site depends on
+- **AND** they SHALL NOT describe a rate limit the site no longer needs
 
 ### Requirement: Drawn text uses the demo's font configuration
 The site SHALL register the same fonts and the same font defaults as the DrawnUI demo site, so that

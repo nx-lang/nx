@@ -1,7 +1,25 @@
+/**
+ * The catalog compile, against the real wasm host under Node.
+ *
+ * These are the tests `server/compile.test.mjs` carried when compilation happened on the server.
+ * They run against the same module the browser loads, so what the site ships is what is checked.
+ */
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
-import { test } from "node:test";
-import { compile, compileWithCatalog, MAX_SOURCE_BYTES } from "./compile.mjs";
+import { after, test } from "node:test";
+import { createNxHost, loadNxModule } from "@nx-lang/sdk-wasm";
+import { MAX_SOURCE_BYTES, compileWithCatalog } from "./catalog.ts";
+
+const catalog = readFileSync(new URL("../../catalog/skia.nx", import.meta.url), "utf8");
+const module = await loadNxModule();
+const host = createNxHost(module);
+
+after(() => host.dispose());
+
+/** Compiles against the app's own catalog. */
+function compile(source) {
+  return compileWithCatalog(host, catalog, source);
+}
 
 test("compiles a program that uses the catalog", () => {
   const result = compile('let root() = { <SkiaLabel Text="hi" /> }');
@@ -32,11 +50,9 @@ test("compiles a trailing element that has children", () => {
   assert.equal(result.ir.format, "nx-ir-json");
 });
 
-const catalogSource = readFileSync(new URL("../catalog/skia.nx", import.meta.url), "utf8");
-
 test("attributes a diagnostic inside the catalog to the catalog", () => {
-  const broken = `${catalogSource}\nexternal component <Broken\n`;
-  const result = compileWithCatalog(broken, 'let root() = { <SkiaLabel Text="hi" /> }');
+  const broken = `${catalog}\nexternal component <Broken\n`;
+  const result = compileWithCatalog(host, broken, 'let root() = { <SkiaLabel Text="hi" /> }');
   assert.equal(result.ir, null);
   assert.ok(result.diagnostics.length > 0);
   for (const diagnostic of result.diagnostics) {
@@ -47,8 +63,8 @@ test("attributes a diagnostic inside the catalog to the catalog", () => {
 });
 
 test("reports a whole-program failure without a position", () => {
-  const broken = `${catalogSource}\nexternal component <Broken value: NoSuchType? />\n`;
-  const result = compileWithCatalog(broken, 'let root() = { <SkiaLabel Text="hi" /> }');
+  const broken = `${catalog}\nexternal component <Broken value: NoSuchType? />\n`;
+  const result = compileWithCatalog(host, broken, 'let root() = { <SkiaLabel Text="hi" /> }');
   assert.equal(result.ir, null);
   assert.ok(result.diagnostics.length > 0);
   for (const diagnostic of result.diagnostics) {

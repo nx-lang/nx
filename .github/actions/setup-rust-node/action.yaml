@@ -1,10 +1,11 @@
 name: Set up Rust and the pnpm workspace
 description: >
-  Installs pnpm and Node, restores the Cargo build cache, and installs the root pnpm workspace, so a
-  job can build and test Rust alongside the repository's own TypeScript runtime and its `tsc`. The
-  Node version for the jobs that do that lives here, so bumping it is one edit; the `src/vscode`
-  jobs and `package-publish.yml` set up Node on their own terms and pin it themselves. Run this
-  after checking out the repository.
+  Installs pnpm and Node, adds the WebAssembly target and checks for clang, restores the Cargo build
+  cache, and installs the root pnpm workspace, so a job can build and test Rust — native and
+  wasm — alongside the repository's own TypeScript runtime and its `tsc`. The Node version for the
+  jobs that do that lives here, so bumping it is one edit; the `src/vscode` jobs and
+  `package-publish.yml` set up Node on their own terms and pin it themselves. Run this after
+  checking out the repository.
 
 runs:
   using: composite
@@ -16,7 +17,24 @@ runs:
     with:
       node-version: '24'
       cache: 'pnpm'
-  # rustup picks the toolchain from rust-toolchain.toml.
+  # rustup picks the toolchain from rust-toolchain.toml, whose `targets` brings wasm32-wasip1 with
+  # it. Installing it explicitly costs nothing when it is already there and makes the failure
+  # legible when a future toolchain change drops it.
+  - name: Add the WebAssembly target
+    run: |
+      rustup target add wasm32-wasip1
+      rustup show
+    shell: bash
+  # clang compiles tree-sitter's C sources for wasm32-wasip1. It is on the GitHub runner images; a
+  # self-hosted runner without it would otherwise fail deep inside a cargo build.
+  - name: Check for clang
+    run: |
+      if ! command -v clang > /dev/null; then
+        echo "::error::clang is required to build the NX WebAssembly module for wasm32-wasip1."
+        exit 1
+      fi
+      clang --version
+    shell: bash
   - name: Cache the Rust build
     uses: Swatinem/rust-cache@v2
   - name: Install dependencies

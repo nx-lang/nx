@@ -31,9 +31,8 @@ export interface CompileResult {
 /**
  * The one seam between authoring and compilation.
  *
- * Compilation happens on the server today because no WASM build of the compiler exists yet.
+ * Compilation happens in the browser, in a worker over the WebAssembly build of the compiler.
  * Everything upstream of this interface — the editor, the renderer, the gallery — is written
- * against the interface alone, so an in-browser compiler later replaces this one implementation
- * and nothing else.
+ * against the interface alone and knows nothing of where the compiler runs.
  */
 export type Compile = (source: string) => Promise<CompileResult>;

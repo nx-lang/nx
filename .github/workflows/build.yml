@@ -228,3 +228,9 @@ jobs:
       run: cargo fmt --all --check
     - name: 🧪 Test the Rust workspace
       run: cargo test --workspace
+    # The wasm SDK's build produces the module and its tests compare it with the Node SDK's answers,
+    # so a divergence between the two bindings fails here rather than reaching a site.
+    - name: 🕸 Build the workspace, including the WebAssembly module
+      run: pnpm -r build
+    - name: 🧪 Test the pnpm workspace
+      run: pnpm -r test

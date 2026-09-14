@@ -387,3 +387,6 @@ release/
 *.rlib
 *.prof*
 .env*
+
+# Toolchain artifacts fetched on demand (the pinned WASI sysroot)
+/.cache/

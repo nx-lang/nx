@@ -9,9 +9,17 @@ This package is separate from `@nx-lang/ir-runtime` under `runtime/typescript`. 
 Use the pure TypeScript IR runtime when JavaScript only needs to execute an already persisted NX IR
 JSON document.
 
+It is also separate from [`@nx-lang/sdk-wasm`](../wasm/README.md), which compiles NX and answers
+editor queries from a WebAssembly module. Reach for the wasm SDK in a browser, in a Web Worker, or
+anywhere a native addon is unwelcome; reach for this package when Node needs what only a native host
+offers — library registries and workspaces loaded from disk, multi-module builds, and evaluation of
+`root()` to values or bytes.
+
 ## Support Posture
 
-- Node only; browser and WASM hosts are not supported by this package.
+- Node only. Browsers, Web Workers and other WebAssembly hosts are served by `@nx-lang/sdk-wasm`,
+  which covers compilation, NX IR generation and the language service; this package's
+  filesystem-backed and evaluation APIs have no counterpart there.
 - Initial local source builds require Node 22 or newer. Release validation should cover supported
   Node LTS majors, starting with Node 22 and Node 24.
 - Native source builds currently use the host platform's Rust toolchain and produce one local

@@ -2,11 +2,10 @@ import { useEffect, useRef } from "react";
 import * as monaco from "monaco-editor";
 // Monaco 0.56 maps `monaco-editor/<path>.js` onto `esm/vs/<path>.js` through its exports map.
 import editorWorker from "monaco-editor/editor/editor.worker.js?worker";
-import { createHttpLanguageService } from "@nx-lang/language-client";
 import { NX_LANGUAGE_ID, registerNxLanguage } from "@nx-lang/monaco";
 import type { Diagnostic } from "../compile";
 import { SkiaEditor } from "../drawnui/index";
-import { API_ROOT } from "../paths";
+import { createWorkerLanguageService } from "../language/worker.ts";
 
 // Monaco expects to be told where its workers live; Vite supplies them as module workers.
 self.MonacoEnvironment = { getWorker: () => new editorWorker() };
@@ -17,12 +16,13 @@ const THEME = "github-dark";
 
 /**
  * Highlighting, hover and completion all come from the shared Monaco integration: the grammar is
- * the repository's published one, and hover and completion are answered by the language route the
- * compile server mounts beside the compile route. The route being unreachable is the compile server
- * being down, which the compile pane already reports, so here the providers only fall silent.
+ * the repository's published one, and hover and completion are answered by the same worker, the
+ * same host and the same catalog prelude that compile the source, so a hover range and a compile
+ * diagnostic land on the same line. A worker that crashed or overran is reported by the compile
+ * pane, so here the providers only fall silent.
  */
 const registration = registerNxLanguage(monaco, {
-  service: createHttpLanguageService({ baseUrl: `${API_ROOT}/language` }),
+  service: createWorkerLanguageService(),
   themes: [THEME],
   onError: (error) => console.debug("nx language", error),
 });

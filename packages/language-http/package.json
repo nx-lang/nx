@@ -1,7 +1,7 @@
 {
   "name": "@nx-lang/language-http",
   "version": "0.1.0",
-  "description": "A stateless, Fetch-shaped Node handler that answers NX language-protocol queries through @nx-lang/sdk-node.",
+  "description": "A stateless, Fetch-shaped Node handler that answers NX language-protocol queries, over @nx-lang/language-core and @nx-lang/sdk-node.",
   "license": "MIT",
   "homepage": "https://nx-lang.dev",
   "repository": {
@@ -32,6 +32,7 @@
     "verify:package": "node ../../scripts/verify-package.mjs"
   },
   "dependencies": {
+    "@nx-lang/language-core": "workspace:*",
     "@nx-lang/language-protocol": "workspace:*",
     "@nx-lang/sdk-node": "workspace:*"
   },

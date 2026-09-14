@@ -1,5 +1,7 @@
 import type { EditorRange, TextPosition } from "@nx-lang/language-protocol";
 
+const encoder = new TextEncoder();
+
 /**
  * Where a document's own text begins once a prelude is placed ahead of it.
  *
@@ -23,7 +25,7 @@ export function preludeOffsets(preludeSource: string): PreludeOffsets {
       lines += 1;
     }
   }
-  return { text, lines, bytes: Buffer.byteLength(text, "utf8") };
+  return { text, lines, bytes: encoder.encode(text).byteLength };
 }
 
 /** Places the prelude ahead of `source`. */

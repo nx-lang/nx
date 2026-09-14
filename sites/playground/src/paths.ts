@@ -8,6 +8,3 @@ export const BASE_URL: string = import.meta.env.BASE_URL;
 
 /** The gallery's address: the prefix with no trailing slash. */
 export const SITE_ROOT = BASE_URL.replace(/\/$/, "");
-
-/** Where the server's own routes — compile, language, health — are mounted. */
-export const API_ROOT = `${SITE_ROOT}/api`;

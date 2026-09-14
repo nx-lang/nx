@@ -1,0 +1,12 @@
+{
+  // The type check the package's own `test` script runs: the sources plus the tests that compare
+  // this binding's answers with the Node SDK's.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts"],
+  // The Vite fixture is built by Vite in a test, with Vite's own asset-URL imports.
+  "exclude": ["test/fixtures/**"]
+}

@@ -1,7 +1,6 @@
-import { createHash } from "node:crypto";
 import type { LanguageDocument } from "@nx-lang/language-protocol";
 
-/** The subset of `NxLanguageSnapshot` the handler uses, so a test can inject a fake. */
+/** The subset of a language snapshot the query dispatcher uses, so a test can inject a fake. */
 export interface SnapshotLike {
   hover(uri: string, position: { line: number; character: number }): unknown;
   completions(uri: string, position: { line: number; character: number }): unknown;
@@ -13,29 +12,33 @@ export interface SnapshotLike {
 /**
  * A stable key for a document set: any change to any document's text, URI or identity changes it.
  *
- * A document's `version` is left out on purpose. It is the editor's counter, not content — a revert
- * or a host that bumps it on every keystroke sends the same text under a new number, and that text
- * has the same analysis. The handler puts the current request's versions back onto the answer.
+ * <para>The key is the document set's own content, each part preceded by its length so no two sets
+ * can join into the same string. The cache holds a handful of entries of a few tens of kilobytes,
+ * so a digest would buy nothing but a dependency on a hash the browser and Node spell
+ * differently.</para>
+ *
+ * <para>A document's `version` is left out on purpose. It is the editor's counter, not content — a
+ * revert or a host that bumps it on every keystroke sends the same text under a new number, and
+ * that text has the same analysis. The caller puts the current request's versions back onto the
+ * answer.</para>
  */
 export function documentSetKey(documents: readonly LanguageDocument[]): string {
-  const hash = createHash("sha256");
+  const parts: string[] = [];
   for (const document of documents) {
     for (const part of [document.uri, document.identity ?? "", document.source]) {
-      hash.update(String(Buffer.byteLength(part, "utf8")));
-      hash.update("\0");
-      hash.update(part);
+      parts.push(String(part.length), part);
     }
-    hash.update("\n");
   }
-  return hash.digest("hex");
+  return parts.join("\u0000");
 }
 
 /**
  * The most recently used snapshots, by document-set key.
  *
  * A hover storm sends the same text many times a second; the snapshot analyzes once and answers
- * each later query from that analysis, so keeping the last few sets is what makes the handler cheap
- * on a single-threaded server. The bound keeps memory flat, and an evicted snapshot is disposed.
+ * each later query from that analysis, so keeping the last few sets is what makes answering cheap
+ * on one thread, whether that thread is a server's or a worker's. The bound keeps memory flat, and
+ * an evicted snapshot is disposed.
  */
 export class SnapshotCache<T extends SnapshotLike> {
   private readonly entries = new Map<string, T>();

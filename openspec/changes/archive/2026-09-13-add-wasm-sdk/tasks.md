@@ -1,0 +1,66 @@
+## 1. Wasm toolchain and native crate
+
+- [x] 1.1 Add `wasm32-wasip1` to `rust-toolchain.toml`'s targets and a `wasm-release` cargo profile (inherits `release`, `strip = true`) to the workspace `Cargo.toml`; verify `rustup show` lists the target after `rustup toolchain install` and `cargo build --profile wasm-release --target wasm32-wasip1 -p nx-diagnostics` succeeds
+- [x] 1.2 Add `scripts/fetch-wasi-sysroot.mjs` that downloads the pinned wasi-sdk 25.0 `wasi-sysroot` tarball into a gitignored `.cache/wasi-sysroot/` under the repository when absent, verifies its SHA-256, and prints the sysroot path; add the cache directory to `.gitignore` and verify a second run is a no-op and a corrupted download is rejected
+- [x] 1.3 Create `bindings/wasm/native` as crate `nx-sdk-wasm-native` (cdylib, `publish = false`, workspace member) over `nx-api`, `nx-codegen` and `nx-language-service`, exporting `nx_wasm_abi_version`, `nx_wasm_alloc`, `nx_wasm_free`, `nx_wasm_result_free`, the program operations (`build`, `nx_ir`, `free`) and the snapshot operations (`new`, `hover`, `completions`, `diagnostics`, `document_symbols`, `free`) per design D2, with JSON payloads matching the Node binding's shapes; verify `cargo test -p nx-sdk-wasm-native` passes native unit tests over the result-record and JSON round trips
+- [x] 1.4 Build the crate for `wasm32-wasip1` with `CC_wasm32_wasip1=clang` and `CFLAGS_wasm32_wasip1=--sysroot=<cache>`; verify with a Node script that `WebAssembly.Module.imports` lists only `wasi_snapshot_preview1` entries and that `nx_wasm_abi_version` answers under `node:wasi`
+
+## 2. `@nx-lang/sdk-wasm` package
+
+- [x] 2.1 Create `bindings/wasm` as private package `@nx-lang/sdk-wasm` (add `bindings/wasm` to `pnpm-workspace.yaml`) with a `build` script that runs the sysroot fetch, invokes cargo for the wasm target with the environment from design D1, and copies the module to `dist/nx.wasm`; verify `pnpm --filter @nx-lang/sdk-wasm build` from a clean checkout produces the module and `pnpm install --frozen-lockfile` stays clean
+- [x] 2.2 Implement the loader: `compileNxModule` from bytes, `Response` or `WebAssembly.Module`, and `createNxHost(module)` with the ABI version check, string marshalling through `nx_wasm_alloc` and `TextEncoder`/`TextDecoder`, result reading through a `DataView`, and release before return; verify a unit test loads the module under Node, calls a trivial operation a thousand times and observes no growth in `memory.buffer.byteLength`, and a test with a wrong-version stub module rejects with both versions named
+- [x] 2.3 Provide the two WASI entry points per design D3: the default entry over `@bjorn3/browser_wasi_shim` and a `node` conditional export over `node:wasi`, both exposing the same `createNxHost`; verify the package's `exports` resolve in a Node test and in a Vite build of a minimal page
+- [x] 2.4 Implement `NxProgramArtifact` (`buildProgramArtifact(source, { fileName })`, `generateNxIr()`, `dispose()`) and `NxLanguageSnapshot` (`createLanguageSnapshot(documents)` with `hover`, `completions`, `diagnostics`, `documentSymbols`, `dispose()`) with `NxEvaluationError` and `NxDisposedResourceError` matching the Node SDK's names and shapes; verify unit tests cover a successful build, a build with diagnostics carrying spans, an unparseable snapshot URI, and disposed-resource errors after `dispose()` including a second `dispose()`
+- [x] 2.5 Implement trap handling per design D4: wrap every module call, map `WebAssembly.RuntimeError` and the WASI exit exception to `NxHostCrashedError` naming the operation, flag the host, refuse later calls, and let `createNxHost` be called again on the same module; verify a test that forces a trap (a debug-only `nx_wasm_trap` export gated behind a cargo feature, or an oversized handle) sees the error, sees the next call refused without entering the module, and sees a replacement host answer
+- [x] 2.6 Add parity tests that compile the same sources through `@nx-lang/sdk-wasm` and `@nx-lang/sdk-node` and compare NX IR text, metadata, and hover, completion, diagnostic and document symbol answers for equality, run by `pnpm --filter @nx-lang/sdk-wasm test` with `--no-warnings`; verify they pass and that a deliberate change to one binding's payload fails them
+- [x] 2.7 Write `bindings/wasm/README.md` describing scope (browser and Node compilation, NX IR and language service; IR evaluation goes to the IR runtime, filesystem workflows to the Node SDK), the toolchain, the load-and-replace model and the trap semantics, and update `bindings/node/README.md` to direct browser and wasm consumers to the new package; verify both READMEs render and the Node README no longer says wasm is unsupported
+
+## 3. Shared language core
+
+- [x] 3.1 Create `packages/language-core` (`@nx-lang/language-core`) and move `prelude.ts`, the snapshot cache and the query dispatcher out of `packages/language-http/src` into it, replacing `Buffer.byteLength` with `TextEncoder` and the SHA-256 key with the document set's content per design D5; verify the moved unit tests pass under `pnpm --filter @nx-lang/language-core test` with no `node:` imports in the package's sources
+- [x] 3.2 Add `createSnapshotLanguageService({ createSnapshot, prelude, cacheSize })` implementing `NxLanguageService` in-process, honoring `AbortSignal` before answering; verify tests over a fake snapshot cover hover through a prelude, prelude-internal diagnostics reported without a range, one analysis for repeated queries with versions echoed per request, and rejection with an abort error on a cancelled signal
+- [x] 3.3 Rewrite `packages/language-http` over the core so it keeps only request parsing, body limits, error responses and the Node listener; verify its existing tests pass unchanged and `pnpm run verify:packages` stays green
+- [x] 3.4 Export `createLanguageService(host, options)` from `@nx-lang/sdk-wasm`, binding the core to the host's snapshots; verify a test answers a hover through a prelude with the real module and its answer equals the HTTP handler's for the same documents and prelude
+
+## 4. Playground in the browser
+
+- [x] 4.1 Add `sites/playground/src/compile/catalog.ts` with `compileWithCatalog(host, catalog, source)`: prelude offsets from the core, build, NX IR, and the `source`/`catalog`/`program` classification and span shift from `server/compile.mjs`; verify unit tests moved from `server/compile.test.mjs` pass against the wasm host under Node, including the catalog-origin case with a broken catalog and the zero-width insertion point case
+- [x] 4.2 Add `sites/playground/src/worker/nx.worker.ts` that imports the module with `?url` and `catalog/skia.nx` with `?raw`, compiles the module with `WebAssembly.compileStreaming`, creates a host, answers `compile` and `language` messages, and on a host crash answers the failing request with the error and replaces the host from the compiled module; verify a Vitest or Playwright test drives the worker with a valid compile, a compile with diagnostics, and a forced trap followed by a successful compile
+- [x] 4.3 Add the main-thread channel with request ids, `AbortSignal` to cancel messages whose late answers are dropped, and a deadline that terminates the worker, rejects in-flight requests with a timeout error, and starts a fresh worker on the next request; verify unit tests with a fake worker cover correlation, cancellation and the deadline replacement
+- [x] 4.4 Implement `compileInBrowser: Compile` in `src/compile/worker.ts` and `createWorkerLanguageService(): NxLanguageService` in `src/language/worker.ts` over that channel, wire them in `App.tsx` and `NxEditor.tsx` in place of `compileOverHttp` and `createHttpLanguageService`, start the worker when the editor view mounts, and delete `src/compile/http.ts`; verify `pnpm run typecheck` passes and the gallery loads without requesting the module
+- [x] 4.5 Surface compiler failures in the diagnostics pane as application faults with a readable message for a crash, a timeout and a failed module load; verify by forcing each in the browser and reading the pane, and that editing continues and the next compile succeeds without a reload
+- [x] 4.6 Point `scripts/check-examples.mjs` and `scripts/emit-example-ir.mjs` at `compileWithCatalog` over the package's `node` entry; verify `pnpm run check-examples` passes for every example with `--no-warnings` and emits IR identical to the previous server path for one example
+- [x] 4.7 Remove `server/compile.mjs`, `server/language.mjs`, `server/watchdog.mjs`, `server/port.mjs`, `scripts/dev.mjs`, their tests, the `dev:all` script and the `@nx-lang/sdk-node` and `@nx-lang/language-http` dependencies from the site; reduce `server/index.mjs` to the redirect, not-found, static files with the same cache headers, and the health route; drop the proxy and probe from `vite.config.ts`; verify `pnpm test` in `sites/playground` passes with the route tests updated to expect 404 for the old API paths, and `pnpm run dev` serves a working editor with no compile server
+- [x] 4.8 Update `sites/playground/README.md`: the pipeline diagram (compile and language in a worker), prerequisites (clang, the wasm target, the sysroot fetched by the build), running with `pnpm run dev` alone, and the layout table without the removed files; verify the README matches the tree
+
+## 5. CI, image and deployment
+
+- [x] 5.1 Update `.github/actions/setup-rust-node/action.yaml` so the wasm target installs with the toolchain and clang's presence is asserted, and confirm `.github/workflows/build.yml`'s Rust job and `deploy-playground.yml`'s validate job build and test the wasm package through `pnpm -r build` and `pnpm -r test`; verify `actionlint` passes and a CI run on the branch is green with the parity tests in its log
+- [x] 5.2 Rework `sites/playground/Dockerfile`: the build stage installs clang, adds the wasm target and builds through `pnpm -r build`; the runtime stage no longer carries the napi addon, the crates or the Rust target directory; verify `docker build -f sites/playground/Dockerfile .` completes and `docker run -p 8080:8080` serves an editor that compiles in the browser at `http://localhost:8080/playground/<id>`
+- [x] 5.3 Update `.railway/railway.ts` comments (the health check gates deploys; the restart policy no longer serves a watchdog) and the `deploy-playground.yml` `paths` filter for `bindings/wasm/**` and `scripts/fetch-wasi-sysroot.mjs`; verify `railway config plan` reports no unintended change and the workflow's path filter matches what the Dockerfile copies
+- [x] 5.4 Update `docs/deployment-setup.md`: remove the rate-limiting rule from the Cloudflare rules and the verify section, note that the cache rule now also covers the compiler module under `/playground/assets/`, and remove the rule from the zone after the first successful deploy; verify `curl -sI https://nxlang.org/playground/assets/<module>` shows the immutable cache header and a second fetch is an edge hit
+- [x] 5.5 Update `specs/future.md`'s playground section: drop "Compile isolation", and record the follow-ups this change leaves (NX IR size and pretty-printing, the catalog as a library artifact, a static host without the Node server); verify the section reads against the shipped state
+
+## 6. Verification
+
+- [x] 6.1 Run the site in a browser with Playwright per the playground verification notes: open an example, edit it, confirm the drawing updates with no network request after the module load, confirm hover and completion answer, and confirm a diagnostic on the visitor's source lands on the line they see; verify with a screenshot and the network log
+- [x] 6.2 Measure and record in the change's review notes the module size (raw and gzipped), first-editor-view load time on a throttled connection, and compile latency for the largest example; verify the numbers are within the design's expectations (module under 3 MB raw, compile under 200 ms) or record the deviation
+
+## Deviations from the design
+
+Two places where the shipped behaviour is not what the design said, both noticed while implementing
+and both deliberate.
+
+- **The gallery loads the compiler module too** (design D6, task 4.4). D6 says the worker starts on
+  the editor view "so the module's 826 KB does not precede the first paint of a page that never
+  compiles". The gallery *does* compile: it draws a live preview of all twenty examples through the
+  same `Compile` seam. So the worker is started eagerly when the editor view mounts, and lazily on
+  the gallery when the first preview compiles — after first paint rather than before it, which is
+  the part of D6 that was actually about the visitor's experience. Making the gallery not compile
+  would be a change to what the gallery is, not to this change's scope.
+- **No cancel message is sent to the worker** (design D6, task 4.3). Messages are delivered in order
+  and the worker answers them one at a time, so a cancel posted after the request it cancels arrives
+  after that request has already been answered — it can never save the work. Cancellation is
+  therefore the main thread's alone: the caller's promise rejects at once with an abort error and the
+  late answer is dropped, which is the behaviour task 4.3 asks to verify. `src/worker/protocol.ts`
+  records the reasoning where the message type would have gone.

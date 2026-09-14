@@ -7,7 +7,7 @@
 import { evaluateFunction, prepareNxIrProgram } from "@nx-lang/ir-runtime";
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { compile } from "../server/compile.mjs";
+import { compile } from "./compile-example.mjs";
 import { expandComponents } from "./expand-components.mjs";
 
 function evaluateRoot(source) {

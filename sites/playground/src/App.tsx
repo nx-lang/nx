@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import "./app.css";
-import { compileOverHttp } from "./compile";
+import { compileInBrowser } from "./compile";
 import { EXAMPLES, coverageNote, exampleById } from "./examples";
 import { EditorView } from "./editor/EditorView";
 import { CoverageChip, Gallery } from "./gallery/Gallery";
@@ -17,7 +17,7 @@ export function App() {
   }, [route]);
 
   if (route.kind === "gallery") {
-    return <Gallery compile={compileOverHttp} onOpen={(example) => navigate({ kind: "editor", id: example.id })} />;
+    return <Gallery compile={compileInBrowser} onOpen={(example) => navigate({ kind: "editor", id: example.id })} />;
   }
 
   // The router only routes to an example it knows, so the fallback is for the type's sake.
@@ -28,7 +28,7 @@ export function App() {
       title={example.name}
       source={edits[example.id] ?? example.source}
       onSourceChange={(source) => setEdits((previous) => ({ ...previous, [example.id]: source }))}
-      compile={compileOverHttp}
+      compile={compileInBrowser}
       coverage={note === null ? undefined : <CoverageChip example={example} />}
       onBack={() => navigate({ kind: "gallery" })}
     />

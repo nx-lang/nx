@@ -138,11 +138,11 @@ in the plan is real, so a plan that shows only those two is fully applied.
 
 What the file sets, and why: `DOCKERFILE` builder with `sites/playground/Dockerfile` and the
 **root directory left at the repository root**, because the Dockerfile copies `packages/`,
-`bindings/node`, `runtime/typescript`, `crates/` and `src/vscode`; `healthcheckPath`
+`bindings/wasm`, `runtime/typescript`, `crates/`, `scripts/` and `src/vscode`; `healthcheckPath`
 `/playground/api/health` with a 60 s timeout, polled only while a deployment starts; and
-`ALWAYS` restarts, which is what brings the process back after the watchdog ends it (no retry
-budget, so the service cannot run out of restarts; the health check is what keeps a build that
-cannot serve from going live). No variables are required: `PORT` is set by the image (8080) and Railway routes to it.
+`ALWAYS` restarts, which brings the process back if it ever exits (no retry budget, so the service
+cannot run out of restarts; the health check is what keeps a build that cannot serve from going
+live). No variables are required: `PORT` is set by the image (8080) and Railway routes to it.
 Which pushes deploy is the workflow's `paths` list, not a Railway watch pattern.
 
 ### Railway token for GitHub Actions
@@ -216,7 +216,7 @@ Nothing in the site depends on who runs `docker build`.
    --service playground`), then issues its certificate.
 4. Leave the service without a Railway-generated domain (`railway domain list --service playground`
    shows only `nxlang.org`). A bare `railway domain` would create one, and it would answer outside
-   Cloudflare, where the rate limit and the rest of the rules below do not apply.
+   Cloudflare, where the rules below do not apply.
 
 ### Cloudflare zone settings
 
@@ -224,7 +224,7 @@ Nothing in the site depends on who runs `docker build`.
 |---|---|---|
 | SSL/TLS → Overview → encryption mode | **Full** (not strict) | Railway's docs: "If you have proxying enabled on Cloudflare (the orange cloud), you MUST set your SSL/TLS settings to Full -- Full (Strict) will not work as intended." For proxied domains Railway "may not always be able to issue a certificate for the domain" and then serves its default `*.up.railway.app` certificate, which strict would reject with a 526 on every page. Full still encrypts edge-to-origin traffic; Flexible would loop with Railway's own HTTPS redirect. |
 | SSL/TLS → Edge Certificates → Always Use HTTPS | **On** | `http://nxlang.org/playground` redirects at the edge before reaching Railway. |
-| Security → Bots → Bot Fight Mode | **Off** | It was on for the first deploy and challenged the workflow's smoke test from the GitHub runner (a Cloudflare managed challenge, 403, on every attempt), so each run reported a failed deploy for a live one. The Free plan cannot exempt it by path or user agent. The rate limit below is what bounds load on the single-threaded origin, and it does not depend on classifying the client, so Bot Fight Mode is off and stays off. |
+| Security → Bots → Bot Fight Mode | **Off** | It was on for the first deploy and challenged the workflow's smoke test from the GitHub runner (a Cloudflare managed challenge, 403, on every attempt), so each run reported a failed deploy for a live one. The Free plan cannot exempt it by path or user agent. The origin serves static files and a health route — compilation happens in the visitor's browser — so there is no load to protect it from, and Bot Fight Mode is off and stays off. |
 | Analytics → Web Analytics | **Enable, excluding visitor data in the EU**, for `nxlang.org` (proxy-injected beacon) | Cookie-less, so no consent banner, and the EU exclusion removes the remaining ePrivacy question at the cost of not seeing EU visitors — the same choice as the account's other sites. No snippet in the site. Dashboard only: the API token permission for it is not available on the zone-scoped token used for the rest. |
 
 ### Cloudflare rules
@@ -236,19 +236,6 @@ Nothing in the site depends on who runs `docker build`.
 - Then: Dynamic redirect, expression `concat("https://nxlang.org", http.request.uri.path)`,
   status 301, preserve query string.
 
-**Rate limiting rule — API path**
-
-- Name: `playground api`
-- When: URI Path starts with `/playground/api/`
-- Characteristics: IP (the API form is `ip.src` plus `cf.colo.id`, which the Free plan requires)
-- Rate: **100 requests per 10 seconds** — an editing session produces a few requests per second
-  at most (compiles are debounced, language analysis is cached per document), while a client at
-  this ceiling could take a fifth of the origin's one thread.
-- Action: Block, for the plan's mitigation timeout (10 seconds on Free).
-
-Excess requests are answered 429 at the edge and never reach Railway. Raise the threshold if the
-editor grows chattier; the number lives here, not in the site.
-
 **Cache rule — site assets**
 
 - Name: `playground assets`
@@ -257,15 +244,21 @@ editor grows chattier; the number lives here, not in the site.
 - Then: Cache eligibility **Eligible for cache**; Edge TTL **Use cache-control header from
   origin**; Browser TTL **Respect origin**.
 
-The origin sends `immutable` for a year on hashed assets (which includes the CanvasKit `.wasm`,
-which Cloudflare would not cache by extension alone) and a day on fonts and images. The shell
-(`/playground`, `/playground/<id>`) and everything under `/playground/api/` are outside the rule and
-carry `no-cache` / `no-store`, so the edge revalidates or bypasses them every time.
+The origin sends `immutable` for a year on hashed assets and a day on fonts and images. The hashed
+assets include two `.wasm` binaries Cloudflare would not cache by extension alone: CanvasKit's, and
+the NX compiler module the editor loads into its worker. The shell (`/playground`,
+`/playground/<id>`) and `/playground/api/health` are outside the rule and carry `no-cache` /
+`no-store`, so the edge revalidates or bypasses them every time.
+
+There is no rate-limiting rule. One existed on `/playground/api/*` while compilation ran on the
+origin's single thread; compilation is the visitor's browser's now, so no request under that prefix
+costs the origin anything and the rule was removed from the zone after the first deploy of this
+change.
 
 All of the above except Web Analytics can be applied with the Cloudflare API from a token holding
 Zone Read, DNS Edit, Zone Settings Edit, Zone WAF Edit, Cache Rules Edit, Single Redirect Edit and
 Bot Management Edit on the zone; the rules are single-rule entrypoint rulesets in the
-`http_request_dynamic_redirect`, `http_ratelimit` and `http_request_cache_settings` phases.
+`http_request_dynamic_redirect` and `http_request_cache_settings` phases.
 
 ### Verify the setup
 
@@ -274,16 +267,13 @@ curl -sI http://nxlang.org/playground | grep -i location        # https://nxlang
 curl -sI https://nxlang.org/                                     # 302 → /playground
 curl -s  https://nxlang.org/playground/api/health                # {"ok":true}
 curl -sI https://nxlang.org/playground/assets/<hashed asset>     # twice: second shows cf-cache-status: HIT
+curl -sI https://nxlang.org/playground/assets/nx-<hash>.wasm     # the compiler module: immutable, and a HIT on the second fetch
 curl -sI https://nxlang.org/playground                           # cf-cache-status: DYNAMIC (never HIT)
 curl -s -H 'accept: text/html' https://nxlang.org/playground | grep -c cloudflareinsights   # 1: the beacon is injected
 #   the edge injects the Web Analytics beacon only into responses to requests that accept HTML,
 #   so a bare curl shows none and proves nothing
-seq 1 200 | xargs -P 40 -I{} curl -s -o /dev/null -w "%{http_code}\n" -X POST \
-  -H 'content-type: application/json' -d '{"source":""}' https://nxlang.org/playground/api/compile | sort | uniq -c
-#   mostly 200, then 429 once the rate limit engages; the requests must be parallel, since one
-#   curl after another from outside the datacenter stays under 100 in any 10 seconds
 ```
 
 Open `https://nxlang.org/playground` in a browser without certificate warnings, open an example,
-edit it, and confirm hover answers. Cloudflare's Web Analytics should show the visit within a few
-minutes.
+edit it, and confirm the drawing updates and hover answers — with no request to the origin after the
+compiler module has loaded. Cloudflare's Web Analytics should show the visit within a few minutes.

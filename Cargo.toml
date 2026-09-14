@@ -14,6 +14,7 @@ members = [
     "crates/nx-interpreter",
     "crates/nx-ffi",
     "bindings/node/native",
+    "bindings/wasm/native",
 ]
 
 [workspace.package]
@@ -57,3 +58,9 @@ insta = { version = "1.34", features = ["yaml"] }
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# WebAssembly builds of the SDK module: release codegen with the name section stripped, so the
+# module the playground ships is as small as the toolchain makes it without extra tooling.
+[profile.wasm-release]
+inherits = "release"
+strip = true
