@@ -131,11 +131,11 @@ had in common was the empty body. Whitespace and comments do not count as conten
 author actually writes — an open tag, a blank line, a close tag — hit it too.
 
 **The app's compile arrangement changed because of this.** A file may end in a single bare element,
-and the grammar allows that element only as the file's **last** item. The server used to append the
+and the grammar allows that element only as the file's **last** item. The compile used to append the
 catalog to the visitor's source, which put declarations after that element and made the form a
 syntax error in the playground even once the grammar was fixed. The catalog now goes first, and
-`classify` in `server/compile.mjs` subtracts the catalog's leading lines and bytes so a diagnostic
-still reports the line and column the visitor sees. Columns need no adjustment, since the catalog
+`classify` in `src/compile/catalog.ts` subtracts the catalog's leading lines and bytes so a
+diagnostic still reports the line and column the visitor sees. Columns need no adjustment, since the catalog
 contributes whole lines. Appending had been chosen precisely to avoid that arithmetic; the
 trailing-element form is what made it worth paying. F4 records the arrangement; F9 records the one
 behavior it changes, where a name declared in both the catalog and the visitor's source now resolves

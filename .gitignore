@@ -376,7 +376,6 @@ src/vscode/server/
 
 # Rust
 target/
-Cargo.lock
 *.rs.bk
 *.pdb
 .cargo/
@@ -387,3 +386,6 @@ release/
 *.rlib
 *.prof*
 .env*
+
+# Toolchain artifacts fetched on demand (the pinned WASI sysroot)
+/.cache/

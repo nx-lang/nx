@@ -10,7 +10,7 @@ and evaluation workflows.
 ### Requirement: Node SDK package is source-buildable and Node-only
 The repository SHALL expose a Node package named `@nx-lang/sdk-node` for native NX
 host/compiler/runtime SDK access, backed by napi-rs / N-API and maintained separately from the pure
-TypeScript NX IR runtime.
+TypeScript NX IR runtime and from the WebAssembly SDK.
 
 #### Scenario: Package layout is discoverable
 - **WHEN** a contributor inspects the repository
@@ -22,7 +22,7 @@ TypeScript NX IR runtime.
 - **WHEN** a consumer reads the Node SDK documentation
 - **THEN** the documentation SHALL identify the package as Node-only native SDK access for NX host,
   compiler, artifact, diagnostics, and evaluation workflows
-- **AND** it SHALL NOT present the package as a browser, WASM, or persisted-IR-only runtime
+- **AND** it SHALL direct browser and WebAssembly consumers to `@nx-lang/sdk-wasm`
 
 #### Scenario: TypeScript IR runtime remains distinct
 - **WHEN** a consumer wants to evaluate an already persisted NX IR JSON document in JavaScript

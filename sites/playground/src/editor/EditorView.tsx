@@ -1,8 +1,9 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import type { Compile, Diagnostic } from "../compile";
 import { Canvas } from "../drawnui/react/index";
 import { pathForRoute } from "../router";
 import { useNxDrawing } from "../render/useNxDrawing";
+import { startNxWorker } from "../worker/index.ts";
 import { NxEditor } from "./NxEditor";
 
 export interface EditorViewProps {
@@ -33,6 +34,10 @@ function DiagnosticRow({ diagnostic }: { diagnostic: Diagnostic }) {
 
 /** The editor view: NX on the left, what it draws on the right. */
 export function EditorView({ title, source, onSourceChange, compile, coverage, onBack }: EditorViewProps) {
+  // The compiler module is 2 MB. Fetching and compiling it starts when this view mounts, so the
+  // gallery — which never compiles — does not pay for it before its first paint.
+  useEffect(startNxWorker, []);
+
   const drawing = useNxDrawing(source, compile);
   const failures = drawing.failure === null ? [] : [drawing.failure];
   const unknown = drawing.unknownControls;

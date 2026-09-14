@@ -1,0 +1,55 @@
+{
+  "name": "@nx-lang/sdk-wasm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser and Node SDK for NX compilation, NX IR generation and the language service, over a WebAssembly module.",
+  "license": "MIT",
+  "homepage": "https://nx-lang.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nx-lang/nx.git",
+    "directory": "bindings/wasm"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "node": {
+        "types": "./dist/src/node.d.ts",
+        "import": "./dist/src/node.js"
+      },
+      "types": "./dist/src/browser.d.ts",
+      "import": "./dist/src/browser.js"
+    },
+    "./nx.wasm": "./dist/nx.wasm"
+  },
+  "types": "./dist/src/browser.d.ts",
+  "scripts": {
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "build:ts": "tsc -p tsconfig.json",
+    "build": "pnpm run build:wasm && pnpm run build:ts",
+    "test": "pnpm run build && pnpm run typecheck && node scripts/build-wasm.mjs --debug-trap && vitest run",
+    "clean": "node scripts/clean.mjs",
+    "rebuild": "pnpm run clean && pnpm run build",
+    "typecheck": "tsc -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "@bjorn3/browser_wasi_shim": "^0.4.2",
+    "@nx-lang/language-core": "workspace:*",
+    "@nx-lang/language-protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@nx-lang/language-http": "workspace:*",
+    "@nx-lang/sdk-node": "workspace:*",
+    "@types/node": "^22.20.0",
+    "typescript": "^6.0.3",
+    "vite": "^7.2.4",
+    "vitest": "^4.1.9"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

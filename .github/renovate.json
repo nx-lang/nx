@@ -2,7 +2,34 @@
 	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
 	"extends": ["config:best-practices"],
 	"labels": ["dependencies"],
+	"customManagers": [
+		{
+			"customType": "regex",
+			"description": "Bump the exact Rust pin in rust-toolchain.toml",
+			"managerFilePatterns": ["/^rust-toolchain\\.toml$/"],
+			"matchStrings": ["channel\\s*=\\s*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""],
+			"depNameTemplate": "rust",
+			"packageNameTemplate": "rust-lang/rust",
+			"datasourceTemplate": "github-releases",
+			"versioningTemplate": "semver"
+		},
+		{
+			"customType": "regex",
+			"description": "Keep the workspace MSRV equal to the pin; resolver 3 selects dependency versions against it",
+			"managerFilePatterns": ["/^Cargo\\.toml$/"],
+			"matchStrings": ["rust-version\\s*=\\s*\"(?<currentValue>\\d+\\.\\d+\\.\\d+)\""],
+			"depNameTemplate": "rust",
+			"packageNameTemplate": "rust-lang/rust",
+			"datasourceTemplate": "github-releases",
+			"versioningTemplate": "semver"
+		}
+	],
 	"packageRules": [
+		{
+			"matchDatasources": ["github-releases"],
+			"matchDepNames": ["rust"],
+			"groupName": "Rust toolchain pin and MSRV"
+		},
 		{
 			"matchPackageNames": ["minver-cli"],
 			"groupName": "minver updates"

@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "declaration": true,
+    "exactOptionalPropertyTypes": true,
+    "lib": ["ES2022", "DOM", "ESNext.Disposable"],
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "noUncheckedIndexedAccess": true,
+    "outDir": "dist",
+    "rootDir": ".",
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2022",
+    "types": ["node"]
+  },
+  // Sources only. The tests need the Node SDK and the HTTP handler to compare answers with, and the
+  // playground's image builds this package without either of them in its context.
+  "include": ["src/**/*.ts"]
+}

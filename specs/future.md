@@ -704,10 +704,11 @@ already supports.
 ## Playground: What `add-playground-site` Left For Later
 
 The playground at `nxlang.org/playground` (`sites/playground`, spec `openspec/specs/playground`)
-shipped as the DrawnUI fiddle under a public address: gallery, editor view, server-side compile,
-watchdog, Railway behind Cloudflare, the service declared in `.railway/railway.ts` and deployed
-by `.github/workflows/deploy-playground.yml` with `railway up`. The items below are what it
-deliberately does not do yet.
+shipped as the DrawnUI fiddle under a public address: gallery, editor view, Railway behind
+Cloudflare, the service declared in `.railway/railway.ts` and deployed by
+`.github/workflows/deploy-playground.yml` with `railway up`. Compilation and language queries were
+server-side then; `add-wasm-sdk` moved both into the visitor's browser, as a WebAssembly module in a
+Web Worker. The items below are what the site deliberately does not do yet.
 
 ### Shareable edited source
 
@@ -718,26 +719,32 @@ fragment of that address free for this — the smallest version encodes the sour
 somewhere to keep it and a policy for how long. Either one is a client change plus, for storage, a
 route; nothing in the current address scheme has to move.
 
-### Compile isolation
+### NX IR size
 
-Compile and language requests call the native binding synchronously on the server's only thread.
-The playground's answer today is a watchdog that ends a process whose main thread has stopped
-answering, so a hang costs every visitor a restart rather than the site. The better answer is a
-child process per compile (or a small pool) with a kill timer: a bad request then costs one request,
-the main thread never blocks, and the health route answers truthfully by construction rather than
-by being on the blocked thread. Worker threads are not enough — `terminate()` cannot preempt a
-native call — so this is a process boundary, and the compile seam in `src/compile/` and
-`server/compile.mjs` is already the one place it would go. A WASM build of the compiler would
-retire the question entirely by moving compilation into the browser.
+Every compile produces the whole program's IR as pretty-printed JSON, and the program is the
+visitor's source plus the entire flattened catalog: a few hundred kilobytes of text per keystroke
+pause, built inside the worker and structured-cloned to the main thread. It is fast enough that no
+one notices, and it is the single largest thing the pipeline moves. Two independent wins are
+available: emitting compact JSON rather than pretty-printed, and not re-emitting the catalog's
+declarations on every compile. Neither changes a seam.
 
-Until then the restart is unbounded by design: the Railway restart policy is `ALWAYS` with no retry
-budget, because Railway polls the health check only while a deployment starts, so the budget would
-be the only thing keeping a live service up, and a service that stops restarting after its tenth
-hang is the failure the watchdog exists to prevent. The cost is that a hang someone keeps provoking
-loops — the process comes back and is stuck again within the watchdog's deadline. The rate limit
-on `/playground/api/*` bounds how often that can happen from one client; repeated `watchdog:`
-lines in the Railway log are the signal. Process isolation retires this too: a bad request would
-then cost one child process, not the server.
+### The catalog as a library artifact
+
+The catalog is prepended to the visitor's source as a prelude, so every compile reanalyzes ~600
+lines of external component declarations that never change. It is a prelude rather than an import
+because an imported external component loses its defaults and its inherited properties
+(NXE12/NXE13). Once that is fixed, the catalog can be a library artifact analyzed once per worker
+and shared by every compile — the win is proportional to how much of each compile is the catalog,
+which today is most of it. The prelude arithmetic in `@nx-lang/language-core` would go with it.
+
+### A static host, without the Node server
+
+The server now serves `dist/` under the prefix, redirects `/`, and answers a health route. Nothing
+it does needs a process: a static host with a rewrite rule and a fallback document would serve the
+same site, and the health check that gates a Railway deployment would go with the thing being
+deployed. What has to be decided first is what replaces the deploy gate — a static host has no
+health check to poll — and where the redirect at `/` lives, which is the same question the section
+below asks. Keeping the Node process meanwhile costs one small container and no complexity.
 
 ### Splitting the domain across services
 
@@ -748,4 +755,4 @@ that moves: it lives in the playground's server and would have to be replaced by
 override (confirm the plan supports it) or a Worker in front of both. Whichever is chosen, the new
 service must go through Cloudflare the way the playground does: the playground has no
 Railway-generated domain on purpose, because that hostname would answer outside the edge, where the
-rate limit does not apply.
+cache rules do not apply.

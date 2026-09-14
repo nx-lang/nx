@@ -214,7 +214,8 @@ diagnostics instead of being dropped. DTO/type-only output remains separate unde
 
 ### Prerequisites
 
-- Rust 1.75 or later
+- Rust via [rustup](https://rustup.rs); the pinned toolchain in `rust-toolchain.toml` installs itself
+  on the first `cargo` command
 - Node.js (for tree-sitter grammar development)
 
 ### Building
@@ -226,7 +227,7 @@ cargo build --workspace
 ### Testing
 
 ```bash
-# Run all tests (197 tests)
+# Run all tests
 cargo test --workspace
 
 # Run tests for specific crate

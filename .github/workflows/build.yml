@@ -226,5 +226,14 @@ jobs:
       uses: ./.github/actions/setup-rust-node
     - name: 💅🏻 Verify formatted code
       run: cargo fmt --all --check
+    # `--locked` fails the job if `Cargo.lock` is out of date with `Cargo.toml`, so a dependency
+    # change cannot land without the lockfile that goes with it. Cargo honors an existing lockfile
+    # everywhere else by default, so this one gate is enough.
     - name: 🧪 Test the Rust workspace
-      run: cargo test --workspace
+      run: cargo test --workspace --locked
+    # The wasm SDK's build produces the module and its tests compare it with the Node SDK's answers,
+    # so a divergence between the two bindings fails here rather than reaching a site.
+    - name: 🕸 Build the workspace, including the WebAssembly module
+      run: pnpm -r build
+    - name: 🧪 Test the pnpm workspace
+      run: pnpm -r test

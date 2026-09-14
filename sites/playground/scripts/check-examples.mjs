@@ -12,7 +12,7 @@ import { evaluateFunction, prepareNxIrProgram } from "@nx-lang/ir-runtime";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { compile } from "../server/compile.mjs";
+import { compile } from "./compile-example.mjs";
 import { expandComponents } from "./expand-components.mjs";
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");

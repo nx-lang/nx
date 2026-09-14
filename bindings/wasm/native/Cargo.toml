@@ -1,0 +1,23 @@
+[package]
+name = "nx-sdk-wasm-native"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Exports `nx_wasm_trap`, which traps on purpose. Only the SDK's trap-handling tests build with it.
+debug-trap = []
+
+[dependencies]
+nx-api = { path = "../../../crates/nx-api" }
+nx-codegen = { path = "../../../crates/nx-codegen" }
+nx-language-service = { path = "../../../crates/nx-language-service" }
+serde.workspace = true
+serde_json.workspace = true

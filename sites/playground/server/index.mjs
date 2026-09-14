@@ -1,32 +1,25 @@
 /**
- * Serves the built SPA under the site's prefix, answers compile requests, answers the source pane's
- * language queries, and reports its own health.
+ * Serves the built SPA under the site's prefix and reports its own health.
  *
- * The server exists only because there is no WASM build of the compiler or the language service
- * yet. It holds no state and has three routes beyond static files — compile, language and health,
- * all under `/playground/api/` — so replacing it later with in-browser analysis removes this file
- * and changes nothing else. Everything it serves lives under the prefix from `base.mjs`: the root
- * redirects there, and any other address outside it is not found, so a misrouted request shows up
- * as an obvious error rather than as a second copy of the site.
+ * Compilation and language queries happen in the visitor's browser, in a worker over the
+ * WebAssembly build of the compiler, so this process holds no state, does no work per visitor and
+ * has one route beyond static files: health, which gates a new deployment. Everything it serves
+ * lives under the prefix from `base.mjs`: the root redirects there, and any other address outside
+ * it is not found, so a misrouted request shows up as an obvious error rather than as a second copy
+ * of the site.
  */
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { dirname, extname, join, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { API_PREFIX, BASE_PATH, HEALTH_PATH } from "../base.mjs";
-import { MAX_SOURCE_BYTES, compile } from "./compile.mjs";
-import { LANGUAGE_ROUTE, languageListener } from "./language.mjs";
-import { COMPILE_PORT } from "./port.mjs";
-import { startWatchdog } from "./watchdog.mjs";
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 /** Where the built SPA is. Tests point this at a stand-in so they need not run a build first. */
 const distRoot = resolve(process.env.PLAYGROUND_DIST ?? join(appRoot, "dist"));
 
-const COMPILE_PATH = `${API_PREFIX}/compile`;
-
-/** Compile requests are bounded by the same limit the compiler applies to source. */
-const MAX_BODY_BYTES = MAX_SOURCE_BYTES + 4096;
+/** The port the site listens on. Railway sets `PORT`; the Dockerfile pins it to 8080. */
+const PORT = Number(process.env.PORT ?? 8080);
 
 /**
  * What an edge cache may keep, decided here so it holds whichever edge sits in front.
@@ -55,7 +48,7 @@ const MIME = {
   ".wasm": "application/wasm",
 };
 
-/** Every JSON answer is an API answer or an error; neither is worth caching. */
+/** Every JSON answer is health or an error; neither is worth caching. */
 function sendJson(response, status, body) {
   const payload = JSON.stringify(body);
   response.writeHead(status, {
@@ -66,64 +59,12 @@ function sendJson(response, status, body) {
   response.end(payload);
 }
 
-function readBody(request) {
-  return new Promise((fulfil, reject) => {
-    const chunks = [];
-    let size = 0;
-    request.on("data", (chunk) => {
-      size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
-        // Stop reading, but leave the socket alive long enough to answer: a client that is told
-        // 413 can shrink its request, while a destroyed connection tells it nothing at all.
-        request.pause();
-        reject(Object.assign(new Error("request body too large"), { status: 413 }));
-        return;
-      }
-      chunks.push(chunk);
-    });
-    request.on("end", () => fulfil(Buffer.concat(chunks).toString("utf8")));
-    request.on("error", reject);
-  });
-}
-
-async function handleCompile(request, response) {
-  if (request.method !== "POST") {
-    sendJson(response, 405, { error: "use POST" });
-    return;
-  }
-  let source;
-  try {
-    const body = await readBody(request);
-    const parsed = JSON.parse(body);
-    source = parsed?.source;
-  } catch (error) {
-    response.on("finish", () => request.destroy());
-    sendJson(response, error.status ?? 400, { error: error.message });
-    return;
-  }
-  if (typeof source !== "string") {
-    sendJson(response, 400, { error: "body must be { source: string }" });
-    return;
-  }
-
-  try {
-    sendJson(response, 200, compile(source));
-  } catch (error) {
-    // A compile that fails outside diagnostics is the app's problem, not the visitor's, but it must
-    // not take the server down with it.
-    const status = error instanceof RangeError ? 413 : 500;
-    sendJson(response, status, { error: error.message });
-  }
-}
-
 /**
- * Says the process can serve, and says nothing when it cannot.
+ * Says the process can serve.
  *
- * Answered inline on the request thread, which is the same thread compile and language calls hold
- * while they are inside the native binding. That is deliberate: a process stuck in one of those
- * calls cannot answer this either, so whoever is checking — the hosting platform before it switches
- * traffic to a new deployment, or a person — sees the truth. A health check answered from anywhere
- * else would report a stuck server as fine. Replacing a stuck process is the watchdog's job.
+ * This is what the hosting platform polls before it switches traffic to a new deployment. Nothing
+ * a visitor does reaches this process's event loop any more, so there is no longer a way for it to
+ * be alive and unable to answer.
  */
 function handleHealth(request, response) {
   // `HEAD` too: external monitors commonly probe with it, and Node drops the body on its own.
@@ -225,18 +166,8 @@ const server = createServer((request, response) => {
       sendJson(response, 404, { error: `nothing is served outside ${BASE_PATH}` });
       return;
     }
-    if (path === COMPILE_PATH) {
-      handleCompile(request, response).catch((error) => failRequest(response, error));
-      return;
-    }
     if (path === HEALTH_PATH) {
       handleHealth(request, response);
-      return;
-    }
-    if (path.startsWith(LANGUAGE_ROUTE)) {
-      // The handler writes its own headers; this one is merged in underneath them.
-      response.setHeader("cache-control", CACHE.api);
-      languageListener(request, response);
       return;
     }
     if (path === API_PREFIX || path.startsWith(`${API_PREFIX}/`)) {
@@ -250,7 +181,6 @@ const server = createServer((request, response) => {
   }
 });
 
-startWatchdog();
-server.listen(COMPILE_PORT, () => {
-  console.log(`NX playground listening on http://localhost:${COMPILE_PORT}${BASE_PATH}`);
+server.listen(PORT, () => {
+  console.log(`NX playground listening on http://localhost:${PORT}${BASE_PATH}`);
 });

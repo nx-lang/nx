@@ -6,6 +6,9 @@
  * boundary checks are here because what they check is not what an answer says but that there is
  * still a process left to answer: one bad request must not end the service for everyone else.
  *
+ * Compilation and language queries are the browser's now, so the only route left beyond static
+ * files is health; the addresses those used to answer on are ordinary unknown API paths.
+ *
  * A stand-in `dist/` is written to a temporary directory so the shell and asset checks do not
  * depend on a build having run.
  */
@@ -190,34 +193,18 @@ test("answers a malformed percent-escape and keeps serving", async () => {
   await assertStillServing();
 });
 
-test("answers a stray delimiter at the end of the source and keeps serving", async () => {
-  // A source the scanner could not finish scanning used to hang the compile thread, which is the
-  // only thread there is: nothing else could be served while it spun.
-  const compiled = await fetch(`${origin}${API_PREFIX}/compile`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ source: "@" }),
-  });
-  assert.equal(compiled.status, 200);
-  assert.equal(compiled.headers.get("cache-control"), "no-store");
-  const body = await compiled.json();
-  assert.equal(body.ir, null);
-  assert.ok(body.diagnostics.length > 0);
+test("the retired compile and language routes are not found, and the server keeps serving", async () => {
+  // A client holding an old shell asks for these until it reloads. They are unknown API paths now,
+  // which the app already reports as a compiler it could not reach.
+  for (const path of [`${API_PREFIX}/compile`, `${API_PREFIX}/language/hover`, `${API_PREFIX}/language/diagnostics`]) {
+    const response = await fetch(`${origin}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ source: "let root() = { 1 }" }),
+    });
+    await response.arrayBuffer();
+    assert.equal(response.status, 404, path);
+  }
 
   await assertStillServing();
-});
-
-test("a language answer is never stored either", async () => {
-  const response = await fetch(`${origin}${API_PREFIX}/language/hover`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      documents: [{ uri: "nx://playground/playground.nx", source: "let root() = 1\n", version: 1 }],
-      uri: "nx://playground/playground.nx",
-      position: { line: 0, character: 5 },
-    }),
-  });
-  await response.arrayBuffer();
-  assert.equal(response.status, 200);
-  assert.equal(response.headers.get("cache-control"), "no-store");
 });
