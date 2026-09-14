@@ -376,7 +376,6 @@ src/vscode/server/
 
 # Rust
 target/
-Cargo.lock
 *.rs.bk
 *.pdb
 .cargo/

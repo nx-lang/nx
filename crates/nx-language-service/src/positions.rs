@@ -160,10 +160,7 @@ fn ancestor_chain(root: SyntaxNode<'_>, offset: usize) -> Vec<SyntaxNode<'_>> {
     let mut chain = vec![root];
     let mut node = root;
 
-    loop {
-        let Some(child) = child_at(node, offset) else {
-            break;
-        };
+    while let Some(child) = child_at(node, offset) {
         chain.push(child);
         node = child;
     }

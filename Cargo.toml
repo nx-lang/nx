@@ -1,5 +1,5 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
     "crates/nx-diagnostics",
     "crates/nx-syntax",
@@ -21,7 +21,7 @@ members = [
 version = "0.1.0"
 authors = ["Bret Johnson"]
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.98.1"
 license = "MIT"
 repository = "https://github.com/nx-lang/nx"
 homepage = "https://nx-lang.dev"

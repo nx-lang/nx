@@ -23,6 +23,7 @@ on:
       - src/vscode/**
       - scripts/**
       - Cargo.toml
+      - Cargo.lock
       - rust-toolchain.toml
       - package.json
       - pnpm-workspace.yaml

@@ -6,7 +6,7 @@ description: 'Spin up your first NX project with the essential tooling.'
 This quickstart gets you from zero to a working NX file, validates your setup, and points to the next learning paths.
 
 ## Prerequisites
-- Rust 1.75+ (`rustup` recommended)
+- Rust via [rustup](https://rustup.rs); the pinned toolchain in `rust-toolchain.toml` installs itself on the first `cargo` command
 - Node.js LTS (for docs site and editor tooling)
 - Optional: `tree-sitter` CLI if you want to parse files from the terminal
 

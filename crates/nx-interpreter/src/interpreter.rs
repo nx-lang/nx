@@ -2883,7 +2883,7 @@ impl Interpreter {
         }
 
         let mut overrides = FxHashMap::default();
-        for (field, value) in record_shape.fields.iter().zip(arg_values.into_iter()) {
+        for (field, value) in record_shape.fields.iter().zip(arg_values) {
             overrides.insert(SmolStr::new(field.name.as_str()), value);
         }
 
@@ -3255,7 +3255,7 @@ impl Interpreter {
         operation: &str,
     ) -> Result<Vec<Value>, RuntimeError> {
         let mut coerced = Vec::with_capacity(arg_values.len());
-        for (param, value) in params.iter().zip(arg_values.into_iter()) {
+        for (param, value) in params.iter().zip(arg_values) {
             coerced.push(self.coerce_value_to_type(
                 module,
                 value,
