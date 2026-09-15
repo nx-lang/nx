@@ -1,6 +1,7 @@
 {
   "name": "@nx-lang/language-http",
   "version": "0.1.0",
+  "private": true,
   "description": "A stateless, Fetch-shaped Node handler that answers NX language-protocol queries, over @nx-lang/language-core and @nx-lang/sdk-node.",
   "license": "MIT",
   "homepage": "https://nx-lang.dev",
@@ -22,14 +23,9 @@
     }
   },
   "types": "./dist/src/index.d.ts",
-  "publishConfig": {
-    "access": "public"
-  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "tsc -p tsconfig.json && node --test \"dist/test/**/*.test.js\"",
-    "prepack": "pnpm run build",
-    "verify:package": "node ../../scripts/verify-package.mjs"
+    "test": "tsc -p tsconfig.json && node --test \"dist/test/**/*.test.js\""
   },
   "dependencies": {
     "@nx-lang/language-core": "workspace:*",

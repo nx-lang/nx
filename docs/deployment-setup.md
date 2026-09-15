@@ -23,7 +23,11 @@ Recommended protection:
 Set up ownership before enabling publication:
 
 - NuGet.org: reserve or own `NxLang.Sdk`.
-- npm: own the `@nx-lang` scope and the `@nx-lang/language` package.
+- npm: own the `@nx-lang` scope and every package the publish job pushes: `@nx-lang/language`
+  (editor assets) and the workspace packages `@nx-lang/language-protocol`, `@nx-lang/language-core`,
+  `@nx-lang/language-client`, `@nx-lang/ir-runtime`, `@nx-lang/sdk-wasm` and `@nx-lang/monaco`.
+  `scripts/pack-packages.mjs` packs every workspace member that is not `private`, so a package
+  joins this list by dropping `private`, and leaves it by adding it back.
 - Visual Studio Marketplace: own publisher `nx-lang` and extension `nx-language`.
 - Open VSX: own namespace `nx-lang` and extension `nx-language`.
 
@@ -34,8 +38,13 @@ Prefer trusted publishing where the registry supports it:
 - NuGet.org: create a trusted publishing policy for repository `nx-lang/nx`, workflow file
   `package-publish.yml`, and the `production` environment. Set `NUGET_USER` as a production
   environment secret for the NuGet owner account used by `NuGet/login`.
-- npm: create a trusted publisher for `@nx-lang/language` that matches repository `nx-lang/nx`,
-  workflow `.github/workflows/package-publish.yml`, and environment `production`.
+- npm: create a trusted publisher for each package in the list above that matches repository
+  `nx-lang/nx`, workflow `.github/workflows/package-publish.yml`, and environment `production`. npm
+  only lets a trusted publisher be configured on a package that already exists, so a package's
+  first version is published by hand from a release's downloaded `.tgz` with a maintainer's
+  token (`npm publish <tgz> --access public`), and the trusted publisher is added right after;
+  the publish job then skips that version as already present and publishes the next release with
+  provenance.
 
 The package publish job requests GitHub OIDC with `id-token: write` only after a package GitHub
 Release is published and its release assets are validated.
@@ -84,13 +93,13 @@ registry-valid `major.minor.patch` versions and are tested by direct VSIX instal
 
 ## First Enablement
 
-1. Confirm PR workflows upload `deployables-Complete`, `editor-assets-package`, and `vscode-vsix-*`
-   artifacts without public registry credentials.
+1. Confirm PR workflows upload `deployables-Complete`, `editor-assets-package`, `npm-packages`,
+   and `vscode-vsix-*` artifacts without public registry credentials.
 2. Confirm the trusted PR artifact comment workflow posts download/install commands without checking
    out or executing pull request code.
 3. Push a test package tag in a disposable repository or dry-run branch and confirm `release.yml`
-   creates a draft package GitHub Release with `.nupkg`, `.snupkg`, `.tgz`, manifest, and checksum
-   assets.
+   creates a draft package GitHub Release with `.nupkg`, `.snupkg`, one `.tgz` per npm package,
+   manifest, and checksum assets.
 4. Push a test VS Code tag in a disposable repository or dry-run branch and confirm
    `vscode-release.yml` creates a draft VS Code GitHub Release with VSIX, manifest, and checksum
    assets.

@@ -200,6 +200,35 @@ jobs:
         path: src/vscode/dist/*.tgz
         if-no-files-found: error
 
+  npm-packages:
+    name: Build npm packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: validate
+    if: ${{ needs.validate.outputs.should_release == 'true' }}
+    steps:
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+      with:
+        fetch-depth: 0
+        ref: ${{ needs.validate.outputs.tag }}
+    - name: Set up Rust and the pnpm workspace
+      uses: ./.github/actions/setup-rust-node
+    - name: Build the workspace, including the WebAssembly module
+      run: pnpm -r build
+    # The module that ships inside @nx-lang/sdk-wasm is the one the parity tests ran against.
+    - name: Test the pnpm workspace
+      run: pnpm -r test
+    - name: Verify and pack the npm packages
+      run: |
+        pnpm run verify:packages
+        node scripts/pack-packages.mjs "${{ needs.validate.outputs.version }}" "${{ runner.temp }}/npm-packages"
+    - name: Upload npm packages
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: package-release-npm
+        path: ${{ runner.temp }}/npm-packages/*.tgz
+        if-no-files-found: error
+
   draft-release:
     name: Create draft GitHub Release
     runs-on: ubuntu-latest
@@ -207,6 +236,7 @@ jobs:
     - validate
     - package
     - editor-assets
+    - npm-packages
     if: ${{ needs.validate.outputs.should_release == 'true' }}
     permissions:
       actions: read
@@ -222,6 +252,11 @@ jobs:
       with:
         name: package-release-editor-assets
         path: ${{ runner.temp }}/editor-assets
+    - name: Download npm release artifacts
+      uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      with:
+        name: package-release-npm
+        path: ${{ runner.temp }}/npm-packages
     - name: Create manifest and checksums
       shell: pwsh
       env:
@@ -234,13 +269,14 @@ jobs:
 
         Get-ChildItem "$env:RUNNER_TEMP/nuget" -File -Include '*.nupkg', '*.snupkg' -Recurse | Copy-Item -Destination $releaseAssets
         Get-ChildItem "$env:RUNNER_TEMP/editor-assets" -File -Filter '*.tgz' -Recurse | Copy-Item -Destination $releaseAssets
+        Get-ChildItem "$env:RUNNER_TEMP/npm-packages" -File -Filter '*.tgz' -Recurse | Copy-Item -Destination $releaseAssets
 
         $nupkg = @(Get-ChildItem $releaseAssets -File -Filter '*.nupkg')
         $snupkg = @(Get-ChildItem $releaseAssets -File -Filter '*.snupkg')
         $tgz = @(Get-ChildItem $releaseAssets -File -Filter '*.tgz')
 
-        if ($nupkg.Count -eq 0 -or $snupkg.Count -eq 0 -or $tgz.Count -eq 0) {
-            throw 'Package releases require .nupkg, .snupkg, and npm .tgz assets.'
+        if ($nupkg.Count -eq 0 -or $snupkg.Count -eq 0 -or $tgz.Count -lt 2) {
+            throw 'Package releases require .nupkg, .snupkg, the editor-assets .tgz and the workspace npm .tgz assets.'
         }
 
         $artifacts = @(Get-ChildItem $releaseAssets -File | Sort-Object Name | ForEach-Object {
@@ -277,7 +313,7 @@ jobs:
         cat > "${notes}" <<EOF
         Draft package release for ${RELEASE_TAG}.
 
-        Review the attached NuGet, symbol, npm editor-assets, manifest, and checksum assets before publishing this GitHub Release.
+        Review the attached NuGet, symbol, npm (editor assets and workspace packages), manifest, and checksum assets before publishing this GitHub Release.
         Publishing the release triggers production package registry publication.
         EOF
 

@@ -1,11 +1,11 @@
 use crate::model::{CodegenProperty, CodegenRecordField};
 use crate::runtime::runtime_helper_source;
 use crate::{
-    build_codegen_program, emit_codegen_program, emit_js_program_module, emit_nx_ir, emit_program,
+    build_codegen_program, emit_codegen_program, emit_js_program_module, emit_program,
     javascript_runtime_helper_source, CodegenDeclaration, CodegenDeclarationKind,
     CodegenEntrypoint, CodegenExpression, CodegenExpressionKind, CodegenModule,
     CodegenModuleProvenance, CodegenOptions, CodegenProgram, CodegenReference, CodegenTarget,
-    CodegenTypeRef, JsProgramModuleOptions, DEFAULT_JS_PROGRAM_MODULE_NAME,
+    CodegenTypeRef, JsProgramModuleOptions, NxIrFormat, DEFAULT_JS_PROGRAM_MODULE_NAME,
     DEFAULT_JS_PROGRAM_MODULE_RUNTIME_IMPORT_SPECIFIER, NX_IR_FORMAT_ID, NX_IR_RUNTIME_ABI,
     NX_IR_SCHEMA_VERSION, NX_JS_RUNTIME_ABI,
 };
@@ -23,6 +23,11 @@ use std::fs;
 use std::process::Command;
 use std::sync::OnceLock;
 use tempfile::TempDir;
+
+/// The IR every SDK emits: compact. Tests parse it or search it for compact tokens.
+fn emit_nx_ir(artifact: &ProgramArtifact) -> Result<crate::GeneratedNxIr, crate::CodegenError> {
+    crate::emit_nx_ir(artifact, NxIrFormat::Compact)
+}
 
 fn artifact_from_source(source: &str) -> ProgramArtifact {
     build_program_artifact_from_source(source, "main.nx", &ProgramBuildContext::empty())
@@ -372,7 +377,7 @@ fn nx_ir_carries_no_unresolved_reference_for_a_case_of_an_unimported_union() {
         generated.json
     );
     assert!(
-        generated.json.contains("\"caseName\": \"cover\""),
+        generated.json.contains(r#""caseName":"cover""#),
         "expected the case to reach the IR: {}",
         generated.json
     );
@@ -423,13 +428,13 @@ fn nx_ir_emits_a_bare_case_written_in_a_component_body() {
     .expect("nx ir for the qualified form");
 
     assert!(
-        bare.json.contains("\"caseName\": \"cover\""),
+        bare.json.contains(r#""caseName":"cover""#),
         "expected the case to reach the IR: {}",
         bare.json
     );
     assert_eq!(
-        bare.json.matches("\"caseName\": \"cover\"").count(),
-        qualified.json.matches("\"caseName\": \"cover\"").count(),
+        bare.json.matches(r#""caseName":"cover""#).count(),
+        qualified.json.matches(r#""caseName":"cover""#).count(),
         "the bare form emitted a different number of case references than the qualified form"
     );
 }
@@ -501,12 +506,12 @@ fn nx_ir_carries_no_unresolved_reference_for_a_case_of_an_aliased_union() {
         generated.json
     );
     assert!(
-        !generated.json.contains("\"reference\": null"),
+        !generated.json.contains(r#""reference":null"#),
         "generated IR carries a reference that resolved to nothing: {}",
         generated.json
     );
     assert!(
-        generated.json.contains("\"caseName\": \"cover\""),
+        generated.json.contains(r#""caseName":"cover""#),
         "expected the case to reach the IR: {}",
         generated.json
     );
@@ -537,6 +542,32 @@ fn nx_ir_emits_metadata_entrypoints_and_source_provenance() {
     assert_eq!(generated.metadata.schema_version, NX_IR_SCHEMA_VERSION);
     assert_eq!(generated.metadata.runtime_abi, NX_IR_RUNTIME_ABI);
     assert_eq!(generated.metadata.function_entrypoints[0].name, "root");
+}
+
+#[test]
+fn compact_and_pretty_nx_ir_carry_the_same_content() {
+    let source = "external component <B v:int />\nlet root() = { <B v=1 /> }";
+    let compact = emit_nx_ir(&artifact_from_source(source)).expect("compact nx ir");
+    let pretty =
+        crate::emit_nx_ir(&artifact_from_source(source), NxIrFormat::Pretty).expect("pretty nx ir");
+
+    // Compact is what leaves the SDKs, so it must be one line; pretty is what the CLI writes to a
+    // file a person opens, so it ends in a newline like any other text file.
+    assert!(
+        !compact.json.contains('\n'),
+        "compact IR has a newline: {}",
+        compact.json
+    );
+    assert!(
+        pretty.json.ends_with("}\n"),
+        "pretty IR should end in a newline"
+    );
+    assert!(pretty.json.lines().count() > 1);
+
+    let compact_value: Value = serde_json::from_str(&compact.json).expect("compact json");
+    let pretty_value: Value = serde_json::from_str(&pretty.json).expect("pretty json");
+    assert_eq!(compact_value, pretty_value);
+    assert_eq!(compact.metadata, pretty.metadata);
 }
 
 #[test]

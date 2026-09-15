@@ -666,24 +666,47 @@ pub struct NxIrSourceEntry {
     pub source: String,
 }
 
-pub fn emit_nx_ir(artifact: &ProgramArtifact) -> Result<GeneratedNxIr, CodegenError> {
-    let program = build_codegen_program(artifact)?;
-    emit_codegen_nx_ir(&program)
+/// How the NX IR JSON is laid out.
+///
+/// The content is the same either way: parsing compact and pretty output of one program yields
+/// equal values. Compact is for IR that travels — over the FFI, out of the wasm module, inside a
+/// share — where every byte is paid for and nobody reads the text. Pretty is for files a person
+/// opens, which is what the CLI writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NxIrFormat {
+    /// No indentation and no line breaks between tokens.
+    #[default]
+    Compact,
+    /// Indented, one token per line, ending in a newline.
+    Pretty,
 }
 
-pub fn emit_codegen_nx_ir(program: &CodegenProgram) -> Result<GeneratedNxIr, CodegenError> {
+pub fn emit_nx_ir(
+    artifact: &ProgramArtifact,
+    format: NxIrFormat,
+) -> Result<GeneratedNxIr, CodegenError> {
+    let program = build_codegen_program(artifact)?;
+    emit_codegen_nx_ir(&program, format)
+}
+
+pub fn emit_codegen_nx_ir(
+    program: &CodegenProgram,
+    format: NxIrFormat,
+) -> Result<GeneratedNxIr, CodegenError> {
     validate_ir_program(program)?;
 
     let ir = NxIrProgram::from_codegen(program);
-    let json = serde_json::to_string_pretty(&ir)
-        .map(|json| format!("{json}\n"))
-        .map_err(|error| {
-            CodegenError::single(
-                Diagnostic::error("nx-ir-serialization-error")
-                    .with_message(format!("failed to serialize NX IR JSON: {error}"))
-                    .build(),
-            )
-        })?;
+    let serialized = match format {
+        NxIrFormat::Compact => serde_json::to_string(&ir),
+        NxIrFormat::Pretty => serde_json::to_string_pretty(&ir).map(|json| format!("{json}\n")),
+    };
+    let json = serialized.map_err(|error| {
+        CodegenError::single(
+            Diagnostic::error("nx-ir-serialization-error")
+                .with_message(format!("failed to serialize NX IR JSON: {error}"))
+                .build(),
+        )
+    })?;
     let metadata = ir.metadata();
 
     Ok(GeneratedNxIr { json, metadata })

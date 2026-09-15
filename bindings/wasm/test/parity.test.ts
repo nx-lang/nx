@@ -44,7 +44,7 @@ describe("NX IR parity with the Node SDK", () => {
       try {
         const fromWasm = artifact.generateNxIr();
 
-        expect(fromWasm.json).toBe(fromNode.json);
+        expect(JSON.parse(fromWasm.json)).toEqual(JSON.parse(fromNode.json));
         expect(fromWasm.metadata).toEqual(fromNode.metadata);
       } finally {
         artifact.dispose();

@@ -6,13 +6,17 @@ One-time environment, registry and hosting setup is in [deployment-setup.md](dep
 ## Release Model
 
 Pull requests and `main` builds are artifact-only. They build, verify, and upload NuGet, npm
-editor-assets, and VSIX artifacts without public registry credentials.
+(editor assets and the workspace packages), and VSIX artifacts without public registry credentials.
 
 Production publishing has two reviewed release tracks:
 
 - Package releases use tags like `v1.2.3`. The tag workflow creates a draft GitHub Release with
-  verified `NxLang.Sdk` `.nupkg` and `.snupkg` assets, the `@nx-lang/language` npm tarball, a
-  release manifest, and checksums.
+  verified `NxLang.Sdk` `.nupkg` and `.snupkg` assets, one npm tarball per package — the
+  `@nx-lang/language` editor assets and the workspace packages `@nx-lang/language-protocol`,
+  `@nx-lang/language-core`, `@nx-lang/language-client`, `@nx-lang/ir-runtime`, `@nx-lang/sdk-wasm`
+  (with the WebAssembly module inside) and `@nx-lang/monaco` — a release manifest, and checksums.
+  Every npm package carries the tag's version, and a workspace package's dependency on another is
+  pinned to that version.
 - VS Code extension releases use tags like `vscode-v1.2.3`. The tag workflow creates a draft GitHub
   Release with verified VSIX assets, a release manifest, and checksums.
 
@@ -50,13 +54,18 @@ Only stable `major.minor.patch` release tags are supported in this implementatio
    ```
 3. Wait for the Package release workflow to finish.
 4. Open the draft GitHub Release for `v1.2.3`.
-5. Inspect the attached `.nupkg`, `.snupkg`, npm `.tgz`, `release-manifest.json`, and
+5. Inspect the attached `.nupkg`, `.snupkg`, npm `.tgz` files, `release-manifest.json`, and
    `release-checksums.txt` assets.
 6. Confirm the manifest tag, version, commit, artifact names, and checksums match the intended
    release.
 7. Publish the GitHub Release.
 8. Approve the `production` environment deployment if reviewers are required.
-9. Confirm publication on NuGet.org and npm.
+9. Confirm publication on NuGet.org and npm: `npm view @nx-lang/sdk-wasm version` and the same
+   for each package should answer with the tag's version.
+
+The publish job publishes the npm tarballs in dependency order (`scripts/publish-packages.mjs`), so
+a consumer installing a just-published package finds its `@nx-lang/*` dependencies on the registry
+already, and skips any version the registry has.
 
 ## Publish A VS Code Extension Release
 
@@ -97,6 +106,16 @@ npm init -y
 pnpm add ../nx-editor-assets/*.tgz
 ```
 
+npm workspace packages test (the tarballs depend on each other by version, so add them together):
+
+```bash
+gh run download <run-id> -R nx-lang/nx -n npm-packages -D nx-npm-packages
+mkdir nx-npm-test
+cd nx-npm-test
+npm init -y
+pnpm add ../nx-npm-packages/*.tgz
+```
+
 VSIX test:
 
 ```bash
@@ -112,13 +131,16 @@ Use workflow or GitHub Release artifacts rather than rebuilding locally:
 unzip -l NxLang.Sdk.*.nupkg
 unzip -l NxLang.Sdk.*.snupkg
 tar -tf nx-lang-language-*.tgz
+tar -tf nx-lang-sdk-wasm-*.tgz | grep nx.wasm
 unzip -l nx-language-*.vsix
 sha256sum -c release-checksums.txt
 ```
 
 For the SDK package, `tools/packaging/Test-NxSdkPackage.ps1` verifies metadata and native SDK
 assets. For editor assets, run `pnpm run verify:package` and `pnpm run smoke:package` from
-`src/vscode`.
+`src/vscode`. For the workspace packages, `pnpm run verify:packages` at the repository root packs
+each one and installs it into a scratch project, and `node scripts/pack-packages.mjs <version>
+<dir>` packs them all at one version and checks the packed manifests.
 
 ## Repair A Partial Publish
 
@@ -145,9 +167,13 @@ For a local emergency repair from already-downloaded assets:
 
 ```bash
 dotnet nuget push NxLang.Sdk.*.nupkg --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
+node scripts/publish-packages.mjs <directory-with-the-release-tgz-files> --version 1.2.3
 pnpm run publish:vsce -- nx-language-*.vsix
 pnpm run publish:ovsx -- nx-language-*.vsix
 ```
+
+The npm script publishes in dependency order and skips versions the registry already has, so it
+can be pointed at the whole set of downloaded `.tgz` files after a partial publish.
 
 Do not rebuild package contents for a repair publish unless the fix requires a new higher version.
 

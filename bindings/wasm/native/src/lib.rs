@@ -17,7 +17,7 @@ use nx_api::{
     diagnostics_to_api_with_source_entries, load_program_artifact_from_source, LibraryRegistry,
     NxDiagnostic, NxSeverity, ProgramArtifact,
 };
-use nx_codegen::{emit_nx_ir, NxIrEntrypointMetadata, NxIrMetadata};
+use nx_codegen::{emit_nx_ir, NxIrEntrypointMetadata, NxIrFormat, NxIrMetadata};
 use nx_language_service::{
     DocumentInput, DocumentUri, SnapshotError, TextPosition, WorkspaceSnapshot,
 };
@@ -264,7 +264,8 @@ fn build_program(argument: Result<&str, OperationError>) -> Operation {
 }
 
 fn program_nx_ir(program: &ProgramArtifact) -> Operation {
-    let ir = emit_nx_ir(program).map_err(|error| codegen_error(error, program))?;
+    let ir =
+        emit_nx_ir(program, NxIrFormat::Compact).map_err(|error| codegen_error(error, program))?;
     result_json(&GeneratedNxIrPayload {
         json: ir.json,
         metadata: ir_metadata_payload(ir.metadata),

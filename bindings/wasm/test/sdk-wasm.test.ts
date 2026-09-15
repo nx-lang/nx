@@ -17,7 +17,10 @@ describe("program artifacts", () => {
     try {
       const ir = artifact.generateNxIr();
 
-      expect(ir.json).toContain("\"schemaVersion\"");
+      const parsed = JSON.parse(ir.json) as { schemaVersion: unknown };
+      expect(parsed.schemaVersion).toBe(ir.metadata.schemaVersion);
+      // Compact: the IR travels inside shares and between threads, where nobody reads the text.
+      expect(ir.json).not.toContain("\n");
       expect(ir.metadata.schemaVersion).toBeTypeOf("number");
       expect(ir.metadata.programFingerprint).toBeTypeOf("string");
       expect(ir.metadata.runtimeAbi).toBeTypeOf("string");

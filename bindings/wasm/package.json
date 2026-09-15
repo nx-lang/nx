@@ -1,7 +1,6 @@
 {
   "name": "@nx-lang/sdk-wasm",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "description": "Browser and Node SDK for NX compilation, NX IR generation and the language service, over a WebAssembly module.",
   "license": "MIT",
@@ -13,6 +12,7 @@
   },
   "files": [
     "dist",
+    "!dist/nx-debug-trap.wasm",
     "README.md"
   ],
   "exports": {
@@ -27,6 +27,9 @@
     "./nx.wasm": "./dist/nx.wasm"
   },
   "types": "./dist/src/browser.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build:wasm": "node scripts/build-wasm.mjs",
     "build:ts": "tsc -p tsconfig.json",
@@ -34,7 +37,9 @@
     "test": "pnpm run build && pnpm run typecheck && node scripts/build-wasm.mjs --debug-trap && vitest run",
     "clean": "node scripts/clean.mjs",
     "rebuild": "pnpm run clean && pnpm run build",
-    "typecheck": "tsc -p tsconfig.test.json"
+    "typecheck": "tsc -p tsconfig.test.json",
+    "prepack": "pnpm run build",
+    "verify:package": "node ../../scripts/verify-package.mjs"
   },
   "dependencies": {
     "@bjorn3/browser_wasi_shim": "^0.4.2",

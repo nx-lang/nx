@@ -220,6 +220,8 @@ jobs:
     timeout-minutes: 30
     steps:
     - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+      with:
+        fetch-depth: 0 # MinVer needs tag history for the npm package version.
     # The codegen tests execute generated JavaScript with `node` and check generated TypeScript
     # with the `tsc` from the pnpm workspace this sets up.
     - name: Set up Rust and the pnpm workspace
@@ -237,3 +239,28 @@ jobs:
       run: pnpm -r build
     - name: 🧪 Test the pnpm workspace
       run: pnpm -r test
+    # The workspace's npm packages are packed at this build's version and verified the way a
+    # consumer installs them, so a manifest that cannot publish fails here rather than on a release
+    # tag. The version comes from the same script as the NuGet and editor-assets versions.
+    - name: Restore .NET tools
+      run: ./init.ps1 -NoPrerequisites -NoRestore
+      shell: pwsh
+    - name: Calculate package version
+      id: versions
+      shell: pwsh
+      run: >
+        tools/versions/Get-ReleaseVersion.ps1
+        -Track package
+        -PullRequestNumber '${{ github.event.pull_request.number }}'
+        -GitHubEnvPath $env:GITHUB_ENV
+        -GitHubOutputPath $env:GITHUB_OUTPUT
+    - name: 📦 Verify and pack the npm packages
+      run: |
+        pnpm run verify:packages
+        node scripts/pack-packages.mjs "${{ steps.versions.outputs.package_version }}" "${{ runner.temp }}/npm-packages"
+    - name: Upload npm packages
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: npm-packages
+        path: ${{ runner.temp }}/npm-packages/*.tgz
+        if-no-files-found: error

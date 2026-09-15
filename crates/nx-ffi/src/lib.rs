@@ -16,7 +16,7 @@ use nx_api::{
 use nx_codegen::{
     emit_js_program_module, emit_nx_ir, GeneratedJsProgramModule,
     GeneratedJsProgramModuleComponentExport, GeneratedJsProgramModuleFunctionExport, GeneratedNxIr,
-    JsProgramModuleOptions, NxIrMetadata,
+    JsProgramModuleOptions, NxIrFormat, NxIrMetadata,
 };
 use nx_value::NxValue;
 use serde::Serialize;
@@ -923,7 +923,7 @@ pub extern "C" fn nx_codegen_nx_ir(
     let output_format = NxOutputFormat::Json;
     let result = panic::catch_unwind(|| {
         let payload = with_program_artifact(program_artifact_ptr, |program_artifact| {
-            match emit_nx_ir(program_artifact) {
+            match emit_nx_ir(program_artifact, NxIrFormat::Compact) {
                 Ok(ir) => Ok((
                     NxEvalStatus::Ok,
                     FfiPayload::Json(json_generated_nx_ir_payload(ir)?),

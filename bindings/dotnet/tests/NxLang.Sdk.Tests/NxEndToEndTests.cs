@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Text.Json;
 using NxLang.Nx;
 using NxLang.Nx.Interop;
 using Xunit;
@@ -224,7 +225,9 @@ public class NxEndToEndTests
 
         NxGeneratedNxIr ir = artifact.GenerateNxIr();
 
-        Assert.Contains("\"format\": \"nx-ir-json\"", ir.Json, StringComparison.Ordinal);
+        using JsonDocument document = JsonDocument.Parse(ir.Json);
+        Assert.Equal("nx-ir-json", document.RootElement.GetProperty("format").GetString());
+        Assert.DoesNotContain('\n', ir.Json);
         Assert.Equal(2, ir.Metadata.SchemaVersion);
         Assert.Equal("nx-ir-runtime-v1", ir.Metadata.RuntimeAbi);
         Assert.True(ir.Metadata.ProgramFingerprint > 0);
@@ -242,7 +245,8 @@ public class NxEndToEndTests
 
         NxGeneratedNxIr ir = NxRuntime.GenerateNxIr("let root() = { 42 }", buildContext);
 
-        Assert.Contains("\"programFingerprint\"", ir.Json, StringComparison.Ordinal);
+        using JsonDocument document = JsonDocument.Parse(ir.Json);
+        Assert.True(document.RootElement.TryGetProperty("programFingerprint", out _));
         Assert.Equal("root", Assert.Single(ir.Metadata.FunctionEntrypoints).Name);
     }
 

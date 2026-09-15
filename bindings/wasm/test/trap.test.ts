@@ -46,7 +46,7 @@ describe("a trapped host", () => {
     const replacement = createNxHost(nxDebugTrapModule);
     try {
       const artifact = replacement.buildProgramArtifact("let root() = { 42 }");
-      expect(artifact.generateNxIr().json).toContain("\"schemaVersion\"");
+      expect(JSON.parse(artifact.generateNxIr().json)).toHaveProperty("schemaVersion");
       artifact.dispose();
       expect(replacement.crashed).toBe(false);
     } finally {

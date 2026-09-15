@@ -37,14 +37,14 @@
   "peerDependencies": {
     "@nx-lang/language": ">=0.1.0",
     "@shikijs/monaco": "^4.0.0",
-    "monaco-editor": ">=0.56.0",
+    "monaco-editor": ">=0.52.0",
     "shiki": "^4.0.0"
   },
   "devDependencies": {
     "@nx-lang/language": "file:../../src/vscode",
     "@shikijs/monaco": "^4.4.3",
     "@types/node": "^22.20.0",
-    "monaco-editor": "^0.56.0",
+    "monaco-editor": "^0.52.2",
     "shiki": "^4.4.3",
     "typescript": "^5.9.3"
   },

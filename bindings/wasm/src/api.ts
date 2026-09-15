@@ -10,6 +10,13 @@ export {
 } from "./errors.js";
 export { createLanguageService, type NxLanguageServiceOptions } from "./language.js";
 export { compileNxModule, type NxModuleSource } from "./module.js";
+export {
+  buildProgramWithPrelude,
+  type NxDiagnosticOrigin,
+  type NxPreludeBuildOptions,
+  type NxPreludeBuildResult,
+  type NxPreludeDiagnostic
+} from "./prelude.js";
 export type { NxHost, NxLanguageSnapshot, NxProgramArtifact } from "./host.js";
 export type {
   SnapshotLanguageService,

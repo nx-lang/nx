@@ -99,6 +99,47 @@ implements the protocol's `NxLanguageService` over these snapshots, shifting pos
 document's own coordinates. It shares that arithmetic with the HTTP handler, so the two cannot
 disagree about a line number.
 
+## Building behind a prelude
+
+A host that keeps its context declarations in a prelude — a catalog of external components, for one
+— compiles the prelude and the document as a single module, because an imported external component
+loses its defaults and inherited props. `buildProgramWithPrelude` does that build and tells the
+prelude's diagnostics from the document's:
+
+```ts
+import { buildProgramWithPrelude } from "@nx-lang/sdk-wasm";
+
+const { ir, diagnostics } = buildProgramWithPrelude(host, catalog, source, { fileName: "doc.nx" });
+if (ir !== null) {
+  const program = JSON.parse(ir.json);
+}
+```
+
+`ir` is the generated IR and metadata, or `null` when the build failed. Each diagnostic carries an
+`origin`:
+
+| Origin    | Meaning                                | `span`                                           |
+| --------- | -------------------------------------- | ------------------------------------------------ |
+| `source`  | The document. The author's to act on.  | Shifted into the document's own lines and bytes  |
+| `catalog` | The prelude. The host's fault.         | `null`: never marked in the document             |
+| `program` | The program as a whole.                | `null`: the compiler reported no location        |
+
+The prelude goes ahead of the document, so a document that ends in a bare element expression stays
+valid, and every `source` span has the prelude's lines and bytes subtracted; columns are relative to
+their line and carry over untouched. The arithmetic is `@nx-lang/language-core`'s prelude offsets,
+the same the language service applies, so a diagnostic from a build and a range from a hover agree
+on where the document starts. An empty span at a real column — an insertion point such as
+`Expected } here` — is kept as a position; only the compiler's whole-program sentinel at 1:1 is
+treated as no position. The playground compiles every example this way, and so does the DrawnUI
+fiddle.
+
+## Compact IR
+
+The IR text in `NxGeneratedNxIr.json` is compact JSON: no indentation and no line breaks. It travels
+inside share artifacts and between threads, where every byte is paid for and nobody reads it. The
+content is what the CLI writes pretty-printed to `.nxir.json` files; parse either and the values are
+equal.
+
 ## A trap ends the host; the caller replaces it
 
 The module targets `wasm32-wasip1`, where a panic aborts rather than unwinds. A panic or an
@@ -157,7 +198,7 @@ the build rather than reaching a site.
 | Path            | What it holds                                                       |
 | --------------- | ------------------------------------------------------------------- |
 | `native/`       | The Rust crate and its ABI                                          |
-| `src/`          | The loader, the two WASI entry points, errors and types             |
+| `src/`          | The loader, the two WASI entry points, the prelude build, errors and types |
 | `scripts/`      | The wasm build and clean scripts                                    |
-| `test/`         | Loader, SDK, trap, entry-point and Node-SDK parity tests            |
+| `test/`         | Loader, SDK, prelude build, trap, entry-point and Node-SDK parity tests |
 | `dist/nx.wasm`  | The built module (gitignored; produced by `pnpm run build`)         |

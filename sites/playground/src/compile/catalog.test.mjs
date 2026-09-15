@@ -1,8 +1,9 @@
 /**
  * The catalog compile, against the real wasm host under Node.
  *
- * These are the tests `server/compile.test.mjs` carried when compilation happened on the server.
- * They run against the same module the browser loads, so what the site ships is what is checked.
+ * These run against the same module the browser loads, so what the site ships is what is checked.
+ * The origin classification and span shifting are `@nx-lang/sdk-wasm`'s and are tested there; what
+ * is checked here is that the site's own catalog compiles and the site's input limits hold.
  */
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
@@ -27,17 +28,6 @@ test("compiles a program that uses the catalog", () => {
   assert.equal(result.ir.format, "nx-ir-json");
 });
 
-test("reports a source diagnostic at the visitor's own line and column", () => {
-  const result = compile('let root() = {\n  <SkiaLabel Text=1.0 />\n}');
-  assert.equal(result.ir, null);
-  assert.equal(result.diagnostics.length, 1);
-  const [diagnostic] = result.diagnostics;
-  assert.equal(diagnostic.origin, "source");
-  // Line 2, column 14 is the `T` of `Text` — the catalog leads, so the span is shifted back.
-  assert.equal(diagnostic.span.startLine, 2);
-  assert.equal(diagnostic.span.startColumn, 14);
-});
-
 test("compiles a source file that is a single trailing element", () => {
   const result = compile("<SkiaLayer VerticalOptions=Fill>\n</SkiaLayer>\n");
   assert.deepEqual(result.diagnostics, []);
@@ -48,41 +38,6 @@ test("compiles a trailing element that has children", () => {
   const result = compile('<SkiaLayer>\n  <SkiaLabel Text="hi" />\n</SkiaLayer>\n');
   assert.deepEqual(result.diagnostics, []);
   assert.equal(result.ir.format, "nx-ir-json");
-});
-
-test("attributes a diagnostic inside the catalog to the catalog", () => {
-  const broken = `${catalog}\nexternal component <Broken\n`;
-  const result = compileWithCatalog(host, broken, 'let root() = { <SkiaLabel Text="hi" /> }');
-  assert.equal(result.ir, null);
-  assert.ok(result.diagnostics.length > 0);
-  for (const diagnostic of result.diagnostics) {
-    assert.equal(diagnostic.origin, "catalog");
-    // A catalog fault is never marked in the editor, so it carries no position.
-    assert.equal(diagnostic.span, null);
-  }
-});
-
-test("reports a whole-program failure without a position", () => {
-  const broken = `${catalog}\nexternal component <Broken value: NoSuchType? />\n`;
-  const result = compileWithCatalog(host, broken, 'let root() = { <SkiaLabel Text="hi" /> }');
-  assert.equal(result.ir, null);
-  assert.ok(result.diagnostics.length > 0);
-  for (const diagnostic of result.diagnostics) {
-    assert.equal(diagnostic.origin, "program");
-    assert.equal(diagnostic.span, null);
-  }
-});
-
-test("marks an insertion point, which the compiler reports as an empty span", () => {
-  // `Expected } here` names a column and no width. That is a position the author can act on, so it
-  // must survive as one rather than be mistaken for a whole-program fault.
-  const result = compile('let root() = { <SkiaLabel Text="hi" />');
-  assert.equal(result.ir, null);
-  assert.equal(result.diagnostics.length, 1);
-  const [diagnostic] = result.diagnostics;
-  assert.equal(diagnostic.origin, "source");
-  assert.equal(diagnostic.span.startLine, 1);
-  assert.equal(diagnostic.span.startColumn, diagnostic.span.endColumn);
 });
 
 test("answers a stray delimiter at the end of the source", () => {

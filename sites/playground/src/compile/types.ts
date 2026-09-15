@@ -1,26 +1,19 @@
+import type {
+  NxDiagnosticOrigin,
+  NxPreludeDiagnostic,
+  NxTextSpan,
+} from "@nx-lang/sdk-wasm";
+
 /** Where a diagnostic points, and therefore how the app is allowed to present it. */
-export type DiagnosticOrigin = "source" | "catalog" | "program";
+export type DiagnosticOrigin = NxDiagnosticOrigin;
 
-export interface DiagnosticSpan {
-  readonly startByte: number;
-  readonly endByte: number;
-  readonly startLine: number;
-  readonly startColumn: number;
-  readonly endLine: number;
-  readonly endColumn: number;
-}
+export type DiagnosticSpan = NxTextSpan;
 
-export interface Diagnostic {
-  readonly severity: string;
-  readonly code: string;
-  readonly message: string;
-  /**
-   * `source` diagnostics carry a span in the author's own coordinates and are marked in the editor.
-   * `catalog` and `program` diagnostics are application faults, reported without a position.
-   */
-  readonly origin: DiagnosticOrigin;
-  readonly span: DiagnosticSpan | null;
-}
+/**
+ * `source` diagnostics carry a span in the author's own coordinates and are marked in the editor.
+ * `catalog` and `program` diagnostics are application faults, reported without a position.
+ */
+export type Diagnostic = NxPreludeDiagnostic;
 
 export interface CompileResult {
   /** The NX IR program, or null when compilation failed. */

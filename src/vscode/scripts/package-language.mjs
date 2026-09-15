@@ -47,6 +47,7 @@ try {
     bugs: manifest.bugs,
     homepage: manifest.homepage,
     type: manifest.type,
+    publishConfig: { access: 'public' },
     exports: {
       './grammar': './syntaxes/nx.tmLanguage.json',
       './markdown-codeblock-grammar': './syntaxes/nx.markdown.codeblock.tmLanguage.json',

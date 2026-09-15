@@ -756,3 +756,43 @@ override (confirm the plan supports it) or a Worker in front of both. Whichever 
 service must go through Cloudflare the way the playground does: the playground has no
 Railway-generated domain on purpose, because that hostname would answer outside the edge, where the
 cache rules do not apply.
+
+## The DrawnUI Fiddle: What `add-nx-to-drawnui-fiddle` Left For Later
+
+NX is a language of the DrawnUI fiddle engine (`DrawnUi.FiddleEngine`, the engine behind
+drawfiddle.com): the fiddle compiles NX in the visitor's browser with `@nx-lang/sdk-wasm` against a
+DrawnUI catalog it generates from the `drawnui-react` package it ships, evaluates `root` with
+`@nx-lang/ir-runtime`, and draws the result with DrawnUi.React. Its shares carry the compiled NX IR
+and play without the compiler. Nothing DrawnUI-specific entered this repository for it; what did was
+the prelude-aware build in the wasm SDK, compact IR, the Monaco peer range, and the npm release
+track for the workspace packages. The items below were deliberately left out.
+
+### Removing DrawnUI from the playground
+
+The playground still vendors DrawnUi.React and keeps its own catalog, generator, coercion and
+renderer under `sites/playground`, duplicating what the fiddle now owns. With the fiddle as the
+public DrawnUI playground for NX, the playground can drop its DrawnUI target and become a
+general-purpose site. Blocked on deciding what a general-purpose playground draws instead — the
+examples, the gallery and the renderer all assume DrawnUI — which is a change of its own rather
+than a deletion.
+
+### The catalog as a library artifact, for shares
+
+Every NX share artifact carries the whole program's IR, and the program is the snippet plus the
+flattened catalog: about 880 KB of compact JSON for a snippet of a few lines, of which the snippet
+is a few kilobytes. Shipping the catalog's IR once with the fiddle's runtime bundle and storing
+only the snippet's in the share needs the IR to reference declarations across artifacts, which is
+the library-artifact work above: an imported external component must keep its defaults and
+inherited properties (NXE12/NXE13) before the catalog can be a library, and the runtime must link
+two IR documents before a share can be one of them. Until then compact JSON is the mitigation, and
+the private backend's artifact limit decides whether NX shares can be opened to the public.
+
+### The fiddle's compile in a Web Worker
+
+The fiddle compiles on the main thread: a compile takes on the order of 100 ms and a trap is
+recovered by rebuilding the host in under 2 ms, so the tab stays responsive and a crash costs one
+run. The playground's worker adds a deadline and isolation that the fiddle does not have, so a
+compiler hang — none is known; the compiler is a type checker and code generator with no
+non-terminating paths — would freeze the tab. Blocked on nothing but a reason: the worker's
+message protocol, the deadline and the crash handling are the playground's `src/worker`, and
+moving them to the fiddle is a port that adds a thread hop to every compile and every hover.

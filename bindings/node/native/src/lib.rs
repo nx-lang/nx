@@ -6,7 +6,7 @@ use nx_api::{
     LibraryRegistry, NxDiagnostic, NxSeverity, NxWorkspace, NxWorkspaceModule, ProgramArtifact,
     ProgramBuildContext,
 };
-use nx_codegen::{emit_nx_ir, GeneratedNxIr, NxIrEntrypointMetadata, NxIrMetadata};
+use nx_codegen::{emit_nx_ir, GeneratedNxIr, NxIrEntrypointMetadata, NxIrFormat, NxIrMetadata};
 use nx_language_service::{
     DocumentInput, DocumentUri, SnapshotError, TextPosition, WorkspaceSnapshot,
 };
@@ -319,7 +319,8 @@ impl NativeNxProgramArtifact {
     #[napi]
     pub fn generate_nx_ir(&self) -> Result<String> {
         let program = self.program()?;
-        let ir = emit_nx_ir(program).map_err(|error| codegen_error(error, program))?;
+        let ir = emit_nx_ir(program, NxIrFormat::Compact)
+            .map_err(|error| codegen_error(error, program))?;
         generated_nx_ir_json(ir)
     }
 

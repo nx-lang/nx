@@ -131,8 +131,8 @@ jobs:
         $snupkg = @(Get-ChildItem $assets -File -Filter 'NxLang.Sdk.*.snupkg')
         $tgz = @(Get-ChildItem $assets -File -Filter '*.tgz')
 
-        if ($nupkg.Count -ne 1 -or $snupkg.Count -ne 1 -or $tgz.Count -ne 1) {
-            throw 'Package releases must include exactly one NxLang.Sdk .nupkg, one .snupkg, and one npm .tgz asset.'
+        if ($nupkg.Count -ne 1 -or $snupkg.Count -ne 1 -or $tgz.Count -lt 1) {
+            throw 'Package releases must include exactly one NxLang.Sdk .nupkg, one .snupkg, and at least one npm .tgz asset.'
         }
 
         $archive = [System.IO.Compression.ZipFile]::OpenRead($nupkg[0].FullName)
@@ -161,28 +161,21 @@ jobs:
             $archive.Dispose()
         }
 
-        $npmVersion = node -e "const cp=require('node:child_process'); const p=cp.execFileSync('tar',['-xOf',process.argv[1],'package/package.json'],{encoding:'utf8'}); console.log(JSON.parse(p).version)" $tgz[0].FullName
-        if ($npmVersion -ne $env:RELEASE_VERSION) {
-            throw "npm package version '$npmVersion' does not match release version '$env:RELEASE_VERSION'."
+        foreach ($package in $tgz) {
+            $npmVersion = node -e "const cp=require('node:child_process'); const p=cp.execFileSync('tar',['-xOf',process.argv[1],'package/package.json'],{encoding:'utf8'}); console.log(JSON.parse(p).version)" $package.FullName
+            if ($npmVersion -ne $env:RELEASE_VERSION) {
+                throw "npm package '$($package.Name)' version '$npmVersion' does not match release version '$env:RELEASE_VERSION'."
+            }
         }
     - name: Check NuGet version
       shell: pwsh
       run: |
         $package = Get-ChildItem "$env:RUNNER_TEMP/release-assets/NxLang.Sdk.*.nupkg" | Select-Object -First 1
         tools/packaging/Test-NuGetPackageVersionAvailable.ps1 -PackagePath $package.FullName
-    - name: Check npm version
-      id: npm-version
-      run: |
-        package=$(find "${RUNNER_TEMP}/release-assets" -maxdepth 1 -name '*.tgz' -type f -print -quit)
-        name=$(node -e "const p=require('child_process').execFileSync('tar',['-xOf',process.argv[1],'package/package.json'],{encoding:'utf8'}); console.log(JSON.parse(p).name)" "$package")
-        package_version=$(node -e "const p=require('child_process').execFileSync('tar',['-xOf',process.argv[1],'package/package.json'],{encoding:'utf8'}); console.log(JSON.parse(p).version)" "$package")
-        if npm view "${name}@${package_version}" version >/dev/null 2>&1; then
-          echo "::warning::${name}@${package_version} already exists on npm; treating this run as an idempotent retry."
-          echo "exists=true" >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
-        echo "exists=false" >> "$GITHUB_OUTPUT"
-        echo "npm package ${name}@${package_version} is available."
+    # Every npm tarball in the release, in dependency order; a version already on the registry is
+    # skipped, so a rerun of this workflow is an idempotent retry that fills in what is missing.
+    - name: Plan npm publication
+      run: node scripts/publish-packages.mjs "${RUNNER_TEMP}/release-assets" --version "${RELEASE_VERSION}" --dry-run
     - name: Check npm trusted publishing support
       shell: bash
       run: |
@@ -222,8 +215,5 @@ jobs:
         Get-ChildItem "$env:RUNNER_TEMP/release-assets" -Filter '*.nupkg' | ForEach-Object {
             dotnet nuget push $_.FullName --source https://api.nuget.org/v3/index.json --api-key $apiKey --skip-duplicate
         }
-    - name: Publish editor-assets package
-      if: ${{ steps.npm-version.outputs.exists != 'true' }}
-      run: |
-        package=$(find "${RUNNER_TEMP}/release-assets" -maxdepth 1 -name '*.tgz' -type f -print -quit)
-        npm publish "$package" --access public --provenance
+    - name: Publish npm packages
+      run: node scripts/publish-packages.mjs "${RUNNER_TEMP}/release-assets" --version "${RELEASE_VERSION}"

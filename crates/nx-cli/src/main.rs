@@ -19,6 +19,7 @@ use nx_api::{
 };
 use nx_codegen::{
     emit_js_program_module, emit_nx_ir, emit_program, CodegenOptions, JsProgramModuleOptions,
+    NxIrFormat,
 };
 use nx_diagnostics::{render_diagnostics_cli, Diagnostic, Severity};
 use nx_hir::{lower_source_module, Item, LoweredModule};
@@ -424,7 +425,7 @@ fn generate_executable_source(
 }
 
 fn generate_executable_nx_ir(artifact: &ProgramArtifact, output_root: &Path) -> ExitCode {
-    let generated = match emit_nx_ir(artifact) {
+    let generated = match emit_nx_ir(artifact, NxIrFormat::Pretty) {
         Ok(output) => output,
         Err(error) => return render_codegen_diagnostics(artifact, &error.diagnostics),
     };

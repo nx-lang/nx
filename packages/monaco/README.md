@@ -25,9 +25,20 @@ const editor = monaco.editor.create(container, {
 ## Peer dependencies
 
 The host installs `monaco-editor`, `shiki`, `@shikijs/monaco`, and `@nx-lang/language`, so there is
-one Monaco on the page and the host controls versions. Until `@nx-lang/language` is on the
-registry, a host consuming this repository links it by path, the way this repository's workspace
-does (`"@nx-lang/language": "file:../../src/vscode"`).
+one Monaco on the page and the host controls versions. Monaco 0.52.0 and later are supported: every
+API the package calls exists there, and the package is compiled against 0.52's declarations. Until
+`@nx-lang/language` is on the registry, a host consuming this repository links it by path, the way
+this repository's workspace does (`"@nx-lang/language": "file:../../src/vscode"`).
+
+The package never imports `monaco-editor` itself; it only uses the namespace it is handed. That
+namespace may be an ES module import, what `@monaco-editor/react` passes to `beforeMount`, or the
+`monaco` global an AMD-loaded Monaco leaves on `window` — BlazorMonaco loads it that way — so a
+host with its own Monaco never ends up with a second copy on the page.
+
+```js
+// An AMD-loaded Monaco: the global is the namespace.
+registerNxLanguage(window.monaco, { service });
+```
 
 ## `registerNxLanguage(monaco, options?)`
 

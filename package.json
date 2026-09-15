@@ -5,7 +5,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
-    "verify:packages": "pnpm -r --filter \"./packages/*\" run verify:package"
+    "verify:packages": "pnpm -r run verify:package"
   },
   "engines": {
     "node": ">=22.18.0"
