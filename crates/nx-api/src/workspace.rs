@@ -59,6 +59,7 @@ impl NxWorkspace {
 pub struct NxWorkspaceModule {
     identity: String,
     source: Arc<str>,
+    version: Option<String>,
 }
 
 impl NxWorkspaceModule {
@@ -77,6 +78,7 @@ impl NxWorkspaceModule {
         Ok(Self {
             identity: normalized_identity,
             source: source.into(),
+            version: None,
         })
     }
 
@@ -101,7 +103,23 @@ impl NxWorkspaceModule {
         Ok(Self {
             identity: normalized_identity,
             source: Arc::<str>::from(source),
+            version: None,
         })
+    }
+
+    /// Returns this module with a version string: the host's name for this revision of the module,
+    /// which every NX IR artifact built from it records in its module table.
+    ///
+    /// <para>NX never reads the string. A runtime compares it for equality when it links an artifact
+    /// against a prepared module, so a snippet built against one release of a catalog is not
+    /// silently run against another.</para>
+    ///
+    /// <para>An empty string is no version, which is how the module table records a module without
+    /// one.</para>
+    pub fn with_version(mut self, version: impl Into<String>) -> Self {
+        let version = version.into();
+        self.version = (!version.is_empty()).then_some(version);
+        self
     }
 
     /// Returns the normalized logical workspace identity.
@@ -112,6 +130,11 @@ impl NxWorkspaceModule {
     /// Returns the decoded source text.
     pub fn source(&self) -> &str {
         &self.source
+    }
+
+    /// Returns the version string the host gave this module, if any.
+    pub fn version(&self) -> Option<&str> {
+        self.version.as_deref()
     }
 
     pub(crate) fn source_arc(&self) -> Arc<str> {

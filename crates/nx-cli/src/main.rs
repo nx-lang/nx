@@ -18,8 +18,8 @@ use nx_api::{
     NxDiagnostic, NxWorkspace, ProgramArtifact, ProgramBuildContext,
 };
 use nx_codegen::{
-    emit_js_program_module, emit_nx_ir, emit_program, CodegenOptions, JsProgramModuleOptions,
-    NxIrFormat,
+    emit_js_program_module, emit_nx_ir, emit_program, explain_nx_ir_image, CodegenOptions,
+    JsProgramModuleOptions, NxIrEmitOptions,
 };
 use nx_diagnostics::{render_diagnostics_cli, Diagnostic, Severity};
 use nx_hir::{lower_source_module, Item, LoweredModule};
@@ -111,6 +111,21 @@ enum Commands {
         #[arg(long)]
         entry: Option<String>,
     },
+
+    /// Inspect NX IR artifacts
+    Ir {
+        #[command(subcommand)]
+        command: IrCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum IrCommands {
+    /// Print an NX IR artifact as readable text, with every table index resolved
+    Explain {
+        /// Path to an .nxir artifact
+        artifact: PathBuf,
+    },
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
@@ -189,6 +204,29 @@ fn main() -> ExitCode {
             format,
             entry,
         } => generate_executable_source(&file, target, format, &output, entry.as_deref()),
+        Commands::Ir {
+            command: IrCommands::Explain { artifact },
+        } => explain_ir_artifact(&artifact),
+    }
+}
+
+fn explain_ir_artifact(path: &Path) -> ExitCode {
+    let image = match std::fs::read(path) {
+        Ok(image) => image,
+        Err(error) => {
+            eprintln!("Error reading '{}': {}", path.display(), error);
+            return ExitCode::from(1);
+        }
+    };
+    match explain_nx_ir_image(&image) {
+        Ok(text) => {
+            print!("{text}");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("Error: {error}");
+            ExitCode::from(1)
+        }
     }
 }
 
@@ -362,7 +400,11 @@ fn generate_executable_source(
             eprintln!("Error: NX IR codegen does not use --format; use --target nx-ir");
             return ExitCode::from(1);
         }
-        return generate_executable_nx_ir(&artifact, output_root);
+        return generate_executable_nx_ir(
+            &artifact,
+            output_root,
+            input_kind == GenerateInputKind::SourceFile,
+        );
     }
 
     if format == ExecutableOutputFormat::JsProgramModule {
@@ -424,8 +466,12 @@ fn generate_executable_source(
     ExitCode::SUCCESS
 }
 
-fn generate_executable_nx_ir(artifact: &ProgramArtifact, output_root: &Path) -> ExitCode {
-    let generated = match emit_nx_ir(artifact, NxIrFormat::Pretty) {
+fn generate_executable_nx_ir(
+    artifact: &ProgramArtifact,
+    output_root: &Path,
+    flatten: bool,
+) -> ExitCode {
+    let generated = match emit_nx_ir(artifact, &NxIrEmitOptions::every_module_with_debug()) {
         Ok(output) => output,
         Err(error) => return render_codegen_diagnostics(artifact, &error.diagnostics),
     };
@@ -439,33 +485,65 @@ fn generate_executable_nx_ir(artifact: &ProgramArtifact, output_root: &Path) -> 
         return ExitCode::from(1);
     }
 
-    let target_path =
-        match resolve_generated_output_path(output_root, &nx_ir_relative_path(artifact)) {
+    for module in generated {
+        let target_path = match resolve_generated_output_path(
+            output_root,
+            &nx_ir_relative_path(&module.identity, flatten),
+        ) {
             Ok(path) => path,
             Err(message) => {
                 eprintln!("Error: {}", message);
                 return ExitCode::from(1);
             }
         };
-    if let Err(error) = std::fs::write(&target_path, generated.json) {
-        eprintln!(
-            "Error writing output to '{}': {}",
-            target_path.display(),
-            error
-        );
-        return ExitCode::from(1);
+        if let Some(parent) = target_path.parent() {
+            if let Err(error) = std::fs::create_dir_all(parent) {
+                eprintln!(
+                    "Error creating output directory '{}': {}",
+                    parent.display(),
+                    error
+                );
+                return ExitCode::from(1);
+            }
+        }
+        if let Err(error) = std::fs::write(&target_path, module.bytes) {
+            eprintln!(
+                "Error writing output to '{}': {}",
+                target_path.display(),
+                error
+            );
+            return ExitCode::from(1);
+        }
     }
 
     ExitCode::SUCCESS
 }
 
-fn nx_ir_relative_path(artifact: &ProgramArtifact) -> PathBuf {
-    let stem = Path::new(&artifact.entry_identity)
+/// Where a module's artifact goes under the output root: its identity with `.nxir` in place of
+/// `.nx`. A source-file build's identity is the path the caller gave (`flatten`), so only its
+/// file name is kept; a workspace identity keeps its directories.
+fn nx_ir_relative_path(identity: &str, flatten: bool) -> PathBuf {
+    let path = Path::new(identity);
+    let escapes = flatten
+        || path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        });
+    let relative = if escapes {
+        PathBuf::from(path.file_name().unwrap_or_default())
+    } else {
+        path.to_path_buf()
+    };
+    let stem = relative
         .file_stem()
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
-        .unwrap_or("program");
-    PathBuf::from(format!("{stem}.nxir.json"))
+        .unwrap_or("program")
+        .to_string();
+    relative.with_file_name(format!("{stem}.nxir"))
 }
 
 fn generate_executable_js_program_module(
@@ -879,6 +957,7 @@ fn render_source_diagnostics(
 mod tests {
     use super::*;
     use nx_api::LibraryRegistry;
+    use nx_codegen::NxIrImage;
     use nx_hir::{lower, SourceId};
     use nx_syntax::parse_file;
     use nx_value::NxValue;
@@ -1481,12 +1560,16 @@ let root() = { Ui.title() }"#,
             "CLI should write NX IR output: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let ir_path = output_path.join("test.nxir.json");
-        let document: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(ir_path).unwrap()).unwrap();
+        let ir_path = output_path.join("test.nxir");
+        let bytes = fs::read(&ir_path).unwrap();
+        let image = NxIrImage::open(&bytes).unwrap();
 
-        assert_eq!(document["format"], "nx-ir-json");
-        assert_eq!(document["functionEntrypoints"][0]["name"], "root");
+        assert_eq!(&bytes[..4], b"NXIR");
+        assert_eq!(image.schema_version(), 3);
+        let root = image.function_entrypoints().get(0).unwrap();
+        assert_eq!(image.declaration_name(root), Some("root"));
+        // The CLI's files carry debug data.
+        assert!(image.source().unwrap().contains("1 + 2"));
         assert!(!output_path.join("nx-runtime.js").exists());
         assert!(!output_path.join("index.js").exists());
         assert!(!output_path.join("m0_test.js").exists());
@@ -1516,16 +1599,139 @@ let root() = { Ui.title() }"#,
             "CLI should write workspace NX IR output: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let document: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(output_path.join("other.nxir.json")).unwrap())
-                .unwrap();
+        let bytes = fs::read(output_path.join("other.nxir")).unwrap();
+        let image = NxIrImage::open(&bytes).unwrap();
 
-        assert_eq!(document["functionEntrypoints"][0]["name"], "root");
-        assert!(document["sources"]
-            .as_array()
+        assert_eq!(image.modules().next().unwrap().identity, "other.nx");
+        assert_eq!(image.source(), Some("let root() = { 2 }"));
+        // The entry references nothing, so only the entry's artifact is its program; the other
+        // module is still part of the workspace and gets its own file.
+        assert!(output_path.join("main.nxir").exists());
+    }
+
+    #[test]
+    fn test_cli_codegen_workspace_nx_ir_writes_one_artifact_per_module() {
+        let (dir, workspace_path) = create_temp_library(&[
+            (
+                "app/main.nx",
+                "import { answer } from \"../shared/value.nx\"\nlet root() = { answer() }",
+            ),
+            ("shared/value.nx", "export let answer() = { 42 }"),
+        ]);
+        let output_path = dir.path().join("codegen-workspace-modules");
+
+        let output = run_cli(&[
+            "codegen",
+            workspace_path.to_str().unwrap(),
+            "--target",
+            "nx-ir",
+            "--entry",
+            "app/main.nx",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+
+        assert!(
+            output.status.success(),
+            "CLI should write workspace NX IR output: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let entry_bytes = fs::read(output_path.join("app/main.nxir")).unwrap();
+        let referenced_bytes = fs::read(output_path.join("shared/value.nxir")).unwrap();
+        let entry = NxIrImage::open(&entry_bytes)
             .unwrap()
-            .iter()
-            .any(|source| source["identity"] == "other.nx"));
+            .modules()
+            .collect::<Vec<_>>();
+        let referenced = NxIrImage::open(&referenced_bytes)
+            .unwrap()
+            .modules()
+            .collect::<Vec<_>>();
+
+        assert_eq!(entry[0].identity, "app/main.nx");
+        assert_eq!(entry[1].identity, "shared/value.nx");
+        assert_eq!(entry[1].fingerprint, referenced[0].fingerprint);
+        assert_eq!(referenced.len(), 1);
+    }
+
+    #[test]
+    fn test_cli_ir_explain_renders_an_artifact_without_indices() {
+        let (dir, workspace_path) = create_temp_library(&[
+            (
+                "drawnui.nx",
+                "export external component <SkiaLabel Text:string FontSize:int = 14 />",
+            ),
+            (
+                "input.nx",
+                "import \"./drawnui.nx\"\nlet root() = <SkiaLabel Text=\"hi\" />",
+            ),
+        ]);
+        let output_path = dir.path().join("explain");
+        let generated = run_cli(&[
+            "codegen",
+            workspace_path.to_str().unwrap(),
+            "--target",
+            "nx-ir",
+            "--entry",
+            "input.nx",
+            "--output",
+            output_path.to_str().unwrap(),
+        ]);
+        assert!(
+            generated.status.success(),
+            "{}",
+            String::from_utf8_lossy(&generated.stderr)
+        );
+
+        let artifact = output_path.join("input.nxir");
+        let output = run_cli(&["ir", "explain", artifact.to_str().unwrap()]);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let text = String::from_utf8_lossy(&output.stdout);
+        assert!(text.contains("function root() @2:1-2:37 ="), "{text}");
+        assert!(
+            text.contains("<drawnui.nx:SkiaLabel Text=\"hi\" />"),
+            "{text}"
+        );
+        assert!(text.contains("links drawnui.nx version \"\""), "{text}");
+        for marker in [
+            "strings[",
+            "types[",
+            "nodes[",
+            "declarations[",
+            "constants[",
+        ] {
+            assert!(!text.contains(marker), "{text}");
+        }
+
+        let mut image = fs::read(&artifact).unwrap();
+        image[4..8].copy_from_slice(&2u32.to_le_bytes());
+        let old_artifact = dir.path().join("old.nxir");
+        fs::write(&old_artifact, &image).unwrap();
+        let refused = run_cli(&["ir", "explain", old_artifact.to_str().unwrap()]);
+        assert!(!refused.status.success());
+        let stderr = String::from_utf8_lossy(&refused.stderr);
+        assert!(stderr.contains("schema version 2"), "{stderr}");
+        assert!(stderr.contains("schema version 3"), "{stderr}");
+
+        // A truncated file and a file that is not an image are diagnostics, not panics.
+        let image = fs::read(&artifact).unwrap();
+        let truncated = dir.path().join("truncated.nxir");
+        fs::write(&truncated, &image[..image.len() / 2]).unwrap();
+        let refused = run_cli(&["ir", "explain", truncated.to_str().unwrap()]);
+        assert!(!refused.status.success());
+        let stderr = String::from_utf8_lossy(&refused.stderr);
+        assert!(stderr.contains("malformed"), "{stderr}");
+        assert!(!stderr.contains("panicked"), "{stderr}");
+
+        let not_an_image = dir.path().join("old.nxir.json");
+        fs::write(&not_an_image, "{\"format\":\"nx-ir-json\"}").unwrap();
+        let refused = run_cli(&["ir", "explain", not_an_image.to_str().unwrap()]);
+        assert!(!refused.status.success());
+        let stderr = String::from_utf8_lossy(&refused.stderr);
+        assert!(stderr.contains("not an NX IR image"), "{stderr}");
     }
 
     #[test]
@@ -1543,7 +1749,7 @@ let root() = { Ui.title() }"#,
         ]);
 
         assert!(!output.status.success());
-        assert!(!output_path.join("test.nxir.json").exists());
+        assert!(!output_path.join("test.nxir").exists());
     }
 
     #[test]
@@ -1565,7 +1771,7 @@ let root() = { Ui.title() }"#,
         assert!(!output.status.success());
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("NX IR codegen does not use --format"));
-        assert!(!output_path.join("test.nxir.json").exists());
+        assert!(!output_path.join("test.nxir").exists());
     }
 
     #[test]
@@ -1587,7 +1793,7 @@ let root() = { Ui.title() }"#,
         assert!(!output.status.success());
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("invalid value 'nx-ir'"));
-        assert!(!output_path.join("test.nxir.json").exists());
+        assert!(!output_path.join("test.nxir").exists());
     }
 
     #[test]
@@ -2250,51 +2456,33 @@ export type QuestionFlowInitialExperience = {
         assert!(bare_out.status.success(), "bare form should generate");
         assert!(qual_out.status.success(), "qualified form should generate");
 
-        // The IR embeds spans, node ids, and the source text, all of which legitimately differ
-        // between two different spellings. Everything else must match.
-        fn strip_volatile(value: &mut serde_json::Value) {
-            const VOLATILE: &[&str] = &[
-                "start",
-                "end",
-                "id",
-                "slot",
-                "programFingerprint",
-                "source",
-                "identity",
-            ];
-            match value {
-                serde_json::Value::Object(map) => {
-                    map.retain(|key, _| !VOLATILE.contains(&key.as_str()));
-                    for entry in map.values_mut() {
-                        strip_volatile(entry);
-                    }
-                }
-                serde_json::Value::Array(items) => {
-                    for item in items {
-                        strip_volatile(item);
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        let read_ir = |dir: &std::path::Path| -> serde_json::Value {
+        // The two sources differ in text, so their fingerprints and debug sections differ, and the
+        // string table may intern the same names in another order. What must not differ is the
+        // meaning, which `ir explain` renders with every index resolved.
+        let explain = |dir: &std::path::Path| -> String {
             let path = std::fs::read_dir(dir)
                 .expect("generated output directory")
                 .filter_map(|entry| entry.ok())
                 .map(|entry| entry.path())
-                .find(|path| path.extension().is_some_and(|ext| ext == "json"))
+                .find(|path| path.extension().is_some_and(|ext| ext == "nxir"))
                 .expect("generated IR file");
-            let mut value: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(path).expect("read IR"))
-                    .expect("parse IR");
-            strip_volatile(&mut value);
-            value
+            let output = run_cli(&["ir", "explain", path.to_str().unwrap()]);
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .skip(1)
+                .filter(|line| !line.contains('@'))
+                .collect::<Vec<_>>()
+                .join("\n")
         };
 
         assert_eq!(
-            read_ir(&bare_dest),
-            read_ir(&qual_dest),
+            explain(&bare_dest),
+            explain(&qual_dest),
             "generated IR must not depend on the source spelling"
         );
     }

@@ -14,10 +14,11 @@ use std::alloc::{alloc, dealloc, Layout};
 use std::ptr;
 
 use nx_api::{
-    diagnostics_to_api_with_source_entries, load_program_artifact_from_source, LibraryRegistry,
-    NxDiagnostic, NxSeverity, ProgramArtifact,
+    build_workspace_program_artifact, diagnostics_to_api_with_source_entries,
+    load_program_artifact_from_source, LibraryRegistry, NxDiagnostic, NxSeverity, NxWorkspace,
+    NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
 };
-use nx_codegen::{emit_nx_ir, NxIrEntrypointMetadata, NxIrFormat, NxIrMetadata};
+use nx_codegen::{emit_nx_ir, explain_nx_ir_image, write_nx_ir_bundle, NxIrEmitOptions};
 use nx_language_service::{
     DocumentInput, DocumentUri, SnapshotError, TextPosition, WorkspaceSnapshot,
 };
@@ -25,7 +26,7 @@ use serde::{Deserialize, Serialize};
 
 /// ABI version the loader checks before it makes any other call. Bump it whenever an export's
 /// signature, a status code or a payload shape changes.
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 2;
 
 /// The operation succeeded; the payload is its JSON result.
 pub const STATUS_OK: u32 = 0;
@@ -55,6 +56,31 @@ struct BuildRequest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct WorkspaceBuildRequest {
+    modules: Vec<WorkspaceModuleRequest>,
+    entry: String,
+    #[serde(default)]
+    implicit_imports: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceModuleRequest {
+    identity: String,
+    source: String,
+    version: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SnapshotRequest {
+    documents: Vec<DocumentRequest>,
+    #[serde(default)]
+    implicit_imports: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct DocumentRequest {
     uri: String,
     source: String,
@@ -74,24 +100,6 @@ struct PositionRequest {
 #[serde(rename_all = "camelCase")]
 struct UriRequest {
     uri: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct GeneratedNxIrPayload {
-    json: String,
-    metadata: NxIrMetadataPayload,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct NxIrMetadataPayload {
-    program_fingerprint: String,
-    schema_version: u32,
-    runtime_abi: String,
-    required_features: Vec<String>,
-    function_entrypoints: Vec<NxIrEntrypointMetadata>,
-    component_entrypoints: Vec<NxIrEntrypointMetadata>,
 }
 
 /// The ABI version this module implements.
@@ -149,13 +157,40 @@ pub unsafe extern "C" fn nx_wasm_program_build(ptr: *const u8, len: usize) -> *m
     into_result(build_program(argument(ptr, len)))
 }
 
-/// Emits NX IR from the artifact `handle` names.
+/// Builds a program artifact from `{ modules: [{ identity, source }], entry, implicitImports }`
+/// JSON and answers with its handle.
 ///
 /// # Safety
-/// `handle` must be a live handle from [`nx_wasm_program_build`].
+/// `ptr` and `len` must describe UTF-8 bytes in the module's memory.
 #[no_mangle]
-pub unsafe extern "C" fn nx_wasm_program_nx_ir(handle: *mut ProgramArtifact) -> *mut NxWasmResult {
-    into_result(program_nx_ir(&*handle))
+pub unsafe extern "C" fn nx_wasm_workspace_build(ptr: *const u8, len: usize) -> *mut NxWasmResult {
+    into_result(build_workspace(argument(ptr, len)))
+}
+
+/// Emits NX IR from the artifact `handle` names, for the modules the `{ modules, debug }` JSON
+/// options select; the payload is an NX IR bundle: a `u32` header length, a JSON header
+/// `[{ identity, metadata, offset, length }]`, padding to four bytes, then the images.
+///
+/// # Safety
+/// `handle` must be a live handle from [`nx_wasm_program_build`] or [`nx_wasm_workspace_build`];
+/// `ptr` and `len` must describe UTF-8 bytes in the module's memory.
+#[no_mangle]
+pub unsafe extern "C" fn nx_wasm_program_nx_ir(
+    handle: *mut ProgramArtifact,
+    ptr: *const u8,
+    len: usize,
+) -> *mut NxWasmResult {
+    into_result(program_nx_ir(&*handle, argument(ptr, len)))
+}
+
+/// Explains an NX IR image as text with every table index resolved; the payload is a JSON string.
+/// A malformed or unsupported image answers with diagnostics rather than trapping.
+///
+/// # Safety
+/// `ptr` and `len` must describe bytes in the module's memory.
+#[no_mangle]
+pub unsafe extern "C" fn nx_wasm_ir_explain(ptr: *const u8, len: usize) -> *mut NxWasmResult {
+    into_result(explain_ir(bytes_argument(ptr, len)))
 }
 
 /// Releases the artifact `handle` names.
@@ -169,8 +204,8 @@ pub unsafe extern "C" fn nx_wasm_program_free(handle: *mut ProgramArtifact) {
     }
 }
 
-/// Analyzes a JSON array of `{ uri, source, identity?, version? }` documents and answers with the
-/// snapshot's handle.
+/// Analyzes `{ documents: [{ uri, source, identity?, version? }], implicitImports }` JSON and
+/// answers with the snapshot's handle.
 ///
 /// # Safety
 /// `ptr` and `len` must describe UTF-8 bytes in the module's memory.
@@ -240,8 +275,9 @@ pub unsafe extern "C" fn nx_wasm_snapshot_free(handle: *mut WorkspaceSnapshot) {
     }
 }
 
-/// A finished operation: JSON to hand back, or a status and JSON describing the failure.
-type Operation = Result<String, OperationError>;
+/// A finished operation: the payload to hand back, JSON unless the export says otherwise, or a
+/// status and JSON describing the failure.
+type Operation = Result<Vec<u8>, OperationError>;
 
 struct OperationError {
     status: u32,
@@ -263,20 +299,59 @@ fn build_program(argument: Result<&str, OperationError>) -> Operation {
     Ok(handle_json(Box::into_raw(Box::new(program))))
 }
 
-fn program_nx_ir(program: &ProgramArtifact) -> Operation {
-    let ir =
-        emit_nx_ir(program, NxIrFormat::Compact).map_err(|error| codegen_error(error, program))?;
-    result_json(&GeneratedNxIrPayload {
-        json: ir.json,
-        metadata: ir_metadata_payload(ir.metadata),
-    })
+fn build_workspace(argument: Result<&str, OperationError>) -> Operation {
+    let request: WorkspaceBuildRequest = parse_request(argument?)?;
+    let mut modules = Vec::with_capacity(request.modules.len());
+    for module in request.modules {
+        let workspace_module = NxWorkspaceModule::from_source(module.identity, module.source)
+            .map_err(|error| workspace_input_error(error.to_string()))?;
+        modules.push(match module.version {
+            Some(version) => workspace_module.with_version(version),
+            None => workspace_module,
+        });
+    }
+    let workspace =
+        NxWorkspace::new(modules).map_err(|error| workspace_input_error(error.to_string()))?;
+    let build_context =
+        ProgramBuildContext::empty().with_implicit_imports(request.implicit_imports);
+    let program = build_workspace_program_artifact(&workspace, &request.entry, &build_context)
+        .map_err(evaluation_error)?;
+
+    Ok(handle_json(Box::into_raw(Box::new(program))))
+}
+
+fn program_nx_ir(program: &ProgramArtifact, argument: Result<&str, OperationError>) -> Operation {
+    let options = NxIrEmitOptions::from_json(argument?)
+        .map_err(|error| internal_error(format!("NX IR emit options are not valid: {error}")))?;
+    let artifacts = emit_nx_ir(program, &options).map_err(|error| codegen_error(error, program))?;
+    write_nx_ir_bundle(&artifacts).map_err(internal_error)
+}
+
+fn explain_ir(argument: Result<&[u8], OperationError>) -> Operation {
+    let text = explain_nx_ir_image(argument?).map_err(|error| {
+        evaluation_error(vec![NxDiagnostic {
+            severity: NxSeverity::Error,
+            code: Some(
+                match error {
+                    nx_codegen::ExplainError::SchemaVersion { .. } => "nx-ir-schema-version",
+                    nx_codegen::ExplainError::Malformed(_) => "nx-ir-malformed",
+                }
+                .to_string(),
+            ),
+            message: error.to_string(),
+            labels: Vec::new(),
+            help: None,
+            note: None,
+        }])
+    })?;
+    result_json(&text)
 }
 
 fn new_snapshot(argument: Result<&str, OperationError>) -> Operation {
-    let documents: Vec<DocumentRequest> = parse_request(argument?)?;
+    let request: SnapshotRequest = parse_request(argument?)?;
 
-    let mut inputs = Vec::with_capacity(documents.len());
-    for document in documents {
+    let mut inputs = Vec::with_capacity(request.documents.len());
+    for document in request.documents {
         let mut input = DocumentInput::new(document.uri, document.source);
         if let Some(identity) = document.identity {
             input = input.with_identity(identity).map_err(snapshot_error)?;
@@ -288,7 +363,10 @@ fn new_snapshot(argument: Result<&str, OperationError>) -> Operation {
     }
 
     let snapshot = WorkspaceSnapshot::from_documents(Option::<std::path::PathBuf>::None, inputs)
-        .map_err(snapshot_error)?;
+        .map_err(snapshot_error)?
+        .with_build_context(
+            ProgramBuildContext::empty().with_implicit_imports(request.implicit_imports),
+        );
     Ok(handle_json(Box::into_raw(Box::new(snapshot))))
 }
 
@@ -352,29 +430,29 @@ unsafe fn argument<'a>(ptr: *const u8, len: usize) -> Result<&'a str, OperationE
     })
 }
 
+/// The bytes of an argument that is not text.
+///
+/// # Safety
+/// `ptr` and `len` must describe bytes in the module's memory.
+unsafe fn bytes_argument<'a>(ptr: *const u8, len: usize) -> Result<&'a [u8], OperationError> {
+    if ptr.is_null() || len == 0 {
+        return Ok(&[]);
+    }
+    Ok(std::slice::from_raw_parts(ptr, len))
+}
+
 fn parse_request<T: for<'de> Deserialize<'de>>(argument: &str) -> Result<T, OperationError> {
     serde_json::from_str(argument)
         .map_err(|error| internal_error(format!("NX wasm argument is not valid JSON: {error}")))
 }
 
 fn result_json<T: Serialize>(value: &T) -> Operation {
-    serde_json::to_string(value)
+    serde_json::to_vec(value)
         .map_err(|error| internal_error(format!("Failed to serialize NX wasm result: {error}")))
 }
 
-fn handle_json<T>(handle: *mut T) -> String {
-    (handle as usize).to_string()
-}
-
-fn ir_metadata_payload(metadata: NxIrMetadata) -> NxIrMetadataPayload {
-    NxIrMetadataPayload {
-        program_fingerprint: metadata.program_fingerprint.to_string(),
-        schema_version: metadata.schema_version,
-        runtime_abi: metadata.runtime_abi,
-        required_features: metadata.required_features,
-        function_entrypoints: metadata.function_entrypoints,
-        component_entrypoints: metadata.component_entrypoints,
-    }
+fn handle_json<T>(handle: *mut T) -> Vec<u8> {
+    (handle as usize).to_string().into_bytes()
 }
 
 fn evaluation_error(diagnostics: Vec<NxDiagnostic>) -> OperationError {
@@ -399,6 +477,17 @@ fn codegen_error(error: nx_codegen::CodegenError, program: &ProgramArtifact) -> 
     ))
 }
 
+fn workspace_input_error(message: String) -> OperationError {
+    evaluation_error(vec![NxDiagnostic {
+        severity: NxSeverity::Error,
+        code: Some("workspace-input-error".to_string()),
+        message,
+        labels: Vec::new(),
+        help: None,
+        note: None,
+    }])
+}
+
 fn snapshot_error(error: SnapshotError) -> OperationError {
     evaluation_error(vec![NxDiagnostic {
         severity: NxSeverity::Error,
@@ -418,12 +507,11 @@ fn internal_error(message: impl Into<String>) -> OperationError {
 }
 
 fn into_result(operation: Operation) -> *mut NxWasmResult {
-    let (status, payload) = match operation {
+    let (status, bytes) = match operation {
         Ok(payload) => (STATUS_OK, payload),
-        Err(error) => (error.status, error.payload),
+        Err(error) => (error.status, error.payload.into_bytes()),
     };
 
-    let bytes = payload.into_bytes();
     let len = bytes.len();
     let ptr = allocate(len);
     if len > 0 {
@@ -465,6 +553,7 @@ unsafe fn release(ptr: *mut u8, len: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nx_codegen::{read_nx_ir_bundle, NxIrImage};
 
     /// Runs an operation the way the loader does: JSON in through `nx_wasm_alloc`, a result record
     /// out, read and released.
@@ -486,13 +575,16 @@ mod tests {
         }
     }
 
-    unsafe fn read_payload(result: *mut NxWasmResult) -> String {
+    unsafe fn read_payload_bytes(result: *mut NxWasmResult) -> Vec<u8> {
         let record = &*result;
         if record.ptr.is_null() || record.len == 0 {
-            return String::new();
+            return Vec::new();
         }
-        String::from_utf8(std::slice::from_raw_parts(record.ptr, record.len).to_vec())
-            .expect("payload is UTF-8")
+        std::slice::from_raw_parts(record.ptr, record.len).to_vec()
+    }
+
+    unsafe fn read_payload(result: *mut NxWasmResult) -> String {
+        String::from_utf8(read_payload_bytes(result)).expect("payload is UTF-8")
     }
 
     fn handle_from(payload: &str) -> usize {
@@ -515,7 +607,7 @@ mod tests {
 
     #[test]
     fn a_result_record_round_trips_its_payload() {
-        let result = into_result(Ok("{\"value\":1}".to_string()));
+        let result = into_result(Ok(b"{\"value\":1}".to_vec()));
         unsafe {
             assert_eq!((*result).status, STATUS_OK);
             assert_eq!(read_payload(result), "{\"value\":1}");
@@ -525,7 +617,7 @@ mod tests {
 
     #[test]
     fn an_empty_payload_round_trips_as_a_null_pointer() {
-        let result = into_result(Ok(String::new()));
+        let result = into_result(Ok(Vec::new()));
         unsafe {
             assert_eq!((*result).len, 0);
             assert!((*result).ptr.is_null());
@@ -553,12 +645,69 @@ mod tests {
 
         let handle = handle_from(&payload) as *mut ProgramArtifact;
         unsafe {
-            let result = nx_wasm_program_nx_ir(handle);
+            let result = nx_wasm_program_nx_ir(handle, ptr::null(), 0);
             assert_eq!((*result).status, STATUS_OK);
-            let ir: serde_json::Value =
-                serde_json::from_str(&read_payload(result)).expect("IR payload is JSON");
-            assert!(ir["json"].is_string());
-            assert!(ir["metadata"]["schemaVersion"].is_number());
+            let artifacts =
+                read_nx_ir_bundle(&read_payload_bytes(result)).expect("IR payload is a bundle");
+            assert_eq!(artifacts.len(), 1);
+            assert_eq!(&artifacts[0].bytes[..4], b"NXIR");
+            assert_eq!(artifacts[0].metadata.schema_version, 3);
+            nx_wasm_result_free(result);
+
+            let image = artifacts[0].bytes.clone();
+            let input = nx_wasm_alloc(image.len());
+            ptr::copy_nonoverlapping(image.as_ptr(), input, image.len());
+            let result = nx_wasm_ir_explain(input, image.len());
+            nx_wasm_free(input, image.len());
+            assert_eq!((*result).status, STATUS_OK);
+            let text: String = serde_json::from_str(&read_payload(result))
+                .expect("explained text is a JSON string");
+            assert!(text.contains("function root() ="), "{text}");
+            nx_wasm_result_free(result);
+
+            let result = nx_wasm_ir_explain(image.as_ptr(), 8);
+            assert_eq!((*result).status, STATUS_EVALUATION_ERROR);
+            let diagnostics: Vec<serde_json::Value> =
+                serde_json::from_str(&read_payload(result)).unwrap();
+            assert_eq!(diagnostics[0]["code"], "nx-ir-malformed");
+            nx_wasm_result_free(result);
+            nx_wasm_program_free(handle);
+        }
+    }
+
+    #[test]
+    fn a_workspace_builds_with_implicit_imports_and_emits_the_entry_alone() {
+        let (status, payload) = call(
+            nx_wasm_workspace_build,
+            &serde_json::json!({
+                "modules": [
+                    { "identity": "drawnui.nx", "source": "export external component <SkiaLabel Text:string />", "version": "9" },
+                    { "identity": "input.nx", "source": "let root() = <SkiaLabel Text=\"hi\" />" }
+                ],
+                "entry": "input.nx",
+                "implicitImports": ["drawnui.nx"]
+            })
+            .to_string(),
+        );
+        assert_eq!(status, STATUS_OK, "{payload}");
+
+        let handle = handle_from(&payload) as *mut ProgramArtifact;
+        let options = "{}";
+        let bytes = options.as_bytes();
+        unsafe {
+            let input = nx_wasm_alloc(bytes.len());
+            ptr::copy_nonoverlapping(bytes.as_ptr(), input, bytes.len());
+            let result = nx_wasm_program_nx_ir(handle, input, bytes.len());
+            nx_wasm_free(input, bytes.len());
+            assert_eq!((*result).status, STATUS_OK);
+            let artifacts =
+                read_nx_ir_bundle(&read_payload_bytes(result)).expect("IR payload is a bundle");
+            assert_eq!(artifacts.len(), 1);
+            assert_eq!(artifacts[0].identity, "input.nx");
+            let image = NxIrImage::open(&artifacts[0].bytes).expect("a valid image");
+            let modules = image.modules().collect::<Vec<_>>();
+            assert_eq!(modules[1].identity, "drawnui.nx");
+            assert_eq!(modules[1].version, "9");
             nx_wasm_result_free(result);
             nx_wasm_program_free(handle);
         }
@@ -582,7 +731,7 @@ mod tests {
     fn a_snapshot_answers_queries_and_reports_an_unparseable_uri() {
         let (status, payload) = call(
             nx_wasm_snapshot_new,
-            &serde_json::json!([{ "uri": "nx://demo/input.nx", "source": "let root() = { 42 }" }])
+            &serde_json::json!({ "documents": [{ "uri": "nx://demo/input.nx", "source": "let root() = { 42 }" }] })
                 .to_string(),
         );
         assert_eq!(status, STATUS_OK, "{payload}");
@@ -598,7 +747,7 @@ mod tests {
 
         let (status, payload) = call(
             nx_wasm_snapshot_new,
-            &serde_json::json!([{ "uri": ":::", "source": "" }]).to_string(),
+            &serde_json::json!({ "documents": [{ "uri": ":::", "source": "" }] }).to_string(),
         );
         assert_eq!(status, STATUS_EVALUATION_ERROR, "{payload}");
         assert!(

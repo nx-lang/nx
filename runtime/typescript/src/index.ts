@@ -1,15 +1,569 @@
-export const NX_IR_FORMAT_ID = "nx-ir-json";
-export const NX_IR_SCHEMA_VERSION = 2;
-export const NX_IR_RUNTIME_ABI = "nx-ir-runtime-v1";
+/**
+ * The NX IR runtime: prepares schema 3 images, links them by name, and evaluates them.
+ *
+ * An image carries one module as flat tables of 32-bit cells over one string blob, and the runtime
+ * reads it in place. `prepareNxIrModule` validates every section, offset and index of the image and
+ * indexes the module's declarations by name; `linkNxIrProgram` resolves the modules the entry names
+ * through a host resolver and checks versions and referenced declarations eagerly; every
+ * evaluation API then takes the linked program. A prepared module is never copied by linking, so
+ * one prepared catalog serves any number of programs.
+ */
+
+export const NX_IR_SCHEMA_VERSION = 3;
+export const NX_IR_RUNTIME_ABI = "nx-ir-runtime-v2";
+
+export const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1 = "update-records-v1";
+export const NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1 = "property-unions-v1";
+export const NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1 = "update-intrinsics-v1";
+
+const knownFeatures = new Set([
+  NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
+  NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
+  NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
+]);
+
+// ------------------------------------------------------------------------------------------------
+// The image as the compiler writes it
+// ------------------------------------------------------------------------------------------------
+
+/** The cell value that spells an absent optional operand. */
+export const NX_IR_NONE = 0xffffffff;
+
+/** `NXIR`, read as a little-endian 32-bit integer. */
+const magic = 0x5249584e;
+const headerLength = 16;
+const directoryEntryLength = 12;
+const sectionKinds = { strings: 0, module: 1, types: 2, constants: 3, nodes: 4, declarations: 5, debug: 6 } as const;
+
+/** The tables whose entries are cells. */
+export type NxIrTable = "types" | "constants" | "nodes" | "declarations";
+const tableSections: Record<NxIrTable, number> = {
+  types: sectionKinds.types,
+  constants: sectionKinds.constants,
+  nodes: sectionKinds.nodes,
+  declarations: sectionKinds.declarations,
+};
+
+export interface NxIrModuleEntry {
+  readonly identity: string;
+  readonly version: string;
+  readonly fingerprint: string;
+}
+
+interface CellTable {
+  readonly count: number;
+  /** `count + 1` cells. */
+  readonly offsets: Uint32Array;
+  readonly pool: Uint32Array;
+}
+
+const decoder = new TextDecoder();
+
+/**
+ * An opened image. The tables are typed-array views over the bytes the host handed in; a string is
+ * decoded the first time it is named and remembered.
+ *
+ * <para>`open` establishes that every section, offset array and string range lies inside the image
+ * and that the string blob is UTF-8. The table entries are checked against their layouts by the
+ * reader that prepares the module; after that, every index an entry holds is in range.</para>
+ */
+export class NxIrImage {
+  readonly schemaVersion: number;
+  readonly runtimeAbi: string;
+  readonly requiredFeatures: readonly string[];
+  /** Slot `0` is the image's own module. */
+  readonly modules: readonly NxIrModuleEntry[];
+  readonly functionEntrypoints: Uint32Array;
+  readonly componentEntrypoints: Uint32Array;
+  readonly #stringOffsets: Uint32Array;
+  readonly #stringBytes: Uint8Array;
+  readonly #strings: (string | undefined)[];
+  readonly #tables: Record<NxIrTable, CellTable>;
+  readonly #declarationSpans: Uint32Array | undefined;
+  readonly #nodeSpans: Uint32Array | undefined;
+  readonly #sourceBytes: Uint8Array | undefined;
+  #source: string | undefined;
+
+  private constructor(
+    schemaVersion: number,
+    strings: { offsets: Uint32Array; bytes: Uint8Array },
+    module: {
+      runtimeAbi: string;
+      requiredFeatures: readonly string[];
+      modules: readonly NxIrModuleEntry[];
+      functionEntrypoints: Uint32Array;
+      componentEntrypoints: Uint32Array;
+    },
+    tables: Record<NxIrTable, CellTable>,
+    debug: { declarationSpans: Uint32Array; nodeSpans: Uint32Array; sourceBytes: Uint8Array } | undefined,
+  ) {
+    this.schemaVersion = schemaVersion;
+    this.#stringOffsets = strings.offsets;
+    this.#stringBytes = strings.bytes;
+    this.#strings = new Array<string | undefined>(strings.offsets.length - 1);
+    this.runtimeAbi = module.runtimeAbi;
+    this.requiredFeatures = module.requiredFeatures;
+    this.modules = module.modules;
+    this.functionEntrypoints = module.functionEntrypoints;
+    this.componentEntrypoints = module.componentEntrypoints;
+    this.#tables = tables;
+    this.#declarationSpans = debug?.declarationSpans;
+    this.#nodeSpans = debug?.nodeSpans;
+    this.#sourceBytes = debug?.sourceBytes;
+  }
+
+  /**
+   * Opens an image, reporting what is wrong with it as diagnostics. A view whose byte offset is
+   * not a multiple of four is copied first, since the tables are read as 32-bit cells.
+   */
+  static open(input: Uint8Array | ArrayBuffer, diagnostics: NxIrDiagnostic[]): NxIrImage | undefined {
+    const bytes = alignedBytes(input);
+    const fail = (message: string): undefined => {
+      diagnostics.push(diagnostic("nx-ir-malformed", `NX IR image is malformed: ${message}.`));
+      return undefined;
+    };
+    if (bytes.byteLength < headerLength) {
+      if (bytes.byteLength < 4 || cellAt(bytes, 0) !== magic) {
+        diagnostics.push(diagnostic("nx-ir-format", "The input is not an NX IR image."));
+        return undefined;
+      }
+      return fail("the header is cut short");
+    }
+    if (cellAt(bytes, 0) !== magic) {
+      diagnostics.push(diagnostic("nx-ir-format", "The input is not an NX IR image."));
+      return undefined;
+    }
+    const schemaVersion = cellAt(bytes, 4);
+    if (schemaVersion !== NX_IR_SCHEMA_VERSION) {
+      diagnostics.push(
+        diagnostic(
+          "nx-ir-schema-version",
+          `NX IR schema version ${schemaVersion} is not supported; this runtime reads schema version ${NX_IR_SCHEMA_VERSION}.`,
+        ),
+      );
+      return undefined;
+    }
+    const total = cellAt(bytes, 8);
+    if (total !== bytes.byteLength) {
+      return fail(`the header says the image is ${total} bytes but ${bytes.byteLength} were given`);
+    }
+    const directoryCount = cellAt(bytes, 12);
+    const directoryEnd = headerLength + directoryCount * directoryEntryLength;
+    if (directoryEnd > bytes.byteLength) {
+      return fail(`the directory of ${directoryCount} entries does not fit the image`);
+    }
+    const sections = new Map<number, Uint8Array>();
+    for (let entry = 0; entry < directoryCount; entry += 1) {
+      const at = headerLength + entry * directoryEntryLength;
+      const kind = cellAt(bytes, at);
+      const offset = cellAt(bytes, at + 4);
+      const length = cellAt(bytes, at + 8);
+      if (offset % 4 !== 0 || length % 4 !== 0) {
+        return fail(`section ${kind} is not four-byte aligned`);
+      }
+      if (offset < directoryEnd || offset + length > bytes.byteLength) {
+        return fail(`section ${kind} lies outside the image`);
+      }
+      if (kind > sectionKinds.debug) {
+        // A kind this reader does not know: skipped, so a section can be added without a schema
+        // change.
+        continue;
+      }
+      if (sections.has(kind)) {
+        return fail(`section ${kind} is listed twice`);
+      }
+      sections.set(kind, bytes.subarray(offset, offset + length));
+    }
+    for (const kind of [sectionKinds.strings, sectionKinds.module, ...Object.values(tableSections)]) {
+      if (!sections.has(kind)) {
+        return fail(`section ${kind} is missing`);
+      }
+    }
+
+    const strings = readStrings(sections.get(sectionKinds.strings)!, fail);
+    if (strings === undefined) {
+      return undefined;
+    }
+    const stringCount = strings.offsets.length - 1;
+    const tables = {} as Record<NxIrTable, CellTable>;
+    for (const table of Object.keys(tableSections) as NxIrTable[]) {
+      const cells = readTable(sections.get(tableSections[table])!, table, fail);
+      if (cells === undefined) {
+        return undefined;
+      }
+      tables[table] = cells;
+    }
+    const module = readModule(sections.get(sectionKinds.module)!, stringCount, tables.declarations.count, fail);
+    if (module === undefined) {
+      return undefined;
+    }
+    const stringAt = (index: number): string => {
+      const start = strings.offsets[index]!;
+      return decoder.decode(strings.bytes.subarray(start, strings.offsets[index + 1]!));
+    };
+    const debugSection = sections.get(sectionKinds.debug);
+    const debug =
+      debugSection === undefined
+        ? undefined
+        : readDebug(debugSection, tables.declarations.count, tables.nodes.count, fail);
+    if (debugSection !== undefined && debug === undefined) {
+      return undefined;
+    }
+    return new NxIrImage(
+      schemaVersion,
+      strings,
+      {
+        runtimeAbi: stringAt(module.runtimeAbi),
+        requiredFeatures: Array.from(module.features, stringAt),
+        modules: Array.from({ length: module.modules.length / 4 }, (_, slot) => ({
+          identity: stringAt(module.modules[slot * 4]!),
+          version: stringAt(module.modules[slot * 4 + 1]!),
+          fingerprint: (
+            BigInt(module.modules[slot * 4 + 2]!) |
+            (BigInt(module.modules[slot * 4 + 3]!) << 32n)
+          ).toString(),
+        })),
+        functionEntrypoints: module.functionEntrypoints,
+        componentEntrypoints: module.componentEntrypoints,
+      },
+      tables,
+      debug,
+    );
+  }
+
+  /** The number of strings in the string table. */
+  get stringCount(): number {
+    return this.#strings.length;
+  }
+
+  /** String `index`, decoded on first use. The index must be inside the table. */
+  string(index: number): string {
+    let value = this.#strings[index];
+    if (value === undefined) {
+      const start = this.#stringOffsets[index]!;
+      value = decoder.decode(this.#stringBytes.subarray(start, this.#stringOffsets[index + 1]!));
+      this.#strings[index] = value;
+    }
+    return value;
+  }
+
+  /** The number of entries in `table`. */
+  entryCount(table: NxIrTable): number {
+    return this.#tables[table].count;
+  }
+
+  /** Entry `index` of `table`, kind cell first, as a view over the pool. The index must be inside the table. */
+  entry(table: NxIrTable, index: number): Uint32Array {
+    const { offsets, pool } = this.#tables[table];
+    return pool.subarray(offsets[index]!, offsets[index + 1]!);
+  }
+
+  /** Whether the image carries its debug section. */
+  get hasDebug(): boolean {
+    return this.#sourceBytes !== undefined;
+  }
+
+  /** The module's source text, when the debug section is present. */
+  get source(): string | undefined {
+    if (this.#source === undefined && this.#sourceBytes !== undefined) {
+      this.#source = decoder.decode(this.#sourceBytes);
+    }
+    return this.#source;
+  }
+
+  /** The byte span of declaration `index` in the source, when the debug section records one. */
+  declarationSpan(index: number): readonly [number, number] | undefined {
+    return spanAt(this.#declarationSpans, index);
+  }
+
+  /** The byte span of node `index` in the source, when the debug section records one. */
+  nodeSpan(index: number): readonly [number, number] | undefined {
+    return spanAt(this.#nodeSpans, index);
+  }
+}
+
+function alignedBytes(input: Uint8Array | ArrayBuffer): Uint8Array {
+  if (input instanceof ArrayBuffer) {
+    return new Uint8Array(input);
+  }
+  if (input.byteOffset % 4 === 0) {
+    return input;
+  }
+  return input.slice();
+}
+
+function cellAt(bytes: Uint8Array, offset: number): number {
+  return (bytes[offset]! | (bytes[offset + 1]! << 8) | (bytes[offset + 2]! << 16) | (bytes[offset + 3]! << 24)) >>> 0;
+}
+
+function cellsOf(bytes: Uint8Array, start = 0, end = bytes.byteLength): Uint32Array {
+  return new Uint32Array(bytes.buffer, bytes.byteOffset + start, (end - start) / 4);
+}
+
+function spanAt(spans: Uint32Array | undefined, index: number): readonly [number, number] | undefined {
+  if (spans === undefined) {
+    return undefined;
+  }
+  const start = spans[index * 2];
+  const end = spans[index * 2 + 1];
+  if (start === undefined || end === undefined || start === NX_IR_NONE || end === NX_IR_NONE) {
+    return undefined;
+  }
+  return [start, end];
+}
+
+type Fail = (message: string) => undefined;
+
+/** Reads `count` and the `count + 1` offsets heading an offset-array section, and returns the cells after them. */
+function readOffsets(bytes: Uint8Array, what: string, fail: Fail): { offsets: Uint32Array; restStart: number } | undefined {
+  if (bytes.byteLength < 4) {
+    return fail(`the ${what} section is empty`);
+  }
+  const count = cellAt(bytes, 0);
+  const restStart = 4 + (count + 1) * 4;
+  if (restStart > bytes.byteLength) {
+    return fail(`the ${what} offsets do not fit their section`);
+  }
+  const offsets = cellsOf(bytes, 4, restStart);
+  if (offsets[0] !== 0) {
+    return fail(`the ${what} offsets do not start at zero`);
+  }
+  for (let index = 1; index < offsets.length; index += 1) {
+    if (offsets[index]! < offsets[index - 1]!) {
+      return fail(`the ${what} offsets decrease`);
+    }
+  }
+  return { offsets, restStart };
+}
+
+function readStrings(bytes: Uint8Array, fail: Fail): { offsets: Uint32Array; bytes: Uint8Array } | undefined {
+  const head = readOffsets(bytes, "string", fail);
+  if (head === undefined) {
+    return undefined;
+  }
+  const blobLength = head.offsets[head.offsets.length - 1]!;
+  const padded = Math.ceil(blobLength / 4) * 4;
+  if (head.restStart + padded !== bytes.byteLength) {
+    return fail(`the string blob is ${blobLength} bytes but its section leaves ${bytes.byteLength - head.restStart} for it`);
+  }
+  const blob = bytes.subarray(head.restStart, head.restStart + blobLength);
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(blob);
+  } catch {
+    return fail("the string blob is not UTF-8");
+  }
+  for (const offset of head.offsets) {
+    // A continuation byte is 0b10xxxxxx; an offset on one is inside a character.
+    if (offset < blobLength && (blob[offset]! & 0xc0) === 0x80) {
+      return fail(`string offset ${offset} is inside a character`);
+    }
+  }
+  return { offsets: head.offsets, bytes: blob };
+}
+
+function readTable(bytes: Uint8Array, table: NxIrTable, fail: Fail): CellTable | undefined {
+  const head = readOffsets(bytes, table, fail);
+  if (head === undefined) {
+    return undefined;
+  }
+  const pool = cellsOf(bytes, head.restStart);
+  const end = head.offsets[head.offsets.length - 1]!;
+  if (end !== pool.length) {
+    return fail(`the ${table} pool is ${pool.length} cells but its offsets end at ${end}`);
+  }
+  return { count: head.offsets.length - 1, offsets: head.offsets, pool };
+}
+
+function readModule(
+  bytes: Uint8Array,
+  stringCount: number,
+  declarationCount: number,
+  fail: Fail,
+):
+  | {
+      runtimeAbi: number;
+      features: Uint32Array;
+      modules: Uint32Array;
+      functionEntrypoints: Uint32Array;
+      componentEntrypoints: Uint32Array;
+    }
+  | undefined {
+  const cells = cellsOf(bytes);
+  let position = 0;
+  const next = (): number | undefined => cells[position++];
+  const check = (what: string, index: number | undefined, count: number): boolean => {
+    if (index === undefined || index >= count) {
+      fail(`${what} index ${String(index)} is out of range (the table has ${count})`);
+      return false;
+    }
+    return true;
+  };
+  const list = (what: string, count: number): Uint32Array | undefined => {
+    const length = next();
+    if (length === undefined || position + length > cells.length) {
+      return fail(`the ${what} list does not fit the module section`);
+    }
+    const items = cells.subarray(position, position + length);
+    position += length;
+    for (const item of items) {
+      if (!check(what, item, count)) {
+        return undefined;
+      }
+    }
+    return items;
+  };
+  const runtimeAbi = next();
+  if (!check("runtime ABI string", runtimeAbi, stringCount)) {
+    return undefined;
+  }
+  const features = list("required feature string", stringCount);
+  if (features === undefined) {
+    return undefined;
+  }
+  const moduleCount = next();
+  if (moduleCount === undefined || moduleCount === 0) {
+    return fail("the module table is empty");
+  }
+  if (position + moduleCount * 4 > cells.length) {
+    return fail("the module table does not fit the module section");
+  }
+  const modules = cells.subarray(position, position + moduleCount * 4);
+  position += moduleCount * 4;
+  for (let slot = 0; slot < moduleCount; slot += 1) {
+    if (
+      !check("module identity string", modules[slot * 4], stringCount) ||
+      !check("module version string", modules[slot * 4 + 1], stringCount)
+    ) {
+      return undefined;
+    }
+  }
+  const functionEntrypoints = list("function entrypoint declaration", declarationCount);
+  const componentEntrypoints = functionEntrypoints === undefined ? undefined : list("component entrypoint declaration", declarationCount);
+  if (functionEntrypoints === undefined || componentEntrypoints === undefined) {
+    return undefined;
+  }
+  if (position !== cells.length) {
+    return fail("the module section has cells after the entrypoints");
+  }
+  return { runtimeAbi: runtimeAbi!, features, modules, functionEntrypoints, componentEntrypoints };
+}
+
+function readDebug(
+  bytes: Uint8Array,
+  declarationCount: number,
+  nodeCount: number,
+  fail: Fail,
+): { declarationSpans: Uint32Array; nodeSpans: Uint32Array; sourceBytes: Uint8Array } | undefined {
+  const cells = cellsOf(bytes);
+  let position = 0;
+  const spans = (what: string, expected: number): Uint32Array | undefined => {
+    const count = cells[position++];
+    if (count !== expected) {
+      return fail(`the debug section has ${String(count)} ${what} spans for ${expected} ${what}s`);
+    }
+    if (position + count * 2 > cells.length) {
+      return fail(`the ${what} spans do not fit the debug section`);
+    }
+    const items = cells.subarray(position, position + count * 2);
+    position += count * 2;
+    return items;
+  };
+  const declarationSpans = spans("declaration", declarationCount);
+  const nodeSpans = declarationSpans === undefined ? undefined : spans("node", nodeCount);
+  if (declarationSpans === undefined || nodeSpans === undefined) {
+    return undefined;
+  }
+  const sourceLength = cells[position++];
+  const sourceStart = position * 4;
+  if (sourceLength === undefined || sourceStart + Math.ceil(sourceLength / 4) * 4 !== bytes.byteLength) {
+    return fail("the source does not fit the debug section");
+  }
+  const sourceBytes = bytes.subarray(sourceStart, sourceStart + sourceLength);
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(sourceBytes);
+  } catch {
+    return fail("the source is not UTF-8");
+  }
+  return { declarationSpans, nodeSpans, sourceBytes };
+}
+
+/** The kind numbers of schema 3, as `docs/nx-ir-format.md` assigns them. */
+export const nodeKinds = {
+  null: 0,
+  bool: 1,
+  string: 2,
+  number: 3,
+  slot: 4,
+  reference: 5,
+  binary: 6,
+  unary: 7,
+  call: 8,
+  intrinsic: 9,
+  if: 10,
+  ifIs: 11,
+  array: 12,
+  for: 13,
+  member: 14,
+  record: 15,
+  unionCase: 16,
+  element: 17,
+  component: 18,
+} as const;
+
+export const typeKinds = { primitive: 0, nominal: 1, array: 2, nullable: 3 } as const;
+export const constantKinds = { int: 0, bigint: 1, float: 2 } as const;
+export const declarationKinds = {
+  function: 0,
+  value: 1,
+  record: 2,
+  component: 3,
+  union: 4,
+  typeAlias: 5,
+} as const;
+const binaryOperators = [
+  "add",
+  "sub",
+  "mul",
+  "div",
+  "idiv",
+  "mod",
+  "imod",
+  "concat",
+  "eq",
+  "ne",
+  "lt",
+  "le",
+  "gt",
+  "ge",
+  "and",
+  "or",
+] as const;
+const unaryOperators = ["neg", "not"] as const;
+const intrinsicNames = ["apply", "merge", "diff", "changed"] as const;
+const fieldFlags = { content: 1, required: 2 } as const;
+const componentFlags = { abstract: 1, external: 2 } as const;
+
+// ------------------------------------------------------------------------------------------------
+// Values and diagnostics
+// ------------------------------------------------------------------------------------------------
 
 export type NxDiagnosticSeverity = "error" | "warning" | "info" | "hint";
+
+export interface NxIrSourceSpan {
+  /** The identity of the module whose source the span indexes. */
+  readonly identity: string;
+  readonly start: number;
+  readonly end: number;
+}
 
 export interface NxIrDiagnostic {
   readonly severity: NxDiagnosticSeverity;
   readonly code: string;
   readonly message: string;
-  readonly path?: string;
+  /** The span of the expression, when the artifact carries a debug section. */
   readonly source?: NxIrSourceSpan;
+  /** The declaration the expression belongs to, as `identity::name`, when it is known. */
+  readonly declaration?: string;
 }
 
 export type NxResult<T> =
@@ -24,221 +578,178 @@ export type NxCanonicalValue =
   | readonly NxCanonicalValue[]
   | { readonly [key: string]: NxCanonicalValue };
 
-export interface NxIrProgram {
-  readonly format: string;
-  readonly schemaVersion: number;
-  readonly runtimeAbi: string;
-  readonly programFingerprint: string;
-  readonly requiredFeatures: readonly string[];
-  readonly functionEntrypoints: readonly NxIrEntrypoint[];
-  readonly componentEntrypoints: readonly NxIrEntrypoint[];
-  readonly modules: readonly NxIrModule[];
-  readonly sources: readonly NxIrSourceEntry[];
+export class NxIrRuntimeError extends Error {
+  public readonly diagnostics: readonly NxIrDiagnostic[];
+
+  public constructor(diagnostics: readonly NxIrDiagnostic[]) {
+    super(diagnostics.map((diagnostic) => diagnostic.message).join("; "));
+    this.name = "NxIrRuntimeError";
+    this.diagnostics = diagnostics;
+  }
 }
 
-export interface NxIrEntrypoint {
-  readonly name: string;
-  readonly reference: NxIrReference;
-}
+// ------------------------------------------------------------------------------------------------
+// The prepared module
+// ------------------------------------------------------------------------------------------------
 
-export interface NxIrModule {
-  readonly id: string;
-  readonly runtimeId: number;
-  readonly provenance: { readonly kind: string; readonly [key: string]: unknown };
-  readonly imports: readonly NxIrReference[];
-  readonly declarations: readonly NxIrDeclaration[];
-}
+export type PreparedType =
+  | { readonly kind: "primitive"; readonly name: string }
+  | { readonly kind: "nominal"; readonly slot: number; readonly name: string }
+  | { readonly kind: "array"; readonly element: PreparedType }
+  | { readonly kind: "nullable"; readonly inner: PreparedType };
 
 export interface NxIrReference {
-  readonly module: string;
-  readonly declaration: string;
+  readonly slot: number;
   readonly name: string;
-  readonly kind: string;
 }
 
-export interface NxIrDeclaration {
-  readonly id: string;
-  readonly reference: NxIrReference;
-  readonly span: NxIrSourceSpan;
-  readonly kind: NxIrDeclarationKind;
-}
-
-export type NxIrDeclarationKind =
-  | NxIrFunctionDeclaration
-  | NxIrValueDeclaration
-  | NxIrRecordDeclaration
-  | NxIrComponentDeclaration
-  | NxIrUnionDeclaration
-  | NxIrTypeAliasDeclaration;
-
-export interface NxIrFunctionDeclaration {
-  readonly tag: "function";
-  readonly params: readonly NxIrParam[];
-  readonly body: NxIrExpression;
-  readonly returnType?: NxIrSemanticType;
-}
-
-export interface NxIrValueDeclaration {
-  readonly tag: "value";
-  readonly value: NxIrExpression;
-  readonly ty?: NxIrSemanticType;
-}
-
-export interface NxIrRecordDeclaration {
-  readonly tag: "record";
-  readonly fields: readonly NxIrRecordField[];
-  /**
-   * The record's abstract bases, nearest first.
-   *
-   * Fields arrive already flattened, so this answers only what flattening cannot: a value stamped
-   * with this record's name is acceptable wherever any of these is expected.
-   */
-  readonly bases?: readonly NxIrReference[];
-  /**
-   * Whether the record was declared `abstract`, and so has no values of its own.
-   *
-   * A base-typed site accepts a value of a record that extends this one, never one of this one.
-   */
-  readonly isAbstract?: boolean;
-  /**
-   * The record or component a derived `<Target>.Update` record patches. Present only on update
-   * records, whose fields are all optional with no defaults: an absent field stays absent.
-   */
-  readonly updateTarget?: NxIrReference;
-}
-
-export interface NxIrComponentDeclaration {
-  readonly tag: "component";
-  readonly isAbstract: boolean;
-  readonly isExternal: boolean;
-  readonly props: readonly NxIrComponentField[];
-  readonly state: readonly NxIrComponentField[];
-  readonly body?: NxIrExpression | null;
-}
-
-export interface NxIrUnionDeclaration {
-  readonly tag: "union";
-  readonly cases: readonly NxIrUnionCase[];
-  /** The union's abstract bases, nearest first, inherited by every case. */
-  readonly bases?: readonly NxIrReference[];
-  /**
-   * The record, action, or component a derived `<Target>.Property` union names the fields of.
-   * Present only on property unions, whose cases are all constant and list the target's effective
-   * fields in declaration order.
-   */
-  readonly propertyTarget?: NxIrReference;
-}
-
-export interface NxIrTypeAliasDeclaration {
-  readonly tag: "typeAlias";
-}
-
-export interface NxIrParam {
+export interface PreparedField {
   readonly name: string;
-  readonly slot: string;
-  readonly ty: NxIrTypeRef;
-  readonly isContent: boolean;
-  readonly span: NxIrSourceSpan;
-}
-
-export interface NxIrRecordField {
-  readonly name: string;
-  readonly slot: string;
-  readonly ty: NxIrTypeRef;
+  readonly ty: PreparedType;
+  /** Node index of the default, or `-1`. */
+  readonly default: number;
   readonly isContent: boolean;
   readonly isRequired: boolean;
-  readonly default?: NxIrExpression | null;
-  readonly span: NxIrSourceSpan;
 }
 
-export interface NxIrComponentField extends NxIrRecordField {
-  readonly ownerModule: string;
-}
-
-export interface NxIrUnionCase {
+export interface PreparedParam {
   readonly name: string;
-  readonly fields: readonly NxIrRecordField[];
-  /**
-   * Whether this case declares no fields in a union that declares no base.
-   *
-   * A constant case carries nothing beyond its own name, so its wire form is that bare string
-   * rather than a `$type` object.
-   */
+  readonly ty: PreparedType;
+  readonly isContent: boolean;
+}
+
+export interface PreparedUnionCase {
+  readonly name: string;
+  readonly fields: readonly PreparedField[];
   readonly isConstant: boolean;
-  readonly span: NxIrSourceSpan;
 }
 
-export interface NxIrExpression {
-  readonly id: string;
-  readonly span: NxIrSourceSpan;
-  readonly ty?: NxIrSemanticType;
-  readonly op: { readonly tag: string; readonly [key: string]: unknown };
-}
+export type PreparedDeclarationKind =
+  | { readonly tag: "function"; readonly params: readonly PreparedParam[]; readonly body: number }
+  | { readonly tag: "value"; readonly value: number }
+  | {
+      readonly tag: "record";
+      readonly fields: readonly PreparedField[];
+      readonly bases: readonly NxIrReference[];
+      readonly isAbstract: boolean;
+      readonly updateTarget: NxIrReference | undefined;
+    }
+  | {
+      readonly tag: "component";
+      readonly props: readonly PreparedField[];
+      readonly state: readonly PreparedField[];
+      /** Node index of the body, or `-1`. */
+      readonly body: number;
+      readonly isAbstract: boolean;
+      readonly isExternal: boolean;
+    }
+  | {
+      readonly tag: "union";
+      readonly cases: readonly PreparedUnionCase[];
+      readonly bases: readonly NxIrReference[];
+      readonly propertyTarget: NxIrReference | undefined;
+    }
+  | { readonly tag: "typeAlias" };
 
-export interface NxIrTypeRef {
-  readonly kind: string;
-  readonly name?: string;
-  readonly reference?: NxIrReference;
-  readonly display?: string;
-  readonly element?: NxIrTypeRef;
-  readonly inner?: NxIrTypeRef;
-  readonly params?: readonly NxIrTypeRef[];
-  readonly returnType?: NxIrTypeRef;
-}
-
-export interface NxIrSemanticType {
-  readonly display: string;
-  readonly shape: { readonly kind: string; readonly [key: string]: unknown };
-}
-
-export interface NxIrSourceSpan {
-  readonly source?: string;
-  readonly start: number;
-  readonly end: number;
-}
-
-export interface NxIrSourceEntry {
-  readonly identity: string;
-  readonly source: string;
-}
-
-export interface NxPreparedProgram {
-  readonly ir: NxIrProgram;
-  readonly modulesById: ReadonlyMap<string, NxIrModule>;
-  readonly declarationsById: ReadonlyMap<string, PreparedDeclaration>;
-  readonly functionEntrypoints: ReadonlyMap<string, PreparedDeclaration>;
-  readonly componentEntrypoints: ReadonlyMap<string, PreparedDeclaration>;
-  readonly sourcesByIdentity: ReadonlyMap<string, string>;
-  /**
-   * Every constructible nominal shape, keyed by the `$type` a value of it carries.
-   *
-   * A value arriving at a base-typed boundary names its own type and nothing more, so this is how
-   * that name is turned back into the schema to normalize it with. One key can hold several shapes:
-   * two modules may each declare a record of the same name.
-   */
-  readonly nominalShapesByDiscriminator: ReadonlyMap<string, readonly NominalShape[]>;
+export interface PreparedDeclaration {
+  readonly index: number;
+  readonly name: string;
+  readonly module: NxPreparedModule;
+  readonly kind: PreparedDeclarationKind;
 }
 
 /**
- * One record or union case as it appears on the wire.
+ * One artifact, validated and indexed. Linking never copies it, so a host prepares a large module
+ * once and links any number of programs against it.
+ */
+export interface NxPreparedModule {
+  readonly identity: string;
+  readonly version: string;
+  readonly fingerprint: string;
+  /** The opened image the module is read from. */
+  readonly artifact: NxIrImage;
+  readonly declarations: readonly PreparedDeclaration[];
+  readonly declarationsByName: ReadonlyMap<string, PreparedDeclaration>;
+  readonly functionEntrypoints: ReadonlyMap<string, PreparedDeclaration>;
+  readonly componentEntrypoints: ReadonlyMap<string, PreparedDeclaration>;
+  /** The declaration names this module references in each other module of its table, by slot. */
+  readonly externalReferences: ReadonlyMap<number, ReadonlySet<string>>;
+  /**
+   * Every constructible nominal shape this module declares, keyed by the `$type` a value of it
+   * carries. Built once here rather than per link, so preparing a catalog is what costs and
+   * linking a snippet against it does not.
+   */
+  readonly nominalShapeSkeletons: ReadonlyMap<string, readonly NominalShapeSkeleton[]>;
+}
+
+/** A prepared module inside one linked program, with its module table resolved. */
+export interface LinkedModule {
+  readonly module: NxPreparedModule;
+  /** Slot `0` is the module itself. */
+  readonly slots: readonly LinkedModule[];
+}
+
+/**
+ * One record or union case of a single module, before any program links it.
  *
- * <para>`bases` holds declaration ids rather than names because that is the only identity that
- * survives separate modules: two records named `Card` are two types, and only the id says which
- * one a base-typed site meant.</para>
+ * <para>This is what preparation indexes, so a module the size of a control catalog is walked once
+ * however many programs link against it. Its `bases` are still the references the artifact carries,
+ * `(slot, name)`; only a link knows which module a slot reaches, so only a link can turn them into
+ * the declaration keys a `NominalShape` holds.</para>
+ */
+export interface NominalShapeSkeleton {
+  /** The `$type` a value of this shape carries: a record's name, or `Union.case`. */
+  readonly discriminator: string;
+  /** The declaring declaration's own name, which is the record's or the union's. */
+  readonly declarationName: string;
+  readonly fields: readonly PreparedField[];
+  readonly bases: readonly NxIrReference[];
+  readonly isAbstract: boolean;
+}
+
+/**
+ * One record or union case as it appears on the wire, in one linked program.
+ *
+ * `bases` holds declaration keys, `identity::name`, rather than names because that is the only
+ * identity that survives separate modules: two records named `Card` are two types, and only the key
+ * says which one a base-typed site meant.
  */
 export interface NominalShape {
   /** The `$type` a value of this shape carries: a record's name, or `Union.case`. */
   readonly discriminator: string;
   readonly declaration: string;
-  readonly fields: readonly NxIrRecordField[];
+  readonly fields: readonly PreparedField[];
   readonly bases: readonly string[];
-  /** Whether this shape is an abstract record, which no value may be an instance of. */
   readonly isAbstract: boolean;
+  /** Where the fields' types and defaults are read. */
+  readonly linked: LinkedModule;
 }
 
-export interface PreparedDeclaration {
-  readonly module: NxIrModule;
-  readonly declaration: NxIrDeclaration;
+export interface NxPreparedProgram {
+  readonly entry: LinkedModule;
+  readonly modulesByIdentity: ReadonlyMap<string, LinkedModule>;
+  readonly functionEntrypoints: ReadonlyMap<string, PreparedDeclaration>;
+  readonly componentEntrypoints: ReadonlyMap<string, PreparedDeclaration>;
+  /**
+   * The constructible shapes of every linked module that a value's `$type` names. This answers
+   * more than one shape when two modules each declare a record of one name; the caller decides
+   * what to do about that rather than being handed a guess.
+   *
+   * <para>Resolved on the question rather than indexed at link time: a linked module already has
+   * its own shapes indexed, so this reads one map per module instead of walking every declaration
+   * of every module on every link.</para>
+   */
+  readonly nominalShapesFor: (discriminator: string) => readonly NominalShape[];
+}
+
+export interface NxLinkOptions {
+  /** Supplies the prepared module of an identity the entry's module table names. */
+  readonly resolve: (identity: string) => NxPreparedModule | undefined;
+  /**
+   * Whether to link a module whose version differs from the one the entry recorded, as long as
+   * every declaration the entry references is present. Off by default.
+   */
+  readonly allowVersionMismatch?: boolean;
 }
 
 export interface NxRuntimeOptions {
@@ -254,145 +765,580 @@ export interface ComponentEvaluateResult {
   readonly rendered: NxCanonicalValue;
 }
 
-export class NxIrRuntimeError extends Error {
-  public readonly diagnostics: readonly NxIrDiagnostic[];
+// ------------------------------------------------------------------------------------------------
+// Preparation
+// ------------------------------------------------------------------------------------------------
 
-  public constructor(diagnostics: readonly NxIrDiagnostic[]) {
-    super(diagnostics.map((diagnostic) => diagnostic.message).join("; "));
-    this.name = "NxIrRuntimeError";
-    this.diagnostics = diagnostics;
-  }
-}
-
-export const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1 = "update-records-v1";
-export const NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1 = "property-unions-v1";
-export const NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1 = "update-intrinsics-v1";
-
-const knownFeatures = new Set([
-  "eager-v1",
-  NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
-  NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
-  NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
-]);
-const knownExpressionTags = new Set([
-  "literal",
-  "slot",
-  "reference",
-  "binary",
-  "unary",
-  "call",
-  "intrinsicCall",
-  "if",
-  "ifIs",
-  "let",
-  "block",
-  "array",
-  "for",
-  "index",
-  "member",
-  "record",
-  "unionCase",
-  "intrinsicElement",
-  "componentDescriptor",
-]);
-
-export function prepareNxIrProgram(input: string | NxIrProgram): NxPreparedProgram {
-  const result = tryPrepareNxIrProgram(input);
+export function prepareNxIrModule(input: Uint8Array | ArrayBuffer): NxPreparedModule {
+  const result = tryPrepareNxIrModule(input);
   if (!result.ok) {
     throw new NxIrRuntimeError(result.diagnostics);
   }
-
   return result.value;
 }
 
-export function tryPrepareNxIrProgram(input: string | NxIrProgram): NxResult<NxPreparedProgram> {
+/**
+ * Opens and validates an image and indexes its module. A view whose byte offset is not a multiple
+ * of four is copied first; an `ArrayBuffer` or a fresh `Uint8Array` is read in place.
+ */
+export function tryPrepareNxIrModule(input: Uint8Array | ArrayBuffer): NxResult<NxPreparedModule> {
   const diagnostics: NxIrDiagnostic[] = [];
-  const ir = typeof input === "string" ? parseIrJson(input, diagnostics) : input;
-  if (ir === undefined) {
+  const image = NxIrImage.open(input, diagnostics);
+  if (image === undefined) {
     return { ok: false, diagnostics };
   }
 
-  if (ir.format !== NX_IR_FORMAT_ID) {
-    diagnostics.push(diagnostic("nx-ir-format", `Unsupported NX IR format '${ir.format}'.`));
-  }
-  if (ir.schemaVersion !== NX_IR_SCHEMA_VERSION) {
-    diagnostics.push(
-      diagnostic(
-        "nx-ir-schema-version",
-        `Unsupported NX IR schema version '${ir.schemaVersion}'.`,
-      ),
-    );
-  }
-  if (ir.runtimeAbi !== NX_IR_RUNTIME_ABI) {
+  if (image.runtimeAbi !== NX_IR_RUNTIME_ABI) {
     diagnostics.push(
       diagnostic(
         "nx-ir-runtime-abi",
-        `Unsupported NX IR runtime ABI '${ir.runtimeAbi}'.`,
+        `NX IR runtime ABI '${image.runtimeAbi}' is not supported; this runtime implements '${NX_IR_RUNTIME_ABI}'.`,
       ),
     );
   }
-  for (const feature of ir.requiredFeatures ?? []) {
+  for (const feature of image.requiredFeatures) {
     if (!knownFeatures.has(feature)) {
+      diagnostics.push(diagnostic("nx-ir-required-feature", `Unsupported NX IR required feature '${feature}'.`));
+    }
+  }
+  if (diagnostics.length > 0) {
+    return { ok: false, diagnostics };
+  }
+
+  const reader = new TableReader(image, diagnostics);
+  reader.validate();
+  if (diagnostics.length > 0) {
+    return { ok: false, diagnostics };
+  }
+
+  const own = image.modules[0]!;
+  const declarations: PreparedDeclaration[] = [];
+  const declarationsByName = new Map<string, PreparedDeclaration>();
+  const module: NxPreparedModule = {
+    identity: own.identity,
+    version: own.version,
+    fingerprint: own.fingerprint,
+    artifact: image,
+    declarations,
+    declarationsByName,
+    functionEntrypoints: new Map<string, PreparedDeclaration>(),
+    componentEntrypoints: new Map<string, PreparedDeclaration>(),
+    externalReferences: reader.externalReferences,
+    nominalShapeSkeletons: new Map<string, NominalShapeSkeleton[]>(),
+  };
+  for (let index = 0; index < image.entryCount("declarations"); index += 1) {
+    const declaration = reader.declaration(index, module);
+    declarations.push(declaration);
+    if (declarationsByName.has(declaration.name)) {
       diagnostics.push(
-        diagnostic("nx-ir-required-feature", `Unsupported NX IR required feature '${feature}'.`),
+        diagnostic("nx-ir-duplicate-declaration", `Module '${own.identity}' declares '${declaration.name}' twice.`),
       );
     }
+    declarationsByName.set(declaration.name, declaration);
   }
-
-  const modulesById = new Map<string, NxIrModule>();
-  const declarationsById = new Map<string, PreparedDeclaration>();
-  const functionEntrypoints = new Map<string, PreparedDeclaration>();
-  const componentEntrypoints = new Map<string, PreparedDeclaration>();
-  const sourcesByIdentity = new Map<string, string>();
-
-  for (const source of ir.sources ?? []) {
-    sourcesByIdentity.set(source.identity, source.source);
-  }
-  for (const module of ir.modules ?? []) {
-    if (modulesById.has(module.id)) {
-      diagnostics.push(diagnostic("nx-ir-duplicate-module", `Duplicate module '${module.id}'.`));
+  for (const [slot, names] of reader.localReferences) {
+    if (slot !== 0) {
+      continue;
     }
-    modulesById.set(module.id, module);
-  }
-  for (const module of ir.modules ?? []) {
-    for (const declaration of module.declarations ?? []) {
-      const prepared = { module, declaration };
-      if (declarationsById.has(declaration.id)) {
+    for (const name of names) {
+      if (!declarationsByName.has(name)) {
         diagnostics.push(
-          diagnostic("nx-ir-duplicate-declaration", `Duplicate declaration '${declaration.id}'.`),
+          diagnostic("nx-ir-reference", `Module '${own.identity}' references its own declaration '${name}', which it does not declare.`),
         );
       }
-      declarationsById.set(declaration.id, prepared);
     }
   }
-  for (const module of ir.modules ?? []) {
-    for (const declaration of module.declarations ?? []) {
-      validateDeclaration(module, declaration, declarationsById, diagnostics);
+  const entrypoints = (indices: Uint32Array, tag: string, target: Map<string, PreparedDeclaration>): void => {
+    for (const index of indices) {
+      const declaration = declarations[index];
+      if (declaration === undefined || declaration.kind.tag !== tag) {
+        diagnostics.push(diagnostic("nx-ir-entrypoint", `${tag} entrypoint ${index} is invalid.`));
+        continue;
+      }
+      target.set(declaration.name, declaration);
+    }
+  };
+  entrypoints(image.functionEntrypoints, "function", module.functionEntrypoints as Map<string, PreparedDeclaration>);
+  entrypoints(image.componentEntrypoints, "component", module.componentEntrypoints as Map<string, PreparedDeclaration>);
+  indexNominalShapes(declarations, module.nominalShapeSkeletons as Map<string, NominalShapeSkeleton[]>);
+
+  if (diagnostics.length > 0) {
+    return { ok: false, diagnostics };
+  }
+  return { ok: true, value: module };
+}
+
+/**
+ * Indexes every nominal shape a module declares by the `$type` its values carry.
+ *
+ * An abstract record is indexed too, even though nothing may be an instance of one: a value that
+ * names one is a value to reject, and rejecting it by name reads better than reporting it as a type
+ * the program does not have. A union contributes one entry per non-constant case, under
+ * `Union.case`; a constant case is a bare string with no schema to normalize.
+ */
+function indexNominalShapes(
+  declarations: readonly PreparedDeclaration[],
+  target: Map<string, NominalShapeSkeleton[]>,
+): void {
+  const add = (skeleton: NominalShapeSkeleton): void => {
+    const existing = target.get(skeleton.discriminator);
+    if (existing === undefined) {
+      target.set(skeleton.discriminator, [skeleton]);
+    } else {
+      existing.push(skeleton);
+    }
+  };
+  for (const declaration of declarations) {
+    const kind = declaration.kind;
+    if (kind.tag === "record") {
+      add({
+        discriminator: declaration.name,
+        declarationName: declaration.name,
+        fields: kind.fields,
+        bases: kind.bases,
+        isAbstract: kind.isAbstract,
+      });
+    } else if (kind.tag === "union") {
+      for (const unionCase of kind.cases) {
+        if (unionCase.isConstant) {
+          continue;
+        }
+        add({
+          discriminator: `${declaration.name}.${unionCase.name}`,
+          declarationName: declaration.name,
+          fields: unionCase.fields,
+          bases: kind.bases,
+          isAbstract: false,
+        });
+      }
+    }
+  }
+}
+
+// ------------------------------------------------------------------------------------------------
+// Entry layouts
+// ------------------------------------------------------------------------------------------------
+
+/**
+ * One operand of a table entry and how it is written as cells. These are the rules of the format:
+ * every layout `docs/nx-ir-format.md` gives is a sequence of these.
+ */
+type Op =
+  | "int"
+  | "binary"
+  | "unary"
+  | "intrinsic"
+  | "str"
+  | "type"
+  | "const"
+  | "node"
+  | "optNode"
+  | "optSlot"
+  | "optStr"
+  | "ref"
+  | "optRef"
+  | "i64"
+  | "f64"
+  | { readonly list: readonly Op[] };
+
+const NODES: readonly Op[] = ["node"];
+const STRS: readonly Op[] = ["str"];
+const REFS: readonly Op[] = ["ref"];
+const PROPERTY: readonly Op[] = ["str", "node"];
+const FIELD: readonly Op[] = ["str", "type", "optNode", "int"];
+const PARAM: readonly Op[] = ["str", "type", "int"];
+const ARM: readonly Op[] = [{ list: NODES }, "node"];
+const UNION_CASE: readonly Op[] = ["str", { list: FIELD }, "int"];
+
+/** The operands after the kind cell, by table and kind number. */
+const layouts: Record<NxIrTable, readonly (readonly Op[])[]> = {
+  types: [["str"], ["ref"], ["type"], ["type"]],
+  constants: [["i64"], ["str"], ["f64"]],
+  nodes: [
+    [],
+    ["int"],
+    ["str"],
+    ["const"],
+    ["int", "str"],
+    ["ref"],
+    ["binary", "node", "node"],
+    ["unary", "node"],
+    ["node", { list: NODES }],
+    ["intrinsic", { list: NODES }, { list: STRS }],
+    ["node", "node", "optNode"],
+    ["node", { list: ARM }, "optNode"],
+    [{ list: NODES }],
+    ["int", "str", "optSlot", "optStr", "node", "node"],
+    ["node", "str"],
+    ["ref", { list: PROPERTY }, { list: NODES }],
+    ["ref", "str", { list: PROPERTY }, { list: NODES }],
+    ["int", "str", { list: PROPERTY }, { list: NODES }],
+    ["ref", { list: PROPERTY }, { list: NODES }],
+  ],
+  declarations: [
+    ["str", { list: PARAM }, "node"],
+    ["str", "node"],
+    ["str", { list: FIELD }, { list: REFS }, "int", "optRef"],
+    ["str", { list: FIELD }, { list: FIELD }, "optNode", "int"],
+    ["str", { list: UNION_CASE }, { list: REFS }, "optRef"],
+    ["str"],
+  ],
+};
+
+/** A position in one entry's cells. */
+class Cursor {
+  readonly cells: Uint32Array;
+  position = 0;
+
+  constructor(cells: Uint32Array) {
+    this.cells = cells;
+  }
+
+  /** The next cell. After validation every read is inside the entry. */
+  next(): number {
+    return this.cells[this.position++]!;
+  }
+
+  get finished(): boolean {
+    return this.position === this.cells.length;
+  }
+}
+
+/**
+ * Checks every entry of every table against its layout, reporting each malformed entry as a
+ * diagnostic, and then decodes declarations from cells the check has passed.
+ */
+class TableReader {
+  readonly externalReferences = new Map<number, Set<string>>();
+  readonly localReferences = new Map<number, Set<string>>();
+  readonly #image: NxIrImage;
+  readonly #diagnostics: NxIrDiagnostic[];
+  readonly #types = new Map<number, PreparedType>();
+
+  constructor(image: NxIrImage, diagnostics: NxIrDiagnostic[]) {
+    this.#image = image;
+    this.#diagnostics = diagnostics;
+  }
+
+  #fail(message: string): false {
+    this.#diagnostics.push(diagnostic("nx-ir-malformed", message));
+    return false;
+  }
+
+  /** Validates every table. Afterwards every index any entry holds is inside the table it names. */
+  validate(): void {
+    for (const table of Object.keys(layouts) as NxIrTable[]) {
+      for (let index = 0; index < this.#image.entryCount(table); index += 1) {
+        this.#validateEntry(table, index);
+      }
     }
   }
 
-  const nominalShapesByDiscriminator = indexNominalShapes(ir);
-  for (const entrypoint of ir.functionEntrypoints ?? []) {
-    const declaration = declarationsById.get(entrypoint.reference.declaration);
-    if (declaration === undefined || declaration.declaration.kind.tag !== "function") {
-      diagnostics.push(
-        diagnostic("nx-ir-entrypoint", `Function entrypoint '${entrypoint.name}' is invalid.`),
-      );
-    } else {
-      functionEntrypoints.set(entrypoint.name, declaration);
+  #validateEntry(table: NxIrTable, index: number): void {
+    const what = `${table.replace(/s$/, "")} ${index}`;
+    const entry = this.#image.entry(table, index);
+    if (entry.length === 0) {
+      this.#fail(`${what} is empty.`);
+      return;
     }
-  }
-  for (const entrypoint of ir.componentEntrypoints ?? []) {
-    const declaration = declarationsById.get(entrypoint.reference.declaration);
-    if (declaration === undefined || declaration.declaration.kind.tag !== "component") {
-      diagnostics.push(
-        diagnostic("nx-ir-entrypoint", `Component entrypoint '${entrypoint.name}' is invalid.`),
-      );
-    } else {
-      componentEntrypoints.set(entrypoint.name, declaration);
+    const cursor = new Cursor(entry);
+    const kind = cursor.next();
+    const layout = layouts[table][kind];
+    if (layout === undefined) {
+      this.#fail(`Unknown ${table.replace(/s$/, "")} kind ${kind} at ${what}.`);
+      return;
+    }
+    // A node's children precede it, and a type's inner type precedes it, so a reader that walks
+    // by index never needs to look ahead and no entry can reach itself.
+    const bounds = {
+      nodes: table === "nodes" ? index : this.#image.entryCount("nodes"),
+      types: table === "types" ? index : this.#image.entryCount("types"),
+    };
+    if (this.#validateSeq(cursor, layout, bounds, what) && !cursor.finished) {
+      this.#fail(`${what} has ${cursor.cells.length - cursor.position} cell(s) more than its layout.`);
     }
   }
 
+  #validateSeq(cursor: Cursor, ops: readonly Op[], bounds: { nodes: number; types: number }, what: string): boolean {
+    for (const op of ops) {
+      if (!this.#validateOp(cursor, op, bounds, what)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  #validateOp(cursor: Cursor, op: Op, bounds: { nodes: number; types: number }, what: string): boolean {
+    const cell = cursor.cells[cursor.position++];
+    if (cell === undefined) {
+      return this.#fail(`${what} ends before its layout does.`);
+    }
+    const inRange = (name: string, index: number, count: number): boolean =>
+      index < count ? true : this.#fail(`${what} ${name} index ${index} is out of range.`);
+    if (typeof op === "object") {
+      for (let element = 0; element < cell; element += 1) {
+        if (!this.#validateSeq(cursor, op.list, bounds, what)) {
+          return false;
+        }
+      }
+      return true;
+    }
+    switch (op) {
+      case "int":
+      case "optSlot":
+        return true;
+      case "binary":
+        return binaryOperators[cell] !== undefined || this.#fail(`${what} uses unknown binary operator ${cell}.`);
+      case "unary":
+        return unaryOperators[cell] !== undefined || this.#fail(`${what} uses unknown unary operator ${cell}.`);
+      case "intrinsic":
+        return intrinsicNames[cell] !== undefined || this.#fail(`${what} uses unknown intrinsic ${cell}.`);
+      case "str":
+        return inRange("string", cell, this.#image.stringCount);
+      case "optStr":
+        return cell === NX_IR_NONE || inRange("string", cell, this.#image.stringCount);
+      case "type":
+        return inRange("type", cell, bounds.types);
+      case "const":
+        return inRange("constant", cell, this.#image.entryCount("constants"));
+      case "node":
+        return inRange("node", cell, bounds.nodes);
+      case "optNode":
+        return cell === NX_IR_NONE || inRange("node", cell, bounds.nodes);
+      case "ref":
+      case "optRef": {
+        const name = cursor.cells[cursor.position++];
+        if (name === undefined) {
+          return this.#fail(`${what} ends before its layout does.`);
+        }
+        if (op === "optRef" && cell === NX_IR_NONE) {
+          return true;
+        }
+        if (!inRange("module slot", cell, this.#image.modules.length) || !inRange("string", name, this.#image.stringCount)) {
+          return false;
+        }
+        this.#reference(cell, this.#image.string(name));
+        return true;
+      }
+      case "i64":
+      case "f64":
+        if (cursor.cells[cursor.position++] === undefined) {
+          return this.#fail(`${what} ends before its layout does.`);
+        }
+        return true;
+    }
+  }
+
+  #reference(slot: number, name: string): NxIrReference {
+    const table = slot === 0 ? this.localReferences : this.externalReferences;
+    let names = table.get(slot);
+    if (names === undefined) {
+      names = new Set();
+      table.set(slot, names);
+    }
+    names.add(name);
+    return { slot, name };
+  }
+
+  #ref(cursor: Cursor): NxIrReference {
+    const slot = cursor.next();
+    return { slot, name: this.#image.string(cursor.next()) };
+  }
+
+  #optRef(cursor: Cursor): NxIrReference | undefined {
+    const slot = cursor.next();
+    const name = cursor.next();
+    return slot === NX_IR_NONE ? undefined : { slot, name: this.#image.string(name) };
+  }
+
+  #list<T>(cursor: Cursor, element: () => T): T[] {
+    const count = cursor.next();
+    const output: T[] = [];
+    for (let index = 0; index < count; index += 1) {
+      output.push(element());
+    }
+    return output;
+  }
+
+  #optNode(cursor: Cursor): number {
+    const cell = cursor.next();
+    return cell === NX_IR_NONE ? -1 : cell;
+  }
+
+  type(index: number): PreparedType {
+    const cached = this.#types.get(index);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const entry = this.#image.entry("types", index);
+    let prepared: PreparedType;
+    switch (entry[0]) {
+      case typeKinds.primitive:
+        prepared = { kind: "primitive", name: this.#image.string(entry[1]!) };
+        break;
+      case typeKinds.nominal:
+        prepared = { kind: "nominal", slot: entry[1]!, name: this.#image.string(entry[2]!) };
+        break;
+      case typeKinds.array:
+        prepared = { kind: "array", element: this.type(entry[1]!) };
+        break;
+      default:
+        prepared = { kind: "nullable", inner: this.type(entry[1]!) };
+        break;
+    }
+    this.#types.set(index, prepared);
+    return prepared;
+  }
+
+  #fields(cursor: Cursor): PreparedField[] {
+    return this.#list(cursor, () => {
+      const name = this.#image.string(cursor.next());
+      const ty = this.type(cursor.next());
+      const defaultNode = this.#optNode(cursor);
+      const flags = cursor.next();
+      return {
+        name,
+        ty,
+        default: defaultNode,
+        isContent: (flags & fieldFlags.content) !== 0,
+        isRequired: (flags & fieldFlags.required) !== 0,
+      };
+    });
+  }
+
+  /** Decodes a validated declaration. */
+  declaration(index: number, module: NxPreparedModule): PreparedDeclaration {
+    const cursor = new Cursor(this.#image.entry("declarations", index));
+    const kind = cursor.next();
+    const name = this.#image.string(cursor.next());
+    let prepared: PreparedDeclarationKind;
+    switch (kind) {
+      case declarationKinds.function: {
+        const params = this.#list(cursor, (): PreparedParam => {
+          const paramName = this.#image.string(cursor.next());
+          const ty = this.type(cursor.next());
+          return { name: paramName, ty, isContent: cursor.next() !== 0 };
+        });
+        prepared = { tag: "function", params, body: cursor.next() };
+        break;
+      }
+      case declarationKinds.value:
+        prepared = { tag: "value", value: cursor.next() };
+        break;
+      case declarationKinds.record: {
+        const fields = this.#fields(cursor);
+        const bases = this.#list(cursor, () => this.#ref(cursor));
+        const isAbstract = cursor.next() !== 0;
+        const updateTarget = this.#optRef(cursor);
+        prepared = { tag: "record", fields, bases, isAbstract, updateTarget };
+        break;
+      }
+      case declarationKinds.component: {
+        const props = this.#fields(cursor);
+        const state = this.#fields(cursor);
+        const body = this.#optNode(cursor);
+        const flags = cursor.next();
+        prepared = {
+          tag: "component",
+          props,
+          state,
+          body,
+          isAbstract: (flags & componentFlags.abstract) !== 0,
+          isExternal: (flags & componentFlags.external) !== 0,
+        };
+        break;
+      }
+      case declarationKinds.union: {
+        const cases = this.#list(cursor, (): PreparedUnionCase => {
+          const caseName = this.#image.string(cursor.next());
+          const fields = this.#fields(cursor);
+          return { name: caseName, fields, isConstant: cursor.next() !== 0 };
+        });
+        const bases = this.#list(cursor, () => this.#ref(cursor));
+        const propertyTarget = this.#optRef(cursor);
+        prepared = { tag: "union", cases, bases, propertyTarget };
+        break;
+      }
+      default:
+        prepared = { tag: "typeAlias" };
+        break;
+    }
+    return { index, name, module, kind: prepared };
+  }
+}
+
+// ------------------------------------------------------------------------------------------------
+// Linking
+// ------------------------------------------------------------------------------------------------
+
+export function linkNxIrProgram(entry: NxPreparedModule, options: NxLinkOptions): NxPreparedProgram {
+  const result = tryLinkNxIrProgram(entry, options);
+  if (!result.ok) {
+    throw new NxIrRuntimeError(result.diagnostics);
+  }
+  return result.value;
+}
+
+export function tryLinkNxIrProgram(entry: NxPreparedModule, options: NxLinkOptions): NxResult<NxPreparedProgram> {
+  const diagnostics: NxIrDiagnostic[] = [];
+  const modulesByIdentity = new Map<string, LinkedModule>();
+
+  const link = (module: NxPreparedModule): LinkedModule => {
+    const existing = modulesByIdentity.get(module.identity);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const slots: LinkedModule[] = [];
+    const linked: LinkedModule = { module, slots };
+    // Registered before its slots resolve, so a module that names itself through another
+    // module's table links to one object rather than recursing.
+    modulesByIdentity.set(module.identity, linked);
+    slots.push(linked);
+    module.artifact.modules.slice(1).forEach((entryTable, offset) => {
+      const slot = offset + 1;
+      const resolved = options.resolve(entryTable.identity);
+      if (resolved === undefined) {
+        diagnostics.push(
+          diagnostic(
+            "nx-ir-link-missing-module",
+            `Module '${module.identity}' links against '${entryTable.identity}', which the resolver did not supply.`,
+          ),
+        );
+        slots.push(linked);
+        return;
+      }
+      if (resolved.identity !== entryTable.identity) {
+        diagnostics.push(
+          diagnostic(
+            "nx-ir-link-identity",
+            `The resolver answered '${entryTable.identity}' with a module whose identity is '${resolved.identity}'.`,
+          ),
+        );
+      }
+      if (resolved.version !== entryTable.version && options.allowVersionMismatch !== true) {
+        diagnostics.push(
+          diagnostic(
+            "nx-ir-link-version",
+            `Module '${module.identity}' was compiled against '${entryTable.identity}' version '${entryTable.version}', but the resolved module is version '${resolved.version}'.`,
+          ),
+        );
+      }
+      for (const name of module.externalReferences.get(slot) ?? []) {
+        if (!resolved.declarationsByName.has(name)) {
+          diagnostics.push(
+            diagnostic(
+              "nx-ir-link-missing-declaration",
+              `Module '${module.identity}' references '${name}' in '${entryTable.identity}', which does not declare it.`,
+            ),
+          );
+        }
+      }
+      slots.push(link(resolved));
+    });
+    return linked;
+  };
+
+  const linkedEntry = link(entry);
   if (diagnostics.length > 0) {
     return { ok: false, diagnostics };
   }
@@ -400,162 +1346,172 @@ export function tryPrepareNxIrProgram(input: string | NxIrProgram): NxResult<NxP
   return {
     ok: true,
     value: {
-      ir,
-      modulesById,
-      declarationsById,
-      functionEntrypoints,
-      componentEntrypoints,
-      sourcesByIdentity,
-      nominalShapesByDiscriminator,
+      entry: linkedEntry,
+      modulesByIdentity,
+      functionEntrypoints: entry.functionEntrypoints,
+      componentEntrypoints: entry.componentEntrypoints,
+      nominalShapesFor: (discriminator) => nominalShapesFor(modulesByIdentity, discriminator),
     },
   };
 }
 
 /**
- * Indexes every nominal shape by the `$type` its values carry.
+ * The shapes a `$type` names across the linked modules.
  *
- * An abstract record is indexed too, even though nothing may be an instance of one: a value that
- * names one is a value to reject, and rejecting it by name reads better than reporting it as a type
- * the program does not have.
- *
- * A record contributes its own name; a union contributes one entry per non-constant case, under
- * `Union.case`, because that is what `evalUnionCase` stamps. A constant case is a bare string with
- * no schema to normalize, so it contributes nothing.
+ * Each module already holds its own shapes indexed by discriminator, so this is one map lookup per
+ * linked module — the modules of a program are few, however many declarations they hold. A base is
+ * resolved through the module that wrote it, since its slot is that module's.
  */
-function indexNominalShapes(ir: NxIrProgram): ReadonlyMap<string, readonly NominalShape[]> {
-  const index = new Map<string, NominalShape[]>();
-  const add = (shape: NominalShape): void => {
-    const existing = index.get(shape.discriminator);
-    if (existing === undefined) {
-      index.set(shape.discriminator, [shape]);
-      return;
-    }
-    existing.push(shape);
-  };
-
-  for (const module of ir.modules ?? []) {
-    for (const declaration of module.declarations ?? []) {
-      const kind = declaration.kind;
-      if (kind.tag === "record") {
-        add({
-          discriminator: declaration.reference.name,
-          declaration: declaration.id,
-          fields: kind.fields ?? [],
-          bases: (kind.bases ?? []).map((base) => base.declaration),
-          isAbstract: kind.isAbstract === true,
-        });
-        continue;
-      }
-      if (kind.tag === "union") {
-        const bases = (kind.bases ?? []).map((base) => base.declaration);
-        for (const unionCase of kind.cases ?? []) {
-          if (unionCase.isConstant) {
-            continue;
-          }
-          add({
-            discriminator: `${declaration.reference.name}.${unionCase.name}`,
-            declaration: declaration.id,
-            fields: unionCase.fields ?? [],
-            bases,
-            isAbstract: false,
-          });
-        }
-      }
+function nominalShapesFor(
+  modulesByIdentity: ReadonlyMap<string, LinkedModule>,
+  discriminator: string,
+): readonly NominalShape[] {
+  const shapes: NominalShape[] = [];
+  for (const linked of modulesByIdentity.values()) {
+    for (const skeleton of linked.module.nominalShapeSkeletons.get(discriminator) ?? []) {
+      shapes.push({
+        discriminator: skeleton.discriminator,
+        declaration: `${linked.module.identity}::${skeleton.declarationName}`,
+        fields: skeleton.fields,
+        bases: skeleton.bases.map((base) => declarationKey(linked, base)),
+        isAbstract: skeleton.isAbstract,
+        linked,
+      });
     }
   }
+  return shapes;
+}
 
-  return index;
+/**
+ * Prepares and links a self-contained artifact: one whose module table holds only itself.
+ */
+export function prepareNxIrProgram(input: Uint8Array | ArrayBuffer): NxPreparedProgram {
+  const result = tryPrepareNxIrProgram(input);
+  if (!result.ok) {
+    throw new NxIrRuntimeError(result.diagnostics);
+  }
+  return result.value;
+}
+
+export function tryPrepareNxIrProgram(input: Uint8Array | ArrayBuffer): NxResult<NxPreparedProgram> {
+  const prepared = tryPrepareNxIrModule(input);
+  if (!prepared.ok) {
+    return prepared;
+  }
+  return tryLinkNxIrProgram(prepared.value, { resolve: () => undefined });
+}
+
+/** The key that identifies one declaration across a program: its module's identity and its name. */
+export function declarationKey(linked: LinkedModule, reference: NxIrReference): string {
+  const target = linked.slots[reference.slot] ?? linked;
+  return `${target.module.identity}::${reference.name}`;
+}
+
+// ------------------------------------------------------------------------------------------------
+// Public evaluation APIs
+// ------------------------------------------------------------------------------------------------
+
+/**
+ * The program an evaluation API runs: a linked program, or a prepared module whose table names
+ * only itself, which is a program on its own. A module that names other modules must be linked.
+ */
+function programOf(program: NxPreparedProgram | NxPreparedModule): NxPreparedProgram {
+  if ("entry" in program) {
+    return program;
+  }
+  if (program.artifact.modules.length > 1) {
+    fail(
+      "nx-ir-unlinked",
+      `Module '${program.identity}' names ${program.artifact.modules.length - 1} other module(s) in its table and must be linked with linkNxIrProgram before it is evaluated.`,
+    );
+  }
+  return linkNxIrProgram(program, { resolve: () => undefined });
 }
 
 export function evaluateFunction(
-  program: NxPreparedProgram,
+  program: NxPreparedProgram | NxPreparedModule,
   name: string,
   args: readonly NxCanonicalValue[] = [],
   options: NxRuntimeOptions = {},
 ): NxCanonicalValue {
-  const prepared = program.functionEntrypoints.get(name);
-  if (prepared === undefined || prepared.declaration.kind.tag !== "function") {
+  const linkedProgram = programOf(program);
+  const declaration = linkedProgram.functionEntrypoints.get(name);
+  if (declaration === undefined || declaration.kind.tag !== "function") {
     fail("nx-ir-missing-entrypoint", `Function entrypoint '${name}' was not found.`);
   }
-
-  return invokeFunction(program, prepared, args, options, 0);
+  return invokeFunction(linkedProgram, linkedProgram.entry, declaration, args, options, 0);
 }
 
 export function constructComponentDescriptor(
-  program: NxPreparedProgram,
+  program: NxPreparedProgram | NxPreparedModule,
   name: string,
   props: Record<string, NxCanonicalValue> = {},
   content: readonly NxCanonicalValue[] = [],
 ): NxCanonicalValue {
-  const prepared = componentDeclaration(program, name);
-  const component = prepared.declaration.kind as NxIrComponentDeclaration;
+  const linkedProgram = programOf(program);
+  const { declaration, component } = componentDeclaration(linkedProgram, name);
   const input = { ...props };
   const contentField = component.props.find((field) => field.isContent);
   applyContentBinding(input, contentField?.name, component.props, content, name);
-  const normalizedProps = normalizeFields(
-    program,
+  const normalized = normalizeFields(
+    linkedProgram,
+    linkedProgram.entry,
+    declaration,
     component.props,
     input,
-    new Map(),
+    [],
     `${name} props`,
     false,
   );
-
-  return { $type: prepared.declaration.reference.name, ...normalizedProps };
+  return { $type: declaration.name, ...normalized };
 }
 
 export function initializeComponent(
-  program: NxPreparedProgram,
+  program: NxPreparedProgram | NxPreparedModule,
   name: string,
   props: Record<string, NxCanonicalValue> = {},
   options: NxRuntimeOptions = {},
 ): ComponentInitResult {
-  const prepared = componentDeclaration(program, name);
-  const component = prepared.declaration.kind as NxIrComponentDeclaration;
-  if (component.isAbstract || component.body === undefined || component.body === null) {
+  const linkedProgram = programOf(program);
+  const { declaration, component } = componentDeclaration(linkedProgram, name);
+  if (component.isAbstract || component.body < 0) {
     fail("nx-ir-component", `Component '${name}' cannot be initialized because it has no body.`);
   }
-
-  const env = new Map<string, NxCanonicalValue>();
-  const normalizedProps = normalizeFields(program, component.props, props, env, `${name} props`, false);
-  const state = normalizeFields(program, component.state, {}, env, `${name} state`, false);
-  const rendered = evalExpression(component.body, {
-    program,
-    env,
+  const frame: NxCanonicalValue[] = [];
+  normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.props, props, frame, `${name} props`, false);
+  const state = normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, {}, frame, `${name} state`, false);
+  const rendered = evalNode(component.body, {
+    program: linkedProgram,
+    linked: linkedProgram.entry,
+    declaration,
+    frame,
     options,
     depth: 0,
   });
-
   return { rendered, state };
 }
 
 export function evaluateComponent(
-  program: NxPreparedProgram,
+  program: NxPreparedProgram | NxPreparedModule,
   name: string,
   props: Record<string, NxCanonicalValue>,
   state: Record<string, NxCanonicalValue>,
   options: NxRuntimeOptions = {},
 ): ComponentEvaluateResult {
-  const prepared = componentDeclaration(program, name);
-  const component = prepared.declaration.kind as NxIrComponentDeclaration;
-  if (component.isAbstract || component.body === undefined || component.body === null) {
+  const linkedProgram = programOf(program);
+  const { declaration, component } = componentDeclaration(linkedProgram, name);
+  if (component.isAbstract || component.body < 0) {
     fail("nx-ir-component", `Component '${name}' cannot be evaluated because it has no body.`);
   }
-
-  const env = new Map<string, NxCanonicalValue>();
-  const normalizedProps = normalizeFields(program, component.props, props, env, `${name} props`, false);
-  for (const field of component.props) {
-    env.set(field.slot, normalizedProps[field.name] ?? null);
-  }
-  const normalizedState = normalizeFields(program, component.state, state, env, `${name} state`, true);
-  for (const field of component.state) {
-    env.set(field.slot, normalizedState[field.name] ?? null);
-  }
-
+  const frame: NxCanonicalValue[] = [];
+  normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.props, props, frame, `${name} props`, false);
+  normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, state, frame, `${name} state`, true);
   return {
-    rendered: evalExpression(component.body, {
-      program,
-      env,
+    rendered: evalNode(component.body, {
+      program: linkedProgram,
+      linked: linkedProgram.entry,
+      declaration,
+      frame,
       options,
       depth: 0,
     }),
@@ -563,13 +1519,14 @@ export function evaluateComponent(
 }
 
 export function normalizeComponentState(
-  program: NxPreparedProgram,
+  program: NxPreparedProgram | NxPreparedModule,
   name: string,
   state: Record<string, NxCanonicalValue>,
 ): Record<string, NxCanonicalValue> {
-  const prepared = componentDeclaration(program, name);
-  const component = prepared.declaration.kind as NxIrComponentDeclaration;
-  return normalizeFields(program, component.state, state, new Map(), `${name} state`, true);
+  const linkedProgram = programOf(program);
+  const { declaration, component } = componentDeclaration(linkedProgram, name);
+  const frame: NxCanonicalValue[] = new Array<NxCanonicalValue>(component.props.length).fill(null);
+  return normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, state, frame, `${name} state`, true);
 }
 
 /**
@@ -580,54 +1537,86 @@ export function normalizeComponentState(
  * absent one keeps it, and a present `null` sets a nullable field to `null`.
  */
 export function applyComponentStatePatch(
-  program: NxPreparedProgram,
+  program: NxPreparedProgram | NxPreparedModule,
   name: string,
   currentState: Record<string, NxCanonicalValue>,
   patch: Record<string, NxCanonicalValue>,
 ): Record<string, NxCanonicalValue> {
-  const prepared = componentDeclaration(program, name);
-  const component = prepared.declaration.kind as NxIrComponentDeclaration;
+  const linkedProgram = programOf(program);
+  const { declaration, component } = componentDeclaration(linkedProgram, name);
   const { $type: discriminator, ...fields } = patch;
-  const expectedUpdate = `${prepared.declaration.reference.name}.Update`;
+  const expectedUpdate = `${declaration.name}.Update`;
   if (discriminator !== undefined && discriminator !== expectedUpdate) {
-    fail(
-      "nx-ir-state-patch",
-      `Cannot apply '${String(discriminator)}' to ${name} state; only '${expectedUpdate}' patches it.`,
-    );
+    fail("nx-ir-state-patch", `Cannot apply '${String(discriminator)}' to ${name} state; only '${expectedUpdate}' patches it.`);
   }
-  patch = fields;
   const known = new Set(component.state.map((field) => field.name));
-  for (const key of Object.keys(patch)) {
+  for (const key of Object.keys(fields)) {
     if (!known.has(key)) {
       fail("nx-ir-state-field", `Unknown ${name} state field '${key}'.`);
     }
   }
-
+  const frame: NxCanonicalValue[] = new Array<NxCanonicalValue>(component.props.length).fill(null);
   return normalizeFields(
-    program,
+    linkedProgram,
+    linkedProgram.entry,
+    declaration,
     component.state,
-    { ...currentState, ...patch },
-    new Map(),
+    { ...currentState, ...fields },
+    frame,
     `${name} state`,
     true,
   );
 }
 
+function componentDeclaration(
+  program: NxPreparedProgram,
+  name: string,
+): { declaration: PreparedDeclaration; component: Extract<PreparedDeclarationKind, { tag: "component" }> } {
+  const declaration = program.componentEntrypoints.get(name);
+  if (declaration === undefined || declaration.kind.tag !== "component") {
+    fail("nx-ir-component", `Component '${name}' was not found.`);
+  }
+  return { declaration, component: declaration.kind };
+}
+
+// ------------------------------------------------------------------------------------------------
+// Evaluation over the node table
+// ------------------------------------------------------------------------------------------------
+
 interface EvalContext {
   readonly program: NxPreparedProgram;
-  readonly env: Map<string, NxCanonicalValue>;
+  /** The module whose node table the indices being evaluated belong to. */
+  readonly linked: LinkedModule;
+  /** The declaration the nodes belong to, for diagnostics. */
+  readonly declaration: PreparedDeclaration;
+  /** The declaration's locals, by slot. */
+  readonly frame: NxCanonicalValue[];
   readonly options: NxRuntimeOptions;
   readonly depth: number;
 }
 
 interface FunctionReferenceValue {
   readonly $nxKind: "functionReference";
-  readonly reference: NxIrReference;
+  readonly linked: LinkedModule;
+  readonly declaration: PreparedDeclaration;
+}
+
+function resolveReference(linked: LinkedModule, slot: number, name: string): { linked: LinkedModule; declaration: PreparedDeclaration } {
+  const target = linked.slots[slot];
+  if (target === undefined) {
+    fail("nx-ir-reference", `Module '${linked.module.identity}' has no module at slot ${slot}.`);
+  }
+  const declaration = target.module.declarationsByName.get(name);
+  if (declaration === undefined) {
+    fail("nx-ir-reference", `Module '${target.module.identity}' does not declare '${name}'.`);
+  }
+  return { linked: target, declaration };
 }
 
 function invokeFunction(
   program: NxPreparedProgram,
-  prepared: PreparedDeclaration,
+  linked: LinkedModule,
+  declaration: PreparedDeclaration,
   args: readonly NxCanonicalValue[],
   options: NxRuntimeOptions,
   depth: number,
@@ -636,233 +1625,295 @@ function invokeFunction(
   if (depth > maxCallDepth) {
     fail("nx-ir-resource-limit", `Maximum NX IR call depth ${maxCallDepth} was exceeded.`);
   }
-
-  const kind = prepared.declaration.kind;
+  const kind = declaration.kind;
   if (kind.tag !== "function") {
-    fail("nx-ir-call", `'${prepared.declaration.reference.name}' is not a function.`);
+    fail("nx-ir-call", `'${declaration.name}' is not a function.`);
   }
   if (args.length !== kind.params.length) {
-    fail(
-      "nx-ir-arguments",
-      `Function '${prepared.declaration.reference.name}' expected ${kind.params.length} arguments, got ${args.length}.`,
-    );
+    fail("nx-ir-arguments", `Function '${declaration.name}' expected ${kind.params.length} arguments, got ${args.length}.`);
   }
-
-  const env = new Map<string, NxCanonicalValue>();
-  for (let index = 0; index < kind.params.length; index += 1) {
-    const param = kind.params[index]!;
-    env.set(param.slot, normalizeValue(program, param.ty, args[index]!, `${param.name}`));
-  }
-
-  return evalExpression(kind.body, { program, env, options, depth });
-}
-
-function evalExpression(expression: NxIrExpression, context: EvalContext): NxCanonicalValue {
-  const op = expression.op as Record<string, unknown>;
-  switch (op.tag) {
-    case "literal":
-      return evalLiteral(op.value);
-    case "slot":
-      return readSlot(context, String(op.slot), String(op.name));
-    case "reference":
-      return evalReference(context, op.reference as NxIrReference);
-    case "binary":
-      return evalBinary(
-        expression,
-        String(op.operator),
-        evalExpression(op.lhs as NxIrExpression, context),
-        evalExpression(op.rhs as NxIrExpression, context),
-      );
-    case "unary":
-      return evalUnary(String(op.operator), evalExpression(op.expr as NxIrExpression, context));
-    case "call":
-      return evalCall(expression, context);
-    case "intrinsicCall":
-      return evalIntrinsicCall(op, context);
-    case "if":
-      return truthy(evalExpression(op.condition as NxIrExpression, context))
-        ? evalExpression(op.thenBranch as NxIrExpression, context)
-        : op.elseBranch === undefined || op.elseBranch === null
-          ? null
-          : evalExpression(op.elseBranch as NxIrExpression, context);
-    case "ifIs":
-      return evalIfIs(op, context);
-    case "let":
-      return evalLet(op, context);
-    case "block":
-      return evalBlock(op, context);
-    case "array":
-      return ((op.elements as readonly NxIrExpression[]) ?? []).map((item) =>
-        evalExpression(item, context),
-      );
-    case "for":
-      return evalFor(op, context);
-    case "index":
-      return evalIndex(
-        evalExpression(op.base as NxIrExpression, context),
-        evalExpression(op.index as NxIrExpression, context),
-        expression.span,
-      );
-    case "member":
-      return evalMember(evalExpression(op.base as NxIrExpression, context), String(op.member));
-    case "record":
-      return evalRecord(op, context);
-    case "unionCase":
-      return evalUnionCase(op, context);
-    case "intrinsicElement":
-      return evalIntrinsicElement(op, context);
-    case "componentDescriptor":
-      return evalComponentDescriptor(op, context);
-    default:
-      fail("nx-ir-expression", `Unknown NX IR expression tag '${String(op.tag)}'.`, expression.span);
-  }
-}
-
-function evalLiteral(value: unknown): NxCanonicalValue {
-  const literal = value as Record<string, unknown>;
-  switch (literal.kind) {
-    case "string":
-      return String(literal.value);
-    case "int":
-      if (typeof literal.number === "number") {
-        return literal.number;
-      }
-      return { $type: "nx.int", value: String(literal.value) };
-    case "float":
-      return Number(literal.value);
-    case "boolean":
-      return Boolean(literal.value);
-    case "null":
-      return null;
-    default:
-      fail("nx-ir-literal", `Unknown literal kind '${String(literal.kind)}'.`);
-  }
-}
-
-function evalReference(context: EvalContext, reference: NxIrReference): NxCanonicalValue {
-  if (reference.kind === "function") {
-    return { $nxKind: "functionReference", reference } as unknown as NxCanonicalValue;
-  }
-  const prepared = context.program.declarationsById.get(reference.declaration);
-  if (prepared === undefined) {
-    fail("nx-ir-reference", `Missing declaration '${reference.declaration}'.`);
-  }
-  if (prepared.declaration.kind.tag === "value") {
-    return evalExpression(prepared.declaration.kind.value, context);
-  }
-
-  fail("nx-ir-reference", `Declaration '${reference.name}' cannot be used as a value.`);
-}
-
-function evalCall(expression: NxIrExpression, context: EvalContext): NxCanonicalValue {
-  const op = expression.op as Record<string, unknown>;
-  const callee = evalExpression(op.callee as NxIrExpression, context) as unknown;
-  if (!isFunctionReference(callee)) {
-    fail("nx-ir-call", "NX IR call callee did not evaluate to a function reference.", expression.span);
-  }
-  const prepared = context.program.declarationsById.get(callee.reference.declaration);
-  if (prepared === undefined) {
-    fail("nx-ir-call", `Missing function declaration '${callee.reference.declaration}'.`);
-  }
-  const args = ((op.args as readonly NxIrExpression[]) ?? []).map((arg) =>
-    evalExpression(arg, context),
-  );
-
-  return invokeFunction(context.program, prepared, args, context.options, context.depth + 1);
-}
-
-function evalIfIs(op: Record<string, unknown>, context: EvalContext): NxCanonicalValue {
-  const scrutinee = evalExpression(op.scrutinee as NxIrExpression, context);
-  for (const arm of (op.arms as readonly Record<string, unknown>[]) ?? []) {
-    const patterns = (arm.patterns as readonly NxIrExpression[]) ?? [];
-    if (patterns.some((pattern) => patternMatches(scrutinee, evalExpression(pattern, context)))) {
-      return evalExpression(arm.body as NxIrExpression, context);
-    }
-  }
-
-  return op.elseBranch === undefined || op.elseBranch === null
-    ? null
-    : evalExpression(op.elseBranch as NxIrExpression, context);
-}
-
-function evalLet(op: Record<string, unknown>, context: EvalContext): NxCanonicalValue {
-  const nextEnv = new Map(context.env);
-  nextEnv.set(String(op.slot), evalExpression(op.value as NxIrExpression, context));
-  return evalExpression(op.body as NxIrExpression, { ...context, env: nextEnv });
-}
-
-function evalBlock(op: Record<string, unknown>, context: EvalContext): NxCanonicalValue {
-  const env = new Map(context.env);
-  const blockContext = { ...context, env };
-  for (const statement of (op.statements as readonly Record<string, unknown>[]) ?? []) {
-    if (statement.tag === "let") {
-      env.set(String(statement.slot), evalExpression(statement.init as NxIrExpression, blockContext));
-    } else if (statement.tag === "expr") {
-      evalExpression(statement.expr as NxIrExpression, blockContext);
-    }
-  }
-
-  return op.expression === undefined || op.expression === null
-    ? null
-    : evalExpression(op.expression as NxIrExpression, blockContext);
-}
-
-function evalFor(op: Record<string, unknown>, context: EvalContext): NxCanonicalValue {
-  const iterable = evalExpression(op.iterable as NxIrExpression, context);
-  if (!Array.isArray(iterable)) {
-    fail("nx-ir-for", "For expression iterable must evaluate to an array.");
-  }
-
-  return iterable.map((item, index) => {
-    const env = new Map(context.env);
-    env.set(String(op.itemSlot), item);
-    if (typeof op.indexSlot === "string") {
-      env.set(op.indexSlot, index);
-    }
-
-    return evalExpression(op.body as NxIrExpression, { ...context, env });
+  const frame: NxCanonicalValue[] = [];
+  const context: EvalContext = { program, linked, declaration, frame, options, depth };
+  kind.params.forEach((param, index) => {
+    frame[index] = normalizeValue(context, param.ty, args[index]!, param.name);
   });
+  return evalNode(kind.body, context);
 }
 
-function evalRecord(op: Record<string, unknown>, context: EvalContext): NxCanonicalValue {
-  const properties = propertiesObject(op.properties as readonly Record<string, unknown>[], context);
-  const content = ((op.content as readonly NxIrExpression[]) ?? []).map((item) =>
-    evalExpression(item, context),
-  );
-  const fields = (op.fields as readonly NxIrRecordField[]) ?? [];
-  applyContentBinding(properties, op.contentField, fields, content, String(op.name));
+function entryAt(context: EvalContext, index: number): Uint32Array {
+  return context.linked.module.artifact.entry("nodes", index);
+}
+
+/** Evaluates the `count, node × count` list at `at` and returns the values and the position after it. */
+function nodesAt(context: EvalContext, entry: Uint32Array, at: number): { values: NxCanonicalValue[]; next: number } {
+  const count = entry[at]!;
+  const values: NxCanonicalValue[] = [];
+  for (let position = at + 1; position < at + 1 + count; position += 1) {
+    values.push(evalNode(entry[position]!, context));
+  }
+  return { values, next: at + 1 + count };
+}
+
+/** Evaluates the `count, (name, node) × count` list at `at` into an object, in property order. */
+function propertiesAt(
+  context: EvalContext,
+  entry: Uint32Array,
+  at: number,
+): { properties: Record<string, NxCanonicalValue>; next: number } {
+  const image = context.linked.module.artifact;
+  const count = entry[at]!;
+  const properties: Record<string, NxCanonicalValue> = {};
+  let position = at + 1;
+  for (let index = 0; index < count; index += 1) {
+    properties[image.string(entry[position]!)] = evalNode(entry[position + 1]!, context);
+    position += 2;
+  }
+  return { properties, next: position };
+}
+
+function evalNode(index: number, context: EvalContext): NxCanonicalValue {
+  const entry = entryAt(context, index);
+  const image = context.linked.module.artifact;
+  switch (entry[0]) {
+    case nodeKinds.null:
+      return null;
+    case nodeKinds.bool:
+      return entry[1] !== 0;
+    case nodeKinds.string:
+      return image.string(entry[1]!);
+    case nodeKinds.number:
+      return evalConstant(context, entry[1]!, index);
+    case nodeKinds.slot: {
+      const slot = entry[1]!;
+      if (slot >= context.frame.length || context.frame[slot] === undefined) {
+        fail("nx-ir-slot", `Local slot '${image.string(entry[2]!)}' was not bound.`, context, index);
+      }
+      return context.frame[slot]!;
+    }
+    case nodeKinds.reference:
+      return evalReference(context, entry[1]!, image.string(entry[2]!), index);
+    case nodeKinds.binary: {
+      const operator = binaryOperators[entry[1]!]!;
+      // `and` and `or` are the only non-strict operators: the left operand decides whether the
+      // right one runs at all, so a guard such as `d != 0 && n / d > 1` never divides by zero.
+      if (operator === "and" || operator === "or") {
+        const left = truthy(evalNode(entry[2]!, context));
+        if (left === (operator === "or")) {
+          return left;
+        }
+        return truthy(evalNode(entry[3]!, context));
+      }
+      return evalBinary(context, index, operator, evalNode(entry[2]!, context), evalNode(entry[3]!, context));
+    }
+    case nodeKinds.unary: {
+      const operand = evalNode(entry[2]!, context);
+      switch (unaryOperators[entry[1]!]) {
+        case "neg":
+          return -checkedNumber(context, index, operand, "neg");
+        case "not":
+          return !truthy(operand);
+        default:
+          fail("nx-ir-operator", `Unknown unary operator '${String(entry[1])}'.`, context, index);
+      }
+    }
+    // eslint-disable-next-line no-fallthrough
+    case nodeKinds.call:
+      return evalCall(context, index, entry);
+    case nodeKinds.intrinsic:
+      return evalIntrinsic(context, index, entry);
+    case nodeKinds.if: {
+      const condition = evalNode(entry[1]!, context);
+      if (truthy(condition)) {
+        return evalNode(entry[2]!, context);
+      }
+      return entry[3] === NX_IR_NONE ? null : evalNode(entry[3]!, context);
+    }
+    case nodeKinds.ifIs: {
+      const scrutinee = evalNode(entry[1]!, context);
+      const arms = entry[2]!;
+      let position = 3;
+      for (let arm = 0; arm < arms; arm += 1) {
+        const patterns = entry[position]!;
+        let matched = false;
+        for (let pattern = position + 1; pattern < position + 1 + patterns; pattern += 1) {
+          if (!matched && patternMatches(scrutinee, evalNode(entry[pattern]!, context))) {
+            matched = true;
+          }
+        }
+        const body = entry[position + 1 + patterns]!;
+        if (matched) {
+          return evalNode(body, context);
+        }
+        position += patterns + 2;
+      }
+      const otherwise = entry[position]!;
+      return otherwise === NX_IR_NONE ? null : evalNode(otherwise, context);
+    }
+    case nodeKinds.array:
+      return nodesAt(context, entry, 1).values;
+    case nodeKinds.for: {
+      const iterable = evalNode(entry[5]!, context);
+      if (!Array.isArray(iterable)) {
+        fail("nx-ir-for", "For expression iterable must evaluate to an array.", context, index);
+      }
+      const itemSlot = entry[1]!;
+      const indexSlot = entry[3]!;
+      return iterable.map((item, position) => {
+        context.frame[itemSlot] = item;
+        if (indexSlot !== NX_IR_NONE) {
+          context.frame[indexSlot] = position;
+        }
+        return evalNode(entry[6]!, context);
+      });
+    }
+    case nodeKinds.member: {
+      const base = evalNode(entry[1]!, context);
+      const member = image.string(entry[2]!);
+      const object = requireObject(base, "member access");
+      if (!Object.prototype.hasOwnProperty.call(object, member)) {
+        fail("nx-ir-member", `Object does not contain member '${member}'.`, context, index);
+      }
+      return object[member]!;
+    }
+    case nodeKinds.record:
+      return evalRecord(context, index, entry);
+    case nodeKinds.unionCase:
+      return evalUnionCase(context, index, entry);
+    case nodeKinds.element: {
+      const { properties, next } = propertiesAt(context, entry, 3);
+      const content = nodesAt(context, entry, next).values;
+      // The interpreter's rule for an element with no declared content field: one child is
+      // bound as itself, several as a list.
+      if (content.length === 1) {
+        properties.content = content[0]!;
+      } else if (content.length > 1) {
+        properties.content = content;
+      }
+      return { $type: image.string(entry[2]!), ...properties };
+    }
+    case nodeKinds.component:
+      return evalComponentDescriptor(context, index, entry);
+    default:
+      fail("nx-ir-expression", `Unknown NX IR node kind '${String(entry[0])}'.`, context, index);
+  }
+}
+
+const float64Cells = new Uint32Array(2);
+const float64View = new Float64Array(float64Cells.buffer);
+const littleEndian = new Uint8Array(float64Cells.buffer)[0] === 0 && (() => {
+  float64Cells[0] = 1;
+  const little = new Uint8Array(float64Cells.buffer)[0] === 1;
+  float64Cells[0] = 0;
+  return little;
+})();
+
+function evalConstant(context: EvalContext, constantIndex: number, nodeIndex: number): NxCanonicalValue {
+  const image = context.linked.module.artifact;
+  const constant = image.entry("constants", constantIndex);
+  switch (constant[0]) {
+    case constantKinds.int:
+      // Two cells, low word first; the high word is signed. Every value the emitter writes with
+      // this kind is inside the safe range, so the product is exact.
+      return (constant[2]! | 0) * 4294967296 + constant[1]!;
+    case constantKinds.float:
+      float64Cells[littleEndian ? 0 : 1] = constant[1]!;
+      float64Cells[littleEndian ? 1 : 0] = constant[2]!;
+      return float64View[0]!;
+    case constantKinds.bigint:
+      return { $type: "nx.int", value: image.string(constant[1]!) };
+    default:
+      fail("nx-ir-literal", `Unknown constant kind '${String(constant[0])}'.`, context, nodeIndex);
+  }
+}
+
+function evalReference(context: EvalContext, slot: number, name: string, nodeIndex: number): NxCanonicalValue {
+  const { linked, declaration } = resolveReference(context.linked, slot, name);
+  if (declaration.kind.tag === "function") {
+    return { $nxKind: "functionReference", linked, declaration } as unknown as NxCanonicalValue;
+  }
+  if (declaration.kind.tag === "value") {
+    return evalNode(declaration.kind.value, {
+      ...context,
+      linked,
+      declaration,
+      frame: [],
+    });
+  }
+  fail("nx-ir-reference", `Declaration '${name}' cannot be used as a value.`, context, nodeIndex);
+}
+
+function evalCall(context: EvalContext, nodeIndex: number, entry: Uint32Array): NxCanonicalValue {
+  const callee = evalNode(entry[1]!, context) as unknown;
+  if (!isFunctionReference(callee)) {
+    fail("nx-ir-call", "NX IR call callee did not evaluate to a function reference.", context, nodeIndex);
+  }
+  const args = nodesAt(context, entry, 2).values;
+  return invokeFunction(context.program, callee.linked, callee.declaration, args, context.options, context.depth + 1);
+}
+
+function evalRecord(context: EvalContext, nodeIndex: number, entry: Uint32Array): NxCanonicalValue {
+  const image = context.linked.module.artifact;
+  const name = image.string(entry[2]!);
+  const { linked, declaration } = resolveReference(context.linked, entry[1]!, name);
+  if (declaration.kind.tag !== "record") {
+    fail("nx-ir-record", `'${name}' is not a record.`, context, nodeIndex);
+  }
+  const record = declaration.kind;
+  const { properties, next } = propertiesAt(context, entry, 3);
+  const content = nodesAt(context, entry, next).values;
+  const contentField = record.fields.find((field) => field.isContent)?.name;
+  applyContentBinding(properties, contentField, record.fields, content, name);
   const normalized =
-    op.isUpdate === true
-      ? normalizePatchFields(context.program, fields, properties, String(op.name))
-      : normalizeFields(context.program, fields, properties, new Map(context.env), String(op.name), false);
-  return { $type: String(op.name), ...normalized };
+    record.updateTarget !== undefined
+      ? normalizePatchFields(context, record.fields, properties, name)
+      : normalizeFields(context.program, linked, declaration, record.fields, properties, [], name, false);
+  return { $type: name, ...normalized };
 }
 
-function evalUnionCase(op: Record<string, unknown>, context: EvalContext): NxCanonicalValue {
-  const union = op.union as NxIrReference;
-  const caseName = String(op.caseName);
-  const properties = propertiesObject(op.properties as readonly Record<string, unknown>[], context);
-  const content = ((op.content as readonly NxIrExpression[]) ?? []).map((item) =>
-    evalExpression(item, context),
-  );
-  const fields = (op.fields as readonly NxIrRecordField[]) ?? [];
-  applyContentBinding(properties, op.contentField, fields, content, `${union.name}.${caseName}`);
-  const normalized = normalizeFields(
-    context.program,
-    fields,
-    properties,
-    new Map(context.env),
-    `${union.name}.${caseName}`,
-    false,
-  );
-
+function evalUnionCase(context: EvalContext, nodeIndex: number, entry: Uint32Array): NxCanonicalValue {
+  const image = context.linked.module.artifact;
+  const unionName = image.string(entry[2]!);
+  const caseName = image.string(entry[3]!);
+  const { linked, declaration } = resolveReference(context.linked, entry[1]!, unionName);
+  if (declaration.kind.tag !== "union") {
+    fail("nx-ir-union", `'${unionName}' is not a union.`, context, nodeIndex);
+  }
+  const unionCase = declaration.kind.cases.find((candidate) => candidate.name === caseName);
+  if (unionCase === undefined) {
+    fail("nx-ir-union", `'${unionName}' has no case '${caseName}'.`, context, nodeIndex);
+  }
   // A constant case carries nothing beyond its own name.
-  if (op.isConstant === true) {
+  if (unionCase.isConstant) {
     return caseName;
   }
-
-  return { $type: `${union.name}.${caseName}`, ...normalized };
+  const { properties, next } = propertiesAt(context, entry, 4);
+  const content = nodesAt(context, entry, next).values;
+  const path = `${unionName}.${caseName}`;
+  const contentField = unionCase.fields.find((field) => field.isContent)?.name;
+  applyContentBinding(properties, contentField, unionCase.fields, content, path);
+  const normalized = normalizeFields(context.program, linked, declaration, unionCase.fields, properties, [], path, false);
+  return { $type: path, ...normalized };
 }
+
+function evalComponentDescriptor(context: EvalContext, nodeIndex: number, entry: Uint32Array): NxCanonicalValue {
+  const image = context.linked.module.artifact;
+  const name = image.string(entry[2]!);
+  const { linked, declaration } = resolveReference(context.linked, entry[1]!, name);
+  if (declaration.kind.tag !== "component") {
+    fail("nx-ir-component", `'${name}' is not a component.`, context, nodeIndex);
+  }
+  const component = declaration.kind;
+  const { properties: props, next } = propertiesAt(context, entry, 3);
+  const content = nodesAt(context, entry, next).values;
+  const contentField = component.props.find((field) => field.isContent)?.name;
+  applyContentBinding(props, contentField, component.props, content, name);
+  const normalized = normalizeFields(context.program, linked, declaration, component.props, props, [], `${name} props`, false);
+  return { $type: name, ...normalized };
+}
+
+// ------------------------------------------------------------------------------------------------
+// Intrinsics
+// ------------------------------------------------------------------------------------------------
 
 /** A record or update record as the runtime holds it: a `$type` and its fields. */
 export type NxRecordObject = { readonly $type: string; readonly [key: string]: NxCanonicalValue };
@@ -872,14 +1923,12 @@ export type NxUpdateOf<T extends NxRecordObject> = { readonly $type: string } & 
   readonly [K in keyof T as K extends "$type" ? never : K]?: T[K];
 };
 
-function evalIntrinsicCall(op: Record<string, unknown>, context: EvalContext): NxCanonicalValue {
-  const args = ((op.args as readonly NxIrExpression[]) ?? []).map((arg) =>
-    evalExpression(arg, context),
-  );
-  const intrinsic = String(op.intrinsic);
+function evalIntrinsic(context: EvalContext, nodeIndex: number, entry: Uint32Array): NxCanonicalValue {
+  const intrinsic = intrinsicNames[entry[1]!] ?? String(entry[1]);
+  const { values: args, next } = nodesAt(context, entry, 2);
   const expectArity = (arity: number): void => {
     if (args.length !== arity) {
-      fail("nx-ir-intrinsic", `Intrinsic '${intrinsic}' expects ${arity} arguments, got ${args.length}.`);
+      fail("nx-ir-intrinsic", `Intrinsic '${intrinsic}' expects ${arity} arguments, got ${args.length}.`, context, nodeIndex);
     }
   };
   switch (intrinsic) {
@@ -895,15 +1944,12 @@ function evalIntrinsicCall(op: Record<string, unknown>, context: EvalContext): N
     case "changed": {
       expectArity(1);
       const update = intrinsicRecord(args[0]!, intrinsic);
-      // The IR carries the target's declared field order with the call; a program that
-      // predates that falls back to the declaration it must then contain.
-      const order = Array.isArray(op.fieldOrder)
-        ? op.fieldOrder.map((name) => String(name))
-        : declaredFieldOrder(update, context.program);
-      return changedFieldsInOrder(update, order);
+      const image = context.linked.module.artifact;
+      const order = Array.from(entry.subarray(next + 1, next + 1 + entry[next]!), (name) => image.string(name));
+      return changedFieldsInOrder(update, order.length > 0 ? order : declaredFieldOrder(update, context.program));
     }
     default:
-      return fail("nx-ir-intrinsic", `Unknown intrinsic '${intrinsic}'.`);
+      fail("nx-ir-intrinsic", `Unknown intrinsic '${intrinsic}'.`, context, nodeIndex);
   }
 }
 
@@ -950,8 +1996,8 @@ export function changedFields(update: NxRecordObject, program: NxPreparedProgram
 }
 
 function declaredFieldOrder(update: NxRecordObject, program: NxPreparedProgram): string[] {
-  const shapes = program.nominalShapesByDiscriminator.get(update.$type);
-  if (shapes === undefined || shapes.length !== 1) {
+  const shapes = program.nominalShapesFor(update.$type);
+  if (shapes.length !== 1) {
     fail("nx-ir-intrinsic", `Cannot order the fields of '${update.$type}': the program does not declare it.`);
   }
   return shapes[0]!.fields.map((field) => field.name);
@@ -1027,55 +2073,28 @@ function valuesEqual(left: NxCanonicalValue, right: NxCanonicalValue): boolean {
   return left === right;
 }
 
-function evalIntrinsicElement(op: Record<string, unknown>, context: EvalContext): NxCanonicalValue {
-  const properties = propertiesObject(op.properties as readonly Record<string, unknown>[], context);
-  const content = ((op.content as readonly NxIrExpression[]) ?? []).map((item) =>
-    evalExpression(item, context),
-  );
-  if (content.length > 0) {
-    properties.children = content;
-  }
-
-  return { $type: String(op.tagName), ...properties };
-}
-
-function evalComponentDescriptor(op: Record<string, unknown>, context: EvalContext): NxCanonicalValue {
-  const reference = op.component as NxIrReference;
-  const prepared = context.program.declarationsById.get(reference.declaration);
-  if (prepared === undefined || prepared.declaration.kind.tag !== "component") {
-    fail("nx-ir-component", `Missing component declaration '${reference.name}'.`);
-  }
-  const component = prepared.declaration.kind;
-  const props = propertiesObject(op.properties as readonly Record<string, unknown>[], context);
-  const content = ((op.content as readonly NxIrExpression[]) ?? []).map((item) =>
-    evalExpression(item, context),
-  );
-  applyContentBinding(props, op.contentField, component.props, content, reference.name);
-  const env = new Map(context.env);
-  const normalized = normalizeFields(context.program, component.props, props, env, `${reference.name} props`, false);
-
-  return { $type: reference.name, ...normalized };
-}
+// ------------------------------------------------------------------------------------------------
+// Boundary normalization
+// ------------------------------------------------------------------------------------------------
 
 function applyContentBinding(
   input: Record<string, NxCanonicalValue>,
-  contentField: unknown,
-  fields: readonly NxIrRecordField[],
+  contentField: string | undefined,
+  fields: readonly PreparedField[],
   content: readonly NxCanonicalValue[],
   path: string,
 ): void {
   if (content.length === 0) {
     return;
   }
-  if (typeof contentField !== "string") {
+  if (contentField === undefined) {
     fail("nx-ir-boundary-field", `${path} does not accept content.`);
   }
   if (Object.prototype.hasOwnProperty.call(input, contentField)) {
     fail("nx-ir-boundary-field", `${path} field '${contentField}' was supplied both as a property and as content.`);
   }
-
   const declared = fields.find((field) => field.name === contentField)?.ty;
-  const bindsList = declared !== undefined && isListTypeRef(declared);
+  const bindsList = declared !== undefined && isListType(declared);
   input[contentField] = bindsList || content.length > 1 ? [...content] : content[0]!;
 }
 
@@ -1086,18 +2105,27 @@ function applyContentBinding(
  * one. Collapsing a single child to the child itself would then fail normalization, and it would
  * disagree with the interpreter, which lists the single child.
  */
-function isListTypeRef(ty: NxIrTypeRef): boolean {
+function isListType(ty: PreparedType): boolean {
   if (ty.kind === "nullable") {
-    return ty.inner !== undefined && isListTypeRef(ty.inner);
+    return isListType(ty.inner);
   }
   return ty.kind === "array";
 }
 
+/**
+ * Normalizes host or program input against a declaration's fields, binding each field's slot in
+ * `frame` as it goes so a later field's default can read an earlier field.
+ *
+ * `linked` and `declaration` are where the fields were declared: defaults are node indices of that
+ * module, and a nominal type resolves through that module's table.
+ */
 function normalizeFields(
   program: NxPreparedProgram,
-  fields: readonly NxIrRecordField[],
+  linked: LinkedModule,
+  declaration: PreparedDeclaration,
+  fields: readonly PreparedField[],
   input: Record<string, NxCanonicalValue>,
-  env: Map<string, NxCanonicalValue>,
+  frame: NxCanonicalValue[],
   path: string,
   requireExplicit: boolean,
 ): Record<string, NxCanonicalValue> {
@@ -1107,42 +2135,34 @@ function normalizeFields(
       fail("nx-ir-boundary-field", `Unknown ${path} field '${key}'.`);
     }
   }
-
+  const context: EvalContext = { program, linked, declaration, frame, options: {}, depth: 0 };
+  const firstSlot = frame.length;
   const output: Record<string, NxCanonicalValue> = {};
-  for (const field of fields) {
+  fields.forEach((field, offset) => {
     let value: NxCanonicalValue;
     if (Object.prototype.hasOwnProperty.call(input, field.name)) {
-      value = normalizeValue(program, field.ty, input[field.name]!, `${path}.${field.name}`);
-    } else if (!requireExplicit && field.default !== undefined && field.default !== null) {
-      value = evalExpression(field.default, {
-        program,
-        env,
-        options: {},
-        depth: 0,
-      });
-      value = normalizeValue(program, field.ty, value, `${path}.${field.name}`);
+      value = normalizeValue(context, field.ty, input[field.name]!, `${path}.${field.name}`);
+    } else if (!requireExplicit && field.default >= 0) {
+      value = normalizeValue(context, field.ty, evalNode(field.default, context), `${path}.${field.name}`);
     } else if (!field.isRequired && !requireExplicit) {
       value = null;
     } else {
-      fail("nx-ir-boundary-field", `Missing required ${path} field '${field.name}'.`, field.span);
+      fail("nx-ir-boundary-field", `Missing required ${path} field '${field.name}'.`, context);
     }
     output[field.name] = value;
-    env.set(field.slot, value);
-  }
-
+    frame[firstSlot + offset] = value;
+  });
   return output;
 }
 
 /**
  * Normalizes the fields of an update record: only the fields supplied, each checked against its
- * declared type.
- *
- * An absent field means "unchanged", so it stays absent — no default is evaluated and nothing is
- * required. A present `null` is accepted only where the field is nullable.
+ * declared type. An absent field means "unchanged", so it stays absent; a present `null` is
+ * accepted only where the field is nullable.
  */
 function normalizePatchFields(
-  program: NxPreparedProgram,
-  fields: readonly NxIrRecordField[],
+  context: EvalContext,
+  fields: readonly PreparedField[],
   input: Record<string, NxCanonicalValue>,
   path: string,
 ): Record<string, NxCanonicalValue> {
@@ -1152,7 +2172,6 @@ function normalizePatchFields(
       fail("nx-ir-boundary-field", `Unknown ${path} field '${key}'.`);
     }
   }
-
   const output: Record<string, NxCanonicalValue> = {};
   for (const field of fields) {
     if (!Object.prototype.hasOwnProperty.call(input, field.name)) {
@@ -1165,55 +2184,33 @@ function normalizePatchFields(
         `Expected ${path}.${field.name} to be non-null; an update record sets a field to null only where the field is nullable.`,
       );
     }
-    output[field.name] = normalizeValue(program, field.ty, value, `${path}.${field.name}`);
+    output[field.name] = normalizeValue(context, field.ty, value, `${path}.${field.name}`);
   }
-
   return output;
 }
 
-function normalizeValue(
-  program: NxPreparedProgram,
-  ty: NxIrTypeRef,
-  value: NxCanonicalValue,
-  path: string,
-): NxCanonicalValue {
+function normalizeValue(context: EvalContext, ty: PreparedType, value: NxCanonicalValue, path: string): NxCanonicalValue {
   switch (ty.kind) {
     case "primitive":
-      return normalizePrimitiveValue(String(ty.name), value, path);
+      return normalizePrimitiveValue(ty.name, value, path);
     case "nominal":
-      return normalizeNominalValue(
-        program,
-        requiredReference(ty.reference, "nominal type"),
-        String(ty.display ?? ty.reference?.name ?? "nominal"),
-        value,
-        path,
-      );
+      return normalizeNominalValue(context, ty, value, path);
     case "array": {
       // A single value at a list-typed site is a list of one. That is the language's rule, not a
       // leniency: `Shadows={ <SkiaShadow /> }` and `xs={3.0}` both evaluate to one-element lists
       // under the interpreter, and the IR records the value at its own type rather than wrapping
       // it, leaving the coercion to normalization.
       const items = Array.isArray(value) ? value : [value];
-      return items.map((item, index) =>
-        normalizeValue(program, requiredTypeRef(ty.element, "array element"), item, `${path}[${index}]`),
-      );
+      return items.map((item, index) => normalizeValue(context, ty.element, item, `${path}[${index}]`));
     }
     case "nullable":
-      return value === null
-        ? null
-        : normalizeValue(program, requiredTypeRef(ty.inner, "nullable inner"), value, path);
-    case "function":
-      return value;
+      return value === null ? null : normalizeValue(context, ty.inner, value, path);
     default:
-      fail("nx-ir-schema", `Unknown type reference kind '${ty.kind}'.`);
+      fail("nx-ir-schema", `Unknown type kind '${String((ty as { kind: unknown }).kind)}'.`);
   }
 }
 
-function normalizePrimitiveValue(
-  name: string,
-  value: NxCanonicalValue,
-  path: string,
-): NxCanonicalValue {
+function normalizePrimitiveValue(name: string, value: NxCanonicalValue, path: string): NxCanonicalValue {
   switch (name) {
     case "int":
     case "int32":
@@ -1242,17 +2239,15 @@ function normalizePrimitiveValue(
 }
 
 function normalizeNominalValue(
-  program: NxPreparedProgram,
-  reference: NxIrReference,
-  display: string,
+  context: EvalContext,
+  ty: Extract<PreparedType, { kind: "nominal" }>,
   value: NxCanonicalValue,
   path: string,
 ): NxCanonicalValue {
-  const prepared = program.declarationsById.get(reference.declaration);
-  if (prepared === undefined) {
-    fail("nx-ir-schema", `Missing nominal type declaration '${reference.declaration}'.`);
-  }
-  const kind = prepared.declaration.kind;
+  const { linked, declaration } = resolveReference(context.linked, ty.slot, ty.name);
+  const display = declaration.name;
+  const kind = declaration.kind;
+  const key = `${linked.module.identity}::${declaration.name}`;
   if (kind.tag === "record" && kind.updateTarget !== undefined) {
     // An update record has no subtypes, so a discriminator must name it exactly.
     const object = requireObject(value, path);
@@ -1260,65 +2255,58 @@ function normalizeNominalValue(
     if (discriminator !== undefined && discriminator !== display) {
       fail("nx-ir-boundary-type", `Expected ${path} to be a ${display}, got '${String(discriminator)}'.`);
     }
-    return { $type: display, ...normalizePatchFields(program, kind.fields, rest, path) };
+    const declaringContext: EvalContext = { ...context, linked, declaration, frame: [] };
+    return { $type: display, ...normalizePatchFields(declaringContext, kind.fields, rest, path) };
   }
   if (kind.tag === "record") {
     const object = requireObject(value, path);
     // The declared type supplies the field list, so a discriminator carried by the value selects
-    // nothing and is dropped rather than used. Record construction stamps one on every value it
-    // produces, so keeping it would make the runtime reject its own output.
-    //
-    // It is still checked before it is dropped, because this path also takes host input: a
-    // discriminator naming some other type is a value of the wrong type, and silently restamping it
-    // with the declared name would report it as the type it is not. Absent is fine — a host writing
-    // a plain object has no discriminator to give.
+    // nothing and is dropped rather than used. It is still checked before it is dropped, because
+    // this path also takes host input: a discriminator naming some other type is a value of the
+    // wrong type. A derived value is not the wrong type: `User extends Base` is acceptable
+    // wherever `Base` is, and it is normalized against its own schema.
     const discriminator = object.$type;
     if (discriminator !== undefined && discriminator !== display) {
-      // A derived value is not the wrong type: `User extends Base` is acceptable wherever `Base`
-      // is. It keeps its own discriminator and is normalized against its own schema, because the
-      // expected type's field list does not have the derived fields in it.
-      const subtype = resolveSubtype(
-        program,
-        String(discriminator),
-        reference.declaration,
-        display,
-        path,
-      );
+      const subtype = resolveSubtype(context.program, String(discriminator), key, display, path);
       const { $type: _derived, ...derived } = object;
       return {
         $type: subtype.discriminator,
-        ...normalizeFields(program, subtype.fields, derived, new Map(), path, false),
+        ...normalizeFields(
+          context.program,
+          subtype.linked,
+          subtype.linked.module.declarationsByName.get(subtype.discriminator) ?? declaration,
+          subtype.fields,
+          derived,
+          [],
+          path,
+          false,
+        ),
       };
     }
-    // Nothing is an instance of an abstract record. Reaching here means the value would be stamped
-    // with this declaration's own name, and analysis rejects that spelling in NX source — so
-    // accepting it from a host would hand back a value no NX program can produce and no consumer
-    // branching on `$type` has a case for.
-    if (kind.isAbstract === true) {
+    // Nothing is an instance of an abstract record.
+    if (kind.isAbstract) {
       fail(
         "nx-ir-boundary-type",
         discriminator === undefined
-          ? `Expected ${path} to be a concrete type extending ${display}, got an object with no ` +
-              `'$type' discriminator naming one.`
+          ? `Expected ${path} to be a concrete type extending ${display}, got an object with no '$type' discriminator naming one.`
           : `Expected ${path} to be a concrete type extending ${display}, got abstract '${display}'.`,
       );
     }
     const { $type: _discard, ...rest } = object;
-    return { $type: display, ...normalizeFields(program, kind.fields, rest, new Map(), path, false) };
+    return {
+      $type: display,
+      ...normalizeFields(context.program, linked, declaration, kind.fields, rest, [], path, false),
+    };
   }
   if (kind.tag === "union") {
     // A constant case arrives as its bare name rather than as a `$type` object.
     if (typeof value === "string") {
       const constantCase = kind.cases.find((item) => item.name === value && item.isConstant);
       if (constantCase === undefined) {
-        fail(
-          "nx-ir-boundary-type",
-          `Invalid constant union case for ${path}: '${value}' is not a case of ${display}.`,
-        );
+        fail("nx-ir-boundary-type", `Invalid constant union case for ${path}: '${value}' is not a case of ${display}.`);
       }
       return value;
     }
-
     const object = requireObject(value, path);
     const typeName = object.$type;
     if (typeof typeName !== "string") {
@@ -1336,37 +2324,24 @@ function normalizeNominalValue(
     const { $type: _discard, ...rest } = object;
     return {
       $type: typeName,
-      ...normalizeFields(program, unionCase.fields, rest, new Map(), path, false),
+      ...normalizeFields(context.program, linked, declaration, unionCase.fields, rest, [], path, false),
     };
   }
-
   return value;
 }
 
 /**
  * Finds the shape a value's `$type` names, given that a value of `expected` was asked for.
  *
- * <para>The discriminator is a name, not an identity, so this can find more than one shape — two
- * modules may each declare a `Card` extending the same base. That is reported rather than guessed
- * at: picking one would normalize against the wrong field list and quietly produce a wrong value.
- * Carrying identity in the value itself is what would remove the ambiguity, and it is not carried
- * because `$type` is output a host reads and the interpreter emits the same names.</para>
+ * The discriminator is a name, not an identity, so this can find more than one shape: two modules
+ * may each declare a `Card` extending the same base. That is reported rather than guessed at.
  */
-function resolveSubtype(
-  program: NxPreparedProgram,
-  discriminator: string,
-  expected: string,
-  display: string,
-  path: string,
-): NominalShape {
-  const candidates = (program.nominalShapesByDiscriminator.get(discriminator) ?? []).filter(
-    (shape) => shape.bases.includes(expected),
-  );
+function resolveSubtype(program: NxPreparedProgram, discriminator: string, expected: string, display: string, path: string): NominalShape {
+  const candidates = program.nominalShapesFor(discriminator).filter((shape) => shape.bases.includes(expected));
   if (candidates.length > 1) {
     fail(
       "nx-ir-boundary-type",
-      `Ambiguous subtype at ${path}: ${candidates.length} declarations named '${discriminator}' ` +
-        `extend ${display}, and a '$type' discriminator cannot tell them apart.`,
+      `Ambiguous subtype at ${path}: ${candidates.length} declarations named '${discriminator}' extend ${display}, and a '$type' discriminator cannot tell them apart.`,
     );
   }
   const only = candidates[0];
@@ -1374,271 +2349,61 @@ function resolveSubtype(
     fail("nx-ir-boundary-type", `Expected ${path} to be a ${display}, got '${discriminator}'.`);
   }
   if (only.isAbstract) {
-    // An intermediate abstract record extends the expected one, so it passes the base check, but it
-    // is still a type with no values.
-    fail(
-      "nx-ir-boundary-type",
-      `Expected ${path} to be a concrete type extending ${display}, got abstract '${discriminator}'.`,
-    );
+    fail("nx-ir-boundary-type", `Expected ${path} to be a concrete type extending ${display}, got abstract '${discriminator}'.`);
   }
   return only;
 }
 
-function propertiesObject(
-  properties: readonly Record<string, unknown>[],
-  context: EvalContext,
-): Record<string, NxCanonicalValue> {
-  const output: Record<string, NxCanonicalValue> = {};
-  for (const property of properties ?? []) {
-    output[String(property.name)] = evalExpression(property.value as NxIrExpression, context);
-  }
-  return output;
-}
+// ------------------------------------------------------------------------------------------------
+// Operators
+// ------------------------------------------------------------------------------------------------
 
-function componentDeclaration(program: NxPreparedProgram, name: string): PreparedDeclaration {
-  const prepared = program.componentEntrypoints.get(name);
-  if (prepared === undefined || prepared.declaration.kind.tag !== "component") {
-    fail("nx-ir-component", `Component '${name}' was not found.`);
-  }
-
-  return prepared;
-}
-
-function validateDeclaration(
-  module: NxIrModule,
-  declaration: NxIrDeclaration,
-  declarationsById: ReadonlyMap<string, PreparedDeclaration>,
-  diagnostics: NxIrDiagnostic[],
-): void {
-  const kind = declaration.kind;
-  switch (kind.tag) {
-    case "function":
-      for (const param of kind.params) {
-        validateTypeRef(param.ty, declarationsById, diagnostics, param.span);
-      }
-      validateExpression(kind.body, diagnostics);
-      break;
-    case "value":
-      validateExpression(kind.value, diagnostics);
-      break;
-    case "record":
-      validateFields(kind.fields, declarationsById, diagnostics);
-      break;
-    case "component":
-      validateFields(kind.props, declarationsById, diagnostics);
-      validateFields(kind.state, declarationsById, diagnostics);
-      if (kind.body !== undefined && kind.body !== null) {
-        validateExpression(kind.body, diagnostics);
-      }
-      break;
-    case "union":
-      for (const item of kind.cases) {
-        validateFields(item.fields, declarationsById, diagnostics);
-      }
-      break;
-    case "typeAlias":
-      break;
-    default:
-      diagnostics.push(
-        diagnostic(
-          "nx-ir-declaration",
-          `Unknown declaration tag '${String((kind as { tag?: unknown }).tag)}' in module '${module.id}'.`,
-          declaration.span,
-        ),
-      );
-  }
-}
-
-function validateFields(
-  fields: readonly {
-    readonly ty: NxIrTypeRef;
-    readonly default?: NxIrExpression | null;
-    readonly span: NxIrSourceSpan;
-  }[],
-  declarationsById: ReadonlyMap<string, PreparedDeclaration>,
-  diagnostics: NxIrDiagnostic[],
-): void {
-  for (const field of fields) {
-    validateTypeRef(field.ty, declarationsById, diagnostics, field.span);
-    if (field.default !== undefined && field.default !== null) {
-      validateExpression(field.default, diagnostics);
-    }
-  }
-}
-
-function validateTypeRef(
-  ty: NxIrTypeRef,
-  declarationsById: ReadonlyMap<string, PreparedDeclaration>,
-  diagnostics: NxIrDiagnostic[],
-  source?: NxIrSourceSpan,
-): void {
-  switch (ty.kind) {
-    case "primitive":
-      if (typeof ty.name !== "string") {
-        diagnostics.push(diagnostic("nx-ir-type-ref", "Primitive type reference is missing a name.", source));
-      }
-      break;
-    case "nominal": {
-      const reference = ty.reference;
-      if (reference === undefined) {
-        diagnostics.push(
-          diagnostic("nx-ir-type-ref", "Nominal type reference is missing a declaration reference.", source),
-        );
-        break;
-      }
-      if (!declarationsById.has(reference.declaration)) {
-        diagnostics.push(
-          diagnostic(
-            "nx-ir-type-ref",
-            `Nominal type reference '${reference.name}' points at missing declaration '${reference.declaration}'.`,
-            source,
-          ),
-        );
-      }
-      break;
-    }
-    case "array":
-      if (ty.element === undefined) {
-        diagnostics.push(diagnostic("nx-ir-type-ref", "Array type reference is missing an element type.", source));
-      } else {
-        validateTypeRef(ty.element, declarationsById, diagnostics, source);
-      }
-      break;
-    case "nullable":
-      if (ty.inner === undefined) {
-        diagnostics.push(diagnostic("nx-ir-type-ref", "Nullable type reference is missing an inner type.", source));
-      } else {
-        validateTypeRef(ty.inner, declarationsById, diagnostics, source);
-      }
-      break;
-    case "function":
-      for (const param of ty.params ?? []) {
-        validateTypeRef(param, declarationsById, diagnostics, source);
-      }
-      if (ty.returnType === undefined) {
-        diagnostics.push(diagnostic("nx-ir-type-ref", "Function type reference is missing a return type.", source));
-      } else {
-        validateTypeRef(ty.returnType, declarationsById, diagnostics, source);
-      }
-      break;
-    default:
-      diagnostics.push(diagnostic("nx-ir-type-ref", `Unknown type reference kind '${ty.kind}'.`, source));
-      break;
-  }
-}
-
-function validateExpression(expression: NxIrExpression, diagnostics: NxIrDiagnostic[]): void {
-  const op = expression.op as Record<string, unknown>;
-  if (!knownExpressionTags.has(String(op.tag))) {
-    diagnostics.push(
-      diagnostic("nx-ir-expression", `Unknown expression tag '${String(op.tag)}'.`, expression.span),
-    );
-    return;
-  }
-
-  for (const child of childExpressions(op)) {
-    validateExpression(child, diagnostics);
-  }
-}
-
-function childExpressions(op: Record<string, unknown>): NxIrExpression[] {
-  const output: NxIrExpression[] = [];
-  const add = (value: unknown): void => {
-    if (value !== undefined && value !== null) {
-      output.push(value as NxIrExpression);
-    }
-  };
-  const addMany = (value: unknown): void => {
-    for (const item of (value as readonly NxIrExpression[] | undefined) ?? []) {
-      add(item);
-    }
-  };
-  switch (op.tag) {
-    case "binary":
-      add(op.lhs);
-      add(op.rhs);
-      break;
-    case "unary":
-      add(op.expr);
-      break;
-    case "call":
-      add(op.callee);
-      addMany(op.args);
-      break;
-    case "intrinsicCall":
-      addMany(op.args);
-      break;
-    case "if":
-      add(op.condition);
-      add(op.thenBranch);
-      add(op.elseBranch);
-      break;
-    case "ifIs":
-      add(op.scrutinee);
-      for (const arm of (op.arms as readonly Record<string, unknown>[] | undefined) ?? []) {
-        addMany(arm.patterns);
-        add(arm.body);
-      }
-      add(op.elseBranch);
-      break;
-    case "let":
-      add(op.value);
-      add(op.body);
-      break;
-    case "block":
-      for (const statement of (op.statements as readonly Record<string, unknown>[] | undefined) ?? []) {
-        add(statement.init);
-        add(statement.expr);
-      }
-      add(op.expression);
-      break;
-    case "array":
-      addMany(op.elements);
-      break;
-    case "for":
-      add(op.iterable);
-      add(op.body);
-      break;
-    case "index":
-      add(op.base);
-      add(op.index);
-      break;
-    case "member":
-      add(op.base);
-      break;
-    case "record":
-    case "unionCase":
-    case "componentDescriptor":
-    case "intrinsicElement":
-      for (const property of (op.properties as readonly Record<string, unknown>[] | undefined) ?? []) {
-        add(property.value);
-      }
-      addMany(op.content);
-      for (const field of (op.fields as readonly { readonly default?: NxIrExpression | null }[] | undefined) ?? []) {
-        add(field.default);
-      }
-      break;
-  }
-  return output;
-}
-
+/** Every operator but `and` and `or`, which `evalNode` applies without evaluating both operands. */
 function evalBinary(
-  expression: NxIrExpression,
-  operator: string,
+  context: EvalContext,
+  nodeIndex: number,
+  operator: Exclude<(typeof binaryOperators)[number], "and" | "or">,
   lhs: NxCanonicalValue,
   rhs: NxCanonicalValue,
 ): NxCanonicalValue {
+  const number = (value: NxCanonicalValue): number => checkedNumber(context, nodeIndex, value, operator);
   switch (operator) {
     case "add":
-      return checkedNumber(lhs, operator, expression.span) + checkedNumber(rhs, operator, expression.span);
+      return number(lhs) + number(rhs);
     case "sub":
-      return checkedNumber(lhs, operator, expression.span) - checkedNumber(rhs, operator, expression.span);
+      return number(lhs) - number(rhs);
     case "mul":
-      return checkedNumber(lhs, operator, expression.span) * checkedNumber(rhs, operator, expression.span);
-    case "div":
-      return evalDivision(lhs, rhs, expression.ty, expression.span);
-    case "mod":
-      return evalModulo(lhs, rhs, expression.ty, expression.span);
+      return number(lhs) * number(rhs);
+    case "div": {
+      const divisor = number(rhs);
+      if (divisor === 0) {
+        fail("nx-ir-division-by-zero", "Division by zero.", context, nodeIndex);
+      }
+      return number(lhs) / divisor;
+    }
+    case "idiv": {
+      const dividend = checkedInteger(context, nodeIndex, number(lhs), operator);
+      const divisor = checkedInteger(context, nodeIndex, number(rhs), operator);
+      if (divisor === 0) {
+        fail("nx-ir-division-by-zero", "Division by zero.", context, nodeIndex);
+      }
+      return normalizeSignedZero(Math.trunc(dividend / divisor));
+    }
+    case "mod": {
+      const divisor = number(rhs);
+      if (divisor === 0) {
+        fail("nx-ir-division-by-zero", "Division by zero.", context, nodeIndex);
+      }
+      return normalizeSignedZero(number(lhs) % divisor);
+    }
+    case "imod": {
+      const dividend = checkedInteger(context, nodeIndex, number(lhs), operator);
+      const divisor = checkedInteger(context, nodeIndex, number(rhs), operator);
+      if (divisor === 0) {
+        fail("nx-ir-division-by-zero", "Division by zero.", context, nodeIndex);
+      }
+      return normalizeSignedZero(dividend % divisor);
+    }
     case "concat":
       return String(lhs) + String(rhs);
     case "eq":
@@ -1646,156 +2411,31 @@ function evalBinary(
     case "ne":
       return !deepEqual(lhs, rhs);
     case "lt":
-      return checkedNumber(lhs, operator, expression.span) < checkedNumber(rhs, operator, expression.span);
+      return number(lhs) < number(rhs);
     case "le":
-      return checkedNumber(lhs, operator, expression.span) <= checkedNumber(rhs, operator, expression.span);
+      return number(lhs) <= number(rhs);
     case "gt":
-      return checkedNumber(lhs, operator, expression.span) > checkedNumber(rhs, operator, expression.span);
+      return number(lhs) > number(rhs);
     case "ge":
-      return checkedNumber(lhs, operator, expression.span) >= checkedNumber(rhs, operator, expression.span);
-    case "and":
-      return truthy(lhs) && truthy(rhs);
-    case "or":
-      return truthy(lhs) || truthy(rhs);
+      return number(lhs) >= number(rhs);
     default:
-      fail("nx-ir-operator", `Unknown binary operator '${operator}'.`);
+      fail("nx-ir-operator", `Unknown binary operator '${String(operator)}'.`, context, nodeIndex);
   }
 }
 
-function evalDivision(
-  lhs: NxCanonicalValue,
-  rhs: NxCanonicalValue,
-  ty: NxIrSemanticType | undefined,
-  source: NxIrSourceSpan,
-): NxCanonicalValue {
-  const lhsNumber = checkedNumber(lhs, "div", source);
-  const rhsNumber = checkedNumber(rhs, "div", source);
-  if (rhsNumber === 0) {
-    fail("nx-ir-division-by-zero", "Division by zero.", source);
-  }
-  if (isIntegerSemanticType(ty)) {
-    checkedInteger(lhsNumber, "div", source);
-    checkedInteger(rhsNumber, "div", source);
-    return normalizeSignedZero(Math.trunc(lhsNumber / rhsNumber));
-  }
-  return lhsNumber / rhsNumber;
-}
 
-function evalModulo(
-  lhs: NxCanonicalValue,
-  rhs: NxCanonicalValue,
-  ty: NxIrSemanticType | undefined,
-  source: NxIrSourceSpan,
-): NxCanonicalValue {
-  const lhsNumber = checkedNumber(lhs, "mod", source);
-  const rhsNumber = checkedNumber(rhs, "mod", source);
-  if (rhsNumber === 0) {
-    fail("nx-ir-division-by-zero", "Division by zero.", source);
-  }
-  if (isIntegerSemanticType(ty)) {
-    checkedInteger(lhsNumber, "mod", source);
-    checkedInteger(rhsNumber, "mod", source);
-  }
-  return normalizeSignedZero(lhsNumber % rhsNumber);
-}
-
-function evalUnary(operator: string, value: NxCanonicalValue): NxCanonicalValue {
-  switch (operator) {
-    case "neg":
-      return -checkedNumber(value, operator);
-    case "not":
-      return !truthy(value);
-    default:
-      fail("nx-ir-operator", `Unknown unary operator '${operator}'.`);
-  }
-}
-
-function readSlot(context: EvalContext, slot: string, name: string): NxCanonicalValue {
-  if (!context.env.has(slot)) {
-    fail("nx-ir-slot", `Local slot '${name}' was not bound.`);
-  }
-  return context.env.get(slot)!;
-}
-
-function evalIndex(
-  base: NxCanonicalValue,
-  index: NxCanonicalValue,
-  source?: NxIrSourceSpan,
-): NxCanonicalValue {
-  if (!Array.isArray(base)) {
-    fail("nx-ir-index", "Index expression requires an array.", source);
-  }
-  if (typeof index !== "number" || !Number.isInteger(index)) {
-    fail("nx-ir-index", "Index expression requires an integer index.", source);
-  }
-  if (index < 0 || index >= base.length) {
-    fail(
-      "nx-ir-index-bounds",
-      `Array index ${index} is out of bounds for length ${base.length}.`,
-      source,
-    );
-  }
-  return base[index]!;
-}
-
-function evalMember(base: NxCanonicalValue, member: string): NxCanonicalValue {
-  const object = requireObject(base, "member access");
-  if (!Object.prototype.hasOwnProperty.call(object, member)) {
-    fail("nx-ir-member", `Object does not contain member '${member}'.`);
-  }
-  return object[member]!;
-}
-
-function parseIrJson(source: string, diagnostics: NxIrDiagnostic[]): NxIrProgram | undefined {
-  try {
-    return JSON.parse(source) as NxIrProgram;
-  } catch (error) {
-    diagnostics.push(diagnostic("nx-ir-json", `Invalid NX IR JSON: ${String(error)}.`));
-    return undefined;
-  }
-}
-
-function requiredTypeRef(value: NxIrTypeRef | undefined, context: string): NxIrTypeRef {
-  if (value === undefined) {
-    fail("nx-ir-schema", `Missing ${context} type reference.`);
-  }
-  return value;
-}
-
-function requiredReference(value: NxIrReference | undefined, context: string): NxIrReference {
-  if (value === undefined) {
-    fail("nx-ir-schema", `Missing ${context} reference.`);
-  }
-  return value;
-}
-
-function isFunctionReference(value: unknown): value is FunctionReferenceValue {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as { readonly $nxKind?: unknown }).$nxKind === "functionReference"
-  );
-}
-
-function checkedNumber(value: NxCanonicalValue, operation: string, source?: NxIrSourceSpan): number {
+function checkedNumber(context: EvalContext, nodeIndex: number, value: NxCanonicalValue, operation: string): number {
   if (typeof value !== "number") {
-    fail("nx-ir-number", `Operator '${operation}' requires JavaScript-safe numeric values.`, source);
+    fail("nx-ir-number", `Operator '${operation}' requires JavaScript-safe numeric values.`, context, nodeIndex);
   }
   return value;
 }
 
-function checkedInteger(value: number, operation: string, source?: NxIrSourceSpan): void {
+function checkedInteger(context: EvalContext, nodeIndex: number, value: number, operation: string): number {
   if (!Number.isInteger(value)) {
-    fail("nx-ir-number", `Operator '${operation}' requires integer operands for integer results.`, source);
+    fail("nx-ir-number", `Operator '${operation}' requires integer operands for integer results.`, context, nodeIndex);
   }
-}
-
-function isIntegerSemanticType(ty: NxIrSemanticType | undefined): boolean {
-  if (ty?.shape.kind !== "primitive") {
-    return false;
-  }
-  const name = ty.shape.name;
-  return name === "int" || name === "int32" || name === "int64";
+  return value;
 }
 
 function normalizeSignedZero(value: number): number {
@@ -1817,6 +2457,10 @@ function deepEqual(lhs: NxCanonicalValue, rhs: NxCanonicalValue): boolean {
   return JSON.stringify(lhs) === JSON.stringify(rhs);
 }
 
+function isFunctionReference(value: unknown): value is FunctionReferenceValue {
+  return typeof value === "object" && value !== null && (value as { readonly $nxKind?: unknown }).$nxKind === "functionReference";
+}
+
 function requireObject(value: NxCanonicalValue, path: string): Record<string, NxCanonicalValue> {
   if (!isObject(value) || Array.isArray(value)) {
     fail("nx-ir-boundary-type", `Expected ${path} to be an object.`);
@@ -1828,15 +2472,23 @@ function isObject(value: unknown): value is Record<string, NxCanonicalValue> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function fail(code: string, message: string, source?: NxIrSourceSpan): never {
-  throw new NxIrRuntimeError([diagnostic(code, message, source)]);
+/**
+ * Raises a runtime diagnostic. With a context, the diagnostic names the declaration the node
+ * belongs to, and its span when the artifact carries a debug section.
+ */
+function fail(code: string, message: string, context?: EvalContext, nodeIndex?: number): never {
+  throw new NxIrRuntimeError([diagnostic(code, message, context, nodeIndex)]);
 }
 
-function diagnostic(code: string, message: string, source?: NxIrSourceSpan): NxIrDiagnostic {
-  return {
-    severity: "error",
-    code,
-    message,
-    ...(source === undefined ? {} : { source }),
-  };
+function diagnostic(code: string, message: string, context?: EvalContext, nodeIndex?: number): NxIrDiagnostic {
+  const output: { -readonly [K in keyof NxIrDiagnostic]: NxIrDiagnostic[K] } = { severity: "error", code, message };
+  if (context !== undefined) {
+    const identity = context.linked.module.identity;
+    output.declaration = `${identity}::${context.declaration.name}`;
+    const span = nodeIndex === undefined ? undefined : context.linked.module.artifact.nodeSpan(nodeIndex);
+    if (span !== undefined) {
+      output.source = { identity, start: span[0], end: span[1] };
+    }
+  }
+  return output;
 }

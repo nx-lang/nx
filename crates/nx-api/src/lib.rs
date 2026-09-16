@@ -50,8 +50,8 @@ pub use diagnostics::{
     diagnostics_to_api_with_source_entries, NxDiagnostic, NxDiagnosticLabel, NxSeverity, NxTextSpan,
 };
 pub use eval::{
-    eval_program_artifact, eval_source, load_library_artifact_from_directory,
-    load_program_artifact_from_source, EvalResult,
+    eval_program_artifact, eval_program_artifact_function, eval_source,
+    load_library_artifact_from_directory, load_program_artifact_from_source, EvalResult,
 };
 pub use value::{from_nx_value, to_nx_value, FromNxValueError};
 pub use workspace::{

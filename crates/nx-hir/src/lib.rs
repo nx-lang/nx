@@ -23,6 +23,7 @@
 pub mod ast;
 pub mod components;
 pub mod db;
+pub mod declarations;
 pub mod lower;
 pub mod prepared;
 pub mod records;
@@ -57,6 +58,7 @@ pub use components::{
 
 // Re-export database types
 pub use db::{DatabaseImpl, NxDatabase};
+pub use declarations::{validate_declaration_names, DuplicateDeclarationError};
 
 // Re-export scope and symbol types
 pub use records::{

@@ -5,15 +5,22 @@ import {
 import type { LanguageDocument } from "@nx-lang/language-protocol";
 
 import type { NxHost } from "./host.js";
+import type { NxLanguageDocumentInput } from "./types.js";
 
 /** What `createLanguageService` accepts beyond the host. */
 export interface NxLanguageServiceOptions {
   /**
-   * NX source placed ahead of the queried document before analysis, for hosts whose context
-   * declarations cannot yet be imported without loss. Positions and ranges are shifted so the
-   * caller sees only its own coordinates.
+   * Documents the host always includes alongside the queried set, such as a catalog of external
+   * components. A diagnostic in one is reported against that document's URI.
    */
-  readonly prelude?: { source: string };
+  readonly documents?: readonly NxLanguageDocumentInput[];
+
+  /**
+   * Identities every queried document imports implicitly, as if it began with a wildcard import
+   * of each; typically the identities of `documents`. A listed document imports nothing
+   * implicitly itself.
+   */
+  readonly implicitImports?: readonly string[];
 
   /** How many analyzed document sets to keep. Default 8. */
   readonly cacheSize?: number;
@@ -22,9 +29,11 @@ export interface NxLanguageServiceOptions {
 /**
  * An `NxLanguageService` that answers from `host`'s snapshots, in this thread.
  *
- * <para>The answering, the prelude arithmetic and the cache are `@nx-lang/language-core`, the same
- * code the HTTP handler runs, so a hover answered here and the same hover answered by a server
- * agree on every line and column.</para>
+ * <para>The answering and the cache are `@nx-lang/language-core`, the same code the HTTP handler
+ * runs, so a hover answered here and the same hover answered by a server agree on every line and
+ * column. The host's context reaches the service as documents of its own, made visible through an
+ * implicit import, so the queried document's text is analyzed as it is and every answer is already
+ * in its coordinates.</para>
  *
  * <para>Every query enters the module, so a caller that must stay responsive — the playground's
  * editor, for one — runs this in a worker. A trap inside the module surfaces as
@@ -35,10 +44,11 @@ export function createLanguageService(
   host: NxHost,
   options: NxLanguageServiceOptions = {}
 ): SnapshotLanguageService {
+  const hostDocuments = Array.from(options.documents ?? []);
+  const implicitImports = Array.from(options.implicitImports ?? []);
   return createSnapshotLanguageService({
     createSnapshot: (documents: readonly LanguageDocument[]) =>
-      host.createLanguageSnapshot(documents),
-    ...(options.prelude === undefined ? {} : { prelude: options.prelude }),
+      host.createLanguageSnapshot([...hostDocuments, ...documents], { implicitImports }),
     ...(options.cacheSize === undefined ? {} : { cacheSize: options.cacheSize })
   });
 }

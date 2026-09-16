@@ -21,6 +21,9 @@ importers:
       '@napi-rs/cli':
         specifier: ^3.7.2
         version: 3.9.0(@emnapi/core@1.9.2)(@emnapi/runtime@1.9.2)(@types/node@22.20.1)
+      '@nx-lang/ir-runtime':
+        specifier: workspace:*
+        version: link:../../runtime/typescript
       '@types/node':
         specifier: ^22.20.0
         version: 22.20.1
@@ -43,6 +46,9 @@ importers:
         specifier: workspace:*
         version: link:../../packages/language-protocol
     devDependencies:
+      '@nx-lang/ir-runtime':
+        specifier: workspace:*
+        version: link:../../runtime/typescript
       '@nx-lang/language-http':
         specifier: workspace:*
         version: link:../../packages/language-http
@@ -135,8 +141,8 @@ importers:
         specifier: ^22.20.0
         version: 22.20.1
       monaco-editor:
-        specifier: ^0.52.2
-        version: 0.52.2
+        specifier: ^0.56.0
+        version: 0.56.0
       shiki:
         specifier: ^4.4.3
         version: 4.4.3
@@ -1510,9 +1516,6 @@ packages:
   minimatch@5.1.9:
     resolution: {integrity: sha512-7o1wEA2RyMP7Iu7GNba9vc0RWWGACJOCZBJX2GJWip0ikV+wcOsgVuY9uE8CPiyQhkGFSlhuSkZPavN7u1c2Fw==}
     engines: {node: '>=10'}
-
-  monaco-editor@0.52.2:
-    resolution: {integrity: sha512-GEQWEZmfkOGLdd3XK8ryrfWz3AIP8YymVXiPHEdewrUq7mh0qrKrfHLNCXcbB6sTnMLnOZ3ztSiKcciFUkIJwQ==}
 
   monaco-editor@0.56.0:
     resolution: {integrity: sha512-sXboRm3BeBeLm938eaiyLMe0OxzfXIlZvbv4ir/jVgQy1zDhWjgmny0WoN45fuDKhCCQsYMbBJrv/A6jd8aCUg==}
@@ -2980,8 +2983,6 @@ snapshots:
   minimatch@5.1.9:
     dependencies:
       brace-expansion: 2.1.4
-
-  monaco-editor@0.52.2: {}
 
   monaco-editor@0.56.0:
     dependencies:

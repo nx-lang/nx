@@ -1,0 +1,24 @@
+{
+  "app/main.nx::card": {
+    "$type": "Card",
+    "Theme": "dark",
+    "Title": "hi"
+  },
+  "app/main.nx::local": {
+    "$type": "Local",
+    "id": 7,
+    "label": "x"
+  },
+  "app/main.nx::root": {
+    "$type": "Card",
+    "Theme": "light",
+    "Title": "Ada"
+  },
+  "app/main.nx::total": 43,
+  "app/main.nx::user": {
+    "$type": "User",
+    "id": 1,
+    "name": "Ada"
+  },
+  "shared/model.nx::answer": 42
+}

@@ -1,0 +1,42 @@
+// Every node kind and binary operator that NX source can write, in one module.
+let answer = 42
+let name = "Ada"
+let flag = true
+let nothing = null
+let items = { 1 2 3 }
+let zero = 0
+
+let add(a:int, b:int) = { a + b }
+let arithmetic() = { add(1, 2) * 3 - 4 }
+let integerDivision() = { 7 / 2 }
+let realDivision() = { 7.0 / 2.0 }
+let integerRemainder() = { 7 % 3 }
+let realRemainder() = { 7.5 % 2.0 }
+let comparisons(x:int) = { x < 10 && x >= 0 || x == 100 }
+let moreComparisons(x:int) = { x > 1 && x <= 5 && x != 3 }
+let ordered() = { comparisons(5) && moreComparisons(2) }
+// `&&` and `||` do not evaluate their right operand once the left one decides the result. The
+// first two divide by zero, which is a runtime diagnostic, if a runtime evaluates both sides.
+let andSkipsRight() = { answer < 0 && 1 / zero > 0 }
+let orSkipsRight() = { answer > 0 || 1 / zero > 0 }
+let andTakesRight() = { answer > 0 && answer < 100 }
+let orTakesRight() = { answer < 0 || answer == 42 }
+let negation() = { -answer }
+let logicalNot() = { !flag }
+let greeting() = { "Hello, " + name }
+let chooseBig(x:int) = { x > 10 ? "big" : "small" }
+let small() = { chooseBig(3) }
+let classify(x:int) = {
+  if x is {
+    0 => "zero"
+    1, 2 => "small"
+    else => "many"
+  }
+}
+let classified() = { classify(2) }
+let doubled() = { for item, index in items { item * 2 + index } }
+let squares() = { for item in items { item * item } }
+let big() = { 9007199254740993 }
+let maybe() = { flag ? name : "nobody" }
+let element() = <div class="box" count={answer}><span /></div>
+let root() = { arithmetic() }

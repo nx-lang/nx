@@ -1,0 +1,24 @@
+{
+  "input.nx::root": {
+    "$type": "SkiaLayout",
+    "Children": [
+      {
+        "$type": "SkiaLabel",
+        "FontSize": 14,
+        "Text": "A document that is one trailing element declares no root of its own."
+      },
+      {
+        "$type": "SkiaLabel",
+        "FontSize": 12,
+        "Text": "The compiler wraps it in an implicit root function."
+      },
+      {
+        "$type": "SkiaButton",
+        "Enabled": true,
+        "Text": "Play"
+      }
+    ],
+    "Spacing": 4,
+    "Type": "Column"
+  }
+}

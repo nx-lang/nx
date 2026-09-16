@@ -1,7 +1,6 @@
 // Copyright (c) Bret Johnson. All rights reserved.
 // Licensed under the MIT license. See LICENSE file in the project root for full license information.
 
-using System;
 using System.Text.Json.Serialization;
 
 namespace NxLang.Nx;
@@ -12,11 +11,17 @@ namespace NxLang.Nx;
 public sealed class NxIrMetadata
 {
     /// <summary>
-    /// Gets the analyzed NX program fingerprint used for cache keys and equivalence checks.
+    /// Gets the workspace identity of the module the artifact carries.
     /// </summary>
-    [CLSCompliant(false)]
-    [JsonPropertyName("programFingerprint")]
-    public ulong ProgramFingerprint { get; init; }
+    [JsonPropertyName("identity")]
+    public string Identity { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the fingerprint of the module's source text, as a decimal string. It is also the first
+    /// module-table entry's fingerprint in the artifact.
+    /// </summary>
+    [JsonPropertyName("fingerprint")]
+    public string Fingerprint { get; init; } = string.Empty;
 
     /// <summary>
     /// Gets the NX IR schema version.
@@ -25,7 +30,7 @@ public sealed class NxIrMetadata
     public int SchemaVersion { get; init; }
 
     /// <summary>
-    /// Gets the TypeScript IR runtime ABI expected by this artifact.
+    /// Gets the IR runtime ABI expected by this artifact.
     /// </summary>
     [JsonPropertyName("runtimeAbi")]
     public string RuntimeAbi { get; init; } = string.Empty;
@@ -37,14 +42,14 @@ public sealed class NxIrMetadata
     public string[] RequiredFeatures { get; init; } = [];
 
     /// <summary>
-    /// Gets public function entrypoints in the IR artifact.
+    /// Gets the names of the module's top-level functions, in declaration order.
     /// </summary>
     [JsonPropertyName("functionEntrypoints")]
-    public NxIrEntrypointMetadata[] FunctionEntrypoints { get; init; } = [];
+    public string[] FunctionEntrypoints { get; init; } = [];
 
     /// <summary>
-    /// Gets public component entrypoints in the IR artifact.
+    /// Gets the names of the module's top-level components, in declaration order.
     /// </summary>
     [JsonPropertyName("componentEntrypoints")]
-    public NxIrEntrypointMetadata[] ComponentEntrypoints { get; init; } = [];
+    public string[] ComponentEntrypoints { get; init; } = [];
 }

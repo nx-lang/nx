@@ -1,22 +1,34 @@
+/**
+ * The runtime's own behavior: header checks, preparation, linking and boundary normalization, over
+ * small artifacts built in the test. Evaluation of real programs is the corpus's job.
+ */
 import {
-  NxIrProgram,
-  NxIrExpression,
-  NxIrRecordField,
-  NxRecordObject,
+  NX_IR_NONE,
+  NX_IR_RUNTIME_ABI,
+  NX_IR_SCHEMA_VERSION,
   NxIrRuntimeError,
-  NxIrSemanticType,
-  NxIrTypeRef,
   applyComponentStatePatch,
   applyUpdate,
   changedFields,
   constructComponentDescriptor,
+  declarationKinds,
   diffRecords,
   evaluateComponent,
   evaluateFunction,
   initializeComponent,
+  linkNxIrProgram,
   mergeUpdates,
+  nodeKinds,
+  normalizeComponentState,
+  prepareNxIrModule,
   prepareNxIrProgram,
+  tryLinkNxIrProgram,
+  tryPrepareNxIrModule,
   tryPrepareNxIrProgram,
+  typeKinds,
+  type NxCanonicalValue,
+  type NxPreparedModule,
+  type NxRecordObject,
 } from "../src/index.js";
 
 type TestCase = readonly [string, () => void];
@@ -35,6 +47,14 @@ function assertEqual(actual: unknown, expected: unknown): void {
   }
 }
 
+/** A value known to be an object, read as one. */
+function fields(value: NxCanonicalValue): Record<string, NxCanonicalValue> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Expected an object, got ${stableJson(value)}`);
+  }
+  return value as Record<string, NxCanonicalValue>;
+}
+
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map(stableJson).join(",")}]`;
@@ -48,7 +68,7 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function assertThrows(run: () => void, expectedMessage: string): void {
+function assertThrows(run: () => void, expectedMessage: string): NxIrRuntimeError {
   try {
     run();
   } catch (error) {
@@ -58,1880 +78,700 @@ function assertThrows(run: () => void, expectedMessage: string): void {
     if (!error.diagnostics.some((diagnostic) => diagnostic.message.includes(expectedMessage))) {
       throw new Error(`Expected diagnostic containing '${expectedMessage}', got ${error.message}`);
     }
-    return;
+    return error;
   }
   throw new Error("Expected function to throw");
 }
 
-const sourceSpan = { source: "test.nx", start: 0, end: 0 };
-let expressionCounter = 0;
+// ------------------------------------------------------------------------------------------------
+// A small image writer, so a test spells a module the way the schema does
+// ------------------------------------------------------------------------------------------------
 
-function ref(name: string, declaration: string, kind: string, module = "m0") {
-  return { module, declaration, name, kind };
+interface ModuleLink {
+  readonly identity: string;
+  readonly version?: string;
+  readonly fingerprint?: string;
 }
 
-function primitive(name: string): NxIrTypeRef {
-  return { kind: "primitive", name };
+interface DebugSection {
+  readonly declarations: readonly (readonly [number, number])[];
+  readonly nodes: readonly (readonly [number, number])[];
+  readonly source: string;
 }
 
-function nominal(reference: ReturnType<typeof ref>, display = reference.name): NxIrTypeRef {
-  return { kind: "nominal", reference, display };
+interface BuildOptions {
+  readonly requiredFeatures?: readonly string[];
+  readonly runtimeAbi?: string;
+  readonly debug?: DebugSection;
 }
 
-const stringType: NxIrTypeRef = primitive("string");
-const intType: NxIrTypeRef = primitive("int");
-const themeType: NxIrTypeRef = nominal(ref("Theme", "m0:d3", "union"));
-const loadStateType: NxIrTypeRef = nominal(ref("LoadState", "m0:d5", "union"));
-const nullableLoadStateType: NxIrTypeRef = { kind: "nullable", inner: loadStateType };
-const intSemantic: NxIrSemanticType = { display: "int", shape: { kind: "primitive", name: "int" } };
-const floatSemantic: NxIrSemanticType = { display: "float64", shape: { kind: "primitive", name: "float64" } };
+/** An entry as cells, kind first, following the layouts of `docs/nx-ir-format.md`. */
+type Cells = readonly number[];
 
-function expr(
-  op: { readonly tag: string; readonly [key: string]: unknown },
-  ty?: NxIrSemanticType,
-): NxIrExpression {
-  expressionCounter += 1;
-  const base = {
-    id: `e${expressionCounter}`,
-    span: sourceSpan,
-    op,
-  };
-  return ty === undefined ? base : { ...base, ty };
-}
+const sectionKinds = { strings: 0, module: 1, types: 2, constants: 3, nodes: 4, declarations: 5, debug: 6 } as const;
 
-function lit(value: unknown) {
-  if (typeof value === "string") {
-    return expr({ tag: "literal", value: { kind: "string", value } });
+class ArtifactBuilder {
+  readonly strings: string[] = [];
+  readonly types: Cells[] = [];
+  readonly constants: Cells[] = [];
+  readonly nodes: Cells[] = [];
+  readonly declarations: Cells[] = [];
+  readonly functionEntrypoints: number[] = [];
+  readonly componentEntrypoints: number[] = [];
+  readonly #links: ModuleLink[];
+
+  constructor(identity: string, links: readonly ModuleLink[] = [], version = "") {
+    this.#links = [{ identity, version, fingerprint: "1" }, ...links];
   }
-  if (typeof value === "number") {
-    return expr({ tag: "literal", value: { kind: "int", value: String(value), number: value } });
+
+  str(value: string): number {
+    const existing = this.strings.indexOf(value);
+    if (existing >= 0) {
+      return existing;
+    }
+    this.strings.push(value);
+    return this.strings.length - 1;
   }
-  if (typeof value === "boolean") {
-    return expr({ tag: "literal", value: { kind: "boolean", value } });
+
+  slot(identity: string): number {
+    const slot = this.#links.findIndex((link) => link.identity === identity);
+    if (slot < 0) {
+      throw new Error(`no link to ${identity}`);
+    }
+    return slot;
   }
-  return expr({ tag: "literal", value: { kind: "null" } });
-}
 
-function floatLit(value: number) {
-  return expr({ tag: "literal", value: { kind: "float", value: String(value) } }, floatSemantic);
-}
+  primitive(name: string): number {
+    return this.type([typeKinds.primitive, this.str(name)]);
+  }
 
-function binary(operator: string, lhs: NxIrExpression, rhs: NxIrExpression, ty?: NxIrSemanticType) {
-  return expr({ tag: "binary", operator, lhs, rhs }, ty);
-}
+  nominal(name: string, identity?: string): number {
+    return this.type([typeKinds.nominal, identity === undefined ? 0 : this.slot(identity), this.str(name)]);
+  }
 
-function slot(name: string, slotId: string) {
-  return expr({ tag: "slot", name, slot: slotId });
-}
+  nullable(inner: number): number {
+    return this.type([typeKinds.nullable, inner]);
+  }
 
-function reference(name: string, declaration: string, kind: string) {
-  return expr({ tag: "reference", reference: ref(name, declaration, kind) });
-}
+  array(element: number): number {
+    return this.type([typeKinds.array, element]);
+  }
 
-const userRecordFields: NxIrRecordField[] = [
-  {
-    name: "name",
-    slot: "User:field:0",
-    ty: stringType,
-    isContent: false,
-    isRequired: true,
-    span: sourceSpan,
-  },
-  {
-    name: "score",
-    slot: "User:field:1",
-    ty: intType,
-    isContent: false,
-    isRequired: false,
-    default: lit(42),
-    span: sourceSpan,
-  },
-];
+  type(entry: Cells): number {
+    const key = entry.join(",");
+    const existing = this.types.findIndex((candidate) => candidate.join(",") === key);
+    if (existing >= 0) {
+      return existing;
+    }
+    this.types.push(entry);
+    return this.types.length - 1;
+  }
 
-const program: NxIrProgram = {
-  format: "nx-ir-json",
-  schemaVersion: 2,
-  runtimeAbi: "nx-ir-runtime-v1",
-  programFingerprint: "42",
-  requiredFeatures: ["eager-v1"],
-  functionEntrypoints: [
-    { name: "root", reference: ref("root", "m0:d2", "function") },
-    { name: "values", reference: ref("values", "m0:d6", "function") },
-    { name: "failed", reference: ref("failed", "m0:d7", "function") },
-    { name: "describe", reference: ref("describe", "m0:d8", "function") },
-    { name: "echoTheme", reference: ref("echoTheme", "m0:d9", "function") },
-    { name: "themeValue", reference: ref("themeValue", "m0:d12", "function") },
-    { name: "mappedValues", reference: ref("mappedValues", "m0:d13", "function") },
-    { name: "flow", reference: ref("flow", "m0:d14", "function") },
-    { name: "letValue", reference: ref("letValue", "m0:d15", "function") },
-    { name: "describeOffline", reference: ref("describeOffline", "m0:d16", "function") },
-  ],
-  componentEntrypoints: [
-    { name: "TextInput", reference: ref("TextInput", "m0:d10", "component") },
-    { name: "SearchBox", reference: ref("SearchBox", "m0:d11", "component") },
-  ],
-  sources: [{ identity: "test.nx", source: "let root() = { 42 }" }],
-  modules: [
-    {
-      id: "m0",
-      runtimeId: 0,
-      provenance: { kind: "sourceProvider", identity: "test.nx" },
-      imports: [],
-      declarations: [
-        {
-          id: "m0:d0",
-          reference: ref("answer", "m0:d0", "function"),
-          span: sourceSpan,
-          kind: {
-            tag: "function",
-            params: [],
-            body: lit(41),
-          },
-        },
-        {
-          id: "m0:d1",
-          reference: ref("add", "m0:d1", "function"),
-          span: sourceSpan,
-          kind: {
-            tag: "function",
-            params: [
-              { name: "a", slot: "add:param:0", ty: intType, isContent: false, span: sourceSpan },
-              { name: "b", slot: "add:param:1", ty: intType, isContent: false, span: sourceSpan },
-            ],
-            body: expr({
-              tag: "binary",
-              operator: "add",
-              lhs: slot("a", "add:param:0"),
-              rhs: slot("b", "add:param:1"),
-            }),
-          },
-        },
-        {
-          id: "m0:d2",
-          reference: ref("root", "m0:d2", "function"),
-          span: sourceSpan,
-          kind: {
-            tag: "function",
-            params: [],
-            body: expr({
-              tag: "call",
-              callee: reference("add", "m0:d1", "function"),
-              args: [
-                expr({ tag: "call", callee: reference("answer", "m0:d0", "function"), args: [] }),
-                lit(1),
-              ],
-            }),
-          },
-        },
-        {
-          id: "m0:d3",
-          reference: ref("Theme", "m0:d3", "union"),
-          span: sourceSpan,
-          kind: {
-            tag: "union",
-            cases: [
-              { name: "light", fields: [], isConstant: true, span: sourceSpan },
-              { name: "dark", fields: [], isConstant: true, span: sourceSpan },
-            ],
-          },
-        },
-        {
-          id: "m0:d4",
-          reference: ref("User", "m0:d4", "record"),
-          span: sourceSpan,
-          kind: {
-            tag: "record",
-            fields: userRecordFields,
-          },
-        },
-        {
-          id: "m0:d5",
-          reference: ref("LoadState", "m0:d5", "union"),
-          span: sourceSpan,
-          kind: {
-            tag: "union",
-            cases: [
-              { name: "idle", fields: [], isConstant: true, span: sourceSpan },
-              {
-                name: "failed",
-                fields: [
-                  {
-                    name: "message",
-                    slot: "LoadState.failed:field:0",
-                    ty: stringType,
-                    isContent: false,
-                    isRequired: true,
-                    span: sourceSpan,
-                  },
-                ],
-                isConstant: false,
-                span: sourceSpan,
-              },
-            ],
-          },
-        },
-        {
-          id: "m0:d6",
-          reference: ref("values", "m0:d6", "function"),
-          span: sourceSpan,
-          kind: {
-            tag: "function",
-            params: [],
-            body: expr({
-              tag: "record",
-              name: "User",
-              fields: userRecordFields,
-              properties: [{ name: "name", value: lit("Ada"), span: sourceSpan }],
-            }),
-          },
-        },
-        {
-          id: "m0:d7",
-          reference: ref("failed", "m0:d7", "function"),
-          span: sourceSpan,
-          kind: {
-            tag: "function",
-            params: [],
-            body: expr({
-              tag: "unionCase",
-              union: ref("LoadState", "m0:d5", "union"),
-              caseName: "failed",
-              fields: [
-                {
-                  name: "message",
-                  slot: "failed:field:0",
-                  ty: stringType,
-                  isContent: false,
-                  isRequired: true,
-                  span: sourceSpan,
-                },
-              ],
-              properties: [{ name: "message", value: lit("offline"), span: sourceSpan }],
-              content: [],
-            }),
-          },
-        },
-        {
-          id: "m0:d8",
-          reference: ref("describe", "m0:d8", "function"),
-          span: sourceSpan,
-          kind: {
-            tag: "function",
-            params: [
-              {
-                name: "state",
-                slot: "describe:param:0",
-                ty: loadStateType,
-                isContent: false,
-                span: sourceSpan,
-              },
-            ],
-            body: expr({
-              tag: "ifIs",
-              scrutinee: slot("state", "describe:param:0"),
-              arms: [
-                {
-                  patterns: [
-                    expr({
-                      tag: "unionCase",
-                      union: ref("LoadState", "m0:d5", "union"),
-                      caseName: "failed",
-                      fields: [],
-                      properties: [],
-                      content: [],
-                    }),
-                  ],
-                  body: lit("failed"),
-                },
-              ],
-              elseBranch: lit("ok"),
-            }),
-          },
-        },
-        {
-          id: "m0:d9",
-          reference: ref("echoTheme", "m0:d9", "function"),
-          span: sourceSpan,
-          kind: {
-            tag: "function",
-            params: [
-              { name: "mode", slot: "theme:param:0", ty: themeType, isContent: false, span: sourceSpan },
-            ],
-            body: slot("mode", "theme:param:0"),
-          },
-        },
-        {
-          id: "m0:d10",
-          reference: ref("TextInput", "m0:d10", "component"),
-          span: sourceSpan,
-          kind: {
-            tag: "component",
-            isAbstract: false,
-            isExternal: true,
-            props: [
-              {
-                name: "value",
-                slot: "TextInput:prop:0",
-                ownerModule: "m0",
-                ty: stringType,
-                isContent: false,
-                isRequired: true,
-                span: sourceSpan,
-              },
-            ],
-            state: [],
-          },
-        },
-        {
-          id: "m0:d11",
-          reference: ref("SearchBox", "m0:d11", "component"),
-          span: sourceSpan,
-          kind: {
-            tag: "component",
-            isAbstract: false,
-            isExternal: false,
-            props: [
-              {
-                name: "placeholder",
-                slot: "SearchBox:prop:0",
-                ownerModule: "m0",
-                ty: stringType,
-                isContent: false,
-                isRequired: false,
-                default: lit("Find docs"),
-                span: sourceSpan,
-              },
-            ],
-            state: [
-              {
-                name: "query",
-                slot: "SearchBox:state:0",
-                ownerModule: "m0",
-                ty: stringType,
-                isContent: false,
-                isRequired: false,
-                default: slot("placeholder", "SearchBox:prop:0"),
-                span: sourceSpan,
-              },
-            ],
-            body: expr({
-              tag: "componentDescriptor",
-              component: ref("TextInput", "m0:d10", "component"),
-              targetKind: "external",
-              properties: [{ name: "value", value: slot("query", "SearchBox:state:0"), span: sourceSpan }],
-              content: [],
-            }),
-          },
-        },
-        {
-          id: "m0:d12",
-          reference: ref("themeValue", "m0:d12", "function"),
-          span: sourceSpan,
-          kind: {
-            tag: "function",
-            params: [],
-            body: expr({
-              tag: "unionCase",
-              union: ref("Theme", "m0:d3", "union"),
-              caseName: "dark",
-              fields: [],
-              properties: [],
-              contentField: null,
-              content: [],
-              isConstant: true,
-            }),
-          },
-        },
-        {
-          id: "m0:d13",
-          reference: ref("mappedValues", "m0:d13", "function"),
-          span: sourceSpan,
-          kind: {
-            tag: "function",
-            params: [],
-            body: expr({
-              tag: "for",
-              itemName: "item",
-              itemSlot: "mappedValues:item",
-              indexName: "index",
-              indexSlot: "mappedValues:index",
-              iterable: expr({ tag: "array", elements: [lit(10), lit(20)] }),
-              body: expr({
-                tag: "binary",
-                operator: "add",
-                lhs: slot("item", "mappedValues:item"),
-                rhs: slot("index", "mappedValues:index"),
-              }),
-            }),
-          },
-        },
-        {
-          id: "m0:d14",
-          reference: ref("flow", "m0:d14", "function"),
-          span: sourceSpan,
-          kind: {
-            tag: "function",
-            params: [],
-            body: expr({
-              tag: "block",
-              statements: [
-                {
-                  tag: "let",
-                  name: "user",
-                  slot: "flow:user",
-                  init: expr({
-                    tag: "record",
-                    name: "User",
-                    fields: userRecordFields,
-                    properties: [{ name: "name", value: lit("Grace"), span: sourceSpan }],
-                  }),
-                },
-                {
-                  tag: "let",
-                  name: "items",
-                  slot: "flow:items",
-                  init: expr({ tag: "array", elements: [lit(40), lit(42)] }),
-                },
-              ],
-              expression: expr({
-                tag: "if",
-                condition: expr({
-                  tag: "binary",
-                  operator: "and",
-                  lhs: expr({ tag: "unary", operator: "not", expr: lit(false) }),
-                  rhs: expr({
-                    tag: "binary",
-                    operator: "eq",
-                    lhs: expr({
-                      tag: "member",
-                      base: slot("user", "flow:user"),
-                      member: "score",
-                    }),
-                    rhs: lit(42),
-                  }),
-                }),
-                thenBranch: expr({
-                  tag: "index",
-                  base: slot("items", "flow:items"),
-                  index: lit(1),
-                }),
-                elseBranch: lit(0),
-              }),
-            }),
-          },
-        },
-        {
-          id: "m0:d15",
-          reference: ref("letValue", "m0:d15", "function"),
-          span: sourceSpan,
-          kind: {
-            tag: "function",
-            params: [],
-            body: expr({
-              tag: "let",
-              name: "amount",
-              slot: "letValue:amount",
-              value: lit(12),
-              body: expr({
-                tag: "unary",
-                operator: "neg",
-                expr: slot("amount", "letValue:amount"),
-              }),
-            }),
-          },
-        },
-        {
-          id: "m0:d16",
-          reference: ref("describeOffline", "m0:d16", "function"),
-          span: sourceSpan,
-          kind: {
-            tag: "function",
-            params: [
-              {
-                name: "state",
-                slot: "describeOffline:param:0",
-                ty: loadStateType,
-                isContent: false,
-                span: sourceSpan,
-              },
-            ],
-            body: expr({
-              tag: "ifIs",
-              scrutinee: slot("state", "describeOffline:param:0"),
-              arms: [
-                {
-                  patterns: [
-                    expr({
-                      tag: "unionCase",
-                      union: ref("LoadState", "m0:d5", "union"),
-                      caseName: "failed",
-                      fields: [
-                        {
-                          name: "message",
-                          slot: "LoadState.failed:field:0",
-                          ty: stringType,
-                          isContent: false,
-                          isRequired: true,
-                          span: sourceSpan,
-                        },
-                      ],
-                      properties: [{ name: "message", value: lit("offline"), span: sourceSpan }],
-                      content: [],
-                    }),
-                  ],
-                  body: lit("failed-type"),
-                },
-              ],
-              elseBranch: lit("other"),
-            }),
-          },
-        },
-      ],
-    },
-  ],
-};
+  node(entry: Cells): number {
+    this.nodes.push(entry);
+    return this.nodes.length - 1;
+  }
 
-test("prepares supported IR and rejects unsupported feature flags", () => {
-  const prepared = prepareNxIrProgram(program);
-  assertEqual(prepared.functionEntrypoints.has("root"), true);
+  string(value: string): number {
+    return this.node([nodeKinds.string, this.str(value)]);
+  }
 
-  const rejected = tryPrepareNxIrProgram({
-    ...program,
-    requiredFeatures: ["future-reactivity"],
-  });
-  assertEqual(rejected.ok, false);
-});
+  int(value: number): number {
+    // Two cells, low word first.
+    this.constants.push([0, value >>> 0, Math.floor(value / 4294967296) >>> 0]);
+    return this.node([nodeKinds.number, this.constants.length - 1]);
+  }
 
-test("rejects unknown operation tags during preparation", () => {
-  const badProgram: NxIrProgram = {
-    ...program,
-    modules: [
-      {
-        ...program.modules[0]!,
-        declarations: [
-          {
-            id: "m0:bad",
-            reference: ref("bad", "m0:bad", "function"),
-            span: sourceSpan,
-            kind: {
-              tag: "function",
-              params: [],
-              body: expr({ tag: "teleport" }),
-            },
-          },
-        ],
-      },
-    ],
-    functionEntrypoints: [{ name: "bad", reference: ref("bad", "m0:bad", "function") }],
-    componentEntrypoints: [],
-  };
+  /** `count, element × count`, for a list operand. */
+  list(elements: readonly Cells[]): number[] {
+    return [elements.length, ...elements.flat()];
+  }
 
-  const rejected = tryPrepareNxIrProgram(badProgram);
-  assertEqual(rejected.ok, false);
-});
+  /** A `[node...]` operand. */
+  content(nodes: readonly number[]): number[] {
+    return [nodes.length, ...nodes];
+  }
 
-test("uses module-qualified nominal type references and entrypoint-only lookup", () => {
-  const rootUserRef = ref("User", "m0:d0", "record", "m0");
-  const libraryUserRef = ref("User", "m1:d0", "record", "m1");
-  const rootUserFields: NxIrRecordField[] = [
-    {
-      name: "name",
-      slot: "m0:User:field:0",
-      ty: stringType,
-      isContent: false,
-      isRequired: true,
-      span: sourceSpan,
-    },
-  ];
-  const libraryUserFields: NxIrRecordField[] = [
-    {
-      name: "score",
-      slot: "m1:User:field:0",
-      ty: intType,
-      isContent: false,
-      isRequired: true,
-      span: sourceSpan,
-    },
-  ];
-  const collisionProgram: NxIrProgram = {
-    format: "nx-ir-json",
-    schemaVersion: 2,
-    runtimeAbi: "nx-ir-runtime-v1",
-    programFingerprint: "43",
-    requiredFeatures: ["eager-v1"],
-    functionEntrypoints: [{ name: "acceptUser", reference: ref("acceptUser", "m0:d1", "function", "m0") }],
-    componentEntrypoints: [],
-    sources: [{ identity: "collision.nx", source: "" }],
-    modules: [
-      {
-        id: "m0",
-        runtimeId: 0,
-        provenance: { kind: "sourceProvider", identity: "app/main.nx" },
-        imports: [],
-        declarations: [
-          {
-            id: "m0:d0",
-            reference: rootUserRef,
-            span: sourceSpan,
-            kind: { tag: "record", fields: rootUserFields },
-          },
-          {
-            id: "m0:d1",
-            reference: ref("acceptUser", "m0:d1", "function", "m0"),
-            span: sourceSpan,
-            kind: {
-              tag: "function",
-              params: [
-                {
-                  name: "user",
-                  slot: "acceptUser:param:0",
-                  ty: nominal(rootUserRef),
-                  isContent: false,
-                  span: sourceSpan,
-                },
-              ],
-              body: slot("user", "acceptUser:param:0"),
-            },
-          },
-          {
-            id: "m0:d2",
-            reference: ref("helper", "m0:d2", "function", "m0"),
-            span: sourceSpan,
-            kind: { tag: "function", params: [], body: lit(1) },
-          },
-        ],
-      },
-      {
-        id: "m1",
-        runtimeId: 1,
-        provenance: { kind: "sourceProvider", identity: "lib/model.nx" },
-        imports: [],
-        declarations: [
-          {
-            id: "m1:d0",
-            reference: libraryUserRef,
-            span: sourceSpan,
-            kind: { tag: "record", fields: libraryUserFields },
-          },
-        ],
-      },
-    ],
-  };
-  const prepared = prepareNxIrProgram(collisionProgram);
+  field(name: string, ty: number, options: { default?: number; content?: boolean; required?: boolean } = {}): Cells {
+    const flags = (options.content === true ? 1 : 0) + (options.required === true ? 2 : 0);
+    return [this.str(name), ty, options.default ?? NX_IR_NONE, flags];
+  }
 
-  assertEqual(evaluateFunction(prepared, "acceptUser", [{ name: "Ada" }]), { $type: "User", name: "Ada" });
-  assertThrows(() => evaluateFunction(prepared, "helper"), "Function entrypoint 'helper' was not found");
-});
+  property(name: string, value: number): Cells {
+    return [this.str(name), value];
+  }
 
-test("evaluates function calls, records, union cases, loops, and match expressions", () => {
-  const prepared = prepareNxIrProgram(program);
+  declaration(entry: Cells): number {
+    this.declarations.push(entry);
+    return this.declarations.length - 1;
+  }
 
-  assertEqual(evaluateFunction(prepared, "root"), 42);
-  assertEqual(evaluateFunction(prepared, "values"), { $type: "User", name: "Ada", score: 42 });
-  assertEqual(evaluateFunction(prepared, "failed"), {
-    $type: "LoadState.failed",
-    message: "offline",
-  });
-  assertEqual(evaluateFunction(prepared, "describe", [{ $type: "LoadState.failed", message: "x" }]), "failed");
-  assertEqual(evaluateFunction(prepared, "describe", ["idle"]), "ok");
-  assertEqual(
-    evaluateFunction(prepared, "describeOffline", [{ $type: "LoadState.failed", message: "online" }]),
-    "failed-type",
-  );
-  assertEqual(evaluateFunction(prepared, "echoTheme", ["dark"]), "dark");
-  assertEqual(evaluateFunction(prepared, "themeValue"), "dark");
-  assertEqual(evaluateFunction(prepared, "mappedValues"), [10, 21]);
-  assertEqual(evaluateFunction(prepared, "flow"), 42);
-  assertEqual(evaluateFunction(prepared, "letValue"), -12);
-  assertThrows(
-    () => evaluateFunction(prepared, "echoTheme", ["blue"]),
-    "Invalid constant union case",
-  );
-});
+  fn(name: string, body: number, params: readonly Cells[] = []): number {
+    const index = this.declaration([declarationKinds.function, this.str(name), ...this.list(params), body]);
+    this.functionEntrypoints.push(index);
+    return index;
+  }
 
-test("matches native numeric division and modulo semantics", () => {
-  const module = program.modules[0]!;
-  const arithmeticProgram: NxIrProgram = {
-    ...program,
-    functionEntrypoints: [
-      ...program.functionEntrypoints,
-      { name: "numericValues", reference: ref("numericValues", "m0:d17", "function") },
-      { name: "divideByZero", reference: ref("divideByZero", "m0:d18", "function") },
-      { name: "moduloByZero", reference: ref("moduloByZero", "m0:d19", "function") },
-    ],
-    modules: [
-      {
-        ...module,
-        declarations: [
-          ...module.declarations,
-          {
-            id: "m0:d17",
-            reference: ref("numericValues", "m0:d17", "function"),
-            span: sourceSpan,
-            kind: {
-              tag: "function",
-              params: [],
-              body: expr({
-                tag: "array",
-                elements: [
-                  binary("div", lit(7), lit(2), intSemantic),
-                  binary("div", lit(-7), lit(2), intSemantic),
-                  binary("mod", lit(7), lit(2), intSemantic),
-                  binary("mod", lit(-7), lit(2), intSemantic),
-                  binary("div", floatLit(7), floatLit(2), floatSemantic),
-                ],
-              }),
-            },
-          },
-          {
-            id: "m0:d18",
-            reference: ref("divideByZero", "m0:d18", "function"),
-            span: sourceSpan,
-            kind: {
-              tag: "function",
-              params: [],
-              body: binary("div", lit(1), lit(0), intSemantic),
-            },
-          },
-          {
-            id: "m0:d19",
-            reference: ref("moduloByZero", "m0:d19", "function"),
-            span: sourceSpan,
-            kind: {
-              tag: "function",
-              params: [],
-              body: binary("mod", lit(1), lit(0), intSemantic),
-            },
-          },
-        ],
-      },
-    ],
-  };
-  const prepared = prepareNxIrProgram(arithmeticProgram);
+  record(name: string, fields: readonly Cells[], options: { bases?: Cells[]; abstract?: boolean; updateTarget?: Cells } = {}): number {
+    return this.declaration([
+      declarationKinds.record,
+      this.str(name),
+      ...this.list(fields),
+      ...this.list(options.bases ?? []),
+      options.abstract === true ? 1 : 0,
+      ...(options.updateTarget ?? [NX_IR_NONE, NX_IR_NONE]),
+    ]);
+  }
 
-  assertEqual(evaluateFunction(prepared, "numericValues"), [3, -3, 1, -1, 3.5]);
-  assertThrows(() => evaluateFunction(prepared, "divideByZero"), "Division by zero");
-  assertThrows(() => evaluateFunction(prepared, "moduloByZero"), "Division by zero");
-});
+  component(name: string, props: readonly Cells[], state: readonly Cells[], body: number, options: { external?: boolean; abstract?: boolean } = {}): number {
+    const flags = (options.abstract === true ? 1 : 0) + (options.external === true ? 2 : 0);
+    const index = this.declaration([
+      declarationKinds.component,
+      this.str(name),
+      ...this.list(props),
+      ...this.list(state),
+      body < 0 ? NX_IR_NONE : body,
+      flags,
+    ]);
+    this.componentEntrypoints.push(index);
+    return index;
+  }
 
-test("rejects out-of-bounds array indexes", () => {
-  const module = program.modules[0]!;
-  const outOfBoundsProgram: NxIrProgram = {
-    ...program,
-    functionEntrypoints: [
-      ...program.functionEntrypoints,
-      { name: "outOfBounds", reference: ref("outOfBounds", "m0:d17", "function") },
-    ],
-    modules: [
-      {
-        ...module,
-        declarations: [
-          ...module.declarations,
-          {
-            id: "m0:d17",
-            reference: ref("outOfBounds", "m0:d17", "function"),
-            span: sourceSpan,
-            kind: {
-              tag: "function",
-              params: [],
-              body: expr({
-                tag: "index",
-                base: expr({ tag: "array", elements: [lit(1), lit(2)] }),
-                index: lit(2),
-              }),
-            },
-          },
-        ],
-      },
-    ],
-  };
-  const prepared = prepareNxIrProgram(outOfBoundsProgram);
+  union(name: string, cases: readonly (readonly [string, readonly Cells[], boolean])[], options: { bases?: Cells[]; propertyTarget?: Cells } = {}): number {
+    return this.declaration([
+      declarationKinds.union,
+      this.str(name),
+      ...this.list(cases.map(([caseName, fields, constant]) => [this.str(caseName), ...this.list(fields), constant ? 1 : 0])),
+      ...this.list(options.bases ?? []),
+      ...(options.propertyTarget ?? [NX_IR_NONE, NX_IR_NONE]),
+    ]);
+  }
 
-  assertThrows(
-    () => evaluateFunction(prepared, "outOfBounds"),
-    "Array index 2 is out of bounds for length 2",
-  );
-});
+  ref(name: string, identity?: string): Cells {
+    return [identity === undefined ? 0 : this.slot(identity), this.str(name)];
+  }
 
-test("normalizes nullable union null and rejects undeclared union cases", () => {
-  const module = program.modules[0]!;
-  const nullableProgram: NxIrProgram = {
-    ...program,
-    functionEntrypoints: [
-      ...program.functionEntrypoints,
-      { name: "optionalState", reference: ref("optionalState", "m0:d17", "function") },
-    ],
-    modules: [
-      {
-        ...module,
-        declarations: [
-          ...module.declarations,
-          {
-            id: "m0:d17",
-            reference: ref("optionalState", "m0:d17", "function"),
-            span: sourceSpan,
-            kind: {
-              tag: "function",
-              params: [
-                {
-                  name: "state",
-                  slot: "optionalState:param:0",
-                  ty: nullableLoadStateType,
-                  isContent: false,
-                  span: sourceSpan,
-                },
-              ],
-              body: slot("state", "optionalState:param:0"),
-            },
-          },
-        ],
-      },
-    ],
-  };
-  const prepared = prepareNxIrProgram(nullableProgram);
+  /** Writes the image: header, directory, and the sections in kind order. */
+  build(options: BuildOptions = {}): Uint8Array {
+    const runtimeAbi = this.str(options.runtimeAbi ?? NX_IR_RUNTIME_ABI);
+    const features = (options.requiredFeatures ?? []).map((feature) => this.str(feature));
+    const modules = this.#links.flatMap((link) => {
+      const fingerprint = BigInt(link.fingerprint ?? "1");
+      return [this.str(link.identity), this.str(link.version ?? ""), Number(fingerprint & 0xffffffffn), Number(fingerprint >> 32n)];
+    });
+    const module = [
+      runtimeAbi,
+      features.length,
+      ...features,
+      this.#links.length,
+      ...modules,
+      this.functionEntrypoints.length,
+      ...this.functionEntrypoints,
+      this.componentEntrypoints.length,
+      ...this.componentEntrypoints,
+    ];
 
-  assertEqual(evaluateFunction(prepared, "optionalState", [null]), null);
-  assertThrows(
-    () => evaluateFunction(prepared, "optionalState", [{ $type: "LoadState.undefined" }]),
-    "Invalid union case",
-  );
-});
-
-test("applies content bindings before required field validation", () => {
-  const module = program.modules[0]!;
-  const bodyField: NxIrRecordField = {
-    name: "body",
-    slot: "ContentBox:field:0",
-    ty: stringType,
-    isContent: true,
-    isRequired: true,
-    span: sourceSpan,
-  };
-  const contentProgram: NxIrProgram = {
-    ...program,
-    functionEntrypoints: [
-      ...program.functionEntrypoints,
-      { name: "recordContent", reference: ref("recordContent", "m0:d17", "function") },
-      { name: "componentContent", reference: ref("componentContent", "m0:d19", "function") },
-    ],
-    componentEntrypoints: [
-      ...program.componentEntrypoints,
-      { name: "Panel", reference: ref("Panel", "m0:d18", "component") },
-    ],
-    modules: [
-      {
-        ...module,
-        declarations: [
-          ...module.declarations,
-          {
-            id: "m0:d17",
-            reference: ref("recordContent", "m0:d17", "function"),
-            span: sourceSpan,
-            kind: {
-              tag: "function",
-              params: [],
-              body: expr({
-                tag: "record",
-                name: "ContentBox",
-                fields: [bodyField],
-                properties: [],
-                contentField: "body",
-                content: [lit("hello")],
-              }),
-            },
-          },
-          {
-            id: "m0:d18",
-            reference: ref("Panel", "m0:d18", "component"),
-            span: sourceSpan,
-            kind: {
-              tag: "component",
-              isAbstract: false,
-              isExternal: true,
-              props: [{ ...bodyField, slot: "Panel:prop:0", ownerModule: "m0" }],
-              state: [],
-            },
-          },
-          {
-            id: "m0:d19",
-            reference: ref("componentContent", "m0:d19", "function"),
-            span: sourceSpan,
-            kind: {
-              tag: "function",
-              params: [],
-              body: expr({
-                tag: "componentDescriptor",
-                component: ref("Panel", "m0:d18", "component"),
-                targetKind: "external",
-                properties: [],
-                contentField: "body",
-                content: [lit("hello")],
-              }),
-            },
-          },
-        ],
-      },
-    ],
-  };
-  const prepared = prepareNxIrProgram(contentProgram);
-
-  assertEqual(evaluateFunction(prepared, "recordContent"), { $type: "ContentBox", body: "hello" });
-  assertEqual(evaluateFunction(prepared, "componentContent"), { $type: "Panel", body: "hello" });
-  assertThrows(() => constructComponentDescriptor(prepared, "Panel"), "Missing required");
-  assertThrows(() => constructComponentDescriptor(prepared, "Panel", { extra: "nope" }), "Unknown Panel props field");
-});
-
-test("constructs descriptors and evaluates components with host-owned state", () => {
-  const prepared = prepareNxIrProgram(program);
-
-  assertEqual(constructComponentDescriptor(prepared, "SearchBox"), {
-    $type: "SearchBox",
-    placeholder: "Find docs",
-  });
-  assertEqual(initializeComponent(prepared, "SearchBox"), {
-    state: { query: "Find docs" },
-    rendered: { $type: "TextInput", value: "Find docs" },
-  });
-  assertEqual(evaluateComponent(prepared, "SearchBox", {}, { query: "docs" }), {
-    rendered: { $type: "TextInput", value: "docs" },
-  });
-  assertEqual(applyComponentStatePatch(prepared, "SearchBox", { query: "docs" }, { query: "guides" }), {
-    query: "guides",
-  });
-  assertThrows(
-    () => applyComponentStatePatch(prepared, "SearchBox", { query: "docs" }, { query: 123 }),
-    "Expected SearchBox state.query to be a string",
-  );
-  assertThrows(() => constructComponentDescriptor(prepared, "TextInput"), "Missing required");
-});
-
-test("coerces a single value at a list-typed field into a list of one", () => {
-  const module = program.modules[0]!;
-  const listField: NxIrRecordField = {
-    name: "sizes",
-    slot: "Sizes:prop:0",
-    ty: { kind: "nullable", inner: { kind: "array", element: intType } },
-    isContent: false,
-    isRequired: false,
-    span: sourceSpan,
-  };
-  const coercionProgram: NxIrProgram = {
-    ...program,
-    functionEntrypoints: [
-      ...program.functionEntrypoints,
-      { name: "oneSize", reference: ref("oneSize", "m0:d32", "function") },
-    ],
-    componentEntrypoints: [
-      ...program.componentEntrypoints,
-      { name: "Sizes", reference: ref("Sizes", "m0:d31", "component") },
-    ],
-    modules: [
-      {
-        ...module,
-        declarations: [
-          ...module.declarations,
-          {
-            id: "m0:d31",
-            reference: ref("Sizes", "m0:d31", "component"),
-            span: sourceSpan,
-            kind: {
-              tag: "component",
-              isAbstract: false,
-              isExternal: true,
-              props: [{ ...listField, ownerModule: "m0" }],
-              state: [],
-            },
-          },
-          {
-            id: "m0:d32",
-            reference: ref("oneSize", "m0:d32", "function"),
-            span: sourceSpan,
-            kind: {
-              tag: "function",
-              params: [],
-              body: expr({
-                tag: "componentDescriptor",
-                component: ref("Sizes", "m0:d31", "component"),
-                targetKind: "external",
-                properties: [{ name: "sizes", value: lit(3), span: sourceSpan }],
-                contentField: null,
-                content: [],
-              }),
-            },
-          },
-        ],
-      },
-    ],
-  };
-  const prepared = prepareNxIrProgram(coercionProgram);
-
-  assertEqual(evaluateFunction(prepared, "oneSize"), { $type: "Sizes", sizes: [3] });
-  assertEqual(constructComponentDescriptor(prepared, "Sizes", { sizes: 3 }), { $type: "Sizes", sizes: [3] });
-  assertEqual(constructComponentDescriptor(prepared, "Sizes", { sizes: [3, 4] }), {
-    $type: "Sizes",
-    sizes: [3, 4],
-  });
-  assertEqual(constructComponentDescriptor(prepared, "Sizes", {}), { $type: "Sizes", sizes: null });
-});
-
-test("normalizes a constructed record into a record-typed field", () => {
-  const module = program.modules[0]!;
-  const userType: NxIrTypeRef = nominal(ref("User", "m0:d4", "record"));
-  const ownerField: NxIrRecordField = {
-    name: "owner",
-    slot: "Card:prop:0",
-    ty: userType,
-    isContent: false,
-    isRequired: true,
-    span: sourceSpan,
-  };
-  const constructUser = expr({
-    tag: "record",
-    name: "User",
-    fields: userRecordFields,
-    properties: [{ name: "name", value: lit("Ada"), span: sourceSpan }],
-  });
-
-  const recordProgram: NxIrProgram = {
-    ...program,
-    functionEntrypoints: [
-      ...program.functionEntrypoints,
-      { name: "cardWithOwner", reference: ref("cardWithOwner", "m0:d29", "function") },
-      { name: "nestedOwner", reference: ref("nestedOwner", "m0:d30", "function") },
-    ],
-    componentEntrypoints: [
-      ...program.componentEntrypoints,
-      { name: "Card", reference: ref("Card", "m0:d28", "component") },
-    ],
-    modules: [
-      {
-        ...module,
-        declarations: [
-          ...module.declarations,
-          {
-            id: "m0:d28",
-            reference: ref("Card", "m0:d28", "component"),
-            span: sourceSpan,
-            kind: {
-              tag: "component",
-              isAbstract: false,
-              isExternal: true,
-              props: [{ ...ownerField, ownerModule: "m0" }],
-              state: [],
-            },
-          },
-          {
-            id: "m0:d29",
-            reference: ref("cardWithOwner", "m0:d29", "function"),
-            span: sourceSpan,
-            kind: {
-              tag: "function",
-              params: [],
-              body: expr({
-                tag: "componentDescriptor",
-                component: ref("Card", "m0:d28", "component"),
-                targetKind: "external",
-                properties: [{ name: "owner", value: constructUser, span: sourceSpan }],
-                contentField: null,
-                content: [],
-              }),
-            },
-          },
-          {
-            id: "m0:d30",
-            reference: ref("nestedOwner", "m0:d30", "function"),
-            span: sourceSpan,
-            kind: {
-              tag: "function",
-              params: [],
-              body: expr({
-                tag: "record",
-                name: "Wrapper",
-                fields: [{ ...ownerField, name: "owner", slot: "Wrapper:field:0" }],
-                properties: [{ name: "owner", value: constructUser, span: sourceSpan }],
-              }),
-            },
-          },
-        ],
-      },
-    ],
-  };
-  const prepared = prepareNxIrProgram(recordProgram);
-  const owner = { $type: "User", name: "Ada", score: 42 };
-
-  assertEqual(evaluateFunction(prepared, "cardWithOwner"), { $type: "Card", owner });
-  assertEqual(evaluateFunction(prepared, "nestedOwner"), { $type: "Wrapper", owner });
-  assertEqual(constructComponentDescriptor(prepared, "Card", { owner }), { $type: "Card", owner });
-
-  // A host writing a plain object has no discriminator to give, which is not an error.
-  assertEqual(constructComponentDescriptor(prepared, "Card", { owner: { name: "Ada", score: 42 } }), {
-    $type: "Card",
-    owner,
-  });
-
-  // But one it does give has to be its own. Restamping a foreign discriminator with the declared
-  // name would hand the program back a value reported as the type it is not.
-  assertThrows(
-    () =>
-      constructComponentDescriptor(prepared, "Card", {
-        owner: { $type: "Ghost", name: "Ada", score: 42 },
-      }),
-    "Expected Card props.owner to be a User, got 'Ghost'",
-  );
-});
-
-test("accepts a derived record at a base-typed field and rejects an unrelated one", () => {
-  const module = program.modules[0]!;
-  const baseField: NxIrRecordField = {
-    name: "name",
-    slot: "Base:field:0",
-    ty: stringType,
-    isContent: false,
-    isRequired: true,
-    span: sourceSpan,
-  };
-  // A derived record's fields arrive flattened, base's first, the way the builder emits them.
-  const derivedFields: NxIrRecordField[] = [
-    { ...baseField, slot: "Derived:field:0" },
-    {
-      name: "role",
-      slot: "Derived:field:1",
-      ty: stringType,
-      isContent: false,
-      isRequired: true,
-      span: sourceSpan,
-    },
-  ];
-  const recordDeclaration = (
-    id: string,
-    name: string,
-    fields: NxIrRecordField[],
-    bases: ReturnType<typeof ref>[],
-  ) => ({
-    id,
-    reference: ref(name, id, "record"),
-    span: sourceSpan,
-    kind: { tag: "record" as const, fields, bases },
-  });
-
-  const subtypeProgram: NxIrProgram = {
-    ...program,
-    componentEntrypoints: [
-      ...program.componentEntrypoints,
-      { name: "Holder", reference: ref("Holder", "m0:d43", "component") },
-    ],
-    modules: [
-      {
-        ...module,
-        declarations: [
-          ...module.declarations,
-          recordDeclaration("m0:d40", "Base", [baseField], []),
-          recordDeclaration("m0:d41", "Derived", derivedFields, [ref("Base", "m0:d40", "record")]),
-          recordDeclaration("m0:d42", "Unrelated", [baseField], []),
-          {
-            id: "m0:d43",
-            reference: ref("Holder", "m0:d43", "component"),
-            span: sourceSpan,
-            kind: {
-              tag: "component",
-              isAbstract: false,
-              isExternal: true,
-              props: [
-                {
-                  name: "held",
-                  slot: "Holder:prop:0",
-                  ty: nominal(ref("Base", "m0:d40", "record")),
-                  isContent: false,
-                  isRequired: true,
-                  ownerModule: "m0",
-                  span: sourceSpan,
-                },
-              ],
-              state: [],
-            },
-          },
-        ],
-      },
-    ],
-  };
-  const prepared = prepareNxIrProgram(subtypeProgram);
-
-  // A derived value is not the wrong type. It keeps its own discriminator and its own fields,
-  // which the base's field list does not have room for.
-  const derived = { $type: "Derived", name: "Ada", role: "admin" };
-  assertEqual(constructComponentDescriptor(prepared, "Holder", { held: derived }), {
-    $type: "Holder",
-    held: derived,
-  });
-
-  // A record that does not extend the base is still the wrong type, even where its fields happen
-  // to fit.
-  assertThrows(
-    () =>
-      constructComponentDescriptor(prepared, "Holder", {
-        held: { $type: "Unrelated", name: "Ada" },
-      }),
-    "Expected Holder props.held to be a Base, got 'Unrelated'",
-  );
-});
-
-test("reports a subtype whose name two declarations share rather than guessing", () => {
-  const module = program.modules[0]!;
-  const nameField: NxIrRecordField = {
-    name: "name",
-    slot: "Base:field:0",
-    ty: stringType,
-    isContent: false,
-    isRequired: true,
-    span: sourceSpan,
-  };
-  const base = ref("Base", "m0:d50", "record");
-  // Two modules may each declare a `Derived` extending the same base. A value carries only its
-  // name, so nothing in it says which declaration to normalize against.
-  const twinProgram: NxIrProgram = {
-    ...program,
-    componentEntrypoints: [
-      ...program.componentEntrypoints,
-      { name: "Twin", reference: ref("Twin", "m0:d53", "component") },
-    ],
-    modules: [
-      {
-        ...module,
-        declarations: [
-          ...module.declarations,
-          {
-            id: "m0:d50",
-            reference: base,
-            span: sourceSpan,
-            kind: { tag: "record", fields: [nameField], bases: [] },
-          },
-          {
-            id: "m0:d51",
-            reference: ref("Derived", "m0:d51", "record"),
-            span: sourceSpan,
-            kind: { tag: "record", fields: [nameField], bases: [base] },
-          },
-          {
-            id: "m0:d52",
-            reference: ref("Derived", "m0:d52", "record"),
-            span: sourceSpan,
-            kind: { tag: "record", fields: [nameField], bases: [base] },
-          },
-          {
-            id: "m0:d53",
-            reference: ref("Twin", "m0:d53", "component"),
-            span: sourceSpan,
-            kind: {
-              tag: "component",
-              isAbstract: false,
-              isExternal: true,
-              props: [
-                {
-                  name: "held",
-                  slot: "Twin:prop:0",
-                  ty: nominal(base),
-                  isContent: false,
-                  isRequired: true,
-                  ownerModule: "m0",
-                  span: sourceSpan,
-                },
-              ],
-              state: [],
-            },
-          },
-        ],
-      },
-    ],
-  };
-  const prepared = prepareNxIrProgram(twinProgram);
-
-  assertThrows(
-    () =>
-      constructComponentDescriptor(prepared, "Twin", {
-        held: { $type: "Derived", name: "Ada" },
-      }),
-    "Ambiguous subtype at Twin props.held: 2 declarations named 'Derived' extend Base",
-  );
-});
-
-test("rejects an abstract record at a base-typed field and accepts one extending it", () => {
-  const module = program.modules[0]!;
-  const nameField: NxIrRecordField = {
-    name: "name",
-    slot: "Base:field:0",
-    ty: stringType,
-    isContent: false,
-    isRequired: true,
-    span: sourceSpan,
-  };
-  const base = ref("Base", "m0:d60", "record");
-  const middle = ref("Middle", "m0:d61", "record");
-  const abstractProgram: NxIrProgram = {
-    ...program,
-    componentEntrypoints: [
-      ...program.componentEntrypoints,
-      { name: "Slot", reference: ref("Slot", "m0:d63", "component") },
-    ],
-    modules: [
-      {
-        ...module,
-        declarations: [
-          ...module.declarations,
-          {
-            id: "m0:d60",
-            reference: base,
-            span: sourceSpan,
-            kind: { tag: "record", fields: [nameField], bases: [], isAbstract: true },
-          },
-          {
-            id: "m0:d61",
-            reference: middle,
-            span: sourceSpan,
-            kind: { tag: "record", fields: [nameField], bases: [base], isAbstract: true },
-          },
-          {
-            id: "m0:d62",
-            reference: ref("Derived", "m0:d62", "record"),
-            span: sourceSpan,
-            kind: {
-              tag: "record",
-              fields: [nameField],
-              bases: [middle, base],
-              isAbstract: false,
-            },
-          },
-          {
-            id: "m0:d63",
-            reference: ref("Slot", "m0:d63", "component"),
-            span: sourceSpan,
-            kind: {
-              tag: "component",
-              isAbstract: false,
-              isExternal: true,
-              props: [
-                {
-                  name: "held",
-                  slot: "Slot:prop:0",
-                  ty: nominal(base),
-                  isContent: false,
-                  isRequired: true,
-                  ownerModule: "m0",
-                  span: sourceSpan,
-                },
-              ],
-              state: [],
-            },
-          },
-        ],
-      },
-    ],
-  };
-  const prepared = prepareNxIrProgram(abstractProgram);
-
-  // A plain host object would otherwise be stamped with the abstract type's own name, producing a
-  // value NX itself refuses to construct.
-  assertThrows(
-    () => constructComponentDescriptor(prepared, "Slot", { held: { name: "Ada" } }),
-    "Expected Slot props.held to be a concrete type extending Base, got an object with no '$type' discriminator naming one.",
-  );
-  assertThrows(
-    () => constructComponentDescriptor(prepared, "Slot", { held: { $type: "Base", name: "Ada" } }),
-    "Expected Slot props.held to be a concrete type extending Base, got abstract 'Base'.",
-  );
-
-  // An intermediate abstract record passes the base check and is still a type with no values.
-  assertThrows(
-    () => constructComponentDescriptor(prepared, "Slot", { held: { $type: "Middle", name: "Ada" } }),
-    "Expected Slot props.held to be a concrete type extending Base, got abstract 'Middle'.",
-  );
-
-  const derived = { $type: "Derived", name: "Ada" };
-  assertEqual(constructComponentDescriptor(prepared, "Slot", { held: derived }), {
-    $type: "Slot",
-    held: derived,
-  });
-});
-
-test("binds list-typed content as a list whatever the child count", () => {
-  const module = program.modules[0]!;
-  const listType: NxIrTypeRef = { kind: "array", element: stringType };
-  const listBody: NxIrRecordField = {
-    name: "body",
-    slot: "Stack:prop:0",
-    ty: listType,
-    isContent: true,
-    isRequired: true,
-    span: sourceSpan,
-  };
-  const optionalListBody: NxIrRecordField = {
-    name: "body",
-    slot: "OptionalStack:prop:0",
-    ty: { kind: "nullable", inner: listType },
-    isContent: true,
-    isRequired: false,
-    span: sourceSpan,
-  };
-  const scalarBody: NxIrRecordField = {
-    name: "body",
-    slot: "Caption:prop:0",
-    ty: stringType,
-    isContent: true,
-    isRequired: true,
-    span: sourceSpan,
-  };
-
-  function externalComponent(id: string, name: string, field: NxIrRecordField) {
-    return {
-      id,
-      reference: ref(name, id, "component"),
-      span: sourceSpan,
-      kind: {
-        tag: "component" as const,
-        isAbstract: false,
-        isExternal: true,
-        props: [{ ...field, ownerModule: "m0" }],
-        state: [],
-      },
+    const encoder = new TextEncoder();
+    const blob = encoder.encode(this.strings.join(""));
+    const stringOffsets = [0];
+    for (const value of this.strings) {
+      stringOffsets.push(stringOffsets[stringOffsets.length - 1]! + encoder.encode(value).byteLength);
+    }
+    const table = (entries: readonly Cells[]): number[] => {
+      const offsets = [0];
+      for (const entry of entries) {
+        offsets.push(offsets[offsets.length - 1]! + entry.length);
+      }
+      return [entries.length, ...offsets, ...entries.flat()];
     };
+    const sections: [number, Uint8Array][] = [
+      [sectionKinds.strings, bytesOf([this.strings.length, ...stringOffsets], blob)],
+      [sectionKinds.module, bytesOf(module)],
+      [sectionKinds.types, bytesOf(table(this.types))],
+      [sectionKinds.constants, bytesOf(table(this.constants))],
+      [sectionKinds.nodes, bytesOf(table(this.nodes))],
+      [sectionKinds.declarations, bytesOf(table(this.declarations))],
+    ];
+    if (options.debug !== undefined) {
+      const spans = (list: readonly (readonly [number, number])[]): number[] => [
+        list.length,
+        ...list.flatMap(([start, end]) => [start < 0 ? NX_IR_NONE : start, end < 0 ? NX_IR_NONE : end]),
+      ];
+      const source = encoder.encode(options.debug.source);
+      sections.push([
+        sectionKinds.debug,
+        bytesOf([...spans(options.debug.declarations), ...spans(options.debug.nodes), source.byteLength], source),
+      ]);
+    }
+
+    const directoryEnd = 16 + sections.length * 12;
+    const total = directoryEnd + sections.reduce((sum, [, bytes]) => sum + bytes.byteLength, 0);
+    const image = new Uint8Array(total);
+    const view = new DataView(image.buffer);
+    image.set(encoder.encode("NXIR"), 0);
+    view.setUint32(4, NX_IR_SCHEMA_VERSION, true);
+    view.setUint32(8, total, true);
+    view.setUint32(12, sections.length, true);
+    let offset = directoryEnd;
+    sections.forEach(([kind, bytes], index) => {
+      view.setUint32(16 + index * 12, kind, true);
+      view.setUint32(16 + index * 12 + 4, offset, true);
+      view.setUint32(16 + index * 12 + 8, bytes.byteLength, true);
+      image.set(bytes, offset);
+      offset += bytes.byteLength;
+    });
+    return image;
   }
-
-  function descriptorFunction(id: string, name: string, component: string, componentId: string, children: string[]) {
-    return {
-      id,
-      reference: ref(name, id, "function"),
-      span: sourceSpan,
-      kind: {
-        tag: "function" as const,
-        params: [],
-        body: expr({
-          tag: "componentDescriptor",
-          component: ref(component, componentId, "component"),
-          targetKind: "external",
-          properties: [],
-          contentField: "body",
-          content: children.map((child) => lit(child)),
-        }),
-      },
-    };
-  }
-
-  const listProgram: NxIrProgram = {
-    ...program,
-    functionEntrypoints: [
-      ...program.functionEntrypoints,
-      { name: "oneChild", reference: ref("oneChild", "m0:d23", "function") },
-      { name: "manyChildren", reference: ref("manyChildren", "m0:d24", "function") },
-      { name: "optionalOneChild", reference: ref("optionalOneChild", "m0:d25", "function") },
-      { name: "scalarOneChild", reference: ref("scalarOneChild", "m0:d26", "function") },
-      { name: "recordOneChild", reference: ref("recordOneChild", "m0:d27", "function") },
-    ],
-    componentEntrypoints: [
-      ...program.componentEntrypoints,
-      { name: "Stack", reference: ref("Stack", "m0:d20", "component") },
-    ],
-    modules: [
-      {
-        ...module,
-        declarations: [
-          ...module.declarations,
-          externalComponent("m0:d20", "Stack", listBody),
-          externalComponent("m0:d21", "OptionalStack", optionalListBody),
-          externalComponent("m0:d22", "Caption", scalarBody),
-          descriptorFunction("m0:d23", "oneChild", "Stack", "m0:d20", ["only"]),
-          descriptorFunction("m0:d24", "manyChildren", "Stack", "m0:d20", ["first", "second"]),
-          descriptorFunction("m0:d25", "optionalOneChild", "OptionalStack", "m0:d21", ["only"]),
-          descriptorFunction("m0:d26", "scalarOneChild", "Caption", "m0:d22", ["only"]),
-          {
-            id: "m0:d27",
-            reference: ref("recordOneChild", "m0:d27", "function"),
-            span: sourceSpan,
-            kind: {
-              tag: "function",
-              params: [],
-              body: expr({
-                tag: "record",
-                name: "StackRecord",
-                fields: [{ ...listBody, slot: "StackRecord:field:0" }],
-                properties: [],
-                contentField: "body",
-                content: [lit("only")],
-              }),
-            },
-          },
-        ],
-      },
-    ],
-  };
-  const prepared = prepareNxIrProgram(listProgram);
-
-  assertEqual(evaluateFunction(prepared, "oneChild"), { $type: "Stack", body: ["only"] });
-  assertEqual(evaluateFunction(prepared, "manyChildren"), { $type: "Stack", body: ["first", "second"] });
-  assertEqual(evaluateFunction(prepared, "optionalOneChild"), { $type: "OptionalStack", body: ["only"] });
-  assertEqual(evaluateFunction(prepared, "scalarOneChild"), { $type: "Caption", body: "only" });
-  assertEqual(evaluateFunction(prepared, "recordOneChild"), { $type: "StackRecord", body: ["only"] });
-  assertEqual(constructComponentDescriptor(prepared, "Stack", {}, ["only"]), {
-    $type: "Stack",
-    body: ["only"],
-  });
-  assertEqual(constructComponentDescriptor(prepared, "Stack", {}, ["first", "second"]), {
-    $type: "Stack",
-    body: ["first", "second"],
-  });
-});
-
-function updateField(name: string, slotId: string, ty: NxIrTypeRef): NxIrRecordField {
-  return { name, slot: slotId, ty, isContent: false, isRequired: false, span: sourceSpan };
 }
 
-const updateUserFields: NxIrRecordField[] = [
-  updateField("name", "User.Update:field:0", stringType),
-  updateField("email", "User.Update:field:1", { kind: "nullable", inner: stringType }),
-];
+/** Cells as little-endian bytes, followed by a blob padded to four bytes. */
+function bytesOf(cells: readonly number[], blob: Uint8Array = new Uint8Array(0)): Uint8Array {
+  const padded = Math.ceil(blob.byteLength / 4) * 4;
+  const bytes = new Uint8Array(cells.length * 4 + padded);
+  const view = new DataView(bytes.buffer);
+  cells.forEach((cell, index) => view.setUint32(index * 4, cell, true));
+  bytes.set(blob, cells.length * 4);
+  return bytes;
+}
 
-const updateProgram: NxIrProgram = {
-  format: "nx-ir-json",
-  schemaVersion: 2,
-  runtimeAbi: "nx-ir-runtime-v1",
-  programFingerprint: "7",
-  requiredFeatures: ["eager-v1", "update-records-v1"],
-  functionEntrypoints: [{ name: "clearEmail", reference: ref("clearEmail", "m0:d2", "function") }],
-  componentEntrypoints: [
-    { name: "Editor", reference: ref("Editor", "m0:d3", "component") },
-    { name: "Counter", reference: ref("Counter", "m0:d4", "component") },
-  ],
-  sources: [{ identity: "test.nx", source: "" }],
-  modules: [
-    {
-      id: "m0",
-      runtimeId: 0,
-      provenance: { kind: "sourceProvider", identity: "test.nx" },
-      imports: [],
-      declarations: [
-        {
-          id: "m0:d0",
-          reference: ref("User", "m0:d0", "record"),
-          span: sourceSpan,
-          kind: {
-            tag: "record",
-            fields: [
-              { ...updateField("name", "User:field:0", stringType), default: lit("anon") },
-              updateField("email", "User:field:1", { kind: "nullable", inner: stringType }),
-            ],
-          },
-        },
-        {
-          id: "m0:d1",
-          reference: ref("User.Update", "m0:d1", "record"),
-          span: sourceSpan,
-          kind: { tag: "record", fields: updateUserFields, updateTarget: ref("User", "m0:d0", "record") },
-        },
-        {
-          id: "m0:d2",
-          reference: ref("clearEmail", "m0:d2", "function"),
-          span: sourceSpan,
-          kind: {
-            tag: "function",
-            params: [],
-            body: expr({
-              tag: "record",
-              name: "User.Update",
-              fields: updateUserFields,
-              properties: [{ name: "email", value: lit(null), span: sourceSpan }],
-              contentField: null,
-              content: [],
-              isUpdate: true,
-            }),
-          },
-        },
-        {
-          id: "m0:d3",
-          reference: ref("Editor", "m0:d3", "component"),
-          span: sourceSpan,
-          kind: {
-            tag: "component",
-            isAbstract: false,
-            isExternal: true,
-            props: [
-              {
-                ...updateField("patch", "Editor:prop:0", nominal(ref("User.Update", "m0:d1", "record"))),
-                isRequired: true,
-                ownerModule: "m0",
-              },
-            ],
-            state: [],
-          },
-        },
-        {
-          id: "m0:d4",
-          reference: ref("Counter", "m0:d4", "component"),
-          span: sourceSpan,
-          kind: {
-            tag: "component",
-            isAbstract: false,
-            isExternal: false,
-            props: [],
-            state: [
-              { ...updateField("count", "Counter:state:0", intType), default: lit(0), ownerModule: "m0" },
-              { ...updateField("label", "Counter:state:1", stringType), default: lit("x"), ownerModule: "m0" },
-            ],
-            body: expr({ tag: "intrinsicElement", elementId: "e", tagName: "Label", properties: [], content: [] }),
-          },
-        },
-      ],
-    },
-  ],
-};
+/** A catalog with `SkiaLabel` (Text, FontSize = 14) and `SkiaButton` (Text). */
+function catalog(version: string, extra: (builder: ArtifactBuilder) => void = () => {}): Uint8Array {
+  const b = new ArtifactBuilder("drawnui.nx", [], version);
+  const text = b.field("Text", b.primitive("string"), { required: true });
+  const fontSize = b.field("FontSize", b.primitive("int"), { default: b.int(14) });
+  extra(b);
+  b.component("SkiaLabel", [text, fontSize], [], -1, { external: true });
+  b.component("SkiaButton", [text], [], -1, { external: true });
+  return b.build();
+}
 
-test("an evaluated update record omits the fields it was not given", () => {
-  const prepared = prepareNxIrProgram(updateProgram);
-  assertEqual(evaluateFunction(prepared, "clearEmail"), { $type: "User.Update", email: null });
+/** A snippet whose root is `<SkiaLabel Text="hi" />`, compiled against catalog `version`. */
+function snippet(version: string, componentName = "SkiaLabel"): Uint8Array {
+  const b = new ArtifactBuilder("input.nx", [{ identity: "drawnui.nx", version, fingerprint: "7" }]);
+  const hi = b.string("hi");
+  const body = b.node([nodeKinds.component, b.slot("drawnui.nx"), b.str(componentName), ...b.list([b.property("Text", hi)]), ...b.content([])]);
+  b.fn("root", body);
+  return b.build();
+}
+
+// ------------------------------------------------------------------------------------------------
+// Header and preparation
+// ------------------------------------------------------------------------------------------------
+
+test("prepares a self-contained artifact and evaluates it without linking", () => {
+  const b = new ArtifactBuilder("main.nx");
+  b.fn("root", b.node([nodeKinds.binary, 0, b.int(1), b.int(2)]));
+  const artifact = b.build();
+
+  const program = prepareNxIrProgram(artifact);
+  assertEqual(evaluateFunction(program, "root"), 3);
+  // A prepared module whose table names only itself is a program on its own.
+  assertEqual(evaluateFunction(prepareNxIrModule(artifact), "root"), 3);
+  // An ArrayBuffer is read in place; a view at an odd offset is copied and read the same.
+  assertEqual(prepareNxIrModule(artifact.buffer as ArrayBuffer).functionEntrypoints.has("root"), true);
+  const shifted = new Uint8Array(artifact.byteLength + 2);
+  shifted.set(artifact, 2);
+  assertEqual(evaluateFunction(prepareNxIrProgram(shifted.subarray(2)), "root"), 3);
 });
 
-test("host input for an update record keeps absent fields absent", () => {
-  const prepared = prepareNxIrProgram(updateProgram);
-  assertEqual(
-    constructComponentDescriptor(prepared, "Editor", { patch: { $type: "User.Update", name: "Ada" } }),
-    { $type: "Editor", patch: { $type: "User.Update", name: "Ada" } },
-  );
-  assertEqual(constructComponentDescriptor(prepared, "Editor", { patch: {} }), {
-    $type: "Editor",
-    patch: { $type: "User.Update" },
-  });
-});
+test("refuses schema 2 naming both versions, and unknown ABIs and features", () => {
+  const b = new ArtifactBuilder("main.nx");
+  b.fn("root", b.int(1));
+  const artifact = b.build();
 
-test("null for a non-nullable update field is rejected by name", () => {
-  const prepared = prepareNxIrProgram(updateProgram);
-  assertThrows(
-    () => constructComponentDescriptor(prepared, "Editor", { patch: { $type: "User.Update", name: null } }),
-    "Editor props.patch.name to be non-null",
-  );
-  assertThrows(
-    () => constructComponentDescriptor(prepared, "Editor", { patch: { $type: "User.Update", nickname: "A" } }),
-    "Unknown Editor props.patch field 'nickname'",
-  );
-  assertThrows(
-    () => constructComponentDescriptor(prepared, "Editor", { patch: { $type: "User", name: "Ada" } }),
-    "Expected Editor props.patch to be a User.Update, got 'User'",
-  );
-});
-
-test("a program that uses update records requires and names the feature", () => {
-  const prepared = tryPrepareNxIrProgram(updateProgram);
-  assertEqual(prepared.ok, true);
-
-  const future = tryPrepareNxIrProgram({ ...updateProgram, requiredFeatures: ["eager-v1", "update-records-v2"] });
-  if (future.ok) {
-    throw new Error("Expected an unknown feature to be refused");
+  const old = artifact.slice();
+  new DataView(old.buffer).setUint32(4, 2, true);
+  const schema2 = tryPrepareNxIrModule(old);
+  assertEqual(schema2.ok, false);
+  if (!schema2.ok) {
+    const message = schema2.diagnostics[0]!.message;
+    assertEqual(message.includes("schema version 2"), true);
+    assertEqual(message.includes("schema version 3"), true);
   }
-  if (!future.diagnostics.some((item) => item.message.includes("'update-records-v2'"))) {
-    throw new Error(`Expected the feature to be named, got ${JSON.stringify(future.diagnostics)}`);
+  assertEqual(tryPrepareNxIrModule(b.build({ runtimeAbi: "nx-ir-runtime-v1" })).ok, false);
+  const notAnImage = tryPrepareNxIrModule(new TextEncoder().encode('{"format":"nx-ir-json","schemaVersion":3}'));
+  assertEqual(notAnImage.ok, false);
+  if (!notAnImage.ok) {
+    assertEqual(notAnImage.diagnostics[0]!.message, "The input is not an NX IR image.");
+  }
+  const feature = tryPrepareNxIrProgram(b.build({ requiredFeatures: ["future-reactivity"] }));
+  assertEqual(feature.ok, false);
+  if (!feature.ok) {
+    assertEqual(feature.diagnostics[0]!.message.includes("future-reactivity"), true);
   }
 });
 
-test("a component's update record patches its state", () => {
-  const prepared = prepareNxIrProgram(updateProgram);
-  assertEqual(
-    applyComponentStatePatch(prepared, "Counter", { count: 1, label: "x" }, { $type: "Counter.Update", count: 3 }),
-    { count: 3, label: "x" },
-  );
-  assertEqual(applyComponentStatePatch(prepared, "Counter", { count: 1, label: "x" }, { label: "y" }), {
-    count: 1,
-    label: "y",
-  });
-  assertThrows(
-    () => applyComponentStatePatch(prepared, "Counter", { count: 1, label: "x" }, { $type: "Other.Update", count: 3 }),
-    "Cannot apply 'Other.Update' to Counter state",
-  );
+test("refuses a truncated image and a wrong length with a diagnostic", () => {
+  const b = new ArtifactBuilder("main.nx");
+  b.fn("root", b.int(1));
+  const artifact = b.build();
+  for (let end = 0; end < artifact.byteLength; end += 4) {
+    const result = tryPrepareNxIrModule(artifact.subarray(0, end));
+    assertEqual(result.ok, false);
+  }
+  const longer = new Uint8Array(artifact.byteLength + 4);
+  longer.set(artifact);
+  assertEqual(tryPrepareNxIrModule(longer).ok, false);
+});
+
+test("rejects unknown kinds and dangling indices during preparation", () => {
+  const b = new ArtifactBuilder("main.nx");
+  b.fn("root", b.node([99]));
+  const unknownKind = tryPrepareNxIrModule(b.build());
+  assertEqual(unknownKind.ok, false);
+
+  const c = new ArtifactBuilder("main.nx");
+  c.fn("root", c.node([nodeKinds.string, 42]));
+  assertEqual(tryPrepareNxIrModule(c.build()).ok, false);
+
+  const d = new ArtifactBuilder("main.nx");
+  d.fn("root", d.node([nodeKinds.reference, 0, d.str("missing")]));
+  const missing = tryPrepareNxIrModule(d.build());
+  assertEqual(missing.ok, false);
+  if (!missing.ok) {
+    assertEqual(missing.diagnostics[0]!.message.includes("'missing'"), true);
+  }
+});
+
+test("refuses to evaluate an unlinked module that names another module", () => {
+  const module = prepareNxIrModule(snippet("9"));
+  assertThrows(() => evaluateFunction(module, "root"), "must be linked");
 });
 
 // ------------------------------------------------------------------------------------------------
-// Property unions and update intrinsics
+// Linking
 // ------------------------------------------------------------------------------------------------
 
-function userRecord(name: string, email: string | null) {
-  return expr({
-    tag: "record",
-    name: "User",
-    fields: [
-      { ...updateField("name", "User:field:0", stringType), isRequired: true },
-      updateField("email", "User:field:1", { kind: "nullable", inner: stringType }),
-    ],
-    properties: [
-      { name: "name", value: lit(name), span: sourceSpan },
-      { name: "email", value: lit(email), span: sourceSpan },
-    ],
-    contentField: null,
-    content: [],
+test("links a snippet against a prepared catalog and evaluates it", () => {
+  const prepared = prepareNxIrModule(catalog("9"));
+  const program = linkNxIrProgram(prepareNxIrModule(snippet("9")), {
+    resolve: (identity) => (identity === "drawnui.nx" ? prepared : undefined),
   });
-}
+  assertEqual(evaluateFunction(program, "root"), { $type: "SkiaLabel", Text: "hi", FontSize: 14 });
+});
 
-function userUpdate(properties: readonly { readonly name: string; readonly value: NxIrExpression }[]) {
-  return expr({
-    tag: "record",
-    name: "User.Update",
-    fields: updateUserFields,
-    properties: properties.map((property) => ({ ...property, span: sourceSpan })),
-    contentField: null,
-    content: [],
-    isUpdate: true,
-  });
-}
-
-function intrinsic(name: string, args: readonly NxIrExpression[]) {
-  return expr({ tag: "intrinsicCall", intrinsic: name, args });
-}
-
-const userPropertyRef = ref("User.Property", "m0:d5", "union");
-
-const propertyProgram: NxIrProgram = {
-  ...updateProgram,
-  requiredFeatures: ["eager-v1", "update-records-v1", "property-unions-v1", "update-intrinsics-v1"],
-  functionEntrypoints: [
-    { name: "propertyKey", reference: ref("propertyKey", "m0:d6", "function") },
-    { name: "applied", reference: ref("applied", "m0:d7", "function") },
-    { name: "agree", reference: ref("agree", "m0:d8", "function") },
-  ],
-  componentEntrypoints: [{ name: "Table", reference: ref("Table", "m0:d9", "component") }],
-  modules: [
-    {
-      ...updateProgram.modules[0]!,
-      declarations: [
-        ...updateProgram.modules[0]!.declarations,
-        {
-          id: "m0:d5",
-          reference: userPropertyRef,
-          span: sourceSpan,
-          kind: {
-            tag: "union",
-            propertyTarget: ref("User", "m0:d0", "record"),
-            cases: [
-              { name: "name", fields: [], isConstant: true, span: sourceSpan },
-              { name: "email", fields: [], isConstant: true, span: sourceSpan },
-            ],
-          },
-        },
-        {
-          id: "m0:d6",
-          reference: ref("propertyKey", "m0:d6", "function"),
-          span: sourceSpan,
-          kind: {
-            tag: "function",
-            params: [],
-            body: expr({
-              tag: "unionCase",
-              union: userPropertyRef,
-              caseName: "email",
-              fields: [],
-              properties: [],
-              contentField: null,
-              content: [],
-              isConstant: true,
-            }),
-          },
-        },
-        {
-          id: "m0:d7",
-          reference: ref("applied", "m0:d7", "function"),
-          span: sourceSpan,
-          kind: {
-            tag: "function",
-            params: [],
-            body: intrinsic("apply", [userRecord("Ada", "x@y"), userUpdate([{ name: "email", value: lit(null) }])]),
-          },
-        },
-        {
-          id: "m0:d8",
-          reference: ref("agree", "m0:d8", "function"),
-          span: sourceSpan,
-          kind: {
-            tag: "function",
-            params: [],
-            body: intrinsic("changed", [intrinsic("diff", [userRecord("Ada", "x@y"), userRecord("Bo", "x@y")])]),
-          },
-        },
-        {
-          id: "m0:d9",
-          reference: ref("Table", "m0:d9", "component"),
-          span: sourceSpan,
-          kind: {
-            tag: "component",
-            isAbstract: false,
-            isExternal: true,
-            props: [
-              {
-                ...updateField("sortBy", "Table:prop:0", nominal(userPropertyRef)),
-                isRequired: true,
-                ownerModule: "m0",
-              },
-            ],
-            state: [],
-          },
-        },
-      ],
-    },
-  ],
-};
-
-test("a prepared program listing the property-union and intrinsic features is accepted", () => {
-  const result = tryPrepareNxIrProgram(propertyProgram);
+test("refuses a version mismatch by default and names both versions", () => {
+  const prepared = prepareNxIrModule(catalog("10"));
+  const result = tryLinkNxIrProgram(prepareNxIrModule(snippet("9")), { resolve: () => prepared });
+  assertEqual(result.ok, false);
   if (!result.ok) {
-    throw new Error(`Expected the program to prepare, got ${JSON.stringify(result.diagnostics)}`);
+    const message = result.diagnostics[0]!.message;
+    assertEqual(message.includes("drawnui.nx"), true);
+    assertEqual(message.includes("'9'"), true);
+    assertEqual(message.includes("'10'"), true);
   }
 });
 
-test("an evaluated property union case is the bare field name", () => {
-  const prepared = prepareNxIrProgram(propertyProgram);
-  assertEqual(evaluateFunction(prepared, "propertyKey"), "email");
+test("links across versions when the host opts in and every declaration resolves", () => {
+  const prepared = prepareNxIrModule(catalog("10"));
+  const program = linkNxIrProgram(prepareNxIrModule(snippet("9")), {
+    resolve: () => prepared,
+    allowVersionMismatch: true,
+  });
+  assertEqual(evaluateFunction(program, "root"), { $type: "SkiaLabel", Text: "hi", FontSize: 14 });
 });
 
-test("host input for a property union is validated against the cases", () => {
-  const prepared = prepareNxIrProgram(propertyProgram);
-  assertEqual(constructComponentDescriptor(prepared, "Table", { sortBy: "name" }), {
-    $type: "Table",
-    sortBy: "name",
+test("refuses a missing declaration naming the module and the declaration", () => {
+  const prepared = prepareNxIrModule(catalog("9"));
+  const result = tryLinkNxIrProgram(prepareNxIrModule(snippet("9", "SkiaSlider")), { resolve: () => prepared });
+  assertEqual(result.ok, false);
+  if (!result.ok) {
+    const message = result.diagnostics[0]!.message;
+    assertEqual(message.includes("drawnui.nx"), true);
+    assertEqual(message.includes("'SkiaSlider'"), true);
+  }
+});
+
+test("refuses a module the resolver cannot supply, naming its identity", () => {
+  const result = tryLinkNxIrProgram(prepareNxIrModule(snippet("9")), { resolve: () => undefined });
+  assertEqual(result.ok, false);
+  if (!result.ok) {
+    assertEqual(result.diagnostics[0]!.message.includes("'drawnui.nx'"), true);
+  }
+});
+
+test("a regenerated catalog with a new control ahead of SkiaLabel still resolves by name", () => {
+  const regenerated = prepareNxIrModule(
+    catalog("9", (b) => {
+      b.component("SkiaSlider", [b.field("Value", b.primitive("int"))], [], -1, { external: true });
+    }),
+  );
+  const program = linkNxIrProgram(prepareNxIrModule(snippet("9")), { resolve: () => regenerated });
+  assertEqual(evaluateFunction(program, "root"), { $type: "SkiaLabel", Text: "hi", FontSize: 14 });
+});
+
+test("one prepared module serves many programs without being copied", () => {
+  let prepared = 0;
+  const cache = new Map<string, NxPreparedModule>();
+  const resolve = (identity: string): NxPreparedModule | undefined => {
+    if (!cache.has(identity)) {
+      prepared += 1;
+      cache.set(identity, prepareNxIrModule(catalog("9")));
+    }
+    return cache.get(identity);
+  };
+  const programs = Array.from({ length: 100 }, () => linkNxIrProgram(prepareNxIrModule(snippet("9")), { resolve }));
+  assertEqual(prepared, 1);
+  for (const program of programs) {
+    // The very object the resolver handed out, not a copy.
+    if (program.entry.slots[1]!.module !== cache.get("drawnui.nx")) {
+      throw new Error("the linked program does not hold the resolver's prepared module");
+    }
+    assertEqual(evaluateFunction(program, "root"), { $type: "SkiaLabel", Text: "hi", FontSize: 14 });
+  }
+});
+
+/**
+ * Linking must not walk the linked modules' declarations. A catalog is the largest module in play
+ * and a host links against it on every mount, so preparation is what pays for indexing its shapes;
+ * a link reads that index rather than rebuilding one.
+ */
+test("linking reads the prepared module's shape index rather than rebuilding it", () => {
+  const prepared = prepareNxIrModule(
+    catalog("9", (b) => {
+      b.record("Card", [b.field("name", b.primitive("string"), { required: true })]);
+    }),
+  );
+  // Indexed once, at preparation, before any program exists.
+  const indexed = prepared.nominalShapeSkeletons.get("Card");
+  assertEqual(indexed?.length, 1);
+
+  let walked = 0;
+  const counting: NxPreparedModule = {
+    ...prepared,
+    get declarations() {
+      walked += 1;
+      return prepared.declarations;
+    },
+  };
+  const programs = Array.from({ length: 10 }, () => linkNxIrProgram(prepareNxIrModule(snippet("9")), { resolve: () => counting }));
+  assertEqual(walked, 0);
+
+  // The very arrays preparation built, handed out rather than rebuilt per program.
+  for (const program of programs) {
+    const shapes = program.nominalShapesFor("Card");
+    assertEqual(shapes.length, 1);
+    if (shapes[0]!.fields !== indexed![0]!.fields) {
+      throw new Error("the linked shape does not reuse the prepared module's field list");
+    }
+  }
+});
+
+// ------------------------------------------------------------------------------------------------
+// Diagnostics
+// ------------------------------------------------------------------------------------------------
+
+test("a runtime diagnostic cites the span with debug data and the declaration without", () => {
+  const b = new ArtifactBuilder("main.nx");
+  const zero = b.int(0);
+  const one = b.int(1);
+  b.fn("root", b.node([nodeKinds.binary, 4, one, zero]));
+  const stripped = b.build();
+  const source = "let root() = { 1 / 0 }";
+  const withDebug = b.build({
+    debug: { declarations: [[0, source.length]], nodes: [[19, 20], [15, 16], [15, 20]], source },
   });
+
+  const strippedError = assertThrows(() => evaluateFunction(prepareNxIrProgram(stripped), "root"), "Division by zero");
+  assertEqual(strippedError.diagnostics[0]!.declaration, "main.nx::root");
+  assertEqual(strippedError.diagnostics[0]!.source, undefined);
+
+  const debugError = assertThrows(() => evaluateFunction(prepareNxIrProgram(withDebug), "root"), "Division by zero");
+  assertEqual(debugError.diagnostics[0]!.declaration, "main.nx::root");
+  assertEqual(debugError.diagnostics[0]!.source, { identity: "main.nx", start: 15, end: 20 });
+});
+
+// ------------------------------------------------------------------------------------------------
+// Boundary normalization with host input
+// ------------------------------------------------------------------------------------------------
+
+/**
+ * `abstract Base { name }`, `User extends Base { role }`, `Theme = light | dark`, `LoadState =
+ * idle | failed { message }`, and a `Card` component with a `user: User`, `theme: Theme?`, a
+ * `state: LoadState?` and content `children: object[]`, plus state `{ count: int = 0 }`.
+ */
+function shapesArtifact(): Uint8Array {
+  const b = new ArtifactBuilder("main.nx");
+  const string = b.primitive("string");
+  const int = b.primitive("int");
+  b.record("Base", [b.field("name", string, { required: true })], { abstract: true });
+  b.record("User", [b.field("name", string, { required: true }), b.field("role", string, { required: true })], {
+    bases: [b.ref("Base")],
+  });
+  b.record("Other", [b.field("name", string, { required: true })]);
+  b.union("Theme", [
+    ["light", [], true],
+    ["dark", [], true],
+  ]);
+  b.union("LoadState", [
+    ["idle", [], true],
+    ["failed", [b.field("message", string, { required: true })], false],
+  ]);
+  const props = [
+    b.field("user", b.nominal("Base"), { required: true }),
+    b.field("theme", b.nullable(b.nominal("Theme"))),
+    b.field("load", b.nullable(b.nominal("LoadState"))),
+    b.field("children", b.array(b.primitive("object")), { content: true }),
+  ];
+  const state = [b.field("count", int, { default: b.int(0) })];
+  // The body renders `<div count={count} />`.
+  const body = b.node([nodeKinds.element, 0, b.str("div"), ...b.list([b.property("count", b.node([nodeKinds.slot, 4, b.str("count")]))]), ...b.content([])]);
+  b.component("Card", props, state, body);
+  return b.build();
+}
+
+test("accepts a derived record at a base-typed prop and rejects an unrelated or abstract one", () => {
+  const program = prepareNxIrProgram(shapesArtifact());
+  const user = { $type: "User", name: "Ada", role: "admin" };
+  assertEqual(constructComponentDescriptor(program, "Card", { user }), {
+    $type: "Card",
+    user,
+    theme: null,
+    load: null,
+    children: null,
+  });
+  assertThrows(() => constructComponentDescriptor(program, "Card", { user: { $type: "Other", name: "x" } }), "Expected Card props.user to be a Base");
+  assertThrows(() => constructComponentDescriptor(program, "Card", { user: { name: "x" } }), "concrete type extending Base");
+  assertThrows(() => constructComponentDescriptor(program, "Card", { user: { $type: "Base", name: "x" } }), "got abstract 'Base'");
+  assertThrows(() => constructComponentDescriptor(program, "Card", { user, extra: 1 }), "Unknown Card props field 'extra'");
+  assertThrows(() => constructComponentDescriptor(program, "Card", {}), "Missing required Card props field 'user'");
+});
+
+/**
+ * A `$type` discriminator is a bare name, and under schema 3 a program spans several modules, so
+ * two of them may each declare a record of one name extending the same base. The runtime reports
+ * that rather than picking one: the two have different fields, and guessing would normalize the
+ * value against the wrong schema.
+ */
+test("reports a subtype whose name two modules share rather than guessing", () => {
+  const base = new ArtifactBuilder("base.nx", [], "1");
+  base.record("Base", [base.field("name", base.primitive("string"), { required: true })], { abstract: true });
+  const preparedBase = prepareNxIrModule(base.build());
+
+  /** A module declaring `Card extends base.nx::Base`, with a field of its own. */
+  const cardModule = (identity: string, ownField: string): NxPreparedModule => {
+    const b = new ArtifactBuilder(identity, [{ identity: "base.nx", version: "1", fingerprint: "1" }], "1");
+    const string = b.primitive("string");
+    b.record("Card", [b.field("name", string, { required: true }), b.field(ownField, string, { required: true })], {
+      bases: [b.ref("Base", "base.nx")],
+    });
+    return prepareNxIrModule(b.build());
+  };
+  const left = cardModule("left.nx", "left");
+  const right = cardModule("right.nx", "right");
+
+  const entry = new ArtifactBuilder("main.nx", [
+    { identity: "base.nx", version: "1", fingerprint: "1" },
+    { identity: "left.nx", version: "1", fingerprint: "1" },
+    { identity: "right.nx", version: "1", fingerprint: "1" },
+  ]);
+  entry.component("Host", [entry.field("item", entry.nominal("Base", "base.nx"), { required: true })], [], -1, { external: true });
+  const modules: Record<string, NxPreparedModule> = { "base.nx": preparedBase, "left.nx": left, "right.nx": right };
+  const program = linkNxIrProgram(prepareNxIrModule(entry.build()), { resolve: (identity) => modules[identity] });
+
   assertThrows(
-    () => constructComponentDescriptor(prepared, "Table", { sortBy: "nickname" }),
-    "'nickname' is not a case of User.Property",
+    () => constructComponentDescriptor(program, "Host", { item: { $type: "Card", name: "a", left: "x" } }),
+    "2 declarations named 'Card' extend Base",
   );
 });
 
-test("an evaluated apply replaces present fields only", () => {
-  const prepared = prepareNxIrProgram(propertyProgram);
-  assertEqual(evaluateFunction(prepared, "applied"), { $type: "User", name: "Ada", email: null });
+test("normalizes constant and payload union cases from host input", () => {
+  const program = prepareNxIrProgram(shapesArtifact());
+  const user = { $type: "User", name: "Ada", role: "admin" };
+  assertEqual(fields(constructComponentDescriptor(program, "Card", { user, theme: "dark" })).theme, "dark");
+  assertThrows(() => constructComponentDescriptor(program, "Card", { user, theme: "blue" }), "'blue' is not a case of Theme");
+  assertEqual(fields(constructComponentDescriptor(program, "Card", { user, load: { $type: "LoadState.failed", message: "x" } })).load, {
+    $type: "LoadState.failed",
+    message: "x",
+  });
+  assertThrows(
+    () => constructComponentDescriptor(program, "Card", { user, load: { $type: "LoadState.exploded" } }),
+    "Invalid union case 'LoadState.exploded'",
+  );
+  assertEqual(fields(constructComponentDescriptor(program, "Card", { user, load: null })).load, null);
 });
 
-test("evaluated diff and changed agree", () => {
-  const prepared = prepareNxIrProgram(propertyProgram);
-  assertEqual(evaluateFunction(prepared, "agree"), ["name"]);
+test("binds content as a list whatever the child count", () => {
+  const program = prepareNxIrProgram(shapesArtifact());
+  const user = { $type: "User", name: "Ada", role: "admin" };
+  assertEqual(fields(constructComponentDescriptor(program, "Card", { user }, [{ $type: "span" }])).children, [{ $type: "span" }]);
+  assertEqual(fields(constructComponentDescriptor(program, "Card", { user }, [1, 2])).children, [1, 2]);
+  assertThrows(
+    () => constructComponentDescriptor(program, "Card", { user, children: [] }, [1]),
+    "supplied both as a property and as content",
+  );
 });
 
-test("the exported helpers apply, merge, diff, and list changed fields on host-held values", () => {
-  const prepared = prepareNxIrProgram(propertyProgram);
-  const user: NxRecordObject = { $type: "User", name: "Ada", email: "x@y" };
-  assertEqual(applyUpdate(user, { $type: "User.Update", email: null }), { $type: "User", name: "Ada", email: null });
-  assertEqual(mergeUpdates({ $type: "User.Update", name: "Ada" }, { $type: "User.Update", name: "Bo" }), {
+test("initializes, evaluates and patches a component's host-owned state", () => {
+  const program = prepareNxIrProgram(shapesArtifact());
+  const user = { $type: "User", name: "Ada", role: "admin" };
+  const initialized = initializeComponent(program, "Card", { user });
+  assertEqual(initialized.state, { count: 0 });
+  assertEqual(initialized.rendered, { $type: "div", count: 0 });
+  assertEqual(evaluateComponent(program, "Card", { user }, { count: 3 }).rendered, { $type: "div", count: 3 });
+  assertThrows(() => evaluateComponent(program, "Card", { user }, {}), "Missing required Card state field 'count'");
+  assertEqual(normalizeComponentState(program, "Card", { count: 2 }), { count: 2 });
+  assertEqual(applyComponentStatePatch(program, "Card", { count: 1 }, { count: 5 }), { count: 5 });
+  assertEqual(applyComponentStatePatch(program, "Card", { count: 1 }, { $type: "Card.Update", count: 6 }), { count: 6 });
+  assertThrows(() => applyComponentStatePatch(program, "Card", { count: 1 }, { $type: "Other.Update" }), "only 'Card.Update' patches it");
+  assertThrows(() => applyComponentStatePatch(program, "Card", { count: 1 }, { size: 2 }), "Unknown Card state field 'size'");
+});
+
+test("host input for an update record keeps absent fields absent and rejects null where not nullable", () => {
+  const b = new ArtifactBuilder("main.nx");
+  const string = b.primitive("string");
+  b.record("User", [b.field("name", string, { required: true }), b.field("email", b.nullable(string))]);
+  b.record("User.Update", [b.field("name", string), b.field("email", b.nullable(string))], { updateTarget: b.ref("User") });
+  b.fn("same", b.node([nodeKinds.slot, 0, b.str("patch")]), [[b.str("patch"), b.nominal("User.Update"), 0]]);
+  const program = prepareNxIrProgram(b.build({ requiredFeatures: ["update-records-v1"] }));
+
+  assertEqual(evaluateFunction(program, "same", [{ $type: "User.Update", email: null }]), { $type: "User.Update", email: null });
+  assertEqual(evaluateFunction(program, "same", [{ name: "Bo" }]), { $type: "User.Update", name: "Bo" });
+  assertThrows(() => evaluateFunction(program, "same", [{ name: null }]), "an update record sets a field to null only where the field is nullable");
+});
+
+test("the exported helpers apply, merge, diff and list changed fields on host-held values", () => {
+  const b = new ArtifactBuilder("main.nx");
+  const string = b.primitive("string");
+  b.record("User", [b.field("name", string, { required: true }), b.field("email", b.nullable(string)), b.field("age", b.nullable(b.primitive("int")))]);
+  b.record("User.Update", [b.field("name", string), b.field("email", b.nullable(string)), b.field("age", b.nullable(b.primitive("int")))], {
+    updateTarget: b.ref("User"),
+  });
+  const program = prepareNxIrProgram(b.build({ requiredFeatures: ["update-records-v1"] }));
+
+  const user: NxRecordObject = { $type: "User", name: "Ada", email: "a@b", age: 3 };
+  assertEqual(applyUpdate(user, { $type: "User.Update", email: null }), { $type: "User", name: "Ada", email: null, age: 3 });
+  assertEqual(mergeUpdates<NxRecordObject>({ $type: "User.Update", age: null }, { $type: "User.Update", name: "Bo" }), {
     $type: "User.Update",
+    age: null,
     name: "Bo",
   });
-  assertEqual(diffRecords(user, { $type: "User", name: "Ada", email: null }), { $type: "User.Update", email: null });
-  assertEqual(changedFields({ $type: "User.Update", email: null, name: "Ada" }, prepared), ["name", "email"]);
-  assertEqual(changedFields({ $type: "User.Update" }, prepared), []);
+  assertEqual(diffRecords(user, { ...user, name: "Bo" }), { $type: "User.Update", name: "Bo" });
+  assertEqual(changedFields({ $type: "User.Update", age: null, name: "Ada" }, program), ["name", "age"]);
+  assertThrows(() => applyUpdate(user, { $type: "Other.Update" }), "only 'User.Update' patches it");
+  // Each helper compares bare `$type` names, which two modules may share, so each checks its own
+  // target rather than trusting the caller to have paired the values.
+  assertThrows(
+    () => mergeUpdates<NxRecordObject>({ $type: "User.Update", name: "Bo" }, { $type: "Other.Update" }),
+    "the updates target different records",
+  );
+  assertThrows(() => diffRecords(user, { $type: "Other", name: "Bo" }), "the records have different types");
 });
 
-test("the exported helpers reject mismatched targets", () => {
-  const user: NxRecordObject = { $type: "User", name: "Ada", email: null };
-  assertThrows(
-    () => applyUpdate(user, { $type: "Team.Update", name: "Core" }),
-    "Cannot apply 'Team.Update' to a 'User'",
-  );
-  assertThrows(
-    () => mergeUpdates({ $type: "User.Update" }, { $type: "Team.Update" }),
-    "'User.Update' with 'Team.Update'",
-  );
-});
+// ------------------------------------------------------------------------------------------------
+// Runner
+// ------------------------------------------------------------------------------------------------
 
+let failures = 0;
 for (const [name, run] of tests) {
-  run();
-  console.log(`ok - ${name}`);
+  try {
+    run();
+    console.log(`ok - ${name}`);
+  } catch (error) {
+    failures += 1;
+    console.log(`not ok - ${name}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+if (failures > 0) {
+  throw new Error(`${failures} test(s) failed`);
 }

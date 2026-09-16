@@ -1,0 +1,252 @@
+{
+  "coverage": {
+    "binaryOperators": {
+      "add": [
+        "components",
+        "expressions",
+        "two-module"
+      ],
+      "and": [
+        "expressions"
+      ],
+      "concat": [
+        "components",
+        "expressions"
+      ],
+      "div": [
+        "expressions"
+      ],
+      "eq": [
+        "expressions"
+      ],
+      "ge": [
+        "expressions"
+      ],
+      "gt": [
+        "expressions"
+      ],
+      "idiv": [
+        "expressions"
+      ],
+      "imod": [
+        "expressions"
+      ],
+      "le": [
+        "expressions"
+      ],
+      "lt": [
+        "expressions"
+      ],
+      "mod": [
+        "expressions"
+      ],
+      "mul": [
+        "expressions"
+      ],
+      "ne": [
+        "expressions"
+      ],
+      "or": [
+        "expressions"
+      ],
+      "sub": [
+        "expressions"
+      ]
+    },
+    "constants": {
+      "bigint": [
+        "expressions"
+      ],
+      "float": [
+        "expressions"
+      ],
+      "int": [
+        "components",
+        "expressions",
+        "records",
+        "snippet",
+        "trailing-element",
+        "two-module"
+      ]
+    },
+    "declarations": {
+      "component": [
+        "components",
+        "snippet",
+        "trailing-element",
+        "two-module"
+      ],
+      "function": [
+        "components",
+        "expressions",
+        "records",
+        "snippet",
+        "trailing-element",
+        "two-module"
+      ],
+      "record": [
+        "records",
+        "two-module"
+      ],
+      "typeAlias": [
+        "records"
+      ],
+      "union": [
+        "records",
+        "two-module"
+      ],
+      "value": [
+        "components",
+        "expressions",
+        "snippet"
+      ]
+    },
+    "intrinsics": {
+      "apply": [
+        "records"
+      ],
+      "changed": [
+        "records"
+      ],
+      "diff": [
+        "records"
+      ],
+      "merge": [
+        "records"
+      ]
+    },
+    "nodes": {
+      "array": [
+        "components",
+        "expressions"
+      ],
+      "binary": [
+        "components",
+        "expressions",
+        "two-module"
+      ],
+      "bool": [
+        "expressions",
+        "snippet",
+        "trailing-element"
+      ],
+      "call": [
+        "expressions",
+        "records",
+        "two-module"
+      ],
+      "component": [
+        "components",
+        "snippet",
+        "trailing-element",
+        "two-module"
+      ],
+      "element": [
+        "expressions"
+      ],
+      "for": [
+        "components",
+        "expressions"
+      ],
+      "if": [
+        "expressions"
+      ],
+      "ifIs": [
+        "expressions"
+      ],
+      "intrinsic": [
+        "records"
+      ],
+      "member": [
+        "records",
+        "two-module"
+      ],
+      "null": [
+        "expressions",
+        "records"
+      ],
+      "number": [
+        "components",
+        "expressions",
+        "records",
+        "snippet",
+        "trailing-element",
+        "two-module"
+      ],
+      "record": [
+        "records",
+        "two-module"
+      ],
+      "reference": [
+        "components",
+        "expressions",
+        "records",
+        "snippet",
+        "two-module"
+      ],
+      "slot": [
+        "components",
+        "expressions",
+        "records",
+        "two-module"
+      ],
+      "string": [
+        "components",
+        "expressions",
+        "records",
+        "snippet",
+        "trailing-element",
+        "two-module"
+      ],
+      "unary": [
+        "expressions"
+      ],
+      "unionCase": [
+        "records",
+        "two-module"
+      ]
+    },
+    "types": {
+      "array": [
+        "components",
+        "records",
+        "snippet",
+        "trailing-element"
+      ],
+      "nominal": [
+        "components",
+        "records",
+        "snippet",
+        "trailing-element",
+        "two-module"
+      ],
+      "nullable": [
+        "records"
+      ],
+      "primitive": [
+        "components",
+        "expressions",
+        "records",
+        "snippet",
+        "trailing-element",
+        "two-module"
+      ]
+    },
+    "unaryOperators": {
+      "neg": [
+        "expressions"
+      ],
+      "not": [
+        "expressions"
+      ]
+    }
+  },
+  "programs": [
+    "components",
+    "expressions",
+    "records",
+    "snippet",
+    "trailing-element",
+    "two-module"
+  ]
+}

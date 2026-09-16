@@ -4,16 +4,17 @@
  * descriptor `root` evaluates to. The failing body is FINDINGS F22 — `+` on a record field lowers
  * to a numeric add — which is exactly the failure the plain evaluation of `root` let through.
  */
-import { evaluateFunction, prepareNxIrProgram } from "@nx-lang/ir-runtime";
+import { evaluateFunction } from "@nx-lang/ir-runtime";
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { compile } from "./compile-example.mjs";
+import { catalogModule, compile } from "./compile-example.mjs";
 import { expandComponents } from "./expand-components.mjs";
+import { prepare } from "../src/render/evaluate.ts";
 
 function evaluateRoot(source) {
   const result = compile(source);
   assert.deepEqual(result.diagnostics, []);
-  const program = prepareNxIrProgram(result.ir);
+  const program = prepare(result.ir, catalogModule);
   return { program, root: evaluateFunction(program, "root") };
 }
 

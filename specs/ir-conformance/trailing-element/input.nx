@@ -1,0 +1,5 @@
+<SkiaLayout Type="Column" Spacing=4>
+  <SkiaLabel Text="A document that is one trailing element declares no root of its own." />
+  <SkiaLabel Text="The compiler wraps it in an implicit root function." FontSize=12 />
+  <SkiaButton Text="Play" />
+</SkiaLayout>

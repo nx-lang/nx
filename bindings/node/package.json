@@ -36,6 +36,7 @@
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.7.2",
+    "@nx-lang/ir-runtime": "workspace:*",
     "@types/node": "^22.20.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"

@@ -12,6 +12,7 @@ internal sealed class NxWorkspaceDescriptorScope : IDisposable
 {
     private readonly GCHandle[] _identityHandles;
     private readonly GCHandle[] _sourceHandles;
+    private readonly GCHandle[] _versionHandles;
     private GCHandle _descriptorHandle;
     private bool _disposed;
 
@@ -23,6 +24,7 @@ internal sealed class NxWorkspaceDescriptorScope : IDisposable
         NxWorkspaceModuleDescriptor[] descriptors = new NxWorkspaceModuleDescriptor[workspace.Modules.Count];
         _identityHandles = new GCHandle[workspace.Modules.Count];
         _sourceHandles = new GCHandle[workspace.Modules.Count];
+        _versionHandles = new GCHandle[workspace.Modules.Count];
 
         try
         {
@@ -32,6 +34,11 @@ internal sealed class NxWorkspaceDescriptorScope : IDisposable
                 byte[] identityBytes = Encoding.UTF8.GetBytes(module.Identity);
                 _identityHandles[index] = GCHandle.Alloc(identityBytes, GCHandleType.Pinned);
                 _sourceHandles[index] = PinSource(module.SourceUtf8, out IntPtr sourcePointer);
+                byte[] versionBytes = Encoding.UTF8.GetBytes(module.Version ?? string.Empty);
+                if (versionBytes.Length > 0)
+                {
+                    _versionHandles[index] = GCHandle.Alloc(versionBytes, GCHandleType.Pinned);
+                }
 
                 descriptors[index] = new NxWorkspaceModuleDescriptor
                 {
@@ -39,6 +46,8 @@ internal sealed class NxWorkspaceDescriptorScope : IDisposable
                     IdentityLen = (nuint)identityBytes.Length,
                     SourceUtf8Ptr = sourcePointer,
                     SourceUtf8Len = (nuint)module.SourceUtf8.Length,
+                    VersionPtr = versionBytes.Length == 0 ? IntPtr.Zero : _versionHandles[index].AddrOfPinnedObject(),
+                    VersionLen = (nuint)versionBytes.Length,
                 };
             }
 
@@ -113,6 +122,11 @@ internal sealed class NxWorkspaceDescriptorScope : IDisposable
             if (_sourceHandles[index].IsAllocated)
             {
                 _sourceHandles[index].Free();
+            }
+
+            if (_versionHandles[index].IsAllocated)
+            {
+                _versionHandles[index].Free();
             }
         }
 

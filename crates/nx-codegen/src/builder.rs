@@ -90,11 +90,13 @@ pub fn build_codegen_program(artifact: &ProgramArtifact) -> Result<CodegenProgra
         .map(|entry| CodegenSourceEntry {
             identity: entry.identity.to_string(),
             source: entry.source.to_string(),
+            version: entry.version.map(str::to_string),
         })
         .collect();
 
     Ok(CodegenProgram {
         fingerprint: artifact.fingerprint,
+        entry_identity: artifact.entry_identity.clone(),
         modules,
         entrypoints,
         component_entrypoints,
@@ -996,6 +998,7 @@ fn build_effective_record_fields(
             is_content: field.is_content,
             is_required: field.is_required,
             default,
+            owner_module_id: owner_module.id,
             span: field.span,
         });
         scope.insert(field.name.as_str());
@@ -1014,7 +1017,9 @@ fn build_expression(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<CodegenExpression> {
     let expr = lowered_module.expr(expr_id);
-    let span = expr.span();
+    // Literals and identifiers carry no span of their own; theirs live in the module's span map,
+    // which `expr_span` consults before falling back to the node.
+    let span = lowered_module.expr_span(expr_id);
     let ty = type_env.get_expr_type(expr_id).cloned();
     let kind = match expr {
         ast::Expr::Literal(literal) => CodegenExpressionKind::Literal(literal.clone()),
@@ -1605,7 +1610,7 @@ fn build_expression(
                     span: property.span,
                 });
             }
-            let (record_name, fields, is_update) = record_literal_shape(
+            let shape = record_literal_shape(
                 artifact,
                 resolved_module.id,
                 prepared_cache,
@@ -1613,12 +1618,13 @@ fn build_expression(
                 diagnostics,
             )?;
             CodegenExpressionKind::Record {
-                name: record_name,
-                fields,
+                name: shape.name,
+                reference: shape.reference,
+                fields: shape.fields,
                 properties: mapped_properties,
                 content_field: None,
                 content: Vec::new(),
-                is_update,
+                is_update: shape.is_update,
             }
         }
         ast::Expr::Element { element, .. } => {
@@ -1784,24 +1790,26 @@ fn build_element_expression(
                     diagnostics,
                 ),
                 ResolvedItemKind::Record => {
-                    let (record_name, fields, is_update) = record_literal_shape(
+                    let shape = record_literal_shape(
                         artifact,
                         resolved_module.id,
                         prepared_cache,
                         element.tag.as_str(),
                         diagnostics,
                     )?;
-                    let content_field = fields
+                    let content_field = shape
+                        .fields
                         .iter()
                         .find(|field| field.is_content)
                         .map(|field| field.name.clone());
                     Some(CodegenExpressionKind::Record {
-                        name: record_name,
-                        fields,
+                        name: shape.name,
+                        reference: shape.reference,
+                        fields: shape.fields,
                         properties: mapped.properties,
                         content_field,
                         content: mapped.content,
-                        is_update,
+                        is_update: shape.is_update,
                     })
                 }
                 _ => Some(CodegenExpressionKind::Element(mapped)),
@@ -2225,22 +2233,41 @@ fn build_union_case_from_reference(
     }
 }
 
+/// What a record construction site needs to know about the record it constructs.
+struct RecordLiteralShape {
+    name: String,
+    reference: Option<CodegenReference>,
+    fields: Vec<CodegenRecordField>,
+    is_update: bool,
+}
+
+impl RecordLiteralShape {
+    fn unresolved(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            reference: None,
+            fields: Vec::new(),
+            is_update: false,
+        }
+    }
+}
+
 fn record_literal_shape(
     artifact: &ProgramArtifact,
     module_id: RuntimeModuleId,
     prepared_cache: &mut PreparedModuleCache,
     record_name: &str,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Option<(String, Vec<CodegenRecordField>, bool)> {
+) -> Option<RecordLiteralShape> {
     let Some(reference) = resolve_visible_reference(artifact, module_id, record_name) else {
-        return Some((record_name.to_string(), Vec::new(), false));
+        return Some(RecordLiteralShape::unresolved(record_name));
     };
     if reference.kind != nx_interpreter::ResolvedItemKind::Record {
-        return Some((record_name.to_string(), Vec::new(), false));
+        return Some(RecordLiteralShape::unresolved(record_name));
     }
 
     let Some(target_module) = artifact.resolved_program.module(reference.module_id) else {
-        return Some((record_name.to_string(), Vec::new(), false));
+        return Some(RecordLiteralShape::unresolved(record_name));
     };
     let Some(module_artifact) = module_artifact_for(artifact, target_module) else {
         diagnostics.push(missing_semantic_data_diagnostic(
@@ -2260,7 +2287,7 @@ fn record_literal_shape(
     };
     let Some(Item::Record(record_def)) = lowered_module.item_by_definition(reference.definition_id)
     else {
-        return Some((record_name.to_string(), Vec::new(), false));
+        return Some(RecordLiteralShape::unresolved(record_name));
     };
     let shape = effective_record_shape_of(
         artifact,
@@ -2283,11 +2310,12 @@ fn record_literal_shape(
         &erase_effective_field_type_parameters(&shape.fields, &type_params),
         diagnostics,
     )?;
-    Some((
-        record_def.name.as_str().to_string(),
+    Some(RecordLiteralShape {
+        name: record_def.name.as_str().to_string(),
+        is_update: record_def.update_target().is_some(),
+        reference: Some(reference),
         fields,
-        record_def.update_target().is_some(),
-    ))
+    })
 }
 
 /// The type parameters of the component whose state `record` patches, when it is the derived

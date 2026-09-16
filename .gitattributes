@@ -68,3 +68,6 @@
 #*.PDF   diff=astextplain
 #*.rtf   diff=astextplain
 #*.RTF   diff=astextplain
+
+# NX IR images are binary; read one with `nxlang ir explain`.
+*.nxir binary

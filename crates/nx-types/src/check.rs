@@ -147,6 +147,16 @@ pub fn analyze_prepared_module(
     // complete case list from the declaration.
     nx_hir::complete_property_unions(&mut prepared_module);
 
+    for error in nx_hir::validate_declaration_names(prepared_module.raw_module()) {
+        diagnostics.push(
+            Diagnostic::error(error.code())
+                .with_message(error.message())
+                .with_label(Label::primary(file_name, error.span))
+                .with_label(Label::secondary(file_name, error.first_span))
+                .build(),
+        );
+    }
+
     for error in nx_hir::validate_record_definitions(&prepared_module) {
         prepared_module.add_diagnostic(LoweringDiagnostic {
             message: error.message(),

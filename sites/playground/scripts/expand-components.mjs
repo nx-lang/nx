@@ -23,7 +23,7 @@ export function expandComponents(program, value, depth = 0) {
     return;
   }
   const type = value.$type;
-  const kind = typeof type === "string" ? program.componentEntrypoints.get(type)?.declaration.kind : undefined;
+  const kind = typeof type === "string" ? program.componentEntrypoints.get(type)?.kind : undefined;
   if (kind !== undefined && kind.tag === "component" && kind.isExternal !== true) {
     const props = {};
     for (const [name, prop] of Object.entries(value)) {

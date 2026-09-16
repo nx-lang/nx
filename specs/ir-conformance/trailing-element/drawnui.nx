@@ -1,0 +1,5 @@
+// A small catalog, standing in for the DrawnUI one: the host prepares it once.
+export abstract external component <SkiaControl />
+export external component <SkiaLabel extends SkiaControl Text:string FontSize:int = 14 />
+export external component <SkiaButton extends SkiaControl Text:string Enabled:boolean = true />
+export external component <SkiaLayout extends SkiaControl Type:string = "Absolute" Spacing:int = 0 content Children:SkiaControl[] />

@@ -66,7 +66,11 @@ function withSource(source, runTest) {
 function emitIr(dir, sourcePath) {
   const outputPath = join(dir, "ir");
   runNxCli(["codegen", sourcePath, "--target", "nx-ir", "--output", outputPath]);
-  return JSON.parse(readFileSync(join(outputPath, "test.nxir.json"), "utf8"));
+  return new Uint8Array(readFileSync(join(outputPath, "test.nxir")));
+}
+
+function requiredFeaturesOf(image) {
+  return prepareNxIrProgram(image).entry.module.artifact.requiredFeatures;
 }
 
 function nativeJson(sourcePath) {
@@ -160,8 +164,8 @@ let root(): User.Update = { <User.Update email={null} /> }
 `,
   (dir, sourcePath) => {
     const ir = emitIr(dir, sourcePath);
-    if (!ir.requiredFeatures.includes("update-records-v1")) {
-      throw new Error(`Expected the update-record feature, got ${JSON.stringify(ir.requiredFeatures)}`);
+    if (!requiredFeaturesOf(ir).includes("update-records-v1")) {
+      throw new Error(`Expected the update-record feature, got ${JSON.stringify(requiredFeaturesOf(ir))}`);
     }
     const prepared = prepareNxIrProgram(ir);
     const expected = { $type: "User.Update", email: null };
@@ -309,8 +313,8 @@ let keys(): User.Property[] = { changed(<User.Update age={null} name="Ada" />) }
   (dir, sourcePath) => {
     const ir = emitIr(dir, sourcePath);
     for (const feature of ["property-unions-v1", "update-intrinsics-v1"]) {
-      if (!ir.requiredFeatures.includes(feature)) {
-        throw new Error(`Expected the ${feature} feature, got ${JSON.stringify(ir.requiredFeatures)}`);
+      if (!requiredFeaturesOf(ir).includes(feature)) {
+        throw new Error(`Expected the ${feature} feature, got ${JSON.stringify(requiredFeaturesOf(ir))}`);
       }
     }
     const prepared = prepareNxIrProgram(ir);

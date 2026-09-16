@@ -99,53 +99,19 @@ export interface NxDiagnostic {
 }
 
 /**
- * Module-qualified declaration reference in generated NX IR metadata.
- */
-export interface NxIrReferenceMetadata {
-  /**
-   * Stable IR module identifier.
-   */
-  readonly module: string;
-
-  /**
-   * Stable IR declaration identifier.
-   */
-  readonly declaration: string;
-
-  /**
-   * Authored NX declaration name.
-   */
-  readonly name: string;
-
-  /**
-   * Declaration kind, such as a function or component.
-   */
-  readonly kind: string;
-}
-
-/**
- * Public entrypoint metadata in a generated NX IR artifact.
- */
-export interface NxIrEntrypointMetadata {
-  /**
-   * Public NX entrypoint name.
-   */
-  readonly name: string;
-
-  /**
-   * Resolved IR reference for the entrypoint.
-   */
-  readonly reference: NxIrReferenceMetadata;
-}
-
-/**
- * Structured metadata emitted alongside deterministic NX IR JSON.
+ * Structured metadata emitted alongside an NX IR artifact.
  */
 export interface NxIrMetadata {
   /**
-   * Fingerprint of the analyzed NX program used for cache keys and equivalence checks.
+   * Workspace identity of the module the artifact carries.
    */
-  readonly programFingerprint: string;
+  readonly identity: string;
+
+  /**
+   * Fingerprint of the module's source text, as a decimal string so it compares without `number`
+   * precision loss. It is also the first module-table entry's fingerprint in the artifact.
+   */
+  readonly fingerprint: string;
 
   /**
    * NX IR schema version.
@@ -153,7 +119,7 @@ export interface NxIrMetadata {
   readonly schemaVersion: number;
 
   /**
-   * TypeScript IR runtime ABI required by this artifact.
+   * IR runtime ABI required by this artifact.
    */
   readonly runtimeAbi: string;
 
@@ -163,27 +129,50 @@ export interface NxIrMetadata {
   readonly requiredFeatures: readonly string[];
 
   /**
-   * Public function entrypoints emitted in the IR artifact.
+   * Names of the module's top-level functions, in declaration order.
    */
-  readonly functionEntrypoints: readonly NxIrEntrypointMetadata[];
+  readonly functionEntrypoints: readonly string[];
 
   /**
-   * Public component entrypoints emitted in the IR artifact.
+   * Names of the module's top-level components, in declaration order.
    */
-  readonly componentEntrypoints: readonly NxIrEntrypointMetadata[];
+  readonly componentEntrypoints: readonly string[];
 }
 
 /**
- * Deterministic NX IR JSON plus metadata generated from an NX program artifact.
+ * What to emit from a program artifact.
+ */
+export interface NxIrEmitOptions {
+  /**
+   * Identities of the modules to emit an artifact for. Omitted, the entry module alone is emitted;
+   * an empty list emits every module of the program, entry first.
+   */
+  readonly modules?: readonly string[];
+
+  /**
+   * Whether each artifact carries its debug section: spans and source text. Off by default, since
+   * the IR travels inside shares where nobody reads it.
+   */
+  readonly debug?: boolean;
+}
+
+/**
+ * One NX IR artifact generated from an NX program artifact: its image and its metadata.
  */
 export interface NxGeneratedNxIr {
   /**
-   * Deterministic NX IR JSON text exactly as emitted by the generator.
+   * Workspace identity of the module the artifact carries.
    */
-  readonly json: string;
+  readonly identity: string;
 
   /**
-   * Structured metadata for the generated IR document.
+   * The artifact as an NX IR image, copied out of the module's memory. The bytes are the caller's:
+   * they outlive the artifact and the host, and `@nx-lang/ir-runtime` reads them in place.
+   */
+  readonly bytes: Uint8Array;
+
+  /**
+   * Structured metadata for the generated artifact.
    */
   readonly metadata: NxIrMetadata;
 }
@@ -196,6 +185,57 @@ export interface NxSourceBuildOptions {
    * Logical file name used in diagnostics and local import normalization. Defaults to `input.nx`.
    */
   readonly fileName?: string;
+}
+
+/**
+ * One module of an in-memory workspace.
+ */
+export interface NxWorkspaceModuleInput {
+  /**
+   * Workspace identity NX resolves imports by, such as `drawnui.nx` or `app/main.nx`.
+   */
+  readonly identity: string;
+
+  /**
+   * Complete source text.
+   */
+  readonly source: string;
+
+  /**
+   * The version string every artifact built from this workspace records for this module in its
+   * module table, so a runtime linking against a prepared module can tell whether it is the one
+   * the artifact was built against. NX never reads it. Records `""` when omitted.
+   */
+  readonly version?: string;
+}
+
+/**
+ * Options for building a program artifact from a workspace of in-memory modules.
+ */
+export interface NxWorkspaceBuildOptions {
+  readonly modules: readonly NxWorkspaceModuleInput[];
+
+  /**
+   * Identity of the module the program is built for.
+   */
+  readonly entry: string;
+
+  /**
+   * Identities every other module imports implicitly, as if it began with a wildcard import of
+   * each. A listed module imports nothing implicitly itself. An identity the workspace does not
+   * hold fails the build with a diagnostic naming it.
+   */
+  readonly implicitImports?: readonly string[];
+}
+
+/**
+ * Options for analyzing documents into a language snapshot.
+ */
+export interface NxLanguageSnapshotOptions {
+  /**
+   * Identities every document imports implicitly; see `NxWorkspaceBuildOptions.implicitImports`.
+   */
+  readonly implicitImports?: readonly string[];
 }
 
 /**

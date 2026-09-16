@@ -614,15 +614,15 @@ artifacts SHALL surface diagnostics through the managed diagnostic exception pat
 
 ### Requirement: Program artifacts emit NX IR as a public executable artifact
 The executable generation API SHALL expose an artifact-first operation that emits a versioned NX IR
-JSON program artifact from a successful `ProgramArtifact`. This operation SHALL be separate from
+program artifact from a successful `ProgramArtifact`. This operation SHALL be separate from
 existing JavaScript and TypeScript source emission and SHALL preserve existing source generation
 behavior unless a caller explicitly requests IR output.
 
 #### Scenario: Valid artifact emits NX IR
 - **WHEN** a caller builds a valid `ProgramArtifact` for an NX source file with `root()`
 - **AND** the caller requests NX IR output
-- **THEN** executable generation SHALL return NX IR JSON and structured metadata identifying the
-  program fingerprint, IR schema version, runtime ABI, and exported entrypoints
+- **THEN** executable generation SHALL return the NX IR image bytes and structured metadata
+  identifying the module fingerprint, IR schema version, runtime ABI, and exported entrypoints
 
 #### Scenario: Existing JavaScript output is unchanged
 - **WHEN** a caller requests existing JavaScript executable file output for a valid NX program

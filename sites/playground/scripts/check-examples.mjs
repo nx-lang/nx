@@ -8,11 +8,12 @@
  *
  * Usage: npm run check-examples
  */
-import { evaluateFunction, prepareNxIrProgram } from "@nx-lang/ir-runtime";
+import { evaluateFunction } from "@nx-lang/ir-runtime";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { compile } from "./compile-example.mjs";
+import { catalogModule, compile } from "./compile-example.mjs";
+import { prepare } from "../src/render/evaluate.ts";
 import { expandComponents } from "./expand-components.mjs";
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -65,7 +66,7 @@ for (const example of examples) {
     failures.push(`${label}: unexpected diagnostic — ${diagnostic.message}`);
   }
   try {
-    const program = prepareNxIrProgram(result.ir);
+    const program = prepare(result.ir, catalogModule);
     expandComponents(program, evaluateFunction(program, "root"));
   } catch (error) {
     failures.push(`${label}: evaluation failed — ${error.message}`);

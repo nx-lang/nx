@@ -1,0 +1,25 @@
+module app/main.nx fingerprint 16698081000363968031
+links shared/model.nx version "" fingerprint 12310689997513723706
+entrypoints functions [total user card local nameOf root] components []
+
+record Local extends shared/model.nx:Base
+  id: int = 7
+  label: string required
+
+function total() =
+  (shared/model.nx:answer() add 1)
+
+function user() =
+  shared/model.nx:makeUser(1, "Ada")
+
+function card() =
+  <shared/model.nx:Card Theme=shared/model.nx:Theme.dark Title="hi" />
+
+function local() =
+  <Local label="x" />
+
+function nameOf(u: shared/model.nx:User) =
+  u.name
+
+function root() =
+  <shared/model.nx:Card Title=nameOf(user()) />

@@ -44,7 +44,7 @@
     "@nx-lang/language": "file:../../src/vscode",
     "@shikijs/monaco": "^4.4.3",
     "@types/node": "^22.20.0",
-    "monaco-editor": "^0.52.2",
+    "monaco-editor": "^0.56.0",
     "shiki": "^4.4.3",
     "typescript": "^5.9.3"
   },

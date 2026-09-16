@@ -1,0 +1,38 @@
+module main.nx fingerprint 9072530855260268794
+entrypoints functions [labels root] components [Node Label Stack Greeting]
+
+component Node abstract external @2:1-2:44
+
+component Label external @3:1-3:79
+  props
+    Text: string required
+    FontSize: int = 14
+
+component Stack external @4:1-4:89
+  props
+    Spacing: int = 4
+    content Children: Node[] required
+
+component Greeting @5:1-11:2
+  props
+    name: string = "world"
+  state
+    count: int = 0
+  body =
+    <Stack>
+      <Label Text=("Hello " concat name) />
+      <Label FontSize=(count add 20) Text="!" />
+    </Stack>
+
+value texts @12:1-12:24 =
+  ["a", "b"]
+
+function labels() @13:1-13:63 =
+  for text in texts yield
+    <Label Text=text />
+
+function root() @14:1-14:80 =
+  <Stack Spacing=8>
+    <Label Text="a" />
+    <Greeting name="Ada" />
+  </Stack>

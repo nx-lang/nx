@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   NxLanguageSnapshot as NodeLanguageSnapshot,
+  NxLibraryRegistry as NodeLibraryRegistry,
+  NxProgramArtifact as NodeProgramArtifact,
+  NxWorkspace as NodeWorkspace,
   generateNxIrFromSource as generateNxIrWithNode
 } from "@nx-lang/sdk-node";
 
@@ -42,15 +45,47 @@ describe("NX IR parity with the Node SDK", () => {
 
       const artifact = host.buildProgramArtifact(source, { fileName });
       try {
-        const fromWasm = artifact.generateNxIr();
+        const [fromWasm] = artifact.generateNxIr();
 
-        expect(JSON.parse(fromWasm.json)).toEqual(JSON.parse(fromNode.json));
-        expect(fromWasm.metadata).toEqual(fromNode.metadata);
+        expect(Buffer.compare(Buffer.from(fromWasm!.bytes), fromNode.bytes)).toBe(0);
+        expect(fromWasm!.metadata).toEqual(fromNode.metadata);
       } finally {
         artifact.dispose();
       }
     });
   }
+
+  it("records a module's version identically", () => {
+    const modules = [
+      { identity: "drawnui.nx", source: "export external component <SkiaLabel Text:string />", version: "9" },
+      { identity: "input.nx", source: 'let root() = <SkiaLabel Text="hi" />' }
+    ];
+    const implicitImports = ["drawnui.nx"];
+    const registry = new NodeLibraryRegistry();
+    const buildContext = registry.createBuildContext();
+    const workspace = new NodeWorkspace(modules);
+    const fromNode = NodeProgramArtifact.buildWorkspace(workspace, {
+      buildContext,
+      entryIdentity: "input.nx",
+      implicitImports
+    });
+    const fromWasm = host.buildWorkspaceArtifact({ modules, entry: "input.nx", implicitImports });
+    try {
+      const nodeArtifacts = fromNode.generateNxIr({ modules: [] });
+      const wasmArtifacts = fromWasm.generateNxIr({ modules: [] });
+      expect(wasmArtifacts.map((entry) => entry.identity)).toEqual(nodeArtifacts.map((entry) => entry.identity));
+      wasmArtifacts.forEach((entry, index) => {
+        expect(Buffer.compare(Buffer.from(entry.bytes), nodeArtifacts[index]!.bytes)).toBe(0);
+        expect(entry.metadata).toEqual(nodeArtifacts[index]!.metadata);
+      });
+    } finally {
+      fromWasm.dispose();
+      fromNode.dispose();
+      workspace.dispose();
+      buildContext.dispose();
+      registry.dispose();
+    }
+  });
 
   it("reports the same diagnostics for source that does not compile", () => {
     const fileName = "broken.nx";

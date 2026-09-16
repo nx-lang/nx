@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Compile, Diagnostic } from "../compile";
 import { drawValue } from "./DrawnTree";
+import { catalogModule } from "./catalog";
 import { evaluateRoot, prepare } from "./evaluate";
 import type { ReactNode } from "react";
 
@@ -17,9 +18,9 @@ export interface NxDrawing {
 /**
  * Compiles source on a pause in typing and draws the result.
  *
- * Edits are debounced rather than compiled per keystroke: each compile crosses the network and
- * builds a program of ~600 lines, and an editor that recompiles mid-word makes the canvas flicker
- * through half-written states.
+ * Edits are debounced rather than compiled per keystroke: each compile crosses to the worker and
+ * builds the visitor's module against the catalog, and an editor that recompiles mid-word makes the
+ * canvas flicker through half-written states.
  */
 export function useNxDrawing(source: string, compile: Compile, debounceMs = 350): NxDrawing {
   const [drawing, setDrawing] = useState<NxDrawing>({
@@ -67,7 +68,7 @@ export function useNxDrawing(source: string, compile: Compile, debounceMs = 350)
         }
         const unknown = new Set<string>();
         try {
-          const program = prepare(result.ir);
+          const program = prepare(result.ir, catalogModule());
           const node = drawValue(evaluateRoot(program), "root", {
             program,
             report: (type) => unknown.add(type),

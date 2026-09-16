@@ -1,15 +1,17 @@
 /**
  * The catalog compile, against the real wasm host under Node.
  *
- * These run against the same module the browser loads, so what the site ships is what is checked.
- * The origin classification and span shifting are `@nx-lang/sdk-wasm`'s and are tested there; what
- * is checked here is that the site's own catalog compiles and the site's input limits hold.
+ * These run against the same module the browser loads, so what the site ships is what is checked:
+ * that the site's own catalog compiles as a module, that a document reaches it without an import
+ * line and is emitted without it, that a diagnostic is classified by the module it belongs to, and
+ * that the input limits hold.
  */
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { after, test } from "node:test";
+import { prepareNxIrModule } from "@nx-lang/ir-runtime";
 import { createNxHost, loadNxModule } from "@nx-lang/sdk-wasm";
-import { MAX_SOURCE_BYTES, compileWithCatalog } from "./catalog.ts";
+import { CATALOG_IDENTITY, MAX_SOURCE_BYTES, compileWithCatalog, emitCatalogArtifact } from "./catalog.ts";
 
 const catalog = readFileSync(new URL("../../catalog/skia.nx", import.meta.url), "utf8");
 const module = await loadNxModule();
@@ -22,22 +24,65 @@ function compile(source) {
   return compileWithCatalog(host, catalog, source);
 }
 
-test("compiles a program that uses the catalog", () => {
+/** The opened image of an artifact: its module table and strings, as the runtime reads them. */
+function opened(image) {
+  const { artifact } = prepareNxIrModule(image);
+  return {
+    modules: artifact.modules,
+    strings: Array.from({ length: artifact.stringCount }, (_, index) => artifact.string(index)),
+    hasDebug: artifact.hasDebug,
+  };
+}
+
+test("compiles a program that uses the catalog to the snippet's artifact alone", () => {
   const result = compile('let root() = { <SkiaLabel Text="hi" /> }');
   assert.equal(result.diagnostics.length, 0);
-  assert.equal(result.ir.format, "nx-ir-json");
+  assert.ok(result.ir instanceof Uint8Array);
+  assert.equal(new TextDecoder().decode(result.ir.subarray(0, 4)), "NXIR");
+  const ir = opened(result.ir);
+  // The visitor's module, naming the catalog in its table and carrying none of its declarations.
+  assert.deepEqual(ir.modules.map((module) => module.identity), ["playground.nx", CATALOG_IDENTITY]);
+  assert.equal(ir.strings.includes("SkiaLayer"), false, "the snippet carries none of the catalog");
+  assert.equal(ir.hasDebug, false, "the snippet carries no debug section");
+  assert.ok(result.ir.byteLength < 4 * 1024, "a one-line snippet's artifact is a few kilobytes");
+});
+
+test("emits the catalog's own artifact, the one a compiled snippet names", () => {
+  const artifact = opened(emitCatalogArtifact(host, catalog));
+  assert.deepEqual(artifact.modules.map((module) => module.identity), [CATALOG_IDENTITY]);
+  assert.ok(artifact.strings.includes("SkiaLayer"), "the catalog's declarations are here");
+  // The same catalog text on both sides, so the snippet's table names exactly this module.
+  const snippet = opened(compile('let root() = { <SkiaLabel Text="hi" /> }').ir);
+  assert.deepEqual(snippet.modules[1], artifact.modules[0]);
+});
+
+test("exports every declaration the catalog holds", () => {
+  // The catalog is reached through an implicit import, which sees only exports: a declaration
+  // generated without `export` is a name no document can use, and nothing else would fail.
+  const unexported = catalog
+    .split("\n")
+    .filter((line) => /^(abstract |external |type |let |component )/.test(line));
+  assert.deepEqual(unexported, [], "every top-level declaration in catalog/skia.nx must be exported");
+});
+
+test("reports a fault in the visitor's document in its own coordinates", () => {
+  const result = compile('let root() = {\n  <SkiaLabel Text=1.0 />\n}');
+  assert.equal(result.ir, null);
+  assert.equal(result.diagnostics.length, 1);
+  assert.equal(result.diagnostics[0].origin, "source");
+  assert.equal(result.diagnostics[0].span.startLine, 2);
 });
 
 test("compiles a source file that is a single trailing element", () => {
   const result = compile("<SkiaLayer VerticalOptions=Fill>\n</SkiaLayer>\n");
   assert.deepEqual(result.diagnostics, []);
-  assert.equal(result.ir.format, "nx-ir-json");
+  assert.ok(result.ir instanceof Uint8Array);
 });
 
 test("compiles a trailing element that has children", () => {
   const result = compile('<SkiaLayer>\n  <SkiaLabel Text="hi" />\n</SkiaLayer>\n');
   assert.deepEqual(result.diagnostics, []);
-  assert.equal(result.ir.format, "nx-ir-json");
+  assert.ok(result.ir instanceof Uint8Array);
 });
 
 test("answers a stray delimiter at the end of the source", () => {

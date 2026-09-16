@@ -1,0 +1,16 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "main.nx",
+      "function": "labels"
+    },
+    {
+      "module": "main.nx",
+      "function": "root"
+    }
+  ]
+}

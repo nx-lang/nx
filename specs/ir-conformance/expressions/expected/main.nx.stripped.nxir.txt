@@ -1,0 +1,114 @@
+module main.nx fingerprint 15107792274714562326
+entrypoints functions [add arithmetic integerDivision realDivision integerRemainder realRemainder comparisons moreComparisons ordered andSkipsRight orSkipsRight andTakesRight orTakesRight negation logicalNot greeting chooseBig small classify classified doubled squares big maybe element root] components []
+
+value answer =
+  42
+
+value name =
+  "Ada"
+
+value flag =
+  true
+
+value nothing =
+  null
+
+value items =
+  [1, 2, 3]
+
+value zero =
+  0
+
+function add(a: int, b: int) =
+  (a add b)
+
+function arithmetic() =
+  ((add(1, 2) mul 3) sub 4)
+
+function integerDivision() =
+  (7 idiv 2)
+
+function realDivision() =
+  (7.0 div 2.0)
+
+function integerRemainder() =
+  (7 imod 3)
+
+function realRemainder() =
+  (7.5 mod 2.0)
+
+function comparisons(x: int) =
+  (((x lt 10) and (x ge 0)) or (x eq 100))
+
+function moreComparisons(x: int) =
+  (((x gt 1) and (x le 5)) and (x ne 3))
+
+function ordered() =
+  (comparisons(5) and moreComparisons(2))
+
+function andSkipsRight() =
+  ((answer lt 0) and ((1 idiv zero) gt 0))
+
+function orSkipsRight() =
+  ((answer gt 0) or ((1 idiv zero) gt 0))
+
+function andTakesRight() =
+  ((answer gt 0) and (answer lt 100))
+
+function orTakesRight() =
+  ((answer lt 0) or (answer eq 42))
+
+function negation() =
+  neg answer
+
+function logicalNot() =
+  not flag
+
+function greeting() =
+  ("Hello, " concat name)
+
+function chooseBig(x: int) =
+  if (x gt 10) then
+    "big"
+  else
+    "small"
+
+function small() =
+  chooseBig(3)
+
+function classify(x: int) =
+  if x is
+    0 =>
+      "zero"
+    1 | 2 =>
+      "small"
+    else =>
+      "many"
+
+function classified() =
+  classify(2)
+
+function doubled() =
+  for item, index in items yield
+    ((item mul 2) add index)
+
+function squares() =
+  for item in items yield
+    (item mul item)
+
+function big() =
+  9007199254740993
+
+function maybe() =
+  if flag then
+    name
+  else
+    "nobody"
+
+function element() =
+  <div class="box" count=answer>
+    <span />
+  </div>
+
+function root() =
+  arithmetic()

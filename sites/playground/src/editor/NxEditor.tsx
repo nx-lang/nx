@@ -17,7 +17,7 @@ const THEME = "github-dark";
 /**
  * Highlighting, hover and completion all come from the shared Monaco integration: the grammar is
  * the repository's published one, and hover and completion are answered by the same worker, the
- * same host and the same catalog prelude that compile the source, so a hover range and a compile
+ * same host and the same catalog module that compile the source, so a hover range and a compile
  * diagnostic land on the same line. A worker that crashed or overran is reported by the compile
  * pane, so here the providers only fall silent.
  */

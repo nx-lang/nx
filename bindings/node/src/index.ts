@@ -25,11 +25,14 @@ import type {
   NxJsonValue,
   NxOutputFormat,
   NxSourceByteEvaluationOptions,
+  NxIrEmitOptions,
+  NxIrMetadata,
   NxSourceBuildOptions,
   NxSourceEvaluationOptions,
   NxSourceInput,
   NxTextSpan,
   NxWorkspaceBuildOptions,
+  NxWorkspaceOptions,
   NxWorkspaceModuleInput
 } from "./types.js";
 
@@ -61,9 +64,8 @@ export type {
   NxDiagnosticLabel,
   NxEvaluationOptions,
   NxGeneratedNxIr,
-  NxIrEntrypointMetadata,
+  NxIrEmitOptions,
   NxIrMetadata,
-  NxIrReferenceMetadata,
   NxJsonValue,
   NxOutputFormat,
   NxSeverity,
@@ -73,6 +75,7 @@ export type {
   NxSourceInput,
   NxTextSpan,
   NxWorkspaceBuildOptions,
+  NxWorkspaceOptions,
   NxWorkspaceModuleInput
 } from "./types.js";
 
@@ -111,9 +114,15 @@ export class NxWorkspace {
    * @throws NxDisposedResourceError when this workspace or the build context has already been disposed.
    * @throws NxNativeError when the native binding cannot run validation.
    */
-  public validate(buildContext: NxProgramBuildContext): readonly NxDiagnostic[] {
+  public validate(
+    buildContext: NxProgramBuildContext,
+    options: NxWorkspaceOptions = {}
+  ): readonly NxDiagnostic[] {
     const diagnosticsJson = invokeNative(() =>
-      getWorkspaceNative(this).validate(getBuildContextNative(buildContext))
+      getWorkspaceNative(this).validate(
+        getBuildContextNative(buildContext),
+        implicitImportsArgument(options)
+      )
     );
     return parseDiagnosticsJson(diagnosticsJson);
   }
@@ -307,7 +316,8 @@ export class NxProgramArtifact {
     const native = invokeNative(() =>
       getBuildContextNative(options.buildContext).buildWorkspaceProgramArtifact(
         getWorkspaceNative(workspace),
-        options.entryIdentity
+        options.entryIdentity,
+        implicitImportsArgument(options)
       )
     );
     return new NxProgramArtifact(native);
@@ -321,14 +331,26 @@ export class NxProgramArtifact {
   }
 
   /**
-   * Generates deterministic NX IR JSON and metadata from this artifact.
+   * Emits NX IR for the modules `options` names, the entry module alone by default, one image per
+   * module with its metadata.
    *
    * @throws NxEvaluationError when IR generation reports NX diagnostics.
    * @throws NxDisposedResourceError when this artifact has already been disposed.
    * @throws NxNativeError when the native binding returns an invalid or unexpected payload.
    */
-  public generateNxIr(): NxGeneratedNxIr {
-    return parseJson<NxGeneratedNxIr>(invokeNative(() => getArtifactNative(this).generateNxIr()));
+  public generateNxIr(options: NxIrEmitOptions = {}): readonly NxGeneratedNxIr[] {
+    // Only the emit options travel: a caller may pass a wider object, such as the options of
+    // `generateNxIrFromSource`, and the native side refuses a key it does not know.
+    const emitOptions = JSON.stringify({
+      ...(options.modules === undefined ? {} : { modules: Array.from(options.modules) }),
+      debug: options.debug === true
+    });
+    const artifacts = invokeNative(() => getArtifactNative(this).generateNxIr(emitOptions));
+    return artifacts.map((artifact) => ({
+      identity: artifact.identity,
+      bytes: artifact.bytes,
+      metadata: parseJson<NxIrMetadata>(artifact.metadataJson)
+    }));
   }
 
   /**
@@ -510,9 +532,10 @@ export class NxLanguageSnapshot {
  */
 export function validateWorkspace(
   workspace: NxWorkspace,
-  buildContext: NxProgramBuildContext
+  buildContext: NxProgramBuildContext,
+  options: NxWorkspaceOptions = {}
 ): readonly NxDiagnostic[] {
-  return workspace.validate(buildContext);
+  return workspace.validate(buildContext, options);
 }
 
 /**
@@ -540,17 +563,33 @@ export function buildProgramArtifactFromWorkspace(
 }
 
 /**
- * Builds a short-lived source artifact, generates deterministic NX IR JSON and metadata, then disposes the artifact.
+ * Renders an NX IR image as text with every table index resolved: the same text `nxlang ir explain`
+ * prints.
+ *
+ * @throws NxEvaluationError when the bytes are not an NX IR image this build reads, with a
+ * diagnostic saying why.
+ */
+export function explainNxIr(image: Uint8Array): string {
+  const bytes = Buffer.isBuffer(image) ? image : Buffer.from(image.buffer, image.byteOffset, image.byteLength);
+  return invokeNative(() => loadNativeBinding().explainNxIr(bytes));
+}
+
+/**
+ * Builds a short-lived source artifact, generates its NX IR image and metadata, then disposes the artifact.
  *
  * @throws NxEvaluationError when build or IR generation reports diagnostics.
  */
 export function generateNxIrFromSource(
   source: NxSourceInput,
-  options: NxSourceBuildOptions = {}
+  options: NxSourceBuildOptions & NxIrEmitOptions = {}
 ): NxGeneratedNxIr {
   const artifact = NxProgramArtifact.buildSource(source, options);
   try {
-    return artifact.generateNxIr();
+    const [entry] = artifact.generateNxIr(options);
+    if (entry === undefined) {
+      throw new NxNativeError("NX IR generation answered with no artifact for the entry module.");
+    }
+    return entry;
   } finally {
     artifact.dispose();
   }
@@ -608,10 +647,15 @@ function withBuildContext<T>(
   }
 }
 
+function implicitImportsArgument(options: NxWorkspaceOptions): string[] | undefined {
+  return options.implicitImports === undefined ? undefined : Array.from(options.implicitImports);
+}
+
 function normalizeWorkspaceModule(module: NxWorkspaceModuleInput): NativeWorkspaceModule {
   return {
     identity: module.identity,
-    source: normalizeSourceInput(module.source)
+    source: normalizeSourceInput(module.source),
+    ...(module.version === undefined ? {} : { version: module.version })
   };
 }
 

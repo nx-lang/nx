@@ -3030,6 +3030,7 @@ fn emit_expression(
             content_field,
             content,
             is_update,
+            ..
         } => emit_record_object(
             current_module_id,
             name,

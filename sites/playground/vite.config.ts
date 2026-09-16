@@ -1,6 +1,48 @@
+import { createNxHost, loadNxModule } from "@nx-lang/sdk-wasm";
 import react from "@vitejs/plugin-react";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { type Plugin, defineConfig } from "vite";
 import { BASE_HREF } from "./base.mjs";
+import { emitCatalogArtifact } from "./src/compile/catalog.ts";
+
+/** The virtual module `src/render/catalog.ts` imports the catalog's image from, as base64. */
+export const CATALOG_ARTIFACT_MODULE = "virtual:nx-catalog-artifact";
+
+const catalogPath = fileURLToPath(new URL("./catalog/skia.nx", import.meta.url));
+
+/**
+ * Compiles the catalog to its NX IR artifact at build time and serves it as a module.
+ *
+ * The compiler is the same wasm module the browser loads, run here under Node, so the artifact the
+ * bundle carries is what the worker's compiles name in their module tables. Emitting it here rather
+ * than in the worker means a compile sends the visitor's module alone — a few kilobytes — and the
+ * catalog is prepared once per page rather than parsed on every keystroke. Nothing is committed:
+ * the catalog text stays the one source, and in development an edit to it re-emits the artifact.
+ */
+function catalogArtifact(): Plugin {
+  const resolved = `\0${CATALOG_ARTIFACT_MODULE}`;
+  return {
+    name: "nx-catalog-artifact",
+    resolveId: (id) => (id === CATALOG_ARTIFACT_MODULE ? resolved : undefined),
+    async load(id) {
+      if (id !== resolved) {
+        return undefined;
+      }
+      this.addWatchFile(catalogPath);
+      const host = createNxHost(await loadNxModule());
+      try {
+        const artifact = emitCatalogArtifact(host, readFileSync(catalogPath, "utf8"));
+        // The image as base64 in a string literal, decoded on first use by `render/catalog.ts`: a
+        // string this size costs the JavaScript parser nothing, and the bundle stays one file with
+        // no asset to fetch before the first drawing.
+        return `export default ${JSON.stringify(Buffer.from(artifact).toString("base64"))};`;
+      } finally {
+        host.dispose();
+      }
+    },
+  };
+}
 
 /**
  * Puts the site's `<base href>` into the shell from the same constant Vite's `base` comes from.
@@ -30,7 +72,7 @@ function siteBase(): Plugin {
  */
 export default defineConfig({
   base: BASE_HREF,
-  plugins: [react(), siteBase()],
+  plugins: [react(), siteBase(), catalogArtifact()],
   build: { target: "esnext" },
   server: {
     // The shared packages are workspace links into the repository, so dev needs to be allowed to

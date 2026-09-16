@@ -9,7 +9,7 @@ import type { SnapshotLanguageService } from "@nx-lang/language-core";
 import type { LanguageQueryName } from "@nx-lang/language-protocol";
 import { NxHostCrashedError, createLanguageService, createNxHost, type NxHost } from "@nx-lang/sdk-wasm";
 
-import { compileWithCatalog } from "../compile/catalog.ts";
+import { CATALOG_IDENTITY, compileWithCatalog } from "../compile/catalog.ts";
 import type { CompileResult } from "../compile/types.ts";
 import type { WorkerRequest } from "./protocol.ts";
 
@@ -17,7 +17,7 @@ import type { WorkerRequest } from "./protocol.ts";
 export interface NxSessionOptions {
   /** The compiled module. A replacement host is created from it, so it is never fetched twice. */
   readonly module: WebAssembly.Module;
-  /** The DrawnUI catalog, prepended to every compile and to every language query. */
+  /** The DrawnUI catalog, a module every compile and every language query imports implicitly. */
   readonly catalog: string;
   /** Creates a host from the module. A test replaces this to force a crash. */
   readonly createHost?: (module: WebAssembly.Module) => NxHost;
@@ -33,16 +33,22 @@ export interface NxSession {
   dispose(): void;
 }
 
+/** The catalog as the language service sees it: a document of its own, implicitly imported. */
+function languageOptions(catalog: string) {
+  return {
+    documents: [{ uri: `nx://playground/${CATALOG_IDENTITY}`, identity: CATALOG_IDENTITY, source: catalog }],
+    implicitImports: [CATALOG_IDENTITY]
+  };
+}
+
 /**
  * Creates the session: a host over `module`, a language service over that host's snapshots, and
- * the catalog prepended to both.
+ * the catalog visible to both as an implicitly imported module.
  */
 export function createNxSession(options: NxSessionOptions): NxSession {
   const createHost = options.createHost ?? createNxHost;
   let host: NxHost = createHost(options.module);
-  let language: SnapshotLanguageService = createLanguageService(host, {
-    prelude: { source: options.catalog }
-  });
+  let language: SnapshotLanguageService = createLanguageService(host, languageOptions(options.catalog));
   let replacements = 0;
 
   /**
@@ -54,7 +60,7 @@ export function createNxSession(options: NxSessionOptions): NxSession {
   function replaceHost(): void {
     replacements += 1;
     host = createHost(options.module);
-    language = createLanguageService(host, { prelude: { source: options.catalog } });
+    language = createLanguageService(host, languageOptions(options.catalog));
   }
 
   return {

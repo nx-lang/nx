@@ -1,13 +1,123 @@
-export declare const NX_IR_FORMAT_ID = "nx-ir-json";
-export declare const NX_IR_SCHEMA_VERSION = 2;
-export declare const NX_IR_RUNTIME_ABI = "nx-ir-runtime-v1";
+/**
+ * The NX IR runtime: prepares schema 3 images, links them by name, and evaluates them.
+ *
+ * An image carries one module as flat tables of 32-bit cells over one string blob, and the runtime
+ * reads it in place. `prepareNxIrModule` validates every section, offset and index of the image and
+ * indexes the module's declarations by name; `linkNxIrProgram` resolves the modules the entry names
+ * through a host resolver and checks versions and referenced declarations eagerly; every
+ * evaluation API then takes the linked program. A prepared module is never copied by linking, so
+ * one prepared catalog serves any number of programs.
+ */
+export declare const NX_IR_SCHEMA_VERSION = 3;
+export declare const NX_IR_RUNTIME_ABI = "nx-ir-runtime-v2";
+export declare const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1 = "update-records-v1";
+export declare const NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1 = "property-unions-v1";
+export declare const NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1 = "update-intrinsics-v1";
+/** The cell value that spells an absent optional operand. */
+export declare const NX_IR_NONE = 4294967295;
+/** The tables whose entries are cells. */
+export type NxIrTable = "types" | "constants" | "nodes" | "declarations";
+export interface NxIrModuleEntry {
+    readonly identity: string;
+    readonly version: string;
+    readonly fingerprint: string;
+}
+/**
+ * An opened image. The tables are typed-array views over the bytes the host handed in; a string is
+ * decoded the first time it is named and remembered.
+ *
+ * <para>`open` establishes that every section, offset array and string range lies inside the image
+ * and that the string blob is UTF-8. The table entries are checked against their layouts by the
+ * reader that prepares the module; after that, every index an entry holds is in range.</para>
+ */
+export declare class NxIrImage {
+    #private;
+    readonly schemaVersion: number;
+    readonly runtimeAbi: string;
+    readonly requiredFeatures: readonly string[];
+    /** Slot `0` is the image's own module. */
+    readonly modules: readonly NxIrModuleEntry[];
+    readonly functionEntrypoints: Uint32Array;
+    readonly componentEntrypoints: Uint32Array;
+    private constructor();
+    /**
+     * Opens an image, reporting what is wrong with it as diagnostics. A view whose byte offset is
+     * not a multiple of four is copied first, since the tables are read as 32-bit cells.
+     */
+    static open(input: Uint8Array | ArrayBuffer, diagnostics: NxIrDiagnostic[]): NxIrImage | undefined;
+    /** The number of strings in the string table. */
+    get stringCount(): number;
+    /** String `index`, decoded on first use. The index must be inside the table. */
+    string(index: number): string;
+    /** The number of entries in `table`. */
+    entryCount(table: NxIrTable): number;
+    /** Entry `index` of `table`, kind cell first, as a view over the pool. The index must be inside the table. */
+    entry(table: NxIrTable, index: number): Uint32Array;
+    /** Whether the image carries its debug section. */
+    get hasDebug(): boolean;
+    /** The module's source text, when the debug section is present. */
+    get source(): string | undefined;
+    /** The byte span of declaration `index` in the source, when the debug section records one. */
+    declarationSpan(index: number): readonly [number, number] | undefined;
+    /** The byte span of node `index` in the source, when the debug section records one. */
+    nodeSpan(index: number): readonly [number, number] | undefined;
+}
+/** The kind numbers of schema 3, as `docs/nx-ir-format.md` assigns them. */
+export declare const nodeKinds: {
+    readonly null: 0;
+    readonly bool: 1;
+    readonly string: 2;
+    readonly number: 3;
+    readonly slot: 4;
+    readonly reference: 5;
+    readonly binary: 6;
+    readonly unary: 7;
+    readonly call: 8;
+    readonly intrinsic: 9;
+    readonly if: 10;
+    readonly ifIs: 11;
+    readonly array: 12;
+    readonly for: 13;
+    readonly member: 14;
+    readonly record: 15;
+    readonly unionCase: 16;
+    readonly element: 17;
+    readonly component: 18;
+};
+export declare const typeKinds: {
+    readonly primitive: 0;
+    readonly nominal: 1;
+    readonly array: 2;
+    readonly nullable: 3;
+};
+export declare const constantKinds: {
+    readonly int: 0;
+    readonly bigint: 1;
+    readonly float: 2;
+};
+export declare const declarationKinds: {
+    readonly function: 0;
+    readonly value: 1;
+    readonly record: 2;
+    readonly component: 3;
+    readonly union: 4;
+    readonly typeAlias: 5;
+};
 export type NxDiagnosticSeverity = "error" | "warning" | "info" | "hint";
+export interface NxIrSourceSpan {
+    /** The identity of the module whose source the span indexes. */
+    readonly identity: string;
+    readonly start: number;
+    readonly end: number;
+}
 export interface NxIrDiagnostic {
     readonly severity: NxDiagnosticSeverity;
     readonly code: string;
     readonly message: string;
-    readonly path?: string;
+    /** The span of the expression, when the artifact carries a debug section. */
     readonly source?: NxIrSourceSpan;
+    /** The declaration the expression belongs to, as `identity::name`, when it is known. */
+    readonly declaration?: string;
 }
 export type NxResult<T> = {
     readonly ok: true;
@@ -19,201 +129,168 @@ export type NxResult<T> = {
 export type NxCanonicalValue = null | boolean | number | string | readonly NxCanonicalValue[] | {
     readonly [key: string]: NxCanonicalValue;
 };
-export interface NxIrProgram {
-    readonly format: string;
-    readonly schemaVersion: number;
-    readonly runtimeAbi: string;
-    readonly programFingerprint: string;
-    readonly requiredFeatures: readonly string[];
-    readonly functionEntrypoints: readonly NxIrEntrypoint[];
-    readonly componentEntrypoints: readonly NxIrEntrypoint[];
-    readonly modules: readonly NxIrModule[];
-    readonly sources: readonly NxIrSourceEntry[];
+export declare class NxIrRuntimeError extends Error {
+    readonly diagnostics: readonly NxIrDiagnostic[];
+    constructor(diagnostics: readonly NxIrDiagnostic[]);
 }
-export interface NxIrEntrypoint {
+export type PreparedType = {
+    readonly kind: "primitive";
     readonly name: string;
-    readonly reference: NxIrReference;
-}
-export interface NxIrModule {
-    readonly id: string;
-    readonly runtimeId: number;
-    readonly provenance: {
-        readonly kind: string;
-        readonly [key: string]: unknown;
-    };
-    readonly imports: readonly NxIrReference[];
-    readonly declarations: readonly NxIrDeclaration[];
-}
+} | {
+    readonly kind: "nominal";
+    readonly slot: number;
+    readonly name: string;
+} | {
+    readonly kind: "array";
+    readonly element: PreparedType;
+} | {
+    readonly kind: "nullable";
+    readonly inner: PreparedType;
+};
 export interface NxIrReference {
-    readonly module: string;
-    readonly declaration: string;
+    readonly slot: number;
     readonly name: string;
-    readonly kind: string;
 }
-export interface NxIrDeclaration {
-    readonly id: string;
-    readonly reference: NxIrReference;
-    readonly span: NxIrSourceSpan;
-    readonly kind: NxIrDeclarationKind;
-}
-export type NxIrDeclarationKind = NxIrFunctionDeclaration | NxIrValueDeclaration | NxIrRecordDeclaration | NxIrComponentDeclaration | NxIrUnionDeclaration | NxIrTypeAliasDeclaration;
-export interface NxIrFunctionDeclaration {
-    readonly tag: "function";
-    readonly params: readonly NxIrParam[];
-    readonly body: NxIrExpression;
-    readonly returnType?: NxIrSemanticType;
-}
-export interface NxIrValueDeclaration {
-    readonly tag: "value";
-    readonly value: NxIrExpression;
-    readonly ty?: NxIrSemanticType;
-}
-export interface NxIrRecordDeclaration {
-    readonly tag: "record";
-    readonly fields: readonly NxIrRecordField[];
-    /**
-     * The record's abstract bases, nearest first.
-     *
-     * Fields arrive already flattened, so this answers only what flattening cannot: a value stamped
-     * with this record's name is acceptable wherever any of these is expected.
-     */
-    readonly bases?: readonly NxIrReference[];
-    /**
-     * Whether the record was declared `abstract`, and so has no values of its own.
-     *
-     * A base-typed site accepts a value of a record that extends this one, never one of this one.
-     */
-    readonly isAbstract?: boolean;
-    /**
-     * The record or component a derived `<Target>.Update` record patches. Present only on update
-     * records, whose fields are all optional with no defaults: an absent field stays absent.
-     */
-    readonly updateTarget?: NxIrReference;
-}
-export interface NxIrComponentDeclaration {
-    readonly tag: "component";
-    readonly isAbstract: boolean;
-    readonly isExternal: boolean;
-    readonly props: readonly NxIrComponentField[];
-    readonly state: readonly NxIrComponentField[];
-    readonly body?: NxIrExpression | null;
-}
-export interface NxIrUnionDeclaration {
-    readonly tag: "union";
-    readonly cases: readonly NxIrUnionCase[];
-    /** The union's abstract bases, nearest first, inherited by every case. */
-    readonly bases?: readonly NxIrReference[];
-    /**
-     * The record, action, or component a derived `<Target>.Property` union names the fields of.
-     * Present only on property unions, whose cases are all constant and list the target's effective
-     * fields in declaration order.
-     */
-    readonly propertyTarget?: NxIrReference;
-}
-export interface NxIrTypeAliasDeclaration {
-    readonly tag: "typeAlias";
-}
-export interface NxIrParam {
+export interface PreparedField {
     readonly name: string;
-    readonly slot: string;
-    readonly ty: NxIrTypeRef;
-    readonly isContent: boolean;
-    readonly span: NxIrSourceSpan;
-}
-export interface NxIrRecordField {
-    readonly name: string;
-    readonly slot: string;
-    readonly ty: NxIrTypeRef;
+    readonly ty: PreparedType;
+    /** Node index of the default, or `-1`. */
+    readonly default: number;
     readonly isContent: boolean;
     readonly isRequired: boolean;
-    readonly default?: NxIrExpression | null;
-    readonly span: NxIrSourceSpan;
 }
-export interface NxIrComponentField extends NxIrRecordField {
-    readonly ownerModule: string;
-}
-export interface NxIrUnionCase {
+export interface PreparedParam {
     readonly name: string;
-    readonly fields: readonly NxIrRecordField[];
-    /**
-     * Whether this case declares no fields in a union that declares no base.
-     *
-     * A constant case carries nothing beyond its own name, so its wire form is that bare string
-     * rather than a `$type` object.
-     */
+    readonly ty: PreparedType;
+    readonly isContent: boolean;
+}
+export interface PreparedUnionCase {
+    readonly name: string;
+    readonly fields: readonly PreparedField[];
     readonly isConstant: boolean;
-    readonly span: NxIrSourceSpan;
 }
-export interface NxIrExpression {
-    readonly id: string;
-    readonly span: NxIrSourceSpan;
-    readonly ty?: NxIrSemanticType;
-    readonly op: {
-        readonly tag: string;
-        readonly [key: string]: unknown;
-    };
-}
-export interface NxIrTypeRef {
-    readonly kind: string;
-    readonly name?: string;
-    readonly reference?: NxIrReference;
-    readonly display?: string;
-    readonly element?: NxIrTypeRef;
-    readonly inner?: NxIrTypeRef;
-    readonly params?: readonly NxIrTypeRef[];
-    readonly returnType?: NxIrTypeRef;
-}
-export interface NxIrSemanticType {
-    readonly display: string;
-    readonly shape: {
-        readonly kind: string;
-        readonly [key: string]: unknown;
-    };
-}
-export interface NxIrSourceSpan {
-    readonly source?: string;
-    readonly start: number;
-    readonly end: number;
-}
-export interface NxIrSourceEntry {
-    readonly identity: string;
-    readonly source: string;
-}
-export interface NxPreparedProgram {
-    readonly ir: NxIrProgram;
-    readonly modulesById: ReadonlyMap<string, NxIrModule>;
-    readonly declarationsById: ReadonlyMap<string, PreparedDeclaration>;
-    readonly functionEntrypoints: ReadonlyMap<string, PreparedDeclaration>;
-    readonly componentEntrypoints: ReadonlyMap<string, PreparedDeclaration>;
-    readonly sourcesByIdentity: ReadonlyMap<string, string>;
-    /**
-     * Every constructible nominal shape, keyed by the `$type` a value of it carries.
-     *
-     * A value arriving at a base-typed boundary names its own type and nothing more, so this is how
-     * that name is turned back into the schema to normalize it with. One key can hold several shapes:
-     * two modules may each declare a record of the same name.
-     */
-    readonly nominalShapesByDiscriminator: ReadonlyMap<string, readonly NominalShape[]>;
+export type PreparedDeclarationKind = {
+    readonly tag: "function";
+    readonly params: readonly PreparedParam[];
+    readonly body: number;
+} | {
+    readonly tag: "value";
+    readonly value: number;
+} | {
+    readonly tag: "record";
+    readonly fields: readonly PreparedField[];
+    readonly bases: readonly NxIrReference[];
+    readonly isAbstract: boolean;
+    readonly updateTarget: NxIrReference | undefined;
+} | {
+    readonly tag: "component";
+    readonly props: readonly PreparedField[];
+    readonly state: readonly PreparedField[];
+    /** Node index of the body, or `-1`. */
+    readonly body: number;
+    readonly isAbstract: boolean;
+    readonly isExternal: boolean;
+} | {
+    readonly tag: "union";
+    readonly cases: readonly PreparedUnionCase[];
+    readonly bases: readonly NxIrReference[];
+    readonly propertyTarget: NxIrReference | undefined;
+} | {
+    readonly tag: "typeAlias";
+};
+export interface PreparedDeclaration {
+    readonly index: number;
+    readonly name: string;
+    readonly module: NxPreparedModule;
+    readonly kind: PreparedDeclarationKind;
 }
 /**
- * One record or union case as it appears on the wire.
+ * One artifact, validated and indexed. Linking never copies it, so a host prepares a large module
+ * once and links any number of programs against it.
+ */
+export interface NxPreparedModule {
+    readonly identity: string;
+    readonly version: string;
+    readonly fingerprint: string;
+    /** The opened image the module is read from. */
+    readonly artifact: NxIrImage;
+    readonly declarations: readonly PreparedDeclaration[];
+    readonly declarationsByName: ReadonlyMap<string, PreparedDeclaration>;
+    readonly functionEntrypoints: ReadonlyMap<string, PreparedDeclaration>;
+    readonly componentEntrypoints: ReadonlyMap<string, PreparedDeclaration>;
+    /** The declaration names this module references in each other module of its table, by slot. */
+    readonly externalReferences: ReadonlyMap<number, ReadonlySet<string>>;
+    /**
+     * Every constructible nominal shape this module declares, keyed by the `$type` a value of it
+     * carries. Built once here rather than per link, so preparing a catalog is what costs and
+     * linking a snippet against it does not.
+     */
+    readonly nominalShapeSkeletons: ReadonlyMap<string, readonly NominalShapeSkeleton[]>;
+}
+/** A prepared module inside one linked program, with its module table resolved. */
+export interface LinkedModule {
+    readonly module: NxPreparedModule;
+    /** Slot `0` is the module itself. */
+    readonly slots: readonly LinkedModule[];
+}
+/**
+ * One record or union case of a single module, before any program links it.
  *
- * <para>`bases` holds declaration ids rather than names because that is the only identity that
- * survives separate modules: two records named `Card` are two types, and only the id says which
- * one a base-typed site meant.</para>
+ * <para>This is what preparation indexes, so a module the size of a control catalog is walked once
+ * however many programs link against it. Its `bases` are still the references the artifact carries,
+ * `(slot, name)`; only a link knows which module a slot reaches, so only a link can turn them into
+ * the declaration keys a `NominalShape` holds.</para>
+ */
+export interface NominalShapeSkeleton {
+    /** The `$type` a value of this shape carries: a record's name, or `Union.case`. */
+    readonly discriminator: string;
+    /** The declaring declaration's own name, which is the record's or the union's. */
+    readonly declarationName: string;
+    readonly fields: readonly PreparedField[];
+    readonly bases: readonly NxIrReference[];
+    readonly isAbstract: boolean;
+}
+/**
+ * One record or union case as it appears on the wire, in one linked program.
+ *
+ * `bases` holds declaration keys, `identity::name`, rather than names because that is the only
+ * identity that survives separate modules: two records named `Card` are two types, and only the key
+ * says which one a base-typed site meant.
  */
 export interface NominalShape {
     /** The `$type` a value of this shape carries: a record's name, or `Union.case`. */
     readonly discriminator: string;
     readonly declaration: string;
-    readonly fields: readonly NxIrRecordField[];
+    readonly fields: readonly PreparedField[];
     readonly bases: readonly string[];
-    /** Whether this shape is an abstract record, which no value may be an instance of. */
     readonly isAbstract: boolean;
+    /** Where the fields' types and defaults are read. */
+    readonly linked: LinkedModule;
 }
-export interface PreparedDeclaration {
-    readonly module: NxIrModule;
-    readonly declaration: NxIrDeclaration;
+export interface NxPreparedProgram {
+    readonly entry: LinkedModule;
+    readonly modulesByIdentity: ReadonlyMap<string, LinkedModule>;
+    readonly functionEntrypoints: ReadonlyMap<string, PreparedDeclaration>;
+    readonly componentEntrypoints: ReadonlyMap<string, PreparedDeclaration>;
+    /**
+     * The constructible shapes of every linked module that a value's `$type` names. This answers
+     * more than one shape when two modules each declare a record of one name; the caller decides
+     * what to do about that rather than being handed a guess.
+     *
+     * <para>Resolved on the question rather than indexed at link time: a linked module already has
+     * its own shapes indexed, so this reads one map per module instead of walking every declaration
+     * of every module on every link.</para>
+     */
+    readonly nominalShapesFor: (discriminator: string) => readonly NominalShape[];
+}
+export interface NxLinkOptions {
+    /** Supplies the prepared module of an identity the entry's module table names. */
+    readonly resolve: (identity: string) => NxPreparedModule | undefined;
+    /**
+     * Whether to link a module whose version differs from the one the entry recorded, as long as
+     * every declaration the entry references is present. Off by default.
+     */
+    readonly allowVersionMismatch?: boolean;
 }
 export interface NxRuntimeOptions {
     readonly maxCallDepth?: number;
@@ -225,20 +302,26 @@ export interface ComponentInitResult {
 export interface ComponentEvaluateResult {
     readonly rendered: NxCanonicalValue;
 }
-export declare class NxIrRuntimeError extends Error {
-    readonly diagnostics: readonly NxIrDiagnostic[];
-    constructor(diagnostics: readonly NxIrDiagnostic[]);
-}
-export declare const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1 = "update-records-v1";
-export declare const NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1 = "property-unions-v1";
-export declare const NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1 = "update-intrinsics-v1";
-export declare function prepareNxIrProgram(input: string | NxIrProgram): NxPreparedProgram;
-export declare function tryPrepareNxIrProgram(input: string | NxIrProgram): NxResult<NxPreparedProgram>;
-export declare function evaluateFunction(program: NxPreparedProgram, name: string, args?: readonly NxCanonicalValue[], options?: NxRuntimeOptions): NxCanonicalValue;
-export declare function constructComponentDescriptor(program: NxPreparedProgram, name: string, props?: Record<string, NxCanonicalValue>, content?: readonly NxCanonicalValue[]): NxCanonicalValue;
-export declare function initializeComponent(program: NxPreparedProgram, name: string, props?: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): ComponentInitResult;
-export declare function evaluateComponent(program: NxPreparedProgram, name: string, props: Record<string, NxCanonicalValue>, state: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): ComponentEvaluateResult;
-export declare function normalizeComponentState(program: NxPreparedProgram, name: string, state: Record<string, NxCanonicalValue>): Record<string, NxCanonicalValue>;
+export declare function prepareNxIrModule(input: Uint8Array | ArrayBuffer): NxPreparedModule;
+/**
+ * Opens and validates an image and indexes its module. A view whose byte offset is not a multiple
+ * of four is copied first; an `ArrayBuffer` or a fresh `Uint8Array` is read in place.
+ */
+export declare function tryPrepareNxIrModule(input: Uint8Array | ArrayBuffer): NxResult<NxPreparedModule>;
+export declare function linkNxIrProgram(entry: NxPreparedModule, options: NxLinkOptions): NxPreparedProgram;
+export declare function tryLinkNxIrProgram(entry: NxPreparedModule, options: NxLinkOptions): NxResult<NxPreparedProgram>;
+/**
+ * Prepares and links a self-contained artifact: one whose module table holds only itself.
+ */
+export declare function prepareNxIrProgram(input: Uint8Array | ArrayBuffer): NxPreparedProgram;
+export declare function tryPrepareNxIrProgram(input: Uint8Array | ArrayBuffer): NxResult<NxPreparedProgram>;
+/** The key that identifies one declaration across a program: its module's identity and its name. */
+export declare function declarationKey(linked: LinkedModule, reference: NxIrReference): string;
+export declare function evaluateFunction(program: NxPreparedProgram | NxPreparedModule, name: string, args?: readonly NxCanonicalValue[], options?: NxRuntimeOptions): NxCanonicalValue;
+export declare function constructComponentDescriptor(program: NxPreparedProgram | NxPreparedModule, name: string, props?: Record<string, NxCanonicalValue>, content?: readonly NxCanonicalValue[]): NxCanonicalValue;
+export declare function initializeComponent(program: NxPreparedProgram | NxPreparedModule, name: string, props?: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): ComponentInitResult;
+export declare function evaluateComponent(program: NxPreparedProgram | NxPreparedModule, name: string, props: Record<string, NxCanonicalValue>, state: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): ComponentEvaluateResult;
+export declare function normalizeComponentState(program: NxPreparedProgram | NxPreparedModule, name: string, state: Record<string, NxCanonicalValue>): Record<string, NxCanonicalValue>;
 /**
  * Applies a patch to host-owned component state and returns the validated next state.
  *
@@ -246,7 +329,7 @@ export declare function normalizeComponentState(program: NxPreparedProgram, name
  * `{ $type: "<Component>.Update", ... }`. Either way a present field replaces the current value, an
  * absent one keeps it, and a present `null` sets a nullable field to `null`.
  */
-export declare function applyComponentStatePatch(program: NxPreparedProgram, name: string, currentState: Record<string, NxCanonicalValue>, patch: Record<string, NxCanonicalValue>): Record<string, NxCanonicalValue>;
+export declare function applyComponentStatePatch(program: NxPreparedProgram | NxPreparedModule, name: string, currentState: Record<string, NxCanonicalValue>, patch: Record<string, NxCanonicalValue>): Record<string, NxCanonicalValue>;
 /** A record or update record as the runtime holds it: a `$type` and its fields. */
 export type NxRecordObject = {
     readonly $type: string;

@@ -8,6 +8,8 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, PartialEq)]
 pub struct CodegenProgram {
     pub fingerprint: u64,
+    /// The workspace identity of the module the program was built for.
+    pub entry_identity: String,
     pub modules: Vec<CodegenModule>,
     pub entrypoints: Vec<CodegenEntrypoint>,
     pub component_entrypoints: Vec<CodegenEntrypoint>,
@@ -31,6 +33,8 @@ impl CodegenProgram {
 pub struct CodegenSourceEntry {
     pub identity: String,
     pub source: String,
+    /// The version string the host gave the module, if any.
+    pub version: Option<String>,
 }
 
 /// One lowered module prepared for target emission.
@@ -175,6 +179,8 @@ pub struct CodegenRecordField {
     pub is_content: bool,
     pub is_required: bool,
     pub default: Option<CodegenExpression>,
+    /// The module that declared the field, which is the module its default's spans belong to.
+    pub owner_module_id: RuntimeModuleId,
     pub span: TextSpan,
 }
 
@@ -309,6 +315,8 @@ pub enum CodegenExpressionKind {
     },
     Record {
         name: String,
+        /// The record declaration being constructed, when the name resolved to one.
+        reference: Option<CodegenReference>,
         fields: Vec<CodegenRecordField>,
         properties: Vec<CodegenProperty>,
         content_field: Option<String>,

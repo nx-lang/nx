@@ -315,21 +315,23 @@ function classChain(checker, tag, exportsByName) {
 
 function nxUnionDeclaration(union) {
   if (union.cases.length === 1) {
-    return `type ${union.name} = | ${union.cases[0]}\n`;
+    return `export type ${union.name} = | ${union.cases[0]}\n`;
   }
   if (union.cases.length <= 5) {
-    return `type ${union.name} = ${union.cases.join(" | ")}\n`;
+    return `export type ${union.name} = ${union.cases.join(" | ")}\n`;
   }
-  return `type ${union.name} =\n${union.cases.map((name) => `  | ${name}`).join("\n")}\n`;
+  return `export type ${union.name} =\n${union.cases.map((name) => `  | ${name}`).join("\n")}\n`;
 }
 
 function nxRecordDeclaration(record) {
   const fields = record.fields.map((field) => `  ${field.name}: ${field.nx}?`).join("\n");
-  return `type ${record.name} = {\n${fields}\n}\n`;
+  return `export type ${record.name} = {\n${fields}\n}\n`;
 }
 
 function nxComponent({ name, isAbstract, base, props, hasContent }) {
-  const header = `${isAbstract ? "abstract " : ""}external component`;
+  // Exported, because the catalog is its own module: the playground and the language service
+  // reach it through an implicit import, which sees only what a module exports.
+  const header = `export ${isAbstract ? "abstract " : ""}external component`;
   const lines = props.map((prop) => `  ${prop.name}: ${prop.nx}?`);
   if (hasContent) {
     lines.push(`  content ${CONTENT_PROPERTY}: ${NODE_ROOT}[]?`);

@@ -8,13 +8,19 @@ import { createNxHost } from "../src/node.js";
 import { nxModule } from "./support.js";
 
 const uri = "nx://tenant/form.nx";
-const panel = "type Mode = light | dark\nlet <Panel mode:Mode title:string /> = <div />";
+const catalogUri = "nx://host/catalog.nx";
+const catalog =
+  "export type Mode = light | dark\nexport let <Panel mode:Mode title:string /> = <div />";
 const source = '<Panel mode=light title="x" />\n';
 const documents = [{ uri, source, version: 5 }];
 
 const host = createNxHost(nxModule);
-const service = createLanguageService(host, { prelude: { source: panel } });
-const handler = createNxLanguageHandler({ prelude: { source: panel } });
+const service = createLanguageService(host, {
+  documents: [{ uri: catalogUri, identity: "catalog.nx", source: catalog }],
+  implicitImports: ["catalog.nx"]
+});
+// The HTTP handler still serves its context as a prelude; its answers are the reference.
+const handler = createNxLanguageHandler({ prelude: { source: catalog } });
 
 async function overHttp<T>(query: string, body: unknown): Promise<T> {
   const response = await handler(
@@ -29,7 +35,7 @@ async function overHttp<T>(query: string, body: unknown): Promise<T> {
 }
 
 describe("the wasm SDK's in-process language service", () => {
-  it("answers hover through a prelude in the document's own coordinates", async () => {
+  it("answers hover through an implicit import in the document's own coordinates", async () => {
     const position = { line: 0, character: 3 };
     const hover = await service.hover({ documents, uri, position });
 
@@ -38,41 +44,53 @@ describe("the wasm SDK's in-process language service", () => {
     expect(hover!.range.start).toEqual({ line: 0, character: 1 });
     expect(hover!.version).toBe(5);
 
-    // The same query through the HTTP handler, which runs the same core over the Node SDK.
+    // The same query through the HTTP handler, which reaches the same declaration as a prelude.
     expect(hover).toEqual(await overHttp<Hover | null>("hover", { documents, uri, position }));
   });
 
-  it("answers completions, diagnostics and document symbols identically to the HTTP handler", async () => {
+  it("offers an implicitly imported component's properties inside its opening tag", async () => {
     const position = { line: 0, character: 7 };
+    const completions = await service.completions({ documents, uri, position });
 
-    expect(await service.completions({ documents, uri, position })).toEqual(
-      await overHttp("completions", { documents, uri, position })
-    );
-    expect(await service.diagnostics({ documents, uri })).toEqual(
-      await overHttp<DiagnosticReport>("diagnostics", { documents, uri })
-    );
+    // `title` is already written in the tag, so what is offered is the property still missing.
+    const labels = completions.items.map((item) => item.label);
+    expect(labels).toContain("mode");
+    expect(completions).toEqual(await overHttp("completions", { documents, uri, position }));
+  });
+
+  it("answers document symbols identically to the HTTP handler", async () => {
     expect(await service.documentSymbols({ documents, uri })).toEqual(
       await overHttp("documentSymbols", { documents, uri })
     );
   });
 
-  it("reports a diagnostic inside the prelude with a prelude origin and no range, as the handler does", async () => {
-    const brokenPrelude = `${panel}\nlet wrong: string = 1`;
-    const brokenService = createLanguageService(host, { prelude: { source: brokenPrelude } });
-    const brokenHandler = createNxLanguageHandler({ prelude: { source: brokenPrelude } });
+  it("reports a fault in a host document against that document's URI", async () => {
+    const brokenService = createLanguageService(host, {
+      documents: [
+        { uri: catalogUri, identity: "catalog.nx", source: `${catalog}\nlet wrong: string = 1` }
+      ],
+      implicitImports: ["catalog.nx"]
+    });
 
-    const fromWasm = await brokenService.diagnostics({ documents, uri });
-    const response = await brokenHandler(
-      new Request("http://localhost/api/language/diagnostics", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ documents, uri })
-      })
-    );
-    const fromHttp = (await response.json()) as DiagnosticReport;
+    const report: DiagnosticReport = await brokenService.diagnostics({ documents, uri });
 
-    expect(fromWasm.workspace.length).toBeGreaterThan(0);
-    expect(fromWasm.workspace[0]!.labels[0]!.identity).toBe("prelude");
-    expect(fromWasm).toEqual(fromHttp);
+    const queried = report.documents.find((document) => document.uri === uri);
+    expect(queried?.diagnostics ?? []).toEqual([]);
+    const hostDocument = report.documents.find((document) => document.uri === catalogUri);
+    expect(hostDocument).toBeDefined();
+    expect(hostDocument!.diagnostics.length).toBeGreaterThan(0);
+    expect(hostDocument!.diagnostics[0]!.range.start.line).toBe(2);
+  });
+
+  it("analyzes a repeated document set once and echoes each request's version", async () => {
+    const first = await service.hover({ documents, uri, position: { line: 0, character: 3 } });
+    const second = await service.hover({
+      documents: [{ uri, source, version: 6 }],
+      uri,
+      position: { line: 0, character: 3 }
+    });
+
+    expect(first!.version).toBe(5);
+    expect(second!.version).toBe(6);
   });
 });

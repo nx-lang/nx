@@ -1,0 +1,19 @@
+{
+  "entry": "input.nx",
+  "implicitImports": [
+    "drawnui.nx"
+  ],
+  "versions": {
+    "drawnui.nx": "9"
+  },
+  "emit": [
+    "input.nx",
+    "drawnui.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "input.nx",
+      "function": "root"
+    }
+  ]
+}

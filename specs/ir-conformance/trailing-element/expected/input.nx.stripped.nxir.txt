@@ -1,0 +1,10 @@
+module input.nx fingerprint 2032086910821180579
+links drawnui.nx version "9" fingerprint 10443083107296702259
+entrypoints functions [root] components []
+
+function root() =
+  <drawnui.nx:SkiaLayout Spacing=4 Type="Column">
+    <drawnui.nx:SkiaLabel Text="A document that is one trailing element declares no root of its own." />
+    <drawnui.nx:SkiaLabel FontSize=12 Text="The compiler wraps it in an implicit root function." />
+    <drawnui.nx:SkiaButton Text="Play" />
+  </drawnui.nx:SkiaLayout>

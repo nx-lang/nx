@@ -1,0 +1,29 @@
+// Records, unions, aliases, construction, member access and the derived declarations.
+export abstract type Named = { name:string }
+export type User extends Named = { email:string? age:int = 30 }
+export type Line = { text:string }
+export type Address = { city:string content lines:Line[] }
+export type LoadState =
+  | idle
+  | loading
+  | failed { message:string }
+export type Fit = fill | contain | cover
+export type Person = User
+
+let ada() = <User name="Ada" email="ada@example.com" />
+let home() = <Address city="Paris"><Line text="12 Rue" /><Line text="75001" /></Address>
+let failure() = <LoadState.failed message="Offline" />
+let idle() = { LoadState.idle }
+let cover() = { Fit.cover }
+let nameOf(user:User) = { user.name }
+let ageOf(user:User) = { user.age }
+let userName() = { nameOf(ada()) }
+let userAge() = { ageOf(ada()) }
+let cityOf(address:Address) = { address.city }
+let city() = { cityOf(home()) }
+let patch() = <User.Update email={null} />
+let applied() = { apply(ada(), patch()) }
+let merged() = { merge(<User.Update name="Bo" />, patch()) }
+let changedKeys() = { changed(diff(ada(), applied())) }
+let key() = { User.Property.email }
+let root() = { ada() }

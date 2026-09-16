@@ -189,11 +189,13 @@ fn binary_subtraction_is_unaffected() {
 
 #[test]
 fn bare_name_resolves_to_a_visible_type_at_a_type_parameter_site() {
+    // A parameter named like the type is in lexical scope at the use site, and a type parameter
+    // site still reads the type. (A second top-level `Contact` is not the way to shadow it: a
+    // module's top-level names are unique.)
     assert_clean(
         "type Contact = { name:string }\n\
          external component <List TItem:type items:TItem[]? />\n\
-         let Contact = \"shadow\"\n\
-         let v = <List TItem=Contact />",
+         let v(Contact:string) = <List TItem=Contact />",
     );
 }
 

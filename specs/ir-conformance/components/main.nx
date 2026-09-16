@@ -1,0 +1,14 @@
+// Components: external, abstract, inherited defaults, state, content and descriptors.
+export abstract external component <Node />
+export external component <Label extends Node Text:string FontSize:int = 14 />
+export external component <Stack extends Node Spacing:int = 4 content Children:Node[] />
+export component <Greeting extends Node name:string = "world" /> = {
+  state { count:int = 0 }
+  <Stack>
+    <Label Text={"Hello " + name} />
+    <Label Text="!" FontSize={count + 20} />
+  </Stack>
+}
+let texts = { "a" "b" }
+let labels() = { for text in texts { <Label Text={text} /> } }
+let root() = <Stack Spacing=8><Label Text="a" /><Greeting name="Ada" /></Stack>

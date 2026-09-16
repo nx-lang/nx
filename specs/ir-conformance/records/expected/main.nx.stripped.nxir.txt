@@ -1,0 +1,95 @@
+module main.nx fingerprint 9537757277585525843
+requires update-records-v1 property-unions-v1 update-intrinsics-v1
+entrypoints functions [ada home failure idle cover nameOf ageOf userName userAge cityOf city patch applied merged changedKeys key root] components []
+
+record Named abstract
+  name: string required
+
+record User extends Named
+  name: string required
+  email: string?
+  age: int = 30
+
+record Line
+  text: string required
+
+record Address
+  city: string required
+  content lines: Line[] required
+
+union LoadState
+  case idle constant
+  case loading constant
+  case failed
+    message: string required
+
+union Fit
+  case fill constant
+  case contain constant
+  case cover constant
+
+alias Person
+
+function ada() =
+  <User email="ada@example.com" name="Ada" />
+
+function home() =
+  <Address city="Paris">
+    <Line text="12 Rue" />
+    <Line text="75001" />
+  </Address>
+
+function failure() =
+  <LoadState.failed message="Offline" />
+
+function idle() =
+  LoadState.idle
+
+function cover() =
+  Fit.cover
+
+function nameOf(user: User) =
+  user.name
+
+function ageOf(user: User) =
+  user.age
+
+function userName() =
+  nameOf(ada())
+
+function userAge() =
+  ageOf(ada())
+
+function cityOf(address: Address) =
+  address.city
+
+function city() =
+  cityOf(home())
+
+function patch() =
+  <User.Update email=null />
+
+function applied() =
+  apply(ada(), patch())
+
+function merged() =
+  merge(<User.Update name="Bo" />, patch())
+
+function changedKeys() =
+  changed(diff(ada(), applied())) ordering name, email, age
+
+function key() =
+  User.Property.email
+
+function root() =
+  ada()
+
+record User.Update update of User
+  name: string
+  email: string?
+  age: int
+
+union User.Property property of User
+  case name constant
+  case email constant
+  case age constant

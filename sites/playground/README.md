@@ -13,16 +13,25 @@ WebAssembly module, loaded into a Web Worker when the editor view mounts; nothin
 server.
 
 ```
-NX source ──▶ @nx-lang/sdk-wasm ──▶ nx-ir-json ──▶ @nx-lang/ir-runtime ──▶ renderer ──▶ DrawnUI
+NX source ──▶ @nx-lang/sdk-wasm ──▶ NX IR image ──▶ @nx-lang/ir-runtime ──▶ renderer ──▶ DrawnUI
    editor        (worker)                            (browser)              (browser)     canvas
      │
      └── hover / completion ──▶ @nx-lang/language-core ──▶ sdk-wasm language snapshot
            (@nx-lang/monaco)          (worker)                    (worker)
 ```
 
-One worker, one host: compiling and answering hover share an instance and the same catalog prelude,
+One worker, one host: compiling and answering hover share an instance and the same catalog module,
 so a diagnostic and a hover range land on the same line of the author's text. A compile that traps
 or overruns its deadline costs that one request — the worker is replaced and the editor stays live.
+
+The catalog (`catalog/skia.nx`) is a module of its own that every compile and every language query
+imports implicitly, so the visitor's document is analyzed exactly as written. A compile answers
+with the visitor's module alone: an NX IR artifact of a few kilobytes that names the catalog in its
+module table and carries none of its declarations. The catalog's own artifact is emitted at build
+time — a Vite plugin in `vite.config.ts` compiles it through the same wasm module and serves it as
+`virtual:nx-catalog-artifact` — and the renderer prepares it once per page and links each compile
+against it. Nothing derived is committed: the catalog text is the one source, and in development
+an edit to it re-emits the artifact.
 
 ## Prerequisites
 
@@ -65,8 +74,9 @@ pnpm test                # server, route, compile, worker and dev-shell tests, t
 pnpm run check-examples  # every example compiles, evaluates, and declares its coverage
 ```
 
-The example check compiles through the same module and the same catalog path the browser uses, so
-what is checked is what ships.
+The example check compiles through the same module and the same catalog path the browser uses, and
+links each example against the catalog artifact emitted the way the build emits it, so what is
+checked is what ships.
 
 The server tests serve a stand-in `dist/` from a temporary directory (`PLAYGROUND_DIST`), so they
 do not need a build to have run.
@@ -76,7 +86,7 @@ do not need a build to have run.
 | Path | What it is |
 |---|---|
 | `base.mjs` | the site's path prefix, and the API and health paths derived from it |
-| `catalog/skia.nx` | the generated NX catalog: external components for the DrawnUI control set |
+| `catalog/skia.nx` | the generated NX catalog: external components for the DrawnUI control set, compiled to its artifact at build time |
 | `catalog/catalog-meta.json` | which types are unions, which are records, which records are constructed |
 | `scripts/generate-catalog.mjs` | generates both from the vendored TypeScript |
 | `scripts/sync-drawnui.mjs` | re-copies DrawnUI's source, demo pages and assets |
@@ -85,10 +95,10 @@ do not need a build to have run.
 | `scripts/compile-example.mjs` | the wasm host and catalog those two scripts compile through |
 | `server/index.mjs` | serves `dist/` under the prefix, the health route, and the root redirect |
 | `src/paths.ts`, `src/routes.ts` | the prefix as the client sees it, and the address scheme under it |
-| `src/compile/` | the compile seam, and NX source + catalog → NX IR with diagnostics |
+| `src/compile/` | the compile seam, NX source + catalog → the visitor's NX IR with diagnostics, and the catalog's own artifact |
 | `src/worker/` | the compiler worker: its module load, its session, and the main thread's channel to it |
 | `src/language/` | the language service the Monaco integration is registered with |
-| `src/render/` | evaluated NX values → DrawnUI controls |
+| `src/render/` | the catalog prepared once, each compile linked against it, and evaluated NX values → DrawnUI controls |
 | `src/editor/` | the editor view, and Monaco through `@nx-lang/monaco` (grammar, highlighting, hover, completion) over `src/language/` |
 | `src/gallery/` | the gallery |
 | `src/examples/` | the ported examples and their metadata |

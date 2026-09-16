@@ -143,8 +143,11 @@ call `SearchBox(props)` directly to construct a descriptor and use generated sta
 The default `nxlang codegen` format is `files`, which writes the existing readable file graph. Use
 `--format program-module` with `--target javascript` to write a single host-neutral `program.js`
 that imports NX helpers from `nx:runtime` and omits the local `nx-runtime.js` copy and index
-barrel. Use `--target nx-ir` to write a host-neutral `.nxir.json` artifact instead of generated
-source files.
+barrel. Use `--target nx-ir` to write host-neutral `.nxir` images instead of generated source
+files: one per module of the program, named from the module's identity, each carrying its debug
+section. `nxlang ir explain ./generated-ir/main.nxir` renders an image as readable text with every
+table index resolved. The image layout is documented in
+[docs/nx-ir-format.md](docs/nx-ir-format.md).
 
 Rust hosts that cache executable programs can use `nx_codegen::emit_js_program_module` instead of the
 CLI file layout. That API returns a single host-neutral JavaScript ESM source string plus

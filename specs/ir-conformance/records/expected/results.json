@@ -1,0 +1,56 @@
+{
+  "main.nx::ada": {
+    "$type": "User",
+    "age": 30,
+    "email": "ada@example.com",
+    "name": "Ada"
+  },
+  "main.nx::applied": {
+    "$type": "User",
+    "age": 30,
+    "email": null,
+    "name": "Ada"
+  },
+  "main.nx::changedKeys": [
+    "email"
+  ],
+  "main.nx::city": "Paris",
+  "main.nx::cover": "cover",
+  "main.nx::failure": {
+    "$type": "LoadState.failed",
+    "message": "Offline"
+  },
+  "main.nx::home": {
+    "$type": "Address",
+    "city": "Paris",
+    "lines": [
+      {
+        "$type": "Line",
+        "text": "12 Rue"
+      },
+      {
+        "$type": "Line",
+        "text": "75001"
+      }
+    ]
+  },
+  "main.nx::idle": "idle",
+  "main.nx::key": "email",
+  "main.nx::merged": {
+    "$type": "User.Update",
+    "email": null,
+    "name": "Bo"
+  },
+  "main.nx::patch": {
+    "$type": "User.Update",
+    "email": null
+  },
+  "main.nx::root": {
+    "$type": "User",
+    "age": 30,
+    "email": "ada@example.com",
+    "name": "Ada"
+  },
+  "main.nx::userAge": 30,
+  "main.nx::userName": "Ada"
+}

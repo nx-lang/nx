@@ -1,0 +1,95 @@
+module main.nx fingerprint 9537757277585525843
+requires update-records-v1 property-unions-v1 update-intrinsics-v1
+entrypoints functions [ada home failure idle cover nameOf ageOf userName userAge cityOf city patch applied merged changedKeys key root] components []
+
+record Named abstract @2:1-2:45
+  name: string required
+
+record User extends Named @3:1-3:64
+  name: string required
+  email: string?
+  age: int = 30
+
+record Line @4:1-4:35
+  text: string required
+
+record Address @5:1-5:59
+  city: string required
+  content lines: Line[] required
+
+union LoadState @6:1-9:30
+  case idle constant
+  case loading constant
+  case failed
+    message: string required
+
+union Fit @10:1-10:41
+  case fill constant
+  case contain constant
+  case cover constant
+
+alias Person @11:1-11:26
+
+function ada() @13:1-13:56 =
+  <User email="ada@example.com" name="Ada" />
+
+function home() @14:1-14:89 =
+  <Address city="Paris">
+    <Line text="12 Rue" />
+    <Line text="75001" />
+  </Address>
+
+function failure() @15:1-15:55 =
+  <LoadState.failed message="Offline" />
+
+function idle() @16:1-16:32 =
+  LoadState.idle
+
+function cover() @17:1-17:28 =
+  Fit.cover
+
+function nameOf(user: User) @18:1-18:38 =
+  user.name
+
+function ageOf(user: User) @19:1-19:36 =
+  user.age
+
+function userName() @20:1-20:35 =
+  nameOf(ada())
+
+function userAge() @21:1-21:33 =
+  ageOf(ada())
+
+function cityOf(address: Address) @22:1-22:47 =
+  address.city
+
+function city() @23:1-23:32 =
+  cityOf(home())
+
+function patch() @24:1-24:43 =
+  <User.Update email=null />
+
+function applied() @25:1-25:42 =
+  apply(ada(), patch())
+
+function merged() @26:1-26:61 =
+  merge(<User.Update name="Bo" />, patch())
+
+function changedKeys() @27:1-27:56 =
+  changed(diff(ada(), applied())) ordering name, email, age
+
+function key() @28:1-28:36 =
+  User.Property.email
+
+function root() @29:1-29:23 =
+  ada()
+
+record User.Update update of User @3:1-3:64
+  name: string
+  email: string?
+  age: int
+
+union User.Property property of User @3:1-3:64
+  case name constant
+  case email constant
+  case age constant

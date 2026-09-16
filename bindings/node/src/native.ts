@@ -7,10 +7,11 @@ import { NxNativeError } from "./errors.js";
 export interface NativeWorkspaceModule {
   readonly identity: string;
   readonly source: string | Buffer;
+  readonly version?: string;
 }
 
 export interface NativeNxWorkspace {
-  validate(buildContext: NativeNxProgramBuildContext): string;
+  validate(buildContext: NativeNxProgramBuildContext, implicitImports?: readonly string[]): string;
   dispose(): void;
 }
 
@@ -32,14 +33,21 @@ export interface NativeNxProgramBuildContext {
   buildSourceProgramArtifact(source: string | Buffer, fileName?: string): NativeNxProgramArtifact;
   buildWorkspaceProgramArtifact(
     workspace: NativeNxWorkspace,
-    entryIdentity: string
+    entryIdentity: string,
+    implicitImports?: readonly string[]
   ): NativeNxProgramArtifact;
   dispose(): void;
 }
 
+export interface NativeGeneratedNxIr {
+  readonly identity: string;
+  readonly bytes: Buffer;
+  readonly metadataJson: string;
+}
+
 export interface NativeNxProgramArtifact {
   readonly entryIdentity: string;
-  generateNxIr(): string;
+  generateNxIr(options?: string): NativeGeneratedNxIr[];
   evaluateJson(): string;
   evaluateBytes(outputFormat?: string): Buffer;
   dispose(): void;
@@ -69,6 +77,7 @@ export interface NativeNxLanguageSnapshotConstructor {
 }
 
 export interface NativeBinding {
+  explainNxIr(image: Buffer): string;
   readonly NativeNxWorkspace: NativeNxWorkspaceConstructor;
   readonly NativeNxLibraryRegistry: NativeNxLibraryRegistryConstructor;
   readonly NativeNxLanguageSnapshot: NativeNxLanguageSnapshotConstructor;

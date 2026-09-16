@@ -13,4 +13,6 @@ internal struct NxWorkspaceModuleDescriptor
     internal nuint IdentityLen;
     internal IntPtr SourceUtf8Ptr;
     internal nuint SourceUtf8Len;
+    internal IntPtr VersionPtr;
+    internal nuint VersionLen;
 }

@@ -45,20 +45,38 @@ public sealed class NxWorkspaceModule
     public ReadOnlyMemory<byte> SourceUtf8 { get; }
 
     /// <summary>
+    /// Gets the version string every NX IR artifact built from this module's workspace records for
+    /// it in its module table, or <see langword="null"/> for none.
+    /// </summary>
+    /// <remarks>
+    /// NX never reads the string. A runtime compares it for equality when it links an artifact
+    /// against a prepared module, so a snippet built against one release of a catalog is not silently
+    /// run against another. An empty string is the same as none.
+    /// </remarks>
+    public string? Version { get; init; }
+
+    /// <summary>
     /// Creates a workspace module by encoding source text as UTF-8.
     /// </summary>
     /// <param name="identity">
     /// Logical module identity used for imports, diagnostics, and workspace entry selection.
     /// </param>
     /// <param name="source">NX source text for the module.</param>
+    /// <param name="version">
+    /// Version string NX IR artifacts record for the module, or <see langword="null"/> for none. See
+    /// <see cref="Version"/>.
+    /// </param>
     /// <returns>A workspace module containing UTF-8 encoded source bytes.</returns>
     /// <exception cref="ArgumentNullException">
     /// Thrown when <paramref name="identity"/> or <paramref name="source"/> is <see langword="null"/>.
     /// </exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="identity"/> is empty.</exception>
-    public static NxWorkspaceModule FromSourceText(string identity, string source)
+    public static NxWorkspaceModule FromSourceText(string identity, string source, string? version = null)
     {
         ArgumentNullException.ThrowIfNull(source);
-        return new NxWorkspaceModule(identity, Encoding.UTF8.GetBytes(source));
+        return new NxWorkspaceModule(identity, Encoding.UTF8.GetBytes(source))
+        {
+            Version = version,
+        };
     }
 }

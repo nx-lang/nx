@@ -1,0 +1,29 @@
+{
+  "main.nx::labels": [
+    {
+      "$type": "Label",
+      "FontSize": 14,
+      "Text": "a"
+    },
+    {
+      "$type": "Label",
+      "FontSize": 14,
+      "Text": "b"
+    }
+  ],
+  "main.nx::root": {
+    "$type": "Stack",
+    "Children": [
+      {
+        "$type": "Label",
+        "FontSize": 14,
+        "Text": "a"
+      },
+      {
+        "$type": "Greeting",
+        "name": "Ada"
+      }
+    ],
+    "Spacing": 8
+  }
+}

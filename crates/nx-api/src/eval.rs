@@ -169,6 +169,35 @@ fn eval_program_artifact_with_source(program: &ProgramArtifact, source: &str) ->
     }
 }
 
+/// Evaluates a zero-argument function of one module of a previously built [`ProgramArtifact`].
+///
+/// This is what a conformance check needs: the interpreter's answer for any named entrypoint, not
+/// only `root` of the entry module. The artifact should already be free of static-analysis errors.
+pub fn eval_program_artifact_function(
+    program: &ProgramArtifact,
+    module_identity: &str,
+    function_name: &str,
+) -> EvalResult {
+    let source = program
+        .source_text(module_identity)
+        .unwrap_or_default()
+        .to_string();
+    if let Some(diagnostics) = program_artifact_error_diagnostics(program, &source) {
+        return EvalResult::Err(diagnostics);
+    }
+    let Some(module_id) = program
+        .resolved_program
+        .source_provider_module_id(module_identity)
+    else {
+        return EvalResult::Err(no_root_diagnostics(module_identity, &source));
+    };
+    let interpreter = Interpreter::from_resolved_program(program.resolved_program.clone());
+    match interpreter.execute_resolved_program_module_function(module_id, function_name, vec![]) {
+        Ok(value) => EvalResult::Ok(to_nx_value(&value)),
+        Err(error) => EvalResult::Err(runtime_error_diagnostics(&source, error)),
+    }
+}
+
 /// Evaluates the `root()` entrypoint of a previously built [`ProgramArtifact`].
 ///
 /// The supplied program artifact should already be free of static-analysis errors.
