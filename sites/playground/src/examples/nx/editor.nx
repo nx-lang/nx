@@ -12,8 +12,8 @@
 // What is missing is what the original reads back and drives: the readouts in the first and third
 // card titles (Text, IsFocused, cursor and selection, the submitted value, the password length), the
 // buttons that call Focus, SelectAll, InsertAtCursor and set Text, and the chat list that collects
-// submitted messages. Those need event handlers and component state; the buttons are drawn and do
-// nothing, and the chat card starts empty as the original does.
+// submitted messages. This port does not use event handlers or component state for them yet; the
+// buttons are drawn and do nothing, and the chat card starts empty as the original does.
 
 component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = {
   <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 />
@@ -76,8 +76,8 @@ Second line" />
     </Card>
 
     <Card Title="Chat input — MaxLines={3} ReturnType='Send': Enter submits and keeps focus, Shift+Enter breaks the line · 0 sent">
-      // The original appends each submitted message above the editor and clears it; that needs
-      // event handlers and component state, so the list stays empty here.
+      // The original appends each submitted message above the editor and clears it; this port does
+      // not use event handlers or component state for that yet, so the list stays empty here.
       <SkiaEditor FontFamily="FontText" FontFamilyFallback="FontSymbols,FontSymbols2,FontEmoji" MaxLines=3 ReturnType=Send PlaceholderText="Message" FontSize=15
         HorizontalOptions=Fill />
     </Card>

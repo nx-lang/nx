@@ -29,5 +29,16 @@
       "module": "shared/model.nx",
       "function": "answer"
     }
+  ],
+  "lifecycles": [
+    {
+      "module": "app/main.nx",
+      "component": "Panel",
+      "batches": [
+        [
+          { "$type": "ActionHandlerInvocation", "token": "h1-1", "action": { "$type": "Control.Tapped" } }
+        ]
+      ]
+    }
   ]
 }

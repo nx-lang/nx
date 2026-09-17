@@ -2,7 +2,9 @@
  * The runtime's own behavior: header checks, preparation, linking and boundary normalization, over
  * small artifacts built in the test. Evaluation of real programs is the corpus's job.
  */
-import { NX_IR_NONE, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION, NxIrRuntimeError, applyComponentStatePatch, applyUpdate, changedFields, constructComponentDescriptor, declarationKinds, diffRecords, evaluateComponent, evaluateFunction, initializeComponent, linkNxIrProgram, mergeUpdates, nodeKinds, normalizeComponentState, prepareNxIrModule, prepareNxIrProgram, tryLinkNxIrProgram, tryPrepareNxIrModule, tryPrepareNxIrProgram, typeKinds, } from "../src/index.js";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { NX_IR_NONE, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION, NxIrRuntimeError, applyComponentStatePatch, applyUpdate, changedFields, constructComponentDescriptor, declarationKinds, diffRecords, dispatchComponentActions, evaluateComponent, evaluateFunction, initializeComponent, linkNxIrProgram, mergeUpdates, nodeKinds, normalizeComponentState, prepareNxIrModule, prepareNxIrProgram, tryLinkNxIrProgram, tryPrepareNxIrModule, tryPrepareNxIrProgram, typeKinds, } from "../src/index.js";
 const tests = [];
 function test(name, run) {
     tests.push([name, run]);
@@ -152,9 +154,14 @@ class ArtifactBuilder {
             ...this.list(state),
             body < 0 ? NX_IR_NONE : body,
             flags,
+            ...this.list((options.emits ?? []).map(([emitName, action]) => [this.str(emitName), ...action])),
         ]);
         this.componentEntrypoints.push(index);
         return index;
+    }
+    /** `[19, ref, str, ref, slot, ref?, node]`: a handler for `component`'s `emit` accepting `action`. */
+    handler(component, emit, action, slot, owner, body) {
+        return this.node([nodeKinds.actionHandler, ...component, this.str(emit), ...action, slot, ...(owner ?? [NX_IR_NONE, NX_IR_NONE]), body]);
     }
     union(name, cases, options = {}) {
         return this.declaration([
@@ -613,6 +620,257 @@ test("the exported helpers apply, merge, diff and list changed fields on host-he
     // target rather than trusting the caller to have paired the values.
     assertThrows(() => mergeUpdates({ $type: "User.Update", name: "Bo" }, { $type: "Other.Update" }), "the updates target different records");
     assertThrows(() => diffRecords(user, { $type: "Other", name: "Bo" }), "the records have different types");
+});
+// ------------------------------------------------------------------------------------------------
+// Action handlers
+// ------------------------------------------------------------------------------------------------
+/**
+ * `component <Counter step:int = 1 emits { Reset } /> = { state { count:int = 0 } [<Button
+ * label="Add" onTapped=<Update count={count + step} /> />, <Button label="Bad"
+ * onTapped=<Update count="oops" /> />] }` beside `external component <Button label:string emits
+ * { Tapped { } } />` and `action Reset = { }`, plus functions whose descriptors bind a handler
+ * under `onReset`, under a name no emit has, and under `onReset` for the wrong emit.
+ */
+function counterArtifact() {
+    const b = new ArtifactBuilder("main.nx");
+    const string = b.primitive("string");
+    const int = b.primitive("int");
+    b.record("Button.Tapped", []);
+    b.record("Reset", []);
+    b.component("Button", [b.field("label", string, { required: true })], [], -1, {
+        external: true,
+        emits: [["Tapped", b.ref("Button.Tapped")]],
+    });
+    b.record("Counter.Update", [b.field("count", int)], { updateTarget: b.ref("Counter") });
+    // Counter's frame: step at 0, count at 1, and each handler's `action` at 2.
+    const count = b.node([nodeKinds.slot, 1, b.str("count")]);
+    const step = b.node([nodeKinds.slot, 0, b.str("step")]);
+    const sum = b.node([nodeKinds.binary, 0, count, step]);
+    const patch = b.node([nodeKinds.record, ...b.ref("Counter.Update"), ...b.list([b.property("count", sum)]), ...b.content([])]);
+    const add = b.handler(b.ref("Button"), "Tapped", b.ref("Button.Tapped"), 2, b.ref("Counter"), patch);
+    const oops = b.node([nodeKinds.record, ...b.ref("Counter.Update"), ...b.list([b.property("count", b.string("oops"))]), ...b.content([])]);
+    const bad = b.handler(b.ref("Button"), "Tapped", b.ref("Button.Tapped"), 2, b.ref("Counter"), oops);
+    const button = (label, handler) => b.node([nodeKinds.component, ...b.ref("Button"), ...b.list([b.property("label", b.string(label)), b.property("onTapped", handler)]), ...b.content([])]);
+    const body = b.node([nodeKinds.array, ...b.content([button("Add", add), button("Bad", bad)])]);
+    b.component("Counter", [b.field("step", int, { default: b.int(1) })], [b.field("count", int, { default: b.int(0) })], body, {
+        emits: [["Reset", b.ref("Reset")]],
+    });
+    // Root-bound handlers: `action` is the function frame's first slot.
+    const reset = b.node([nodeKinds.record, ...b.ref("Reset"), ...b.list([]), ...b.content([])]);
+    const onReset = b.handler(b.ref("Counter"), "Reset", b.ref("Reset"), 0, undefined, reset);
+    const counter = (property, handler) => b.node([nodeKinds.component, ...b.ref("Counter"), ...b.list([b.property(property, handler), b.property("step", b.int(2))]), ...b.content([])]);
+    b.fn("card", counter("onReset", onReset));
+    b.fn("nope", counter("onNope", onReset));
+    b.fn("wrongEmit", counter("onReset", b.handler(b.ref("Button"), "Tapped", b.ref("Button.Tapped"), 0, undefined, reset)));
+    return b.build({ requiredFeatures: ["update-records-v1", "action-handlers-v1"] });
+}
+/** The token of the rendered `Button` at `index` of a `Counter`'s output. */
+function counterToken(rendered, index = 0) {
+    const button = fields(rendered[index]);
+    const handler = fields(button.onTapped);
+    if (typeof handler.token !== "string") {
+        throw new Error(`no token in ${stableJson(button)}`);
+    }
+    return handler.token;
+}
+function tapped(token) {
+    return { $type: "ActionHandlerInvocation", token, action: { $type: "Button.Tapped" } };
+}
+test("prepares an image listing the handler feature and refuses one naming a feature it does not know", () => {
+    const program = prepareNxIrProgram(counterArtifact());
+    assertEqual(program.entry.module.artifact.requiredFeatures, ["update-records-v1", "action-handlers-v1"]);
+    const counter = program.componentEntrypoints.get("Counter").kind;
+    if (counter.tag !== "component") {
+        throw new Error("Counter is not a component");
+    }
+    assertEqual(counter.emits, [{ name: "Reset", action: { slot: 0, name: "Reset" } }]);
+    const b = new ArtifactBuilder("main.nx");
+    b.fn("root", b.int(1));
+    const refused = tryPrepareNxIrModule(b.build({ requiredFeatures: ["action-handlers-v2"] }));
+    if (refused.ok || !refused.diagnostics.some((diagnostic) => diagnostic.code === "nx-ir-required-feature" && diagnostic.message.includes("action-handlers-v2"))) {
+        throw new Error("expected the unknown feature to be refused by name");
+    }
+});
+test("a descriptor keeps its handler property as a token-less ActionHandler record", () => {
+    const program = prepareNxIrProgram(counterArtifact());
+    const card = fields(evaluateFunction(program, "card"));
+    assertEqual(card, { $type: "Counter", step: 2, onReset: { $type: "ActionHandler", action: "Reset" } });
+    assertThrows(() => evaluateFunction(program, "nope"), "Unknown Counter props field 'onNope'");
+    assertThrows(() => evaluateFunction(program, "wrongEmit"), "Expected Counter props.onReset to be an action handler for Counter.Reset, got one for Button.Tapped");
+    const evaluated = evaluateComponent(program, "Counter", {}, { count: 3 }).rendered;
+    assertEqual(fields(evaluated[0]).onTapped, { $type: "ActionHandler", action: "Button.Tapped" });
+    if (stableJson(evaluated).includes("$nxKind") || stableJson(card).includes("$nxKind")) {
+        throw new Error("an internal value reached canonical output");
+    }
+});
+test("a handler for a same-named component of another module is refused naming both modules", () => {
+    const ui = new ArtifactBuilder("ui/button.nx", [], "1");
+    ui.record("Button.Tapped", []);
+    ui.component("Button", [], [], -1, { external: true, emits: [["Tapped", ui.ref("Button.Tapped")]] });
+    const preparedUi = prepareNxIrModule(ui.build());
+    // `main.nx` declares a `Button` of its own and binds a handler for it on the imported one.
+    const b = new ArtifactBuilder("main.nx", [{ identity: "ui/button.nx", version: "1", fingerprint: "1" }]);
+    b.record("Log", []);
+    b.record("Button.Tapped", []);
+    b.component("Button", [], [], -1, { external: true, emits: [["Tapped", b.ref("Button.Tapped")]] });
+    const log = b.node([nodeKinds.record, ...b.ref("Log"), ...b.list([]), ...b.content([])]);
+    const handler = b.handler(b.ref("Button"), "Tapped", b.ref("Button.Tapped"), 0, undefined, log);
+    b.fn("root", b.node([nodeKinds.component, ...b.ref("Button", "ui/button.nx"), ...b.list([b.property("onTapped", handler)]), ...b.content([])]));
+    const program = linkNxIrProgram(prepareNxIrModule(b.build({ requiredFeatures: ["action-handlers-v1"] })), {
+        resolve: () => preparedUi,
+    });
+    const refused = assertThrows(() => evaluateFunction(program, "root"), "Expected Button props.onTapped to be an action handler for ui/button.nx::Button.Tapped, got one for main.nx::Button.Tapped.");
+    assertEqual(refused.diagnostics[0].code, "nx-ir-type");
+});
+test("initialization tokens handlers and dispatch patches the state live within a batch", () => {
+    const program = prepareNxIrProgram(counterArtifact());
+    const initialized = initializeComponent(program, "Counter", { step: 2 });
+    assertEqual(initialized.state, { count: 0 });
+    assertEqual(counterToken(initialized.rendered), "h1-1");
+    assertEqual(counterToken(initialized.rendered, 1), "h1-2");
+    if (!Object.isFrozen(initialized.instance) || !Object.isFrozen(initialized.instance.state)) {
+        throw new Error("the instance is not frozen");
+    }
+    const once = dispatchComponentActions(program, initialized.instance, [tapped("h1-1")]);
+    assertEqual(once.state, { count: 2 });
+    assertEqual(once.effects, []);
+    assertEqual(counterToken(once.rendered), "h2-1");
+    const twice = dispatchComponentActions(program, once.instance, [tapped("h2-1"), tapped("h2-1")]);
+    assertEqual(twice.state, { count: 6 });
+    // An empty batch re-renders with fresh tokens, and the previous ones no longer name anything.
+    const idle = dispatchComponentActions(program, twice.instance, []);
+    assertEqual(counterToken(idle.rendered), "h4-1");
+    assertEqual(idle.state, { count: 6 });
+    const stale = assertThrows(() => dispatchComponentActions(program, idle.instance, [tapped("h3-1")]), "Unknown handler token 'h3-1'");
+    assertEqual(stale.diagnostics[0].code, "nx-ir-handler-token");
+    assertEqual(initialized.instance.state, { count: 0 });
+});
+test("dispatch refuses the wrong action, an action the component does not emit, and a malformed entry", () => {
+    const program = prepareNxIrProgram(counterArtifact());
+    const { instance } = initializeComponent(program, "Counter");
+    const wrong = assertThrows(() => dispatchComponentActions(program, instance, [{ $type: "ActionHandlerInvocation", token: "h1-1", action: { $type: "Slider.EndChanged" } }]), "Expected an action of type 'Button.Tapped' for handler Button.Tapped, got 'Slider.EndChanged'");
+    assertEqual(wrong.diagnostics[0].code, "nx-ir-type");
+    const unknown = assertThrows(() => dispatchComponentActions(program, instance, [{ $type: "Other.Changed" }]), "Component 'Counter' does not emit 'Other.Changed'");
+    assertEqual(unknown.diagnostics[0].code, "nx-ir-component-action");
+    assertThrows(() => dispatchComponentActions(program, instance, [{ $type: "ActionHandlerInvocation", token: 1, action: {} }]), "string 'token'");
+    // An emitted action the parent bound nothing for is checked and then a no-op.
+    const noop = dispatchComponentActions(program, instance, [{ $type: "Reset" }]);
+    assertEqual(noop.effects, []);
+    assertEqual(noop.state, { count: 0 });
+    assertEqual(counterToken(noop.rendered), "h2-1");
+});
+test("a failing batch is atomic and leaves the supplied instance usable", () => {
+    const program = prepareNxIrProgram(counterArtifact());
+    const { instance } = initializeComponent(program, "Counter", { step: 5 });
+    assertThrows(() => dispatchComponentActions(program, instance, [tapped("h1-1"), tapped("h9-9")]), "Unknown handler token 'h9-9'");
+    const bad = assertThrows(() => dispatchComponentActions(program, instance, [tapped("h1-1"), tapped("h1-2")]), "Expected Counter.Update.count to be a number");
+    assertEqual(bad.diagnostics[0].code, "nx-ir-boundary-type");
+    const retry = dispatchComponentActions(program, instance, [tapped("h1-1")]);
+    assertEqual(retry.state, { count: 5 });
+    assertEqual(instance.state, { count: 0 });
+});
+/**
+ * The corpus's `handlers` program: `Page` renders a `Label`, a `TextInput`, a `Button` and two
+ * `SearchBox`es inside a `Stack`.
+ */
+function handlersProgram() {
+    const path = fileURLToPath(new URL("../../../../specs/ir-conformance/handlers/expected/main.nx.stripped.nxir", import.meta.url));
+    return prepareNxIrProgram(new Uint8Array(readFileSync(path)));
+}
+function children(instance) {
+    return fields(instance.rendered).children.map(fields);
+}
+/** The rendered descriptors of `type` in a list, in order. */
+function ofType(list, type) {
+    return list.map(fields).filter((child) => child.$type === type);
+}
+function searchBoxProps(descriptor) {
+    const { $type: _type, ...props } = descriptor;
+    return props;
+}
+test("a parent's handler reaches the child through the parent's instance and runs on the child's emit", () => {
+    const program = handlersProgram();
+    const page = initializeComponent(program, "Page");
+    const [first, second] = ofType(children(page), "SearchBox");
+    assertEqual(fields(first.onSearchSubmitted).token, "h1-2");
+    const searchBox = initializeComponent(program, "SearchBox", searchBoxProps(first), { parent: page.instance });
+    assertEqual(searchBox.rendered, { $type: "TextInput", value: "Find" });
+    assertEqual(searchBox.state, { query: "Find" });
+    assertEqual(Object.keys(searchBox.instance.props), ["placeholder"]);
+    const submitted = dispatchComponentActions(program, searchBox.instance, [{ $type: "SearchSubmitted", searchString: "docs" }]);
+    assertEqual(submitted.effects, [{ $type: "DoSearch", search: "docs" }]);
+    assertEqual(submitted.state, { query: "Find" });
+    // The second box's handler returns the parent's own update record, which is an effect here.
+    const again = initializeComponent(program, "SearchBox", searchBoxProps(second), { parent: page.instance });
+    const patched = dispatchComponentActions(program, again.instance, [{ $type: "SearchSubmitted", searchString: "docs" }]);
+    assertEqual(patched.effects, [{ $type: "Page.Update", query: "docs" }]);
+    assertEqual(patched.state, { query: "Again" });
+    assertThrows(() => dispatchComponentActions(program, again.instance, [{ $type: "SearchSubmitted", searchString: 3 }]), "Expected SearchSubmitted action.searchString to be a string");
+});
+test("a handler in a content child stays the parent's and is unowned by the child that renders it", () => {
+    const program = handlersProgram();
+    const page = initializeComponent(program, "Page");
+    const stack = initializeComponent(program, "Stack", { children: fields(page.rendered).children }, { parent: page.instance });
+    // Re-rendered by the Stack instance, the handlers take that instance's tokens.
+    // `<column>{children}</column>`: the one content child is the list itself.
+    const [button] = ofType(fields(stack.rendered).content, "Button");
+    assertEqual(fields(button.onTapped).token, "h1-1");
+    const dispatched = dispatchComponentActions(program, stack.instance, [tapped("h1-1")]);
+    assertEqual(dispatched.effects, [{ $type: "Page.Update", count: 1 }]);
+    assertEqual(dispatched.state, {});
+});
+test("an ActionHandler record in props needs a parent instance and a token that instance holds", () => {
+    const program = handlersProgram();
+    const page = initializeComponent(program, "Page");
+    const [first] = ofType(children(page), "SearchBox");
+    const withoutParent = assertThrows(() => initializeComponent(program, "SearchBox", searchBoxProps(first)), "names a handler only through a parent instance");
+    assertEqual(withoutParent.diagnostics[0].code, "nx-ir-boundary-field");
+    const stale = assertThrows(() => initializeComponent(program, "SearchBox", { onSearchSubmitted: { $type: "ActionHandler", action: "SearchSubmitted", token: "h7-1" } }, { parent: page.instance }), "Unknown handler token 'h7-1'");
+    assertEqual(stale.diagnostics[0].code, "nx-ir-handler-token");
+    // A handler for another component or emit is refused where it is bound.
+    const [button] = ofType(children(page), "Button");
+    assertThrows(() => initializeComponent(program, "SearchBox", { onSearchSubmitted: button.onTapped }, { parent: page.instance }), "Expected SearchBox props.onSearchSubmitted to be an action handler for SearchBox.SearchSubmitted, got one for Button.Tapped");
+    const instance = page.instance;
+    assertEqual(instance.generation, 1);
+});
+test("initialization takes a complete state in place of the initial one", () => {
+    const program = handlersProgram();
+    const kept = initializeComponent(program, "SearchBox", { placeholder: "Find" }, { state: { query: "docs" } });
+    assertEqual(kept.rendered, { $type: "TextInput", value: "docs" });
+    assertEqual(kept.state, { query: "docs" });
+    assertEqual(kept.instance.generation, 1);
+    assertEqual(kept.instance.props, { placeholder: "Find" });
+    // Re-initializing a Counter with the state it holds and new props keeps its count and renumbers.
+    const counter = initializeComponent(program, "Counter");
+    const stepped = dispatchComponentActions(program, counter.instance, [tapped("h1-1")]);
+    const again = initializeComponent(program, "Counter", { step: 5 }, { state: stepped.state });
+    assertEqual(again.state, stepped.state);
+    assertEqual(fields(children(again)[1].onTapped).token, "h1-1");
+    assertEqual(dispatchComponentActions(program, again.instance, [tapped("h1-1")]).state.count, 6);
+    const mistyped = assertThrows(() => initializeComponent(program, "SearchBox", {}, { state: { query: 123 } }), "SearchBox state.query");
+    assertEqual(mistyped.diagnostics[0].code, "nx-ir-boundary-type");
+    const missing = assertThrows(() => initializeComponent(program, "SearchBox", {}, { state: {} }), "Missing required SearchBox state field 'query'");
+    assertEqual(missing.diagnostics[0].code, "nx-ir-boundary-field");
+});
+test("a handler resolved through the parent is the parent's own value", () => {
+    const program = handlersProgram();
+    const page = initializeComponent(program, "Page");
+    const [button] = ofType(children(page), "Button");
+    const pageToken = fields(button.onTapped).token;
+    const stack = initializeComponent(program, "Stack", { children: fields(page.rendered).children }, { parent: page.instance });
+    const [rendered] = ofType(fields(stack.rendered).content, "Button");
+    const stackToken = fields(rendered.onTapped).token;
+    assertEqual(pageToken, "h1-1");
+    assertEqual(stackToken, "h1-1");
+    const handler = page.instance.handlers.get(pageToken);
+    if (handler === undefined || stack.instance.handlers.get(stackToken) !== handler) {
+        throw new Error("the Stack instance holds a copy of the Page handler rather than the handler itself");
+    }
+    // A host can find the instance that created a handler by looking for it in each ancestor's table.
+    const searchBoxHandler = page.instance.handlers.get("h1-2");
+    if (searchBoxHandler === undefined || [...stack.instance.handlers.values()].includes(searchBoxHandler) === false) {
+        throw new Error("every Page handler in the content reaches the Stack instance's table");
+    }
 });
 // ------------------------------------------------------------------------------------------------
 // Runner

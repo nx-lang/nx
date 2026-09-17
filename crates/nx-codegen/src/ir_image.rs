@@ -125,6 +125,7 @@ const FIELD: &[Op] = &[Op::Str, Op::Type, Op::OptNode, Op::Int];
 const PARAM: &[Op] = &[Op::Str, Op::Type, Op::Int];
 const ARM: &[Op] = &[Op::List(NODES), Op::Node];
 const UNION_CASE: &[Op] = &[Op::Str, Op::List(FIELD), Op::Int];
+const EMIT: &[Op] = &[Op::Str, Op::RefPair];
 
 /// The tables whose entries are cells.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -208,6 +209,7 @@ impl Table {
                 node::RECORD | node::COMPONENT => &[Op::Ref, Op::List(PROPERTY), Op::List(NODES)],
                 node::UNION_CASE => &[Op::Ref, Op::Str, Op::List(PROPERTY), Op::List(NODES)],
                 node::ELEMENT => &[Op::Int, Op::Str, Op::List(PROPERTY), Op::List(NODES)],
+                node::ACTION_HANDLER => &[Op::Ref, Op::Str, Op::Ref, Op::Int, Op::OptRef, Op::Node],
                 _ => return None,
             },
             Table::Declarations => match kind {
@@ -226,6 +228,7 @@ impl Table {
                     Op::List(FIELD),
                     Op::OptNode,
                     Op::Int,
+                    Op::List(EMIT),
                 ],
                 declaration::UNION => &[Op::Str, Op::List(UNION_CASE), Op::List(REFS), Op::OptRef],
                 declaration::TYPE_ALIAS => &[Op::Str],
@@ -1606,11 +1609,23 @@ mod tests {
         assert!(refused > 0);
     }
 
-    /// The smallest corpus image, which is always a stripped one, and the smallest that carries a
-    /// debug section, so that span offsets and the source length are damaged too.
+    /// The smallest corpus image, which is always a stripped one, the smallest that carries a
+    /// debug section, so that span offsets and the source length are damaged too, and the smallest
+    /// that carries an action handler, so that its node and a non-empty `emits` list are too.
     #[test]
     fn every_cell_can_be_damaged_without_a_panic() {
         let images = corpus_images();
+        let (label, _, bytes) = images
+            .iter()
+            .filter(|(_, artifact, _)| {
+                artifact.nodes.iter().any(|node| {
+                    node.as_list().and_then(|entry| entry[0].as_int())
+                        == Some(kinds::node::ACTION_HANDLER)
+                })
+            })
+            .min_by_key(|(_, _, bytes)| bytes.len())
+            .expect("a corpus image with an action handler");
+        damage_every_cell(label, bytes);
         let (label, _, bytes) = images
             .iter()
             .min_by_key(|(_, _, bytes)| bytes.len())

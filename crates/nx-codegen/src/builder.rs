@@ -1,9 +1,10 @@
 use crate::model::{
-    expr_id_u32, CodegenComponent, CodegenComponentDescriptor, CodegenComponentField,
-    CodegenComponentTargetKind, CodegenDeclaration, CodegenDeclarationKind, CodegenElement,
-    CodegenEntrypoint, CodegenExpression, CodegenExpressionKind, CodegenMatchArm, CodegenModule,
-    CodegenModuleProvenance, CodegenParam, CodegenProgram, CodegenProperty, CodegenRecordField,
-    CodegenReference, CodegenSourceEntry, CodegenStatement, CodegenTypeRef, CodegenUnionCase,
+    expr_id_u32, CodegenActionHandler, CodegenComponent, CodegenComponentDescriptor,
+    CodegenComponentEmit, CodegenComponentField, CodegenComponentTargetKind, CodegenDeclaration,
+    CodegenDeclarationKind, CodegenElement, CodegenEntrypoint, CodegenExpression,
+    CodegenExpressionKind, CodegenMatchArm, CodegenModule, CodegenModuleProvenance, CodegenParam,
+    CodegenProgram, CodegenProperty, CodegenRecordField, CodegenReference, CodegenSourceEntry,
+    CodegenStatement, CodegenTypeRef, CodegenUnionCase,
 };
 use crate::options::CodegenError;
 use nx_api::{LibraryArtifact, ProgramArtifact};
@@ -588,6 +589,24 @@ fn build_component(
         None => None,
     };
 
+    let emits = contract
+        .emits
+        .iter()
+        .map(|emit| {
+            Some(CodegenComponentEmit {
+                name: emit.emit.name.as_str().to_string(),
+                action: resolve_reference_in_module_identity(
+                    artifact,
+                    resolved_module,
+                    &emit.module_identity,
+                    emit.emit.action_name.as_str(),
+                    emit.emit.span,
+                    diagnostics,
+                )?,
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+
     Some(CodegenComponent {
         is_abstract: component.is_abstract,
         is_external: component.is_external,
@@ -597,8 +616,41 @@ fn build_component(
             .collect(),
         props,
         state,
+        emits,
         body,
     })
+}
+
+/// Resolves `name` as the module with `module_identity` sees it: how an emit's action record is
+/// reached, since the emit names it in the module that wrote the `emits` clause.
+fn resolve_reference_in_module_identity(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    module_identity: &str,
+    name: &str,
+    span: TextSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<CodegenReference> {
+    let Some(declaring) = artifact
+        .resolved_program
+        .module_by_prepared_identity(module_identity)
+    else {
+        diagnostics.push(missing_semantic_data_diagnostic(
+            resolved_module,
+            &format!("declaring module '{module_identity}' of '{name}'"),
+            span,
+        ));
+        return None;
+    };
+    let Some(reference) = resolve_visible_reference(artifact, declaring.id, name) else {
+        diagnostics.push(missing_semantic_data_diagnostic(
+            declaring,
+            &format!("declaration '{name}'"),
+            span,
+        ));
+        return None;
+    };
+    Some(reference)
 }
 
 fn build_params(
@@ -1642,11 +1694,13 @@ fn build_expression(
             };
             kind
         }
+        // A handler is always the value of an element property, which `build_element_expression`
+        // builds with the element's own component reference.
         ast::Expr::ActionHandler { span, .. } => {
             diagnostics.push(unsupported_diagnostic(
                 resolved_module,
                 *span,
-                "action-handler codegen is not supported by this non-reactive executable target",
+                "an action handler outside an element property cannot be emitted",
             ));
             return None;
         }
@@ -1678,6 +1732,89 @@ fn build_expression(
     })
 }
 
+/// Builds a handler bound as a property of an element whose tag resolves to `component`: the
+/// descriptor's own reference, so the handler names the component the descriptor does however the
+/// binding module spells it.
+#[allow(clippy::too_many_arguments)]
+fn build_action_handler(
+    artifact: &ProgramArtifact,
+    resolved_module: &ResolvedModule,
+    prepared_cache: &mut PreparedModuleCache,
+    lowered_module: &LoweredModule,
+    type_env: &TypeEnvironment,
+    expr_id: ExprId,
+    component: CodegenReference,
+    scope: &mut LexicalScope,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<CodegenExpression> {
+    let ast::Expr::ActionHandler {
+        emit,
+        action_name,
+        action_module_identity,
+        owner,
+        body,
+        span: handler_span,
+        ..
+    } = lowered_module.expr(expr_id)
+    else {
+        unreachable!("build_action_handler is called for handler expressions only");
+    };
+    // The action record is declared where the emit was written, which need not be the module
+    // binding the handler; `None` means the binding's own module.
+    let action_module_identity = action_module_identity
+        .clone()
+        .unwrap_or_else(|| resolved_module.prepared_module_identity());
+    let action = resolve_reference_in_module_identity(
+        artifact,
+        resolved_module,
+        &action_module_identity,
+        action_name.as_str(),
+        *handler_span,
+        diagnostics,
+    )?;
+    let owner_reference = match owner {
+        Some(owner) => {
+            let Some(reference) =
+                resolve_visible_reference(artifact, resolved_module.id, owner.as_str())
+            else {
+                diagnostics.push(missing_semantic_data_diagnostic(
+                    resolved_module,
+                    &format!("handler owner component '{}'", owner.as_str()),
+                    *handler_span,
+                ));
+                return None;
+            };
+            Some(reference)
+        }
+        None => None,
+    };
+    scope.push();
+    scope.insert("action");
+    let body = build_expression(
+        artifact,
+        resolved_module,
+        prepared_cache,
+        lowered_module,
+        type_env,
+        *body,
+        scope,
+        diagnostics,
+    );
+    scope.pop();
+    Some(CodegenExpression {
+        expr_id: expr_id_u32(expr_id),
+        span: lowered_module.expr_span(expr_id),
+        ty: type_env.get_expr_type(expr_id).cloned(),
+        kind: CodegenExpressionKind::ActionHandler(CodegenActionHandler {
+            component,
+            emit: emit.as_str().to_string(),
+            action,
+            owner: owner_reference,
+            body: Box::new(body?),
+        }),
+    })
+}
+
 fn build_element_expression(
     artifact: &ProgramArtifact,
     resolved_module: &ResolvedModule,
@@ -1692,20 +1829,53 @@ fn build_element_expression(
     let mut mapped = CodegenElement::from_id(element_id, &element.tag);
     for entry in element.property_entries() {
         match entry {
-            PropertyEntry::Value(property) => mapped.properties.push(CodegenProperty {
-                name: property.key.as_str().to_string(),
-                value: build_expression(
-                    artifact,
-                    resolved_module,
-                    prepared_cache,
-                    lowered_module,
-                    type_env,
-                    property.value,
-                    scope,
-                    diagnostics,
-                )?,
-                span: property.span,
-            }),
+            PropertyEntry::Value(property) => {
+                let value = if matches!(
+                    lowered_module.expr(property.value),
+                    ast::Expr::ActionHandler { .. }
+                ) {
+                    let Some(component) = resolve_visible_reference(
+                        artifact,
+                        resolved_module.id,
+                        element.tag.as_str(),
+                    )
+                    .filter(|reference| reference.kind == ResolvedItemKind::Component) else {
+                        diagnostics.push(missing_semantic_data_diagnostic(
+                            resolved_module,
+                            &format!("handler component '{}'", element.tag.as_str()),
+                            property.span,
+                        ));
+                        return None;
+                    };
+                    build_action_handler(
+                        artifact,
+                        resolved_module,
+                        prepared_cache,
+                        lowered_module,
+                        type_env,
+                        property.value,
+                        component,
+                        scope,
+                        diagnostics,
+                    )?
+                } else {
+                    build_expression(
+                        artifact,
+                        resolved_module,
+                        prepared_cache,
+                        lowered_module,
+                        type_env,
+                        property.value,
+                        scope,
+                        diagnostics,
+                    )?
+                };
+                mapped.properties.push(CodegenProperty {
+                    name: property.key.as_str().to_string(),
+                    value,
+                    span: property.span,
+                });
+            }
             PropertyEntry::If { span, .. }
             | PropertyEntry::ConditionList { span, .. }
             | PropertyEntry::Match { span, .. } => {

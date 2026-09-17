@@ -130,21 +130,54 @@ cached like the previous one.
 
 ## What it does not do
 
-**Authored interaction is not supported.** The TypeScript IR runtime has no action dispatch, so
-`Tapped`, `Toggled` and the rest are not in the catalog and authored NX renders statically. DrawnUI's
-own behavior still works: scroll regions scroll, carousels swipe, drawers drag, ripples play,
-switches toggle, sliders drag. What is missing is anything that would have to run authored NX in
-response — counters, readouts, navigation, animation.
+**Handlers and state run inside components; the root is evaluated once.** The renderer holds an
+instance for every use of an authored component, keyed by its position in the drawn tree. A handler
+bound on a control inside a component body becomes that control's DrawnUI event (`onTapped` is
+`Tapped`, `onToggled` is `Toggled`, and so on through the catalog's emits); the event dispatches
+the handler against the instance whose body bound it, its `<Update ... />` patches that instance's
+state, and the drawing redraws from the root without a compile. An action a component emits goes
+to the handler its parent bound, and the parent's state is patched in turn. An action nothing in
+the tree handles — an emit nobody bound, or an action outside the component's contract that a
+handler returns, such as `<DoSearch />` from a page component — is a host effect, listed in the
+diagnostics pane with the instance that produced it; the site has no host to receive it. A dispatch
+that fails is reported there too, and leaves the drawing as it was.
+Editing the source recompiles and starts every instance again.
+
+The root function is evaluated, not instantiated, so a handler bound outside any component has
+nothing to run it: the control draws without a callback and the site says so. The pattern every
+interactive example uses is a page component:
+
+```nx
+component <Page /> = {
+  state { count:int = 0 }
+  <SkiaStack>
+    <SkiaLabel Text={if count > 0 { "tapped" } else { "untapped" }} />
+    <SkiaButton Text="Tap" onTapped=<Update count={count + 1} /> />
+  </SkiaStack>
+}
+
+<Page />
+```
+
+DrawnUI's own behavior works as before: scroll regions scroll, carousels swipe, drawers drag,
+ripples play, switches toggle, sliders drag, whether or not a handler is bound.
 
 All twenty DrawnUI demo pages at the vendored commit are ported — none is omitted — and each says
 where it stands: **complete** (no note), **static** (drawn correctly, nothing responds), or
-**reduced** (scaled down, because NX cannot express the mechanism the original demonstrates). Only
-SVG is complete today; the rest gained interaction or code-driven mechanisms upstream and say so.
-Every non-complete example names the missing capability from a fixed vocabulary —
-`event-handlers`, `animation`, `component-state`, `list-virtualization`, `code-behind` (an engine
-object built or driven from code: a shader effect, a CanvasKit filter, a sprite set, a cell class
-with drag logic) — so the gallery can be read as a coverage report on NX rather than a list of
-disclaimers.
+**reduced** (scaled down, because NX cannot express the mechanism the original demonstrates). SVG,
+Text and Shapes are complete; the rest gained interaction or code-driven mechanisms upstream and
+say so. Every non-complete example names its gap from a fixed vocabulary, and the vocabulary
+separates what NX lacks from what a port has not used: `animation`, `list-virtualization` and
+`code-behind` (an engine object built or driven from code: a shader effect, a CanvasKit filter, a
+sprite set, a cell class with drag logic) are capabilities NX does not have, while
+`event-handlers` and `component-state` are capabilities NX has and the port does not use yet. The
+gallery can be read as a coverage report on NX rather than a list of disclaimers, and a landed
+capability is never presented as missing.
+
+Most of the remaining readouts — "SelectedIndex=2", a slider's value, a tap count, a node count —
+wait on one language gap rather than on the renderer: NX has string concatenation but no
+conversion from a number to a string, so a readout that formats a number cannot be written yet.
+The examples that need one say so at the point the readout would appear.
 
 See `docs/FINDINGS.md` for the toolchain gaps this site ran into, and `docs/CATALOG.md` for where the
 catalog diverges from the DrawnUI object model.

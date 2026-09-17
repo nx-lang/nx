@@ -65,6 +65,73 @@ versions, before anything is evaluated. A truncated or altered image is refused 
 with an exception from inside the reader. `tryPrepareNxIrModule` and `tryLinkNxIrProgram` return
 the same as a result instead of throwing.
 
+## Components, instances and dispatch
+
+`initializeComponent` normalizes the props, materializes the state, renders the body and returns
+the rendered output, the initial state and an *instance*: an immutable value the host holds and
+hands back to `dispatchComponentActions`, which runs a batch and returns the rendered output, the
+effects, the next state and the next instance. Every handler in a lifecycle's rendered output is a
+record `{ $type: "ActionHandler", action, token }`; the token is how the host names that handler in
+a batch, and it is valid only for the instance returned with it. This is the `Counter` of
+`examples/nx/component.nx`:
+
+```ts
+const { rendered, instance } = initializeComponent(program, "Counter", { step: 2 });
+// rendered.children[1].onTapped is { $type: "ActionHandler", action: "Button.Tapped", token: "h1-1" }
+const next = dispatchComponentActions(program, instance, [
+  { $type: "ActionHandlerInvocation", token: "h1-1", action: { $type: "Button.Tapped" } },
+]);
+// next.state.count is 2; next.rendered carries tokens h2-1 and h2-2; next.effects is []
+const reset = dispatchComponentActions(program, next.instance, [
+  { $type: "ActionHandlerInvocation", token: "h2-2", action: { $type: "Button.Tapped" } },
+]);
+// reset.state.count is 0 and reset.effects is [{ $type: "Reset" }], for the host to route
+```
+
+A batch entry is either an action record the component emits, which runs the handler the parent
+bound under `on<Emit>` and is a no-op when none was bound, or an `ActionHandlerInvocation` naming a
+handler of the instance's most recent output by token, with the action to feed it. Entries run in
+order. A handler the component's own body bound reads the state live, so two patches in one batch
+compound, and every `<Component>.Update` it returns patches the state; every other returned record
+is an effect. A handler bound anywhere else, at the root or in a parent whose content the component
+renders, sees only what it captured, and everything it returns is an effect. A failure throws
+`NxIrRuntimeError` before anything is returned, and the instance the call was given is unchanged
+and still usable. Tokens are `h<generation>-<n>`: the generation is `1` at initialization and one
+more after every dispatch, and the number is the handler's position in a walk that visits lists in
+order and object keys in sorted order, the same walk the Rust runtime does, so the two runtimes
+hand out the same tokens for the same program.
+
+A host that initializes a child from a parent's rendered descriptor passes the descriptor's fields
+as props and the parent's instance as `options.parent`:
+
+```ts
+const page = initializeComponent(program, "Page");
+const { $type, ...props } = page.rendered.children[1];
+const searchBox = initializeComponent(program, "SearchBox", props, { parent: page.instance });
+const submitted = dispatchComponentActions(program, searchBox.instance, [
+  { $type: "SearchSubmitted", searchString: "docs" },
+]);
+// submitted.effects is [{ $type: "DoSearch", search: "docs" }], the parent's handler's result
+```
+
+Every `ActionHandler` record among the props, at any depth, is replaced by the handler the parent
+holds under its token; a token the parent does not hold is a diagnostic, and such a record with no
+parent is an unknown field. A handler property is never in the child's scope: its body cannot read
+`onSearchSubmitted`. The handler substituted is the parent's own value, not a copy: the handler a
+child's table holds under one token is the same object the parent's table holds under another, so
+a host holding both instances can find the instance whose body created a handler by looking for it
+in each ancestor's table.
+
+There is no "update props" operation. A host that has to re-render an instance whose props changed
+initializes again with the new props and `options.state` set to the state the instance holds:
+
+```ts
+const kept = initializeComponent(program, "SearchBox", { placeholder: "Find" }, { state: instance.state });
+```
+
+The state is validated as a complete state for the component, as `evaluateComponent` validates
+its state argument, and the new instance's tokens start at generation 1 again.
+
 ## Diagnostics
 
 A runtime diagnostic names the declaration the failing expression belongs to, as
@@ -80,15 +147,18 @@ runtime never reads a source file.
 | `linkNxIrProgram`, `tryLinkNxIrProgram` | Link a prepared entry module against resolved modules. |
 | `prepareNxIrProgram`, `tryPrepareNxIrProgram` | Prepare and link a self-contained artifact. |
 | `evaluateFunction` | Evaluate a function entrypoint by name with arguments. |
-| `constructComponentDescriptor`, `initializeComponent`, `evaluateComponent` | Build a component's descriptor, initialize its state, and evaluate it. |
+| `constructComponentDescriptor`, `initializeComponent`, `evaluateComponent` | Build a component's descriptor, initialize it into an instance, and evaluate it from explicit state. |
+| `dispatchComponentActions` | Run a batch of actions and handler invocations against an instance. |
 | `normalizeComponentState`, `applyComponentStatePatch` | Bring component state into its declared shape and apply a patch. |
 | `applyUpdate`, `mergeUpdates`, `diffRecords`, `changedFields` | Record update arithmetic over host-held values. |
 | `NX_IR_SCHEMA_VERSION`, `NX_IR_RUNTIME_ABI` | The schema and ABI this runtime accepts. |
+| `NX_IR_REQUIRED_FEATURE_*` | The required features this runtime knows. |
 | `nodeKinds`, `typeKinds`, `constantKinds`, `declarationKinds` | The kind numbers of the schema. |
 | `NxIrRuntimeError` | Thrown for an artifact the runtime cannot run, with its diagnostics. |
 
-The opened image (`NxIrImage`) and the prepared types (`NxPreparedModule`, `NxPreparedProgram`,
-`PreparedDeclaration`) are exported so a host can read the program it runs. The image's layout is
+The opened image (`NxIrImage`), the prepared types (`NxPreparedModule`, `NxPreparedProgram`,
+`PreparedDeclaration`) and the instance (`NxComponentInstance`) are exported so a host can read the
+program it runs and type what it holds; the instance's fields are the runtime's, not an API. The image's layout is
 documented in `docs/nx-ir-format.md`; `nxlang ir explain`, or `explainNxIr` from either SDK,
 renders one as text.
 
@@ -105,5 +175,5 @@ conformance corpus through this runtime on every build.
 | --- | --- |
 | `src/index.ts` | The whole runtime |
 | `test/runtime.test.ts` | Preparation, linking and boundary tests over images written by the test |
-| `test/corpus.test.mjs` | Evaluates every image of `specs/ir-conformance` against the interpreter's results, and refuses every truncation and cell overwrite of them |
+| `test/corpus.test.mjs` | Evaluates every image of `specs/ir-conformance` against the interpreter's results, drives every lifecycle it names, and refuses every truncation and cell overwrite of them |
 | `test/emitted-ir.test.mjs` | Compiles NX through the CLI and runs the emitted IR, comparing with the native evaluator |

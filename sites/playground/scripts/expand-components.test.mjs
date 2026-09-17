@@ -38,6 +38,34 @@ test("expanding the components runs the body and surfaces its failure", () => {
   assert.throws(() => expandComponents(program, root), /Operator 'add'/);
 });
 
+test("a child is initialized under its parent, so a handler the parent bound resolves", () => {
+  const { program, root } = evaluateRoot(`component <Child extends DrawnNode emits { Chosen { } } /> = {
+  <SkiaButton Text="Pick" onTapped=<Child.Chosen /> />
+}
+component <Page /> = {
+  state { picked:boolean = false }
+  <Child onChosen=<Update picked=true /> />
+}
+<Page />
+`);
+  assert.deepEqual(expandComponents(program, root), { inert: [] });
+});
+
+test("a handler bound outside any component is reported rather than expanded", () => {
+  const { program, root } = evaluateRoot(`action Log = { }
+component <Card extends DrawnNode content Children:DrawnNode[] /> = { <SkiaStack>{Children}</SkiaStack> }
+<Card><SkiaButton Text="Log" onTapped=<Log /> /></Card>
+`);
+  assert.deepEqual(expandComponents(program, root), { inert: ["SkiaButton.onTapped"] });
+});
+
+test("a handler bound on a control outside any component is reported, as the renderer reports it", () => {
+  const { program, root } = evaluateRoot(`action Log = { }
+<SkiaStack><SkiaButton Text="Log" onTapped=<Log /> /></SkiaStack>
+`);
+  assert.deepEqual(expandComponents(program, root), { inert: ["SkiaButton.onTapped"] });
+});
+
 test("a body that evaluates expands silently, nested uses included", () => {
   const { program, root } = evaluateRoot(`component <Chip extends DrawnNode Text:string /> = {
   <SkiaLabel Text={Text + "!"} />

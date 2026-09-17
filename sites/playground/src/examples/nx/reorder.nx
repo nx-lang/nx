@@ -5,7 +5,9 @@
 // scroll offset, and the drop glides into the new slot. Every part of that is built in code — a
 // ReorderCell class carrying the drag logic (code-behind) over a recycled ItemsSource (list
 // virtualization), a ghost the page moves per frame and a status line it rewrites (component state,
-// event handlers). None of it can be expressed in NX yet.
+// event handlers). The cell class and the recycling cannot be expressed in NX yet, and without them
+// the ghost and the status line have nothing to report on, so this port does not use handlers or
+// state.
 //
 // What is ported is the list itself: every language as a static row with its grip, title, locale
 // tag and colored stroke, in a SkiaScroll that scrolls, under the two status lines as the page

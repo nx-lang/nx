@@ -31,10 +31,12 @@ const failures = [];
 
 for (const example of examples) {
   const label = example.id;
+  const failuresBefore = failures.length;
   const path = join(appRoot, "src/examples/nx", example.file);
 
   if (!existsSync(path)) {
     failures.push(`${label}: no NX source at ${example.file}`);
+    console.log(`not ok - ${example.name}`);
     continue;
   }
   if (!COVERAGE.has(example.coverage)) {
@@ -60,6 +62,7 @@ for (const example of examples) {
     for (const diagnostic of result.diagnostics) {
       failures.push(`${label}: ${diagnostic.origin} ${diagnostic.message}`);
     }
+    console.log(`not ok - ${example.name}`);
     continue;
   }
   for (const diagnostic of result.diagnostics) {
@@ -67,9 +70,17 @@ for (const example of examples) {
   }
   try {
     const program = prepare(result.ir, catalogModule);
-    expandComponents(program, evaluateFunction(program, "root"));
+    const { inert } = expandComponents(program, evaluateFunction(program, "root"));
+    for (const where of inert) {
+      failures.push(`${label}: '${where}' binds a handler outside any component, so nothing can run it`);
+    }
   } catch (error) {
     failures.push(`${label}: evaluation failed — ${error.message}`);
+    console.log(`not ok - ${example.name}`);
+    continue;
+  }
+  if (failures.length > failuresBefore) {
+    console.log(`not ok - ${example.name}`);
     continue;
   }
   const state = example.coverage === "complete" ? "complete" : `${example.coverage} (${example.capabilities.join(", ")})`;

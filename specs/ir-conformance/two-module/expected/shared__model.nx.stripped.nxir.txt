@@ -1,5 +1,5 @@
-module shared/model.nx fingerprint 12310689997513723706
-entrypoints functions [answer makeUser] components [Card]
+module shared/model.nx fingerprint 14674601980650906756
+entrypoints functions [answer makeUser] components [Card Control]
 
 record Base abstract
   id: int = 7
@@ -22,3 +22,9 @@ component Card external
 
 function makeUser(id: int, name: string) =
   <User id=id name=name />
+
+component Control abstract external
+  emits
+    Tapped = Control.Tapped
+
+record Control.Tapped

@@ -135,7 +135,7 @@ Unless stated otherwise, numeric values must be finite JSON numbers and default 
 
 | Property | Type | Required | Meaning |
 |---|---|---:|---|
-| `format` | `string` | yes | Artifact discriminator. MVP value: `"nx-ui-json"`, following the `format` + `schemaVersion` convention already used by [NX IR JSON](nx-ir-format.md). |
+| `format` | `string` | yes | Artifact discriminator. MVP value: `"nx-ui-json"`, following the `format` + `schemaVersion` convention [NX IR](nx-ir-format.md) used when this proposal was written. NX IR has since moved to a binary image with a magic header, so the convention now stands on its own here. |
 | `schemaVersion` | `string` | yes | NX document schema version, in semantic-version form. MVP value: `"0.1.0"`. |
 | `catalogs` | `CatalogUse[]` | yes | Catalogs and exact versions needed to interpret component types. |
 | `root` | `ElementId` | yes | ID of the single root element. |

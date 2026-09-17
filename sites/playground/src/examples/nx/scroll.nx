@@ -7,7 +7,8 @@
 // Scrolling, snapping, the scroll bars and the pull all work here: they are the control's own.
 // What is missing is what the original wires from outside — the RefreshCommand that puts the
 // scroll into its refreshing state for two seconds, and the CurrentIndex readouts in two card
-// titles — which need event handlers and component state. Without a command the indicator follows
+// titles — which this port does not drive yet (event handlers, component state; the readouts
+// format numbers, which NX cannot turn into text). Without a command the indicator follows
 // the pull and springs back.
 
 component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = {

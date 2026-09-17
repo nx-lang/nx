@@ -293,6 +293,12 @@ export abstract external component
   VirtualisationInflated: float64?
   WidthRequest: float64?
   ZIndex: float64?
+  emits {
+    ChildTapped { }
+    ConsumeGestures { }
+    ContextMenu { }
+    Tapped { }
+  }
 />
 
 export abstract external component
@@ -338,6 +344,10 @@ export abstract external component
   DefaultFrame: float64?
   Repeat: float64?
   SpeedRatio: float64?
+  emits {
+    Finished { }
+    Started { }
+  }
 />
 
 export abstract external component
@@ -390,6 +400,10 @@ export abstract external component
   VerticalOffset: float64?
   ZoomX: float64?
   ZoomY: float64?
+  emits {
+    Error { }
+    Success { source:string }
+  }
 />
 
 export abstract external component
@@ -403,6 +417,9 @@ export abstract external component
   IsAnimated: boolean?
   IsToggled: boolean?
   RespondsToGestures: boolean?
+  emits {
+    Toggled { value:boolean }
+  }
 />
 
 export abstract external component
@@ -415,6 +432,11 @@ export abstract external component
   RubberDamping: float64?
   RubberEffect: float64?
   SnapDistanceRatio: float64?
+  emits {
+    Scrolled { }
+    Stopped { }
+    TransitionChanged { inTransition:boolean }
+  }
 />
 
 export abstract external component
@@ -428,6 +450,11 @@ export abstract external component
   SelectedIndex: float64?
   SidesOffset: float64?
   SwipeSpeed: float64?
+  emits {
+    ItemAppearing { index:float64 }
+    ItemDisappearing { index:float64 }
+    SelectedIndexChanged { index:float64 }
+  }
 />
 
 export external component
@@ -505,6 +532,12 @@ export external component
   UseMarkdown: boolean?
   UseUnicode: boolean?
   VerticalTextAlignment: TextAlignment?
+  emits {
+    CursorMoved { }
+    FocusChanged { focused:boolean }
+    TextChanged { text:string }
+    TextSubmitted { text:string }
+  }
 />
 
 export external component
@@ -524,6 +557,10 @@ export external component
   RenderWidthUnits: float64?
   Rows: float64?
   Source: string?
+  emits {
+    Error { }
+    Success { source:string }
+  }
 />
 
 export external component
@@ -550,6 +587,9 @@ export external component
   StrikeoutColor: string?
   UnderlineLink: boolean?
   UnderlineWidth: float64?
+  emits {
+    LinkTapped { url:string }
+  }
 />
 
 export external component
@@ -570,11 +610,18 @@ export external component
   TextColor: string?
   Underline: boolean?
   UnderlineWidth: float64?
+  emits {
+    Tapped { }
+  }
 />
 
 export external component
 <SkiaHotspot extends SkiaControl
   LockPanning: boolean?
+  emits {
+    Down { }
+    Up { }
+  }
 />
 
 export external component
@@ -592,6 +639,10 @@ export external component
   StrokeWidth: float64?
   Text: string?
   TextColor: string?
+  emits {
+    Down { }
+    Up { }
+  }
 />
 
 export external component <SkiaImage extends SkiaImageBase />
@@ -614,6 +665,10 @@ export external component
   SvgString: string?
   TintColor: string?
   VerticalAlignment: DrawImageAlignment?
+  emits {
+    Error { }
+    Success { source:string }
+  }
 />
 
 export external component
@@ -625,6 +680,10 @@ export external component
   IsOn: boolean?
   Source: string?
   StopAtCurrentFrame: boolean?
+  emits {
+    Error { }
+    Success { source:string }
+  }
 />
 
 export external component
@@ -633,6 +692,10 @@ export external component
   HorizontalAlignment: DrawImageAlignment?
   Source: string?
   VerticalAlignment: DrawImageAlignment?
+  emits {
+    Error { }
+    Success { source:string }
+  }
 />
 
 export external component
@@ -670,6 +733,13 @@ export external component
   ViewportOffsetX: float64?
   ViewportOffsetY: float64?
   content Children: DrawnNode[]?
+  emits {
+    CurrentIndexChanged { index:float64 }
+    LoadMoreCommand { }
+    LoadMoreTopCommand { }
+    RefreshCommand { }
+    Scrolled { }
+  }
 />
 
 export external component
@@ -742,6 +812,10 @@ export external component
   ThumbColor: string?
   TrackColor: string?
   TrackSelectedColor: string?
+  emits {
+    EndChanged { value:float64 }
+    StartChanged { value:float64 }
+  }
 />
 
 export external component
@@ -756,6 +830,9 @@ export external component
   TransitionShaderCode: string?
   TransitionTemplate: string?
   content Children: DrawnNode[]?
+  emits {
+    FromToChanged { }
+  }
 />
 
 export external component
@@ -766,4 +843,8 @@ export external component
   HeaderSize: float64?
   IsOpen: boolean?
   content Children: DrawnNode[]?
+  emits {
+    IsOpenChanged { isOpen:boolean }
+    StateTransitionComplete { isOpen:boolean }
+  }
 />

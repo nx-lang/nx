@@ -446,10 +446,10 @@ let root(): QuestionFlow[] = { omitted() explicit() }`
   });
 
   it("preserves source labels for IR generation diagnostics", () => {
+    // A conditional property fragment is a construct NX IR has no node for.
     const error = captureEvaluationError(() => {
-      generateNxIrFromSource(`external component <SearchBox emits { SearchRequested { query:string } } />
-action DoSearch = { query:string }
-let root() = { <SearchBox onSearchRequested=<DoSearch query={action.query} /> /> }`);
+      generateNxIrFromSource(`external component <Notice density:string />
+let root(compact:boolean) = { <Notice if compact { density="tight" } else { density="normal" } /> }`);
     });
     const diagnostic = error.diagnostics.find((item) => item.code === "codegen-unsupported-construct");
     if (diagnostic === undefined) {

@@ -21,9 +21,9 @@ pub use emit::{
 pub use ir::{
     build_nx_ir_artifacts, emit_codegen_nx_ir, emit_nx_ir, kinds as nx_ir_kinds, GeneratedNxIr,
     IrItem, NxIrArtifact, NxIrDebug, NxIrDebugSpans, NxIrEmitOptions, NxIrMetadata,
-    NxIrModuleEntry, NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
-    NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
-    NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
+    NxIrModuleEntry, NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1,
+    NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
+    NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
 };
 pub use ir_bundle::{read_nx_ir_bundle, write_nx_ir_bundle, NxIrBundleEntry};
 pub use ir_explain::{explain_nx_ir, explain_nx_ir_image, ExplainError};
@@ -32,10 +32,11 @@ pub use ir_image::{
     NxIrModuleRef, Table as NxIrTable, NONE as NX_IR_NONE, NX_IR_MAGIC,
 };
 pub use model::{
-    CodegenComponent, CodegenComponentDescriptor, CodegenComponentField, CodegenDeclaration,
-    CodegenDeclarationKind, CodegenElement, CodegenEntrypoint, CodegenExpression,
-    CodegenExpressionKind, CodegenMatchArm, CodegenModule, CodegenModuleProvenance, CodegenProgram,
-    CodegenReference, CodegenSourceEntry, CodegenTypeRef, CodegenUnsupportedConstruct,
+    CodegenActionHandler, CodegenComponent, CodegenComponentDescriptor, CodegenComponentEmit,
+    CodegenComponentField, CodegenDeclaration, CodegenDeclarationKind, CodegenElement,
+    CodegenEntrypoint, CodegenExpression, CodegenExpressionKind, CodegenMatchArm, CodegenModule,
+    CodegenModuleProvenance, CodegenProgram, CodegenReference, CodegenSourceEntry, CodegenTypeRef,
+    CodegenUnsupportedConstruct,
 };
 pub use options::{
     CodegenError, CodegenOptions, CodegenOutput, CodegenOutputFormat, CodegenTarget,

@@ -15,12 +15,18 @@ export const NX_IR_RUNTIME_ABI = "nx-ir-runtime-v2";
 export const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1 = "update-records-v1";
 export const NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1 = "property-unions-v1";
 export const NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1 = "update-intrinsics-v1";
+export const NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1 = "action-handlers-v1";
 
 const knownFeatures = new Set([
   NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
   NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
   NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
+  NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1,
 ]);
+
+/** The `$type` of a rendered handler, and of the batch entry that invokes one by token. */
+const actionHandlerTypeName = "ActionHandler";
+const handlerInvocationTypeName = "ActionHandlerInvocation";
 
 // ------------------------------------------------------------------------------------------------
 // The image as the compiler writes it
@@ -508,6 +514,7 @@ export const nodeKinds = {
   unionCase: 16,
   element: 17,
   component: 18,
+  actionHandler: 19,
 } as const;
 
 export const typeKinds = { primitive: 0, nominal: 1, array: 2, nullable: 3 } as const;
@@ -624,6 +631,12 @@ export interface PreparedUnionCase {
   readonly isConstant: boolean;
 }
 
+/** One action a component emits: the local name a parent binds as `on<Name>`, and its record. */
+export interface PreparedEmit {
+  readonly name: string;
+  readonly action: NxIrReference;
+}
+
 export type PreparedDeclarationKind =
   | { readonly tag: "function"; readonly params: readonly PreparedParam[]; readonly body: number }
   | { readonly tag: "value"; readonly value: number }
@@ -642,6 +655,8 @@ export type PreparedDeclarationKind =
       readonly body: number;
       readonly isAbstract: boolean;
       readonly isExternal: boolean;
+      /** The effective emits, inherited included, in declaration order. */
+      readonly emits: readonly PreparedEmit[];
     }
   | {
       readonly tag: "union";
@@ -756,13 +771,82 @@ export interface NxRuntimeOptions {
   readonly maxCallDepth?: number;
 }
 
+/**
+ * A handler as the runtime holds it between the render that created it and the dispatch that
+ * runs it. Opaque to hosts: it reaches them only as an `ActionHandler` record in canonical output,
+ * and comes back only as a token.
+ */
+export interface ActionHandlerValue {
+  readonly $nxKind: "actionHandler";
+  /** The module and declaration the handler node was written in, where its body is evaluated. */
+  readonly linked: LinkedModule;
+  readonly declaration: PreparedDeclaration;
+  /** The declaration key of the component whose emit the handler answers. */
+  readonly component: string;
+  /** That component's declaration name, for diagnostics. */
+  readonly componentName: string;
+  readonly emit: string;
+  /** The action record the handler accepts; its declaration name is the public action name. */
+  readonly action: { readonly linked: LinkedModule; readonly declaration: PreparedDeclaration };
+  readonly actionSlot: number;
+  /** The declaration key of the component whose body bound the handler, or `undefined` at the root. */
+  readonly owner: string | undefined;
+  readonly body: number;
+  /** The frame as it stood when the handler was created: the by-value capture. */
+  readonly captured: readonly NxCanonicalValue[];
+}
+
+/**
+ * A component instance: what dispatch needs to run a batch against a component that initialization
+ * or a previous dispatch rendered. Opaque to hosts and never modified; every dispatch returns a new
+ * one, and the one it was given stays valid for a retry.
+ */
+export interface NxComponentInstance {
+  readonly component: string;
+  readonly declaration: PreparedDeclaration;
+  /** The declared props, normalized. */
+  readonly props: Readonly<Record<string, NxCanonicalValue>>;
+  /** The handlers the parent bound, by property name (`onTapped`). Never in the body's scope. */
+  readonly handlerProps: ReadonlyMap<string, ActionHandlerValue>;
+  readonly state: Readonly<Record<string, NxCanonicalValue>>;
+  /** The handlers in the most recent rendered output, by the token that output carries. */
+  readonly handlers: ReadonlyMap<string, ActionHandlerValue>;
+  /** The render generation the tokens belong to. */
+  readonly generation: number;
+}
+
+export interface ComponentInitOptions extends NxRuntimeOptions {
+  /**
+   * The instance whose rendered output the props were read from. Every `ActionHandler` record in
+   * the props, at any depth, is replaced by the handler that instance holds under the record's
+   * token, which is how a parent's binding reaches a child the host initializes.
+   */
+  readonly parent?: NxComponentInstance;
+  /**
+   * The state to use in place of the initial one, validated as a complete state for the component.
+   * Initializing again with the state an instance holds and new props is how a host re-renders an
+   * instance whose props changed without losing its state.
+   */
+  readonly state?: Readonly<Record<string, NxCanonicalValue>>;
+}
+
 export interface ComponentInitResult {
   readonly rendered: NxCanonicalValue;
   readonly state: Record<string, NxCanonicalValue>;
+  readonly instance: NxComponentInstance;
 }
 
 export interface ComponentEvaluateResult {
   readonly rendered: NxCanonicalValue;
+}
+
+export interface ComponentDispatchResult {
+  /** The body rendered against the next state, its handlers carrying fresh tokens. */
+  readonly rendered: NxCanonicalValue;
+  /** Everything the handlers returned for the host, in dispatch order. */
+  readonly effects: readonly NxCanonicalValue[];
+  readonly state: Record<string, NxCanonicalValue>;
+  readonly instance: NxComponentInstance;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -949,6 +1033,7 @@ const FIELD: readonly Op[] = ["str", "type", "optNode", "int"];
 const PARAM: readonly Op[] = ["str", "type", "int"];
 const ARM: readonly Op[] = [{ list: NODES }, "node"];
 const UNION_CASE: readonly Op[] = ["str", { list: FIELD }, "int"];
+const EMIT: readonly Op[] = ["str", "ref"];
 
 /** The operands after the kind cell, by table and kind number. */
 const layouts: Record<NxIrTable, readonly (readonly Op[])[]> = {
@@ -974,12 +1059,13 @@ const layouts: Record<NxIrTable, readonly (readonly Op[])[]> = {
     ["ref", "str", { list: PROPERTY }, { list: NODES }],
     ["int", "str", { list: PROPERTY }, { list: NODES }],
     ["ref", { list: PROPERTY }, { list: NODES }],
+    ["ref", "str", "ref", "int", "optRef", "node"],
   ],
   declarations: [
     ["str", { list: PARAM }, "node"],
     ["str", "node"],
     ["str", { list: FIELD }, { list: REFS }, "int", "optRef"],
-    ["str", { list: FIELD }, { list: FIELD }, "optNode", "int"],
+    ["str", { list: FIELD }, { list: FIELD }, "optNode", "int", { list: EMIT }],
     ["str", { list: UNION_CASE }, { list: REFS }, "optRef"],
     ["str"],
   ],
@@ -1238,6 +1324,10 @@ class TableReader {
         const state = this.#fields(cursor);
         const body = this.#optNode(cursor);
         const flags = cursor.next();
+        const emits = this.#list(cursor, (): PreparedEmit => {
+          const emitName = this.#image.string(cursor.next());
+          return { name: emitName, action: this.#ref(cursor) };
+        });
         prepared = {
           tag: "component",
           props,
@@ -1245,6 +1335,7 @@ class TableReader {
           body,
           isAbstract: (flags & componentFlags.abstract) !== 0,
           isExternal: (flags & componentFlags.external) !== 0,
+          emits,
         };
         break;
       }
@@ -1439,7 +1530,7 @@ export function evaluateFunction(
   if (declaration === undefined || declaration.kind.tag !== "function") {
     fail("nx-ir-missing-entrypoint", `Function entrypoint '${name}' was not found.`);
   }
-  return invokeFunction(linkedProgram, linkedProgram.entry, declaration, args, options, 0);
+  return canonicalizeRendered(invokeFunction(linkedProgram, linkedProgram.entry, declaration, args, options, 0)).value;
 }
 
 export function constructComponentDescriptor(
@@ -1450,7 +1541,7 @@ export function constructComponentDescriptor(
 ): NxCanonicalValue {
   const linkedProgram = programOf(program);
   const { declaration, component } = componentDeclaration(linkedProgram, name);
-  const input = { ...props };
+  const { fields: input, handlers } = splitHandlerProperties(linkedProgram.entry, declaration, props, `${name} props`);
   const contentField = component.props.find((field) => field.isContent);
   applyContentBinding(input, contentField?.name, component.props, content, name);
   const normalized = normalizeFields(
@@ -1463,32 +1554,50 @@ export function constructComponentDescriptor(
     `${name} props`,
     false,
   );
-  return { $type: declaration.name, ...normalized };
+  return canonicalizeRendered({ $type: declaration.name, ...normalized, ...handlerObject(handlers) }).value;
 }
 
 export function initializeComponent(
   program: NxPreparedProgram | NxPreparedModule,
   name: string,
   props: Record<string, NxCanonicalValue> = {},
-  options: NxRuntimeOptions = {},
+  options: ComponentInitOptions = {},
 ): ComponentInitResult {
   const linkedProgram = programOf(program);
   const { declaration, component } = componentDeclaration(linkedProgram, name);
   if (component.isAbstract || component.body < 0) {
     fail("nx-ir-component", `Component '${name}' cannot be initialized because it has no body.`);
   }
+  const path = `${name} props`;
+  const resolved = resolveParentHandlersInProps(props, options.parent, path);
+  const { fields, handlers: handlerProps } = splitHandlerProperties(linkedProgram.entry, declaration, resolved, path);
   const frame: NxCanonicalValue[] = [];
-  normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.props, props, frame, `${name} props`, false);
-  const state = normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, {}, frame, `${name} state`, false);
-  const rendered = evalNode(component.body, {
-    program: linkedProgram,
-    linked: linkedProgram.entry,
+  const normalizedProps = normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.props, fields, frame, path, false);
+  const state =
+    options.state === undefined
+      ? normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, {}, frame, `${name} state`, false)
+      : normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, { ...options.state }, frame, `${name} state`, true);
+  const { value: rendered, handlers } = canonicalizeRendered(
+    evalNode(component.body, {
+      program: linkedProgram,
+      linked: linkedProgram.entry,
+      declaration,
+      frame,
+      options,
+      depth: 0,
+    }),
+    1,
+  );
+  const instance = freezeInstance({
+    component: name,
     declaration,
-    frame,
-    options,
-    depth: 0,
+    props: normalizedProps,
+    handlerProps,
+    state,
+    handlers,
+    generation: 1,
   });
-  return { rendered, state };
+  return { rendered, state: { ...state }, instance };
 }
 
 export function evaluateComponent(
@@ -1503,18 +1612,126 @@ export function evaluateComponent(
   if (component.isAbstract || component.body < 0) {
     fail("nx-ir-component", `Component '${name}' cannot be evaluated because it has no body.`);
   }
+  const path = `${name} props`;
+  const { fields } = splitHandlerProperties(linkedProgram.entry, declaration, props, path);
   const frame: NxCanonicalValue[] = [];
-  normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.props, props, frame, `${name} props`, false);
+  normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.props, fields, frame, path, false);
   normalizeFields(linkedProgram, linkedProgram.entry, declaration, component.state, state, frame, `${name} state`, true);
   return {
-    rendered: evalNode(component.body, {
-      program: linkedProgram,
-      linked: linkedProgram.entry,
-      declaration,
-      frame,
-      options,
-      depth: 0,
-    }),
+    rendered: canonicalizeRendered(
+      evalNode(component.body, {
+        program: linkedProgram,
+        linked: linkedProgram.entry,
+        declaration,
+        frame,
+        options,
+        depth: 0,
+      }),
+    ).value,
+  };
+}
+
+/**
+ * Dispatches a batch against an instance and returns the next one, without touching the instance
+ * given. Each entry is either an action the component emits, which runs the handler the parent
+ * bound on the instance's props, or an `ActionHandlerInvocation` naming a handler of the
+ * instance's most recent rendered output by token, with the action to feed it. Entries run in
+ * order. A handler the component's own body bound reads the state live and patches it with the
+ * component's update records; any other handler sees only what it captured, and everything it
+ * returns is an effect. The body is rendered once against the state the batch produced. A failure
+ * throws before anything is returned, so the instance given stays the state of record.
+ */
+export function dispatchComponentActions(
+  program: NxPreparedProgram | NxPreparedModule,
+  instance: NxComponentInstance,
+  batch: readonly NxCanonicalValue[],
+  options: NxRuntimeOptions = {},
+): ComponentDispatchResult {
+  const linkedProgram = programOf(program);
+  const { declaration, component } = componentDeclaration(linkedProgram, instance.component);
+  if (declaration !== instance.declaration) {
+    fail("nx-ir-component", `The instance of '${instance.component}' was initialized by another program.`);
+  }
+  const linked = linkedProgram.entry;
+  const ownerKey = `${linked.module.identity}::${declaration.name}`;
+  let working: Record<string, NxCanonicalValue> = { ...instance.state };
+  const effects: NxCanonicalValue[] = [];
+
+  batch.forEach((entry, index) => {
+    const path = `dispatch entry ${index}`;
+    const object = requireObject(entry, path);
+    if (object.$type === handlerInvocationTypeName) {
+      const token = object.token;
+      if (typeof token !== "string") {
+        fail("nx-ir-boundary-type", `Expected ${path} to carry a string 'token' read from rendered output.`);
+      }
+      const handler = instance.handlers.get(token);
+      if (handler === undefined) {
+        fail("nx-ir-handler-token", `Unknown handler token '${token}' for the '${instance.component}' instance.`);
+      }
+      const owned = handler.owner === ownerKey;
+      const results = invokeHandler(
+        linkedProgram,
+        handler,
+        requireObject(object.action ?? null, `${path}.action`),
+        owned ? { component, state: working } : undefined,
+        options,
+      );
+      for (const result of results) {
+        if (owned && isUpdateRecordFor(result, linkedProgram, ownerKey)) {
+          working = patchComponentState(linkedProgram, linked, declaration, component, working, result as NxRecordObject);
+        } else {
+          effects.push(result);
+        }
+      }
+      return;
+    }
+    const typeName = object.$type;
+    if (typeof typeName !== "string") {
+      fail("nx-ir-boundary-type", `Expected ${path} to be an action record with a '$type' discriminator.`);
+    }
+    const emit = component.emits.find((candidate) => resolveReference(linked, candidate.action.slot, candidate.action.name).declaration.name === typeName);
+    if (emit === undefined) {
+      fail("nx-ir-component-action", `Component '${instance.component}' does not emit '${typeName}'.`);
+    }
+    // The entry is host input, so it is constructed against the emitted action before the handler
+    // is looked up: a malformed payload fails whether or not the parent bound one.
+    const action = normalizeActionInput(linkedProgram, resolveReference(linked, emit.action.slot, emit.action.name), object, `${typeName} action`);
+    const handler = instance.handlerProps.get(handlerPropertyName(emit.name));
+    if (handler !== undefined) {
+      // The parent bound this handler, so everything it returns belongs to the parent, via the host.
+      effects.push(...invokeHandler(linkedProgram, handler, action, undefined, options));
+    }
+  });
+
+  // The body sees the declared props and the state, as it did at initialization; the handler
+  // props the parent bound are carried by the instance but were never in scope.
+  const frame: NxCanonicalValue[] = [];
+  component.props.forEach((field, index) => {
+    frame[index] = instance.props[field.name] ?? null;
+  });
+  component.state.forEach((field, index) => {
+    frame[component.props.length + index] = working[field.name] ?? null;
+  });
+  const generation = instance.generation + 1;
+  const { value: rendered, handlers } = canonicalizeRendered(
+    evalNode(component.body, { program: linkedProgram, linked, declaration, frame, options, depth: 0 }),
+    generation,
+  );
+  const next = freezeInstance({
+    component: instance.component,
+    declaration,
+    props: instance.props,
+    handlerProps: instance.handlerProps,
+    state: working,
+    handlers,
+    generation,
+  });
+  return {
+    rendered,
+    effects: effects.map((effect) => canonicalizeRendered(effect).value),
+    state: { ...working },
+    instance: next,
   };
 }
 
@@ -1544,8 +1761,21 @@ export function applyComponentStatePatch(
 ): Record<string, NxCanonicalValue> {
   const linkedProgram = programOf(program);
   const { declaration, component } = componentDeclaration(linkedProgram, name);
+  return patchComponentState(linkedProgram, linkedProgram.entry, declaration, component, currentState, patch);
+}
+
+/** Applies a patch to a component's state with full validation: what `applyComponentStatePatch` and dispatch share. */
+function patchComponentState(
+  program: NxPreparedProgram,
+  linked: LinkedModule,
+  declaration: PreparedDeclaration,
+  component: Extract<PreparedDeclarationKind, { tag: "component" }>,
+  currentState: Readonly<Record<string, NxCanonicalValue>>,
+  patch: Readonly<Record<string, NxCanonicalValue>>,
+): Record<string, NxCanonicalValue> {
+  const name = declaration.name;
   const { $type: discriminator, ...fields } = patch;
-  const expectedUpdate = `${declaration.name}.Update`;
+  const expectedUpdate = `${name}.Update`;
   if (discriminator !== undefined && discriminator !== expectedUpdate) {
     fail("nx-ir-state-patch", `Cannot apply '${String(discriminator)}' to ${name} state; only '${expectedUpdate}' patches it.`);
   }
@@ -1556,16 +1786,7 @@ export function applyComponentStatePatch(
     }
   }
   const frame: NxCanonicalValue[] = new Array<NxCanonicalValue>(component.props.length).fill(null);
-  return normalizeFields(
-    linkedProgram,
-    linkedProgram.entry,
-    declaration,
-    component.state,
-    { ...currentState, ...fields },
-    frame,
-    `${name} state`,
-    true,
-  );
+  return normalizeFields(program, linked, declaration, component.state, { ...currentState, ...fields }, frame, `${name} state`, true);
 }
 
 function componentDeclaration(
@@ -1599,6 +1820,11 @@ interface FunctionReferenceValue {
   readonly $nxKind: "functionReference";
   readonly linked: LinkedModule;
   readonly declaration: PreparedDeclaration;
+}
+
+/** An internal value smuggled through `NxCanonicalValue` positions until the boundary. */
+function internal(value: FunctionReferenceValue | ActionHandlerValue): NxCanonicalValue {
+  return value as unknown as NxCanonicalValue;
 }
 
 function resolveReference(linked: LinkedModule, slot: number, name: string): { linked: LinkedModule; declaration: PreparedDeclaration } {
@@ -1793,9 +2019,37 @@ function evalNode(index: number, context: EvalContext): NxCanonicalValue {
     }
     case nodeKinds.component:
       return evalComponentDescriptor(context, index, entry);
+    case nodeKinds.actionHandler:
+      return evalActionHandler(context, entry);
     default:
       fail("nx-ir-expression", `Unknown NX IR node kind '${String(entry[0])}'.`, context, index);
   }
+}
+
+/**
+ * `[19, ref, str, ref, slot, ref?, node]`: the component and emit the handler answers, the action
+ * record it accepts, the slot of its `action` binding, its owner, and its body. Nothing is
+ * evaluated here beyond copying the frame, which is the by-value capture the interpreter takes.
+ */
+function evalActionHandler(context: EvalContext, entry: Uint32Array): NxCanonicalValue {
+  const image = context.linked.module.artifact;
+  const component = resolveReference(context.linked, entry[1]!, image.string(entry[2]!));
+  const action = resolveReference(context.linked, entry[4]!, image.string(entry[5]!));
+  const ownerSlot = entry[7]!;
+  const owner = ownerSlot === NX_IR_NONE ? undefined : resolveReference(context.linked, ownerSlot, image.string(entry[8]!));
+  return internal({
+    $nxKind: "actionHandler",
+    linked: context.linked,
+    declaration: context.declaration,
+    component: `${component.linked.module.identity}::${component.declaration.name}`,
+    componentName: component.declaration.name,
+    emit: image.string(entry[3]!),
+    action,
+    actionSlot: entry[6]!,
+    owner: owner === undefined ? undefined : `${owner.linked.module.identity}::${owner.declaration.name}`,
+    body: entry[9]!,
+    captured: context.frame.slice(),
+  });
 }
 
 const float64Cells = new Uint32Array(2);
@@ -1829,7 +2083,7 @@ function evalConstant(context: EvalContext, constantIndex: number, nodeIndex: nu
 function evalReference(context: EvalContext, slot: number, name: string, nodeIndex: number): NxCanonicalValue {
   const { linked, declaration } = resolveReference(context.linked, slot, name);
   if (declaration.kind.tag === "function") {
-    return { $nxKind: "functionReference", linked, declaration } as unknown as NxCanonicalValue;
+    return internal({ $nxKind: "functionReference", linked, declaration });
   }
   if (declaration.kind.tag === "value") {
     return evalNode(declaration.kind.value, {
@@ -1903,12 +2157,264 @@ function evalComponentDescriptor(context: EvalContext, nodeIndex: number, entry:
     fail("nx-ir-component", `'${name}' is not a component.`, context, nodeIndex);
   }
   const component = declaration.kind;
-  const { properties: props, next } = propertiesAt(context, entry, 3);
+  const { properties, next } = propertiesAt(context, entry, 3);
   const content = nodesAt(context, entry, next).values;
+  const { fields: props, handlers } = splitHandlerProperties(linked, declaration, properties, `${name} props`);
   const contentField = component.props.find((field) => field.isContent)?.name;
   applyContentBinding(props, contentField, component.props, content, name);
   const normalized = normalizeFields(context.program, linked, declaration, component.props, props, [], `${name} props`, false);
-  return { $type: name, ...normalized };
+  return { $type: name, ...normalized, ...handlerObject(handlers) };
+}
+
+// ------------------------------------------------------------------------------------------------
+// Action handlers: properties, canonical output, instances and dispatch
+// ------------------------------------------------------------------------------------------------
+
+/** The property a parent binds a handler for `emit` under: `onTapped` for `Tapped`. */
+function handlerPropertyName(emit: string): string {
+  return `on${emit}`;
+}
+
+function handlerObject(handlers: ReadonlyMap<string, ActionHandlerValue>): Record<string, NxCanonicalValue> {
+  const output: Record<string, NxCanonicalValue> = {};
+  for (const [name, handler] of handlers) {
+    output[name] = internal(handler);
+  }
+  return output;
+}
+
+/**
+ * Splits a component's handler properties from its declared props. A property named `on<Emit>` for
+ * an emit the component declares is a handler property: it is not a prop, a body cannot read it,
+ * and it goes around normalization to ride on the descriptor or the instance. Its value must be a
+ * handler for that very emit of that very component. A handler under any other name matches no
+ * emit, and an `ActionHandler` record names a handler only through a parent instance.
+ */
+function splitHandlerProperties(
+  linked: LinkedModule,
+  declaration: PreparedDeclaration,
+  input: Readonly<Record<string, NxCanonicalValue>>,
+  path: string,
+): { fields: Record<string, NxCanonicalValue>; handlers: Map<string, ActionHandlerValue> } {
+  const component = declaration.kind;
+  if (component.tag !== "component") {
+    fail("nx-ir-component", `'${declaration.name}' is not a component.`);
+  }
+  const componentKey = `${linked.module.identity}::${declaration.name}`;
+  const emitsByProperty = new Map(component.emits.map((emit) => [handlerPropertyName(emit.name), emit]));
+  const fields: Record<string, NxCanonicalValue> = {};
+  const handlers = new Map<string, ActionHandlerValue>();
+  for (const [key, value] of Object.entries(input)) {
+    const emit = emitsByProperty.get(key);
+    if (emit === undefined) {
+      if (isActionHandler(value)) {
+        fail("nx-ir-boundary-field", `Unknown ${path} field '${key}': '${declaration.name}' emits nothing a handler named '${key}' would answer.`);
+      }
+      fields[key] = value;
+      continue;
+    }
+    if (isCanonicalActionHandler(value)) {
+      fail("nx-ir-boundary-field", `Unknown ${path} field '${key}': an ActionHandler record names a handler only through a parent instance.`);
+    }
+    if (!isActionHandler(value)) {
+      fail("nx-ir-type", `Expected ${path}.${key} to be an action handler for ${declaration.name}.${emit.name}.`);
+    }
+    if (value.component !== componentKey || value.emit !== emit.name) {
+      // Two components of one name in different modules are told apart by their keys.
+      const [expected, got] =
+        value.componentName === declaration.name ? [componentKey, value.component] : [declaration.name, value.componentName];
+      fail(
+        "nx-ir-type",
+        `Expected ${path}.${key} to be an action handler for ${expected}.${emit.name}, got one for ${got}.${value.emit}.`,
+      );
+    }
+    handlers.set(key, value);
+  }
+  return { fields, handlers };
+}
+
+/**
+ * Replaces every `ActionHandler` record in host-supplied props, at any depth, by the handler the
+ * parent instance holds under its token. Without a parent such a record names nothing.
+ */
+function resolveParentHandlers(
+  value: NxCanonicalValue,
+  parent: NxComponentInstance | undefined,
+  path: string,
+): NxCanonicalValue {
+  if (Array.isArray(value)) {
+    return value.map((item, index) => resolveParentHandlers(item, parent, `${path}[${index}]`));
+  }
+  if (!isObject(value)) {
+    return value;
+  }
+  if (isCanonicalActionHandler(value)) {
+    if (parent === undefined) {
+      fail("nx-ir-boundary-field", `Unknown field ${path}: an ActionHandler record names a handler only through a parent instance.`);
+    }
+    const token = value.token;
+    const handler = typeof token === "string" ? parent.handlers.get(token) : undefined;
+    if (handler === undefined) {
+      fail("nx-ir-handler-token", `Unknown handler token '${String(token)}' at ${path} for the '${parent.component}' instance.`);
+    }
+    return internal(handler);
+  }
+  const output: Record<string, NxCanonicalValue> = {};
+  for (const [key, item] of Object.entries(value)) {
+    output[key] = resolveParentHandlers(item, parent, `${path}.${key}`);
+  }
+  return output;
+}
+
+function resolveParentHandlersInProps(
+  props: Readonly<Record<string, NxCanonicalValue>>,
+  parent: NxComponentInstance | undefined,
+  path: string,
+): Record<string, NxCanonicalValue> {
+  return resolveParentHandlers(props, parent, path) as Record<string, NxCanonicalValue>;
+}
+
+/**
+ * Turns a rendered tree into canonical output, replacing every handler by its `ActionHandler`
+ * record: the public name of the action it accepts and, when a generation is given, a token
+ * `h<generation>-<n>` numbered by a walk that visits lists in order and object keys in sorted
+ * order, which is the interpreter's walk, so the two runtimes agree on every token. The handlers
+ * met are returned by token, for the instance that owns the output.
+ */
+function canonicalizeRendered(value: NxCanonicalValue, generation?: number): { value: NxCanonicalValue; handlers: Map<string, ActionHandlerValue> } {
+  const handlers = new Map<string, ActionHandlerValue>();
+  const walk = (item: NxCanonicalValue): NxCanonicalValue => {
+    if (Array.isArray(item)) {
+      return item.map(walk);
+    }
+    if (!isObject(item)) {
+      return item;
+    }
+    if (isActionHandler(item)) {
+      const record: Record<string, NxCanonicalValue> = { $type: actionHandlerTypeName, action: item.action.declaration.name };
+      if (generation !== undefined) {
+        const token = `h${generation}-${handlers.size + 1}`;
+        handlers.set(token, item);
+        record.token = token;
+      }
+      return record;
+    }
+    if (isFunctionReference(item)) {
+      return item;
+    }
+    // Keys are visited in sorted order so the numbering matches, and written back in their own
+    // order so the output reads as the declaration does.
+    const canonical = new Map<string, NxCanonicalValue>();
+    for (const key of Object.keys(item).sort()) {
+      canonical.set(key, walk(item[key]!));
+    }
+    const output: Record<string, NxCanonicalValue> = {};
+    for (const key of Object.keys(item)) {
+      output[key] = canonical.get(key)!;
+    }
+    return output;
+  };
+  return { value: walk(value), handlers };
+}
+
+function freezeInstance(instance: NxComponentInstance): NxComponentInstance {
+  Object.freeze(instance.props);
+  Object.freeze(instance.state);
+  return Object.freeze(instance);
+}
+
+/** Constructs a host-supplied action against the record the emit declares, defaults and all. */
+function normalizeActionInput(
+  program: NxPreparedProgram,
+  action: { linked: LinkedModule; declaration: PreparedDeclaration },
+  input: Readonly<Record<string, NxCanonicalValue>>,
+  path: string,
+): NxRecordObject {
+  const expected = action.declaration.name;
+  const kind = action.declaration.kind;
+  if (kind.tag !== "record") {
+    fail("nx-ir-type", `'${expected}' is not an action record.`);
+  }
+  const { $type: discriminator, ...rest } = input;
+  if (discriminator !== undefined && discriminator !== expected) {
+    fail("nx-ir-type", `Expected ${path} to be a '${expected}' action, got '${String(discriminator)}'.`);
+  }
+  return { $type: expected, ...normalizeFields(program, action.linked, action.declaration, kind.fields, rest, [], path, false) };
+}
+
+/**
+ * Runs a handler: the action is constructed against the record the handler accepts, the body runs
+ * over the captured frame with `action` in its slot, and, for a handler its own component
+ * dispatches, `live` names that component and its working state, whose slots the body reads
+ * instead of what was captured. The result is one record or a non-empty list of them.
+ */
+function invokeHandler(
+  program: NxPreparedProgram,
+  handler: ActionHandlerValue,
+  action: Readonly<Record<string, NxCanonicalValue>>,
+  live: {
+    readonly component: Extract<PreparedDeclarationKind, { tag: "component" }>;
+    readonly state: Readonly<Record<string, NxCanonicalValue>>;
+  } | undefined,
+  options: NxRuntimeOptions,
+): NxCanonicalValue[] {
+  const label = `${handler.componentName}.${handler.emit}`;
+  const expected = handler.action.declaration.name;
+  if (action.$type !== expected) {
+    fail("nx-ir-type", `Expected an action of type '${expected}' for handler ${label}, got '${String(action.$type)}'.`);
+  }
+  const normalizedAction = normalizeActionInput(program, handler.action, action, `${label} action`);
+  const frame = handler.captured.slice();
+  if (live !== undefined) {
+    live.component.state.forEach((field, index) => {
+      frame[live.component.props.length + index] = live.state[field.name] ?? null;
+    });
+  }
+  frame[handler.actionSlot] = normalizedAction;
+  const result = evalNode(handler.body, {
+    program,
+    linked: handler.linked,
+    declaration: handler.declaration,
+    frame,
+    options,
+    depth: 0,
+  });
+  const results = Array.isArray(result) ? [...result] : [result];
+  if (results.length === 0) {
+    fail("nx-ir-handler-result", `Handler ${label} returned an empty list; a handler returns an action, an update record, or a list of them.`);
+  }
+  for (const item of results) {
+    if (!isObject(item) || typeof item.$type !== "string") {
+      fail("nx-ir-handler-result", `Handler ${label} returned ${JSON.stringify(item)}; a handler returns an action, an update record, or a list of them.`);
+    }
+  }
+  return results;
+}
+
+/** Whether `value` is the update record of the component with `ownerKey`. */
+function isUpdateRecordFor(value: NxCanonicalValue, program: NxPreparedProgram, ownerKey: string): boolean {
+  if (!isObject(value) || typeof value.$type !== "string") {
+    return false;
+  }
+  return program.nominalShapesFor(value.$type).some((shape) => {
+    // A record's discriminator is its declaration name; a union case's never names an update record.
+    const declaration = shape.linked.module.declarationsByName.get(shape.discriminator);
+    return (
+      declaration !== undefined &&
+      declaration.kind.tag === "record" &&
+      declaration.kind.updateTarget !== undefined &&
+      declarationKey(shape.linked, declaration.kind.updateTarget) === ownerKey
+    );
+  });
+}
+
+function isActionHandler(value: unknown): value is ActionHandlerValue {
+  return typeof value === "object" && value !== null && (value as { readonly $nxKind?: unknown }).$nxKind === "actionHandler";
+}
+
+/** A rendered handler as a host sees it: the record canonical output carries in a handler's place. */
+function isCanonicalActionHandler(value: unknown): value is Record<string, NxCanonicalValue> & { readonly $type: "ActionHandler" } {
+  return isObject(value) && value.$type === actionHandlerTypeName;
 }
 
 // ------------------------------------------------------------------------------------------------

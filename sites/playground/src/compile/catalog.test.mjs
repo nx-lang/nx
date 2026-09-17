@@ -102,3 +102,36 @@ test("rejects source larger than the limit", () => {
 test("rejects a non-string source", () => {
   assert.throws(() => compile({ not: "source" }), TypeError);
 });
+
+test("binds a catalog event as a handler property, inherited events included", () => {
+  // `Tapped` is declared on the abstract SkiaControl; SkiaButton reaches it through `extends`.
+  const result = compile(`component <Page /> = {
+  state { taps:int = 0 }
+  <SkiaButton Text="Tap" onTapped=<Update taps={taps + 1} /> />
+}
+let root() = { <Page /> }`);
+  assert.deepEqual(result.diagnostics.map((d) => d.message), []);
+});
+
+test("types an event's primitive parameter as a payload field", () => {
+  const result = compile(`component <Page /> = {
+  state { on:boolean = false }
+  <SkiaSwitch onToggled=<Update on={action.value} /> />
+}
+let root() = { <Page /> }`);
+  assert.deepEqual(result.diagnostics.map((d) => d.message), []);
+  const mistyped = compile(`component <Page /> = {
+  state { label:string = "" }
+  <SkiaSwitch onToggled=<Update label={action.value} /> />
+}
+let root() = { <Page /> }`);
+  assert.equal(mistyped.ir, null, "a boolean payload field does not fill a string");
+});
+
+test("rejects a handler for an event the control does not have, naming the property", () => {
+  const result = compile(`action Log = { }
+component <Page /> = { <SkiaButton Text="Tap" onNope=<Log /> /> }
+let root() = { <Page /> }`);
+  assert.equal(result.ir, null);
+  assert.ok(result.diagnostics.some((d) => d.message.includes("onNope")), result.diagnostics.map((d) => d.message).join("\n"));
+});

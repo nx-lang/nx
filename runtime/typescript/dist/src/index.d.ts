@@ -13,6 +13,7 @@ export declare const NX_IR_RUNTIME_ABI = "nx-ir-runtime-v2";
 export declare const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1 = "update-records-v1";
 export declare const NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1 = "property-unions-v1";
 export declare const NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1 = "update-intrinsics-v1";
+export declare const NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1 = "action-handlers-v1";
 /** The cell value that spells an absent optional operand. */
 export declare const NX_IR_NONE = 4294967295;
 /** The tables whose entries are cells. */
@@ -83,6 +84,7 @@ export declare const nodeKinds: {
     readonly unionCase: 16;
     readonly element: 17;
     readonly component: 18;
+    readonly actionHandler: 19;
 };
 export declare const typeKinds: {
     readonly primitive: 0;
@@ -169,6 +171,11 @@ export interface PreparedUnionCase {
     readonly fields: readonly PreparedField[];
     readonly isConstant: boolean;
 }
+/** One action a component emits: the local name a parent binds as `on<Name>`, and its record. */
+export interface PreparedEmit {
+    readonly name: string;
+    readonly action: NxIrReference;
+}
 export type PreparedDeclarationKind = {
     readonly tag: "function";
     readonly params: readonly PreparedParam[];
@@ -190,6 +197,8 @@ export type PreparedDeclarationKind = {
     readonly body: number;
     readonly isAbstract: boolean;
     readonly isExternal: boolean;
+    /** The effective emits, inherited included, in declaration order. */
+    readonly emits: readonly PreparedEmit[];
 } | {
     readonly tag: "union";
     readonly cases: readonly PreparedUnionCase[];
@@ -295,12 +304,80 @@ export interface NxLinkOptions {
 export interface NxRuntimeOptions {
     readonly maxCallDepth?: number;
 }
+/**
+ * A handler as the runtime holds it between the render that created it and the dispatch that
+ * runs it. Opaque to hosts: it reaches them only as an `ActionHandler` record in canonical output,
+ * and comes back only as a token.
+ */
+export interface ActionHandlerValue {
+    readonly $nxKind: "actionHandler";
+    /** The module and declaration the handler node was written in, where its body is evaluated. */
+    readonly linked: LinkedModule;
+    readonly declaration: PreparedDeclaration;
+    /** The declaration key of the component whose emit the handler answers. */
+    readonly component: string;
+    /** That component's declaration name, for diagnostics. */
+    readonly componentName: string;
+    readonly emit: string;
+    /** The action record the handler accepts; its declaration name is the public action name. */
+    readonly action: {
+        readonly linked: LinkedModule;
+        readonly declaration: PreparedDeclaration;
+    };
+    readonly actionSlot: number;
+    /** The declaration key of the component whose body bound the handler, or `undefined` at the root. */
+    readonly owner: string | undefined;
+    readonly body: number;
+    /** The frame as it stood when the handler was created: the by-value capture. */
+    readonly captured: readonly NxCanonicalValue[];
+}
+/**
+ * A component instance: what dispatch needs to run a batch against a component that initialization
+ * or a previous dispatch rendered. Opaque to hosts and never modified; every dispatch returns a new
+ * one, and the one it was given stays valid for a retry.
+ */
+export interface NxComponentInstance {
+    readonly component: string;
+    readonly declaration: PreparedDeclaration;
+    /** The declared props, normalized. */
+    readonly props: Readonly<Record<string, NxCanonicalValue>>;
+    /** The handlers the parent bound, by property name (`onTapped`). Never in the body's scope. */
+    readonly handlerProps: ReadonlyMap<string, ActionHandlerValue>;
+    readonly state: Readonly<Record<string, NxCanonicalValue>>;
+    /** The handlers in the most recent rendered output, by the token that output carries. */
+    readonly handlers: ReadonlyMap<string, ActionHandlerValue>;
+    /** The render generation the tokens belong to. */
+    readonly generation: number;
+}
+export interface ComponentInitOptions extends NxRuntimeOptions {
+    /**
+     * The instance whose rendered output the props were read from. Every `ActionHandler` record in
+     * the props, at any depth, is replaced by the handler that instance holds under the record's
+     * token, which is how a parent's binding reaches a child the host initializes.
+     */
+    readonly parent?: NxComponentInstance;
+    /**
+     * The state to use in place of the initial one, validated as a complete state for the component.
+     * Initializing again with the state an instance holds and new props is how a host re-renders an
+     * instance whose props changed without losing its state.
+     */
+    readonly state?: Readonly<Record<string, NxCanonicalValue>>;
+}
 export interface ComponentInitResult {
     readonly rendered: NxCanonicalValue;
     readonly state: Record<string, NxCanonicalValue>;
+    readonly instance: NxComponentInstance;
 }
 export interface ComponentEvaluateResult {
     readonly rendered: NxCanonicalValue;
+}
+export interface ComponentDispatchResult {
+    /** The body rendered against the next state, its handlers carrying fresh tokens. */
+    readonly rendered: NxCanonicalValue;
+    /** Everything the handlers returned for the host, in dispatch order. */
+    readonly effects: readonly NxCanonicalValue[];
+    readonly state: Record<string, NxCanonicalValue>;
+    readonly instance: NxComponentInstance;
 }
 export declare function prepareNxIrModule(input: Uint8Array | ArrayBuffer): NxPreparedModule;
 /**
@@ -319,8 +396,19 @@ export declare function tryPrepareNxIrProgram(input: Uint8Array | ArrayBuffer): 
 export declare function declarationKey(linked: LinkedModule, reference: NxIrReference): string;
 export declare function evaluateFunction(program: NxPreparedProgram | NxPreparedModule, name: string, args?: readonly NxCanonicalValue[], options?: NxRuntimeOptions): NxCanonicalValue;
 export declare function constructComponentDescriptor(program: NxPreparedProgram | NxPreparedModule, name: string, props?: Record<string, NxCanonicalValue>, content?: readonly NxCanonicalValue[]): NxCanonicalValue;
-export declare function initializeComponent(program: NxPreparedProgram | NxPreparedModule, name: string, props?: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): ComponentInitResult;
+export declare function initializeComponent(program: NxPreparedProgram | NxPreparedModule, name: string, props?: Record<string, NxCanonicalValue>, options?: ComponentInitOptions): ComponentInitResult;
 export declare function evaluateComponent(program: NxPreparedProgram | NxPreparedModule, name: string, props: Record<string, NxCanonicalValue>, state: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): ComponentEvaluateResult;
+/**
+ * Dispatches a batch against an instance and returns the next one, without touching the instance
+ * given. Each entry is either an action the component emits, which runs the handler the parent
+ * bound on the instance's props, or an `ActionHandlerInvocation` naming a handler of the
+ * instance's most recent rendered output by token, with the action to feed it. Entries run in
+ * order. A handler the component's own body bound reads the state live and patches it with the
+ * component's update records; any other handler sees only what it captured, and everything it
+ * returns is an effect. The body is rendered once against the state the batch produced. A failure
+ * throws before anything is returned, so the instance given stays the state of record.
+ */
+export declare function dispatchComponentActions(program: NxPreparedProgram | NxPreparedModule, instance: NxComponentInstance, batch: readonly NxCanonicalValue[], options?: NxRuntimeOptions): ComponentDispatchResult;
 export declare function normalizeComponentState(program: NxPreparedProgram | NxPreparedModule, name: string, state: Record<string, NxCanonicalValue>): Record<string, NxCanonicalValue>;
 /**
  * Applies a patch to host-owned component state and returns the validated next state.

@@ -4,6 +4,7 @@
       "add": [
         "components",
         "expressions",
+        "handlers",
         "two-module"
       ],
       "and": [
@@ -63,6 +64,7 @@
       "int": [
         "components",
         "expressions",
+        "handlers",
         "records",
         "snippet",
         "trailing-element",
@@ -72,6 +74,7 @@
     "declarations": {
       "component": [
         "components",
+        "handlers",
         "snippet",
         "trailing-element",
         "two-module"
@@ -79,12 +82,14 @@
       "function": [
         "components",
         "expressions",
+        "handlers",
         "records",
         "snippet",
         "trailing-element",
         "two-module"
       ],
       "record": [
+        "handlers",
         "records",
         "two-module"
       ],
@@ -92,12 +97,14 @@
         "records"
       ],
       "union": [
+        "handlers",
         "records",
         "two-module"
       ],
       "value": [
         "components",
         "expressions",
+        "handlers",
         "snippet"
       ]
     },
@@ -116,13 +123,19 @@
       ]
     },
     "nodes": {
+      "actionHandler": [
+        "handlers",
+        "two-module"
+      ],
       "array": [
         "components",
-        "expressions"
+        "expressions",
+        "handlers"
       ],
       "binary": [
         "components",
         "expressions",
+        "handlers",
         "two-module"
       ],
       "bool": [
@@ -137,16 +150,19 @@
       ],
       "component": [
         "components",
+        "handlers",
         "snippet",
         "trailing-element",
         "two-module"
       ],
       "element": [
-        "expressions"
+        "expressions",
+        "handlers"
       ],
       "for": [
         "components",
-        "expressions"
+        "expressions",
+        "handlers"
       ],
       "if": [
         "expressions"
@@ -158,6 +174,7 @@
         "records"
       ],
       "member": [
+        "handlers",
         "records",
         "two-module"
       ],
@@ -168,18 +185,21 @@
       "number": [
         "components",
         "expressions",
+        "handlers",
         "records",
         "snippet",
         "trailing-element",
         "two-module"
       ],
       "record": [
+        "handlers",
         "records",
         "two-module"
       ],
       "reference": [
         "components",
         "expressions",
+        "handlers",
         "records",
         "snippet",
         "two-module"
@@ -187,12 +207,14 @@
       "slot": [
         "components",
         "expressions",
+        "handlers",
         "records",
         "two-module"
       ],
       "string": [
         "components",
         "expressions",
+        "handlers",
         "records",
         "snippet",
         "trailing-element",
@@ -202,6 +224,7 @@
         "expressions"
       ],
       "unionCase": [
+        "handlers",
         "records",
         "two-module"
       ]
@@ -209,12 +232,14 @@
     "types": {
       "array": [
         "components",
+        "handlers",
         "records",
         "snippet",
         "trailing-element"
       ],
       "nominal": [
         "components",
+        "handlers",
         "records",
         "snippet",
         "trailing-element",
@@ -226,6 +251,7 @@
       "primitive": [
         "components",
         "expressions",
+        "handlers",
         "records",
         "snippet",
         "trailing-element",
@@ -244,6 +270,7 @@
   "programs": [
     "components",
     "expressions",
+    "handlers",
     "records",
     "snippet",
     "trailing-element",

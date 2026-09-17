@@ -4,8 +4,9 @@
 // their own — playback is the control's, not authored NX — so every animation here runs as in the
 // original. What is missing is what the original drives from outside: the Start/Stop/Seek/GoToEnd
 // buttons, the SpeedRatio buttons, the IsOn toggle, and the status readouts in the card titles
-// (frame counts, "playing", "Finished"), which need event handlers and component state. The
-// buttons are drawn in their starting state and do nothing.
+// (frame counts, "playing", "Finished"). This port does not use event handlers or component state
+// for them yet — the readouts format numbers, which NX cannot turn into text — so the buttons are
+// drawn in their starting state and do nothing.
 
 component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = {
   <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 />
@@ -59,8 +60,8 @@ component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> =
       <SkiaRow Spacing=16>
         <SkiaLottie Source="lottie/ok.json" WidthRequest=90 HeightRequest=90 AutoPlay=false
           DefaultFrame=0 DefaultFrameWhenOn=-1 IsOn=false />
-        // The original flips IsOn from this button; without event handlers the Lottie rests on
-        // frame 0.
+        // The original flips IsOn from this button; this port binds no handler to it yet, so the
+        // Lottie rests on frame 0.
         <SkiaButton Text="IsOn = true" BackgroundColor="#6610F2" VerticalOptions=Center />
         <SkiaLabel FontSize=12 TextColor="#ADB5BD" VerticalOptions=Center HorizontalOptions=Fill
           Text="Stopped animations show DefaultFrame, or DefaultFrameWhenOn (-1 = last frame) when IsOn: the C# recipe for animated checkboxes." />

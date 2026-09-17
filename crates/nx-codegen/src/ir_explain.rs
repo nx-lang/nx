@@ -306,6 +306,16 @@ impl<'a> Explainer<'a> {
                     lines.push("  state".to_string());
                     lines.extend(indent(indent(state)));
                 }
+                let emits = self.list_operand(entry, 6, "component")?;
+                if !emits.is_empty() {
+                    lines.push("  emits".to_string());
+                    for emit in emits {
+                        let emit = self.list(emit, "emit")?;
+                        let name = self.string(self.int_operand(emit, 0, "emit")?)?;
+                        let action = self.reference_item(self.operand(emit, 1, "emit")?)?;
+                        lines.push(format!("    {name} = {action}"));
+                    }
+                }
                 let body = self.int_operand(entry, 4, "component")?;
                 if body >= 0 {
                     lines.push("  body =".to_string());
@@ -573,6 +583,30 @@ impl<'a> Explainer<'a> {
                     self.list_operand(entry, 3, "component")?,
                     self.list_operand(entry, 4, "component")?,
                 )?
+            }
+            kinds::node::ACTION_HANDLER => {
+                let component = self.reference(
+                    self.int_operand(entry, 1, "actionHandler")?,
+                    self.int_operand(entry, 2, "actionHandler")?,
+                )?;
+                let emit = self.string(self.int_operand(entry, 3, "actionHandler")?)?;
+                let action = self.reference(
+                    self.int_operand(entry, 4, "actionHandler")?,
+                    self.int_operand(entry, 5, "actionHandler")?,
+                )?;
+                let slot = self.int_operand(entry, 6, "actionHandler")?;
+                let owner = self
+                    .optional_reference_suffix(self.operand(entry, 7, "actionHandler")?, "owner")?;
+                // The slot is printed because the body's reads of `action` print only the name.
+                let mut lines = vec![format!(
+                    "handler {component}.{emit} action@{slot}:{action}{owner} =>"
+                )];
+                lines.extend(indent(self.node(self.int_operand(
+                    entry,
+                    8,
+                    "actionHandler",
+                )?)?));
+                lines
             }
             other => return Err(self.malformed(format!("unknown node kind {other}"))),
         })

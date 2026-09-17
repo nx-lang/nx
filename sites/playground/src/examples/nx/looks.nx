@@ -4,7 +4,8 @@
 //
 // The controls themselves still respond — switches toggle, sliders drag — because that is DrawnUI's
 // own behavior, not authored NX. What is missing is the original's "Last:" readout, which reports
-// the most recent interaction and needs both event handlers and component state.
+// the most recent interaction. This port does not use event handlers or component state for it
+// yet: the readout formats a slider's value, which NX cannot turn into text.
 
 component <Card extends DrawnNode Title:string Style:PrebuiltControlStyle /> = {
   <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=16 />

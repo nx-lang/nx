@@ -1,12 +1,11 @@
 import {
   evaluateFunction,
-  initializeComponent,
   linkNxIrProgram,
   prepareNxIrModule,
   type NxPreparedModule,
   type NxPreparedProgram,
 } from "@nx-lang/ir-runtime";
-import type { NxObject, NxValue } from "./values";
+import type { NxValue } from "./values";
 
 /** The entrypoint every playground program provides. */
 export const ROOT_FUNCTION = "root";
@@ -47,23 +46,4 @@ export function evaluateRoot(program: Program): NxValue {
 export function isAuthoredComponent(program: Program, type: string): boolean {
   const kind = program.componentEntrypoints.get(type)?.kind;
   return kind !== undefined && kind.tag === "component" && !kind.isExternal;
-}
-
-/**
- * Renders an author-defined component to the controls it produces.
- *
- * A descriptor for a component the author wrote — the `Demo`, `Card` and `Tile` wrappers every
- * DrawnUI demo page is built from — evaluates to `{ $type: "Demo", ... }` rather than to what the
- * component draws, because descriptor construction is deliberately atomic. Expanding it is the
- * renderer's job, and `initializeComponent` is the call that does it: it resolves the component's
- * own state block to its initial values and renders the body once.
- */
-export function renderAuthoredComponent(program: Program, type: string, node: NxObject): NxValue {
-  const props: Record<string, NxValue> = {};
-  for (const [name, value] of Object.entries(node)) {
-    if (name !== "$type" && value !== undefined) {
-      props[name] = value;
-    }
-  }
-  return initializeComponent(program, type, props as never).rendered as NxValue;
 }

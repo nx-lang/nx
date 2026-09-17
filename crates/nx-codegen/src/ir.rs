@@ -11,10 +11,10 @@
 use crate::builder::build_codegen_program;
 use crate::ir_image::{write_nx_ir_image, NxIrImageError};
 use crate::model::{
-    CodegenComponent, CodegenComponentField, CodegenDeclaration, CodegenDeclarationKind,
-    CodegenExpression, CodegenExpressionKind, CodegenModule, CodegenModuleProvenance,
-    CodegenProgram, CodegenProperty, CodegenRecordField, CodegenReference, CodegenSourceEntry,
-    CodegenStatement, CodegenTypeRef,
+    CodegenActionHandler, CodegenComponent, CodegenComponentField, CodegenDeclaration,
+    CodegenDeclarationKind, CodegenExpression, CodegenExpressionKind, CodegenModule,
+    CodegenModuleProvenance, CodegenProgram, CodegenProperty, CodegenRecordField, CodegenReference,
+    CodegenSourceEntry, CodegenStatement, CodegenTypeRef,
 };
 use crate::options::CodegenError;
 use nx_api::ProgramArtifact;
@@ -37,6 +37,9 @@ pub const NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1: &str = "property-unions-v1"
 /// Required by a module that calls an update intrinsic, so a runtime that predates them rejects
 /// the module rather than failing on an unknown node.
 pub const NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1: &str = "update-intrinsics-v1";
+/// Required by a module that binds an action handler, so a runtime that predates them refuses the
+/// module by name rather than failing on an unknown node.
+pub const NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1: &str = "action-handlers-v1";
 
 /// The kind numbers of schema 3. A number, once assigned, is never reused for anything else.
 pub mod kinds {
@@ -61,6 +64,7 @@ pub mod kinds {
         pub const UNION_CASE: i64 = 16;
         pub const ELEMENT: i64 = 17;
         pub const COMPONENT: i64 = 18;
+        pub const ACTION_HANDLER: i64 = 19;
 
         pub const NAMES: &[(i64, &str)] = &[
             (NULL, "null"),
@@ -82,6 +86,7 @@ pub mod kinds {
             (UNION_CASE, "unionCase"),
             (ELEMENT, "element"),
             (COMPONENT, "component"),
+            (ACTION_HANDLER, "actionHandler"),
         ];
     }
 
@@ -582,16 +587,31 @@ fn required_features(module: &CodegenModule) -> Vec<String> {
     }) {
         features.push(NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1.to_string());
     }
-    if module.declarations.iter().any(declaration_calls_intrinsic) {
+    if module.declarations.iter().any(|declaration| {
+        declaration_contains(declaration, |expression| {
+            matches!(expression.kind, CodegenExpressionKind::IntrinsicCall { .. })
+        })
+    }) {
         features.push(NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1.to_string());
+    }
+    if module.declarations.iter().any(|declaration| {
+        declaration_contains(declaration, |expression| {
+            matches!(expression.kind, CodegenExpressionKind::ActionHandler(_))
+        })
+    }) {
+        features.push(NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1.to_string());
     }
     features
 }
 
-fn declaration_calls_intrinsic(declaration: &CodegenDeclaration) -> bool {
+/// Whether any expression a declaration owns, at any depth, satisfies `predicate`.
+fn declaration_contains(
+    declaration: &CodegenDeclaration,
+    predicate: impl Fn(&CodegenExpression) -> bool,
+) -> bool {
     let mut found = false;
     visit_declaration_expressions(declaration, &mut |expression| {
-        if matches!(expression.kind, CodegenExpressionKind::IntrinsicCall { .. }) {
+        if predicate(expression) {
             found = true;
         }
     });
@@ -742,6 +762,7 @@ fn visit_expression(expression: &CodegenExpression, visit: &mut dyn FnMut(&Codeg
             }
             visit_expressions(&element.content, visit);
         }
+        CodegenExpressionKind::ActionHandler(handler) => visit_expression(&handler.body, visit),
     }
 }
 
@@ -1168,6 +1189,15 @@ impl<'a> ModuleEmitter<'a> {
         };
         let flags = i64::from(component.is_abstract) * kinds::component::ABSTRACT
             + i64::from(component.is_external) * kinds::component::EXTERNAL;
+        let emits = component
+            .emits
+            .iter()
+            .map(|emit| {
+                let name = self.string(&emit.name);
+                let action = self.reference_item(&emit.action);
+                IrItem::list([IrItem::Int(name), action])
+            })
+            .collect::<Vec<_>>();
         IrItem::list([
             IrItem::Int(kinds::declaration::COMPONENT),
             IrItem::Int(name),
@@ -1175,6 +1205,7 @@ impl<'a> ModuleEmitter<'a> {
             state,
             IrItem::Int(body),
             IrItem::Int(flags),
+            IrItem::List(emits),
         ])
     }
 
@@ -1524,10 +1555,37 @@ impl<'a> ModuleEmitter<'a> {
                     content,
                 ])
             }
+            CodegenExpressionKind::ActionHandler(handler) => self.action_handler(handler),
             // Refused by `validate_ir_program` before emission starts.
             CodegenExpressionKind::Unsupported(_) => IrItem::ints([kinds::node::NULL]),
         };
         self.push_node(entry, span)
+    }
+
+    /// Emits a handler as `[19, ref, str, ref, slot, ref?, node]`: the component and emit it
+    /// answers, the action record it accepts, the slot of its `action` binding, its owner, and
+    /// its body. The slot is the next integer of the enclosing frame, as a `let` binding's would
+    /// be, and the body reads every other local through the slots it already had.
+    fn action_handler(&mut self, handler: &CodegenActionHandler) -> IrItem {
+        let (component_slot, component_name) = self.reference(&handler.component);
+        let emit = self.string(&handler.emit);
+        let (action_slot, action_name) = self.reference(&handler.action);
+        self.frame.push();
+        let slot = self.frame.alloc("action");
+        let body = self.expression(&handler.body);
+        self.frame.pop();
+        let owner = self.optional_reference(handler.owner.as_ref());
+        IrItem::list([
+            IrItem::Int(kinds::node::ACTION_HANDLER),
+            IrItem::Int(component_slot),
+            IrItem::Int(component_name),
+            IrItem::Int(emit),
+            IrItem::Int(action_slot),
+            IrItem::Int(action_name),
+            IrItem::Int(slot),
+            owner,
+            IrItem::Int(body),
+        ])
     }
 
     fn literal(&mut self, literal: &Literal) -> IrItem {

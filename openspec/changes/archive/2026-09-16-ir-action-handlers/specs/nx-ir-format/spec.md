@@ -16,14 +16,15 @@ update-intrinsic support. A `changed` call SHALL also carry the declared field o
 record, so a runtime orders the result without consulting the declaration.
 
 An action-handler binding (`onTapped=<Update count={count + 1} />`) SHALL be encoded as an
-action-handler construct that carries the component and emit the handler answers, a reference to
-the action record it accepts, the slot the handler's `action` binding occupies, the owner component
-whose state the handler may patch (absent for a handler bound outside any component body), and the
-body expression. The construct SHALL NOT carry an evaluated environment; captured locals are the
-slots the body references. A program that contains one SHALL list a required feature naming
-action-handler support, and a program that contains none SHALL emit exactly the IR it emitted
-before the construct existed. Unsupported executable constructs SHALL be reported as IR build
-diagnostics.
+action-handler node kind that carries a reference to the component and the name of the emit the
+handler answers, a reference to the action record it accepts, the slot the handler's `action`
+binding occupies, a reference to the owner component whose state the handler may patch (absent for
+a handler bound outside any component body), and the body node. The node SHALL NOT carry an
+evaluated environment; captured locals are the slots the body references. The public name of the
+action a runtime reports for the handler SHALL be the action reference's declaration name. A
+module that contains the node SHALL list a required feature naming action-handler support, and a
+module that contains none SHALL NOT list it. Unsupported executable constructs SHALL be reported
+as IR build diagnostics.
 
 #### Scenario: Match expressions are preserved
 - **WHEN** NX source contains a match-style `if value is { ... }` expression accepted by static
@@ -69,10 +70,10 @@ diagnostics.
   `component <Counter /> = { state { count:int = 0 } <Button onTapped=<Update count={count + 1} /> /> }`
 - **AND** NX IR is emitted for the program
 - **THEN** the `onTapped` property of the `Button` descriptor SHALL be encoded with the
-  action-handler construct
-- **AND** the construct SHALL name component `Button`, emit `Tapped`, and the `Button.Tapped` action
-  record by reference
-- **AND** the construct SHALL name `Counter` as the owner
+  action-handler node kind
+- **AND** the node SHALL reference component `Button`, name emit `Tapped`, and reference the
+  `Button.Tapped` action record
+- **AND** the node SHALL reference `Counter` as the owner
 - **AND** the body SHALL be the `Counter.Update` construction, referencing `count` through the
   slot of `Counter`'s `count` state field
 - **AND** the required feature list SHALL name action-handler support
@@ -80,34 +81,31 @@ diagnostics.
 #### Scenario: A handler bound outside a component body has no owner
 - **WHEN** NX source contains `let root() = { <SearchBox onSearchSubmitted=<DoSearch search={action.searchString} /> /> }`
 - **AND** NX IR is emitted for the program
-- **THEN** the construct SHALL carry no owner
-- **AND** the body SHALL reference `action` through the slot the construct declares for it
+- **THEN** the node SHALL carry no owner
+- **AND** the body SHALL reference `action` through the slot the node declares for it
+- **AND** that slot SHALL be the next slot of the enclosing frame, as a `let` binding's would be
 
-#### Scenario: A program without handlers is unchanged
+#### Scenario: A program without handlers lists no handler feature
 - **WHEN** NX source binds no action handler
 - **AND** NX IR is emitted for the program
 - **THEN** the required feature list SHALL NOT name action-handler support
-- **AND** the emitted IR SHALL be identical to the IR emitted before the action-handler construct
-  existed
 
 #### Scenario: Unsupported action handler is rejected in v1
 - **WHEN** NX source binds an action handler
-- **AND** a caller requests executable TypeScript or JavaScript output, the one target that still
-  cannot represent a handler
-- **THEN** codegen SHALL fail with a diagnostic identifying the unsupported construct
-- **AND** it SHALL NOT silently drop the handler
-- **AND** the same source SHALL emit NX IR successfully, carrying the handler as the action-handler
-  construct
+- **AND** NX IR is emitted for the program
+- **THEN** emission SHALL succeed, carrying the handler as the action-handler node
+- **AND** the same source SHALL still fail executable TypeScript or JavaScript generation as
+  `executable-code-generation` requires
 
 ### Requirement: NX IR encodes component contracts, descriptors, and state metadata
 NX IR SHALL preserve effective component prop contracts, declared state fields, defaults, content
 field metadata, abstract/external/concrete component flags, the effective emits of the component
-(each emit's name and a reference to the action record it carries, inherited emits included),
-component body expressions where available, and schemas needed to normalize props and state at
-runtime. Component descriptor expressions SHALL remain atomic and SHALL encode normalized
-descriptor construction rather than deep-rendering the referenced component body. A descriptor's
-handler properties SHALL be encoded as properties of the descriptor, alongside its declared props,
-so a runtime can carry the parent's bindings with the instance.
+(each emit's name and a reference to the action record it carries, inherited emits included, in
+declaration order), component body expressions where available, and schemas needed to normalize
+props and state at runtime. Component descriptor expressions SHALL remain atomic and SHALL encode
+normalized descriptor construction rather than deep-rendering the referenced component body. A
+descriptor's handler properties SHALL be encoded as properties of the descriptor, alongside its
+declared props, so a runtime can carry the parent's bindings with the instance.
 
 #### Scenario: Stateful component emits state metadata
 - **WHEN** NX source declares `component <SearchBox placeholder:string = "Find docs" /> = { state { query:string = placeholder } <TextInput value={query} /> }`
@@ -132,9 +130,60 @@ so a runtime can carry the parent's bindings with the instance.
   inline `Counter.ValueChanged` record
 - **AND** a component that declares no emits SHALL list none
 
+#### Scenario: An inherited emit references its declaring module
+- **WHEN** a component extends a base declared in another module whose inline emit is `Tapped`
+- **AND** NX IR is emitted for the extending component's module
+- **THEN** the extending component's `emits` SHALL list `Tapped` referencing the base module's
+  `<Base>.Tapped` record
+
 #### Scenario: A descriptor keeps its handler property beside its props
 - **WHEN** NX source constructs `<Counter step=2 onReset=<Log /> />` for a component that declares
   prop `step` and emits `Reset`
 - **AND** NX IR is emitted for the program
 - **THEN** the descriptor SHALL carry both `step` and `onReset` as properties
-- **AND** `onReset`'s value SHALL be the action-handler construct
+- **AND** `onReset`'s value SHALL be the action-handler node
+
+### Requirement: A conformance corpus defines NX IR behavior
+The repository SHALL hold a corpus of NX programs, each with its expected artifact for every emitted
+module, the explained text of each expected artifact, and its expected evaluation results for every
+entrypoint the corpus names. A corpus program MAY also name component lifecycles: a component to
+initialize, optional props, and ordered batches to dispatch against it, whose entries are written
+as a host would send them, handler tokens included. The expected results SHALL then record the
+rendered output of initialization and, for each batch in turn, the rendered output and the ordered
+effects, all as canonical values with their handler tokens, as the interpreter produces them. The
+emitter's tests SHALL check that each program emits its expected artifact byte for byte, SHALL
+report a difference as explained text, and SHALL check that each committed explained text is the
+explanation of its committed artifact. Every supported runtime SHALL check that it evaluates each
+expected artifact to the expected results, lifecycles included. One regeneration command SHALL
+write the artifacts, their explained text and the expected results together. The corpus SHALL cover
+every node kind, type kind and declaration kind, cross-artifact references, and a program emitted
+without its debug section. For every corpus program, the artifact emitted without a debug section
+SHALL be at most six times the UTF-8 length of the program's own module source.
+
+#### Scenario: Emitter output is pinned by the corpus
+- **WHEN** the emitter is changed so that a corpus program's artifact differs
+- **THEN** the emitter's corpus test SHALL fail naming the program and the difference as explained
+  text
+
+#### Scenario: A change to the emitter is readable in review
+- **WHEN** the emitter is changed so that a corpus program's artifact differs
+- **AND** the corpus is regenerated
+- **THEN** both the image and its explained text SHALL be updated
+- **AND** the explained text's diff SHALL name what changed about the program
+
+#### Scenario: Stale explained text is caught
+- **WHEN** a corpus image is committed without regenerating its explained text
+- **THEN** the emitter's corpus test SHALL fail naming the program
+
+#### Scenario: A runtime is checked against the corpus
+- **WHEN** a runtime evaluates a corpus artifact's named entrypoint
+- **THEN** its canonical value SHALL equal the expected result recorded for it
+
+#### Scenario: A runtime's dispatch is checked against the corpus
+- **WHEN** a runtime initializes a corpus lifecycle's component and dispatches its batches in order
+- **THEN** each rendered output, its tokens included, and each effect list SHALL equal the values
+  recorded for it
+
+#### Scenario: The size budget is enforced
+- **WHEN** a corpus program of 8,000 bytes of source is emitted without a debug section
+- **THEN** the artifact SHALL be at most 48,000 bytes

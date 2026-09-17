@@ -47,20 +47,16 @@
     "name": "Shapes",
     "blurb": "SkiaShape \u2014 rectangle, circle, ellipse, arc, polygon, line, path; stroke, corner radii, clipping",
     "file": "shapes.nx",
-    "coverage": "static",
-    "capabilities": [
-      "event-handlers"
-    ]
+    "coverage": "complete",
+    "capabilities": []
   },
   {
     "id": "text",
     "name": "Text",
     "blurb": "SkiaLabel \u2014 word wrap, MaxLines, alignment, spans, weights, glyph fallback",
     "file": "text.nx",
-    "coverage": "static",
-    "capabilities": [
-      "event-handlers"
-    ]
+    "coverage": "complete",
+    "capabilities": []
   },
   {
     "id": "layouts",

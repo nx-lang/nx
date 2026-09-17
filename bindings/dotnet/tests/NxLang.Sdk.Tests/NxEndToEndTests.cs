@@ -317,6 +317,24 @@ public class NxEndToEndTests
     [Fact]
     public void GenerateNxIr_WithIrDiagnostics_ThrowsEvaluationException()
     {
+        // A conditional property fragment is a construct NX IR has no node for.
+        using NxProgramArtifact artifact = NxProgramArtifact.Build(
+            """
+            external component <Notice density:string />
+            let root(compact:boolean) = { <Notice if compact { density="tight" } else { density="normal" } /> }
+            """);
+
+        NxEvaluationException exception = Assert.Throws<NxEvaluationException>(
+            () => artifact.GenerateNxIr());
+
+        Assert.Contains(
+            exception.Diagnostics,
+            diagnostic => diagnostic.Code == "codegen-unsupported-construct");
+    }
+
+    [Fact]
+    public void GenerateNxIr_WithActionHandler_CarriesTheHandler()
+    {
         using NxProgramArtifact artifact = NxProgramArtifact.Build(
             """
             external component <TextInput />
@@ -325,14 +343,13 @@ public class NxEndToEndTests
             let root() = { <SearchBox onSearchSubmitted=<DoSearch query={action.query} /> /> }
             """);
 
-        NxEvaluationException exception = Assert.Throws<NxEvaluationException>(
-            () => artifact.GenerateNxIr());
+        NxGeneratedNxIr ir = artifact.GenerateNxIr();
 
+        Assert.Equal(new[] { "action-handlers-v1" }, ir.Metadata.RequiredFeatures);
         Assert.Contains(
-            exception.Diagnostics,
-            diagnostic => diagnostic.Message.Contains(
-                "action-handler codegen is not supported",
-                StringComparison.Ordinal));
+            "onSearchSubmitted=handler SearchBox.SearchSubmitted action@0:SearchBox.SearchSubmitted =>",
+            NxRuntime.ExplainNxIr(ir.Bytes),
+            StringComparison.Ordinal);
     }
 
     [Fact]

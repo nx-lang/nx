@@ -8,8 +8,9 @@ use crate::ir::{kinds, NxIrArtifact, NxIrEmitOptions};
 use crate::ir_image::{write_nx_ir_image, NxIrImage};
 use crate::{
     build_nx_ir_artifacts, emit_nx_ir, explain_nx_ir, explain_nx_ir_image, ExplainError,
-    NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
-    NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
+    NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1, NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
+    NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
+    NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
 };
 use nx_api::{
     build_program_artifact_from_source, build_workspace_program_artifact, LibraryRegistry,
@@ -1129,4 +1130,243 @@ fn an_update_record_of_a_generic_component_erases_the_parameter() {
     assert_line(&text, "record List.Update update of List");
     assert_line(&text, "  sel: object?");
     assert!(!text.contains("TItem"), "{text}");
+}
+
+// ------------------------------------------------------------------------------------------------
+// Action handlers and component emits
+// ------------------------------------------------------------------------------------------------
+
+const COUNTER_SOURCE: &str = r#"
+action Reset = { }
+external component <Button label:string emits { Tapped { } } />
+component <Counter emits { Reset ValueChanged { value:int } } /> = {
+  state { count:int = 0 }
+  <Button label="Add" onTapped=<Update count={count + 1} /> />
+}
+component <Plain /> = { <Button label="x" /> }
+"#;
+
+const SEARCH_SOURCE: &str = r#"
+external component <TextInput />
+component <SearchBox emits { SearchSubmitted { searchString:string } } /> = { <TextInput /> }
+action DoSearch = { search:string }
+let root() = { <SearchBox onSearchSubmitted=<DoSearch search={action.searchString} /> /> }
+"#;
+
+/// The node with `kind`, and its entry, from an artifact's node table.
+fn node_of_kind(artifact: &NxIrArtifact, kind: i64) -> &[crate::IrItem] {
+    artifact
+        .nodes
+        .iter()
+        .filter_map(|node| node.as_list())
+        .find(|node| node[0].as_int() == Some(kind))
+        .unwrap_or_else(|| panic!("no node of kind {kind}"))
+}
+
+#[test]
+fn component_declarations_carry_their_emits_in_declaration_order() {
+    let text = explain_source(COUNTER_SOURCE);
+    let counter = text
+        .split("\ncomponent Counter\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n\n").next())
+        .expect("the Counter declaration");
+    assert_contains(
+        counter,
+        "  emits\n    Reset = Reset\n    ValueChanged = Counter.ValueChanged\n  body =",
+    );
+    // An inline emit's record is an ordinary record of the module.
+    assert_line(&text, "record Counter.ValueChanged");
+    let plain = text
+        .split("\ncomponent Plain\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n\n").next())
+        .expect("the Plain declaration");
+    assert!(!plain.contains("emits"), "{plain}");
+}
+
+#[test]
+fn an_inherited_emit_references_its_declaring_module() {
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "app/main.nx",
+                "import { Base } from \"../ui/base.nx\"\nexternal component <Button extends Base />\nlet root() = { <Button /> }",
+            ),
+            (
+                "ui/base.nx",
+                "export abstract external component <Base emits { Tapped { } } />",
+            ),
+        ],
+        "app/main.nx",
+    );
+    let text = explain(&entry_artifact(&artifact));
+    assert_line(&text, "    Tapped = ui/base.nx:Base.Tapped");
+}
+
+#[test]
+fn a_handler_bound_to_an_inherited_emit_references_the_emit_module_action() {
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "app/main.nx",
+                "import { Base } from \"../ui/base.nx\"\naction Log = { }\nexternal component <Button extends Base />\nlet root() = { <Button onTapped=<Log /> /> }",
+            ),
+            (
+                "ui/base.nx",
+                "export abstract external component <Base emits { Tapped { } } />",
+            ),
+        ],
+        "app/main.nx",
+    );
+    let text = explain(&entry_artifact(&artifact));
+    assert_line(
+        &text,
+        "    onTapped=handler Button.Tapped action@0:ui/base.nx:Base.Tapped =>",
+    );
+}
+
+#[test]
+fn a_handler_names_the_component_its_descriptor_names() {
+    // An aliased import beside a local component of the same name: the handler on `ui.Button`
+    // answers the imported component, as the descriptor does, not the local one.
+    let artifact = artifact_from_workspace(
+        &[
+            (
+                "app/main.nx",
+                "import { Button as ui.Button } from \"../ui/button.nx\"\naction Log = { }\nexternal component <Button emits { Tapped { } } />\nlet root() = { <ui.Button onTapped=<Log /> /> }",
+            ),
+            (
+                "ui/button.nx",
+                "export external component <Button emits { Tapped { } } />",
+            ),
+        ],
+        "app/main.nx",
+    );
+    let text = explain(&entry_artifact(&artifact));
+    assert_line(&text, "  <ui/button.nx:Button");
+    assert_line(
+        &text,
+        "    onTapped=handler ui/button.nx:Button.Tapped action@0:ui/button.nx:Button.Tapped =>",
+    );
+}
+
+#[test]
+fn an_intrinsic_call_inside_a_handler_lists_the_intrinsic_feature() {
+    let artifact = entry_artifact(&artifact_from_source(
+        r#"
+type User = { name:string }
+external component <Button emits { Tapped { } } />
+component <Editor /> = {
+  state { user:User = <User name="a" /> }
+  <Button onTapped=<Update user={apply(user, <User.Update name="b" />)} /> />
+}
+"#,
+    ));
+    assert!(
+        artifact
+            .required_features
+            .iter()
+            .any(|feature| feature == NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1),
+        "{:?}",
+        artifact.required_features
+    );
+}
+
+#[test]
+fn a_handler_bound_inside_a_component_body_is_encoded_with_its_owner() {
+    let artifact = entry_artifact(&artifact_from_source(COUNTER_SOURCE));
+    assert_eq!(
+        artifact.required_features,
+        [
+            NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
+            NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1
+        ]
+    );
+    let text = explain(&artifact);
+    assert_line(
+        &text,
+        "      onTapped=handler Button.Tapped action@1:Button.Tapped owner Counter =>",
+    );
+    assert_line(&text, "        <Counter.Update count=(count add 1) />");
+
+    // `[19, ref, str, ref, slot, ref?, node]`: `Counter`'s frame is its one state field at slot
+    // 0, so `action` takes slot 1 and the body reads `count` through slot 0.
+    let handler = node_of_kind(&artifact, kinds::node::ACTION_HANDLER);
+    assert_eq!(handler.len(), 9);
+    assert_eq!(
+        artifact.strings[handler[2].as_int().unwrap() as usize],
+        "Button"
+    );
+    assert_eq!(
+        artifact.strings[handler[3].as_int().unwrap() as usize],
+        "Tapped"
+    );
+    assert_eq!(
+        artifact.strings[handler[5].as_int().unwrap() as usize],
+        "Button.Tapped"
+    );
+    assert_eq!(handler[6].as_int(), Some(1), "the action slot");
+    let owner = handler[7].as_list().expect("owner reference");
+    assert_eq!(
+        artifact.strings[owner[1].as_int().unwrap() as usize],
+        "Counter"
+    );
+    let count = node_of_kind(&artifact, kinds::node::SLOT);
+    assert_eq!(count[1].as_int(), Some(0));
+    assert_eq!(
+        artifact.strings[count[2].as_int().unwrap() as usize],
+        "count"
+    );
+}
+
+#[test]
+fn a_handler_bound_outside_a_component_body_has_no_owner() {
+    let artifact = entry_artifact(&artifact_from_source(SEARCH_SOURCE));
+    let text = explain(&artifact);
+    assert_line(
+        &text,
+        "    onSearchSubmitted=handler SearchBox.SearchSubmitted action@0:SearchBox.SearchSubmitted =>",
+    );
+    assert_line(&text, "      <DoSearch search=action.searchString />");
+    let handler = node_of_kind(&artifact, kinds::node::ACTION_HANDLER);
+    // `root` has no parameters, so `action` is the frame's first slot.
+    assert_eq!(handler[6].as_int(), Some(0));
+    assert_eq!(handler[7].as_list(), Some(&[][..]), "no owner");
+    let action = node_of_kind(&artifact, kinds::node::SLOT);
+    assert_eq!(action[1].as_int(), Some(0));
+    assert_eq!(
+        artifact.strings[action[2].as_int().unwrap() as usize],
+        "action"
+    );
+}
+
+#[test]
+fn a_program_without_handlers_lists_no_handler_feature() {
+    let artifact = entry_artifact(&artifact_from_source(
+        "external component <Button label:string emits { Tapped { } } />\nlet root() = { <Button label=\"x\" /> }",
+    ));
+    assert!(
+        artifact.required_features.is_empty(),
+        "{:?}",
+        artifact.required_features
+    );
+}
+
+/// A handler of the shape `component_action_handler_bindings_fail_before_emission` in `tests.rs`
+/// refuses for the JavaScript target emits an image here.
+#[test]
+fn a_handler_emits_an_image_that_reads_back() {
+    let artifact = artifact_from_source(SEARCH_SOURCE);
+    let bytes = image_bytes(&artifact);
+    let image = NxIrImage::open(&bytes).expect("a valid image");
+    assert_eq!(
+        image.required_features().collect::<Vec<_>>(),
+        [NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1]
+    );
+    assert_eq!(read_back(&bytes), entry_artifact(&artifact));
+    assert_eq!(
+        explain_nx_ir_image(&bytes).expect("explain"),
+        explain(&entry_artifact(&artifact))
+    );
 }

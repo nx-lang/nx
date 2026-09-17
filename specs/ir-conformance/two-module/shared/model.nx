@@ -5,3 +5,4 @@ export type Theme = light | dark
 export let answer(): int = { 42 }
 export external component <Card Title:string Theme:Theme = {Theme.light} />
 export let makeUser(id:int, name:string): User = <User id={id} name={name} />
+export abstract external component <Control emits { Tapped { } } />

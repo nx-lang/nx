@@ -7,7 +7,8 @@
 //
 // What is missing is the readouts the original updates as you use it — the live snapshot line
 // (node count, focused node, last activated) and the counters and toggles — which need event
-// handlers and component state. Their controls are drawn in their initial state.
+// handlers and component state this port does not use yet. Their controls are drawn in their
+// initial state.
 
 component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = {
   <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 />
@@ -32,7 +33,7 @@ component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> =
 
     <Card Title="Accessibility snapshot (Canvas.AccessibilityManager)">
       // The original reads the live snapshot here — node count, focused node, last activated —
-      // which needs component state to hold and event handlers to refresh.
+      // which this port does not yet hold in component state or refresh from event handlers.
       <SkiaLabel Text="Nodes in the overlay: — · focused: — · last activated: —" FontSize=14
         TextColor="#DEE2E6" HorizontalOptions=Fill AccessibilityRole="status" AccessibilityLive="polite" />
     </Card>

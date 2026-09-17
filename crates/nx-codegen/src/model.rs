@@ -194,7 +194,17 @@ pub struct CodegenComponent {
     pub type_params: Vec<String>,
     pub props: Vec<CodegenComponentField>,
     pub state: Vec<CodegenComponentField>,
+    /// The component's effective emits, inherited first, in declaration order.
+    pub emits: Vec<CodegenComponentEmit>,
     pub body: Option<CodegenExpression>,
+}
+
+/// One action a component emits: the local name a parent binds as `on<Name>`, and the action
+/// record the handler accepts, resolved in the module that declared the emit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodegenComponentEmit {
+    pub name: String,
+    pub action: CodegenReference,
 }
 
 /// Prop or state field metadata for component normalization.
@@ -329,7 +339,29 @@ pub enum CodegenExpressionKind {
     },
     ComponentDescriptor(CodegenComponentDescriptor),
     Element(CodegenElement),
+    /// An action-handler binding, `onTapped=<Update count={count + 1} />`.
+    ///
+    /// <para>Nothing here is evaluated when the binding is built: the body runs when a host
+    /// dispatches the action, against the locals captured where the binding was written.</para>
+    ActionHandler(CodegenActionHandler),
     Unsupported(CodegenUnsupportedConstruct),
+}
+
+/// The handler a parent binds to one of a component's emits.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CodegenActionHandler {
+    /// The component whose emit the handler answers.
+    pub component: CodegenReference,
+    /// The emit's local name: `Tapped` for `onTapped`.
+    pub emit: String,
+    /// The action record the handler accepts, resolved in the module that declared the emit.
+    /// Its declaration name is the public name a rendered handler reports.
+    pub action: CodegenReference,
+    /// The component whose declaration the binding was written in, whose state the body may
+    /// patch; `None` for a binding at the root.
+    pub owner: Option<CodegenReference>,
+    /// The body, with `action` bound as a local of the enclosing frame.
+    pub body: Box<CodegenExpression>,
 }
 
 /// One authored-order arm in a match-style `if is` expression.

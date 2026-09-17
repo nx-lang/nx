@@ -4,9 +4,10 @@
 // because snapping is the control's own gesture handling rather than authored NX. What is missing
 // is everything driven from outside them — the toggles that flip IsLooped, Bounces, IsVertical or
 // SidesOffset, the Prev/Next/ScrollTo buttons, the "SelectedIndex=N" readouts, the dot that
-// stretches to mark the current slide, and the drawer's open/close button — all of which need
-// event handlers and component state. Two of the carousels also recycle their slides through
-// ItemsSource and an ItemTemplate (list virtualization); here the same slides are static children.
+// stretches to mark the current slide, and the drawer's open/close button — all of which this port
+// does not drive yet (event handlers, component state). Two of the carousels also recycle their
+// slides through ItemsSource and an ItemTemplate (list virtualization); here the same slides are
+// static children.
 //
 // Each control is authored to rest where the original starts, and the toggles are drawn in the
 // state the original starts in. Nothing is drawn mid-transition.
@@ -78,8 +79,8 @@ let peek = {
       <SkiaLabel Text="Carousel & Drawer" FontSize=24 TextColor="#FFFFFF" HorizontalOptions=Center />
 
       <Card Title="SkiaCarousel playground (Sandbox MainPageCarousels)">
-        // In the original every button here changes the carousel below; without event handlers
-        // they are drawn in their starting state and do nothing.
+        // In the original every button here changes the carousel below; this port binds no
+        // handlers to them yet, so they are drawn in their starting state and do nothing.
         <SkiaWrap Spacing=8>
           <Toggle Text="IsLooped" On=false />
           <Toggle Text="Bounces" On=false />

@@ -2,9 +2,9 @@
 //
 // The demo site's landing page: logo, title, subtitle, and a card per sample flowing in a SkiaWrap —
 // two columns when the page is wide, one when it is not. Its cards navigate when tapped, and the
-// footer's repository span opens a browser tab — both need event handlers, so here they are drawn
-// but inert. DrawnUI's own ripple still plays, because the ripple is the control's behavior rather
-// than authored NX.
+// footer's repository span opens a browser tab — this port binds no handlers to them yet, since
+// navigation and opening a tab have no NX expression, so here they are drawn but inert. DrawnUI's
+// own ripple still plays, because the ripple is the control's behavior rather than authored NX.
 //
 // The original sizes its cards from the window width so two columns fit at any size. That is
 // component state driven by a resize listener; the port fixes the card width instead, at what
@@ -74,8 +74,8 @@ let samples = {
       }
     </SkiaWrap>
 
-    // The original's middle span opens the repository when tapped; without event handlers it is
-    // colored like a link and does nothing.
+    // The original's middle span opens the repository when tapped; this port binds no handler to
+    // it, so it is colored like a link and does nothing.
     <SkiaLabel FontSize=12 TextColor="#6C757D" HorizontalOptions=Center Margin=<Thickness Top=16 />>
       <TextSpan Text="helloreact.drawnui.net · " />
       <TextSpan Text="github.com/DrawnUi/DrawnUi.React" TextColor="#6EA8FE" />

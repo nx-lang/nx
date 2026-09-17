@@ -1,0 +1,54 @@
+// Action handlers: emits on components, handlers bound inside a component body and at the root,
+// and the lifecycles a host drives: initialize, dispatch by token, emit to the parent.
+abstract external component <Node />
+external component <Label extends Node text:int />
+external component <Button extends Node label:string emits { Tapped { } } />
+external component <TextInput extends Node value:string />
+external component <Card extends Node items:Node[] header:Node count:int />
+component <Stack extends Node content children:Node[] /> = { <column>{children}</column> }
+
+action Reset = { }
+action SearchSubmitted = { searchString:string }
+action DoSearch = { search:string }
+
+// From examples/nx/component.nx: an owned handler patches the state; a second one also emits.
+component <Counter extends Node step:int = 1 emits { Reset } /> = {
+  state { count:int = 0 last:Counter.Property = {Property.count} }
+  <Stack>
+    <Label text={count} />
+    <Button label="Add" onTapped=<Update count={count + step} last={Property.count} /> />
+    <Button label="Reset" onTapped={<Update count=0 /> <Reset />} />
+  </Stack>
+}
+
+// A handler in a descriptor prop, and two in a loop whose variable shadows the state field: the
+// header's handler reads `count` live at dispatch, the loop's keep the value they captured. `Card`
+// declares, and this body writes, `items` before `header`, so only a walk in sorted key order
+// numbers the header's handler first.
+let tens = { 10 20 }
+component <Tens /> = {
+  state { count:int = 0 }
+  <Card
+    items={for count in tens { <Button label="Ten" onTapped=<Update count={count + 1} /> /> }}
+    header=<Button label="Header" onTapped=<Update count={count + 100} /> />
+    count={count} />
+}
+
+component <SearchBox extends Node placeholder:string = "Find" emits { SearchSubmitted } /> = {
+  state { query:string = {placeholder} }
+  <TextInput value={query} />
+}
+
+// Every handler here is Page's, whichever instance ends up rendering the content child.
+component <Page emits { DoSearch } /> = {
+  state { count:int = 0 query:string = "" }
+  <Stack>
+    <Label text={count} />
+    <TextInput value={query} />
+    <Button label="More" onTapped=<Update count={count + 1} /> />
+    <SearchBox onSearchSubmitted=<DoSearch search={action.searchString} /> />
+    <SearchBox placeholder="Again" onSearchSubmitted=<Update query={action.searchString} /> />
+  </Stack>
+}
+
+let root() = { <SearchBox onSearchSubmitted=<DoSearch search={action.searchString} /> /> }

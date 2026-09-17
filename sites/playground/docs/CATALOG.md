@@ -5,7 +5,7 @@ both it and `catalog/catalog-meta.json` are committed. This file records the pla
 generated catalog is deliberately not a faithful copy of the object model it was derived from, so
 that a surprise in the playground can be checked against a list rather than guessed at.
 
-It covers 34 components, 31 unions and 6 record types.
+It covers 34 components, 31 unions, 6 record types and 43 emits.
 
 ## Every property is optional
 
@@ -84,10 +84,55 @@ The one with an effect is `SkiaShape.Type`, which narrows `SkiaLayout.Type` to s
 the catalog a `SkiaShape` accepts layout cases too; passing one draws nothing useful, and NX will
 not stop you.
 
+## Events are emits; parameters with no NX type are dropped
+
+Every DrawnUI event — an optional function member whose return type is `void`, or a union that
+includes it — is declared as an emit of the component for the class that declares it, under
+DrawnUI's own name, so `Tapped` sits on the abstract `SkiaControl` once and every control below
+binds it as `onTapped`. The callback's parameters after the leading sender become the emit's
+payload: a parameter whose type is a string, number or boolean is a field under the parameter's own
+name (`Toggled { value:boolean }`, `TextChanged { text:string }`, `SelectedIndexChanged
+{ index:float64 }`), and a handler reads it as `action.value`. The action a handler receives is the
+emit's own record, `SkiaControl.Tapped` or `SkiaToggle.Toggled`. `catalog-meta.json` records each
+control's events with the parameter names in order, which is what the renderer builds the action
+from. 43 emits are declared.
+
+A parameter typed as an engine object or a CanvasKit type has no NX expression and is dropped from
+the payload, so `Tapped { }` carries nothing and `Error { }` loses its message. Each is recorded in
+`omitted.json` with the parameter and its type:
+
+| Event | Parameter | TypeScript type |
+|---|---|---|
+| `SkiaButton.Down` | `args` | `SkiaGesturesParameters` |
+| `SkiaButton.Up` | `args` | `SkiaGesturesParameters` |
+| `SkiaControl.ChildTapped` | `e` | `ControlTappedEventArgs` |
+| `SkiaControl.ConsumeGestures` | `e` | `SkiaGesturesInfo` |
+| `SkiaControl.ContextMenu` | `e` | `ContextMenuEventArgs` |
+| `SkiaControl.Tapped` | `e` | `ControlTappedEventArgs` |
+| `SkiaGif.Error` | `error` | `Error` |
+| `SkiaHotspot.Down` | `args` | `SkiaGesturesParameters` |
+| `SkiaHotspot.Up` | `args` | `SkiaGesturesParameters` |
+| `SkiaImage.Error` | `error` | `Error` |
+| `SkiaLottie.Error` | `error` | `Error` |
+| `SkiaScroll.Scrolled` | `e` | `ScaledPoint` |
+| `SkiaSprite.Error` | `error` | `Error` |
+| `SkiaSvg.Error` | `error` | `Error` |
+| `SnappingLayout.Scrolled` | `position` | `SKPoint` |
+| `SnappingLayout.Stopped` | `position` | `SKPoint` |
+| `TextSpan.Tapped` | `e` | `ControlTappedEventArgs` |
+
+`ContextMenu` returns `boolean | void` upstream, true to suppress the browser's own menu. An emit
+has no return value; the renderer's callback returns `true` whenever a handler is bound, which is
+what binding one means in the demos.
+
 ## Properties with no NX expression
 
-43 event handlers are omitted, since the TypeScript IR runtime has no action dispatch:
-`AnimatedFramesRenderer.Finished`, `AnimatedFramesRenderer.Started`, `SkiaButton.Down`, `SkiaButton.Up`, `SkiaCarousel.ItemAppearing`, `SkiaCarousel.ItemDisappearing`, `SkiaCarousel.SelectedIndexChanged`, `SkiaControl.ChildTapped`, `SkiaControl.ConsumeGestures`, `SkiaControl.ContextMenu`, `SkiaControl.Tapped`, `SkiaDrawer.IsOpenChanged`, `SkiaDrawer.StateTransitionComplete`, `SkiaEditor.CursorMoved`, `SkiaEditor.FocusChanged`, `SkiaEditor.TextChanged`, `SkiaEditor.TextSubmitted`, `SkiaGif.Error`, `SkiaGif.Success`, `SkiaHotspot.Down`, `SkiaHotspot.Up`, `SkiaImage.Error`, `SkiaImage.Success`, `SkiaLottie.Error`, `SkiaLottie.Success`, `SkiaRichLabel.LinkTapped`, `SkiaScroll.CurrentIndexChanged`, `SkiaScroll.LoadMoreCommand`, `SkiaScroll.LoadMoreTopCommand`, `SkiaScroll.RefreshCommand`, `SkiaScroll.Scrolled`, `SkiaShaderCarousel.FromToChanged`, `SkiaSlider.EndChanged`, `SkiaSlider.StartChanged`, `SkiaSprite.Error`, `SkiaSprite.Success`, `SkiaSvg.Error`, `SkiaSvg.Success`, `SkiaToggle.Toggled`, `SnappingLayout.Scrolled`, `SnappingLayout.Stopped`, `SnappingLayout.TransitionChanged`, `TextSpan.Tapped`.
+Two function-typed members are not events, since they return a value, and stay omitted:
+
+| Property | TypeScript type |
+|---|---|
+| `SkiaLayout.ItemTemplate` | `() => SkiaControl` |
+| `SkiaLottie.ProcessJson` | `(json: string) => string` |
 
 Three properties are references to engine objects, built in code and attached to a control — what
 the examples call `code-behind`:
@@ -104,8 +149,6 @@ The rest:
 |---|---|
 | `SkiaControl.BindingContext` | `unknown` |
 | `SkiaLayout.ItemsSource` | `readonly unknown[]` |
-| `SkiaLayout.ItemTemplate` | `() => SkiaControl` |
-| `SkiaLottie.ProcessJson` | `(json: string) => string` |
 
 `ItemsSource` and `ItemTemplate` are what `Cells` and `UnevenCells` are built on, which is why those
 examples are ported as `reduced` over a short fixed list. `VisualEffects` is what the Shaders page

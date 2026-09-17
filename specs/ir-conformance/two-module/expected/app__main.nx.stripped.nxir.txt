@@ -1,6 +1,7 @@
-module app/main.nx fingerprint 16698081000363968031
-links shared/model.nx version "" fingerprint 12310689997513723706
-entrypoints functions [total user card local nameOf root] components []
+module app/main.nx fingerprint 4176870241451159357
+links shared/model.nx version "" fingerprint 14674601980650906756
+requires update-records-v1 action-handlers-v1
+entrypoints functions [total user card local nameOf root] components [Tap Panel]
 
 record Local extends shared/model.nx:Base
   id: int = 7
@@ -23,3 +24,22 @@ function nameOf(u: shared/model.nx:User) =
 
 function root() =
   <shared/model.nx:Card Title=nameOf(user()) />
+
+component Tap external
+  props
+    count: int required
+  emits
+    Tapped = shared/model.nx:Control.Tapped
+
+component Panel
+  state
+    taps: int = 0
+  body =
+    <Tap count=taps
+      onTapped=handler Tap.Tapped action@1:shared/model.nx:Control.Tapped owner Panel =>
+        <Panel.Update taps=(taps add 1) />
+    >
+    </Tap>
+
+record Panel.Update update of Panel
+  taps: int

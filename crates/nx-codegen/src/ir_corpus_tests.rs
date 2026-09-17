@@ -1,19 +1,23 @@
 //! The NX IR conformance corpus, from the emitter's side.
 //!
 //! <para>`specs/ir-conformance` holds NX programs with the images the emitter produces for them,
-//! the explained text of each image, and the values the interpreter evaluates their entrypoints
-//! to. These tests pin the images byte for byte, keep the explained text and the expected results
-//! in step, check that the corpus covers every kind the schema defines, and hold the size budget.
-//! Set `NX_UPDATE_CORPUS=1` to rewrite the expected files after an intended change, then review
-//! the diff of the explained text.</para>
+//! the explained text of each image, the values the interpreter evaluates their entrypoints to,
+//! and what it renders and emits when a host drives their component lifecycles. These tests pin
+//! the images byte for byte, keep the explained text and the expected results in step, check that
+//! the corpus covers every kind the schema defines, and hold the size budget. Set
+//! `NX_UPDATE_CORPUS=1` to rewrite the expected files after an intended change, then review the
+//! diff of the explained text.</para>
 
 use crate::ir::{kinds, NxIrArtifact, NxIrEmitOptions};
 use crate::ir_image::{write_nx_ir_image, NxIrImage};
 use crate::{build_codegen_program, build_nx_ir_artifacts, explain_nx_ir, explain_nx_ir_image};
 use nx_api::{
-    build_workspace_program_artifact, eval_program_artifact_function, EvalResult, NxWorkspace,
+    build_workspace_program_artifact, dispatch_component_actions_program_artifact,
+    eval_program_artifact_function, initialize_component_program_artifact,
+    ComponentDispatchEvalResult, ComponentInitEvalResult, EvalResult, NxWorkspace,
     NxWorkspaceModule, ProgramArtifact, ProgramBuildContext,
 };
+use nx_value::NxValue;
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -32,12 +36,26 @@ struct ProgramManifest {
     versions: BTreeMap<String, String>,
     emit: Vec<String>,
     entrypoints: Vec<Entrypoint>,
+    #[serde(default)]
+    lifecycles: Vec<Lifecycle>,
 }
 
 #[derive(Debug, Deserialize)]
 struct Entrypoint {
     module: String,
     function: String,
+}
+
+/// A component to initialize and the batches to dispatch against it, in order, written as a host
+/// would send them: handler tokens are literal, since the token scheme is deterministic and the
+/// literal is itself the claim a runtime is checked against.
+#[derive(Debug, Deserialize)]
+struct Lifecycle {
+    module: String,
+    component: String,
+    #[serde(default)]
+    props: BTreeMap<String, Value>,
+    batches: Vec<Vec<Value>>,
 }
 
 pub(crate) struct CorpusProgram {
@@ -315,6 +333,72 @@ fn canonical_json(value: Value) -> Value {
     }
 }
 
+fn canonical_nx_value(value: &NxValue) -> Value {
+    canonical_json(
+        serde_json::from_str(&value.to_json_string().expect("json")).expect("json value"),
+    )
+}
+
+fn nx_value(value: &Value) -> NxValue {
+    serde_json::from_value(value.clone()).expect("an NxValue")
+}
+
+/// Runs one lifecycle through `nx-api` and records what a runtime must reproduce: the rendered
+/// output of initialization and, per batch, the rendered output and the effects. State is not
+/// recorded, since `nx-api` returns it only inside an opaque snapshot; the rendered output
+/// reflects it.
+fn run_lifecycle(program: &CorpusProgram, lifecycle: &Lifecycle) -> Value {
+    assert_eq!(
+        lifecycle.module, program.manifest.entry,
+        "corpus program '{}': a lifecycle's component is reached through the entry module",
+        program.name
+    );
+    let props = NxValue::Record {
+        type_name: None,
+        properties: lifecycle
+            .props
+            .iter()
+            .map(|(name, value)| (name.clone(), nx_value(value)))
+            .collect(),
+    };
+    let initialized = match initialize_component_program_artifact(
+        &program.artifact,
+        &lifecycle.component,
+        &props,
+    ) {
+        ComponentInitEvalResult::Ok(result) => result,
+        ComponentInitEvalResult::Err(diagnostics) => panic!(
+            "corpus program '{}' lifecycle {} failed to initialize: {diagnostics:#?}",
+            program.name, lifecycle.component
+        ),
+    };
+    let mut snapshot = initialized.state_snapshot;
+    let mut batches = Vec::with_capacity(lifecycle.batches.len());
+    for (index, batch) in lifecycle.batches.iter().enumerate() {
+        let entries = batch.iter().map(nx_value).collect::<Vec<_>>();
+        let dispatched = match dispatch_component_actions_program_artifact(
+            &program.artifact,
+            &snapshot,
+            &entries,
+        ) {
+            ComponentDispatchEvalResult::Ok(result) => result,
+            ComponentDispatchEvalResult::Err(diagnostics) => panic!(
+                "corpus program '{}' lifecycle {} batch {index} failed: {diagnostics:#?}",
+                program.name, lifecycle.component
+            ),
+        };
+        batches.push(serde_json::json!({
+            "rendered": canonical_nx_value(&dispatched.rendered),
+            "effects": dispatched.effects.iter().map(canonical_nx_value).collect::<Vec<_>>(),
+        }));
+        snapshot = dispatched.state_snapshot;
+    }
+    serde_json::json!({
+        "initial": canonical_nx_value(&initialized.rendered),
+        "batches": batches,
+    })
+}
+
 #[test]
 fn corpus_results_match_the_interpreter() {
     let mut failures = Vec::new();
@@ -332,12 +416,19 @@ fn corpus_results_match_the_interpreter() {
                     program.name, entrypoint.module, entrypoint.function
                 ),
             };
-            let json: Value =
-                serde_json::from_str(&value.to_json_string().expect("json")).expect("json value");
             results.insert(
                 format!("{}::{}", entrypoint.module, entrypoint.function),
-                canonical_json(json),
+                canonical_nx_value(&value),
             );
+        }
+        for lifecycle in &program.manifest.lifecycles {
+            let key = format!("{}::{}", lifecycle.module, lifecycle.component);
+            assert!(
+                !results.contains_key(&key),
+                "corpus program '{}' records {key} twice",
+                program.name
+            );
+            results.insert(key, run_lifecycle(&program, lifecycle));
         }
         let path = program.dir.join("expected").join("results.json");
         let actual = format!(

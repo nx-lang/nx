@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  dispatchComponentActions,
   evaluateComponent,
   evaluateFunction,
   initializeComponent,
@@ -291,10 +292,11 @@ console.log(JSON.stringify({
 `,
     );
 
+    const { rendered, state } = initializeComponent(prepared, "SearchBox");
     assertEqual(
       {
         descriptor: evaluateFunction(prepared, "root"),
-        init: initializeComponent(prepared, "SearchBox"),
+        init: { rendered, state },
         evaluated: evaluateComponent(prepared, "SearchBox", {}, { query: "docs" }).rendered,
       },
       generated,
@@ -322,5 +324,37 @@ let keys(): User.Property[] = { changed(<User.Update age={null} name="Ada" />) }
     assertEqual(evaluateFunction(prepared, "root"), nativeJson(sourcePath));
     assertEqual(evaluateFunction(prepared, "keys"), ["name", "age"]);
     console.log("ok - an emitted property reference and apply match the native interpreter");
+  },
+);
+
+withSource(
+  `
+external component <Button label:string emits { Tapped { } } />
+component <Counter step:int = 1 /> = {
+  state { count:int = 0 }
+  <Button label="Add" onTapped=<Update count={count + step} /> />
+}
+`,
+  (dir, sourcePath) => {
+    const ir = emitIr(dir, sourcePath);
+    if (!requiredFeaturesOf(ir).includes("action-handlers-v1")) {
+      throw new Error(`Expected the action-handler feature, got ${JSON.stringify(requiredFeaturesOf(ir))}`);
+    }
+    const prepared = prepareNxIrProgram(ir);
+    const initialized = initializeComponent(prepared, "Counter", { step: 3 });
+    assertEqual(initialized.rendered, {
+      $type: "Button",
+      label: "Add",
+      onTapped: { $type: "ActionHandler", action: "Button.Tapped", token: "h1-1" },
+    });
+    const dispatched = dispatchComponentActions(prepared, initialized.instance, [
+      { $type: "ActionHandlerInvocation", token: "h1-1", action: { $type: "Button.Tapped" } },
+    ]);
+    assertEqual(dispatched.state, { count: 3 });
+    assertEqual(evaluateComponent(prepared, "Counter", {}, { count: 1 }).rendered.onTapped, {
+      $type: "ActionHandler",
+      action: "Button.Tapped",
+    });
+    console.log("ok - emitted component IR carries an action handler the runtime initializes and dispatches");
   },
 );

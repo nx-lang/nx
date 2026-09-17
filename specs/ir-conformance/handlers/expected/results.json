@@ -1,0 +1,525 @@
+{
+  "main.nx::Counter": {
+    "batches": [
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Stack",
+          "children": [
+            {
+              "$type": "Label",
+              "text": 2
+            },
+            {
+              "$type": "Button",
+              "label": "Add",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h2-1"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Reset",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h2-2"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Stack",
+          "children": [
+            {
+              "$type": "Label",
+              "text": 6
+            },
+            {
+              "$type": "Button",
+              "label": "Add",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h3-1"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Reset",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h3-2"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "effects": [
+          {
+            "$type": "Reset"
+          }
+        ],
+        "rendered": {
+          "$type": "Stack",
+          "children": [
+            {
+              "$type": "Label",
+              "text": 0
+            },
+            {
+              "$type": "Button",
+              "label": "Add",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h4-1"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Reset",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h4-2"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Stack",
+          "children": [
+            {
+              "$type": "Label",
+              "text": 0
+            },
+            {
+              "$type": "Button",
+              "label": "Add",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h5-1"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Reset",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h5-2"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Stack",
+          "children": [
+            {
+              "$type": "Label",
+              "text": 0
+            },
+            {
+              "$type": "Button",
+              "label": "Add",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h6-1"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Reset",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h6-2"
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "initial": {
+      "$type": "Stack",
+      "children": [
+        {
+          "$type": "Label",
+          "text": 0
+        },
+        {
+          "$type": "Button",
+          "label": "Add",
+          "onTapped": {
+            "$type": "ActionHandler",
+            "action": "Button.Tapped",
+            "token": "h1-1"
+          }
+        },
+        {
+          "$type": "Button",
+          "label": "Reset",
+          "onTapped": {
+            "$type": "ActionHandler",
+            "action": "Button.Tapped",
+            "token": "h1-2"
+          }
+        }
+      ]
+    }
+  },
+  "main.nx::Page": {
+    "batches": [
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Stack",
+          "children": [
+            {
+              "$type": "Label",
+              "text": 1
+            },
+            {
+              "$type": "TextInput",
+              "value": ""
+            },
+            {
+              "$type": "Button",
+              "label": "More",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h2-1"
+              }
+            },
+            {
+              "$type": "SearchBox",
+              "onSearchSubmitted": {
+                "$type": "ActionHandler",
+                "action": "SearchSubmitted",
+                "token": "h2-2"
+              },
+              "placeholder": "Find"
+            },
+            {
+              "$type": "SearchBox",
+              "onSearchSubmitted": {
+                "$type": "ActionHandler",
+                "action": "SearchSubmitted",
+                "token": "h2-3"
+              },
+              "placeholder": "Again"
+            }
+          ]
+        }
+      },
+      {
+        "effects": [
+          {
+            "$type": "DoSearch",
+            "search": "docs"
+          }
+        ],
+        "rendered": {
+          "$type": "Stack",
+          "children": [
+            {
+              "$type": "Label",
+              "text": 1
+            },
+            {
+              "$type": "TextInput",
+              "value": ""
+            },
+            {
+              "$type": "Button",
+              "label": "More",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h3-1"
+              }
+            },
+            {
+              "$type": "SearchBox",
+              "onSearchSubmitted": {
+                "$type": "ActionHandler",
+                "action": "SearchSubmitted",
+                "token": "h3-2"
+              },
+              "placeholder": "Find"
+            },
+            {
+              "$type": "SearchBox",
+              "onSearchSubmitted": {
+                "$type": "ActionHandler",
+                "action": "SearchSubmitted",
+                "token": "h3-3"
+              },
+              "placeholder": "Again"
+            }
+          ]
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Stack",
+          "children": [
+            {
+              "$type": "Label",
+              "text": 1
+            },
+            {
+              "$type": "TextInput",
+              "value": "guides"
+            },
+            {
+              "$type": "Button",
+              "label": "More",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h4-1"
+              }
+            },
+            {
+              "$type": "SearchBox",
+              "onSearchSubmitted": {
+                "$type": "ActionHandler",
+                "action": "SearchSubmitted",
+                "token": "h4-2"
+              },
+              "placeholder": "Find"
+            },
+            {
+              "$type": "SearchBox",
+              "onSearchSubmitted": {
+                "$type": "ActionHandler",
+                "action": "SearchSubmitted",
+                "token": "h4-3"
+              },
+              "placeholder": "Again"
+            }
+          ]
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Stack",
+          "children": [
+            {
+              "$type": "Label",
+              "text": 1
+            },
+            {
+              "$type": "TextInput",
+              "value": "guides"
+            },
+            {
+              "$type": "Button",
+              "label": "More",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h5-1"
+              }
+            },
+            {
+              "$type": "SearchBox",
+              "onSearchSubmitted": {
+                "$type": "ActionHandler",
+                "action": "SearchSubmitted",
+                "token": "h5-2"
+              },
+              "placeholder": "Find"
+            },
+            {
+              "$type": "SearchBox",
+              "onSearchSubmitted": {
+                "$type": "ActionHandler",
+                "action": "SearchSubmitted",
+                "token": "h5-3"
+              },
+              "placeholder": "Again"
+            }
+          ]
+        }
+      }
+    ],
+    "initial": {
+      "$type": "Stack",
+      "children": [
+        {
+          "$type": "Label",
+          "text": 0
+        },
+        {
+          "$type": "TextInput",
+          "value": ""
+        },
+        {
+          "$type": "Button",
+          "label": "More",
+          "onTapped": {
+            "$type": "ActionHandler",
+            "action": "Button.Tapped",
+            "token": "h1-1"
+          }
+        },
+        {
+          "$type": "SearchBox",
+          "onSearchSubmitted": {
+            "$type": "ActionHandler",
+            "action": "SearchSubmitted",
+            "token": "h1-2"
+          },
+          "placeholder": "Find"
+        },
+        {
+          "$type": "SearchBox",
+          "onSearchSubmitted": {
+            "$type": "ActionHandler",
+            "action": "SearchSubmitted",
+            "token": "h1-3"
+          },
+          "placeholder": "Again"
+        }
+      ]
+    }
+  },
+  "main.nx::Tens": {
+    "batches": [
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Card",
+          "count": 11,
+          "header": {
+            "$type": "Button",
+            "label": "Header",
+            "onTapped": {
+              "$type": "ActionHandler",
+              "action": "Button.Tapped",
+              "token": "h2-1"
+            }
+          },
+          "items": [
+            {
+              "$type": "Button",
+              "label": "Ten",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h2-2"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Ten",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h2-3"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "effects": [],
+        "rendered": {
+          "$type": "Card",
+          "count": 121,
+          "header": {
+            "$type": "Button",
+            "label": "Header",
+            "onTapped": {
+              "$type": "ActionHandler",
+              "action": "Button.Tapped",
+              "token": "h3-1"
+            }
+          },
+          "items": [
+            {
+              "$type": "Button",
+              "label": "Ten",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h3-2"
+              }
+            },
+            {
+              "$type": "Button",
+              "label": "Ten",
+              "onTapped": {
+                "$type": "ActionHandler",
+                "action": "Button.Tapped",
+                "token": "h3-3"
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "initial": {
+      "$type": "Card",
+      "count": 0,
+      "header": {
+        "$type": "Button",
+        "label": "Header",
+        "onTapped": {
+          "$type": "ActionHandler",
+          "action": "Button.Tapped",
+          "token": "h1-1"
+        }
+      },
+      "items": [
+        {
+          "$type": "Button",
+          "label": "Ten",
+          "onTapped": {
+            "$type": "ActionHandler",
+            "action": "Button.Tapped",
+            "token": "h1-2"
+          }
+        },
+        {
+          "$type": "Button",
+          "label": "Ten",
+          "onTapped": {
+            "$type": "ActionHandler",
+            "action": "Button.Tapped",
+            "token": "h1-3"
+          }
+        }
+      ]
+    }
+  },
+  "main.nx::root": {
+    "$type": "SearchBox",
+    "onSearchSubmitted": {
+      "$type": "ActionHandler",
+      "action": "SearchSubmitted"
+    },
+    "placeholder": "Find"
+  }
+}

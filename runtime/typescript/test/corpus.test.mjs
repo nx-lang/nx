@@ -1,13 +1,23 @@
 /**
  * The conformance corpus, from the runtime's side: every artifact in `specs/ir-conformance` is
  * prepared, linked where its module table requires, and evaluated, and each named entrypoint's
- * canonical value must equal the result the interpreter recorded.
+ * canonical value must equal the result the interpreter recorded. Each lifecycle is initialized
+ * and its batches dispatched in order, and every rendered output, tokens included, and every
+ * effect list must equal what the interpreter recorded.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { NxIrRuntimeError, evaluateFunction, linkNxIrProgram, prepareNxIrModule, tryPrepareNxIrModule } from "../dist/src/index.js";
+import {
+  NxIrRuntimeError,
+  dispatchComponentActions,
+  evaluateFunction,
+  initializeComponent,
+  linkNxIrProgram,
+  prepareNxIrModule,
+  tryPrepareNxIrModule,
+} from "../dist/src/index.js";
 
 const testRoot = fileURLToPath(new URL(".", import.meta.url));
 const corpusRoot = resolve(testRoot, "../../../specs/ir-conformance");
@@ -69,6 +79,35 @@ for (const program of loadCorpus()) {
         if (stableJson(actual) !== stableJson(expected)) {
           throw new Error(`expected ${stableJson(expected)}, got ${stableJson(actual)}`);
         }
+        console.log(`ok - ${label}`);
+      } catch (error) {
+        failures += 1;
+        console.log(`not ok - ${label}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    for (const lifecycle of program.manifest.lifecycles ?? []) {
+      const label = `${program.name} (${variant}) ${lifecycle.module}::${lifecycle.component} lifecycle`;
+      try {
+        const module = modules.get(lifecycle.module);
+        if (module === undefined) {
+          throw new Error(`the corpus emits no artifact for ${lifecycle.module}`);
+        }
+        const linked = linkNxIrProgram(module, { resolve });
+        const expected = program.results[`${lifecycle.module}::${lifecycle.component}`];
+        const expect = (what, actual, wanted) => {
+          if (stableJson(actual) !== stableJson(wanted)) {
+            throw new Error(`${what}: expected ${stableJson(wanted)}, got ${stableJson(actual)}`);
+          }
+        };
+        const initialized = initializeComponent(linked, lifecycle.component, lifecycle.props ?? {});
+        expect("initial rendered output", initialized.rendered, expected.initial);
+        let instance = initialized.instance;
+        lifecycle.batches.forEach((batch, index) => {
+          const dispatched = dispatchComponentActions(linked, instance, batch);
+          expect(`batch ${index} rendered output`, dispatched.rendered, expected.batches[index].rendered);
+          expect(`batch ${index} effects`, dispatched.effects, expected.batches[index].effects);
+          instance = dispatched.instance;
+        });
         console.log(`ok - ${label}`);
       } catch (error) {
         failures += 1;

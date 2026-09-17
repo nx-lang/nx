@@ -32,6 +32,7 @@
     "verify:package": "node ../../scripts/verify-package.mjs"
   },
   "devDependencies": {
+    "@types/node": "^22.20.0",
     "typescript": "^5.6.3"
   },
   "engines": {

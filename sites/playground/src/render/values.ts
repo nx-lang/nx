@@ -1,5 +1,6 @@
 import meta from "../../catalog/catalog-meta.json";
 import { CornerRadius, SkiaBevel, SkiaPoint, SkiaShadow, Thickness } from "../drawnui/index";
+import { isHandlerRecord, type HandlerRecord } from "./instances";
 
 /** Anything the IR runtime can hand back. */
 export type NxValue = string | number | boolean | null | NxValue[] | NxObject;
@@ -42,12 +43,25 @@ const CONSTRUCTORS: Record<string, (fields: Record<string, unknown>) => unknown>
 
 const unions = meta.unions as Record<string, readonly string[]>;
 const records = meta.records as Record<string, { construct: string | null; fields: readonly string[] }>;
-export const components = meta.components as Record<string, { class: string; content: string | null }>;
+/** Each drawable control: its class, its content property, and its events with their parameter names in order. */
+export const components = meta.components as Record<
+  string,
+  { class: string; content: string | null; events: Record<string, readonly string[]> }
+>;
 export const contentProperty = meta.contentProperty;
 
 function isObject(value: NxValue): value is NxObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+
+/** A DrawnUI event callback: the sender first, then the event's own arguments. */
+export type EventCallback = (sender: unknown, ...args: unknown[]) => unknown;
+
+/**
+ * Turns a handler record bound under `on<Event>` into the callback DrawnUI calls for `<Event>`,
+ * given the event's parameter names in order, or returns nothing to bind no callback.
+ */
+export type BindHandler = (event: string, record: HandlerRecord, params: readonly string[]) => EventCallback | undefined;
 
 /**
  * Coerces one evaluated NX value into what DrawnUI expects for a property.
@@ -95,11 +109,25 @@ export function coerce(value: NxValue): unknown {
   return value;
 }
 
-/** The properties of a control, coerced, with nulls dropped so DrawnUI's own defaults survive. */
-export function coerceProps(value: NxObject): Record<string, unknown> {
+/**
+ * The properties of a control, coerced, with nulls dropped so DrawnUI's own defaults survive.
+ *
+ * A handler record under `on<Event>` is not a value the control takes: it becomes the callback
+ * DrawnUI fires for `<Event>`, through `bind`, and is dropped when `bind` gives none.
+ */
+export function coerceProps(value: NxObject, bind?: BindHandler): Record<string, unknown> {
   const props: Record<string, unknown> = {};
+  const events = typeof value.$type === "string" ? components[value.$type]?.events : undefined;
   for (const [name, item] of Object.entries(value)) {
     if (name === "$type" || name === contentProperty || item === null || item === undefined) {
+      continue;
+    }
+    if (isHandlerRecord(item)) {
+      const event = name.startsWith("on") ? name.slice(2) : name;
+      const callback = bind?.(event, item, events?.[event] ?? []);
+      if (callback !== undefined) {
+        props[event] = callback;
+      }
       continue;
     }
     props[name] = coerce(item);

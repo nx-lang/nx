@@ -125,7 +125,8 @@ reader that evaluates by index never needs to look ahead and no node reaches its
 | 15 | record | `[15, ref, [[str, node]...], [node...]]` | Constructs the record the reference names from named properties and content children. Defaults, required fields, the content field and whether the record is an update record all come from the declaration. |
 | 16 | unionCase | `[16, ref, str, [[str, node]...], [node...]]` | Constructs a case of the union the reference names. The string is the case name. A constant case evaluates to its bare name. |
 | 17 | element | `[17, id, str, [[str, node]...], [node...]]` | An intrinsic element with a module-local id, a tag, properties and content children. |
-| 18 | component | `[18, ref, [[str, node]...], [node...]]` | A component descriptor: props are normalized against the component's declaration. |
+| 18 | component | `[18, ref, [[str, node]...], [node...]]` | A component descriptor: props are normalized against the component's declaration. A property named `on<Emit>` for an emit the component declares is a handler property, not a prop: its value is an action handler, and it is carried on the descriptor rather than normalized. |
+| 19 | actionHandler | `[19, ref, str, ref, slot, ref?, node]` | An action handler, `onTapped=<Update count={count + 1} />`: the component and the name of the emit it answers, the action record it accepts, the slot of its `action` binding, the owner component whose body bound it (absent at the root), and the body. Evaluating the node captures the frame; the body runs when a host dispatches the action. See *Action handlers*. |
 
 A `{ expression }` block in NX source is its expression; it has no node of its own. NX has no
 syntax for a local `let` binding, an index expression or a function type, so none has a kind.
@@ -172,7 +173,7 @@ declarations use the names the language gives them: `User.Update`, `User.Propert
 | 0 | function | `[0, str, [[str, type, isContent]...], node]` — name, parameters (name, type, `0` or `1`), body. |
 | 1 | value | `[1, str, node]` — name and value. |
 | 2 | record | `[2, str, [field...], [ref...], isAbstract, ref?]` — name, fields, abstract bases nearest first, `0` or `1`, and the update target when the record is a derived `T.Update`. |
-| 3 | component | `[3, str, [field...], [field...], node?, flags]` — name, props, state, body (absent for an external component), flags: bit 0 abstract, bit 1 external. |
+| 3 | component | `[3, str, [field...], [field...], node?, flags, [[str, ref]...]]` — name, props, state, body (absent for an external component), flags: bit 0 abstract, bit 1 external, and the emits: each an emit's local name and a reference to its action record, inherited emits included, in declaration order. An inherited emit's reference names the module that declared it. |
 | 4 | union | `[4, str, [[str, [field...], isConstant]...], [ref...], ref?]` — name, cases (name, fields, `0` or `1`), abstract bases, and the property target when the union is a derived `T.Property`. |
 | 5 | typeAlias | `[5, str]` — name only. |
 
@@ -189,8 +190,9 @@ is then the bare case name rather than a `$type` object.
 A slot is an integer local to the frame that owns it. Each function, value, component, record and
 union case is one frame. The frame's leading slots are assigned in declaration order to the
 parameters, then (for a component) the props followed by the state fields, or (for a record or
-union case) the fields. Every `let`, `letStatement` and `for` binding after that takes the next
-integer in the order the body is walked. Two declarations are free to use the same integers.
+union case) the fields. Every `let`, `letStatement` and `for` binding after that, and every action
+handler's `action` binding, takes the next integer in the order the body is walked. Two
+declarations are free to use the same integers.
 
 A record's or component's field default can read the fields declared before it through their slots.
 A runtime normalizing a construction evaluates each default in a fresh frame for that declaration,
@@ -239,9 +241,10 @@ Referenced modules are listed in the order the emitter first meets them, so the 
 deterministic.
 
 - The identity is the module's logical workspace identity, for example `input.nx` or `app/main.nx`.
-- The version is the string the host passed for the module when it built the program, or `""` when
-  it passed none. It is recorded, not interpreted: a runtime linking two images compares the
-  strings for equality.
+- The version is the string the host gave the workspace module when it built the program, or `""`
+  when it gave none. It is part of the module, not an emit option, so every image emitted from one
+  program records the same version for a module. It is recorded, not interpreted: a runtime
+  linking two images compares the strings for equality.
 - The fingerprint is a 64-bit hash of the module's identity and source text: FNV-1a over the
   identity's UTF-8 bytes, a zero byte, and the source's UTF-8 bytes, so the same module fingerprints
   the same whatever emitted it. A JavaScript reader holds it as a `BigInt`, or as its decimal string.
@@ -295,20 +298,22 @@ exception, and no input can make a reader read outside the image.
 
 Both the Rust reader (`NxIrImage::open`) and the TypeScript runtime (`prepareNxIrModule`) are
 tested against the corpus: each truncates every image at every four-byte boundary, and each
-overwrites every cell of the smallest image with four values, refusing it or reading it as valid but
-never failing another way. The Rust suite adds the smallest image carrying a debug section, so span
-offsets and the source length are damaged too, and probes every node and type cell of every image
-with its own entry index, which is the bound the paragraph above describes. The TypeScript suite
-takes the smallest image that owns a function entrypoint and links and evaluates every damaged image
-it accepted, so a hostile artifact is exercised through evaluation and not only through opening.
+overwrites every cell of a chosen image with four values, refusing the result or reading it as valid
+but never failing another way. The Rust suite damages the smallest image and the smallest image
+carrying a debug section, so span offsets and the source length are damaged too, and probes every
+node and type cell of every image with its own entry index, which is the bound the paragraph above
+describes. The TypeScript suite damages the smallest image that owns a function entrypoint and links
+and evaluates every damaged image it accepted, so a hostile artifact is exercised through evaluation
+and not only through opening.
 
 ## Required features
 
 A module lists a feature only when it uses the construct that needs one, so most modules list none.
 A module that declares a derived update record lists `update-records-v1`; one that declares a
 derived property union lists `property-unions-v1`; one that calls an update intrinsic lists
-`update-intrinsics-v1`. A runtime that does not know a listed feature refuses the image rather than
-guessing, which is what makes the list safe to grow. An image does not record its evaluation
+`update-intrinsics-v1`; one that binds an action handler lists `action-handlers-v1`. A runtime that
+does not know a listed feature refuses the image rather than guessing, which is what makes the list
+safe to grow. An image does not record its evaluation
 semantics here. The schema version and the runtime ABI carry that, and an intentional change to how
 a runtime evaluates an image bumps the ABI.
 
@@ -320,7 +325,41 @@ name when the case is constant. A component descriptor is an object whose `$type
 name. An intrinsic element is an object whose `$type` is the tag, with its children under `content`: one
 child as itself, several as a list.
 An integer outside JavaScript's safe range is `{ "$type": "nx.int", "value": "<decimal>" }`, and
-arithmetic on one is a runtime diagnostic in JavaScript.
+arithmetic on one is a runtime diagnostic in JavaScript. An action handler is
+`{ "$type": "ActionHandler", "action": "<name>" }`, the name being the declaration name of the
+action record it accepts (`Button.Tapped` for an inline emit, `SearchSubmitted` for a shared one),
+plus a `token` when the output came from a lifecycle render; the record names the handler and is
+not the handler, so a runtime accepts it as input only where *Action handlers* says.
+
+## Action handlers
+
+A handler node captures the frame when it is evaluated: the body reads every local it closes over
+through the slot it already had, so the image carries no environment, and a handler for a component
+declared in another module resolves its component and action by reference like any other node.
+Whether the owner reference is present decides nothing by itself; what matters is which instance
+dispatches the handler. A handler whose owner is the component an instance was initialized from
+reads that instance's state live when it runs, through the owner's state slots, and every
+`<Owner>.Update` record it returns patches the instance's state. Any other handler in the output,
+one bound at the root or one written in a parent's body and rendered by a child through content, sees
+only what it captured, and everything it returns is an effect for the host.
+
+The lifecycle a runtime implements is the interpreter's. Initialization normalizes the props, sets
+the handler properties aside (a body never sees `onTapped`), materializes the state, renders the
+body, and assigns every handler in the output a token `h<generation>-<n>`, generation `1`, numbered
+by a walk that visits lists in order and object keys in sorted order. Dispatch takes an ordered batch
+of entries, each an action record the component emits or `{ "$type": "ActionHandlerInvocation",
+"token", "action" }` naming a handler of the most recent output; an emitted action runs the handler
+the parent bound under `on<Emit>`, and is a no-op when none was, once the action has been
+constructed against its record. After the batch the body renders once against the state the batch
+produced, with the generation incremented, so a token from an earlier output never names a handler
+again. A batch is atomic: a failure returns a diagnostic and the instance the host holds is
+unchanged. A host initializing a child from a parent's rendered descriptor hands the descriptor's
+fields over as props together with the parent's instance, and every `ActionHandler` record among
+them, at any depth, is replaced by the handler the parent holds under its token; what is
+substituted is the parent's handler value itself, so a host holding both instances can recognize it
+in the child's table. Initialization may also be given a complete state to use in place of the
+initial one, which is how a host re-renders an instance with new props and the state it holds;
+the runtime has no other "update props" operation and needs none.
 
 ## Determinism
 
@@ -499,6 +538,11 @@ several artifacts as a *bundle*: a little-endian `u32` header length, a JSON hea
 at the offsets the header gives, measured from the start of the bundle. The loaders slice the images
 out and hand each over as its own buffer.
 
+Every SDK takes a module's version on the workspace module: `{ identity, source, version }` in the
+wasm and Node SDKs, `NxWorkspaceModule.Version` (or `FromSourceText`'s `version`) in the .NET SDK,
+and `version_ptr`/`version_len` on the C FFI's `NxWorkspaceModule`. The emit options are the modules to emit and whether to keep the
+debug section, and nothing else; an unknown key is refused.
+
 ## TypeScript runtime
 
 The TypeScript runtime lives in `runtime/typescript` and exposes:
@@ -508,8 +552,12 @@ The TypeScript runtime lives in `runtime/typescript` and exposes:
 - `prepareNxIrProgram` / `tryPrepareNxIrProgram`, for a self-contained image
 - `evaluateFunction`
 - `constructComponentDescriptor`
-- `initializeComponent`
+- `initializeComponent`, which returns the rendered output, the initial state and an instance, and
+  takes a `parent` instance to resolve `ActionHandler` records in the props and a `state` to use
+  in place of the initial one
 - `evaluateComponent`
+- `dispatchComponentActions`, over an instance and a batch, returning the rendered output, the
+  effects, the next state and the next instance
 - `normalizeComponentState`
 - `applyComponentStatePatch`
 
@@ -517,19 +565,22 @@ Preparation validates the image as described under *Validation*, then the runtim
 features and the kind numbers, before returning a prepared module whose tables are views over the
 bytes given; a string is decoded the first time it is named. Public host APIs resolve names through
 the entrypoint tables. A module that names another module in its table must be linked before it is
-evaluated.
+evaluated. An instance is an immutable value the host holds between calls; the runtime keeps no
+state of its own, and a dispatch that fails leaves the instance it was given usable.
 
 ## Conformance corpus
 
 `specs/ir-conformance/` holds NX programs with their expected images, with and without the debug
-section, the explained text of each image beside it, and the expected canonical value of every
-named entrypoint. The emitter's tests pin the images byte for byte and check that each committed
-text is the explanation of its committed image; the TypeScript runtime's tests evaluate the images
-and refuse every truncation and cell overwrite of them; and the corpus is where a second runtime
-starts. It covers every node, type and declaration kind, a program spanning two images, derived
-declarations and a document that is a single trailing element. It also holds the size budget: an
-image emitted without its debug section is at most six times the UTF-8 length of its module's
-source.
+section, the explained text of each image beside it, the expected canonical value of every named
+entrypoint, and, for every lifecycle a program names, the rendered output of initialization and
+the rendered output and effects of each dispatched batch, tokens included. The emitter's tests pin
+the images byte for byte and check that each committed text is the explanation of its committed
+image; the TypeScript runtime's tests evaluate the images, drive the lifecycles, and refuse every
+truncation and cell overwrite of them; and the corpus is where a second runtime starts. It covers
+every node, type and declaration kind, a program spanning two images, derived declarations, a
+document that is a single trailing element, and components that bind action handlers. It also holds
+the size budget: an image emitted without its debug section is at most six times the UTF-8 length
+of its module's source.
 
 ## Non-goals
 
@@ -546,10 +597,10 @@ and a component's state belongs to the host, which validates and patches it thro
 APIs. A runtime that wants to track dependencies derives what it needs by walking the tables at
 prepare time, so no image carries that metadata and none needs to.
 
-The format's own limit is narrower. An action handler is an unevaluated expression closed over the
-frame that declares it, and schema 3 assigns no kind to one: a call node evaluates its callee
-eagerly, and a reference node names a top-level declaration, which cannot capture a component's
-slots or state. A program that binds a handler is refused before an image is written. Reducers sit
-in between. Functions, derived update records and the update intrinsics express what a reducer
-does, while no declaration says which function reduces which component, so a runtime that wants
-NX-owned reducers supplies that association itself.
+The one deferred evaluation the format has is the action handler, and it is deferred the way the
+language defines it: the body closes over the frame by value, runs when a host dispatches the
+action, and returns records rather than performing anything. Which instance a handler runs against,
+and what becomes of what it returns, is the lifecycle a runtime implements (see *Action handlers*),
+not a property of the node. Reducers sit in between. Functions, derived update records and the
+update intrinsics express what a reducer does, while no declaration says which function reduces
+which component, so a runtime that wants NX-owned reducers supplies that association itself.

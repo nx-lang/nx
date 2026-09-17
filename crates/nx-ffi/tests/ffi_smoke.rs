@@ -743,8 +743,41 @@ fn ffi_codegen_nx_ir_returns_a_bundle_of_images_and_metadata() {
     assert_eq!(diagnostics[0].code.as_deref(), Some("nx-ir-malformed"));
 }
 
+/// A conditional property fragment is a construct NX IR has no node for.
 #[test]
 fn ffi_codegen_nx_ir_returns_json_diagnostics_for_ir_errors() {
+    let build_context = create_empty_build_context();
+    let (program, build_status, build_bytes) = build_program_artifact_handle(
+        build_context,
+        r#"
+external component <Notice density:string />
+let root(compact:boolean) = { <Notice if compact { density="tight" } else { density="normal" } /> }
+"#,
+        "root.nx",
+    );
+    nx_free_program_build_context(build_context);
+
+    assert!(matches!(build_status, NxEvalStatus::Ok));
+    assert!(build_bytes.is_empty());
+    assert!(!program.is_null());
+
+    let (status, json) = codegen_nx_ir(program);
+    nx_free_program_artifact(program);
+
+    assert!(matches!(status, NxEvalStatus::Error));
+    let diagnostics: Vec<NxDiagnostic> = serde_json::from_slice(&json).unwrap();
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code.as_deref() == Some("codegen-unsupported-construct")),
+        "{diagnostics:?}"
+    );
+}
+
+/// An action handler is an IR node, so the source the JavaScript target refuses below emits an
+/// image whose explained text names the handler and whose feature list names handler support.
+#[test]
+fn ffi_codegen_nx_ir_carries_action_handlers() {
     let build_context = create_empty_build_context();
     let (program, build_status, build_bytes) = build_program_artifact_handle(
         build_context,
@@ -762,14 +795,24 @@ let root() = { <SearchBox onSearchSubmitted=<DoSearch query={action.query} /> />
     assert!(build_bytes.is_empty());
     assert!(!program.is_null());
 
-    let (status, json) = codegen_nx_ir(program);
+    let (status, bundle) = codegen_nx_ir(program);
     nx_free_program_artifact(program);
 
-    assert!(matches!(status, NxEvalStatus::Error));
-    let diagnostics: Vec<NxDiagnostic> = serde_json::from_slice(&json).unwrap();
-    assert!(diagnostics.iter().any(|diagnostic| diagnostic
-        .message
-        .contains("action-handler codegen is not supported")));
+    assert!(matches!(status, NxEvalStatus::Ok));
+    let artifacts = read_nx_ir_bundle(&bundle).expect("the payload is a bundle");
+    assert_eq!(
+        artifacts[0].metadata.required_features,
+        vec!["action-handlers-v1".to_string()]
+    );
+    let (status, text) = explain_nx_ir(&artifacts[0].bytes);
+    assert!(matches!(status, NxEvalStatus::Ok));
+    let text = String::from_utf8(text).unwrap();
+    assert!(
+        text.contains(
+            "onSearchSubmitted=handler SearchBox.SearchSubmitted action@0:SearchBox.SearchSubmitted =>"
+        ),
+        "{text}"
+    );
 }
 
 #[test]

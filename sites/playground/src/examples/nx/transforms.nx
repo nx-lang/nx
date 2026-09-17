@@ -3,9 +3,11 @@
 // The transform tiles are the substance of this page and they port exactly: transforms are applied
 // at render around the arranged box, so a still frame shows everything the original shows.
 //
-// Two things do not port. The tap counter needs event handlers and component state. The animation
-// row — FadeToAsync, ScaleToAsync, TranslateToAsync, RotateToAsync and the spin toggle — needs both
-// event handlers and animation; the logo below is drawn at rest where the original animates it.
+// Two things do not port. The tap counter is not wired yet (event handlers, component state): its
+// count is a number, which NX cannot turn into text. The animation row — FadeToAsync, ScaleToAsync,
+// TranslateToAsync, RotateToAsync and the spin toggle — needs animation, which NX lacks, and event
+// handlers this port does not use yet; the logo below is drawn at rest where the original animates
+// it.
 
 component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = {
   <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 />
@@ -67,9 +69,10 @@ component <Tile
 
     <Card Title="Gestures map through transforms — the original counts taps here">
       <SkiaStack Spacing=8 HeightRequest=120 HorizontalOptions=Fill>
-        // The original's label reads "Tapped N×" and increments on tap: event handlers and
-        // component state. The button is drawn transformed, and its ripple still lands under the
-        // pointer, because the ripple is DrawnUI's own.
+        // The original's label reads "Tapped N×" and increments on tap; this port does not use
+        // event handlers or component state for it yet, since the count needs a number-to-string
+        // conversion NX lacks. The button is drawn transformed, and its ripple still lands under
+        // the pointer, because the ripple is DrawnUI's own.
         <SkiaButton Text="Tapped 0×" BackgroundColor="#D63384" HorizontalOptions=Center
           VerticalOptions=Center Rotation=-20 ScaleX=1.4 ScaleY=1.4 ApplyEffect=Ripple />
       </SkiaStack>
@@ -79,8 +82,9 @@ component <Tile
 
     <Card Title="Animations — the original fades, scales, translates and spins this logo">
       <SkiaStack Spacing=0 HeightRequest=140 HorizontalOptions=Fill>
-        // Each button below drives a *ToAsync animation on this logo. NX has no animation and no
-        // event handlers, so the logo rests at its starting position and the buttons are inert.
+        // Each button below drives a *ToAsync animation on this logo. NX has no animation, and this
+        // port binds no handlers, so the logo rests at its starting position and the buttons are
+        // inert.
         <SkiaSvg Source="images/drawnui.svg" WidthRequest=100 LockRatio=1
           HorizontalOptions=Center VerticalOptions=Center />
       </SkiaStack>

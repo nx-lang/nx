@@ -208,6 +208,15 @@ fn collect_expression_source_codegen_diagnostics(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     match &expression.kind {
+        // A handler is an unevaluated body a host dispatches later; these targets have no
+        // instance to dispatch against, so the binding is refused before anything is emitted.
+        CodegenExpressionKind::ActionHandler(_) => {
+            diagnostics.push(source_codegen_unsupported_diagnostic(
+                module,
+                expression.span,
+                "action-handler codegen is not supported by this non-reactive executable target",
+            ));
+        }
         CodegenExpressionKind::Match { .. } => {
             diagnostics.push(source_codegen_unsupported_diagnostic(
                 module,
@@ -3050,6 +3059,9 @@ fn emit_expression(
         CodegenExpressionKind::Unsupported(unsupported) => {
             format!("nxRuntimeError({})", js_string(&unsupported.message))
         }
+        CodegenExpressionKind::ActionHandler(_) => {
+            unreachable!("validate_source_codegen_program refuses handlers before emission")
+        }
     }
 }
 
@@ -3908,6 +3920,9 @@ fn collect_expression_value_references(
                 collect_expression_value_references(current_module_id, content, output);
             }
         }
+        CodegenExpressionKind::ActionHandler(handler) => {
+            collect_expression_value_references(current_module_id, &handler.body, output);
+        }
         CodegenExpressionKind::Literal(_)
         | CodegenExpressionKind::Identifier {
             reference: None, ..
@@ -4069,6 +4084,9 @@ fn collect_expression_runtime_helpers(
         }
         CodegenExpressionKind::Unsupported(_) => {
             output.insert("nxRuntimeError");
+        }
+        CodegenExpressionKind::ActionHandler(_) => {
+            unreachable!("validate_source_codegen_program refuses handlers before emission")
         }
         CodegenExpressionKind::Literal(_) | CodegenExpressionKind::Identifier { .. } => {}
         CodegenExpressionKind::Binary { lhs, rhs, .. } => {

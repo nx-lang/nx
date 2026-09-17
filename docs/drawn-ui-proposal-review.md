@@ -60,11 +60,11 @@ Sources consulted first-hand are listed in the appendix, along with three factua
 
 ### RF1 — `format` discriminator and semver `schemaVersion` (§4.1)
 
-The document had `schemaVersion: "0.1"` while catalogs used `0.1.0`, and no way to tell an NX UI document from any other JSON. The sibling artifact format in this repo ([nx-ir-format.md](nx-ir-format.md)) already establishes the convention: `format: "nx-ir-json"` plus `schemaVersion`. Added `format: "nx-ui-json"` and moved `schemaVersion` to `"0.1.0"` so one version syntax is used throughout.
+The document had `schemaVersion: "0.1"` while catalogs used `0.1.0`, and no way to tell an NX UI document from any other JSON. The sibling artifact format in this repo ([nx-ir-format.md](nx-ir-format.md)) established the convention at the time: `format: "nx-ir-json"` plus `schemaVersion`. Added `format: "nx-ui-json"` and moved `schemaVersion` to `"0.1.0"` so one version syntax is used throughout. NX IR has since moved to a binary image with a magic header, so the `nx-ui-json` naming now stands on its own.
 
 ### RF2 — Media type and file extension (§4.1)
 
-Nothing named the serialized artifact. A2UI standardized `application/a2ui+json` in v1.0 for the practical reason that transports and caches otherwise have to sniff payloads. Added `application/nx-ui+json` and `.nxui.json`, which also matches the existing `.nxir.json` extension convention.
+Nothing named the serialized artifact. A2UI standardized `application/a2ui+json` in v1.0 for the practical reason that transports and caches otherwise have to sniff payloads. Added `application/nx-ui+json` and `.nxui.json`, which matched the `.nxir.json` extension NX IR used before it became a binary `.nxir` image.
 
 ### RF3 — `ElementId` charset (§4.4)
 
