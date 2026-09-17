@@ -188,6 +188,100 @@ impl Value {
     }
 }
 
+impl Value {
+    /// The canonical text form of a primitive value, or `None` for a value that has none.
+    ///
+    /// <para>This is the text `+` joins to a string and a text body embeds, and it is the same
+    /// text every backend prints: an integer as its decimal digits, a boolean as `true` or
+    /// `false`, and a float in the ECMAScript `Number::toString` form. A `float32` prints the
+    /// shortest digits that round-trip as a `float32`, so one holding `0.1` prints `0.1` and not
+    /// the expansion of its `float64` widening. It is not [`std::fmt::Display`], which renders
+    /// lists and records for diagnostics and spells an integral float `1.0`.</para>
+    pub fn to_text(&self) -> Option<String> {
+        Some(match self {
+            Value::Int32(value) => value.to_string(),
+            Value::Int(value) => value.to_string(),
+            Value::Float32(value) => float_text(
+                value.is_nan(),
+                value.is_infinite(),
+                value.is_sign_negative(),
+                *value == 0.0,
+                format!("{:e}", value),
+            ),
+            Value::Float(value) => float_text(
+                value.is_nan(),
+                value.is_infinite(),
+                value.is_sign_negative(),
+                *value == 0.0,
+                format!("{:e}", value),
+            ),
+            Value::Boolean(value) => value.to_string(),
+            Value::String(value) => value.to_string(),
+            _ => return None,
+        })
+    }
+}
+
+/// The ECMAScript `Number::toString` text of a float, given the facts about it and its shortest
+/// round-trip scientific form.
+///
+/// <para>Rust's `{:e}` already prints the shortest digits that round-trip at the value's own
+/// width, which is the hard part and is why a `float32` is formatted as a `float32` before it
+/// gets here. What is left is ECMAScript's layout of those digits: plain decimal when the decimal
+/// point falls within 21 digits to the right or 6 to the left, the exponent form `1e+21` or
+/// `1e-7` beyond that, `0` for either zero, and `NaN`, `Infinity` and `-Infinity` spelled
+/// out.</para>
+fn float_text(
+    is_nan: bool,
+    is_infinite: bool,
+    is_negative: bool,
+    is_zero: bool,
+    scientific: String,
+) -> String {
+    if is_nan {
+        return "NaN".to_string();
+    }
+    if is_infinite {
+        return if is_negative { "-Infinity" } else { "Infinity" }.to_string();
+    }
+    if is_zero {
+        return "0".to_string();
+    }
+
+    let unsigned = scientific.trim_start_matches('-');
+    let (mantissa, exponent) = unsigned.split_once('e').unwrap_or((unsigned, "0"));
+    let digits: String = mantissa.chars().filter(|c| *c != '.').collect();
+    let exponent: i32 = exponent.parse().unwrap_or(0);
+
+    // `k` digits, with the decimal point after the `n`th.
+    let k = digits.len() as i32;
+    let n = exponent + 1;
+
+    let body = if k <= n && n <= 21 {
+        format!("{}{}", digits, "0".repeat((n - k) as usize))
+    } else if 0 < n && n <= 21 {
+        let (whole, fraction) = digits.split_at(n as usize);
+        format!("{}.{}", whole, fraction)
+    } else if -6 < n && n <= 0 {
+        format!("0.{}{}", "0".repeat((-n) as usize), digits)
+    } else {
+        let exponent = n - 1;
+        let sign = if exponent < 0 { '-' } else { '+' };
+        let (first, rest) = digits.split_at(1);
+        if rest.is_empty() {
+            format!("{}e{}{}", first, sign, exponent.abs())
+        } else {
+            format!("{}.{}e{}{}", first, rest, sign, exponent.abs())
+        }
+    };
+
+    if is_negative {
+        format!("-{}", body)
+    } else {
+        body
+    }
+}
+
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -260,6 +354,65 @@ mod tests {
 
         let null_val = Value::Null;
         assert!(null_val.is_null());
+    }
+
+    #[test]
+    fn test_to_text_prints_floats_in_the_ecmascript_form() {
+        let text = |value: f64| Value::Float(value).to_text().unwrap();
+
+        assert_eq!(text(1.0), "1");
+        assert_eq!(text(0.1), "0.1");
+        assert_eq!(text(1.5), "1.5");
+        assert_eq!(text(-2.25), "-2.25");
+        assert_eq!(text(100.0), "100");
+        assert_eq!(text(123.456), "123.456");
+        assert_eq!(text(1e21), "1e+21");
+        assert_eq!(text(1.5e21), "1.5e+21");
+        assert_eq!(text(1e-7), "1e-7");
+        assert_eq!(text(1.5e-7), "1.5e-7");
+        assert_eq!(text(0.000001), "0.000001");
+        assert_eq!(text(-0.0), "0");
+        assert_eq!(text(0.0), "0");
+        assert_eq!(text(123456789012345680000.0), "123456789012345680000");
+        assert_eq!(text(9007199254740993.0), "9007199254740992");
+        assert_eq!(text(f64::NAN), "NaN");
+        assert_eq!(text(f64::INFINITY), "Infinity");
+        assert_eq!(text(f64::NEG_INFINITY), "-Infinity");
+        assert_eq!(text(f64::MAX), "1.7976931348623157e+308");
+        assert_eq!(text(f64::MIN_POSITIVE), "2.2250738585072014e-308");
+    }
+
+    #[test]
+    fn test_to_text_prints_a_float32_as_a_float32() {
+        assert_eq!(Value::Float32(0.1).to_text().unwrap(), "0.1");
+        assert_eq!(Value::Float32(1.0).to_text().unwrap(), "1");
+        assert_eq!(Value::Float32(16777216.0).to_text().unwrap(), "16777216");
+        assert_eq!(Value::Float32(1e-7).to_text().unwrap(), "1e-7");
+        // The same number carried as a float64 is a different value and prints as one.
+        assert_eq!(
+            Value::Float(f64::from(0.1f32)).to_text().unwrap(),
+            "0.10000000149011612"
+        );
+    }
+
+    #[test]
+    fn test_to_text_prints_integers_booleans_and_strings() {
+        assert_eq!(Value::Int(3).to_text().unwrap(), "3");
+        assert_eq!(Value::Int(-42).to_text().unwrap(), "-42");
+        assert_eq!(Value::Int32(7).to_text().unwrap(), "7");
+        assert_eq!(
+            Value::Int(9007199254740993).to_text().unwrap(),
+            "9007199254740993"
+        );
+        assert_eq!(Value::Boolean(true).to_text().unwrap(), "true");
+        assert_eq!(Value::Boolean(false).to_text().unwrap(), "false");
+        assert_eq!(Value::String(SmolStr::new("hi")).to_text().unwrap(), "hi");
+    }
+
+    #[test]
+    fn test_to_text_declines_values_with_no_text_form() {
+        assert_eq!(Value::Null.to_text(), None);
+        assert_eq!(Value::Array(vec![Value::Int(1)]).to_text(), None);
     }
 
     #[test]

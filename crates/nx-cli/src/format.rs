@@ -32,8 +32,8 @@ fn format_value_inner(value: &Value, output: &mut String, indent: usize) -> Resu
     match value {
         Value::Int32(n) => write!(output, "{}", n).unwrap(),
         Value::Int(n) => write!(output, "{}", n).unwrap(),
-        Value::Float32(f) => output.push_str(&format_real_literal(f64::from(*f))),
-        Value::Float(f) => output.push_str(&format_real_literal(*f)),
+        Value::Float32(f) => output.push_str(&format_real_literal(f.to_string(), f.is_finite())),
+        Value::Float(f) => output.push_str(&format_real_literal(f.to_string(), f.is_finite())),
         Value::String(s) => output.push_str(s.as_str()),
         Value::Boolean(b) => write!(output, "{}", b).unwrap(),
         Value::Null => output.push_str("null"),
@@ -116,8 +116,8 @@ fn format_property_value(value: &Value, output: &mut String, indent: usize) -> R
         Value::String(s) => write!(output, "\"{}\"", escape_string(s.as_str())).unwrap(),
         Value::Int32(n) => write!(output, "{}", n).unwrap(),
         Value::Int(n) => write!(output, "{}", n).unwrap(),
-        Value::Float32(f) => output.push_str(&format_real_literal(f64::from(*f))),
-        Value::Float(f) => output.push_str(&format_real_literal(*f)),
+        Value::Float32(f) => output.push_str(&format_real_literal(f.to_string(), f.is_finite())),
+        Value::Float(f) => output.push_str(&format_real_literal(f.to_string(), f.is_finite())),
         Value::Boolean(b) => write!(output, "{}", b).unwrap(),
         Value::Null => output.push_str("null"),
         // A bare case name; the declaring union comes from the target type.
@@ -165,9 +165,10 @@ fn unspellable_nested_list() -> String {
 /// `1.0` formats as `1` by default. An integer literal does bind at a float-typed site, but
 /// rendered output has to read back wherever it is pasted, including sites that supply no expected
 /// type: `let x = 1` infers `int`, so dropping the `.0` would round-trip a float as an integer.
-fn format_real_literal(value: f64) -> String {
-    let rendered = format!("{}", value);
-    if rendered.contains(['.', 'e', 'E']) || !value.is_finite() {
+/// A real value as an NX literal, from its shortest round-trip digits. A `float32` is rendered from
+/// its own digits (`0.1`), not those of its `float64` widening, and reads back as the same value.
+fn format_real_literal(rendered: String, finite: bool) -> String {
+    if rendered.contains(['.', 'e', 'E']) || !finite {
         rendered
     } else {
         format!("{}.0", rendered)
@@ -239,6 +240,22 @@ mod tests {
             !formatted.contains('"'),
             "no scalar should be quoted: {formatted}"
         );
+    }
+
+    /// A `float32` prints its own shortest digits, which read back at a `float32` site as the same
+    /// value, rather than the digits of its `float64` widening.
+    #[test]
+    fn test_format_float32_prints_its_own_digits() {
+        let mut fields = FxHashMap::default();
+        fields.insert(SmolStr::new("v"), Value::Float32(0.1));
+        fields.insert(SmolStr::new("n"), Value::Float32(2.0));
+        let value = Value::Record {
+            type_name: nx_hir::Name::new("F"),
+            fields,
+        };
+
+        assert_eq!(formatted(&value).trim(), "<F n=2.0 v=0.1 />");
+        assert_eq!(formatted(&Value::Float32(0.1)), "0.1");
     }
 
     /// A float keeps its real-literal spelling: at a site with no expected type the spelling is

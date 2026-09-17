@@ -1,0 +1,59 @@
+{
+  "main.nx::enabled": "enabled: true",
+  "main.nx::float32Compared": true,
+  "main.nx::float32Product": "6.8999996 px",
+  "main.nx::float32StepsOf": 0.7333332896232605,
+  "main.nx::float32Tenth": "0.1",
+  "main.nx::float32Widened": 6.899999618530273,
+  "main.nx::fractionalFloat": "0.1",
+  "main.nx::fullName": {
+    "$type": "Label",
+    "text": "Ada Lovelace"
+  },
+  "main.nx::integerDivisionOf": 3,
+  "main.nx::integralFloat": "1",
+  "main.nx::joinedArmDivision": 3.0,
+  "main.nx::joinedFloat32Product": 6.899999618530273,
+  "main.nx::joinedIf": 1.5,
+  "main.nx::joinedIntegerDivision": 3.0,
+  "main.nx::joinedList": [
+    3,
+    1.5
+  ],
+  "main.nx::joinedListDivision": [
+    3.0,
+    0.5
+  ],
+  "main.nx::joinedMatch": 1.5,
+  "main.nx::label": {
+    "$type": "Label",
+    "text": "Total: 3 of 0.1"
+  },
+  "main.nx::largeFloat": "1e+21",
+  "main.nx::leftAssociative": "3 items",
+  "main.nx::markdownNote": {
+    "$type": "Label",
+    "text": "# Tasks\n\nYou have 3 open.\n\n- one"
+  },
+  "main.nx::mixedDivision": 1.5,
+  "main.nx::mixedEqual": true,
+  "main.nx::mixedLess": true,
+  "main.nx::mixedSumOf": 2.5,
+  "main.nx::negativeInt": "-42",
+  "main.nx::negativeZero": "0",
+  "main.nx::onTheLeft": "1.5 px",
+  "main.nx::reorder": "Reorder Rust",
+  "main.nx::root": "Total: 3",
+  "main.nx::smallFloat": "1e-7",
+  "main.nx::stringFirst": "n=12",
+  "main.nx::total": "Total: 3",
+  "main.nx::widened": {
+    "$type": "Box",
+    "opacity": 3.0,
+    "ratios": [
+      3.0,
+      2.5
+    ],
+    "width": 3.0
+  }
+}

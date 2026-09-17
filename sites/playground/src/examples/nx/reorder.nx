@@ -25,11 +25,8 @@ component <Row extends DrawnNode Item:Language /> = {
   <SkiaLayer HeightRequest=44 HorizontalOptions=Fill>
     <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 /> BackgroundColor="#111827"
       StrokeWidth=1 StrokeColor={Item.Color} HorizontalOptions=Fill VerticalOptions=Fill />
-    // The original labels the grip "Reorder <title>". `"Reorder " + Item.Title` compiles but fails
-    // at runtime: `+` on a record field lowers to a numeric add (FINDINGS F22), so the label is the
-    // title and the verb goes in the hint.
     <SkiaLayer WidthRequest=26 HorizontalOptions=Start VerticalOptions=Fill Margin=<Thickness Left=10 />
-      AccessibilityRole="button" AccessibilityLabel={Item.Title} AccessibilityHint="Reorder">
+      AccessibilityRole="button" AccessibilityLabel={"Reorder " + Item.Title}>
       <SkiaStack Spacing=3 VerticalOptions=Center HorizontalOptions=Fill>
         <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=1 /> HeightRequest=2 WidthRequest=16 BackgroundColor="#94A3B8" HorizontalOptions=Center />
         <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=1 /> HeightRequest=2 WidthRequest=16 BackgroundColor="#94A3B8" HorizontalOptions=Center />

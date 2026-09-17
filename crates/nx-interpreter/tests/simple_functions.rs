@@ -106,6 +106,31 @@ fn test_string_concat() {
         let <concat a:string b:string /> = { a + b }
     "#;
 
+    // Analysis decides that this `+` concatenates, so the analyzed module is what runs.
+    let checked = nx_types::check_str(source, "test.nx");
+    assert!(checked.errors().is_empty(), "{:?}", checked.diagnostics);
+    let module = checked.lowered_module.expect("lowered module");
+    let result = Interpreter::new()
+        .execute_function(
+            &module,
+            "concat",
+            vec![
+                Value::String(SmolStr::new("hello")),
+                Value::String(SmolStr::new(" world")),
+            ],
+        )
+        .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
+    assert_eq!(result, Value::String(SmolStr::new("hello world")));
+}
+
+#[test]
+fn test_string_addition_without_analysis_is_not_concatenation() {
+    // A freshly lowered `+` is an addition whatever its operands; nothing below type analysis
+    // guesses otherwise, which is the guess that used to get a field access wrong.
+    let source = r#"
+        let <concat a:string b:string /> = { a + b }
+    "#;
+
     let result = execute_function(
         source,
         "concat",
@@ -113,9 +138,12 @@ fn test_string_concat() {
             Value::String(SmolStr::new("hello")),
             Value::String(SmolStr::new(" world")),
         ],
-    )
-    .unwrap_or_else(|err| panic!("Function execution failed:\n{}", err));
-    assert_eq!(result, Value::String(SmolStr::new("hello world")));
+    );
+    assert!(
+        result.is_err(),
+        "expected a runtime error, got {:?}",
+        result
+    );
 }
 
 #[test]

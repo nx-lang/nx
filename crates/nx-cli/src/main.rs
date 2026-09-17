@@ -1565,7 +1565,7 @@ let root() = { Ui.title() }"#,
         let image = NxIrImage::open(&bytes).unwrap();
 
         assert_eq!(&bytes[..4], b"NXIR");
-        assert_eq!(image.schema_version(), 3);
+        assert_eq!(image.schema_version(), 4);
         let root = image.function_entrypoints().get(0).unwrap();
         assert_eq!(image.declaration_name(root), Some("root"));
         // The CLI's files carry debug data.
@@ -1707,14 +1707,14 @@ let root() = { Ui.title() }"#,
         }
 
         let mut image = fs::read(&artifact).unwrap();
-        image[4..8].copy_from_slice(&2u32.to_le_bytes());
+        image[4..8].copy_from_slice(&3u32.to_le_bytes());
         let old_artifact = dir.path().join("old.nxir");
         fs::write(&old_artifact, &image).unwrap();
         let refused = run_cli(&["ir", "explain", old_artifact.to_str().unwrap()]);
         assert!(!refused.status.success());
         let stderr = String::from_utf8_lossy(&refused.stderr);
-        assert!(stderr.contains("schema version 2"), "{stderr}");
         assert!(stderr.contains("schema version 3"), "{stderr}");
+        assert!(stderr.contains("schema version 4"), "{stderr}");
 
         // A truncated file and a file that is not an image are diagnostics, not panics.
         let image = fs::read(&artifact).unwrap();

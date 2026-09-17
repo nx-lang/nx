@@ -92,6 +92,22 @@ test("two taps read the state live: the second sees what the first left", () => 
   assert.deepEqual(root.instance.state, { count: 2 });
 });
 
+test("a readout joins the state's number, boolean and float to its words, and follows a tap", () => {
+  const { tree, root } = open(`
+component <Page /> = {
+  state { taps:int = 0 open:boolean = false speed:float64 = 1 }
+  <SkiaStack>
+    <SkiaLabel Text={"Tapped " + taps + "× · IsOpen: " + open + " · " + speed + "x"} />
+    <SkiaButton Text="Tap" onTapped=<Update taps={taps + 1} open={!open} speed={speed / 2} /> />
+  </SkiaStack>
+}
+let root() = { <Page /> }
+`);
+  assert.ok(find(root.rendered, control("SkiaLabel", "Tapped 0× · IsOpen: false · 1x")));
+  tree.dispatch(root, tokenOf(root, "SkiaButton"), tapped);
+  assert.ok(find(root.rendered, control("SkiaLabel", "Tapped 1× · IsOpen: true · 0.5x")));
+});
+
 const CHOSEN = `
 component <Child extends DrawnNode emits { Chosen { name:string } } /> = {
   <SkiaButton Text="Pick" onTapped=<Child.Chosen name="a" /> />

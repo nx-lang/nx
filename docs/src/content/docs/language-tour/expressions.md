@@ -61,12 +61,13 @@ let banner = if {
 ## Loops (`for`)
 
 ```nx
-let items = for index, user in users {
+let items = for user, index in users {
   <li key={index}>{user.name}</li>
 }
 ```
 
-`for` yields a sequence; include the index when you need position.
+`for` yields a sequence. Add a second name after the item, as in `for user, index`, when you need
+its zero-based position.
 
 ## Calls and operators
 

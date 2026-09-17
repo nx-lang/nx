@@ -1,0 +1,189 @@
+module main.nx fingerprint 813895554484553202
+entrypoints functions [total onTheLeft enabled leftAssociative stringFirst reorder integralFloat fractionalFloat largeFloat smallFloat negativeZero negativeInt float32Tenth float32Scaled float32Product scaled float32Widened float32Compared float32Steps float32StepsOf label named note markdownNote fullName mixedSum mixedSumOf mixedEqual mixedLess mixedDivision integerDivision integerDivisionOf pick joinedIf arm joinedMatch joinedList halfOrX joinedIntegerDivision armHalf joinedArmDivision listHalf joinedListDivision productOrX scaledJoin joinedFloat32Product widened root] components []
+
+record Item @4:1-4:29
+  title: string required
+
+record Label @5:1-5:37
+  content text: string required
+
+record Box @6:1-6:63
+  width: float64 required
+  ratios: float64[] required
+  opacity: float64?
+
+value count @8:1-8:14 =
+  3
+
+value item @9:1-9:33 =
+  <Item title="Rust" />
+
+value tenth @10:1-10:25 =
+  0.10000000149011612
+
+function total() @13:1-13:36 =
+  ("Total: " concat text<int>(count))
+
+function onTheLeft() @14:1-14:34 =
+  (text<float64>(1.5) concat " px")
+
+function enabled() @15:1-15:39 =
+  ("enabled: " concat text<boolean>(true))
+
+function leftAssociative() @16:1-16:45 =
+  (text<int>((1 add 2)) concat " items")
+
+function stringFirst() @17:1-17:37 =
+  (("n=" concat text<int>(1)) concat text<int>(2))
+
+function reorder() @19:1-19:44 =
+  ("Reorder " concat item.title)
+
+function integralFloat() @23:1-23:35 =
+  ("" concat text<float64>(1.0))
+
+function fractionalFloat() @24:1-24:37 =
+  ("" concat text<float64>(0.1))
+
+function largeFloat() @25:1-25:35 =
+  ("" concat text<float64>(1000000000000000000000.0))
+
+function smallFloat() @26:1-26:35 =
+  ("" concat text<float64>(0.0000001))
+
+function negativeZero() @27:1-27:35 =
+  ("" concat text<float64>(-0.0))
+
+function negativeInt() @28:1-28:33 =
+  ("" concat text<int>(-42))
+
+function float32Tenth() @29:1-29:36 =
+  ("" concat text<float32>(tenth))
+
+function float32Scaled(w: float32) @31:1-31:49 =
+  (text<float32>((w fmul32 3.0)) concat " px")
+
+function float32Product() @32:1-32:46 =
+  float32Scaled(2.299999952316284)
+
+function scaled(v: float32) @35:1-35:43 =
+  (v fmul32 3.0)
+
+function float32Widened() @36:1-36:39 =
+  scaled(2.299999952316284)
+
+function float32Compared() @37:1-37:61 =
+  (scaled(2.299999952316284) eq 6.899999618530273)
+
+function float32Steps(v: float32, d: float32) @38:1-38:74 =
+  (((v fadd32 0.10000000149011612) fsub32 0.20000000298023224) fdiv32 d)
+
+function float32StepsOf() @39:1-39:48 =
+  float32Steps(2.299999952316284, 3.0)
+
+function label() @42:1-42:59 =
+  <Label>
+    (((("Total: " concat text<int>(count)) concat " ") concat "of ") concat text<float32>(tenth))
+  </Label>
+
+function named(first: string, last: string) @43:1-43:73 =
+  <Label>
+    ((first concat " ") concat last)
+  </Label>
+
+function note(count: int) @45:1-52:11 =
+  <Label>
+    (("# Tasks\n\nYou have " concat text<int>(count)) concat " open.\n\n- one")
+  </Label>
+
+function markdownNote() @53:1-53:33 =
+  note(3)
+
+function fullName() @54:1-54:46 =
+  named("Ada", "Lovelace")
+
+function mixedSum(n: int, x: float64) @58:1-58:43 =
+  (n add x)
+
+function mixedSumOf() @59:1-59:40 =
+  mixedSum(1, 1.5)
+
+function mixedEqual() @60:1-60:36 =
+  (count eq 3.0)
+
+function mixedLess() @61:1-61:34 =
+  (count lt 3.5)
+
+function mixedDivision() @62:1-62:38 =
+  (count div 2.0)
+
+function integerDivision(n: int32, m: int) @63:1-63:48 =
+  (n idiv m)
+
+function integerDivisionOf() @64:1-64:52 =
+  integerDivision(7, 2)
+
+function pick(b: boolean, n: int, x: float64) @68:1-68:66 =
+  if b then
+    n
+  else
+    x
+
+function joinedIf() @69:1-69:48 =
+  (pick(true, count, 1.5) div 2.0)
+
+function arm(k: int, n: int, x: float64) @70:1-70:69 =
+  if k is
+    1 =>
+      n
+    else =>
+      x
+
+function joinedMatch() @71:1-71:47 =
+  (arm(1, count, 1.5) div 2.0)
+
+function joinedList() @72:1-72:33 =
+  [count, 1.5]
+
+function halfOrX(b: boolean, n: int, x: float64) @75:1-75:73 =
+  if b then
+    (n idiv 2)
+  else
+    x
+
+function joinedIntegerDivision() @76:1-76:56 =
+  halfOrX(true, 7, 0.5)
+
+function armHalf(k: int, n: int, x: float64) @77:1-77:77 =
+  if k is
+    1 =>
+      (n idiv 2)
+    else =>
+      x
+
+function joinedArmDivision() @78:1-78:49 =
+  armHalf(1, 7, 0.5)
+
+function listHalf(n: int, x: float64) @79:1-79:47 =
+  [(n idiv 2), x]
+
+function joinedListDivision() @80:1-80:48 =
+  listHalf(7, 0.5)
+
+function productOrX(b: boolean, v: float32, x: float64) @81:1-81:80 =
+  if b then
+    (v fmul32 3.0)
+  else
+    x
+
+function scaledJoin(v: float32) @82:1-82:57 =
+  productOrX(true, v, 0.5)
+
+function joinedFloat32Product() @83:1-83:49 =
+  scaledJoin(2.299999952316284)
+
+function widened() @86:1-86:77 =
+  <Box opacity=count ratios=[count, 2.5] width=count />
+
+function root() @87:1-87:25 =
+  total()

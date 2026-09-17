@@ -1,14 +1,17 @@
-# NX IR, schema 3
+# NX IR, schema 4
 
 NX IR is a deterministic binary image emitted from a successful `ProgramArtifact`. It is intended
-for caching, inspection, and loading by a runtime without re-reading NX source. Schema 3 carries
+for caching, inspection, and loading by a runtime without re-reading NX source. Schema 4 carries
 one module per image, links to other modules by name, and encodes the module as flat tables so
 that a name, a type or a literal is written once and referenced by index. The tables are 32-bit
 cells over one string blob, laid out so a runtime reads them in place: a JavaScript reader is one
 typed-array view per table, and no table is decoded before it is used.
 
-Schema 2 artifacts, and the JSON encoding schema 3 had before it was released, are not read by any
-runtime and are not emitted by the compiler. There is no converter.
+Schema 4 differs from schema 3 by the `text` node, kind `20`, by the `float32` binary operators
+`16` to `19`, and by `concat` taking string operands only; every other kind, table and layout is
+unchanged. Schema 3 and schema 2 artifacts,
+and the JSON encoding schema 3 had before it was released, are not read by any runtime and are not
+emitted by the compiler. There is no converter.
 
 ## Reading this document
 
@@ -127,6 +130,7 @@ reader that evaluates by index never needs to look ahead and no node reaches its
 | 17 | element | `[17, id, str, [[str, node]...], [node...]]` | An intrinsic element with a module-local id, a tag, properties and content children. |
 | 18 | component | `[18, ref, [[str, node]...], [node...]]` | A component descriptor: props are normalized against the component's declaration. A property named `on<Emit>` for an emit the component declares is a handler property, not a prop: its value is an action handler, and it is carried on the descriptor rather than normalized. |
 | 19 | actionHandler | `[19, ref, str, ref, slot, ref?, node]` | An action handler, `onTapped=<Update count={count + 1} />`: the component and the name of the emit it answers, the action record it accepts, the slot of its `action` binding, the owner component whose body bound it (absent at the root), and the body. Evaluating the node captures the frame; the body runs when a host dispatches the action. See *Action handlers*. |
+| 20 | text | `[20, node, str]` | The canonical text form of a primitive value: the operand, and the name of its static type, one of `int`, `int32`, `int64`, `float32`, `float64` or `boolean`. See *Text conversion*. |
 
 A `{ expression }` block in NX source is its expression; it has no node of its own. NX has no
 syntax for a local `let` binding, an index expression or a function type, so none has a kind.
@@ -144,7 +148,7 @@ Property lists are sorted by property name. Content lists are in source order.
 | 4 | idiv | Integer division, truncating toward zero; both operands must be integers. |
 | 5 | mod | Floating-point remainder. |
 | 6 | imod | Integer remainder; both operands must be integers. |
-| 7 | concat | String concatenation. |
+| 7 | concat | String concatenation. Both operands are strings; see *Text conversion*. |
 | 8 | eq | Structural equality. |
 | 9 | ne | Structural inequality. |
 | 10 | lt | Less than. |
@@ -153,6 +157,10 @@ Property lists are sorted by property name. Content lists are in source order.
 | 13 | ge | Greater than or equal. |
 | 14 | and | Logical and. Non-strict in its right operand. |
 | 15 | or | Logical or. Non-strict in its right operand. |
+| 16 | fadd32 | `float32` addition: the sum, rounded to the nearest `float32`. |
+| 17 | fsub32 | `float32` subtraction: the difference, rounded to the nearest `float32`. |
+| 18 | fmul32 | `float32` multiplication: the product, rounded to the nearest `float32`. |
+| 19 | fdiv32 | `float32` division: the quotient, rounded to the nearest `float32`. |
 
 `and` and `or` are the only operators that do not evaluate both operands. `and` evaluates its right
 operand only when its left is true, and `or` only when its left is false, exactly as
@@ -161,6 +169,44 @@ evaluates both. This matters because NX is not total: it is what lets `d != 0 &&
 the division rather than perform it.
 
 Division or remainder by zero is a runtime diagnostic.
+
+#### Text conversion
+
+Whether a `+` in NX source adds or concatenates is decided by type analysis, from the operand
+types and never from their syntactic form, and the emitter writes `add` or `concat` accordingly.
+A `+` concatenates when either operand is a `string`; the other may be a `string` or a primitive
+with a text form. The emitter wraps each operand that is not a string in a `text` node, so
+`concat` only ever sees strings and a runtime does not coerce its operands: `"Total: " + count`
+with `count:int` is `concat` over the string and `text<int>(count)`. A text body that binds to a
+`string` content property is emitted the same way, as one chain of `concat` nodes over its runs and
+its braced values.
+
+The `text` node names its operand's static type because a runtime need not be able to recover it.
+A JavaScript runtime carries every numeric type as a `number`, so a `float32` holding the nearest
+value to `0.1` arrives as `0.10000000149011612`, and only the named type says it prints as `0.1`.
+The text forms are:
+
+| Type | Text |
+| --- | --- |
+| `int`, `int32`, `int64` | The decimal digits, with a leading `-` when negative. |
+| `float64` | The ECMAScript `Number::toString` form: an integral value without a fraction (`1`), otherwise the shortest digits that round-trip, the exponent form at or above 10^21 and below 10^-6 (`1e+21`, `1e-7`), `0` for negative zero, and `NaN`, `Infinity`, `-Infinity`. |
+| `float32` | The same, with the shortest digits that round-trip to the same `float32`. |
+| `boolean` | `true` or `false`. |
+
+Numeric widening, by contrast, emits nothing. An `int` written at a `float64` site, or an `int`
+operand of a `float64` addition, is recorded at its own type with no conversion node, because every
+supported runtime carries the integer and floating-point types in one numeric representation and
+the widening is unobservable there. The operator still follows the checked type: `n / x` with
+`n:int` and `x:float64` is `div`, not `idiv`.
+
+The same holds for a `float32`, provided every `float32` value a runtime holds is already rounded
+to a `float32`. The emitter keeps that true for arithmetic: an `add`, `sub`, `mul` or `div` whose
+checked type is `float32` is written as `fadd32`, `fsub32`, `fmul32` or `fdiv32`. A runtime that
+computes the operation on `float64` operands and rounds the result to the nearest `float32` (in
+JavaScript, `Math.fround`) gets exactly the `float32` result, so `v * 3` with `v:float32` holding
+`2.3` is `6.899999618530273` when widened or compared, as it is under the interpreter. A `float32`
+remainder is always exact, so it stays `mod`, and negation needs no rounding. Constants are
+rounded when emitted, and a runtime rounds a number the host supplies at a `float32` site.
 
 ### Declaration list
 
@@ -272,7 +318,7 @@ An image begins with a 16-byte header of four cells:
 | Offset | Cell | Value |
 | --- | --- | --- |
 | 0 | magic | The ASCII bytes `NXIR`. |
-| 4 | schema version | `3`. |
+| 4 | schema version | `4`. |
 | 8 | total length | The length of the whole image in bytes. |
 | 12 | directory count | The number of directory entries that follow. |
 
@@ -401,7 +447,7 @@ Its image without the debug section, `specs/ir-conformance/snippet/expected/inpu
 is 836 bytes. Cells are shown as little-endian values, sixteen bytes per line, offsets in hex.
 
 ```
-0000  "NXIR"  3         344       6           header: magic, schema 3, 836 bytes, 6 sections
+0000  "NXIR"  4         344       6           header: magic, schema 4, 836 bytes, 6 sections
 0010  0       58        118       1           directory: strings at 0x58, 280 bytes; module …
 0020  170     38        2         1a8         … at 0x170, 56 bytes; types at 0x1a8 …
 0030  8       3         1b0       28          … 8 bytes; constants at 0x1b0, 40 bytes

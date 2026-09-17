@@ -2,12 +2,17 @@
 //
 // One card per prebuilt style; the same tree each time, only ControlStyle changes.
 //
-// The controls themselves still respond — switches toggle, sliders drag — because that is DrawnUI's
-// own behavior, not authored NX. What is missing is the original's "Last:" readout, which reports
-// the most recent interaction. This port does not use event handlers or component state for it
-// yet: the readout formats a slider's value, which NX cannot turn into text.
+// The controls respond on their own — switches toggle, sliders drag — because that is DrawnUI's
+// behavior, not authored NX. The "Last:" readout is authored: every control reports to its card,
+// the card emits what happened as one line of text, and the page keeps the latest. A toggle's
+// boolean and a slider's number convert to text where `+` joins them to the words around them.
 
-component <Card extends DrawnNode Title:string Style:PrebuiltControlStyle /> = {
+component <Card
+  extends DrawnNode
+  Title: string
+  Style: PrebuiltControlStyle
+  emits { Logged { text:string } }
+/> = {
   <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=16 />
     BackgroundColor="#F5F5F5" Padding=<Thickness Left=18 Top=14 Right=18 Bottom=14 />
     HorizontalOptions=Fill UseCache=Image>
@@ -15,33 +20,52 @@ component <Card extends DrawnNode Title:string Style:PrebuiltControlStyle /> = {
       <SkiaLabel Text={Title} FontSize=16 FontAttributes=Bold TextColor="#111827" />
 
       <SkiaRow Spacing=16 HorizontalOptions=Fill>
-        <SkiaSwitch ControlStyle={Style} IsToggled=true VerticalOptions=Center />
-        <SkiaCheckbox ControlStyle={Style} IsToggled=true VerticalOptions=Center />
+        <SkiaSwitch ControlStyle={Style} IsToggled=true VerticalOptions=Center
+          onToggled=<Card.Logged text={Title + " switch: " + action.value} /> />
+        <SkiaCheckbox ControlStyle={Style} IsToggled=true VerticalOptions=Center
+          onToggled=<Card.Logged text={Title + " checkbox: " + action.value} /> />
+        // Choosing one radio button switches the other off, and both events arrive in one gesture.
+        // The site runs the first and drops the second (FINDINGS F26), so each button reports the
+        // choice either way: switched off, it names the other one.
         <SkiaRadioButton ControlStyle={Style} Text="One" IsToggled=true GroupName={Title}
-          VerticalOptions=Center />
+          VerticalOptions=Center
+          onToggled=<Card.Logged text={Title + " radio: " + if action.value { "One" } else { "Two" }} /> />
         <SkiaRadioButton ControlStyle={Style} Text="Two" GroupName={Title}
-          VerticalOptions=Center />
+          VerticalOptions=Center
+          onToggled=<Card.Logged text={Title + " radio: " + if action.value { "Two" } else { "One" }} /> />
       </SkiaRow>
 
-      <SkiaButton Text="Button" ControlStyle={Style} HorizontalOptions=Start />
+      <SkiaButton Text="Button" ControlStyle={Style} HorizontalOptions=Start
+        onTapped=<Card.Logged text={Title + " button tapped"} /> />
       <SkiaProgress ControlStyle={Style} Value=65 HorizontalOptions=Fill />
-      <SkiaSlider ControlStyle={Style} End=65 HorizontalOptions=Fill />
+      // A slider moves in whole steps (Step=1), so its float64 value prints without a fraction.
+      <SkiaSlider ControlStyle={Style} End=65 HorizontalOptions=Fill
+        onEndChanged=<Card.Logged text={Title + " slider: " + action.value} /> />
       <SkiaSlider ControlStyle={Style} EnableRange=true Start=20 End=80
-        HorizontalOptions=Fill />
+        HorizontalOptions=Fill
+        onStartChanged=<Card.Logged text={Title + " range start: " + action.value} />
+        onEndChanged=<Card.Logged text={Title + " range end: " + action.value} /> />
     </SkiaStack>
   </SkiaShape>
 }
 
-<SkiaScroll Orientation=Vertical>
-  <SkiaStack Spacing=16 Padding=<Thickness Left=16 Top=16 Right=16 Bottom=16 />
-    HorizontalOptions=Center MaximumWidthRequest=720>
-    <SkiaLabel Text="Common Controls" FontSize=24 TextColor="#FFFFFF" HorizontalOptions=Center />
-    <SkiaLabel FontSize=13 TextColor="#ADB5BD" HorizontalOptions=Fill HorizontalTextAlignment=Center
-      Text="SkiaSwitch, SkiaCheckbox, SkiaRadioButton, SkiaButton, SkiaProgress, SkiaSlider — the same tree per card, only ControlStyle changes." />
-    <Card Title="Default" Style=Unset />
-    <Card Title="Windows — Fluent" Style=Windows />
-    <Card Title="Cupertino — iOS" Style=Cupertino />
-    <Card Title="Material — Android" Style=Material />
-    <Card Title="Material3 — Android" Style=Material3 />
-  </SkiaStack>
-</SkiaScroll>
+component <Page /> = {
+  state { last:string = "interact with any control" }
+
+  <SkiaScroll Orientation=Vertical>
+    <SkiaStack Spacing=16 Padding=<Thickness Left=16 Top=16 Right=16 Bottom=16 />
+      HorizontalOptions=Center MaximumWidthRequest=720>
+      <SkiaLabel Text="Common Controls" FontSize=24 TextColor="#FFFFFF" HorizontalOptions=Center />
+      <SkiaLabel FontSize=13 TextColor="#ADB5BD" HorizontalOptions=Fill HorizontalTextAlignment=Center
+        Text="SkiaSwitch, SkiaCheckbox, SkiaRadioButton, SkiaButton, SkiaProgress, SkiaSlider — the same tree per card, only ControlStyle changes." />
+      <SkiaLabel Text={"Last: " + last} FontSize=13 TextColor="#6EA8FE" HorizontalOptions=Center />
+      <Card Title="Default" Style=Unset onLogged=<Update last={action.text} /> />
+      <Card Title="Windows — Fluent" Style=Windows onLogged=<Update last={action.text} /> />
+      <Card Title="Cupertino — iOS" Style=Cupertino onLogged=<Update last={action.text} /> />
+      <Card Title="Material — Android" Style=Material onLogged=<Update last={action.text} /> />
+      <Card Title="Material3 — Android" Style=Material3 onLogged=<Update last={action.text} /> />
+    </SkiaStack>
+  </SkiaScroll>
+}
+
+<Page />

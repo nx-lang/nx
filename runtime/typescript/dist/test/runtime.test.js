@@ -4,7 +4,7 @@
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { NX_IR_NONE, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION, NxIrRuntimeError, applyComponentStatePatch, applyUpdate, changedFields, constructComponentDescriptor, declarationKinds, diffRecords, dispatchComponentActions, evaluateComponent, evaluateFunction, initializeComponent, linkNxIrProgram, mergeUpdates, nodeKinds, normalizeComponentState, prepareNxIrModule, prepareNxIrProgram, tryLinkNxIrProgram, tryPrepareNxIrModule, tryPrepareNxIrProgram, typeKinds, } from "../src/index.js";
+import { NX_IR_NONE, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION, NxIrRuntimeError, applyComponentStatePatch, applyUpdate, changedFields, constructComponentDescriptor, declarationKinds, diffRecords, dispatchComponentActions, evaluateComponent, evaluateFunction, float32Text, initializeComponent, linkNxIrProgram, mergeUpdates, nodeKinds, normalizeComponentState, prepareNxIrModule, prepareNxIrProgram, tryLinkNxIrProgram, tryPrepareNxIrModule, tryPrepareNxIrProgram, typeKinds, } from "../src/index.js";
 const tests = [];
 function test(name, run) {
     tests.push([name, run]);
@@ -110,6 +110,17 @@ class ArtifactBuilder {
         // Two cells, low word first.
         this.constants.push([0, value >>> 0, Math.floor(value / 4294967296) >>> 0]);
         return this.node([nodeKinds.number, this.constants.length - 1]);
+    }
+    /** A `float64` constant, as the two cells of its bits, low word first. */
+    float(value) {
+        const bits = new DataView(new ArrayBuffer(8));
+        bits.setFloat64(0, value, true);
+        this.constants.push([2, bits.getUint32(0, true), bits.getUint32(4, true)]);
+        return this.node([nodeKinds.number, this.constants.length - 1]);
+    }
+    /** `[20, node, str]`: the canonical text of `operand`, whose static type is `type`. */
+    text(operand, type) {
+        return this.node([nodeKinds.text, operand, this.str(type)]);
     }
     /** `count, element × count`, for a list operand. */
     list(elements) {
@@ -289,18 +300,19 @@ test("prepares a self-contained artifact and evaluates it without linking", () =
     shifted.set(artifact, 2);
     assertEqual(evaluateFunction(prepareNxIrProgram(shifted.subarray(2)), "root"), 3);
 });
-test("refuses schema 2 naming both versions, and unknown ABIs and features", () => {
+test("refuses schema 3 naming both versions, and unknown ABIs and features", () => {
     const b = new ArtifactBuilder("main.nx");
     b.fn("root", b.int(1));
     const artifact = b.build();
+    assertEqual(new DataView(artifact.buffer, artifact.byteOffset).getUint32(4, true), 4);
     const old = artifact.slice();
-    new DataView(old.buffer).setUint32(4, 2, true);
-    const schema2 = tryPrepareNxIrModule(old);
-    assertEqual(schema2.ok, false);
-    if (!schema2.ok) {
-        const message = schema2.diagnostics[0].message;
-        assertEqual(message.includes("schema version 2"), true);
+    new DataView(old.buffer).setUint32(4, 3, true);
+    const schema3 = tryPrepareNxIrModule(old);
+    assertEqual(schema3.ok, false);
+    if (!schema3.ok) {
+        const message = schema3.diagnostics[0].message;
         assertEqual(message.includes("schema version 3"), true);
+        assertEqual(message.includes("schema version 4"), true);
     }
     assertEqual(tryPrepareNxIrModule(b.build({ runtimeAbi: "nx-ir-runtime-v1" })).ok, false);
     const notAnImage = tryPrepareNxIrModule(new TextEncoder().encode('{"format":"nx-ir-json","schemaVersion":3}'));
@@ -313,6 +325,142 @@ test("refuses schema 2 naming both versions, and unknown ABIs and features", () 
     if (!feature.ok) {
         assertEqual(feature.diagnostics[0].message.includes("future-reactivity"), true);
     }
+});
+// ------------------------------------------------------------------------------------------------
+// Primitive text and string concatenation
+// ------------------------------------------------------------------------------------------------
+/** The `concat` operator's number, as `docs/nx-ir-format.md` assigns it. */
+const CONCAT = 7;
+const LT = 10;
+/** A one-parameter function `f(value) = text<type>(value)`. */
+function textOfParameter(type) {
+    const b = new ArtifactBuilder("main.nx");
+    const operand = b.node([nodeKinds.slot, 0, b.str("value")]);
+    b.fn("f", b.text(operand, type), [[b.str("value"), b.primitive(type), 0]]);
+    return prepareNxIrProgram(b.build());
+}
+test("a text node over an int prints its digits and concat joins the strings", () => {
+    const b = new ArtifactBuilder("main.nx");
+    const count = b.node([nodeKinds.slot, 0, b.str("count")]);
+    const body = b.node([nodeKinds.binary, CONCAT, b.string("Total: "), b.text(count, "int")]);
+    b.fn("f", body, [[b.str("count"), b.primitive("int"), 0]]);
+    const program = prepareNxIrProgram(b.build());
+    assertEqual(evaluateFunction(program, "f", [3]), "Total: 3");
+    assertEqual(evaluateFunction(program, "f", [-42]), "Total: -42");
+});
+test("a text node over a float32 prints as a float32, not as the float64 it is carried in", () => {
+    const tenth = Math.fround(0.1);
+    assertEqual(String(tenth), "0.10000000149011612");
+    assertEqual(evaluateFunction(textOfParameter("float32"), "f", [tenth]), "0.1");
+    // The same carried number under its own type prints every digit it has.
+    assertEqual(evaluateFunction(textOfParameter("float64"), "f", [tenth]), "0.10000000149011612");
+    assertEqual(float32Text(Math.fround(1.5)), "1.5");
+    assertEqual(float32Text(Math.fround(16777216)), "16777216");
+    assertEqual(float32Text(Math.fround(1e-7)), "1e-7");
+    assertEqual(float32Text(Math.fround(1e21)), "1e+21");
+    assertEqual(float32Text(Math.fround(3.4028234663852886e38)), "3.4028235e+38");
+    assertEqual(float32Text(-0), "0");
+    assertEqual(float32Text(Number.NaN), "NaN");
+    assertEqual(float32Text(Number.NEGATIVE_INFINITY), "-Infinity");
+    // The helper rounds what it is given, so an unrounded float64 still prints as its float32.
+    assertEqual(float32Text(Math.fround(2.3) * 3), "6.8999996");
+    assertEqual(evaluateFunction(textOfParameter("float32"), "f", [Math.fround(2.3) * 3]), "6.8999996");
+});
+/** The float32 operators' numbers, as `docs/nx-ir-format.md` assigns them. */
+const FADD32 = 16;
+const FMUL32 = 18;
+const FDIV32 = 19;
+test("a float32 operator rounds its result to a float32, as the interpreter computes it", () => {
+    const b = new ArtifactBuilder("main.nx");
+    const v = b.node([nodeKinds.slot, 0, b.str("v")]);
+    b.fn("scaled", b.node([nodeKinds.binary, FMUL32, v, b.float(3)]), [[b.str("v"), b.primitive("float32"), 0]]);
+    const sum = b.node([nodeKinds.binary, FADD32, b.node([nodeKinds.slot, 0, b.str("v")]), b.float(Math.fround(0.1))]);
+    b.fn("sum", sum, [[b.str("v"), b.primitive("float32"), 0]]);
+    const zero = b.node([nodeKinds.binary, FDIV32, b.float(1), b.float(0)]);
+    b.fn("zero", zero);
+    const program = prepareNxIrProgram(b.build());
+    // Unrounded, the product would be the float64 6.8999998569488525.
+    assertEqual(evaluateFunction(program, "scaled", [2.3]), 6.899999618530273);
+    assertEqual(evaluateFunction(program, "sum", [0.2]), Math.fround(Math.fround(0.2) + Math.fround(0.1)));
+    assertThrows(() => evaluateFunction(program, "zero"), "Division by zero");
+});
+test("a host number takes the width of an int32 or float32 parameter", () => {
+    const program = textOfParameter("float32");
+    // A real rounds to the nearest float32, and an integer a float32 holds exactly is kept.
+    assertEqual(evaluateFunction(program, "f", [0.1]), "0.1");
+    assertEqual(evaluateFunction(program, "f", [16777216]), "16777216");
+    assertThrows(() => evaluateFunction(program, "f", [16777217]), "not exact as a float32");
+    const int32 = textOfParameter("int32");
+    assertEqual(evaluateFunction(int32, "f", [-2147483648]), "-2147483648");
+    assertThrows(() => evaluateFunction(int32, "f", [3000000000]), "out of range for int32");
+    assertThrows(() => evaluateFunction(int32, "f", [1.5]), "to be an int32, got 1.5.");
+});
+test("a float64 prints in the ECMAScript form: no fraction when integral, exponents at the ends", () => {
+    const program = textOfParameter("float64");
+    assertEqual(evaluateFunction(program, "f", [1]), "1");
+    assertEqual(evaluateFunction(program, "f", [0.1]), "0.1");
+    assertEqual(evaluateFunction(program, "f", [1e21]), "1e+21");
+    assertEqual(evaluateFunction(program, "f", [1e-7]), "1e-7");
+    assertEqual(evaluateFunction(program, "f", [-0]), "0");
+});
+test("a boolean prints as true or false, and a wide integer as its digits", () => {
+    const program = textOfParameter("boolean");
+    assertEqual(evaluateFunction(program, "f", [true]), "true");
+    assertEqual(evaluateFunction(program, "f", [false]), "false");
+    // An integer outside the safe range is a `bigint` constant, carried as its digits.
+    const wide = new ArtifactBuilder("main.nx");
+    wide.constants.push([1, wide.str("9007199254740993")]);
+    wide.fn("root", wide.text(wide.node([nodeKinds.number, wide.constants.length - 1]), "int64"));
+    assertEqual(evaluateFunction(prepareNxIrProgram(wide.build()), "root"), "9007199254740993");
+});
+test("a text node refuses an operand that is not the primitive it names", () => {
+    const b = new ArtifactBuilder("main.nx");
+    b.fn("root", b.text(b.string("three"), "int"));
+    const error = assertThrows(() => evaluateFunction(prepareNxIrProgram(b.build()), "root"), "text conversion");
+    assertEqual(error.diagnostics[0].code, "nx-ir-operator");
+    const flag = new ArtifactBuilder("main.nx");
+    flag.fn("root", flag.text(flag.int(1), "boolean"));
+    assertThrows(() => evaluateFunction(prepareNxIrProgram(flag.build()), "root"), "text conversion");
+});
+test("the validator accepts kind 20 only as [20, node, str] naming a type with a text form", () => {
+    const named = new ArtifactBuilder("main.nx");
+    named.fn("root", named.text(named.int(1), "string"));
+    const unknownType = tryPrepareNxIrModule(named.build());
+    assertEqual(unknownType.ok, false);
+    if (!unknownType.ok) {
+        assertEqual(unknownType.diagnostics[0].message.includes("'string'"), true);
+    }
+    const short = new ArtifactBuilder("main.nx");
+    short.fn("root", short.node([nodeKinds.text, short.int(1)]));
+    assertEqual(tryPrepareNxIrModule(short.build()).ok, false);
+    const long = new ArtifactBuilder("main.nx");
+    long.fn("root", long.node([nodeKinds.text, long.int(1), long.str("int"), 0]));
+    assertEqual(tryPrepareNxIrModule(long.build()).ok, false);
+    const forward = new ArtifactBuilder("main.nx");
+    forward.fn("root", forward.node([nodeKinds.text, 7, forward.str("int")]));
+    assertEqual(tryPrepareNxIrModule(forward.build()).ok, false);
+});
+test("concat over a non-string operand is refused", () => {
+    const b = new ArtifactBuilder("main.nx");
+    b.fn("root", b.node([nodeKinds.binary, CONCAT, b.string("Total: "), b.int(3)]));
+    const error = assertThrows(() => evaluateFunction(prepareNxIrProgram(b.build()), "root"), "'concat' requires string operands");
+    assertEqual(error.diagnostics[0].code, "nx-ir-operator");
+});
+test("mixed numeric comparison and arithmetic need no conversion and compare numerically", () => {
+    const b = new ArtifactBuilder("main.nx");
+    const n = b.node([nodeKinds.slot, 0, b.str("n")]);
+    const x = b.node([nodeKinds.slot, 1, b.str("x")]);
+    const params = [
+        [b.str("n"), b.primitive("int"), 0],
+        [b.str("x"), b.primitive("float64"), 0],
+    ];
+    b.fn("less", b.node([nodeKinds.binary, LT, n, x]), params);
+    b.fn("sum", b.node([nodeKinds.binary, 0, n, x]), params);
+    b.fn("same", b.node([nodeKinds.binary, 8, n, x]), params);
+    const program = prepareNxIrProgram(b.build());
+    assertEqual(evaluateFunction(program, "less", [2, 2.5]), true);
+    assertEqual(evaluateFunction(program, "sum", [1, 1.5]), 2.5);
+    assertEqual(evaluateFunction(program, "same", [2, 2.0]), true);
 });
 test("refuses a truncated image and a wrong length with a diagnostic", () => {
     const b = new ArtifactBuilder("main.nx");
@@ -524,7 +672,7 @@ test("accepts a derived record at a base-typed prop and rejects an unrelated or 
     assertThrows(() => constructComponentDescriptor(program, "Card", {}), "Missing required Card props field 'user'");
 });
 /**
- * A `$type` discriminator is a bare name, and under schema 3 a program spans several modules, so
+ * A `$type` discriminator is a bare name, and since schema 3 a program spans several modules, so
  * two of them may each declare a record of one name extending the same base. The runtime reports
  * that rather than picking one: the two have different fields, and guessing would normalize the
  * value against the wrong schema.

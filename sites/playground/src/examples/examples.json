@@ -77,11 +77,8 @@
     "name": "Common Controls",
     "blurb": "SkiaSwitch, SkiaCheckbox, SkiaRadioButton, SkiaProgress, SkiaSlider, SkiaButton \u2014 five styles",
     "file": "looks.nx",
-    "coverage": "static",
-    "capabilities": [
-      "event-handlers",
-      "component-state"
-    ]
+    "coverage": "complete",
+    "capabilities": []
   },
   {
     "id": "snapping",
@@ -90,9 +87,8 @@
     "file": "snapping.nx",
     "coverage": "static",
     "capabilities": [
-      "event-handlers",
-      "component-state",
-      "list-virtualization"
+      "list-virtualization",
+      "code-behind"
     ]
   },
   {
@@ -102,8 +98,7 @@
     "file": "animations.nx",
     "coverage": "static",
     "capabilities": [
-      "event-handlers",
-      "component-state"
+      "code-behind"
     ]
   },
   {
@@ -125,8 +120,7 @@
     "file": "editor.nx",
     "coverage": "static",
     "capabilities": [
-      "event-handlers",
-      "component-state"
+      "code-behind"
     ]
   },
   {
@@ -147,8 +141,7 @@
     "file": "scroll.nx",
     "coverage": "static",
     "capabilities": [
-      "event-handlers",
-      "component-state"
+      "code-behind"
     ]
   },
   {
@@ -184,9 +177,7 @@
     "file": "transforms.nx",
     "coverage": "static",
     "capabilities": [
-      "event-handlers",
-      "animation",
-      "component-state"
+      "animation"
     ]
   },
   {
@@ -210,8 +201,7 @@
     "file": "accessibility.nx",
     "coverage": "static",
     "capabilities": [
-      "event-handlers",
-      "component-state"
+      "code-behind"
     ]
   },
   {

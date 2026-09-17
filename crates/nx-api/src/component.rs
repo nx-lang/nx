@@ -524,6 +524,69 @@ mod tests {
     }
 
     #[test]
+    fn evaluate_component_source_gives_json_numbers_the_width_of_their_site() {
+        // JSON cannot spell `int32` or `float32`, so a host number takes the declared width.
+        let source = r#"
+            external component <Gauge count:int32 ratio:float32 scale:float32 />
+            component <Meter count:int32 ratio:float32 scale:float32 /> = {
+              state { step:int32 }
+              <Gauge count={count + step} ratio={ratio} scale={scale} />
+            }
+        "#;
+        let props: NxValue =
+            serde_json::from_str(r#"{ "count": 7, "ratio": 0.1, "scale": 2 }"#).expect("props");
+        let state: NxValue = serde_json::from_str(r#"{ "step": 1 }"#).expect("state");
+
+        let result = evaluate_component_source(
+            source,
+            "component-host-numbers.nx",
+            &ProgramBuildContext::empty(),
+            "Meter",
+            &props,
+            &state,
+        );
+        let result = match result {
+            ComponentEvaluateEvalResult::Ok(result) => result,
+            ComponentEvaluateEvalResult::Err(diagnostics) => {
+                panic!("Expected JSON numbers to bind at int32 and float32 properties: {diagnostics:?}")
+            }
+        };
+        let NxValue::Record { properties, .. } = result.rendered else {
+            panic!("Expected rendered element record");
+        };
+        assert_eq!(properties.get("count"), Some(&NxValue::Int32(8)));
+        assert_eq!(properties.get("ratio"), Some(&NxValue::Float32(0.1)));
+        assert_eq!(properties.get("scale"), Some(&NxValue::Float32(2.0)));
+    }
+
+    #[test]
+    fn evaluate_component_source_refuses_a_json_number_its_site_cannot_hold() {
+        let source = r#"
+            external component <Gauge count:int32 />
+            component <Meter count:int32 /> = { <Gauge count={count} /> }
+        "#;
+        let props: NxValue = serde_json::from_str(r#"{ "count": 3000000000 }"#).expect("props");
+
+        let result = evaluate_component_source(
+            source,
+            "component-host-numbers-range.nx",
+            &ProgramBuildContext::empty(),
+            "Meter",
+            &props,
+            &empty_record(),
+        );
+        let ComponentEvaluateEvalResult::Err(diagnostics) = result else {
+            panic!("Expected an out-of-range int32 prop to be refused");
+        };
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("out of range for int32")),
+            "{diagnostics:?}"
+        );
+    }
+
+    #[test]
     fn evaluate_component_source_returns_static_diagnostics_before_runtime_work() {
         let result = evaluate_component_source(
             static_analysis_failure_source(),

@@ -1,16 +1,16 @@
 // Ported from the DrawnUI React demo's Carousel & Drawer page.
 //
-// Every control here still works: the carousels swipe, wrap and snap, and the drawer drags,
-// because snapping is the control's own gesture handling rather than authored NX. What is missing
-// is everything driven from outside them — the toggles that flip IsLooped, Bounces, IsVertical or
-// SidesOffset, the Prev/Next/ScrollTo buttons, the "SelectedIndex=N" readouts, the dot that
-// stretches to mark the current slide, and the drawer's open/close button — all of which this port
-// does not drive yet (event handlers, component state). Two of the carousels also recycle their
-// slides through ItemsSource and an ItemTemplate (list virtualization); here the same slides are
-// static children.
+// The carousels swipe, wrap and snap and the drawer drags on their own: snapping is the control's
+// gesture handling, not authored NX. Everything the original drives from outside them is the
+// page's state here — the toggles that flip IsLooped, Bounces, IsVertical or SidesOffset, the
+// buttons that move a carousel, the dot that stretches to mark the current slide, the drawer's
+// button, and every readout. An index, an offset and a speed are numbers and IsOpen is a boolean;
+// each converts to text where `+` joins it to its label.
 //
-// Each control is authored to rest where the original starts, and the toggles are drawn in the
-// state the original starts in. Nothing is drawn mid-transition.
+// Where the original calls a method on a control — GoPrev, GoNext, ScrollTo, Close — this port
+// sets the property the method would have changed, since NX cannot call into a control. Two of
+// the carousels also recycle their slides through ItemsSource and an ItemTemplate (list
+// virtualization); here the same slides are static children.
 
 type Slide = {
   Title: string
@@ -29,13 +29,19 @@ component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> =
   </SkiaShape>
 }
 
-// A toggle button drawn in its starting state. The original flips a carousel property on tap.
-component <Toggle extends DrawnNode Text:string On:boolean /> = {
-  if On {
-    <SkiaButton Text={Text + ": On"} BackgroundColor="#20C997" TextColor="#1A1A2E" FontSize=13 />
-  } else {
-    <SkiaButton Text={Text + ": Off"} BackgroundColor="#495057" TextColor="#FFFFFF" FontSize=13 />
-  }
+// A toggle button. It holds nothing itself: the page owns the flag and flips it when this taps.
+component <Toggle extends DrawnNode Text:string On:boolean emits { Tapped { } } /> = {
+  <SkiaButton Text={Text + if On { ": On" } else { ": Off" }} FontSize=13
+    BackgroundColor={if On { "#20C997" } else { "#495057" }}
+    TextColor={if On { "#1A1A2E" } else { "#FFFFFF" }} onTapped=<Toggle.Tapped /> />
+}
+
+let speeds:float64[] = { 0.5 1.0 2.0 }
+
+// The looped carousel's twelve slides, by color: the original cycles six colors by index.
+let loopColors = {
+  "#0D6EFD" "#6610F2" "#D63384" "#20C997" "#FD7E14" "#0DCAF0"
+  "#0D6EFD" "#6610F2" "#D63384" "#20C997" "#FD7E14" "#0DCAF0"
 }
 
 // The playground's big slides: a number filling a plain rectangle.
@@ -72,134 +78,174 @@ let peek = {
   <Slide Title="Slide 4" Color="#20C997" Text="#FFFFFF" />
 }
 
-<SkiaLayer VerticalOptions=Fill>
-  <SkiaScroll Orientation=Vertical>
-    <SkiaStack Spacing=16 Padding=<Thickness Left=16 Top=16 Right=16 Bottom=260 />
-      HorizontalOptions=Center MaximumWidthRequest=720>
-      <SkiaLabel Text="Carousel & Drawer" FontSize=24 TextColor="#FFFFFF" HorizontalOptions=Center />
+component <Page /> = {
+  state {
+    index:float64 = 0
+    looped:boolean = false
+    bounces:boolean = false
+    preload:boolean = true
+    vertical:boolean = false
+    sides:float64 = 40
+    speed:float64 = 1
+    inTransition:boolean = false
+    appeared:string = ""
+    peekIndex:float64 = 1
+    loopIndex:float64 = 0
+    dynIndex:float64 = 0
+    open:boolean = false
+  }
 
-      <Card Title="SkiaCarousel playground (Sandbox MainPageCarousels)">
-        // In the original every button here changes the carousel below; this port binds no
-        // handlers to them yet, so they are drawn in their starting state and do nothing.
-        <SkiaWrap Spacing=8>
-          <Toggle Text="IsLooped" On=false />
-          <Toggle Text="Bounces" On=false />
-          <Toggle Text="PreloadNeighboors" On=true />
-          <Toggle Text="IsVertical" On=false />
-          <SkiaButton Text="SidesOffset: 40" BackgroundColor="#495057" FontSize=13 />
-        </SkiaWrap>
-        <SkiaWrap Spacing=8>
-          <SkiaButton Text="← Prev" FontFamilyFallback="FontSymbols,FontSymbols2" BackgroundColor="#0F3460" FontSize=13 />
-          <SkiaButton Text="Next →" FontFamilyFallback="FontSymbols,FontSymbols2" BackgroundColor="#0F3460" FontSize=13 />
-          <SkiaButton Text="ScrollTo(2)" BackgroundColor="#0F3460" FontSize=13 />
-          <SkiaButton Text="ScrollTo(0, no anim)" BackgroundColor="#0F3460" FontSize=13 />
-          <SkiaButton Text="Set index 3" BackgroundColor="#0F3460" FontSize=13 />
-        </SkiaWrap>
-        <SkiaCarousel HeightRequest=250 BackgroundColor="#16213E" IsLooped=false Bounces=false
-          SwipeSpeed=1 SidesOffset=40 Spacing=20 PreloadNeighboors=true IsVertical=false SelectedIndex=0>
-          for slide in big {
-            <BigSlide Item={slide} />
-          }
-        </SkiaCarousel>
-        // Indicators: the original stretches the selected dot to 24; here the first one is.
-        <SkiaRow Spacing=8 HorizontalOptions=Center>
-          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=4 /> WidthRequest=24 HeightRequest=8 BackgroundColor="#E94560" />
-          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=4 /> WidthRequest=8 HeightRequest=8 BackgroundColor="#0F3460" />
-          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=4 /> WidthRequest=8 HeightRequest=8 BackgroundColor="#533483" />
-          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=4 /> WidthRequest=8 HeightRequest=8 BackgroundColor="#A8DF8E" />
-        </SkiaRow>
-        <SkiaLabel FontSize=13 TextColor="#ADB5BD" HorizontalOptions=Fill
-          Text="Selected Index: 0   ·   InTransition: false   ·   Looping disabled - bounded scroll" />
-        <SkiaRow Spacing=8 VerticalOptions=Center>
-          <SkiaLabel Text="Swipe Speed" FontSize=14 TextColor="#FFFFFF" VerticalOptions=Center />
-          <SkiaButton Text="0.5x" BackgroundColor="#495057" FontSize=13 />
-          <SkiaButton Text="1.0x" BackgroundColor="#533483" FontSize=13 />
-          <SkiaButton Text="2.0x" BackgroundColor="#495057" FontSize=13 />
-          <SkiaLabel Text="Current: 1.0x" FontSize=12 TextColor="#ADB5BD" VerticalOptions=Center />
-        </SkiaRow>
-      </Card>
-
-      <Card Title="SidesOffset={40} Spacing={12} — neighbours peek in · SelectedIndex=1">
-        <SkiaCarousel HeightRequest=140 SidesOffset=40 Spacing=12 SelectedIndex=1>
-          for slide in peek {
-            <SlideFace Item={slide} Size=20 />
-          }
-        </SkiaCarousel>
-      </Card>
-
-      <Card Title="IsLooped + 12 slides (the original recycles them through ItemsSource) · SelectedIndex=0">
-        <SkiaCarousel HeightRequest=130 IsLooped=true SidesOffset=30 Spacing=10 LinearSpeedMs=350 SelectedIndex=0>
-          <SlideFace Item=<Slide Title="Item 1" Color="#0D6EFD" Text="#FFFFFF" /> Size=22 Sub="static child · index 0" />
-          <SlideFace Item=<Slide Title="Item 2" Color="#6610F2" Text="#FFFFFF" /> Size=22 Sub="static child · index 1" />
-          <SlideFace Item=<Slide Title="Item 3" Color="#D63384" Text="#FFFFFF" /> Size=22 Sub="static child · index 2" />
-          <SlideFace Item=<Slide Title="Item 4" Color="#20C997" Text="#FFFFFF" /> Size=22 Sub="static child · index 3" />
-          <SlideFace Item=<Slide Title="Item 5" Color="#FD7E14" Text="#FFFFFF" /> Size=22 Sub="static child · index 4" />
-          <SlideFace Item=<Slide Title="Item 6" Color="#0DCAF0" Text="#FFFFFF" /> Size=22 Sub="static child · index 5" />
-          <SlideFace Item=<Slide Title="Item 7" Color="#0D6EFD" Text="#FFFFFF" /> Size=22 Sub="static child · index 6" />
-          <SlideFace Item=<Slide Title="Item 8" Color="#6610F2" Text="#FFFFFF" /> Size=22 Sub="static child · index 7" />
-          <SlideFace Item=<Slide Title="Item 9" Color="#D63384" Text="#FFFFFF" /> Size=22 Sub="static child · index 8" />
-          <SlideFace Item=<Slide Title="Item 10" Color="#20C997" Text="#FFFFFF" /> Size=22 Sub="static child · index 9" />
-          <SlideFace Item=<Slide Title="Item 11" Color="#FD7E14" Text="#FFFFFF" /> Size=22 Sub="static child · index 10" />
-          <SlideFace Item=<Slide Title="Item 12" Color="#0DCAF0" Text="#FFFFFF" /> Size=22 Sub="static child · index 11" />
-        </SkiaCarousel>
-        <SkiaRow Spacing=8>
-          <SkiaButton Text="Prev" BackgroundColor="#0D6EFD" />
-          <SkiaButton Text="Next" BackgroundColor="#0D6EFD" />
-          <SkiaLabel FontFamilyFallback="FontSymbols,FontSymbols2" FontSize=12 TextColor="#ADB5BD"
-            VerticalOptions=Center HorizontalOptions=Fill
-            Text="Wraps last → first both ways (virtual anchors); LinearSpeedMs=350 = one slide per 350 ms without Bounces. The original recycles cells through ItemTemplate; these twelve are static." />
-        </SkiaRow>
-      </Card>
-
-      <Card Title="DynamicSize — auto height follows the selected slide · SelectedIndex=0">
-        <SkiaCarousel DynamicSize=true VerticalOptions=Start Bounces=true SelectedIndex=0>
-          <SlideFace Item=<Slide Title="80 pt" Color="#0D6EFD" Text="#FFFFFF" /> Size=22 Sub="static child · index 0" Height=80 />
-          <SlideFace Item=<Slide Title="160 pt" Color="#6610F2" Text="#FFFFFF" /> Size=22 Sub="static child · index 1" Height=160 />
-          <SlideFace Item=<Slide Title="110 pt" Color="#20C997" Text="#FFFFFF" /> Size=22 Sub="static child · index 2" Height=110 />
-        </SkiaCarousel>
-        <SkiaLabel FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Fill
-          Text="No HeightRequest: the carousel measures the selected slide (80 / 160 / 110 pt) and re-measures on every index change." />
-      </Card>
-
-      <Card Title="SkiaDrawer — drag the header below, or:">
-        // The original toggles the drawer from this button and shows its IsOpen state beside it.
-        <SkiaRow Spacing=8>
-          <SkiaButton Text="Open drawer" BackgroundColor="#6610F2" />
-          <SkiaLabel Text="IsOpen: false" FontSize=14 TextColor="#DEE2E6" VerticalOptions=Center />
-        </SkiaRow>
-        <SkiaLabel FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Fill
-          Text="Direction=FromBottom HeaderSize=56, sits in a SkiaLayer with VerticalOptions=End; snaps by velocity, Bounces enabled." />
-      </Card>
-    </SkiaStack>
-  </SkiaScroll>
-
-  // The drawer lives in its own full-size layer over the page, anchored to the bottom edge, and
-  // rests closed with only its header showing. The top corners alone are rounded, like a MAUI
-  // CornerRadius="20,20,0,0"; the bottom corners are written as zero because an unset corner
-  // mirrors the first.
   <SkiaLayer VerticalOptions=Fill>
-    <SkiaDrawer Direction=FromBottom HeaderSize=56 HeightRequest=320 VerticalOptions=End
-      HorizontalOptions=Fill Bounces=true>
-      <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=20 TopRight=20 BottomLeft=0 BottomRight=0 />
-        BackgroundColor="#F5F5F5" HorizontalOptions=Fill VerticalOptions=Fill
-        Shadows={ <SkiaShadow X=0 Y=-2 Blur=8 Opacity=0.4 Color="#000000" /> }>
-        <SkiaStack Spacing=0 HorizontalOptions=Fill>
-          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=20 TopRight=20 BottomLeft=0 BottomRight=0 />
-            BackgroundColor="#0D6EFD" HeightRequest=56 HorizontalOptions=Fill>
-            <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=3 /> BackgroundColor="#FFFFFF"
-              WidthRequest=44 HeightRequest=5 HorizontalOptions=Center Margin=<Thickness Top=8 /> />
-            <SkiaLabel Text="Drag me" FontSize=16 FontFamily="FontTextBold" TextColor="#FFFFFF"
-              HorizontalOptions=Center VerticalOptions=Center Margin=<Thickness Top=10 /> />
-          </SkiaShape>
-          <SkiaStack Padding=<Thickness Left=20 Top=20 Right=20 Bottom=20 /> Spacing=12>
-            <SkiaLabel Text="Drawer content" FontSize=20 FontFamily="FontTextBold" TextColor="#111827" />
-            <SkiaLabel FontSize=14 TextColor="#374151" HorizontalOptions=Fill
-              Text="Everything inside is a normal drawn tree: buttons keep working, the drawer only takes vertical drags. Release with a flick to snap open or closed." />
-            // The original closes the drawer from this button.
-            <SkiaButton Text="Close" ControlStyle=Material />
+    <SkiaScroll Orientation=Vertical>
+      <SkiaStack Spacing=16 Padding=<Thickness Left=16 Top=16 Right=16 Bottom=260 />
+        HorizontalOptions=Center MaximumWidthRequest=720>
+        <SkiaLabel Text="Carousel & Drawer" FontSize=24 TextColor="#FFFFFF" HorizontalOptions=Center />
+
+        <Card Title="SkiaCarousel playground (Sandbox MainPageCarousels)">
+          <SkiaWrap Spacing=8>
+            <Toggle Text="IsLooped" On={looped} onTapped=<Update looped={!looped} /> />
+            <Toggle Text="Bounces" On={bounces} onTapped=<Update bounces={!bounces} /> />
+            <Toggle Text="PreloadNeighboors" On={preload} onTapped=<Update preload={!preload} /> />
+            <Toggle Text="IsVertical" On={vertical} onTapped=<Update vertical={!vertical} /> />
+            // Cycles 40, 0, 20. The offset is a float64, and a whole one prints without a fraction.
+            <SkiaButton Text={"SidesOffset: " + sides} BackgroundColor="#495057" FontSize=13
+              onTapped=<Update sides={if sides == 40 { 0 } else { if sides == 0 { 20 } else { 40 } }} /> />
+          </SkiaWrap>
+          // The original calls GoPrev(), GoNext() and ScrollTo() on the carousel. NX cannot call a
+          // method, so these set SelectedIndex, which the carousel follows. Two differences come
+          // with that: Prev and Next stop at the ends where the methods wrap a looped carousel, and
+          // "no anim" animates like the rest, since skipping the animation is the method's argument.
+          <SkiaWrap Spacing=8>
+            <SkiaButton Text="← Prev" FontFamilyFallback="FontSymbols,FontSymbols2" BackgroundColor="#0F3460" FontSize=13
+              onTapped=<Update index={if index > 0 { index - 1 } else { index }} /> />
+            <SkiaButton Text="Next →" FontFamilyFallback="FontSymbols,FontSymbols2" BackgroundColor="#0F3460" FontSize=13
+              onTapped=<Update index={if index < 3 { index + 1 } else { index }} /> />
+            <SkiaButton Text="ScrollTo(2)" BackgroundColor="#0F3460" FontSize=13 onTapped=<Update index=2 /> />
+            <SkiaButton Text="ScrollTo(0, no anim)" BackgroundColor="#0F3460" FontSize=13
+              onTapped=<Update index=0 /> />
+            <SkiaButton Text="Set index 3" BackgroundColor="#0F3460" FontSize=13 onTapped=<Update index=3 /> />
+          </SkiaWrap>
+          <SkiaCarousel HeightRequest=250 BackgroundColor="#16213E" IsLooped={looped} Bounces={bounces}
+            SwipeSpeed={speed} SidesOffset={sides} Spacing=20 PreloadNeighboors={preload}
+            IsVertical={vertical} SelectedIndex={index}
+            onSelectedIndexChanged=<Update index={action.index} />
+            onTransitionChanged=<Update inTransition={action.inTransition} />
+            onItemAppearing=<Update appeared={"ItemAppearing " + action.index} />
+            onItemDisappearing=<Update appeared={"ItemDisappearing " + action.index} />>
+            for slide in big {
+              <BigSlide Item={slide} />
+            }
+          </SkiaCarousel>
+          // Indicators: the selected dot stretches to 24. The loop's position is an int and the
+          // selected index a float64; the comparison widens the int.
+          <SkiaRow Spacing=8 HorizontalOptions=Center>
+            for slide, position in big {
+              <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=4 /> HeightRequest=8
+                WidthRequest={if position == index { 24 } else { 8 }} BackgroundColor={slide.Color} />
+            }
+          </SkiaRow>
+          <SkiaLabel FontSize=13 TextColor="#ADB5BD" HorizontalOptions=Fill
+            Text={"Selected Index: " + index + "   ·   InTransition: " + inTransition + "   ·   "
+              + if looped { "Looping enabled - infinite scroll" } else { "Looping disabled - bounded scroll" }
+              + "   ·   " + appeared} />
+          <SkiaRow Spacing=8 VerticalOptions=Center>
+            <SkiaLabel Text="Swipe Speed" FontSize=14 TextColor="#FFFFFF" VerticalOptions=Center />
+            // The original pads these with toFixed(1): "1.0x". NX has one text form for a float64,
+            // the one JavaScript's own conversion gives, so a whole speed reads "1x".
+            for v in speeds {
+              <SkiaButton Text={v + "x"} FontSize=13
+                BackgroundColor={if speed == v { "#533483" } else { "#495057" }}
+                onTapped=<Update speed={v} /> />
+            }
+            <SkiaLabel Text={"Current: " + speed + "x"} FontSize=12 TextColor="#ADB5BD" VerticalOptions=Center />
+          </SkiaRow>
+        </Card>
+
+        <Card Title={"SidesOffset={40} Spacing={12} — neighbours peek in · SelectedIndex=" + peekIndex}>
+          <SkiaCarousel HeightRequest=140 SidesOffset=40 Spacing=12 SelectedIndex={peekIndex}
+            onSelectedIndexChanged=<Update peekIndex={action.index} />>
+            for slide in peek {
+              <SlideFace Item={slide} Size=20 />
+            }
+          </SkiaCarousel>
+        </Card>
+
+        <Card Title={"IsLooped + 12 slides (the original recycles them through ItemsSource) · SelectedIndex=" + loopIndex}>
+          <SkiaCarousel HeightRequest=130 IsLooped=true SidesOffset=30 Spacing=10 LinearSpeedMs=350
+            SelectedIndex={loopIndex} onSelectedIndexChanged=<Update loopIndex={action.index} />>
+            // "Item 1" … "Item 12": the loop's position converts to text in the title and the footer.
+            for color, position in loopColors {
+              <SlideFace Item=<Slide Title={"Item " + (position + 1)} Color={color} Text="#FFFFFF" /> Size=22
+                Sub={"static child · index " + position} />
+            }
+          </SkiaCarousel>
+          <SkiaRow Spacing=8>
+            // GoPrev() and GoNext() in the original; here the index wraps by hand, as they do.
+            <SkiaButton Text="Prev" BackgroundColor="#0D6EFD"
+              onTapped=<Update loopIndex={if loopIndex > 0 { loopIndex - 1 } else { 11 }} /> />
+            <SkiaButton Text="Next" BackgroundColor="#0D6EFD"
+              onTapped=<Update loopIndex={if loopIndex < 11 { loopIndex + 1 } else { 0 }} /> />
+            <SkiaLabel FontFamilyFallback="FontSymbols,FontSymbols2" FontSize=12 TextColor="#ADB5BD"
+              VerticalOptions=Center HorizontalOptions=Fill
+              Text="Wraps last → first both ways (virtual anchors); LinearSpeedMs=350 = one slide per 350 ms without Bounces. The original recycles cells through ItemTemplate; these twelve are static." />
+          </SkiaRow>
+        </Card>
+
+        <Card Title={"DynamicSize — auto height follows the selected slide · SelectedIndex=" + dynIndex}>
+          <SkiaCarousel DynamicSize=true VerticalOptions=Start Bounces=true SelectedIndex={dynIndex}
+            onSelectedIndexChanged=<Update dynIndex={action.index} />>
+            <SlideFace Item=<Slide Title="80 pt" Color="#0D6EFD" Text="#FFFFFF" /> Size=22 Sub="static child · index 0" Height=80 />
+            <SlideFace Item=<Slide Title="160 pt" Color="#6610F2" Text="#FFFFFF" /> Size=22 Sub="static child · index 1" Height=160 />
+            <SlideFace Item=<Slide Title="110 pt" Color="#20C997" Text="#FFFFFF" /> Size=22 Sub="static child · index 2" Height=110 />
+          </SkiaCarousel>
+          <SkiaLabel FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Fill
+            Text="No HeightRequest: the carousel measures the selected slide (80 / 160 / 110 pt) and re-measures on every index change." />
+        </Card>
+
+        <Card Title="SkiaDrawer — drag the header below, or:">
+          // The drawer's IsOpen is the page's flag: the button flips it, a drag reports it back, and
+          // the boolean converts to text in the readout.
+          <SkiaRow Spacing=8>
+            <SkiaButton Text={if open { "Close drawer" } else { "Open drawer" }} BackgroundColor="#6610F2"
+              onTapped=<Update open={!open} /> />
+            <SkiaLabel Text={"IsOpen: " + open} FontSize=14 TextColor="#DEE2E6" VerticalOptions=Center />
+          </SkiaRow>
+          <SkiaLabel FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Fill
+            Text="Direction=FromBottom HeaderSize=56, sits in a SkiaLayer with VerticalOptions=End; snaps by velocity, Bounces enabled." />
+        </Card>
+      </SkiaStack>
+    </SkiaScroll>
+
+    // The drawer lives in its own full-size layer over the page, anchored to the bottom edge, and
+    // rests closed with only its header showing. The top corners alone are rounded, like a MAUI
+    // CornerRadius="20,20,0,0"; the bottom corners are written as zero because an unset corner
+    // mirrors the first.
+    <SkiaLayer VerticalOptions=Fill>
+      <SkiaDrawer Direction=FromBottom HeaderSize=56 HeightRequest=320 VerticalOptions=End
+        HorizontalOptions=Fill Bounces=true IsOpen={open} onIsOpenChanged=<Update open={action.isOpen} />>
+        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=20 TopRight=20 BottomLeft=0 BottomRight=0 />
+          BackgroundColor="#F5F5F5" HorizontalOptions=Fill VerticalOptions=Fill
+          Shadows={ <SkiaShadow X=0 Y=-2 Blur=8 Opacity=0.4 Color="#000000" /> }>
+          <SkiaStack Spacing=0 HorizontalOptions=Fill>
+            <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=20 TopRight=20 BottomLeft=0 BottomRight=0 />
+              BackgroundColor="#0D6EFD" HeightRequest=56 HorizontalOptions=Fill>
+              <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=3 /> BackgroundColor="#FFFFFF"
+                WidthRequest=44 HeightRequest=5 HorizontalOptions=Center Margin=<Thickness Top=8 /> />
+              <SkiaLabel Text="Drag me" FontSize=16 FontFamily="FontTextBold" TextColor="#FFFFFF"
+                HorizontalOptions=Center VerticalOptions=Center Margin=<Thickness Top=10 /> />
+            </SkiaShape>
+            <SkiaStack Padding=<Thickness Left=20 Top=20 Right=20 Bottom=20 /> Spacing=12>
+              <SkiaLabel Text="Drawer content" FontSize=20 FontFamily="FontTextBold" TextColor="#111827" />
+              <SkiaLabel FontSize=14 TextColor="#374151" HorizontalOptions=Fill
+                Text="Everything inside is a normal drawn tree: buttons keep working, the drawer only takes vertical drags. Release with a flick to snap open or closed." />
+              // Close() in the original; here the page's flag, which the drawer follows.
+              <SkiaButton Text="Close" ControlStyle=Material onTapped=<Update open=false /> />
+            </SkiaStack>
           </SkiaStack>
-        </SkiaStack>
-      </SkiaShape>
-    </SkiaDrawer>
+        </SkiaShape>
+      </SkiaDrawer>
+    </SkiaLayer>
   </SkiaLayer>
-</SkiaLayer>
+}
+
+<Page />

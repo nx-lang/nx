@@ -260,6 +260,19 @@ pub enum CodegenExpressionKind {
         op: ast::UnOp,
         expr: Box<CodegenExpression>,
     },
+    /// String concatenation: a `+` type analysis found to have a string operand. Both operands
+    /// are strings, a non-string one having been wrapped in a [`CodegenExpressionKind::ToText`].
+    Concat {
+        lhs: Box<CodegenExpression>,
+        rhs: Box<CodegenExpression>,
+    },
+    /// The conversion of a primitive value to its canonical text form, naming the operand's
+    /// static type so a target that carries every number the same way can still print a
+    /// `float32` as one.
+    ToText {
+        expr: Box<CodegenExpression>,
+        ty: ast::PrimitiveType,
+    },
     Call {
         callee: Box<CodegenExpression>,
         args: Vec<CodegenExpression>,

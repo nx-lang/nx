@@ -450,6 +450,11 @@ impl<'a> Explainer<'a> {
                 let operand = self.node(self.int_operand(entry, 2, "unary")?)?;
                 prefixed(format!("{op} "), operand)
             }
+            kinds::node::TEXT => {
+                let operand = self.node(self.int_operand(entry, 1, "text")?)?;
+                let ty = self.string(self.int_operand(entry, 2, "text")?)?;
+                call_like(format!("text<{ty}>"), vec![operand])
+            }
             kinds::node::CALL => {
                 let callee = self.node(self.int_operand(entry, 1, "call")?)?;
                 let args = self.nodes(self.list_operand(entry, 2, "call")?)?;

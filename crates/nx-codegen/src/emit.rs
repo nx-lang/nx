@@ -34,10 +34,15 @@ const JS_PROGRAM_MODULE_RESERVED_RUNTIME_NAMES: &[&str] = &[
     "nxComponentSchema",
     "nxDiagnosticsFromError",
     "nxDiffRecords",
+    "nxDiv",
     "nxElement",
     "nxEnumSchema",
     "nxExternalComponentSchema",
     "nxField",
+    "nxFloat32Schema",
+    "nxFloat32Text",
+    "nxIntDiv",
+    "nxMod",
     "nxMergeUpdates",
     "nxMissingField",
     "nxNamedRecordSchema",
@@ -224,11 +229,12 @@ fn collect_expression_source_codegen_diagnostics(
                 "match expressions are not supported by executable source codegen yet",
             ));
         }
-        CodegenExpressionKind::Binary { lhs, rhs, .. } => {
+        CodegenExpressionKind::Binary { lhs, rhs, .. }
+        | CodegenExpressionKind::Concat { lhs, rhs } => {
             collect_expression_source_codegen_diagnostics(module, lhs, diagnostics);
             collect_expression_source_codegen_diagnostics(module, rhs, diagnostics);
         }
-        CodegenExpressionKind::Unary { expr, .. } => {
+        CodegenExpressionKind::Unary { expr, .. } | CodegenExpressionKind::ToText { expr, .. } => {
             collect_expression_source_codegen_diagnostics(module, expr, diagnostics);
         }
         CodegenExpressionKind::Call { callee, args } => {
@@ -2390,9 +2396,10 @@ fn emit_named_type_schema(
     seen: &mut FxHashSet<ReferenceKey>,
 ) -> String {
     match name {
-        "int" | "int32" | "int64" | "float32" | "float64" => {
+        "int" | "int32" | "int64" | "float64" => {
             return "nxNumberSchema".to_string();
         }
+        "float32" => return "nxFloat32Schema".to_string(),
         "string" => return "nxStringSchema".to_string(),
         "boolean" => return "nxBooleanSchema".to_string(),
         _ => {}
@@ -2884,15 +2891,73 @@ fn emit_expression(
             .as_ref()
             .map(|reference| context.reference_name(current_module_id, reference))
             .unwrap_or_else(|| safe_identifier(name)),
-        CodegenExpressionKind::Binary { lhs, op, rhs } => format!(
-            "({} {} {})",
-            emit_expression(current_module_id, lhs, context),
-            binop_text(*op),
-            emit_expression(current_module_id, rhs, context)
-        ),
+        // A division or remainder goes through a helper: integer division truncates, which
+        // JavaScript's `/` does not, and a zero divisor is a runtime error on every other backend
+        // rather than `Infinity` or `NaN`. A `float32` quotient is rounded like any `float32`
+        // operation; a remainder is exact and needs no rounding.
+        CodegenExpressionKind::Binary {
+            lhs,
+            op: op @ (BinOp::Div | BinOp::Mod),
+            rhs,
+        } => {
+            let helper = match op {
+                BinOp::Mod => "nxMod",
+                _ if is_integer_type(expression.ty.as_ref()) => "nxIntDiv",
+                _ => "nxDiv",
+            };
+            let text = format!(
+                "{helper}({}, {})",
+                emit_expression(current_module_id, lhs, context),
+                emit_expression(current_module_id, rhs, context)
+            );
+            if helper == "nxDiv"
+                && matches!(expression.ty, Some(Type::Primitive(Primitive::Float32)))
+            {
+                format!("Math.fround({text})")
+            } else {
+                text
+            }
+        }
+        CodegenExpressionKind::Binary { lhs, op, rhs } => {
+            let text = format!(
+                "({} {} {})",
+                emit_expression(current_module_id, lhs, context),
+                binop_text(*op),
+                emit_expression(current_module_id, rhs, context)
+            );
+            // A `float32` is carried as a `number`, so `float32` arithmetic is the `number`
+            // operation rounded to the nearest `float32`, which is the `float32` operation itself.
+            // A remainder is exact and needs no rounding.
+            let float32 = matches!(
+                expression.ty,
+                Some(Type::Primitive(Primitive::Float32))
+            );
+            if float32 && matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul) {
+                format!("Math.fround{text}")
+            } else {
+                text
+            }
+        }
         CodegenExpressionKind::Unary { op, expr } => format!(
             "({}{})",
             unop_text(*op),
+            emit_expression(current_module_id, expr, context)
+        ),
+        // Both operands are strings, so JavaScript's `+` joins them.
+        CodegenExpressionKind::Concat { lhs, rhs } => format!(
+            "({} + {})",
+            emit_expression(current_module_id, lhs, context),
+            emit_expression(current_module_id, rhs, context)
+        ),
+        // `String()` is the ECMAScript number-to-string conversion, which is the canonical text
+        // form by definition. A `float32` is carried as the `number` it widens to, so it goes
+        // through the helper that prints the shortest digits that round-trip as a `float32`.
+        CodegenExpressionKind::ToText { expr, ty } => format!(
+            "{}({})",
+            match ty {
+                nx_hir::ast::PrimitiveType::Float32 => "nxFloat32Text",
+                _ => "String",
+            },
             emit_expression(current_module_id, expr, context)
         ),
         CodegenExpressionKind::Call { callee, args } => format!(
@@ -3782,11 +3847,12 @@ fn collect_expression_value_references(
                 output.push(union_reference.clone());
             }
         }
-        CodegenExpressionKind::Binary { lhs, rhs, .. } => {
+        CodegenExpressionKind::Binary { lhs, rhs, .. }
+        | CodegenExpressionKind::Concat { lhs, rhs } => {
             collect_expression_value_references(current_module_id, lhs, output);
             collect_expression_value_references(current_module_id, rhs, output);
         }
-        CodegenExpressionKind::Unary { expr, .. } => {
+        CodegenExpressionKind::Unary { expr, .. } | CodegenExpressionKind::ToText { expr, .. } => {
             collect_expression_value_references(current_module_id, expr, output);
         }
         CodegenExpressionKind::Call { callee, args } => {
@@ -4024,8 +4090,11 @@ fn collect_component_schema_runtime_helpers(
 fn collect_type_ref_schema_runtime_helpers(ty: &TypeRef, output: &mut FxHashSet<&'static str>) {
     match ty {
         TypeRef::Name(name) => match name.as_str() {
-            "int" | "int32" | "int64" | "float32" | "float64" => {
+            "int" | "int32" | "int64" | "float64" => {
                 output.insert("nxNumberSchema");
+            }
+            "float32" => {
+                output.insert("nxFloat32Schema");
             }
             "string" => {
                 output.insert("nxStringSchema");
@@ -4040,6 +4109,7 @@ fn collect_type_ref_schema_runtime_helpers(ty: &TypeRef, output: &mut FxHashSet<
                 output.insert("nxAnySchema");
                 output.insert("nxArraySchema");
                 output.insert("nxBooleanSchema");
+                output.insert("nxFloat32Schema");
                 output.insert("nxNullableSchema");
                 output.insert("nxNumberSchema");
                 output.insert("nxStringSchema");
@@ -4089,11 +4159,33 @@ fn collect_expression_runtime_helpers(
             unreachable!("validate_source_codegen_program refuses handlers before emission")
         }
         CodegenExpressionKind::Literal(_) | CodegenExpressionKind::Identifier { .. } => {}
-        CodegenExpressionKind::Binary { lhs, rhs, .. } => {
+        CodegenExpressionKind::Binary { lhs, op, rhs } => {
+            match op {
+                BinOp::Mod => {
+                    output.insert("nxMod");
+                }
+                BinOp::Div if is_integer_type(expression.ty.as_ref()) => {
+                    output.insert("nxIntDiv");
+                }
+                BinOp::Div => {
+                    output.insert("nxDiv");
+                }
+                _ => {}
+            }
+            collect_expression_runtime_helpers(lhs, output);
+            collect_expression_runtime_helpers(rhs, output);
+        }
+        CodegenExpressionKind::Concat { lhs, rhs } => {
             collect_expression_runtime_helpers(lhs, output);
             collect_expression_runtime_helpers(rhs, output);
         }
         CodegenExpressionKind::Unary { expr, .. } => {
+            collect_expression_runtime_helpers(expr, output);
+        }
+        CodegenExpressionKind::ToText { expr, ty } => {
+            if matches!(ty, nx_hir::ast::PrimitiveType::Float32) {
+                output.insert("nxFloat32Text");
+            }
             collect_expression_runtime_helpers(expr, output);
         }
         CodegenExpressionKind::Call { callee, args } => {
@@ -4237,7 +4329,8 @@ fn emit_literal(literal: &Literal) -> String {
     match literal {
         Literal::String(value) => js_string(value.as_str()),
         Literal::Int(value) => value.to_string(),
-        Literal::Float(value) => {
+        Literal::Int32(value) => value.to_string(),
+        Literal::Float(value) | Literal::Float32(value) => {
             if value.0.is_finite() {
                 value.0.to_string()
             } else {
@@ -4249,9 +4342,18 @@ fn emit_literal(literal: &Literal) -> String {
     }
 }
 
+fn is_integer_type(ty: Option<&Type>) -> bool {
+    matches!(
+        ty,
+        Some(Type::Primitive(
+            Primitive::Int | Primitive::Int32 | Primitive::Int64
+        ))
+    )
+}
+
 fn binop_text(op: BinOp) -> &'static str {
     match op {
-        BinOp::Add | BinOp::Concat => "+",
+        BinOp::Add => "+",
         BinOp::Sub => "-",
         BinOp::Mul => "*",
         BinOp::Div => "/",

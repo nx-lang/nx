@@ -12,15 +12,33 @@ pub enum Literal {
     /// Example: `"hello world"`
     String(SmolStr),
 
-    /// Integer literal.
+    /// Integer literal of type `int` or `int64`.
+    ///
+    /// Lowering gives every integer literal this form. Type analysis rewrites one written at an
+    /// `int32` site to [`Literal::Int32`] and one written at a floating-point site to a real
+    /// literal, so below analysis a literal's variant is its width. `int64` keeps this variant:
+    /// it has no distinct runtime carrier yet.
     ///
     /// Example: `42`, `-10`
     Int(i64),
 
-    /// Floating-point literal.
+    /// Integer literal of type `int32`.
+    ///
+    /// Never produced by lowering: type analysis rewrites an [`Literal::Int`] written at an
+    /// `int32` site into this, once the value is known to fit.
+    Int32(i32),
+
+    /// Floating-point literal of type `float64`.
     ///
     /// Example: `3.14`, `-0.5`
     Float(OrderedFloat),
+
+    /// Floating-point literal of type `float32`.
+    ///
+    /// Never produced by lowering: type analysis rewrites a literal written at a `float32` site
+    /// into this. The carried value is already rounded to the nearest `float32`, widened back to
+    /// `f64` so the literal can be compared and hashed like [`Literal::Float`].
+    Float32(OrderedFloat),
 
     /// Boolean literal.
     ///
@@ -95,9 +113,58 @@ pub enum BinOp {
     // Logical
     And, // &&
     Or,  // ||
+}
 
-    // String
-    Concat, // + (for strings)
+/// A primitive type as a HIR node names it after type analysis.
+///
+/// The type checker decides that a `+` concatenates and which operand needs its text form, and
+/// records that decision on the module as [`Expr::ToText`] naming the operand's type with one of
+/// these. It is also the width a numeric literal took from its site. Only the primitives a value
+/// can have are here: `void` and `never` name no value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PrimitiveType {
+    Int,
+    Int32,
+    Int64,
+    Float32,
+    Float64,
+    Boolean,
+    String,
+}
+
+impl PrimitiveType {
+    /// The type's source spelling, which is also its name in NX IR.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PrimitiveType::Int => "int",
+            PrimitiveType::Int32 => "int32",
+            PrimitiveType::Int64 => "int64",
+            PrimitiveType::Float32 => "float32",
+            PrimitiveType::Float64 => "float64",
+            PrimitiveType::Boolean => "boolean",
+            PrimitiveType::String => "string",
+        }
+    }
+
+    /// The primitive with this source spelling, if any.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Some(match name {
+            "int" => PrimitiveType::Int,
+            "int32" => PrimitiveType::Int32,
+            "int64" => PrimitiveType::Int64,
+            "float32" => PrimitiveType::Float32,
+            "float64" => PrimitiveType::Float64,
+            "boolean" => PrimitiveType::Boolean,
+            "string" => PrimitiveType::String,
+            _ => return None,
+        })
+    }
+}
+
+impl std::fmt::Display for PrimitiveType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// Unary operator.
@@ -176,6 +243,47 @@ pub enum Expr {
     UnaryOp {
         op: UnOp,
         expr: ExprId,
+        span: TextSpan,
+    },
+
+    /// String concatenation: a `+` that type analysis found to have a string operand.
+    ///
+    /// Never produced by lowering, which emits [`BinOp::Add`] for every `+`; the type checker is
+    /// the one place every operand's type is known, so it decides which additions concatenate and
+    /// rewrites them to this. Both operands are strings by the time evaluation sees the node: a
+    /// non-string operand was wrapped in an [`Expr::ToText`] by the same rewrite. A joined text
+    /// body at a `string` content property is a chain of these too.
+    ///
+    /// Example: what `"Total: " + count` becomes
+    Concat {
+        lhs: ExprId,
+        rhs: ExprId,
+        span: TextSpan,
+    },
+
+    /// Conversion of a primitive value to its canonical text form.
+    ///
+    /// Produced by the same rewrite as [`Expr::Concat`], around each operand that is not already
+    /// a string. The type named is the operand's static type, which is what lets a runtime that
+    /// carries every number the same way still print a `float32` as a `float32`.
+    ToText {
+        expr: ExprId,
+        ty: PrimitiveType,
+        span: TextSpan,
+    },
+
+    /// Numeric widening of one branch of a join: an `if` or `match` result, or a list element.
+    ///
+    /// Never produced by lowering. When type analysis joins an `int` branch with a `float64` one,
+    /// the join is a `float64`, and the type checker wraps the narrower branch in this node so the
+    /// value it produces is one too. The type named is the numeric type the join has; a list or a
+    /// nullable value is widened item by item, and `null` is left alone. A runtime that carries
+    /// every number the same way has nothing to do here.
+    ///
+    /// Example: what `n` becomes in `if b { n } else { x }`, with `n:int` and `x:float64`
+    Widen {
+        expr: ExprId,
+        ty: PrimitiveType,
         span: TextSpan,
     },
 
@@ -338,6 +446,9 @@ impl Expr {
             Expr::ResolvedUnionCase { span, .. } => *span,
             Expr::BinaryOp { span, .. } => *span,
             Expr::UnaryOp { span, .. } => *span,
+            Expr::Concat { span, .. } => *span,
+            Expr::ToText { span, .. } => *span,
+            Expr::Widen { span, .. } => *span,
             Expr::Call { span, .. } => *span,
             Expr::If { span, .. } => *span,
             Expr::Match { span, .. } => *span,

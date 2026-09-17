@@ -17,7 +17,7 @@ use nx_hir::{
 };
 use nx_types::{
     common_supertype, is_object_type, resolve_type_ref_with, resolve_type_ref_with_seen,
-    type_satisfies_expected, Type,
+    type_satisfies_expected, Primitive, Type,
 };
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
@@ -200,6 +200,10 @@ enum ValueOrigin {
     Internal,
     /// Supplied by the host through props, explicit state, or a dispatch batch.
     Host,
+    /// Supplied by the host as an argument of an entry call. A number in it takes the width of its
+    /// parameter as a [`ValueOrigin::Host`] number does, but a record in it is passed through as
+    /// the host built it rather than rebuilt from its fields.
+    EntryArgument,
 }
 
 impl Interpreter {
@@ -889,8 +893,13 @@ impl Interpreter {
         let mut ctx = ExecutionContext::with_limits(limits);
         self.bind_top_level_values(module, &mut ctx)?;
 
-        let coerced_args =
-            self.coerce_arguments_for_params(module, args, &function.params, "function call")?;
+        let coerced_args = self.coerce_arguments_for_params(
+            module,
+            args,
+            &function.params,
+            "function call",
+            ValueOrigin::EntryArgument,
+        )?;
 
         // T012: Bind parameters to argument values
         for (param, arg) in function.params.iter().zip(coerced_args.iter()) {
@@ -2124,6 +2133,15 @@ impl Interpreter {
                 self.eval_binary_op(module, ctx, *lhs, *op, *rhs)
             }
             ast::Expr::UnaryOp { op, expr, .. } => self.eval_unary_op(module, ctx, *op, *expr),
+            ast::Expr::Concat { lhs, rhs, .. } => self.eval_concat(module, ctx, *lhs, *rhs),
+            ast::Expr::ToText { expr, .. } => self.eval_to_text(module, ctx, *expr),
+            ast::Expr::Widen { expr, ty, .. } => {
+                let value = self.eval_expr(module, ctx, *expr)?;
+                Ok(Self::widened_value(
+                    value,
+                    &Type::Primitive(Primitive::from_hir_type(*ty)),
+                ))
+            }
             ast::Expr::If {
                 condition,
                 then_branch,
@@ -2194,11 +2212,61 @@ impl Interpreter {
         }
     }
 
+    /// Evaluate a string concatenation: a `+` analysis found to have a string operand.
+    ///
+    /// <para>Both operands are strings here. Whether a `+` concatenates was decided by the type
+    /// checker, and the same rewrite wrapped each operand that was not a string in an
+    /// `Expr::ToText`, so there is nothing left to decide from the values.</para>
+    fn eval_concat(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        lhs: ExprId,
+        rhs: ExprId,
+    ) -> Result<Value, RuntimeError> {
+        let lhs = self.eval_expr(module, ctx, lhs)?;
+        let rhs = self.eval_expr(module, ctx, rhs)?;
+        match (lhs, rhs) {
+            (Value::String(lhs), Value::String(rhs)) => {
+                let mut joined = String::with_capacity(lhs.len() + rhs.len());
+                joined.push_str(&lhs);
+                joined.push_str(&rhs);
+                Ok(Value::String(joined.into()))
+            }
+            (lhs, rhs) => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: "string".to_string(),
+                actual: format!("{} and {}", lhs.type_name(), rhs.type_name()),
+                operation: "concatenation".to_string(),
+            })),
+        }
+    }
+
+    /// Evaluate the conversion of a primitive value to its canonical text form.
+    fn eval_to_text(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        expr: ExprId,
+    ) -> Result<Value, RuntimeError> {
+        let value = self.eval_expr(module, ctx, expr)?;
+        match value.to_text() {
+            Some(text) => Ok(Value::String(text.into())),
+            None => Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: "a string, a number or a boolean".to_string(),
+                actual: value.type_name().to_string(),
+                operation: "text conversion".to_string(),
+            })),
+        }
+    }
+
     /// Evaluate a literal expression (T015 - placeholder)
     fn eval_literal(&self, lit: &ast::Literal) -> Result<Value, RuntimeError> {
         let value = match lit {
             ast::Literal::Int(n) => Value::Int(*n),
+            ast::Literal::Int32(n) => Value::Int32(*n),
             ast::Literal::Float(f) => Value::Float(f.0),
+            // Already rounded to the nearest float32 when the literal took the type.
+            ast::Literal::Float32(f) => Value::Float32(f.0 as f32),
             ast::Literal::String(s) => Value::String(s.clone()),
             ast::Literal::Boolean(b) => Value::Boolean(*b),
             ast::Literal::Null => Value::Null,
@@ -2381,8 +2449,7 @@ impl Interpreter {
                     | ast::BinOp::Sub
                     | ast::BinOp::Mul
                     | ast::BinOp::Div
-                    | ast::BinOp::Mod
-                    | ast::BinOp::Concat => {
+                    | ast::BinOp::Mod => {
                         crate::eval::arithmetic::eval_arithmetic_op(lhs_val, op, rhs_val)
                     }
 
@@ -2834,6 +2901,7 @@ impl Interpreter {
             arg_values,
             &function.params,
             "function call",
+            ValueOrigin::Internal,
         )?;
 
         ctx.push_scope();
@@ -3253,14 +3321,16 @@ impl Interpreter {
         arg_values: Vec<Value>,
         params: &[nx_hir::Param],
         operation: &str,
+        origin: ValueOrigin,
     ) -> Result<Vec<Value>, RuntimeError> {
         let mut coerced = Vec::with_capacity(arg_values.len());
         for (param, value) in params.iter().zip(arg_values) {
-            coerced.push(self.coerce_value_to_type(
+            coerced.push(self.coerce_value_to_type_from(
                 module,
                 value,
                 &param.ty,
                 &format!("{} parameter '{}'", operation, param.name.as_str()),
+                origin,
             )?);
         }
         Ok(coerced)
@@ -3384,7 +3454,9 @@ impl Interpreter {
                     }));
                 }
                 match origin {
-                    ValueOrigin::Internal => Ok(Value::Record { type_name, fields }),
+                    ValueOrigin::Internal | ValueOrigin::EntryArgument => {
+                        Ok(Value::Record { type_name, fields })
+                    }
                     ValueOrigin::Host => {
                         self.construct_host_record_value(module, type_name, fields, operation)
                     }
@@ -3404,7 +3476,7 @@ impl Interpreter {
                     }))
                 }
             }
-            other => self.coerce_non_record_value(other, expected, operation),
+            other => self.coerce_non_record_value(other, expected, operation, origin),
         }
     }
 
@@ -3413,7 +3485,15 @@ impl Interpreter {
         value: Value,
         expected: &Type,
         operation: &str,
+        origin: ValueOrigin,
     ) -> Result<Value, RuntimeError> {
+        let value = match origin {
+            ValueOrigin::Internal => value,
+            ValueOrigin::Host | ValueOrigin::EntryArgument => {
+                Self::host_number_at_site(value, expected, operation)?
+            }
+        };
+
         if matches!(value, Value::Array(_)) && !is_object_type(expected) {
             let actual_ty = self.runtime_type_of_value(&value);
             return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
@@ -3424,7 +3504,7 @@ impl Interpreter {
         }
 
         if self.value_matches_expected_type(&value, expected) {
-            Ok(value)
+            Ok(Self::widened_to_site(value, expected))
         } else {
             let actual_ty = self.runtime_type_of_value(&value);
             Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
@@ -3432,6 +3512,84 @@ impl Interpreter {
                 actual: actual_ty.to_string(),
                 operation: operation.to_string(),
             }))
+        }
+    }
+
+    /// Gives a numeric value that was accepted by widening the type of the site it is bound at.
+    ///
+    /// <para>This is the one place a declared type meets a value, so it is where an implicit
+    /// numeric conversion happens at run time: an `int` bound at a `float64` property is the
+    /// `float64` `3.0` from here on, not an integer a consumer is left to widen. The canonical
+    /// output tells the two apart, which is why the value is converted rather than left alone.
+    /// Lists and nullable types have been taken apart by the caller, so only a scalar arrives.
+    /// `int64` has no carrier of its own, so widening to it changes only an `int32`.</para>
+    fn widened_to_site(value: Value, expected: &Type) -> Value {
+        let Type::Primitive(expected) = expected else {
+            return value;
+        };
+        match (value, expected) {
+            (Value::Int32(n), Primitive::Int | Primitive::Int64) => Value::Int(i64::from(n)),
+            (Value::Int32(n), Primitive::Float64) => Value::Float(f64::from(n)),
+            (Value::Int(n), Primitive::Float64) => Value::Float(n as f64),
+            (Value::Float32(n), Primitive::Float64) => Value::Float(f64::from(n)),
+            (value, _) => value,
+        }
+    }
+
+    /// Gives a number the host supplied the width of the site it is bound at.
+    ///
+    /// <para>A host has no way to spell `int32` or `float32`: a JSON number arrives as an `int` or
+    /// a `float64`. Such a number takes a narrower site's width on the terms a literal written
+    /// there does: an integer after a range check at `int32` and an exactness check at `float32`,
+    /// and a real by rounding at `float32`. A number that cannot take the width is refused here.
+    /// Checked NX never needs this, because analysis already guarantees nothing narrows.
+    /// Lists and nullable types have been taken apart by the caller, so only a scalar
+    /// arrives.</para>
+    fn host_number_at_site(
+        value: Value,
+        expected: &Type,
+        operation: &str,
+    ) -> Result<Value, RuntimeError> {
+        let out_of_range = |actual: String, target: &str| {
+            RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: target.to_string(),
+                actual,
+                operation: operation.to_string(),
+            })
+        };
+        match (value, expected) {
+            (Value::Int(n), Type::Primitive(Primitive::Int32)) => i32::try_from(n)
+                .map(Value::Int32)
+                .map_err(|_| out_of_range(format!("{} (out of range for int32)", n), "int32")),
+            (Value::Int(n), Type::Primitive(Primitive::Float32)) => {
+                if Primitive::Float32.represents_integer_exactly(n) {
+                    Ok(Value::Float32(n as f32))
+                } else {
+                    Err(out_of_range(
+                        format!("{} (not exact as a float32)", n),
+                        "float32",
+                    ))
+                }
+            }
+            (Value::Float(x), Type::Primitive(Primitive::Float32)) => Ok(Value::Float32(x as f32)),
+            (value, _) => Ok(value),
+        }
+    }
+
+    /// Widens the numbers in a branch of a join to the join's numeric type, item by item in a list.
+    ///
+    /// <para>The type checker wrapped the branch in an `Expr::Widen` because its type is narrower
+    /// than the join's. `null` and anything that is not a number are left alone.</para>
+    fn widened_value(value: Value, target: &Type) -> Value {
+        match value {
+            Value::Array(items) => Value::Array(
+                items
+                    .iter()
+                    .cloned()
+                    .map(|item| Self::widened_value(item, target))
+                    .collect(),
+            ),
+            value => Self::widened_to_site(value, target),
         }
     }
 

@@ -8,6 +8,8 @@ pub mod stmt;
 pub mod types;
 
 // Re-export commonly used types
-pub use expr::{BinOp, Expr, Literal, MatchArm, OrderedFloat, RecordLiteralProperty, UnOp};
+pub use expr::{
+    BinOp, Expr, Literal, MatchArm, OrderedFloat, PrimitiveType, RecordLiteralProperty, UnOp,
+};
 pub use stmt::Stmt;
 pub use types::TypeRef;

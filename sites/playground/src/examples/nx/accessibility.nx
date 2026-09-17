@@ -5,10 +5,11 @@
 // the same way it is built from the original. Tab still moves between the drawn controls and a
 // screen reader still reads them.
 //
-// What is missing is the readouts the original updates as you use it — the live snapshot line
-// (node count, focused node, last activated) and the counters and toggles — which need event
-// handlers and component state this port does not use yet. Their controls are drawn in their
-// initial state.
+// The counter, the toggles and the "last activated" readout work as in the original: the page
+// holds them in its state, and the counter's number converts to text where it joins the button's
+// words. What is missing is the other half of the snapshot line — the overlay's node count and its
+// focused node — which the original reads from the canvas's AccessibilityManager, an engine object
+// NX has no way to reach (code-behind).
 
 component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = {
   <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 />
@@ -23,88 +24,105 @@ component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> =
   </SkiaShape>
 }
 
-<SkiaScroll Orientation=Vertical>
-  <SkiaStack Spacing=16 Padding=<Thickness Left=16 Top=16 Right=16 Bottom=16 />
-    HorizontalOptions=Center MaximumWidthRequest=720>
-    <SkiaLabel Text="Accessibility" FontSize=24 TextColor="#FFFFFF" HorizontalOptions=Center
-      AccessibilityRole="heading" />
-    <SkiaLabel FontSize=14 TextColor="#D3D3D3" HorizontalOptions=Fill HorizontalTextAlignment=Center
-      Text="Press Tab to move between the drawn controls, Enter or Space to activate. Screen readers see the same overlay: roles, labels, hints, pressed state, live regions." />
+component <Page /> = {
+  state {
+    count:int = 0
+    sound:boolean = true
+    dark:boolean = false
+    last:string = "-"
+  }
 
-    <Card Title="Accessibility snapshot (Canvas.AccessibilityManager)">
-      // The original reads the live snapshot here — node count, focused node, last activated —
-      // which this port does not yet hold in component state or refresh from event handlers.
-      <SkiaLabel Text="Nodes in the overlay: — · focused: — · last activated: —" FontSize=14
-        TextColor="#DEE2E6" HorizontalOptions=Fill AccessibilityRole="status" AccessibilityLive="polite" />
-    </Card>
-
-    <Card Title="AccessibilityTextSelectable — real selectable text over the drawn label (opt-in)">
-      // Selection is the overlay's own behavior, so it works here as in the original.
-      <SkiaLabel AccessibilityTextSelectable=true FontSize=14 TextColor="#DEE2E6" HorizontalOptions=Fill
-        Text="This paragraph is drawn on the canvas, but the accessibility overlay also carries it as real, invisible text in the same font and line positions. Select it with the mouse or touch, copy it with Ctrl+C, let a screen reader read it word by word — like any HTML paragraph. Off by default: pointer input over selectable text goes to the selection, not to the drawn control, so it is never turned on for buttons, carousels or anything gesture-driven." />
-      <SkiaLabel FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Fill
-        Text="This one is a normal label: exposed to screen readers, not selectable." />
-    </Card>
-
-    <Card Title="Buttons — label from Text, hint, custom label, disabled">
-      <SkiaWrap Spacing=8>
-        // The original counts taps in this button's own text.
-        <SkiaButton Text="Tapped 0×" BackgroundColor="#0D6EFD" AccessibilityHint="Increments the counter" />
-        <SkiaButton Text="★" FontSize=18 FontFamilyFallback="FontSymbols,FontSymbols2"
-          BackgroundColor="#6610F2" WidthRequest=48 AccessibilityLabel="Favorite"
-          AccessibilityHint="Icon-only button: AccessibilityLabel replaces the glyph" />
-        <SkiaButton Text="Disabled" BackgroundColor="#495057" IsDisabled=true
-          AccessibilityHint="IsDisabled: no tab stop, not activatable" />
-      </SkiaWrap>
-    </Card>
-
-    <Card Title="Toggles — AccessibilityIsPressed → aria-pressed">
-      // Both toggles are drawn in the state the original starts in: sound on, dark off.
-      <SkiaRow Spacing=8>
-        <SkiaButton Text="Sound: on" BackgroundColor="#20C997" AccessibilityLabel="Sound"
-          AccessibilityIsPressed=true />
-        <SkiaButton Text="Dark: off" BackgroundColor="#495057" AccessibilityLabel="Dark mode"
-          AccessibilityIsPressed=false />
-      </SkiaRow>
-    </Card>
-
-    <Card Title="Any control can be a node — SkiaShape as a button, image with a description">
-      <SkiaWrap Spacing=12>
-        <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=12 /> BackgroundColor="#373B3E"
-          StrokeColor="#6EA8FE" StrokeWidth=1 AnimationTapped=Ripple
-          AccessibilityRole="button" AccessibilityLabel="Open settings"
-          AccessibilityHint="A SkiaShape with Tapped: role button, label and hint set explicitly">
-          <SkiaStack Padding=<Thickness Left=16 Top=12 Right=16 Bottom=12 /> Spacing=4>
-            <SkiaLabel Text="Settings" FontSize=18 FontFamily="FontTextBold" TextColor="#FFFFFF"
-              AccessibilityRole="presentation" />
-            <SkiaLabel Text="inner labels are RolePresentation" FontSize=12 TextColor="#ADB5BD"
-              AccessibilityRole="presentation" />
-          </SkiaStack>
-        </SkiaShape>
-        <SkiaSvg Source="images/drawnui.svg" WidthRequest=72 LockRatio=1
-          AccessibilityRole="img" AccessibilityLabel="DrawnUI palette logo" />
-        <SkiaShape Type=Circle BackgroundColor="#FFC107" WidthRequest=48 LockRatio=1
-          VerticalOptions=Center AccessibilityRole="presentation" />
-      </SkiaWrap>
-      <SkiaLabel FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Fill
-        Text="The yellow circle is decorative: AccessibilityRole=presentation keeps it out of the tree." />
-    </Card>
-
-    <Card Title="Labels — read by default, opted out per control">
-      <SkiaLabel FontSize=14 TextColor="#DEE2E6" HorizontalOptions=Fill
-        Text="This label is announced: SkiaLabel.DefaultAccessibilityRole = Aria.RoleText was set once at startup." />
-      <SkiaLabel FontSize=14 TextColor="#ADB5BD" HorizontalOptions=Fill AccessibilityRole="presentation"
-        Text="This one is visible but hidden from assistive technology (RolePresentation)." />
-      <SkiaLabel Text="Heading level text" FontSize=16 FontFamily="FontTextBold" TextColor="#FFFFFF"
+  <SkiaScroll Orientation=Vertical>
+    <SkiaStack Spacing=16 Padding=<Thickness Left=16 Top=16 Right=16 Bottom=16 />
+      HorizontalOptions=Center MaximumWidthRequest=720>
+      <SkiaLabel Text="Accessibility" FontSize=24 TextColor="#FFFFFF" HorizontalOptions=Center
         AccessibilityRole="heading" />
-    </Card>
+      <SkiaLabel FontSize=14 TextColor="#D3D3D3" HorizontalOptions=Fill HorizontalTextAlignment=Center
+        Text="Press Tab to move between the drawn controls, Enter or Space to activate. Screen readers see the same overlay: roles, labels, hints, pressed state, live regions." />
 
-    <Card Title="How it works">
-      <SkiaLabel FontSize=13 TextColor="#ADB5BD" HorizontalOptions=Fill
-        Text="• <canvas> is aria-hidden; a DOM overlay mirrors accessible controls with role / aria-label / title / aria-pressed / aria-live / tabindex.
+      <Card Title="Accessibility snapshot (Canvas.AccessibilityManager)">
+        // The original also reads the node count and the focused node from
+        // Canvas.AccessibilityManager, which is code-behind: an engine object NX cannot reach, so
+        // those parts of the line are left out. The last activated control is the page's own state.
+        <SkiaLabel Text={"Last activated: " + last} FontSize=14
+          TextColor="#DEE2E6" HorizontalOptions=Fill AccessibilityRole="status" AccessibilityLive="polite" />
+      </Card>
+
+      <Card Title="AccessibilityTextSelectable — real selectable text over the drawn label (opt-in)">
+        // Selection is the overlay's own behavior, so it works here as in the original.
+        <SkiaLabel AccessibilityTextSelectable=true FontSize=14 TextColor="#DEE2E6" HorizontalOptions=Fill
+          Text="This paragraph is drawn on the canvas, but the accessibility overlay also carries it as real, invisible text in the same font and line positions. Select it with the mouse or touch, copy it with Ctrl+C, let a screen reader read it word by word — like any HTML paragraph. Off by default: pointer input over selectable text goes to the selection, not to the drawn control, so it is never turned on for buttons, carousels or anything gesture-driven." />
+        <SkiaLabel FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Fill
+          Text="This one is a normal label: exposed to screen readers, not selectable." />
+      </Card>
+
+      <Card Title="Buttons — label from Text, hint, custom label, disabled">
+        <SkiaWrap Spacing=8>
+          // The count is an int; `+` converts it to text on its way into the button's string.
+          <SkiaButton Text={"Tapped " + count + "×"} BackgroundColor="#0D6EFD"
+            AccessibilityHint="Increments the counter"
+            onTapped=<Update count={count + 1} last="counter" /> />
+          <SkiaButton Text="★" FontSize=18 FontFamilyFallback="FontSymbols,FontSymbols2"
+            BackgroundColor="#6610F2" WidthRequest=48 AccessibilityLabel="Favorite"
+            AccessibilityHint="Icon-only button: AccessibilityLabel replaces the glyph"
+            onTapped=<Update last="favorite" /> />
+          <SkiaButton Text="Disabled" BackgroundColor="#495057" IsDisabled=true
+            AccessibilityHint="IsDisabled: no tab stop, not activatable" />
+        </SkiaWrap>
+      </Card>
+
+      <Card Title="Toggles — AccessibilityIsPressed → aria-pressed">
+        <SkiaRow Spacing=8>
+          <SkiaButton Text={if sound { "Sound: on" } else { "Sound: off" }}
+            BackgroundColor={if sound { "#20C997" } else { "#495057" }} AccessibilityLabel="Sound"
+            AccessibilityIsPressed={sound} onTapped=<Update sound={!sound} last="sound" /> />
+          <SkiaButton Text={if dark { "Dark: on" } else { "Dark: off" }}
+            BackgroundColor={if dark { "#20C997" } else { "#495057" }} AccessibilityLabel="Dark mode"
+            AccessibilityIsPressed={dark} onTapped=<Update dark={!dark} last="dark" /> />
+        </SkiaRow>
+      </Card>
+
+      <Card Title="Any control can be a node — SkiaShape as a button, image with a description">
+        <SkiaWrap Spacing=12>
+          <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=12 /> BackgroundColor="#373B3E"
+            StrokeColor="#6EA8FE" StrokeWidth=1 AnimationTapped=Ripple
+            AccessibilityRole="button" AccessibilityLabel="Open settings"
+            AccessibilityHint="A SkiaShape with Tapped: role button, label and hint set explicitly"
+            onTapped=<Update last="settings card" />>
+            <SkiaStack Padding=<Thickness Left=16 Top=12 Right=16 Bottom=12 /> Spacing=4>
+              <SkiaLabel Text="Settings" FontSize=18 FontFamily="FontTextBold" TextColor="#FFFFFF"
+                AccessibilityRole="presentation" />
+              <SkiaLabel Text="inner labels are RolePresentation" FontSize=12 TextColor="#ADB5BD"
+                AccessibilityRole="presentation" />
+            </SkiaStack>
+          </SkiaShape>
+          <SkiaSvg Source="images/drawnui.svg" WidthRequest=72 LockRatio=1
+            AccessibilityRole="img" AccessibilityLabel="DrawnUI palette logo" />
+          <SkiaShape Type=Circle BackgroundColor="#FFC107" WidthRequest=48 LockRatio=1
+            VerticalOptions=Center AccessibilityRole="presentation" />
+        </SkiaWrap>
+        <SkiaLabel FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Fill
+          Text="The yellow circle is decorative: AccessibilityRole=presentation keeps it out of the tree." />
+      </Card>
+
+      <Card Title="Labels — read by default, opted out per control">
+        <SkiaLabel FontSize=14 TextColor="#DEE2E6" HorizontalOptions=Fill
+          Text="This label is announced: SkiaLabel.DefaultAccessibilityRole = Aria.RoleText was set once at startup." />
+        <SkiaLabel FontSize=14 TextColor="#ADB5BD" HorizontalOptions=Fill AccessibilityRole="presentation"
+          Text="This one is visible but hidden from assistive technology (RolePresentation)." />
+        <SkiaLabel Text="Heading level text" FontSize=16 FontFamily="FontTextBold" TextColor="#FFFFFF"
+          AccessibilityRole="heading" />
+      </Card>
+
+      <Card Title="How it works">
+        <SkiaLabel FontSize=13 TextColor="#ADB5BD" HorizontalOptions=Fill
+          Text="• <canvas> is aria-hidden; a DOM overlay mirrors accessible controls with role / aria-label / title / aria-pressed / aria-live / tabindex.
 • Snapshot rebuilt at most once per second from the arranged rects, so it follows scrolling.
 • Overlay has pointer-events:none — hover and gestures reach the canvas; keyboard and screen-reader activation are routed as a Tapped.
 • Same property names as DrawnUi (.NET): AccessibilityRole, AccessibilityLabel, AccessibilityHint, AccessibilityCanInteract, AccessibilityIsPressed, AccessibilityLive." />
-    </Card>
-  </SkiaStack>
-</SkiaScroll>
+      </Card>
+    </SkiaStack>
+  </SkiaScroll>
+}
+
+<Page />

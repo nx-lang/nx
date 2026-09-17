@@ -11,7 +11,7 @@ use crate::{
     ExprId, Function, Import, ImportKind, Item, LoweredModule, LoweringDiagnostic, Name, Param,
     Property, PropertyConditionArm, PropertyEntry, PropertyMatchArm, RecordDef, RecordField,
     RecordKind, SelectiveImport, SourceId, TypeAlias, TypeParameter, UnionCaseDef, UnionCaseField,
-    UnionDef, ValueDef, Visibility, PROPERTY_UNION_SUFFIX, UPDATE_RECORD_SUFFIX,
+    UnionDef, ValueDef, Visibility, WhitespaceRun, PROPERTY_UNION_SUFFIX, UPDATE_RECORD_SUFFIX,
 };
 use nx_diagnostics::{TextSize, TextSpan};
 use nx_syntax::{property_definition_is_type_parameter, SyntaxKind, SyntaxNode};
@@ -22,6 +22,51 @@ use smol_str::SmolStr;
 ///
 /// Maintains the module being built and provides helper methods for
 /// allocating expressions and handling errors.
+/// The whitespace written between the pieces of one element body.
+///
+/// <para>The grammar treats whitespace in a body as layout: it is in no text run, so `{a} {b}`
+/// lowers to two pieces and the run in `{count} items` starts at `items`. The pieces alone
+/// therefore cannot reproduce the text as written. This reads the gap between each piece and the
+/// one before it out of the body's source, so a body that binds to a `string` content property can
+/// be joined faithfully. A gap that is not all whitespace is not layout and is not recorded.</para>
+struct ContentGaps<'tree> {
+    text: &'tree str,
+    start: usize,
+    last_end: Option<usize>,
+    runs: Vec<WhitespaceRun>,
+    text_runs: Vec<usize>,
+}
+
+impl<'tree> ContentGaps<'tree> {
+    fn new(content_node: &SyntaxNode<'tree>) -> Self {
+        Self {
+            text: content_node.text(),
+            start: content_node.start_byte(),
+            last_end: None,
+            runs: Vec::new(),
+            text_runs: Vec::new(),
+        }
+    }
+
+    /// Notes that the content piece about to take index `index` was lowered from `node`.
+    fn note_piece(&mut self, node: &SyntaxNode<'_>, index: usize) {
+        if let Some(last_end) = self.last_end {
+            let gap = last_end
+                .checked_sub(self.start)
+                .zip(node.start_byte().checked_sub(self.start))
+                .and_then(|(from, to)| self.text.get(from..to))
+                .unwrap_or("");
+            if !gap.is_empty() && gap.trim().is_empty() {
+                self.runs.push(WhitespaceRun {
+                    before: index,
+                    text: SmolStr::new(gap),
+                });
+            }
+        }
+        self.last_end = Some(node.end_byte());
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TypeTag {
     Int,
@@ -70,10 +115,6 @@ impl TypeTag {
             (TypeTag::Float64, TypeTag::Float64) => TypeTag::Float64,
             _ => TypeTag::Unknown,
         }
-    }
-
-    fn is_string(self) -> bool {
-        matches!(self, TypeTag::String)
     }
 }
 
@@ -1238,15 +1279,10 @@ impl LoweringContext {
                     _ => None,
                 });
 
-                if let Some(mut op) = op {
-                    if matches!(op, BinOp::Add) {
-                        let lhs_ty = self.expr_type(lhs);
-                        let rhs_ty = self.expr_type(rhs);
-                        if lhs_ty.is_string() && rhs_ty.is_string() {
-                            op = BinOp::Concat;
-                        }
-                    }
-
+                if let Some(op) = op {
+                    // Every `+` lowers as `Add`. Whether it concatenates is decided by the type
+                    // checker, which knows every operand's type; the tags here know only literals
+                    // and annotated names.
                     let result_ty = match op {
                         BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
                             TypeTag::combine_numeric(self.expr_type(lhs), self.expr_type(rhs))
@@ -1259,7 +1295,6 @@ impl LoweringContext {
                         | BinOp::Ge
                         | BinOp::And
                         | BinOp::Or => TypeTag::Boolean,
-                        BinOp::Concat => TypeTag::String,
                     };
 
                     let expr = self.alloc_expr(Expr::BinaryOp {
@@ -1947,7 +1982,12 @@ impl LoweringContext {
     ///
     /// Content can be wrapped in element/text containers. This preserves expression-producing
     /// body content instead of only literal nested elements.
-    fn lower_element_content(&mut self, node: SyntaxNode, content: &mut Vec<ExprId>) {
+    fn lower_element_content(
+        &mut self,
+        node: SyntaxNode,
+        content: &mut Vec<ExprId>,
+        gaps: &mut ContentGaps<'_>,
+    ) {
         match node.kind() {
             SyntaxKind::ELEMENT
             | SyntaxKind::TEXT_CHILD_ELEMENT
@@ -1964,6 +2004,7 @@ impl LoweringContext {
             | SyntaxKind::ELEMENTS_IF_MATCH_EXPRESSION
             | SyntaxKind::ELEMENTS_IF_CONDITION_LIST_EXPRESSION
             | SyntaxKind::ELEMENTS_FOR_EXPRESSION => {
+                gaps.note_piece(&node, content.len());
                 content.push(self.lower_expr(node));
             }
             // These containers just group body content, so recurse into their syntax children.
@@ -1973,19 +2014,26 @@ impl LoweringContext {
             | SyntaxKind::TEXT_CONTENT
             | SyntaxKind::EMBED_TEXT_CONTENT => {
                 for child in node.children() {
-                    self.lower_element_content(child, content);
+                    self.lower_element_content(child, content, gaps);
                 }
             }
-            SyntaxKind::TEXT_RUN | SyntaxKind::RAW_TEXT_RUN => {
+            // A typed text body (`<Note:markdown>`) is text too; only `@{}` interpolates in it.
+            SyntaxKind::TEXT_RUN | SyntaxKind::EMBED_TEXT_RUN | SyntaxKind::RAW_TEXT_RUN => {
                 // Text in a body is a string literal like any other, so it is allocated the same
                 // way — one place records a literal's span, and a literal cannot arrive without
                 // one. Nothing reads this span yet: an offset in element content resolves to no
                 // expression today (`specs/future.md`, unchecked element content). The type is
                 // lowering-local and inert here, since a text run is never an operand.
-                let text = node.text();
+                let text = Self::text_run_value(node);
                 if !text.trim().is_empty() {
+                    gaps.note_piece(&node, content.len());
+                    // Raw text is kept exactly as written, like a braced string, so only a plain
+                    // or typed run is recorded as layout-bearing text.
+                    if node.kind() != SyntaxKind::RAW_TEXT_RUN {
+                        gaps.text_runs.push(content.len());
+                    }
                     content.push(self.literal_expr(
-                        Literal::String(SmolStr::new(text)),
+                        Literal::String(SmolStr::new(&text)),
                         TypeTag::String,
                         node.span(),
                     ));
@@ -1993,6 +2041,29 @@ impl LoweringContext {
             }
             _ => {}
         }
+    }
+
+    /// The text a run stands for: its source with each `\{`, `\}` and `\@` escape replaced by
+    /// the character it escapes. Entities are kept as written.
+    fn text_run_value(node: SyntaxNode) -> String {
+        let source = node.text();
+        let start = usize::from(node.span().start());
+        let mut text = String::with_capacity(source.len());
+        let mut copied = 0;
+        for child in node.children() {
+            let escaped = match child.kind() {
+                SyntaxKind::ESCAPED_LBRACE => '{',
+                SyntaxKind::ESCAPED_RBRACE => '}',
+                SyntaxKind::ESCAPED_AT => '@',
+                _ => continue,
+            };
+            let span = child.span();
+            text.push_str(&source[copied..usize::from(span.start()) - start]);
+            text.push(escaped);
+            copied = usize::from(span.end()) - start;
+        }
+        text.push_str(&source[copied..]);
+        text
     }
 
     fn lower_property_value(
@@ -2232,9 +2303,18 @@ impl LoweringContext {
 
         // Parse body content expressions.
         let mut content = Vec::new();
+        let mut whitespace_runs = Vec::new();
+        let mut text_runs = Vec::new();
         if let Some(content_node) = node.child_by_field("content") {
-            self.lower_element_content(content_node, &mut content);
+            let mut gaps = ContentGaps::new(&content_node);
+            self.lower_element_content(content_node, &mut content, &mut gaps);
+            whitespace_runs = gaps.runs;
+            text_runs = gaps.text_runs;
         }
+
+        let text_type = node
+            .child_by_field("text_type")
+            .map(|n| Name::new(n.text()));
 
         // Extract closing tag name for validation
         let close_name = node
@@ -2246,6 +2326,9 @@ impl LoweringContext {
             properties,
             property_entries,
             content,
+            whitespace_runs,
+            text_runs,
+            text_type,
             close_name,
             span,
         }
@@ -4427,7 +4510,9 @@ type Mode = light | dark"#;
     }
 
     #[test]
-    fn test_string_addition_lowers_to_concat() {
+    fn test_string_addition_lowers_to_add() {
+        // Whether a `+` concatenates is the type checker's decision, not lowering's: every `+` is
+        // `Add` here, string operands or not.
         let source = r#"let <concat a:string b:string /> = { a + b }"#;
         let parse_result = parse_str(source, "test.nx");
         assert!(
@@ -4445,19 +4530,19 @@ type Mode = light | dark"#;
             _ => panic!("expected function item"),
         };
 
-        let assert_concat = |expr_id: ExprId| match module.expr(expr_id) {
-            Expr::BinaryOp { op, .. } => assert_eq!(*op, BinOp::Concat),
+        let assert_add = |expr_id: ExprId| match module.expr(expr_id) {
+            Expr::BinaryOp { op, .. } => assert_eq!(*op, BinOp::Add),
             Expr::Block {
                 expr: Some(final_expr),
                 ..
             } => match module.expr(*final_expr) {
-                Expr::BinaryOp { op, .. } => assert_eq!(*op, BinOp::Concat),
+                Expr::BinaryOp { op, .. } => assert_eq!(*op, BinOp::Add),
                 other => panic!("expected binary op in block, found {:?}", other),
             },
             other => panic!("expected binary op, found {:?}", other),
         };
 
-        assert_concat(func.body);
+        assert_add(func.body);
     }
 
     #[test]

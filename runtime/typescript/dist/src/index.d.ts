@@ -1,5 +1,5 @@
 /**
- * The NX IR runtime: prepares schema 3 images, links them by name, and evaluates them.
+ * The NX IR runtime: prepares schema 4 images, links them by name, and evaluates them.
  *
  * An image carries one module as flat tables of 32-bit cells over one string blob, and the runtime
  * reads it in place. `prepareNxIrModule` validates every section, offset and index of the image and
@@ -8,7 +8,7 @@
  * evaluation API then takes the linked program. A prepared module is never copied by linking, so
  * one prepared catalog serves any number of programs.
  */
-export declare const NX_IR_SCHEMA_VERSION = 3;
+export declare const NX_IR_SCHEMA_VERSION = 4;
 export declare const NX_IR_RUNTIME_ABI = "nx-ir-runtime-v2";
 export declare const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1 = "update-records-v1";
 export declare const NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1 = "property-unions-v1";
@@ -63,7 +63,7 @@ export declare class NxIrImage {
     /** The byte span of node `index` in the source, when the debug section records one. */
     nodeSpan(index: number): readonly [number, number] | undefined;
 }
-/** The kind numbers of schema 3, as `docs/nx-ir-format.md` assigns them. */
+/** The kind numbers of schema 4, as `docs/nx-ir-format.md` assigns them. */
 export declare const nodeKinds: {
     readonly null: 0;
     readonly bool: 1;
@@ -85,6 +85,7 @@ export declare const nodeKinds: {
     readonly element: 17;
     readonly component: 18;
     readonly actionHandler: 19;
+    readonly text: 20;
 };
 export declare const typeKinds: {
     readonly primitive: 0;
@@ -448,3 +449,12 @@ export declare function diffRecords<T extends NxRecordObject>(before: T, after: 
  * update record, since the order is then unknowable from the value.
  */
 export declare function changedFields(update: NxRecordObject, program: NxPreparedProgram): string[];
+/**
+ * The canonical text form of a `float32`, which the runtime carries as the `number` it widens to.
+ *
+ * `String(value)` prints that widening's digits, `0.10000000149011612` for the `float32` nearest
+ * `0.1`. This prints the shortest digits that round-trip to the same `float32`, `0.1`, in the same
+ * ECMAScript layout every other number prints in. A `float32` needs at most nine significant
+ * digits, so the search ends there.
+ */
+export declare function float32Text(value: number): string;

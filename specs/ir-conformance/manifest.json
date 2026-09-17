@@ -3,6 +3,7 @@
     "binaryOperators": {
       "add": [
         "components",
+        "conversions",
         "expressions",
         "handlers",
         "two-module"
@@ -12,13 +13,28 @@
       ],
       "concat": [
         "components",
+        "conversions",
         "expressions"
       ],
       "div": [
+        "conversions",
         "expressions"
       ],
       "eq": [
+        "conversions",
         "expressions"
+      ],
+      "fadd32": [
+        "conversions"
+      ],
+      "fdiv32": [
+        "conversions"
+      ],
+      "fmul32": [
+        "conversions"
+      ],
+      "fsub32": [
+        "conversions"
       ],
       "ge": [
         "expressions"
@@ -27,6 +43,7 @@
         "expressions"
       ],
       "idiv": [
+        "conversions",
         "expressions"
       ],
       "imod": [
@@ -36,6 +53,7 @@
         "expressions"
       ],
       "lt": [
+        "conversions",
         "expressions"
       ],
       "mod": [
@@ -59,10 +77,12 @@
         "expressions"
       ],
       "float": [
+        "conversions",
         "expressions"
       ],
       "int": [
         "components",
+        "conversions",
         "expressions",
         "handlers",
         "records",
@@ -81,6 +101,7 @@
       ],
       "function": [
         "components",
+        "conversions",
         "expressions",
         "handlers",
         "records",
@@ -89,6 +110,7 @@
         "two-module"
       ],
       "record": [
+        "conversions",
         "handlers",
         "records",
         "two-module"
@@ -103,6 +125,7 @@
       ],
       "value": [
         "components",
+        "conversions",
         "expressions",
         "handlers",
         "snippet"
@@ -129,21 +152,25 @@
       ],
       "array": [
         "components",
+        "conversions",
         "expressions",
         "handlers"
       ],
       "binary": [
         "components",
+        "conversions",
         "expressions",
         "handlers",
         "two-module"
       ],
       "bool": [
+        "conversions",
         "expressions",
         "snippet",
         "trailing-element"
       ],
       "call": [
+        "conversions",
         "expressions",
         "records",
         "two-module"
@@ -165,15 +192,18 @@
         "handlers"
       ],
       "if": [
+        "conversions",
         "expressions"
       ],
       "ifIs": [
+        "conversions",
         "expressions"
       ],
       "intrinsic": [
         "records"
       ],
       "member": [
+        "conversions",
         "handlers",
         "records",
         "two-module"
@@ -184,6 +214,7 @@
       ],
       "number": [
         "components",
+        "conversions",
         "expressions",
         "handlers",
         "records",
@@ -192,12 +223,14 @@
         "two-module"
       ],
       "record": [
+        "conversions",
         "handlers",
         "records",
         "two-module"
       ],
       "reference": [
         "components",
+        "conversions",
         "expressions",
         "handlers",
         "records",
@@ -206,6 +239,7 @@
       ],
       "slot": [
         "components",
+        "conversions",
         "expressions",
         "handlers",
         "records",
@@ -213,12 +247,16 @@
       ],
       "string": [
         "components",
+        "conversions",
         "expressions",
         "handlers",
         "records",
         "snippet",
         "trailing-element",
         "two-module"
+      ],
+      "text": [
+        "conversions"
       ],
       "unary": [
         "expressions"
@@ -232,6 +270,7 @@
     "types": {
       "array": [
         "components",
+        "conversions",
         "handlers",
         "records",
         "snippet",
@@ -246,10 +285,12 @@
         "two-module"
       ],
       "nullable": [
+        "conversions",
         "records"
       ],
       "primitive": [
         "components",
+        "conversions",
         "expressions",
         "handlers",
         "records",
@@ -269,6 +310,7 @@
   },
   "programs": [
     "components",
+    "conversions",
     "expressions",
     "handlers",
     "records",

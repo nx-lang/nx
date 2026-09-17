@@ -150,17 +150,6 @@ direction and is deferred to its own change. Note that `JSON.stringify` throws o
 `bigint`, so the IR's existing string encoding for large integer literals stays
 mandatory.
 
-### Type compatibility is widening-only at the type level but not enforced directionally
-
-`Type::is_compatible_with` treats any integer width as compatible with any other
-(same for floats). This means `int64 → int32` is implicitly allowed in argument
-passing and assignment. If width should be enforced, this needs to be split into
-directional "assignable" (widening only: int32 → int → int64 ok, the reverse an
-error) vs "comparable" (either direction) checks.
-
-`Primitive::numeric_promotion` already encodes the rank order int32 < int < int64,
-so the widening direction is defined even though compatibility does not enforce it.
-
 ### FFI boundary validation
 
 Even without full runtime 32-bit support, FFI calls should validate that values
@@ -546,6 +535,44 @@ If this is revisited in the future:
 - Note that this closes the second half of "Findings not fixed" in the `resolve-editor-positions`
   review; the first half, literal spans, was fixed in that change.
 
+## String Literal Escapes Are Never Decoded
+
+The grammar accepts a backslash escape inside a string literal (`seq('\\', /./)` in
+`crates/nx-syntax/grammar.js`), but lowering never decodes it: `unquote_string_literal`
+(`crates/nx-hir/src/lower.rs`) only strips the quotes. So `"\n"` evaluates to a backslash followed by
+`n`, `"\""` keeps its backslash, and no documentation says which escapes exist.
+
+The gap shows up with text bodies. A joined `string` body reads a line break in its text as one space
+(see `implicit-primitive-conversions`), and a braced string is the way to put an exact line break in.
+Today that only works with a string literal that actually spans two lines, not with `{"\n"}`.
+
+If this is revisited in the future:
+- Decide the escape set (at least `\n`, `\t`, `\r`, `\\` and `\"`, and possibly `\u{...}`) and
+  whether an unknown escape is an error. Document it in the expressions reference.
+- Decode in one place in lowering, so every backend sees the decoded value. Check that the TextMate
+  grammar and the formatter agree with the escape set.
+- Existing sources with a literal backslash in a string would change meaning, so search the examples
+  and the conformance corpus first.
+
+## Typed Text Bodies: What A Text Type Means
+
+`implicit-primitive-conversions` made a typed body (`<Note:markdown>`) bind its text: lowering has
+an arm for `EMBED_TEXT_RUN`, the escapes `\@`, `\{` and `\}` are decoded, the body keeps its line
+breaks and loses the indentation its lines share, and `Element` records the `text_type` the tag
+names. What a text type *means* is still open.
+
+Today the text type is recorded and nothing reads it: every typed body binds as one string, exactly
+as a plain body does, and a host that wants Markdown rendered has to know from the property which
+processor to run.
+
+If this is revisited in the future:
+- Decide what a text type gives a host: the joined string as now, the text and its interpolated
+  values separately (so a processor can escape a value it did not write), or a processor named in
+  the type system rather than the tag.
+- Decide whether an unknown text type is an error, and where the known ones are declared.
+- Entities in a typed body are still kept as written, and decoding them for a Markdown processor
+  would turn `&lt;script&gt;` into raw HTML. See "Entities in text content are kept as written".
+
 ## Editor Hover: The Positions Still Unanswered
 
 `resolve-editor-positions` made hover answer at declarations, references, expressions, literals,
@@ -796,3 +823,83 @@ compiler hang — none is known; the compiler is a type checker and code generat
 non-terminating paths — would freeze the tab. Blocked on nothing but a reason: the worker's
 message protocol, the deadline and the crash handling are the playground's `src/worker`, and
 moving them to the fiddle is a port that adds a thread hop to every compile and every hover.
+
+## Logical operands: the IR runtime coerces, the interpreter demands a boolean
+
+**Observed.** The two runtimes disagree about what a non-boolean operand of `&&` or `||` means. The
+TypeScript IR runtime passes each operand through a truthiness helper, `truthy` in
+`runtime/typescript/src/index.ts`, which is `Boolean(value)`, so a string or a number is accepted
+and coerced. The Rust interpreter rejects it, raising a type error naming `logical and` at
+`crates/nx-interpreter/src/interpreter.rs`.
+
+**Why it might matter.** This is the same family as the short-circuit divergence that was fixed by
+making the IR runtime non-strict in the right operand of `and` and `or`. That one was observable and
+wrong. This one may not be observable at all, because the type checker probably rejects a
+non-boolean operand before either runtime sees it, in which case the coercion is dead code rather
+than a semantic difference. It was not verified either way.
+
+**What would settle it.** Try to compile a program whose `&&` operand is not a boolean, for example
+`let root() = { "a" && true }`. If static analysis rejects it, the coercion is unreachable and the
+helper can be replaced with a check that fails loudly, which is the safer thing for a runtime that
+reads images written by strangers. If static analysis accepts it, the two runtimes genuinely
+disagree and one of them is wrong, and a conformance corpus case should pin whichever behavior the
+language intends.
+
+**Related.** The conformance corpus gained short-circuit cases in
+`specs/ir-conformance/expressions/main.nx`. A case for this would belong beside them.
+
+## `int32` overflow: the interpreter wraps, JavaScript does not
+
+**Observed.** An `int32` result outside the `int32` range differs between backends. The interpreter
+wraps it (`wrapping_add`, `wrapping_sub` and `wrapping_mul` in
+`crates/nx-interpreter/src/eval/arithmetic.rs`), so `2147483647 + 1` at `int32` is `-2147483648`.
+The TypeScript IR runtime and generated JavaScript carry an `int32` as a `number` and compute
+`2147483648`. The TS runtime refuses that value once it reaches an `int32` parameter or field
+(`normalizePrimitiveValue`), but generated JavaScript carries it on silently. Negating `int32::MIN`
+and dividing it by `-1` hit the same edge, and the interpreter's `a / b` on `i32` panics on the
+second.
+
+**Why it might matter.** It is the one remaining way a narrow numeric type can compute a different
+value on different backends. `float32` arithmetic was made to agree by giving the IR `float32`
+operators (`fadd32` and siblings, `implicit-primitive-conversions` RF14). Integer arithmetic was
+not changed, because the `primitive-type-names` spec already says arithmetic should be checked
+rather than wrapping, and leaves that enforcement to a later change that also covers `int`'s
+±(2^53−1) range and user-declared ranges.
+
+**What would settle it.** The range-enforcement change: make integer overflow an error in the
+interpreter (`checked_add` and siblings, including `MIN / -1`), and have the JS targets check the
+result of each `int32` operation. A check after the fact is enough for checked arithmetic, since a
+product that leaves the `int32` range stays outside it even when a `float64` rounds it. That may
+mean `int32` IR operators like the `float32` ones, or a range check the runtime derives from the
+operator's checked type. Add conformance corpus cases for overflow on each operator.
+
+**Related.** `int` has the same shape at a larger scale: the interpreter wraps an `i64`, and
+JavaScript loses precision beyond 2^53.
+
+## Entities in text content are kept as written
+
+**Observed.** The grammar lexes `&amp;`, `&#10;` and `&#x0A;` in a text run as `entity` tokens, and
+the language tour says `<Tag:raw>` exists "to prevent interpretation of braces or entities". No
+backend decodes them, though. Lowering copies a run's source text (`text_run_value` in
+`crates/nx-hir/src/lower.rs`), so `<Label>a &amp; b</Label>` binds `text` to `a &amp; b`. The
+escapes `\@`, `\{` and `\}` are decoded there (`implicit-primitive-conversions` RF21). Entities
+were left alone because decoding them is a design choice, not a bug fix.
+
+**Why it might matter.** `implicit-primitive-conversions` made a text body a user-visible string
+at a `string` content property, so the undecoded form now reaches hosts and output. Decoding raises
+two questions:
+- **Which names.** The scanner accepts any `&name;`. Candidates are XML's five (`amp`, `lt`, `gt`,
+  `quot`, `apos`) plus numeric references, or HTML's full table. An unknown name could be kept, or
+  it could be a diagnostic.
+- **Where.** A typed body such as `<Note:markdown>` is handed to a host that parses it again.
+  Decoding `&lt;script&gt;` before a Markdown renderer sees it turns escaped text into raw HTML. A
+  plain body at a `string` site has no second parser, so decoding it is safe.
+
+**What would settle it.** Choose the name set and whether typed bodies decode. A likely answer is to
+decode XML's five and numeric references in plain text, reject an unknown name, and pass typed
+text through unchanged for its host to interpret. Put the decoding in `text_run_value` and add
+checker diagnostics and a conformance corpus case. Then make the tour's `raw` sentence true, or
+reword it.
+
+**Related.** The same function decodes the escapes. `\{` in a plain body does not parse today,
+although the `text_run` grammar lists `escaped_lbrace`.

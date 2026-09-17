@@ -271,9 +271,9 @@ fn test_string_concat_direct_hir() {
 
     let a_expr = module.alloc_expr(Expr::Ident(Name::new("a")));
     let b_expr = module.alloc_expr(Expr::Ident(Name::new("b")));
-    let concat_expr = module.alloc_expr(Expr::BinaryOp {
+    // The node type analysis rewrites a `+` with a string operand into.
+    let concat_expr = module.alloc_expr(Expr::Concat {
         lhs: a_expr,
-        op: BinOp::Concat,
         rhs: b_expr,
         span: span(0, 5),
     });

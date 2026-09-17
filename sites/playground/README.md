@@ -163,21 +163,22 @@ DrawnUI's own behavior works as before: scroll regions scroll, carousels swipe, 
 ripples play, switches toggle, sliders drag, whether or not a handler is bound.
 
 All twenty DrawnUI demo pages at the vendored commit are ported — none is omitted — and each says
-where it stands: **complete** (no note), **static** (drawn correctly, nothing responds), or
-**reduced** (scaled down, because NX cannot express the mechanism the original demonstrates). SVG,
-Text and Shapes are complete; the rest gained interaction or code-driven mechanisms upstream and
-say so. Every non-complete example names its gap from a fixed vocabulary, and the vocabulary
-separates what NX lacks from what a port has not used: `animation`, `list-virtualization` and
-`code-behind` (an engine object built or driven from code: a shader effect, a CanvasKit filter, a
-sprite set, a cell class with drag logic) are capabilities NX does not have, while
-`event-handlers` and `component-state` are capabilities NX has and the port does not use yet. The
-gallery can be read as a coverage report on NX rather than a list of disclaimers, and a landed
-capability is never presented as missing.
+where it stands: **complete** (no note), **static** (drawn correctly, with some of the original's
+motion or interaction absent), or **reduced** (scaled down, because NX cannot express the mechanism
+the original demonstrates). SVG, Text, Shapes and Common Controls are complete; the rest gained
+interaction or code-driven mechanisms upstream and say so. Every non-complete example names its gap
+from a fixed vocabulary, and the vocabulary separates what NX lacks from what a port has not used:
+`animation`, `list-virtualization` and `code-behind` (an engine object built, driven or read from
+code: a shader effect, a CanvasKit filter, a sprite set, a cell class with drag logic, a method
+called on a control) are capabilities NX does not have, while `event-handlers` and `component-state`
+are capabilities NX has and the port does not use yet. The gallery can be read as a coverage report
+on NX rather than a list of disclaimers, and a landed capability is never presented as missing.
 
-Most of the remaining readouts — "SelectedIndex=2", a slider's value, a tap count, a node count —
-wait on one language gap rather than on the renderer: NX has string concatenation but no
-conversion from a number to a string, so a readout that formats a number cannot be written yet.
-The examples that need one say so at the point the readout would appear.
+The readouts are wired: a tap count, a selected index, a slider's value, a speed, `IsOpen`. Each is
+a number or a boolean held in a page component's state, and `+` converts it to text where it joins
+the words around it (`"Tapped " + taps + "×"`). What a wired example still leaves out is what the
+original does by calling into a control — `Seek(30)`, `SelectAll()`, the accessibility manager's
+node count — which is `code-behind`, and the example says so at the point the call would appear.
 
 See `docs/FINDINGS.md` for the toolchain gaps this site ran into, and `docs/CATALOG.md` for where the
 catalog diverges from the DrawnUI object model.

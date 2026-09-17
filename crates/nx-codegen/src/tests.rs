@@ -444,6 +444,75 @@ fn javascript_output_executes_as_esm() {
 }
 
 #[test]
+fn string_plus_emits_a_text_conversion_for_each_primitive_operand() {
+    let artifact = artifact_from_source(
+        "let label(count:int) = { \"Total: \" + count }\n\
+         let width(w:float32) = { w + \" px\" }\n\
+         let root() = { label(3) }",
+    );
+    let module = generated_file(&artifact, CodegenTarget::JavaScript, "m0_main.js");
+    let runtime = generated_file(&artifact, CodegenTarget::JavaScript, "nx-runtime.js");
+
+    assert!(module.contains("(\"Total: \" + String(count))"), "{module}");
+    // A float32 is carried as a number, so `String` would print its float64 expansion.
+    assert!(module.contains("(nxFloat32Text(w) + \" px\")"), "{module}");
+    assert!(module.contains("nxFloat32Text"), "{module}");
+    assert!(
+        runtime.contains("export function nxFloat32Text"),
+        "{runtime}"
+    );
+}
+
+#[test]
+fn generated_javascript_prints_primitives_as_the_interpreter_does() {
+    let cases = [
+        "let root() = { \"Total: \" + 3 }",
+        "let root() = { 1 + 2 + \" items\" }",
+        "let root() = { \"n=\" + 1 + 2 }",
+        "let root() = { \"on: \" + true }",
+        "let root() = { \"\" + 1.0 + \" \" + 0.1 + \" \" + 1.0e21 + \" \" + 1.0e-7 + \" \" + -0.0 }",
+        "let tenth: float32 = 0.1\nlet root() = { \"w=\" + tenth }",
+        // A computed float32 is not rounded by JavaScript arithmetic, so the helper must round it.
+        "let scaled(w:float32) = { w * 3 + \" px\" }\nlet root() = { scaled(2.3) }",
+        "type Item = { title:string }\n\
+         let item = <Item title=\"Rust\" />\n\
+         let root() = { \"Reorder \" + item.title }",
+        "let root() = { 1 + 1.5 }",
+        "let root() = { 2 == 2.0 }",
+        // A join is a float64, so dividing it by an int divides as floats. Generated JavaScript
+        // has no match expressions yet; the conformance corpus covers a match arm.
+        "let pick(b:boolean, n:int, x:float64) = { if b { n } else { x } }\n\
+         let root() = { pick(true, 3, 1.5) / 2 }",
+        // Each float32 operation rounds to a float32, so a widened or compared result agrees.
+        "let scaled(w:float32): float64 = { w * 3 }\nlet root() = { scaled(2.3) }",
+        "let scaled(w:float32): float64 = { w * 3 }\n\
+         let root() = { scaled(2.3) == 6.899999618530273 }",
+        "let steps(v:float32, d:float32): float64 = { (v + 0.1 - 0.2) / d }\n\
+         let root() = { steps(2.3, 3) }",
+        "let half(v:float32): float64 = { v / 2 }\nlet root() = { half(0.1) }",
+        // Integer division truncates toward zero.
+        "let a(n:int) = { n / 2 }\nlet root() = { a(7) + a(-7) * 10 }",
+        "let q(n:int32, m:int) = { n / m }\nlet root() = { q(7, 2) }",
+        // A remainder and a float32 quotient go through the same helpers.
+        "let r(n:int, m:int) = { n % m }\nlet root() = { r(-7, 2) }",
+        "let fr(v:float64, w:float64) = { v % w }\nlet root() = { fr(-7.5, 2.0) }",
+        "let fq(a:float32, b:float32): float64 = { a / b }\nlet root() = { fq(0.1, 3) }",
+        // A widened branch computes at its own type before the join widens its result.
+        "let half(b:boolean, n:int, x:float64) = { if b { n / 2 } else { x } }\n\
+         let root() = { half(true, 7, 0.5) + 0.25 }",
+        "let pickf(b:boolean, v:float32, x:float64) = { if b { v * 3 } else { x } }\n\
+         let scale(v:float32) = { pickf(true, v, 0.5) }\n\
+         let root() = { scale(2.3) }",
+    ];
+    for source in cases {
+        assert_json_values_eq(
+            &execute_generated_javascript_root(source),
+            &interpreter_json_root(source),
+        );
+    }
+}
+
+#[test]
 fn emits_cross_module_imports_from_resolved_references() {
     let artifact = artifact_from_workspace(
         &[
@@ -1545,6 +1614,31 @@ let root() = { 1 }
 }
 
 #[test]
+fn generated_javascript_gives_a_json_number_the_width_of_a_float32_prop() {
+    let artifact = artifact_from_source(
+        r#"
+component <Gauge ratio:float32 /> = { ratio * 3 == 0.3 }
+let root() = { 1 }
+"#,
+    );
+    let output = execute_generated_javascript_artifact_script(
+        &artifact,
+        r#"console.log(JSON.stringify({
+  rounded: m.GaugeSchema.evaluateJson({ ratio: 0.1 }),
+  exact: m.GaugeSchema.tryEvaluateJson({ ratio: 16777216 }).ok,
+  inexact: m.GaugeSchema.tryEvaluateJson({ ratio: 16777217 }).ok
+}));"#,
+    );
+
+    // `0.1` is rounded on the way in, and the product on the way out, as the interpreter does.
+    assert_json_values_eq(
+        &output,
+        r#"{ "rounded": true, "exact": true, "inexact": false }"#,
+    );
+    assert_generated_typescript_artifact_type_checks(&artifact);
+}
+
+#[test]
 fn generated_cross_module_component_imports_include_element_and_schema_names() {
     let artifact = artifact_from_workspace(
         &[
@@ -2059,6 +2153,37 @@ let root() = <Box first={User.Property.name} keys={changed(<User.Update age={nul
 /// against both pins each helper to the interpreter's answer for the same values — a record
 /// missing an optional field, a merged `null`, an order-less `changed` — and fails the moment the
 /// copies disagree.
+/// Dividing by zero fails on every backend. Generated JavaScript would otherwise return `Infinity`
+/// or `NaN`, where the interpreter and the IR runtime raise a run-time error.
+#[test]
+fn generated_javascript_fails_on_a_division_by_zero_like_the_interpreter() {
+    let artifact = artifact_from_source(
+        "let intDiv(n:int, m:int) = { n / m }\n\
+         let intMod(n:int, m:int) = { n % m }\n\
+         let div(x:float64, y:float64) = { x / y }\n\
+         let f32Div(a:float32, b:float32) = { a / b }\n\
+         let root() = { 1 }",
+    );
+    let output = execute_generated_javascript_artifact_script(
+        &artifact,
+        r#"
+const out = [];
+for (const call of [() => m.intDiv(1, 0), () => m.intMod(1, 0), () => m.div(1.0, 0.0), () => m.f32Div(1.0, 0.0)]) {
+  try {
+    out.push(call());
+  } catch (error) {
+    out.push(error.message ?? String(error));
+  }
+}
+console.log(JSON.stringify(out));
+"#,
+    );
+    assert_json_values_eq(
+        &output,
+        r#"["Division by zero", "Division by zero", "Division by zero", "Division by zero"]"#,
+    );
+}
+
 #[test]
 fn emitted_runtime_intrinsic_helpers_agree_across_targets() {
     let script = r#"

@@ -1,4 +1,4 @@
-//! The NX IR image: schema 3 as a little-endian binary a runtime reads in place.
+//! The NX IR image: schema 4 as a little-endian binary a runtime reads in place.
 //!
 //! <para>An image is a 16-byte header, a directory of sections, and the sections themselves, each
 //! starting on a four-byte boundary. The string table is an offset array over one UTF-8 blob; every
@@ -188,6 +188,7 @@ impl Table {
                 node::REFERENCE => &[Op::Ref],
                 node::BINARY => &[Op::Code(kinds::binary::NAMES), Op::Node, Op::Node],
                 node::UNARY => &[Op::Code(kinds::unary::NAMES), Op::Node],
+                node::TEXT => &[Op::Node, Op::Str],
                 node::CALL => &[Op::Node, Op::List(NODES)],
                 node::INTRINSIC => &[
                     Op::Code(kinds::intrinsic::NAMES),
@@ -1382,7 +1383,7 @@ mod tests {
         let bytes = write_nx_ir_image(&artifact).expect("image");
 
         assert_eq!(&bytes[0..4], b"NXIR");
-        assert_eq!(cell_at(&bytes, 4), 3, "schema version");
+        assert_eq!(cell_at(&bytes, 4), 4, "schema version");
         assert_eq!(cell_at(&bytes, 8) as usize, bytes.len(), "total length");
         assert_eq!(cell_at(&bytes, 12), 6, "six sections without debug");
 
@@ -1528,12 +1529,12 @@ mod tests {
     #[test]
     fn another_schema_version_is_refused_naming_both() {
         let mut bytes = write_nx_ir_image(&snippet_input()).expect("image");
-        bytes[4..8].copy_from_slice(&2u32.to_le_bytes());
+        bytes[4..8].copy_from_slice(&3u32.to_le_bytes());
         assert_eq!(
             NxIrImage::open(&bytes).unwrap_err(),
             NxIrImageError::SchemaVersion {
-                found: 2,
-                supported: 3
+                found: 3,
+                supported: 4
             }
         );
     }

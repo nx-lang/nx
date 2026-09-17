@@ -50,7 +50,7 @@ function captureEvaluationError(callback: () => void): NxEvaluationError {
   return thrown as NxEvaluationError;
 }
 
-/** The parts of a schema 3 artifact these tests read. */
+/** The parts of a schema 4 artifact these tests read. */
 type IrRuntimeModule = typeof import("@nx-lang/ir-runtime");
 
 /**

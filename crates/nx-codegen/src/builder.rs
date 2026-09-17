@@ -1201,6 +1201,63 @@ fn build_expression(
                 expr: Box::new(expr),
             }
         }
+        ast::Expr::Concat { lhs, rhs, .. } => {
+            let lhs = build_expression(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                lowered_module,
+                type_env,
+                *lhs,
+                scope,
+                diagnostics,
+            )?;
+            let rhs = build_expression(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                lowered_module,
+                type_env,
+                *rhs,
+                scope,
+                diagnostics,
+            )?;
+            CodegenExpressionKind::Concat {
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            }
+        }
+        // A generated runtime carries every number the same way, so a widening emits nothing. The
+        // branch keeps its own type, which is what picks its operators: `n / 2` in a branch
+        // widened to `float64` is still integer division.
+        ast::Expr::Widen { expr, .. } => {
+            return build_expression(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                lowered_module,
+                type_env,
+                *expr,
+                scope,
+                diagnostics,
+            );
+        }
+        ast::Expr::ToText { expr, ty, .. } => {
+            let expr = build_expression(
+                artifact,
+                resolved_module,
+                prepared_cache,
+                lowered_module,
+                type_env,
+                *expr,
+                scope,
+                diagnostics,
+            )?;
+            CodegenExpressionKind::ToText {
+                expr: Box::new(expr),
+                ty: *ty,
+            }
+        }
         ast::Expr::Call { func, args, .. } => {
             // An intrinsic has no callee declaration to build: the checker resolved the name
             // before any binding, and a runtime supplies the operation.

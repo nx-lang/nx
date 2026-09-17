@@ -145,7 +145,7 @@ pub use check::{
 pub use env::{TypeBinding, TypeEnvironment};
 pub use infer::{ContextualResolution, InferenceContext, TypeInference};
 pub use semantics::{
-    common_supertype, float_literal_target, is_object_type, resolve_type_ref_with,
+    common_supertype, is_object_type, numeric_literal_target, resolve_type_ref_with,
     resolve_type_ref_with_seen, type_satisfies_expected, type_satisfies_expected_with_coercion,
 };
 pub use ty::{

@@ -28,12 +28,12 @@ fn assert_reports(source: &str, needle: &str) {
 
 #[test]
 fn a_type_error_in_an_unresolved_elements_content_is_reported() {
-    let in_element = errors("let root() = <div>{1 + \"a\"}</div>\n");
-    let at_top = errors("let root() = { 1 + \"a\" }\n");
+    let in_element = errors("let root() = <div>{1 + true}</div>\n");
+    let at_top = errors("let root() = { 1 + true }\n");
 
     assert!(
         !at_top.is_empty(),
-        "the addition of int and string is expected to be an error outside an element"
+        "the addition of int and boolean is expected to be an error outside an element"
     );
     assert_eq!(
         in_element, at_top,
@@ -44,7 +44,7 @@ fn a_type_error_in_an_unresolved_elements_content_is_reported() {
 
 #[test]
 fn a_type_error_in_an_unresolved_elements_property_value_is_reported() {
-    assert_reports("let root() = <div class={1 + \"a\"} />\n", "string");
+    assert_reports("let root() = <div class={1 + true} />\n", "boolean");
 }
 
 #[test]

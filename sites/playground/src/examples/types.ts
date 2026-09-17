@@ -22,7 +22,9 @@ export type Coverage = "complete" | "static" | "reduced";
  * shader effect in `VisualEffects`, a CanvasKit filter in `PaintColorFilter`, a `SkiaSpriteSet`
  * subclass, a cell class carrying drag logic. It is what DrawnUI's own docs call code-behind, and
  * none of the other tags names it: the missing piece is neither a handler nor state but an object
- * NX has no way to construct.
+ * NX has no way to construct. It also names the other direction — a handler calling into a control
+ * (`Seek(30)`, `SelectAll()`) or reading from one (a Lottie's frame count, the accessibility
+ * manager's snapshot) — since NX has no way to reach the object either.
  */
 export type Capability =
   | "event-handlers"
@@ -75,7 +77,7 @@ export function coverageNote(example: Example): string | null {
     case "complete":
       return null;
     case "static":
-      return `Static: drawn as in the original, but nothing here responds. ${describeGaps(example.capabilities)}`;
+      return `Static: drawn as in the original, but some of its motion or interaction is absent. ${describeGaps(example.capabilities)}`;
     case "reduced":
       return `Reduced: the original demonstrates ${example.demonstrates ?? "more than this"}. ${describeGaps(example.capabilities)}`;
   }

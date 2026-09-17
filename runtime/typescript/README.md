@@ -1,7 +1,7 @@
 # @nx-lang/ir-runtime
 
 Evaluates persisted NX IR in JavaScript, in a browser or under Node, with no compiler and no NX
-checkout. The IR is the schema 3 image `@nx-lang/sdk-wasm`, `@nx-lang/sdk-node`, the .NET SDK
+checkout. The IR is the schema 4 image `@nx-lang/sdk-wasm`, `@nx-lang/sdk-node`, the .NET SDK
 and the `nxlang` CLI emit for one module of a compiled program: a binary a runtime reads in place.
 This package links images by name and turns them into values.
 
@@ -151,6 +151,7 @@ runtime never reads a source file.
 | `dispatchComponentActions` | Run a batch of actions and handler invocations against an instance. |
 | `normalizeComponentState`, `applyComponentStatePatch` | Bring component state into its declared shape and apply a patch. |
 | `applyUpdate`, `mergeUpdates`, `diffRecords`, `changedFields` | Record update arithmetic over host-held values. |
+| `float32Text` | The canonical text of a `float32` carried as a `number`: the shortest digits that round-trip as a `float32`, which is what a `text` node naming `float32` prints. |
 | `NX_IR_SCHEMA_VERSION`, `NX_IR_RUNTIME_ABI` | The schema and ABI this runtime accepts. |
 | `NX_IR_REQUIRED_FEATURE_*` | The required features this runtime knows. |
 | `nodeKinds`, `typeKinds`, `constantKinds`, `declarationKinds` | The kind numbers of the schema. |

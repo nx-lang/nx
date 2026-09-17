@@ -3,11 +3,12 @@
 // The transform tiles are the substance of this page and they port exactly: transforms are applied
 // at render around the arranged box, so a still frame shows everything the original shows.
 //
-// Two things do not port. The tap counter is not wired yet (event handlers, component state): its
-// count is a number, which NX cannot turn into text. The animation row — FadeToAsync, ScaleToAsync,
-// TranslateToAsync, RotateToAsync and the spin toggle — needs animation, which NX lacks, and event
-// handlers this port does not use yet; the logo below is drawn at rest where the original animates
-// it.
+// The tap counter ports too: the page holds the count in its state, and the button's text joins it
+// to the words around it, the number converting to text as it does in the original's template.
+//
+// One thing does not port. The animation row — FadeToAsync, ScaleToAsync, TranslateToAsync,
+// RotateToAsync and the spin toggle — needs animation, which NX lacks; the logo below is drawn at
+// rest where the original animates it.
 
 component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = {
   <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 />
@@ -47,56 +48,59 @@ component <Tile
   </SkiaStack>
 }
 
-<SkiaScroll Orientation=Vertical>
-  <SkiaStack Spacing=16 Padding=<Thickness Left=16 Top=16 Right=16 Bottom=16 />
-    HorizontalOptions=Center MaximumWidthRequest=720>
-    <SkiaLabel Text="Transforms" FontSize=24 TextColor="#FFFFFF" HorizontalOptions=Center />
-    <SkiaLabel FontSize=13 TextColor="#D3D3D3" HorizontalOptions=Fill HorizontalTextAlignment=Center
-      Text="Applied at render around the arranged box, so layout is untouched and caches stay valid. Same names as MAUI: TranslationX/Y, Rotation, ScaleX/Y, SkewX/Y, AnchorX/Y, Opacity." />
+component <Page /> = {
+  state { taps:int = 0 }
 
-    <Card Title="One property each">
-      <SkiaWrap Spacing=4 HorizontalOptions=Center>
-        <Tile Text="none" />
-        <Tile Text="Rotation={15}" Rotation=15 />
-        <Tile Text="Scale={1.3}" ScaleX=1.3 ScaleY=1.3 />
-        <Tile Text="ScaleX={-1}" ScaleX=-1 />
-        <Tile Text="SkewX={20}" SkewX=20 />
-        <Tile Text="TranslationY={10}" TranslationY=10 />
-        <Tile Text="Opacity={0.35}" Opacity=0.35 />
-        <Tile Text="Rotation={15} AnchorX/Y={0}" Rotation=15 AnchorX=0 AnchorY=0 />
-      </SkiaWrap>
-    </Card>
+  <SkiaScroll Orientation=Vertical>
+    <SkiaStack Spacing=16 Padding=<Thickness Left=16 Top=16 Right=16 Bottom=16 />
+      HorizontalOptions=Center MaximumWidthRequest=720>
+      <SkiaLabel Text="Transforms" FontSize=24 TextColor="#FFFFFF" HorizontalOptions=Center />
+      <SkiaLabel FontSize=13 TextColor="#D3D3D3" HorizontalOptions=Fill HorizontalTextAlignment=Center
+        Text="Applied at render around the arranged box, so layout is untouched and caches stay valid. Same names as MAUI: TranslationX/Y, Rotation, ScaleX/Y, SkewX/Y, AnchorX/Y, Opacity." />
 
-    <Card Title="Gestures map through transforms — the original counts taps here">
-      <SkiaStack Spacing=8 HeightRequest=120 HorizontalOptions=Fill>
-        // The original's label reads "Tapped N×" and increments on tap; this port does not use
-        // event handlers or component state for it yet, since the count needs a number-to-string
-        // conversion NX lacks. The button is drawn transformed, and its ripple still lands under
-        // the pointer, because the ripple is DrawnUI's own.
-        <SkiaButton Text="Tapped 0×" BackgroundColor="#D63384" HorizontalOptions=Center
-          VerticalOptions=Center Rotation=-20 ScaleX=1.4 ScaleY=1.4 ApplyEffect=Ripple />
-      </SkiaStack>
-      <SkiaLabel FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Fill
-        Text="The hit rect is the drawn one (inverse RenderTransformMatrix), not the layout box; the ripple lands under the finger." />
-    </Card>
+      <Card Title="One property each">
+        <SkiaWrap Spacing=4 HorizontalOptions=Center>
+          <Tile Text="none" />
+          <Tile Text="Rotation={15}" Rotation=15 />
+          <Tile Text="Scale={1.3}" ScaleX=1.3 ScaleY=1.3 />
+          <Tile Text="ScaleX={-1}" ScaleX=-1 />
+          <Tile Text="SkewX={20}" SkewX=20 />
+          <Tile Text="TranslationY={10}" TranslationY=10 />
+          <Tile Text="Opacity={0.35}" Opacity=0.35 />
+          <Tile Text="Rotation={15} AnchorX/Y={0}" Rotation=15 AnchorX=0 AnchorY=0 />
+        </SkiaWrap>
+      </Card>
 
-    <Card Title="Animations — the original fades, scales, translates and spins this logo">
-      <SkiaStack Spacing=0 HeightRequest=140 HorizontalOptions=Fill>
-        // Each button below drives a *ToAsync animation on this logo. NX has no animation, and this
-        // port binds no handlers, so the logo rests at its starting position and the buttons are
-        // inert.
-        <SkiaSvg Source="images/drawnui.svg" WidthRequest=100 LockRatio=1
-          HorizontalOptions=Center VerticalOptions=Center />
-      </SkiaStack>
-      <SkiaWrap Spacing=6>
-        <SkiaButton Text="Fade" BackgroundColor="#0D6EFD" />
-        <SkiaButton Text="Scale" BackgroundColor="#0D6EFD" />
-        <SkiaButton Text="Translate" BackgroundColor="#0D6EFD" />
-        <SkiaButton Text="Rotate" BackgroundColor="#0D6EFD" />
-        <SkiaButton Text="Spin" BackgroundColor="#20C997" />
-      </SkiaWrap>
-      <SkiaLabel FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Fill
-        Text="Each *ToAsync cancels its previous run of the same kind; pass an AbortSignal to cancel from outside." />
-    </Card>
-  </SkiaStack>
-</SkiaScroll>
+      <Card Title="Gestures map through transforms — tap the rotated, scaled button">
+        <SkiaStack Spacing=8 HeightRequest=120 HorizontalOptions=Fill>
+          // The count is an int, and `+` converts it to text on its way into the button's string.
+          <SkiaButton Text={"Tapped " + taps + "×"} BackgroundColor="#D63384" HorizontalOptions=Center
+            VerticalOptions=Center Rotation=-20 ScaleX=1.4 ScaleY=1.4 ApplyEffect=Ripple
+            onTapped=<Update taps={taps + 1} /> />
+        </SkiaStack>
+        <SkiaLabel FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Fill
+          Text="The hit rect is the drawn one (inverse RenderTransformMatrix), not the layout box; the ripple lands under the finger." />
+      </Card>
+
+      <Card Title="Animations — the original fades, scales, translates and spins this logo">
+        <SkiaStack Spacing=0 HeightRequest=140 HorizontalOptions=Fill>
+          // Each button below drives a *ToAsync animation on this logo. NX has no animation, so the
+          // logo rests at its starting position and the buttons are inert.
+          <SkiaSvg Source="images/drawnui.svg" WidthRequest=100 LockRatio=1
+            HorizontalOptions=Center VerticalOptions=Center />
+        </SkiaStack>
+        <SkiaWrap Spacing=6>
+          <SkiaButton Text="Fade" BackgroundColor="#0D6EFD" />
+          <SkiaButton Text="Scale" BackgroundColor="#0D6EFD" />
+          <SkiaButton Text="Translate" BackgroundColor="#0D6EFD" />
+          <SkiaButton Text="Rotate" BackgroundColor="#0D6EFD" />
+          <SkiaButton Text="Spin" BackgroundColor="#20C997" />
+        </SkiaWrap>
+        <SkiaLabel FontSize=12 TextColor="#ADB5BD" HorizontalOptions=Fill
+          Text="Each *ToAsync cancels its previous run of the same kind; pass an AbortSignal to cancel from outside." />
+      </Card>
+    </SkiaStack>
+  </SkiaScroll>
+}
+
+<Page />

@@ -1874,7 +1874,8 @@ fn export_literal_default(literal: &Literal) -> ExportedLiteralDefault {
     match literal {
         Literal::String(value) => ExportedLiteralDefault::String(value.as_str().to_string()),
         Literal::Int(value) => ExportedLiteralDefault::Int(*value),
-        Literal::Float(value) => ExportedLiteralDefault::Float(*value),
+        Literal::Int32(value) => ExportedLiteralDefault::Int(i64::from(*value)),
+        Literal::Float(value) | Literal::Float32(value) => ExportedLiteralDefault::Float(*value),
         Literal::Boolean(value) => ExportedLiteralDefault::Boolean(*value),
         Literal::Null => ExportedLiteralDefault::Null,
     }

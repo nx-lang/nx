@@ -715,7 +715,7 @@ fn ffi_codegen_nx_ir_returns_a_bundle_of_images_and_metadata() {
     assert_eq!(artifact.identity, "root.nx");
     assert!(!image.has_debug());
     assert_eq!(artifact.metadata.identity, "root.nx");
-    assert_eq!(artifact.metadata.schema_version, 3);
+    assert_eq!(artifact.metadata.schema_version, 4);
     assert_eq!(artifact.metadata.runtime_abi, "nx-ir-runtime-v2");
     assert_eq!(
         artifact.metadata.fingerprint,

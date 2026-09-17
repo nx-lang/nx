@@ -1,8 +1,9 @@
 /**
  * Pins the component expansion `check-examples` relies on: a runtime failure inside a component
  * body must surface, and it only does if the walk expands the body rather than stopping at the
- * descriptor `root` evaluates to. The failing body is FINDINGS F22 — `+` on a record field lowers
- * to a numeric add — which is exactly the failure the plain evaluation of `root` let through.
+ * descriptor `root` evaluates to. The failing body divides by a prop that is zero, which compiles
+ * clean and fails only when the body runs. The failure this was written for, a `+` on a record
+ * field lowering to a numeric add, was a compiler defect and is fixed, so it no longer serves as one.
  */
 import { evaluateFunction } from "@nx-lang/ir-runtime";
 import { strict as assert } from "node:assert";
@@ -18,12 +19,12 @@ function evaluateRoot(source) {
   return { program, root: evaluateFunction(program, "root") };
 }
 
-const FAILING_BODY = `type Item = { Title: string }
+const FAILING_BODY = `type Item = { Title: string  Columns: int }
 component <Row extends DrawnNode Item:Item /> = {
-  <SkiaLabel Text={"Reorder " + Item.Title} />
+  <SkiaLabel Text={Item.Title} FontSize={120 / Item.Columns} />
 }
 <SkiaStack>
-  <Row Item=<Item Title="English" /> />
+  <Row Item=<Item Title="English" Columns=0 /> />
 </SkiaStack>
 `;
 
@@ -35,7 +36,20 @@ test("evaluating root alone does not run a component body", () => {
 
 test("expanding the components runs the body and surfaces its failure", () => {
   const { program, root } = evaluateRoot(FAILING_BODY);
-  assert.throws(() => expandComponents(program, root), /Operator 'add'/);
+  assert.throws(() => expandComponents(program, root), /Division by zero/);
+});
+
+test("a string joined to a record field in a component body evaluates", () => {
+  // This `+` used to lower to a numeric add and fail only here, in the body.
+  const { program, root } = evaluateRoot(`type Item = { Title: string }
+component <Row extends DrawnNode Item:Item /> = {
+  <SkiaLabel Text={"Reorder " + Item.Title} />
+}
+<SkiaStack>
+  <Row Item=<Item Title="English" /> />
+</SkiaStack>
+`);
+  assert.deepEqual(expandComponents(program, root), { inert: [] });
 });
 
 test("a child is initialized under its parent, so a handler the parent bound resolves", () => {

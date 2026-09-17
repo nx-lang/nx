@@ -224,10 +224,21 @@ pub fn analyze_prepared_module(
     // Apply contextual name resolutions before the module is snapshotted, so every consumer after
     // type checking sees the qualified member access rather than the bare source spelling.
     let contextual_resolutions = ctx.resolved_contextual_names().clone();
-    let converted_int_literals: Vec<_> = ctx.converted_int_literals().keys().copied().collect();
+    let converted_literals: FxHashMap<_, _> = ctx
+        .converted_literals()
+        .iter()
+        .filter_map(|(expr, primitive)| Some((*expr, primitive.hir_type()?)))
+        .collect();
+    let folded_constants = ctx.folded_constants().clone();
+    let string_conversions = ctx.string_conversions().clone();
+    let widened_joins: FxHashMap<_, _> = ctx
+        .widened_joins()
+        .iter()
+        .filter_map(|(expr, primitive)| Some((*expr, primitive.hir_type()?)))
+        .collect();
     let consumed_type_arguments = ctx.consumed_type_arguments().clone();
     let element_type_arguments = ctx.resolved_type_arguments().clone();
-    let (type_env, type_diagnostics) = ctx.finish();
+    let (mut type_env, type_diagnostics) = ctx.finish();
     diagnostics.extend(normalize_diagnostics_file_name(type_diagnostics, file_name));
     // A resolution reached a union declaration, so it has an origin. One without cannot be
     // rewritten, and an unrewritten contextual name is not an error anywhere below type checking:
@@ -251,11 +262,32 @@ pub fn analyze_prepared_module(
         );
     }
 
-    // An integer literal that took a float type becomes one, for the same reason and at the same
-    // point: below here, `24` at a float property is the float literal `24.0` and nothing else.
-    // The two passes are independent — a contextual name is not an integer literal — so their
-    // order does not matter.
-    nx_hir::apply_int_literal_conversions(&mut prepared_module, &converted_int_literals);
+    // A numeric literal that took a type from its site becomes a literal of that width, for the
+    // same reason and at the same point: below here, `24` at a float property is the float literal
+    // `24.0` and nothing else. The passes are independent — a contextual name is not a numeric
+    // literal — so their order does not matter. A constant expression that took a type is first
+    // replaced by the literal it folded to, which the conversion then gives the site's width.
+    nx_hir::apply_constant_folds(&mut prepared_module, &folded_constants);
+    nx_hir::apply_literal_conversions(&mut prepared_module, &converted_literals);
+
+    // A `+` the checker found to concatenate becomes a `Concat`, its non-string operands wrapped
+    // in their text conversions, and a text body at a `string` content property becomes one
+    // `Concat` chain. Every node the rewrite creates is a string, and is typed as one so the IR
+    // builder sees a type for it like for any other expression.
+    for created in nx_hir::apply_string_conversions(&mut prepared_module, &string_conversions) {
+        type_env.set_expr_type(created, Type::string());
+    }
+
+    // A branch of a join that widens is wrapped so it produces a value of the join's numeric
+    // type. The wrapper is typed as the widened branch, which is what the join expects of it.
+    for (wrapped, branch) in nx_hir::apply_join_widenings(&mut prepared_module, &widened_joins) {
+        let target = widened_joins[&branch];
+        let branch_ty = type_env
+            .get_expr_type(branch)
+            .cloned()
+            .unwrap_or(Type::Error);
+        type_env.set_expr_type(wrapped, crate::infer::widened_type(&branch_ty, target));
+    }
 
     nx_hir::apply_contextual_name_resolutions(
         &mut prepared_module,
@@ -663,8 +695,8 @@ mod tests {
     #[test]
     fn test_an_expected_float_type_binds_the_same_for_both_literal_spellings() {
         // What a reader of the declaration observes is the type of the *binding*, and it is the
-        // declared one at every width. The type recorded for the literal expression is a separate
-        // question, answered by making both spellings agree rather than by the declared type.
+        // declared one at every width. The literal expression records that same width, for both
+        // spellings; `test_a_numeric_literal_takes_the_width_of_its_site` covers that.
         for (source, declared) in [
             ("let x: float32 = 42", "float32"),
             ("let x: float32 = 42.0", "float32"),
@@ -716,11 +748,7 @@ mod tests {
     }
 
     #[test]
-    fn test_contextual_typing_does_not_reach_beyond_integer_literals() {
-        assert_rejected(
-            "an int-typed parameter at a float site",
-            "external component <B v:float64 />\ncomponent <A n:int /> = { <B v={n} /> }",
-        );
+    fn test_a_real_literal_takes_no_integer_type() {
         assert_rejected(
             "a float literal at an int site",
             "external component <B v:int />\nlet root() = { <B v=1.5 /> }",
@@ -728,6 +756,664 @@ mod tests {
         assert_rejected(
             "a whole-valued float literal at an int site",
             "external component <B v:int />\nlet root() = { <B v=1.0 /> }",
+        );
+    }
+
+    /// The declared or inferred return type of the function `name`, as the source spells it.
+    fn return_type(source: &str, name: &str) -> String {
+        let checked = check_str(source, "main.nx");
+        assert!(
+            errors(source).is_empty(),
+            "`{}` should type check, but reported {:?}",
+            source,
+            errors(source)
+        );
+        match checked.type_env.lookup(&Name::new(name)) {
+            Some(Type::Function { ret, .. }) => ret.to_string(),
+            other => panic!("expected `{}` to be a function, found {:?}", name, other),
+        }
+    }
+
+    /// Every literal of the analyzed module with the type recorded for it, in arena order.
+    fn literals(source: &str) -> Vec<(nx_hir::ast::Literal, String)> {
+        let checked = check_str(source, "main.nx");
+        assert!(
+            errors(source).is_empty(),
+            "`{}` should type check, but reported {:?}",
+            source,
+            errors(source)
+        );
+        let module = checked.lowered_module.as_ref().expect("lowered module");
+        module
+            .exprs()
+            .filter_map(|(id, expr)| match expr {
+                nx_hir::ast::Expr::Literal(literal) => Some((
+                    literal.clone(),
+                    checked
+                        .type_env
+                        .get_expr_type(id)
+                        .map(|ty| ty.to_string())
+                        .unwrap_or_default(),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_mixed_numeric_operands_take_the_narrowest_common_widening() {
+        assert_eq!(
+            return_type("let f(n:int, x:float64) = { n + x }", "f"),
+            "float64",
+            "int plus float64 is float64"
+        );
+        assert_eq!(
+            return_type("let f(n:int, x:float64) = { n == x }", "f"),
+            "boolean",
+            "int compared with float64 is boolean"
+        );
+        assert_eq!(
+            return_type("let f(n:int32, x:float32) = { n + x }", "f"),
+            "float64",
+            "neither int32 nor float32 widens to the other, and both widen to float64"
+        );
+        assert_eq!(
+            return_type("let f(n:int32, x:float32) = { n < x }", "f"),
+            "boolean",
+            "a comparison is typed at the common widening too"
+        );
+        assert_eq!(
+            return_type("let f(n:int32, m:int) = { n / m }", "f"),
+            "int",
+            "integer division stays integer"
+        );
+        assert_eq!(
+            return_type("let f(n:int, m:int64) = { n * m }", "f"),
+            "int64"
+        );
+        assert_eq!(
+            return_type("let f(x:float32, y:float64) = { x - y }", "f"),
+            "float64"
+        );
+    }
+
+    #[test]
+    fn test_numeric_operands_with_no_common_widening_are_rejected_naming_both() {
+        for source in [
+            "let f(n:int64, x:float64) = { n + x }",
+            "let f(n:int64, x:float64) = { n == x }",
+        ] {
+            let reported = assert_rejected("int64 with float64", source);
+            assert!(
+                reported.contains("int64")
+                    && reported.contains("float64")
+                    && reported.contains("without loss"),
+                "the diagnostic should name both types and say the conversion is lossy: {}",
+                reported
+            );
+        }
+        let reported = assert_rejected(
+            "int64 with float32",
+            "let f(n:int64, x:float32) = { n * x }",
+        );
+        assert!(reported.contains("int64") && reported.contains("float32"));
+    }
+
+    #[test]
+    fn test_a_numeric_expression_widens_at_every_binding_site() {
+        assert_accepted(
+            "an int parameter at a float64 property",
+            "external component <B v:float64 />\ncomponent <A n:int /> = { <B v={n} /> }",
+        );
+        assert_accepted(
+            "an int32 parameter at an int64 property",
+            "external component <B v:int64 />\ncomponent <A n:int32 /> = { <B v={n} /> }",
+        );
+        assert_accepted(
+            "a record field default reading an earlier int field",
+            "type Opts = { n:int = 1  x:float64 = {n} }\nlet root() = { <Opts /> }",
+        );
+        assert_accepted(
+            "a component property default reading an earlier int32 prop",
+            "component <C n:int32 = 1 x:float64 = {n} /> = { <div /> }\nlet root() = { <C /> }",
+        );
+        assert_accepted(
+            "a constructed record field",
+            "type T = { x:float64 }\nlet f(n:int) = { <T x={n} /> }",
+        );
+        assert_accepted("an annotated let", "let k: int32 = 3\nlet x: float64 = {k}");
+        assert_accepted(
+            "a declared integer return type",
+            "let f(n:int32): int = { n }",
+        );
+        assert_accepted(
+            "a declared float64 return type",
+            "let f(n:int): float64 = { n }",
+        );
+        assert_accepted(
+            "an argument at a typed parameter",
+            "let f(x:float64) = { x }\nlet g(n:int) = { f(n) }",
+        );
+        assert_accepted(
+            "each element of a list",
+            "external component <B v:float64[] />\nlet f(n:int, m:int32) = { <B v={n m} /> }",
+        );
+        assert_accepted(
+            "a nullable site",
+            "external component <B v:float64? />\ncomponent <A n:int /> = { <B v={n} /> }",
+        );
+        assert_accepted(
+            "a nullable int at a nullable float64 site",
+            "let a:int? = {3}\nlet b:float64? = {a}",
+        );
+        assert_accepted(
+            "a nullable int at a nullable float64 return type",
+            "let f(n:int?): float64? = { n }",
+        );
+        assert_accepted(
+            "a list of nullable ints at a list of nullable float64s",
+            "let f(ns:int?[]): float64?[] = { ns }",
+        );
+        assert_accepted(
+            "a content property",
+            "let <collect content item: float64 />: float64 = { item }\n\
+             let f(n:int) = { <collect>{n}</collect> }",
+        );
+        assert_accepted(
+            "float32 at float64",
+            "external component <B v:float64 />\ncomponent <A x:float32 /> = { <B v={x} /> }",
+        );
+    }
+
+    #[test]
+    fn test_a_narrowing_or_lossy_conversion_is_rejected_naming_both_types() {
+        for (label, source, found, wanted) in [
+            (
+                "int64 at a declared int32 return type",
+                "let f(n:int64): int32 = { n }",
+                "int64",
+                "int32",
+            ),
+            (
+                "int64 at an int property",
+                "external component <B v:int />\ncomponent <A n:int64 /> = { <B v={n} /> }",
+                "int64",
+                "int",
+            ),
+            (
+                "int at an int32 property",
+                "external component <B v:int32 />\ncomponent <A n:int /> = { <B v={n} /> }",
+                "int",
+                "int32",
+            ),
+            (
+                "float64 at a float32 property",
+                "external component <B v:float32 />\ncomponent <A x:float64 /> = { <B v={x} /> }",
+                "float64",
+                "float32",
+            ),
+            (
+                "int at a float32 property",
+                "external component <B v:float32 />\ncomponent <A n:int /> = { <B v={n} /> }",
+                "int",
+                "float32",
+            ),
+            (
+                "int64 at a float64 property",
+                "external component <B v:float64 />\ncomponent <A n:int64 /> = { <B v={n} /> }",
+                "int64",
+                "float64",
+            ),
+            (
+                "a nullable int64 at a nullable float64 return type",
+                "let f(n:int64?): float64? = { n }",
+                "int64?",
+                "float64?",
+            ),
+            (
+                "an int64 element of a float64 list",
+                "external component <B v:float64[] />\nlet f(n:int64) = { <B v={n 1} /> }",
+                "int64",
+                "float64",
+            ),
+        ] {
+            let reported = assert_rejected(label, source);
+            assert!(
+                reported.contains(found) && reported.contains(wanted),
+                "{}: the diagnostic should name {} and {}: {}",
+                label,
+                found,
+                wanted,
+                reported
+            );
+        }
+
+        assert_rejected(
+            "a string at an int site: more than one plausible result",
+            "external component <B v:int />\ncomponent <A s:string /> = { <B v={s} /> }",
+        );
+        assert_rejected(
+            "a nullable int at an int site: undefined for null",
+            "external component <B v:int />\ncomponent <A n:int? /> = { <B v={n} /> }",
+        );
+    }
+
+    #[test]
+    fn test_a_numeric_literal_takes_the_width_of_its_site() {
+        use nx_hir::ast::{Literal, OrderedFloat};
+
+        assert_eq!(
+            literals("external component <B v:int32 />\nlet root() = { <B v=1 /> }"),
+            vec![(Literal::Int32(1), "int32".to_string())],
+            "an integer literal at an int32 site is an int32 literal"
+        );
+        assert_eq!(
+            literals("external component <B v:int32 />\nlet root() = { <B v=-7 /> }"),
+            vec![(Literal::Int32(-7), "int32".to_string())],
+            "a negated literal on the same terms"
+        );
+        assert_eq!(
+            literals("external component <B v:int64 />\nlet root() = { <B v=1 /> }"),
+            vec![(Literal::Int(1), "int64".to_string())],
+            "int64 shares the int literal form and records its own type"
+        );
+        assert_eq!(
+            literals("external component <B v:float32 />\nlet root() = { <B v=1.5 /> }"),
+            vec![(Literal::Float32(OrderedFloat(1.5)), "float32".to_string())],
+            "a real literal at a float32 site is a float32 literal"
+        );
+        assert_eq!(
+            literals("external component <B v:float32 />\nlet root() = { <B v=0.1 /> }"),
+            vec![(
+                Literal::Float32(OrderedFloat(f64::from(0.1f32))),
+                "float32".to_string()
+            )],
+            "and is rounded to the nearest float32, with no exactness check"
+        );
+        assert_eq!(
+            literals("external component <B v:float32 />\nlet root() = { <B v=1 /> }"),
+            vec![(Literal::Float32(OrderedFloat(1.0)), "float32".to_string())],
+            "an integer literal at a float32 site is the literal `1.0` takes there"
+        );
+        assert_eq!(
+            literals("external component <B v:float64 />\nlet root() = { <B v=1 /> }"),
+            vec![(Literal::Float(OrderedFloat(1.0)), "float64".to_string())],
+        );
+        assert_eq!(
+            literals("external component <B v:int32[] />\nlet root() = { <B v={1 2} /> }"),
+            vec![
+                (Literal::Int32(1), "int32".to_string()),
+                (Literal::Int32(2), "int32".to_string())
+            ],
+            "each element of a list is written at the element type"
+        );
+    }
+
+    #[test]
+    fn test_an_integer_literal_out_of_range_for_int32_is_rejected() {
+        let reported = assert_rejected(
+            "one past the largest int32",
+            "external component <B v:int32 />\nlet root() = { <B v=2147483648 /> }",
+        );
+        assert!(
+            reported.contains("integer-literal-out-of-range")
+                && reported.contains("2147483648")
+                && reported.contains("int32"),
+            "the diagnostic should name the literal and the type: {}",
+            reported
+        );
+        assert_accepted(
+            "the largest int32",
+            "external component <B v:int32 />\nlet root() = { <B v=2147483647 /> }",
+        );
+        assert_accepted(
+            "the smallest int32",
+            "external component <B v:int32 />\nlet root() = { <B v=-2147483648 /> }",
+        );
+    }
+
+    #[test]
+    fn test_a_literal_operand_takes_the_other_operands_width() {
+        assert_eq!(
+            return_type("let f(w:float32) = { w * 1.5 }", "f"),
+            "float32"
+        );
+        assert_eq!(return_type("let f(w:float32) = { 2 * w }", "f"), "float32");
+        assert_eq!(return_type("let g(n:int32) = { n + 1 }", "g"), "int32");
+        assert_eq!(return_type("let g(n:int64) = { n + 1 }", "g"), "int64");
+        assert_eq!(
+            return_type("let g(n:int32) = { n + 1.5 }", "g"),
+            "float64",
+            "a real literal takes no integer type, so the pair promotes"
+        );
+        assert_eq!(
+            return_type("let g(w:float32) = { w < 1.5 }", "g"),
+            "boolean"
+        );
+
+        let out_of_range = assert_rejected(
+            "a literal operand past the other operand's range",
+            "let g(n:int32) = { n + 3000000000 }",
+        );
+        assert!(out_of_range.contains("int32"), "{}", out_of_range);
+
+        for (source, name, expected) in
+            [("let n = 42", "n", "int"), ("let x = 1.5", "x", "float64")]
+        {
+            assert_eq!(
+                check_str(source, "main.nx")
+                    .type_env
+                    .lookup(&Name::new(name))
+                    .map(|ty| ty.to_string()),
+                Some(expected.to_string()),
+                "a literal with nothing expecting a type of it keeps its default"
+            );
+        }
+    }
+
+    #[test]
+    fn test_plus_concatenates_when_either_operand_is_a_string() {
+        assert_eq!(
+            return_type("let f(count:int) = { \"Total: \" + count }", "f"),
+            "string"
+        );
+        assert_eq!(
+            return_type("let f(x:float64) = { x + \" px\" }", "f"),
+            "string"
+        );
+        assert_eq!(
+            return_type("let f(on:boolean) = { \"enabled: \" + on }", "f"),
+            "string"
+        );
+        assert_eq!(
+            return_type("let f() = { 1 + 2 + \" items\" }", "f"),
+            "string"
+        );
+        assert_eq!(
+            return_type(
+                "type Item = { title:string }\nlet f(item:Item) = { \"Reorder \" + item.title }",
+                "f"
+            ),
+            "string",
+            "a field access concatenates exactly as a literal does"
+        );
+    }
+
+    #[test]
+    fn test_plus_rejects_a_string_with_anything_that_has_no_text_form() {
+        let record = assert_rejected(
+            "a string plus a record",
+            "type Item = { title:string }\nlet f(item:Item) = { \"Item: \" + item }",
+        );
+        assert!(
+            record.contains("Item"),
+            "the diagnostic should name the operand type: {}",
+            record
+        );
+        assert_rejected(
+            "a string plus a nullable string",
+            "let f(s:string?) = { \"value: \" + s }",
+        );
+        assert_rejected("a string plus null", "let f() = { \"value: \" + null }");
+        assert_rejected(
+            "a string plus a list",
+            "let f(xs:int[]) = { \"items: \" + xs }",
+        );
+        assert_rejected("a string minus a number", "let f(n:int) = { \"a\" - n }");
+        assert_rejected(
+            "a boolean plus a number, neither a string",
+            "let f(n:int, on:boolean) = { on + n }",
+        );
+    }
+
+    /// The body of `f` in the analyzed module, rendered as nested constructor names.
+    fn shape(source: &str) -> String {
+        use nx_hir::ast::Expr;
+
+        fn render(module: &nx_hir::LoweredModule, id: nx_hir::ExprId) -> String {
+            match module.expr(id) {
+                Expr::Literal(_) => "Literal".to_string(),
+                Expr::Ident(_) => "Ident".to_string(),
+                Expr::Member { .. } => "Member".to_string(),
+                Expr::Concat { lhs, rhs, .. } => {
+                    format!("Concat({}, {})", render(module, *lhs), render(module, *rhs))
+                }
+                Expr::BinaryOp { lhs, op, rhs, .. } => format!(
+                    "{:?}({}, {})",
+                    op,
+                    render(module, *lhs),
+                    render(module, *rhs)
+                ),
+                Expr::ToText { expr, ty, .. } => {
+                    format!("ToText({}, {})", render(module, *expr), ty)
+                }
+                Expr::Widen { expr, ty, .. } => {
+                    format!("Widen({}, {})", render(module, *expr), ty)
+                }
+                Expr::If {
+                    then_branch,
+                    else_branch: Some(else_branch),
+                    ..
+                } => format!(
+                    "If({}, {})",
+                    render(module, *then_branch),
+                    render(module, *else_branch)
+                ),
+                Expr::Match { arms, .. } => {
+                    let arms = arms
+                        .iter()
+                        .map(|arm| render(module, arm.body))
+                        .collect::<Vec<_>>();
+                    format!("Match[{}]", arms.join(", "))
+                }
+                Expr::Array { elements, .. } => {
+                    let elements = elements
+                        .iter()
+                        .map(|element| render(module, *element))
+                        .collect::<Vec<_>>();
+                    format!("List[{}]", elements.join(", "))
+                }
+                Expr::Block {
+                    expr: Some(expr), ..
+                } => render(module, *expr),
+                Expr::Element { element, .. } => {
+                    let content = module
+                        .element(*element)
+                        .content
+                        .iter()
+                        .map(|piece| render(module, *piece))
+                        .collect::<Vec<_>>();
+                    format!("Element[{}]", content.join(", "))
+                }
+                other => format!("{:?}", other),
+            }
+        }
+
+        let checked = check_str(source, "main.nx");
+        assert!(
+            errors(source).is_empty(),
+            "`{}` should type check, but reported {:?}",
+            source,
+            errors(source)
+        );
+        let module = checked.lowered_module.as_ref().expect("lowered module");
+        let body = module
+            .items()
+            .iter()
+            .find_map(|item| match item {
+                Item::Function(function) if function.name.as_str() == "f" => Some(function.body),
+                _ => None,
+            })
+            .expect("a function named f");
+        render(module, body)
+    }
+
+    #[test]
+    fn test_the_prepared_module_widens_the_narrower_branches_of_a_join() {
+        assert_eq!(
+            shape("let f(b:boolean, n:int, x:float64) = { if b { n } else { x } }"),
+            "If(Widen(Ident, float64), Ident)"
+        );
+        assert_eq!(
+            shape(
+                "type Size = small | large\n\
+                 let f(size:Size, n:int, x:float64) = { if size is { small => n  large => x } }"
+            ),
+            "Match[Widen(Ident, float64), Ident]"
+        );
+        assert_eq!(
+            shape("let f(n:int32, m:int, x:float64) = { n m x }"),
+            "List[Widen(Ident, float64), Widen(Ident, float64), Ident]"
+        );
+        assert_eq!(
+            shape("let f(n:int32, m:int) = { n m }"),
+            "List[Widen(Ident, int), Ident]"
+        );
+        assert_eq!(
+            shape("let f(b:boolean, n:int, m:int) = { if b { n } else { m } }"),
+            "If(Ident, Ident)"
+        );
+        assert_eq!(
+            shape("let f(b:boolean, n:int, s:string) = { if b { n } else { s } }"),
+            "If(Ident, Ident)",
+            "a join that climbs to object widens nothing"
+        );
+    }
+
+    #[test]
+    fn test_a_widened_branch_is_typed_as_the_join_expects_it() {
+        let source = "let f(b:boolean, n:int?, x:float64?) = { if b { n } else { x } }";
+        let checked = check_str(source, "main.nx");
+        let module = checked.lowered_module.as_ref().expect("lowered module");
+        let (wrapper, _) = module
+            .exprs()
+            .find(|(_, expr)| matches!(expr, nx_hir::ast::Expr::Widen { .. }))
+            .expect("a widened branch");
+        assert_eq!(
+            checked.type_env.get_expr_type(wrapper),
+            Some(&Type::nullable(Type::float64()))
+        );
+    }
+
+    #[test]
+    fn test_the_prepared_module_carries_the_concatenation_decision() {
+        assert_eq!(
+            shape("let f(count:int) = { \"Total: \" + count }"),
+            "Concat(Literal, ToText(Ident, int))"
+        );
+        assert_eq!(
+            shape("let f() = { \"a\" + \"b\" }"),
+            "Concat(Literal, Literal)"
+        );
+        assert_eq!(
+            shape("let f(w:float32) = { w + \" px\" }"),
+            "Concat(ToText(Ident, float32), Literal)"
+        );
+        assert_eq!(
+            shape("let f() = { 1 + 2 + \" items\" }"),
+            "Concat(ToText(Add(Literal, Literal), int), Literal)",
+            "`+` is left-associative, so the inner addition stays numeric"
+        );
+        assert_eq!(
+            shape("let f() = { \"n=\" + 1 + 2 }"),
+            "Concat(Concat(Literal, ToText(Literal, int)), ToText(Literal, int))"
+        );
+        assert_eq!(
+            shape("type Item = { title:string }\nlet f(item:Item) = { \"Reorder \" + item.title }"),
+            "Concat(Literal, Member)"
+        );
+        assert_eq!(
+            shape("let f(a:int, b:int) = { a + b }"),
+            "Add(Ident, Ident)",
+            "an addition with no string operand is left alone"
+        );
+    }
+
+    #[test]
+    fn test_a_text_body_binds_to_a_string_content_property_as_one_string() {
+        const LABEL: &str = "type Label = { content text:string }\n";
+
+        assert_eq!(
+            shape(&format!(
+                "{LABEL}let f(count:int) = <Label>Total: {{count}}</Label>"
+            )),
+            "Element[Concat(Literal, ToText(Ident, int))]"
+        );
+        assert_eq!(
+            shape(&format!(
+                "{LABEL}let f(first:string, last:string) = <Label>{{first}} {{last}}</Label>"
+            )),
+            "Element[Concat(Concat(Ident, Literal), Ident)]",
+            "the whitespace between two braced values is kept as a run"
+        );
+        assert_eq!(
+            shape(&format!("{LABEL}let f() = <Label>Just text</Label>")),
+            "Element[Literal]",
+            "a single-run body binds as it always has"
+        );
+        assert_eq!(
+            shape(&format!(
+                "{LABEL}let f(count:int) = <Label>{{count}}</Label>"
+            )),
+            "Element[ToText(Ident, int)]",
+            "a lone braced number is a join of one piece"
+        );
+        assert_eq!(
+            shape(&format!(
+                "{LABEL}let f(name:string) = <Label>{{name}}</Label>"
+            )),
+            "Element[Ident]",
+            "a lone braced string binds as it always has"
+        );
+        assert_accepted(
+            "a lone braced float literal",
+            &format!("{LABEL}let f() = <Label>{{1.0}}</Label>"),
+        );
+        let nullable = assert_rejected(
+            "a lone braced nullable int",
+            &format!("{LABEL}let f(count:int?) = <Label>{{count}}</Label>"),
+        );
+        assert!(
+            nullable.contains("content-type-mismatch"),
+            "a nullable number has no text form: {}",
+            nullable
+        );
+        assert_accepted(
+            "a nullable string content property",
+            "type Label = { content text:string? }\n\
+             let f(on:boolean) = <Label>Enabled: {on}</Label>",
+        );
+
+        let record = assert_rejected(
+            "a braced record in a string body",
+            &format!(
+                "{LABEL}type Item = {{ title:string }}\n\
+                 let f(item:Item) = <Label>Item: {{item}}</Label>"
+            ),
+        );
+        assert!(
+            record.contains("content-type-mismatch") && record.contains("Item"),
+            "the diagnostic should name the type: {}",
+            record
+        );
+    }
+
+    #[test]
+    fn test_an_element_content_property_body_is_not_joined() {
+        assert_eq!(
+            shape(
+                "component <Panel content body:Element /> = { <section>{body}</section> }\n\
+                 let f(item:Element) = <Panel>{item}</Panel>"
+            ),
+            "Element[Ident]"
+        );
+        assert_eq!(
+            shape(
+                "let <collect content items: object[] />: object[] = { items }\n\
+                 let f(count:int) = <collect>Total: {count}</collect>"
+            ),
+            "Element[Literal, Ident]",
+            "a body at a list content property stays a list of pieces"
         );
     }
 

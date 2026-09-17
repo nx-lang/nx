@@ -103,7 +103,7 @@ mod tests {
             metadata: NxIrMetadata {
                 identity: identity.to_string(),
                 fingerprint: 7,
-                schema_version: 3,
+                schema_version: 4,
                 runtime_abi: "nx-ir-runtime-v2".to_string(),
                 required_features: Vec::new(),
                 function_entrypoints: vec!["root".to_string()],

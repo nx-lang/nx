@@ -417,21 +417,184 @@ fn emit_options_refuse_a_key_they_do_not_have() {
 // Explain
 // ------------------------------------------------------------------------------------------------
 
+// ------------------------------------------------------------------------------------------------
+// Primitive-to-text conversion and numeric widening
+// ------------------------------------------------------------------------------------------------
+
+#[test]
+fn a_string_plus_an_int_is_emitted_as_concat_over_a_text_node() {
+    let text = explain_source("let f(count:int) = { \"Total: \" + count }\nlet root() = { f(3) }");
+    // The string constant is a bare operand; only the int is wrapped, and the node names `int`.
+    assert_line(&text, "  (\"Total: \" concat text<int>(count))");
+}
+
+#[test]
+fn a_float32_operand_names_its_type() {
+    let text = explain_source("let f(w:float32) = { w + \" px\" }\nlet root() = { 1 }");
+    assert_line(&text, "  (text<float32>(w) concat \" px\")");
+}
+
+#[test]
+fn every_stringifiable_primitive_names_its_own_type() {
+    let text = explain_source(
+        "let f(a:int32, b:int64, c:float64, d:boolean) = { \"\" + a + b + c + d }\n\
+         let root() = { 1 }",
+    );
+    for ty in ["int32", "int64", "float64", "boolean"] {
+        assert_contains(&text, &format!("text<{ty}>("));
+    }
+}
+
+#[test]
+fn a_string_field_access_is_emitted_as_concat_with_no_text_node() {
+    let text = explain_source(
+        "type Item = { title:string }\n\
+         let f(item:Item) = { \"Reorder \" + item.title }\n\
+         let root() = { 1 }",
+    );
+    assert_line(&text, "  (\"Reorder \" concat item.title)");
+    assert!(
+        !text.contains("text<"),
+        "no operand needs a conversion:\n{text}"
+    );
+}
+
+#[test]
+fn a_widened_operand_carries_no_conversion_node() {
+    let text = explain_source(
+        "let f(n:int, x:float64) = { n + x }\n\
+         let g(n:int, x:float64) = { n / x }\n\
+         let h(n:int, m:int32) = { n / m }\n\
+         let root() = { 1 }",
+    );
+    assert_line(&text, "  (n add x)");
+    // The checked type of the division is float64, so it is the floating-point operator even
+    // though one operand is an integer.
+    assert_line(&text, "  (n div x)");
+    assert_line(&text, "  (n idiv m)");
+    assert!(!text.contains("text<"), "widening emits nothing:\n{text}");
+}
+
+#[test]
+fn a_division_of_a_widened_join_is_the_floating_point_operator() {
+    // Each join is a float64, so dividing it by an int is `div` though one branch is an int, and
+    // the narrower branch is emitted as it is, with no conversion node.
+    let text = explain_source(
+        "let pick(b:boolean, n:int, x:float64) = { if b { n } else { x } }\n\
+         let ratio(b:boolean, n:int, x:float64, d:int) = { pick(b, n, x) / d }\n\
+         let arm(k:int, n:int, x:float64) = { if k is { 1 => n  else => x } }\n\
+         let armRatio(k:int, n:int, x:float64, d:int) = { arm(k, n, x) / d }\n\
+         let root() = { 1 }",
+    );
+    assert_line(&text, "  (pick(b, n, x) div d)");
+    assert_line(&text, "  (arm(k, n, x) div d)");
+    assert!(
+        !text.contains("idiv"),
+        "every division is a float one:\n{text}"
+    );
+    assert!(!text.contains("text<"), "widening emits nothing:\n{text}");
+}
+
+#[test]
+fn float32_arithmetic_is_the_float32_operator() {
+    // A runtime carries a float32 as a float64, so the operator names the rounding. A remainder is
+    // exact and keeps `mod`, and float64 arithmetic over a float32 operand is plain.
+    let text = explain_source(
+        "let f32(v:float32, d:float32) = { v + 0.1 - 0.2 * d / 2 }\n\
+         let rem(v:float32, d:float32) = { v % d }\n\
+         let wide(v:float32, x:float64) = { v * x }\n\
+         let root() = { 1 }",
+    );
+    assert_line(
+        &text,
+        "  ((v fadd32 0.10000000149011612) fsub32 ((0.20000000298023224 fmul32 d) fdiv32 2.0))",
+    );
+    assert_line(&text, "  (v mod d)");
+    assert_line(&text, "  (v mul x)");
+}
+
+#[test]
+fn an_operator_in_a_widened_branch_is_chosen_by_the_branch_type() {
+    // The widening is applied to the branch's result, so the branch computes at its own type:
+    // integer division stays `idiv`, and float32 arithmetic stays `fmul32`.
+    let text = explain_source(
+        "let half(b:boolean, n:int, x:float64) = { if b { n / 2 } else { x } }\n\
+         let pickf(b:boolean, v:float32, x:float64) = { if b { v * 3 } else { x } }\n\
+         let arm(k:int, n:int, x:float64) = { if k is { 1 => n / 2  else => x } }\n\
+         let list(n:int, x:float64) = { (n / 2) x }\n\
+         let root() = { 1 }",
+    );
+    assert_line(&text, "    (n idiv 2)");
+    assert_line(&text, "    (v fmul32 3.0)");
+    assert!(
+        !text.contains(" div "),
+        "no branch is a float division:\n{text}"
+    );
+    assert!(
+        text.lines()
+            .any(|line| line.contains("(n idiv 2)") && line.contains('x')),
+        "the list element is integer division:\n{text}"
+    );
+}
+
+#[test]
+fn a_constant_expression_at_a_narrow_site_is_emitted_as_its_folded_literal() {
+    // Folded at the literals' own types, then given the site's width: `7 / 2` is `3`, and a
+    // constant operand of a float32 product is one float32 constant.
+    let text = explain_source(
+        "let half(): float32 = { 7 / 2 }\n\
+         let scaled(w:float32) = { w * (1.5 * 2) }\n\
+         let wide() = { 7 / 2 }\n\
+         let root() = { 1 }",
+    );
+    assert_line(&text, "  3.0");
+    assert_line(&text, "  (w fmul32 3.0)");
+    // Without a site to narrow to, the expression is left for evaluation.
+    assert_line(&text, "  (7 idiv 2)");
+}
+
+#[test]
+fn a_text_body_at_a_string_content_property_is_emitted_as_one_concat_chain() {
+    let text = explain_source(
+        "type Label = { content text:string }\n\
+         let f(count:int) = <Label>Total: {count} left</Label>\n\
+         let root() = { 1 }",
+    );
+    // The space before `left` is layout the grammar keeps out of the run, put back as written.
+    assert_contains(
+        &text,
+        "(((\"Total: \" concat text<int>(count)) concat \" \") concat \"left\")",
+    );
+}
+
+#[test]
+fn a_text_node_is_kind_20_and_reads_back_from_the_image() {
+    assert_eq!(kinds::node::TEXT, 20);
+    assert_eq!(
+        kinds::name(kinds::node::NAMES, kinds::node::TEXT),
+        Some("text")
+    );
+
+    let artifact = artifact_from_source("let root(count:int) = { \"n=\" + count }");
+    let model = entry_artifact(&artifact);
+    assert_eq!(read_back(&image_bytes(&artifact)), model);
+}
+
 #[test]
 fn explain_refuses_another_schema_version_naming_both() {
     let artifact = artifact_from_source("let root() = { 1 }");
     let mut bytes = image_bytes(&artifact);
-    bytes[4..8].copy_from_slice(&2u32.to_le_bytes());
-    let error = explain_nx_ir_image(&bytes).expect_err("schema 2 is refused");
+    bytes[4..8].copy_from_slice(&3u32.to_le_bytes());
+    let error = explain_nx_ir_image(&bytes).expect_err("schema 3 is refused");
     assert_eq!(
         error,
         ExplainError::SchemaVersion {
-            found: 2,
-            supported: 3
+            found: 3,
+            supported: 4
         }
     );
-    assert!(error.to_string().contains("schema version 2"));
     assert!(error.to_string().contains("schema version 3"));
+    assert!(error.to_string().contains("schema version 4"));
 }
 
 #[test]

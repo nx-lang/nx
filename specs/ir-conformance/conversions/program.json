@@ -1,0 +1,144 @@
+{
+  "entry": "main.nx",
+  "emit": [
+    "main.nx"
+  ],
+  "entrypoints": [
+    {
+      "module": "main.nx",
+      "function": "total"
+    },
+    {
+      "module": "main.nx",
+      "function": "onTheLeft"
+    },
+    {
+      "module": "main.nx",
+      "function": "enabled"
+    },
+    {
+      "module": "main.nx",
+      "function": "leftAssociative"
+    },
+    {
+      "module": "main.nx",
+      "function": "stringFirst"
+    },
+    {
+      "module": "main.nx",
+      "function": "reorder"
+    },
+    {
+      "module": "main.nx",
+      "function": "integralFloat"
+    },
+    {
+      "module": "main.nx",
+      "function": "fractionalFloat"
+    },
+    {
+      "module": "main.nx",
+      "function": "largeFloat"
+    },
+    {
+      "module": "main.nx",
+      "function": "smallFloat"
+    },
+    {
+      "module": "main.nx",
+      "function": "negativeZero"
+    },
+    {
+      "module": "main.nx",
+      "function": "negativeInt"
+    },
+    {
+      "module": "main.nx",
+      "function": "float32Tenth"
+    },
+    {
+      "module": "main.nx",
+      "function": "float32Product"
+    },
+    {
+      "module": "main.nx",
+      "function": "float32Widened"
+    },
+    {
+      "module": "main.nx",
+      "function": "float32Compared"
+    },
+    {
+      "module": "main.nx",
+      "function": "float32StepsOf"
+    },
+    {
+      "module": "main.nx",
+      "function": "label"
+    },
+    {
+      "module": "main.nx",
+      "function": "fullName"
+    },
+    {
+      "module": "main.nx",
+      "function": "markdownNote"
+    },
+    {
+      "module": "main.nx",
+      "function": "mixedSumOf"
+    },
+    {
+      "module": "main.nx",
+      "function": "mixedEqual"
+    },
+    {
+      "module": "main.nx",
+      "function": "mixedLess"
+    },
+    {
+      "module": "main.nx",
+      "function": "mixedDivision"
+    },
+    {
+      "module": "main.nx",
+      "function": "integerDivisionOf"
+    },
+    {
+      "module": "main.nx",
+      "function": "joinedIf"
+    },
+    {
+      "module": "main.nx",
+      "function": "joinedMatch"
+    },
+    {
+      "module": "main.nx",
+      "function": "joinedList"
+    },
+    {
+      "module": "main.nx",
+      "function": "joinedIntegerDivision"
+    },
+    {
+      "module": "main.nx",
+      "function": "joinedArmDivision"
+    },
+    {
+      "module": "main.nx",
+      "function": "joinedListDivision"
+    },
+    {
+      "module": "main.nx",
+      "function": "joinedFloat32Product"
+    },
+    {
+      "module": "main.nx",
+      "function": "widened"
+    },
+    {
+      "module": "main.nx",
+      "function": "root"
+    }
+  ]
+}

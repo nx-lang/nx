@@ -1,5 +1,5 @@
 /**
- * The NX IR runtime: prepares schema 3 images, links them by name, and evaluates them.
+ * The NX IR runtime: prepares schema 4 images, links them by name, and evaluates them.
  *
  * An image carries one module as flat tables of 32-bit cells over one string blob, and the runtime
  * reads it in place. `prepareNxIrModule` validates every section, offset and index of the image and
@@ -8,7 +8,7 @@
  * evaluation API then takes the linked program. A prepared module is never copied by linking, so
  * one prepared catalog serves any number of programs.
  */
-export const NX_IR_SCHEMA_VERSION = 3;
+export const NX_IR_SCHEMA_VERSION = 4;
 export const NX_IR_RUNTIME_ABI = "nx-ir-runtime-v2";
 export const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1 = "update-records-v1";
 export const NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1 = "property-unions-v1";
@@ -401,7 +401,7 @@ function readDebug(bytes, declarationCount, nodeCount, fail) {
     }
     return { declarationSpans, nodeSpans, sourceBytes };
 }
-/** The kind numbers of schema 3, as `docs/nx-ir-format.md` assigns them. */
+/** The kind numbers of schema 4, as `docs/nx-ir-format.md` assigns them. */
 export const nodeKinds = {
     null: 0,
     bool: 1,
@@ -423,7 +423,10 @@ export const nodeKinds = {
     element: 17,
     component: 18,
     actionHandler: 19,
+    text: 20,
 };
+/** The primitive types a `text` node can name: the ones with a canonical text form. */
+const textTypes = ["int", "int32", "int64", "float32", "float64", "boolean"];
 export const typeKinds = { primitive: 0, nominal: 1, array: 2, nullable: 3 };
 export const constantKinds = { int: 0, bigint: 1, float: 2 };
 export const declarationKinds = {
@@ -451,6 +454,10 @@ const binaryOperators = [
     "ge",
     "and",
     "or",
+    "fadd32",
+    "fsub32",
+    "fmul32",
+    "fdiv32",
 ];
 const unaryOperators = ["neg", "not"];
 const intrinsicNames = ["apply", "merge", "diff", "changed"];
@@ -630,6 +637,7 @@ const layouts = {
         ["int", "str", { list: PROPERTY }, { list: NODES }],
         ["ref", { list: PROPERTY }, { list: NODES }],
         ["ref", "str", "ref", "int", "optRef", "node"],
+        ["node", "textType"],
     ],
     declarations: [
         ["str", { list: PARAM }, "node"],
@@ -739,6 +747,14 @@ class TableReader {
                 return intrinsicNames[cell] !== undefined || this.#fail(`${what} uses unknown intrinsic ${cell}.`);
             case "str":
                 return inRange("string", cell, this.#image.stringCount);
+            case "textType": {
+                if (!inRange("string", cell, this.#image.stringCount)) {
+                    return false;
+                }
+                const name = this.#image.string(cell);
+                return (textTypes.includes(name) ||
+                    this.#fail(`${what} names '${name}', which is not a primitive type with a text form.`));
+            }
             case "optStr":
                 return cell === NX_IR_NONE || inRange("string", cell, this.#image.stringCount);
             case "type":
@@ -1324,6 +1340,8 @@ function evalNode(index, context) {
             }
             return evalBinary(context, index, operator, evalNode(entry[2], context), evalNode(entry[3], context));
         }
+        case nodeKinds.text:
+            return primitiveText(context, index, evalNode(entry[1], context), image.string(entry[2]));
         case nodeKinds.unary: {
             const operand = evalNode(entry[2], context);
             switch (unaryOperators[entry[1]]) {
@@ -2003,14 +2021,35 @@ function normalizeValue(context, ty, value, path) {
 function normalizePrimitiveValue(name, value, path) {
     switch (name) {
         case "int":
-        case "int32":
         case "int64":
-        case "float32":
         case "float64":
             if (typeof value !== "number") {
                 fail("nx-ir-boundary-type", `Expected ${path} to be a number.`);
             }
             return value;
+        // A host format such as JSON cannot spell the narrow types, so a number takes the width of its
+        // site on the terms a literal written there does.
+        case "int32":
+            if (typeof value !== "number") {
+                fail("nx-ir-boundary-type", `Expected ${path} to be a number.`);
+            }
+            if (!Number.isInteger(value)) {
+                fail("nx-ir-boundary-type", `Expected ${path} to be an int32, got ${value}.`);
+            }
+            if (value < -2147483648 || value > 2147483647) {
+                fail("nx-ir-boundary-type", `Expected ${path} to be an int32, got ${value} (out of range for int32).`);
+            }
+            return value;
+        case "float32": {
+            if (typeof value !== "number") {
+                fail("nx-ir-boundary-type", `Expected ${path} to be a number.`);
+            }
+            const rounded = Math.fround(value);
+            if (Number.isInteger(value) && rounded !== value) {
+                fail("nx-ir-boundary-type", `Expected ${path} to be a float32, got ${value} (not exact as a float32).`);
+            }
+            return rounded;
+        }
         case "string":
             if (typeof value !== "string") {
                 fail("nx-ir-boundary-type", `Expected ${path} to be a string.`);
@@ -2141,6 +2180,21 @@ function evalBinary(context, nodeIndex, operator, lhs, rhs) {
             }
             return number(lhs) / divisor;
         }
+        // A `float32` operation computed on `float64` operands and rounded to the nearest `float32` is
+        // the `float32` operation itself, so its result is the value the interpreter computes.
+        case "fadd32":
+            return Math.fround(number(lhs) + number(rhs));
+        case "fsub32":
+            return Math.fround(number(lhs) - number(rhs));
+        case "fmul32":
+            return Math.fround(number(lhs) * number(rhs));
+        case "fdiv32": {
+            const divisor = number(rhs);
+            if (divisor === 0) {
+                fail("nx-ir-division-by-zero", "Division by zero.", context, nodeIndex);
+            }
+            return Math.fround(number(lhs) / divisor);
+        }
         case "idiv": {
             const dividend = checkedInteger(context, nodeIndex, number(lhs), operator);
             const divisor = checkedInteger(context, nodeIndex, number(rhs), operator);
@@ -2165,7 +2219,13 @@ function evalBinary(context, nodeIndex, operator, lhs, rhs) {
             return normalizeSignedZero(dividend % divisor);
         }
         case "concat":
-            return String(lhs) + String(rhs);
+            // Strings only: the emitter wraps an operand that is not one in a `text` node, which is
+            // where a primitive's text form is decided. Coercing here would print a `float32` as the
+            // `float64` it is carried in.
+            if (typeof lhs !== "string" || typeof rhs !== "string") {
+                fail("nx-ir-operator", "Operator 'concat' requires string operands.", context, nodeIndex);
+            }
+            return lhs + rhs;
         case "eq":
             return deepEqual(lhs, rhs);
         case "ne":
@@ -2181,6 +2241,66 @@ function evalBinary(context, nodeIndex, operator, lhs, rhs) {
         default:
             fail("nx-ir-operator", `Unknown binary operator '${String(operator)}'.`, context, nodeIndex);
     }
+}
+/**
+ * The canonical text form of a `float32`, which the runtime carries as the `number` it widens to.
+ *
+ * `String(value)` prints that widening's digits, `0.10000000149011612` for the `float32` nearest
+ * `0.1`. This prints the shortest digits that round-trip to the same `float32`, `0.1`, in the same
+ * ECMAScript layout every other number prints in. A `float32` needs at most nine significant
+ * digits, so the search ends there.
+ */
+export function float32Text(value) {
+    const target = Math.fround(value);
+    if (!Number.isFinite(target) || target === 0) {
+        return String(target);
+    }
+    for (let precision = 1; precision <= 9; precision += 1) {
+        const candidate = Number(target.toPrecision(precision));
+        if (Math.fround(candidate) === target) {
+            return String(candidate);
+        }
+    }
+    return String(target);
+}
+/**
+ * A `text` node: the canonical text form of a primitive value, by the static type the node names.
+ *
+ * For every type but `float32` that form is what `String()` prints for the carried value, which
+ * is the ECMAScript number-to-string conversion the form is defined as. An integer outside the
+ * safe range is carried as its digits and prints as them.
+ */
+function primitiveText(context, nodeIndex, value, type) {
+    const refuse = () => fail("nx-ir-operator", `A text conversion from '${type}' cannot render ${describeValue(value)}.`, context, nodeIndex);
+    switch (type) {
+        case "boolean":
+            return typeof value === "boolean" ? String(value) : refuse();
+        case "float32":
+            return typeof value === "number" ? float32Text(value) : refuse();
+        case "float64":
+            return typeof value === "number" ? String(value) : refuse();
+        case "int":
+        case "int32":
+        case "int64":
+            if (typeof value === "number") {
+                return String(value);
+            }
+            if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+                const wide = value;
+                if (wide.$type === "nx.int" && typeof wide.value === "string") {
+                    return wide.value;
+                }
+            }
+            return refuse();
+        default:
+            return fail("nx-ir-operator", `A text conversion names '${type}', which has no text form.`, context, nodeIndex);
+    }
+}
+function describeValue(value) {
+    if (value === null) {
+        return "null";
+    }
+    return Array.isArray(value) ? "a list" : `a ${typeof value}`;
 }
 function checkedNumber(context, nodeIndex, value, operation) {
     if (typeof value !== "number") {

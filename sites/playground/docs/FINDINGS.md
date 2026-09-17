@@ -3,166 +3,16 @@
 Every item here was found by trying to build the app, not by reading code. Each has a stable
 number so it can be cited from a proposal, a commit, or another finding.
 
-Seven were fixed in this change: three in the TypeScript IR runtime, which rejected values the
-language itself produces (F1–F3); three in type checking, which never looked inside a component
-body (F5, F7, F19); and one in the grammar, which rejected an element with an empty body (F20). One
-more (F21) was fixed later, by a change these examples were the evidence for. The rest are worked
-around here; each is a candidate for its own change. The last group is not bugs at
-all — behavior that shaped the catalog and is worth knowing before writing NX against it.
+Only what is still open is listed. A finding that has been fixed is removed, and the numbers are
+never reused, so a gap in the sequence is a finding that is gone: F1–F7, F13, F19–F22 and F27
+so far. The git history of this file has their write-ups. What remains is worked around here, and
+each is a candidate for its own change. The last group is not bugs at all — behavior that shaped
+the catalog and is worth knowing before writing NX against it.
 
 Unless a finding says otherwise, the Rust interpreter is the reference: where the two runtimes
 disagree, the interpreter is the one that matches the language.
 
-## Fixed in this change — `runtime/typescript`
-
-The TypeScript IR runtime rejected values the language itself produces. All three are the same
-shape, and all three are aligned with the interpreter rather than newly invented.
-
-### F1 — A single child of a list-typed content property was not a list
-
-`<SkiaScroll><SkiaStack/></SkiaScroll>` — the opening shape of nearly every DrawnUI page — failed
-with `Expected props.Children to be an array`, because content binding collapsed one child to the
-child itself. Content binding now respects the content property's declared type.
-
-### F2 — A record value could not normalize into a record-typed field
-
-Record construction stamps a `$type` discriminator, and normalization then reported that
-discriminator as an unknown field, so `Padding=<Thickness Left=4.0 />` failed — as did every
-record-valued property in the catalog, which is to say `Padding` and `Margin` on every control. The
-union branch beside it already discarded its discriminator; the record branch now does the same.
-
-### F3 — A single value at a list-typed property was not coerced to a list of one
-
-`Shadows={ <SkiaShadow Y=6.0 /> }` and `xs={3.0}` are one-element lists under the interpreter, which
-performs the coercion during normalization — the IR records the value at its own type. The
-TypeScript runtime failed instead. This is the general rule that F1 is one case of.
-
-## Fixed in this change — `crates/nx-types`
-
-Type checking walked `Item::Function` and skipped `Item::Component`, so a component body was never
-inferred. Three findings fall out of that one line, and out of fixing it.
-
-### F5 — A bare contextual union case could not be emitted to IR from a component body
-
-`HorizontalOptions=Center` evaluated under the interpreter and generated correctly inside
-`let root()`, but inside a component body code generation failed with `unresolved contextual name
-cannot be emitted`. The same limit applied to prop defaults, where `= {LayoutType.Absolute}` was the
-only working spelling.
-
-A contextual name has no type of its own; inference resolves it against the declared type of its
-binding site, and those resolutions are what rewrite the bare name into the qualified case before
-anything downstream sees it. A body that is never inferred keeps its bare names, and codegen has
-nothing to emit them as — which is why the diagnostic reads as an internal error rather than as
-something an author did. Component bodies are now inferred, with props and state bound by name the
-way a function's parameters are.
-
-```nx
-component <A extends Node /> = { <Paint colour=Red /> }        // now emits Hue.Red
-component <B extends Node hue:Hue = Green /> = { ... }         // and so does a default
-```
-
-The examples write the bare form everywhere now. Across all twelve, the emitted IR is identical to
-what the qualified form produced apart from source spans and slot numbering, which is what makes
-that rewrite safe.
-
-### F7 — A property type mismatch inside a component body was not reported
-
-The same cause, and the same fix: an uninferred body is an unchecked body. Passing a case of the
-wrong union was rejected at the top level and accepted inside a component body, failing only at
-runtime. This cost real debugging time on the Layouts port: the example compiled with no
-diagnostics and then refused to draw.
-
-```nx
-type Alpha = Red | Green
-type Beta = Red | Blue
-external component <Paint colour:Alpha? />
-abstract external component <Node />
-component <Wrapper extends Node /> = { <Paint colour={Beta.Red} /> }   // now rejected
-let root() = { <Paint colour={Beta.Red} /> }                          // already rejected
-```
-
-A prop or state default is now checked against its declared type as well, under
-`component-default-type-mismatch`.
-
-### F19 — A record field had no type
-
-`u.name` on a record-typed binding reported `Member access not yet implemented: .name`. Inference
-had an arm for a union and for a union case and none for a record, so every read of a record field
-was an error — in a function body as much as in a component body.
-
-It surfaced the moment F5's fix started inferring component bodies, because that is where the
-examples read record props: `Text={Item.Title}` in `ContactCell` is the shape. Fixing F5 without it
-would have broken the examples F5 was blocking, so both are here.
-
-A field is resolved through the record's effective shape, so an inherited field is found as readily
-as a declared one, and each field's type is resolved in the module that declared *that field* rather
-than the module the record came from. An unknown field now names the fields that exist.
-
-A **nullable** base reads its field the same way, which was not true at first. `Item:Contact?` with
-`Item.Title` in the body is the natural thing to write against a catalog whose every property is
-optional, and it reported `Member access not yet implemented: .Title` — nullable was unhandled for
-records and unions alike, and had been all along, but nothing reached it while component bodies went
-unchecked. NX has no narrowing construct to discharge the null with, so demanding one would make a
-nullable record or union prop unreadable rather than safer; the base is unwrapped and the field's own
-declared type is returned, not a nullable of it, since a `string?` would fail at every `string` site
-downstream. The looseness is deliberate and matches what the interpreter does at runtime.
-
-## Fixed in this change — `crates/nx-syntax`
-
-### F20 — An element with an empty body was a syntax error
-
-```nx
-<SkiaLayer VerticalOptions=Fill>
-</SkiaLayer>
-```
-
-An opening tag closed immediately by its own closing tag did not parse. The `element` rule required
-body content, and body content is `repeat1`, so nothing stood between `>` and `</`. Body content is
-now optional, and an empty body means what a self-closing tag means: the declared content property
-is left unset. Supplying content is unchanged — a target declaring no content property still accepts
-`<Plain></Plain>` and still rejects `<Plain><Kid /></Plain>` — and a closing tag naming a different
-element is still reported as a mismatch.
-
-The defect looked positional and was not. It was found while trying to write a file as a single
-trailing element rather than as `let root() = { ... }`, which NX has always allowed, so the first
-reading was that the top-level form was broken. It was not: `<App><Header /></App>` parsed fine at
-the top level all along, and `let root() = { <App></App> }` failed just as hard. What the two cases
-had in common was the empty body. Whitespace and comments do not count as content, so the shape an
-author actually writes — an open tag, a blank line, a close tag — hit it too.
-
-**The app's compile arrangement changed because of this.** A file may end in a single bare element,
-and the grammar allows that element only as the file's **last** item. The compile used to append the
-catalog to the visitor's source, which put declarations after that element and made the form a
-syntax error in the playground even once the grammar was fixed. The catalog now goes first, and
-`classify` in `src/compile/catalog.ts` subtracts the catalog's leading lines and bytes so a
-diagnostic still reports the line and column the visitor sees. Columns need no adjustment, since the catalog
-contributes whole lines. Appending had been chosen precisely to avoid that arithmetic; the
-trailing-element form is what made it worth paying. F4 records the arrangement; F9 records the one
-behavior it changes, where a name declared in both the catalog and the visitor's source now resolves
-to the visitor's rather than the catalog's.
-
-The examples are written in the trailing-element form now. Across all twelve, the emitted IR is
-identical to what `let root() = { ... }` produced apart from source spans, slot and declaration
-numbering, and the embedded source text with its fingerprint — all of which move when the text
-moves. That is what makes the rewrite safe; a bare trailing element lowers to the same synthesized
-`root` entrypoint, so nothing downstream can tell the two forms apart. Note that dedenting a body
-into the trailing form is not a whitespace-only edit: a newline in a string literal is a newline in
-the value (F11), so the continuation lines of a multi-line string must keep their exact columns.
-
 ## Compiler and analysis gaps
-
-### F4 — Cross-module external components lose defaults and inherited props
-
-Documented as NXE12/NXE13 in `docs/drawn-ui-proposal-nx-enhancements.md`. A workspace-sibling
-import (`import "./skia"`) did not resolve at all. The app compiles the visitor's source and the
-catalog as a single module, with the catalog first — see F20 for why that order, and for the
-position arithmetic it costs.
-
-### F6 — The two runtimes serialize union cases differently
-
-For the same program the Rust interpreter emits `"Type": "Column"` and the TypeScript IR runtime
-emits `"Type": {"$type": "LayoutType.Column"}`. The renderer unwraps the second form using the
-generated catalog metadata. Whichever is chosen, they should agree.
 
 ### F8 — An unresolved type name is not reported by analysis
 
@@ -176,25 +26,20 @@ external component <Box value: NoSuchType? />    // evaluates, no diagnostic
 Code generation does reject it, with `type binding 'NoSuchType' is unavailable` — but only when the
 whole program is built, and without pointing at the annotation (see F10).
 
-### F9 — A duplicate declaration is silently accepted, and the last one wins
+### F9 — A visitor's declaration silently replaces the catalog's
 
-Two declarations of the same component name produce no diagnostic. The second shadows the first,
-and using the first's property then gives a misleading error about the property rather than about
-the duplicate:
+The catalog is a module the visitor's source imports implicitly. A visitor who declares a component
+the catalog also declares gets no diagnostic: their declaration shadows the catalog's, their own
+properties work, and every catalog property on that tag is suddenly unknown. The diagnostic they
+eventually see names a property rather than the collision:
 
 ```nx
-external component <Box a:string? />
-external component <Box b:string? />
-let root() = { <Box a="first" /> }   // Element 'Box' has no property 'a'
-let root() = { <Box b="second" /> }  // fine
+external component <SkiaLabel mine:string? />
+<SkiaLabel Text="x" />   // Element 'SkiaLabel' has no property 'Text'
 ```
 
-This matters here because the catalog is concatenated with the visitor's source. Since the catalog
-comes first (F20), a visitor who declares `SkiaLabel` silently replaces the catalog's rather than
-being replaced by it: their own properties work, every catalog property on that tag is suddenly
-unknown, and the diagnostic they eventually see names a property rather than the collision. The
-shadowing runs the other way from how it read when the catalog was appended, which is a little
-kinder to the visitor and no less confusing.
+Two declarations of one name inside a single module are reported; it is the collision across the
+import that is silent.
 
 ### F10 — Whole-program code generation failures carry no position
 
@@ -217,46 +62,44 @@ attributes in embedded XML.
 `for label in ["a", "b"] { ... }` inside an element fails with `Invalid element syntax`; binding the
 list to a `let` first works. Both forms are fine outside content position.
 
-### F13 — An empty list has no spelling
+## Found by wiring the readouts
 
-`{}`, `{ }`, `[]` and `{[]}` are all syntax errors, so a list-typed property cannot be defaulted to
-empty. Already proposed separately as the `empty-list-spelling` change; recorded here because the
-catalog generator ran into it, and it is part of why the catalog declares no defaults.
+Once `+` could join a number or a boolean to a string, the examples that had drawn a fixed
+"Tapped 0×" or "SelectedIndex=1" were wired to the page's state, and the hand-numbered rows became
+loops. Wiring them found four more. None blocks an example; each is worked around in the NX and
+said so at the point of the workaround.
 
-### F21 — A whole number had to be written `24.0` at a float property — fixed
+### F26 — Two events in one gesture: the first runs, the second is dropped
 
-Every numeric property in this catalog is `float64`, and an integer literal was rejected at a float
-site, so `Spacing=8 WidthRequest=150 FontSize=13` had to be written `Spacing=8.0 WidthRequest=150.0
-FontSize=13.0`. It was not a rare inconvenience: **634 of the 713 float literals in these examples**
-were whole numbers carrying a `.0` that said nothing the declaration had not already said.
+Choosing a radio button switches its neighbour off, and DrawnUI raises both `Toggled` events inside
+the one tap. The renderer dispatches the first, which replaces the instance, and then drops the
+second: its callback belongs to the drawing the dispatch just retired, and `DrawnTree` ignores a
+callback whose instance has moved on. That guard is right for an event that arrives late, and wrong
+for one that arrives in the same turn. The Common Controls page has each radio button report the
+chosen option whichever event it receives, so either one produces the right line. A fix would queue
+the events of one turn and run each against the instance the one before it left.
 
-Fixed by the `int-literals-at-float-sites` change: an integer literal now takes the floating-point
-type its binding site declares, and is converted rather than merely tolerated, so `8` and `8.0`
-produce identical NX IR. A literal that cannot be represented exactly in the target float type is
-still rejected rather than rounded. The examples in this app were the corpus the change was measured
-against, and the proof it changed nothing but the notation is that their emitted IR is byte-identical
-across the edit.
+### F28 — An `if` without `else` is `void`, so a loop cannot filter and a handler cannot decline
 
-## Found by the preview.4 sync
+The expressions reference shows `for n in numbers { if n % 2 == 0 { n } }` as a filter. The checker
+types the `if` as `void` and the loop as `void[]`, which no content property accepts. The same rule
+reaches handlers: `if action.value { <Card.Logged ... /> }` is rejected because a handler must
+return an action, and a component with no state has no `<Update />` to return in the other branch.
+The SkiaScroll page writes out one color list per row count instead of filtering a longer one.
+The pending `type-conditionals-without-else` change addresses the sequence case.
 
-Three more, found while bringing the examples up to DrawnUI `f617e07`. One is the compiler's; two
-are the engine's, worked around in the site's own code rather than in the vendored tree, so a
-future sync does not erase the fix.
+### F29 — What the readouts still cannot say
 
-### F22 — `+` on a record field is a numeric add, not a string concatenation
+Each of these left a note in an example where the original does more:
 
-`"Reorder " + Item.Title` compiled with no diagnostic and failed in the browser with `Operator 'add'
-requires JavaScript-safe numeric values`. HIR lowering turns `+` into `Concat` only when both
-operands carry a string type tag at lowering time (`crates/nx-hir/src/lower.rs`, the `BinOp::Add`
-arm); a string literal and a `string` prop do, a record field access does not, so the operator
-stays `Add` and every runtime rejects the string operands. `Text + ": On"` on a `string` prop works,
-which is why the Carousel & Drawer toggles could keep it. The Drag to reorder rows label the grip
-with the title alone and put the verb in the hint.
-
-`check-examples` did not catch it, because `evaluateFunction(root)` evaluates a component *use*
-to its descriptor and leaves the body to the renderer, which expands it through
-`initializeComponent`. The check now expands every authored component the way the renderer does,
-so a runtime failure inside a component body fails the check.
+- **No range and no list indexing.** A loop needs a list of the right length, and a palette cannot
+  be cycled by index, so SkiaScroll and Carousel & Drawer spell out their color lists.
+- **No string length and no trim.** The Editor's password card cannot count its characters, and
+  its chat card counts a message of only spaces, which the original skips.
+- **No way to append to a list.** The Editor's chat card shows the latest message, not the last four.
+- **No number formatting.** A `float64` has one text form, so a speed reads `1x` where the original
+  pads it to `1.0x` with `toFixed(1)`.
+- **No `else if`.** A three-way choice nests an `if` inside the `else` block.
 
 ## Engine integration
 

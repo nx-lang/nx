@@ -2,14 +2,14 @@
  * Expands every authored component in an evaluated value tree, the way the renderer does.
  *
  * Evaluating `root` turns a component *use* into a descriptor — `{ $type: "Card", Title: … }` — and
- * leaves the body for whoever draws it, so a runtime failure inside a component body (FINDINGS
- * F22 was one) would pass a check that stopped at the descriptor. This walks the tree through the
- * same instance tree the site draws with, and walks what it meets the way `drawValue` does: each
- * authored component is initialized under the instance that encloses it, so a handler its parent
- * bound resolves through the parent, and what it rendered is walked in turn; a catalog control's
- * content is walked, and a handler without a token on it is reported, as `bind` reports it; any
- * other value is a placeholder the renderer does not look inside. What it produces is the
- * exception a body throws, or the handlers bound outside any component, which no instance can run.
+ * leaves the body for whoever draws it, so a runtime failure inside a component body would pass a
+ * check that stopped at the descriptor. This walks the tree through the same instance tree the site
+ * draws with, and walks what it meets the way `drawValue` does: each authored component is
+ * initialized under the instance that encloses it, so a handler its parent bound resolves through
+ * the parent, and what it rendered is walked in turn; a catalog control's content is walked, and a
+ * handler without a token on it is reported, as `bind` reports it; any other value is a placeholder
+ * the renderer does not look inside. What it produces is the exception a body throws, or the
+ * handlers bound outside any component, which no instance can run.
  */
 import meta from "../catalog/catalog-meta.json" with { type: "json" };
 import { InstanceTree, isHandlerRecord } from "../src/render/instances.ts";

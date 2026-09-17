@@ -1,4 +1,4 @@
-//! NX IR schema 3: one module per artifact, encoded as flat tables.
+//! NX IR schema 4: one module per artifact, encoded as flat tables.
 //!
 //! <para>An artifact carries the module's string, type, constant and node tables and its
 //! declaration list, plus a module table naming every module it references. A reference is a
@@ -26,7 +26,7 @@ use nx_types::{Primitive, Type};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
-pub const NX_IR_SCHEMA_VERSION: u32 = 3;
+pub const NX_IR_SCHEMA_VERSION: u32 = 4;
 pub const NX_IR_RUNTIME_ABI: &str = "nx-ir-runtime-v2";
 /// Required by a module that declares a derived update record, so a runtime that predates them
 /// refuses the module rather than normalizing a patch as a whole record.
@@ -41,7 +41,7 @@ pub const NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1: &str = "update-intrinsics
 /// module by name rather than failing on an unknown node.
 pub const NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1: &str = "action-handlers-v1";
 
-/// The kind numbers of schema 3. A number, once assigned, is never reused for anything else.
+/// The kind numbers of schema 4. A number, once assigned, is never reused for anything else.
 pub mod kinds {
     /// Node kinds: the first element of every `nodes` entry.
     pub mod node {
@@ -65,6 +65,7 @@ pub mod kinds {
         pub const ELEMENT: i64 = 17;
         pub const COMPONENT: i64 = 18;
         pub const ACTION_HANDLER: i64 = 19;
+        pub const TEXT: i64 = 20;
 
         pub const NAMES: &[(i64, &str)] = &[
             (NULL, "null"),
@@ -87,6 +88,7 @@ pub mod kinds {
             (ELEMENT, "element"),
             (COMPONENT, "component"),
             (ACTION_HANDLER, "actionHandler"),
+            (TEXT, "text"),
         ];
     }
 
@@ -151,6 +153,10 @@ pub mod kinds {
         pub const GE: i64 = 13;
         pub const AND: i64 = 14;
         pub const OR: i64 = 15;
+        pub const FADD32: i64 = 16;
+        pub const FSUB32: i64 = 17;
+        pub const FMUL32: i64 = 18;
+        pub const FDIV32: i64 = 19;
 
         pub const NAMES: &[(i64, &str)] = &[
             (ADD, "add"),
@@ -169,6 +175,10 @@ pub mod kinds {
             (GE, "ge"),
             (AND, "and"),
             (OR, "or"),
+            (FADD32, "fadd32"),
+            (FSUB32, "fsub32"),
+            (FMUL32, "fmul32"),
+            (FDIV32, "fdiv32"),
         ];
     }
 
@@ -669,7 +679,13 @@ fn visit_expression(expression: &CodegenExpression, visit: &mut dyn FnMut(&Codeg
             visit_expression(lhs, visit);
             visit_expression(rhs, visit);
         }
-        CodegenExpressionKind::Unary { expr, .. } => visit_expression(expr, visit),
+        CodegenExpressionKind::Unary { expr, .. } | CodegenExpressionKind::ToText { expr, .. } => {
+            visit_expression(expr, visit)
+        }
+        CodegenExpressionKind::Concat { lhs, rhs } => {
+            visit_expression(lhs, visit);
+            visit_expression(rhs, visit);
+        }
         CodegenExpressionKind::Call { callee, args } => {
             visit_expression(callee, visit);
             visit_expressions(args, visit);
@@ -1326,6 +1342,19 @@ impl<'a> ModuleEmitter<'a> {
                 };
                 IrItem::ints([kinds::node::UNARY, op, operand])
             }
+            // Whether a `+` concatenates was decided by type analysis and is the node's own
+            // kind here, so nothing about the operands is consulted. `concat` takes strings
+            // only: the operand that was not one arrives wrapped in a `text` node.
+            CodegenExpressionKind::Concat { lhs, rhs } => {
+                let lhs = self.expression(lhs);
+                let rhs = self.expression(rhs);
+                IrItem::ints([kinds::node::BINARY, kinds::binary::CONCAT, lhs, rhs])
+            }
+            CodegenExpressionKind::ToText { expr, ty } => {
+                let operand = self.expression(expr);
+                let ty = self.string(ty.as_str());
+                IrItem::ints([kinds::node::TEXT, operand, ty])
+            }
             CodegenExpressionKind::Call { callee, args } => {
                 let callee = self.expression(callee);
                 let args = self.expressions(args);
@@ -1604,7 +1633,15 @@ impl<'a> ModuleEmitter<'a> {
                 let constant = self.constant(constant);
                 IrItem::ints([kinds::node::NUMBER, constant])
             }
-            Literal::Float(value) => {
+            // A literal's width is not part of the IR: every supported runtime carries the
+            // numeric types in one representation, so an `int32` is an `int` constant and a
+            // `float32` is the `float` constant of its rounded value.
+            Literal::Int32(value) => {
+                let constant =
+                    self.constant(IrItem::ints([kinds::constant::INT, i64::from(*value)]));
+                IrItem::ints([kinds::node::NUMBER, constant])
+            }
+            Literal::Float(value) | Literal::Float32(value) => {
                 let constant = self.constant(IrItem::list([
                     IrItem::Int(kinds::constant::FLOAT),
                     IrItem::Float(value.0),
@@ -1617,8 +1654,10 @@ impl<'a> ModuleEmitter<'a> {
     }
 }
 
-/// The operator code of a binary expression. Division and remainder are integer operations when
-/// the expression's own type is an integer type, which is what the interpreter does too.
+/// The operator code of a binary expression, chosen by the expression's own type as the
+/// interpreter chooses it. A runtime carries every number as a `float64`, so the type picks integer
+/// division and remainder, and the `float32` arithmetic whose result is rounded to a `float32`. A
+/// `float32` remainder is exact, so it needs no variant.
 fn binary_operator(op: BinOp, ty: Option<&Type>) -> i64 {
     let integer = matches!(
         ty,
@@ -1626,11 +1665,16 @@ fn binary_operator(op: BinOp, ty: Option<&Type>) -> i64 {
             Primitive::Int | Primitive::Int32 | Primitive::Int64
         ))
     );
+    let float32 = matches!(ty, Some(Type::Primitive(Primitive::Float32)));
     match op {
+        BinOp::Add if float32 => kinds::binary::FADD32,
         BinOp::Add => kinds::binary::ADD,
+        BinOp::Sub if float32 => kinds::binary::FSUB32,
         BinOp::Sub => kinds::binary::SUB,
+        BinOp::Mul if float32 => kinds::binary::FMUL32,
         BinOp::Mul => kinds::binary::MUL,
         BinOp::Div if integer => kinds::binary::IDIV,
+        BinOp::Div if float32 => kinds::binary::FDIV32,
         BinOp::Div => kinds::binary::DIV,
         BinOp::Mod if integer => kinds::binary::IMOD,
         BinOp::Mod => kinds::binary::MOD,
@@ -1642,7 +1686,6 @@ fn binary_operator(op: BinOp, ty: Option<&Type>) -> i64 {
         BinOp::Ge => kinds::binary::GE,
         BinOp::And => kinds::binary::AND,
         BinOp::Or => kinds::binary::OR,
-        BinOp::Concat => kinds::binary::CONCAT,
     }
 }
 

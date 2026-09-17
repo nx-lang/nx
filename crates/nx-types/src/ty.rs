@@ -79,6 +79,43 @@ impl Primitive {
         self.is_integer() || self.is_float()
     }
 
+    /// Whether a value of this type has a canonical text form: the numeric types and `boolean`.
+    ///
+    /// <para>These are the types `+` joins to a string and a text body may embed. `string` is
+    /// already text and needs no conversion, and `void` and `never` name no value.</para>
+    pub fn is_stringifiable(&self) -> bool {
+        self.is_numeric() || matches!(self, Primitive::Boolean)
+    }
+
+    /// This primitive as a HIR node names it, or `None` for the inference-internal ones.
+    pub fn hir_type(&self) -> Option<nx_hir::ast::PrimitiveType> {
+        use nx_hir::ast::PrimitiveType;
+        Some(match self {
+            Primitive::Int => PrimitiveType::Int,
+            Primitive::Int32 => PrimitiveType::Int32,
+            Primitive::Int64 => PrimitiveType::Int64,
+            Primitive::Float32 => PrimitiveType::Float32,
+            Primitive::Float64 => PrimitiveType::Float64,
+            Primitive::String => PrimitiveType::String,
+            Primitive::Boolean => PrimitiveType::Boolean,
+            Primitive::Void | Primitive::Never => return None,
+        })
+    }
+
+    /// The primitive a HIR node names.
+    pub fn from_hir_type(ty: nx_hir::ast::PrimitiveType) -> Self {
+        use nx_hir::ast::PrimitiveType;
+        match ty {
+            PrimitiveType::Int => Primitive::Int,
+            PrimitiveType::Int32 => Primitive::Int32,
+            PrimitiveType::Int64 => Primitive::Int64,
+            PrimitiveType::Float32 => Primitive::Float32,
+            PrimitiveType::Float64 => Primitive::Float64,
+            PrimitiveType::String => Primitive::String,
+            PrimitiveType::Boolean => Primitive::Boolean,
+        }
+    }
+
     /// Whether this floating-point primitive represents `value` exactly.
     ///
     /// <para>Always false for a non-floating-point primitive: the question is whether converting an
@@ -97,36 +134,52 @@ impl Primitive {
         }
     }
 
-    /// Returns the promoted type when combining two numeric primitives of the
-    /// same category (both integer or both float). Returns `None` for
-    /// cross-category combinations (e.g. int32 + float64).
+    /// Whether a value of this primitive type is accepted, unchanged in meaning, at a site of
+    /// `target`'s type.
     ///
-    /// Promotion rules follow the integer rank order int32 < int < int64, so the wider operand
-    /// wins:
-    /// - int32 + int32 → int32
-    /// - int32 + int → int
-    /// - int + int → int
-    /// - int64 with any integer → int64
-    /// - float32 + float32 → float32
-    /// - float32 + float64 → float64 (the wider operand wins)
-    pub fn numeric_promotion(a: Primitive, b: Primitive) -> Option<Primitive> {
-        if a.is_integer() && b.is_integer() {
-            if matches!(a, Primitive::Int64) || matches!(b, Primitive::Int64) {
-                Some(Primitive::Int64)
-            } else if matches!(a, Primitive::Int) || matches!(b, Primitive::Int) {
-                Some(Primitive::Int)
-            } else {
-                Some(Primitive::Int32)
-            }
-        } else if a.is_float() && b.is_float() {
-            if matches!(a, Primitive::Float32) && matches!(b, Primitive::Float32) {
-                Some(Primitive::Float32)
-            } else {
-                Some(Primitive::Float64)
-            }
-        } else {
-            None
+    /// <para>This is the implicit numeric conversion lattice, written once: `int32 → int → int64`,
+    /// `float32 → float64`, and the two exact crossings into floating point, `int32 → float64` and
+    /// `int → float64`. A conversion is on the list only when it is total, exact, and has one
+    /// obvious result. `int` is exact over ±(2^53−1), precisely the integer range a `float64`
+    /// holds without loss, so those two crossings qualify; `int64` exceeds it and `float32` is
+    /// exact only to ±2^24, so `int64` to any float and any integer to `float32` do not. Every
+    /// primitive widens to itself. The relation runs one way: nothing narrows.</para>
+    pub fn widens_to(self, target: Primitive) -> bool {
+        if self == target {
+            return true;
         }
+        match self {
+            Primitive::Int32 => matches!(
+                target,
+                Primitive::Int | Primitive::Int64 | Primitive::Float64
+            ),
+            Primitive::Int => matches!(target, Primitive::Int64 | Primitive::Float64),
+            Primitive::Float32 => matches!(target, Primitive::Float64),
+            _ => false,
+        }
+    }
+
+    /// The narrowest numeric primitive both operands widen to, or `None` when there is none.
+    ///
+    /// <para>This is what a mixed arithmetic or comparison operation is typed at. It is computed
+    /// from [`Primitive::widens_to`] over the rank order `int32, int, int64, float32, float64`
+    /// rather than written as its own table, so the lattice has one home. The results that fall
+    /// out: `int32 + int → int`, `int + int64 → int64`, `float32 + float64 → float64`,
+    /// `int + float64 → float64`, `int32 + float32 → float64` (neither widens to `float32`, both
+    /// widen exactly to `float64`), and `int64` with either float has no common type.</para>
+    pub fn numeric_promotion(a: Primitive, b: Primitive) -> Option<Primitive> {
+        const RANK: [Primitive; 5] = [
+            Primitive::Int32,
+            Primitive::Int,
+            Primitive::Int64,
+            Primitive::Float32,
+            Primitive::Float64,
+        ];
+        if !a.is_numeric() || !b.is_numeric() {
+            return None;
+        }
+        RANK.into_iter()
+            .find(|candidate| a.widens_to(*candidate) && b.widens_to(*candidate))
     }
 }
 
@@ -434,12 +487,18 @@ impl Type {
             return true;
         }
 
-        // Numeric width promotion within the same category
+        // Numeric widening, one way only: `int32 → int → int64`, `float32 → float64`, and the
+        // exact crossings `int32`/`int → float64`. A narrowing is never compatible.
         if let (Type::Primitive(a), Type::Primitive(b)) = (self, other) {
-            if a.is_integer() && b.is_integer() {
+            if a.widens_to(*b) {
                 return true;
             }
-            if a.is_float() && b.is_float() {
+        }
+
+        // T? is compatible with U? when T is compatible with U: `null` stays `null`, and anything
+        // else converts as T to U does.
+        if let (Type::Nullable(a), Type::Nullable(b)) = (self, other) {
+            if a.is_compatible_with(b) {
                 return true;
             }
         }
@@ -899,11 +958,83 @@ mod tests {
             assert_eq!(Primitive::numeric_promotion(a, b), Some(Primitive::Int64));
         }
 
-        // `int` stays in its own category.
+        // Cross-category promotion follows the exact crossings into `float64`.
         assert_eq!(
             Primitive::numeric_promotion(Primitive::Int, Primitive::Float64),
+            Some(Primitive::Float64)
+        );
+        assert_eq!(
+            Primitive::numeric_promotion(Primitive::Float32, Primitive::Int32),
+            Some(Primitive::Float64)
+        );
+        assert_eq!(
+            Primitive::numeric_promotion(Primitive::Float32, Primitive::Float64),
+            Some(Primitive::Float64)
+        );
+        assert_eq!(
+            Primitive::numeric_promotion(Primitive::Float32, Primitive::Float32),
+            Some(Primitive::Float32)
+        );
+        // `int64` is lossy in every float, so it has no common type with either.
+        assert_eq!(
+            Primitive::numeric_promotion(Primitive::Int64, Primitive::Float64),
             None
         );
+        assert_eq!(
+            Primitive::numeric_promotion(Primitive::Float32, Primitive::Int64),
+            None
+        );
+        assert_eq!(
+            Primitive::numeric_promotion(Primitive::String, Primitive::Int),
+            None
+        );
+    }
+
+    #[test]
+    fn test_widens_to_admits_exactly_the_six_widenings() {
+        use Primitive::*;
+        for (from, to) in [
+            (Int32, Int),
+            (Int32, Int64),
+            (Int, Int64),
+            (Float32, Float64),
+            (Int32, Float64),
+            (Int, Float64),
+        ] {
+            assert!(from.widens_to(to), "{from} should widen to {to}");
+            assert!(
+                Type::Primitive(from).is_compatible_with(&Type::Primitive(to)),
+                "{from} should be compatible with {to}"
+            );
+        }
+        for p in [Int32, Int, Int64, Float32, Float64, String, Boolean] {
+            assert!(p.widens_to(p), "{p} should widen to itself");
+        }
+    }
+
+    #[test]
+    fn test_widens_to_rejects_every_narrowing_and_lossy_crossing() {
+        use Primitive::*;
+        for (from, to) in [
+            (Int64, Int),
+            (Int64, Int32),
+            (Int, Int32),
+            (Float64, Float32),
+            (Int64, Float64),
+            (Int, Float32),
+            (Int32, Float32),
+            (Int64, Float32),
+            (Float32, Int),
+            (Float64, Int),
+            (String, Int),
+            (Boolean, Int32),
+        ] {
+            assert!(!from.widens_to(to), "{from} should not widen to {to}");
+            assert!(
+                !Type::Primitive(from).is_compatible_with(&Type::Primitive(to)),
+                "{from} should not be compatible with {to}"
+            );
+        }
     }
 
     #[test]
@@ -944,15 +1075,6 @@ mod tests {
     }
 
     #[test]
-    fn test_int_is_compatible_with_the_other_integer_widths() {
-        assert!(Type::int().is_compatible_with(&Type::int32()));
-        assert!(Type::int32().is_compatible_with(&Type::int()));
-        assert!(Type::int().is_compatible_with(&Type::int64()));
-        assert!(Type::int64().is_compatible_with(&Type::int()));
-        assert!(!Type::int().is_compatible_with(&Type::float64()));
-    }
-
-    #[test]
     fn test_numeric_promotion() {
         // Same width
         assert_eq!(
@@ -977,34 +1099,6 @@ mod tests {
             Primitive::numeric_promotion(Primitive::Float32, Primitive::Float64),
             Some(Primitive::Float64)
         );
-
-        // Cross category: error
-        assert_eq!(
-            Primitive::numeric_promotion(Primitive::Int32, Primitive::Float32),
-            None
-        );
-        assert_eq!(
-            Primitive::numeric_promotion(Primitive::Int64, Primitive::Float64),
-            None
-        );
-    }
-
-    #[test]
-    fn test_is_compatible_same_category_widths() {
-        // int32 compatible with int64 (same category, different width)
-        assert!(Type::int32().is_compatible_with(&Type::int64()));
-        assert!(Type::int64().is_compatible_with(&Type::int32()));
-
-        // float32 compatible with float64
-        assert!(Type::float32().is_compatible_with(&Type::float64()));
-        assert!(Type::float64().is_compatible_with(&Type::float32()));
-    }
-
-    #[test]
-    fn test_is_not_compatible_cross_category() {
-        // int32 not compatible with float32
-        assert!(!Type::int32().is_compatible_with(&Type::float32()));
-        assert!(!Type::int64().is_compatible_with(&Type::float64()));
     }
 
     #[test]
