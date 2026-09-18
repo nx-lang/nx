@@ -71,3 +71,10 @@
 
 # NX IR images are binary; read one with `nxlang ir explain`.
 *.nxir binary
+
+# NX sources check out with LF everywhere. A module's fingerprint is a hash of its source text, so
+# a CRLF working copy emits a different image, and the conformance corpus compares the images it
+# emits with committed ones byte for byte. The corpus's expected explanations are pinned for the
+# same reason.
+*.nx eol=lf
+*.nxir.txt eol=lf
