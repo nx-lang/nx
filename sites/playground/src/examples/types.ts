@@ -16,7 +16,10 @@ export type Coverage = "complete" | "static" | "reduced";
  * every example ready to be upgraded.
  *
  * Two of them, `event-handlers` and `component-state`, NX now has: a tag naming one says the port
- * does not use it yet, which is porting work, not a language gap. The other three NX lacks.
+ * does not use it yet, which is porting work, not a language gap. The other two NX lacks. List
+ * virtualization is not in the vocabulary: a templated `SkiaLayout` binds `ItemsSource` and an
+ * element function through `ItemTemplate`, and DrawnUI recycles the cells, so Cells and Uneven
+ * Cells are ported with the virtualization the originals demonstrate.
  *
  * `code-behind` is an engine object built or driven from code and attached to a control — a
  * shader effect in `VisualEffects`, a CanvasKit filter in `PaintColorFilter`, a `SkiaSpriteSet`
@@ -26,19 +29,13 @@ export type Coverage = "complete" | "static" | "reduced";
  * (`Seek(30)`, `SelectAll()`) or reading from one (a Lottie's frame count, the accessibility
  * manager's snapshot) — since NX has no way to reach the object either.
  */
-export type Capability =
-  | "event-handlers"
-  | "animation"
-  | "component-state"
-  | "list-virtualization"
-  | "code-behind";
+export type Capability = "event-handlers" | "animation" | "component-state" | "code-behind";
 
 /** The one place each capability is worded, so two examples sharing a tag word it identically. */
 export const CAPABILITY_WORDING: Record<Capability, string> = {
   "event-handlers": "event handlers",
   animation: "animation",
   "component-state": "component state",
-  "list-virtualization": "list virtualization",
   "code-behind": "code-behind",
 };
 
@@ -47,7 +44,6 @@ export const CAPABILITY_STATUS: Record<Capability, "missing" | "unused"> = {
   "event-handlers": "unused",
   animation: "missing",
   "component-state": "unused",
-  "list-virtualization": "missing",
   "code-behind": "missing",
 };
 

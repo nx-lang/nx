@@ -2,9 +2,9 @@ use crate::model::{
     expr_id_u32, CodegenActionHandler, CodegenComponent, CodegenComponentDescriptor,
     CodegenComponentEmit, CodegenComponentField, CodegenComponentTargetKind, CodegenDeclaration,
     CodegenDeclarationKind, CodegenElement, CodegenEntrypoint, CodegenExpression,
-    CodegenExpressionKind, CodegenMatchArm, CodegenModule, CodegenModuleProvenance, CodegenParam,
-    CodegenProgram, CodegenProperty, CodegenRecordField, CodegenReference, CodegenSourceEntry,
-    CodegenStatement, CodegenTypeRef, CodegenUnionCase,
+    CodegenExpressionKind, CodegenFunctionParam, CodegenMatchArm, CodegenModule,
+    CodegenModuleProvenance, CodegenParam, CodegenProgram, CodegenProperty, CodegenRecordField,
+    CodegenReference, CodegenSourceEntry, CodegenStatement, CodegenTypeRef, CodegenUnionCase,
 };
 use crate::options::CodegenError;
 use nx_api::{LibraryArtifact, ProgramArtifact};
@@ -1957,6 +1957,59 @@ fn build_element_expression(
             diagnostics,
         )?);
     }
+    // A tag that analysis resolved to a function-typed value in scope is a call of that value by
+    // name, ahead of any declaration the name might also reach. Body content binds under the
+    // callee type's content parameter, which analysis recorded with the call.
+    if let Some(content_param) = module_artifact_for(artifact, resolved_module)
+        .and_then(|module_artifact| module_artifact.function_value_calls.get(&element_id))
+    {
+        // The callee is a lexical binding when the call sits inside the function or component that
+        // binds it, and a declaration reference when it names a top-level `let` of function type,
+        // exactly as a bare identifier in expression position resolves.
+        let in_scope = scope.contains(element.tag.as_str());
+        let callee_reference = if in_scope {
+            None
+        } else {
+            resolve_visible_reference(artifact, resolved_module.id, element.tag.as_str())
+        };
+        if !in_scope && callee_reference.is_none() {
+            diagnostics.push(missing_semantic_data_diagnostic(
+                resolved_module,
+                &format!("function-typed binding '{}'", element.tag.as_str()),
+                element.span,
+            ));
+            return None;
+        }
+        let mut args = mapped.properties;
+        if !mapped.content.is_empty() {
+            let Some(content_param) = content_param else {
+                diagnostics.push(missing_semantic_data_diagnostic(
+                    resolved_module,
+                    &format!("content parameter of '{}'", element.tag.as_str()),
+                    element.span,
+                ));
+                return None;
+            };
+            args.push(CodegenProperty {
+                name: content_param.as_str().to_string(),
+                value: content_expression(mapped.content, element.span),
+                span: element.span,
+            });
+        }
+        return Some(CodegenExpressionKind::NamedCall {
+            callee: Box::new(CodegenExpression {
+                expr_id: 0,
+                span: element.span,
+                ty: None,
+                kind: CodegenExpressionKind::Identifier {
+                    name: element.tag.as_str().to_string(),
+                    reference: callee_reference,
+                },
+            }),
+            args,
+        });
+    }
+
     mapped
         .properties
         .sort_by(|lhs, rhs| lhs.name.cmp(&rhs.name));
@@ -2745,14 +2798,18 @@ fn build_type_ref_resolving_aliases(
             params: {
                 let mut mapped = Vec::with_capacity(params.len());
                 for param in params {
-                    mapped.push(build_type_ref_resolving_aliases(
-                        artifact,
-                        resolved_module,
-                        prepared_cache,
-                        param,
-                        aliases,
-                        diagnostics,
-                    )?);
+                    mapped.push(CodegenFunctionParam {
+                        name: param.name.as_str().to_string(),
+                        ty: build_type_ref_resolving_aliases(
+                            artifact,
+                            resolved_module,
+                            prepared_cache,
+                            &param.ty,
+                            aliases,
+                            diagnostics,
+                        )?,
+                        is_content: param.is_content,
+                    });
                 }
                 mapped
             },

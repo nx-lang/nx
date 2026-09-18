@@ -125,13 +125,54 @@ the payload, so `Tapped { }` carries nothing and `Error { }` loses its message. 
 has no return value; the renderer's callback returns `true` whenever a handler is bound, which is
 what binding one means in the demos.
 
+## Templated controls
+
+A class declaring both `ItemsSource: readonly unknown[]` and `ItemTemplate: () => SkiaControl`
+binds an item collection and a cell recipe, and DrawnUI realizes, recycles and measures the cells
+itself. `SkiaLayout` declares the pair, so `SkiaLayoutBase` — and every layout under it — gets a
+type parameter and two properties:
+
+```nx
+export abstract external component
+<SkiaLayoutBase extends SkiaControl
+  TItem: type
+  ItemsSource: TItem[]?
+  ItemTemplate: (<function Item:TItem Index:int />: DrawnNode)?
+  ...
+/>
+```
+
+An author binds the collection and an element function, and names the item type at the use site:
+
+```nx
+type Contact = { Id:int Title:string }
+let <ContactCell Item:Contact Index:int />: DrawnNode = <SkiaLabel Text={Item.Title} />
+let contacts = { <Contact Id=1 Title="Ada" /> <Contact Id=2 Title="Kai" /> }
+
+<SkiaStack TItem=Contact ItemsSource={contacts} ItemTemplate={ContactCell}
+  RecyclingTemplate=Enabled MeasureItemsStrategy=MeasureFirst />
+```
+
+The function is checked against the property's type with `Contact` substituted for `TItem`, so a
+template whose `Item` is another type is a diagnostic naming both function types, and one without
+`TItem=` is a diagnostic asking for it. A template may leave `Index` out — a function satisfies a
+function type by parameter name, and may declare fewer parameters than the type supplies.
+
+The parameter names are a **divergence** from DrawnUI, recorded here: DrawnUI sets the bound item
+as the cell's `BindingContext` and its position as `ContextIndex`; the template is called with
+`Item` and `Index`, which is what the names mean to an author. `catalog-meta.json` records, for
+every control that carries `ItemTemplate`, the parameter names the template is called with in that
+order (`templates`) and the property the items come from (`itemsSource`); the renderer hands
+DrawnUI a cell factory whose cells call the function on every bind and draw the result. A cell is
+drawn outside the instance tree, so a handler bound inside one is inert and reported as such.
+
 ## Properties with no NX expression
 
-Two function-typed members are not events, since they return a value, and stay omitted:
+One function-typed member is neither an event nor a cell factory, since it returns a value, and
+stays omitted:
 
 | Property | TypeScript type |
 |---|---|
-| `SkiaLayout.ItemTemplate` | `() => SkiaControl` |
 | `SkiaLottie.ProcessJson` | `(json: string) => string` |
 
 Three properties are references to engine objects, built in code and attached to a control — what
@@ -148,12 +189,10 @@ The rest:
 | Property | TypeScript type |
 |---|---|
 | `SkiaControl.BindingContext` | `unknown` |
-| `SkiaLayout.ItemsSource` | `readonly unknown[]` |
 
-`ItemsSource` and `ItemTemplate` are what `Cells` and `UnevenCells` are built on, which is why those
-examples are ported as `reduced` over a short fixed list. `VisualEffects` is what the Shaders page
-is built on, and `PaintColorFilter` what the custom-filter card in Images is; both are ported the
-same way, with the host drawn plain.
+`BindingContext` is what a cell's template receives as `Item`, so it has no property of its own.
+`VisualEffects` is what the Shaders page is built on, and `PaintColorFilter` what the custom-filter
+card in Images is; both are ported with the host drawn plain.
 
 ## Writing NX against this catalog
 

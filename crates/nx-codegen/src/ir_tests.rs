@@ -8,9 +8,9 @@ use crate::ir::{kinds, NxIrArtifact, NxIrEmitOptions};
 use crate::ir_image::{write_nx_ir_image, NxIrImage};
 use crate::{
     build_nx_ir_artifacts, emit_nx_ir, explain_nx_ir, explain_nx_ir_image, ExplainError,
-    NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1, NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
-    NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
-    NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
+    NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1, NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1,
+    NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1, NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
+    NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1, NX_IR_RUNTIME_ABI, NX_IR_SCHEMA_VERSION,
 };
 use nx_api::{
     build_program_artifact_from_source, build_workspace_program_artifact, LibraryRegistry,
@@ -1531,5 +1531,175 @@ fn a_handler_emits_an_image_that_reads_back() {
     assert_eq!(
         explain_nx_ir_image(&bytes).expect("explain"),
         explain(&entry_artifact(&artifact))
+    );
+}
+
+// ------------------------------------------------------------------------------------------------
+// Function types and function values
+// ------------------------------------------------------------------------------------------------
+
+const TEMPLATE_LIST: &str =
+    "external component <List ItemTemplate:(<function Item:object Index:int />: string)? />\n";
+
+#[test]
+fn a_function_typed_prop_is_a_function_type_in_nx_spelling() {
+    assert_eq!(kinds::ty::FUNCTION, 4);
+    assert_eq!(
+        kinds::name(kinds::ty::NAMES, kinds::ty::FUNCTION),
+        Some("function")
+    );
+    let text = explain_source(&format!("{TEMPLATE_LIST}let root() = {{ 1 }}"));
+    assert_contains(
+        &text,
+        "ItemTemplate: (<function Item:object Index:int />: string)?",
+    );
+    assert!(!text.contains("=>"), "{text}");
+
+    // One function type, one spelling: the explained artifact reads a type table and the checker
+    // reads a `Type`, and both assemble the text through `nx_hir::ast::spell_function_type`.
+    let checked = nx_types::Type::nullable(nx_types::Type::function(
+        vec![
+            nx_types::FunctionParam::new("Item", nx_types::Type::named("object")),
+            nx_types::FunctionParam::new("Index", nx_types::Type::int()),
+        ],
+        nx_types::Type::string(),
+    ));
+    assert_contains(&text, &format!("ItemTemplate: {checked}"));
+}
+
+#[test]
+fn two_identical_function_types_share_one_table_entry() {
+    let artifact = artifact_from_source(
+        "external component <List RowTemplate:<function Item:object />: string HeaderTemplate:<function Item:object />: string />\n\
+         let root() = { 1 }",
+    );
+    let model = entry_artifact(&artifact);
+    let function_types = model
+        .types
+        .iter()
+        .filter(|entry| {
+            entry
+                .as_list()
+                .and_then(|entry| entry.first())
+                .and_then(|k| k.as_int())
+                == Some(kinds::ty::FUNCTION)
+        })
+        .count();
+    assert_eq!(function_types, 1, "{:?}", model.types);
+    assert_eq!(read_back(&image_bytes(&artifact)), model);
+}
+
+#[test]
+fn a_type_parameter_inside_a_function_type_is_erased() {
+    let text = explain_source(
+        "external component <SkiaLayout TItem:type ItemTemplate:(<function Item:TItem Index:int />: object)? />\n\
+         let root() = { 1 }",
+    );
+    assert_contains(
+        &text,
+        "ItemTemplate: (<function Item:object Index:int />: object)?",
+    );
+    assert!(!text.contains("TItem"), "{text}");
+}
+
+#[test]
+fn a_function_bound_to_a_prop_is_a_reference_and_needs_the_feature() {
+    let source = format!(
+        "let <Row Item:object />: string = \"r\"\n\
+         external component <List ItemTemplate:(<function Item:object />: string)? />\n\
+         let root() = <List ItemTemplate={{Row}} />"
+    );
+    let model = entry_artifact(&artifact_from_source(&source));
+    let text = explain(&model);
+    // A same-module reference renders unqualified, as every reference does.
+    assert_contains(&text, "<List ItemTemplate=Row />");
+    assert!(
+        model
+            .required_features
+            .contains(&NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1.to_string()),
+        "{:?}",
+        model.required_features
+    );
+}
+
+#[test]
+fn a_call_of_a_function_typed_binding_is_a_named_call() {
+    assert_eq!(kinds::node::NAMED_CALL, 21);
+    assert_eq!(
+        kinds::name(kinds::node::NAMES, kinds::node::NAMED_CALL),
+        Some("namedCall")
+    );
+    let artifact = artifact_from_source(
+        "component <Section Row:<function Item:object Index:int />: string /> = { <Row Item=\"a\" Index=1 /> }\n\
+         let root() = { 1 }",
+    );
+    let model = entry_artifact(&artifact);
+    let text = explain(&model);
+    assert_contains(&text, "<Row Index=1 Item=\"a\" />");
+    let named_calls = model
+        .nodes
+        .iter()
+        .filter(|entry| {
+            entry
+                .as_list()
+                .and_then(|entry| entry.first())
+                .and_then(|k| k.as_int())
+                == Some(kinds::node::NAMED_CALL)
+        })
+        .count();
+    assert_eq!(named_calls, 1, "{text}");
+    assert!(model
+        .required_features
+        .contains(&NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1.to_string()));
+    assert_eq!(read_back(&image_bytes(&artifact)), model);
+}
+
+#[test]
+fn a_call_of_a_top_level_let_of_function_type_is_a_named_call_on_a_reference() {
+    // The callee is a declaration, not a lexical binding, so it emits the same reference node a
+    // bare identifier would.
+    let artifact = artifact_from_source(
+        "external component <Box Label:string? />\n\
+         let <Wrap Item:object />: string = \"w\"\n\
+         let F: <function Item:object />: string = {Wrap}\n\
+         let root() = <Box Label=<F Item=\"x\" /> />",
+    );
+    let model = entry_artifact(&artifact);
+    let text = explain(&model);
+    assert_contains(&text, "<F Item=\"x\" />");
+    let named_calls = model
+        .nodes
+        .iter()
+        .filter(|entry| {
+            entry
+                .as_list()
+                .and_then(|entry| entry.first())
+                .and_then(|k| k.as_int())
+                == Some(kinds::node::NAMED_CALL)
+        })
+        .count();
+    assert_eq!(named_calls, 1, "{text}");
+    assert_eq!(read_back(&image_bytes(&artifact)), model);
+}
+
+#[test]
+fn a_program_without_function_values_lists_no_new_feature() {
+    // Functions declared and called, one of them by element, but never named as a value.
+    let model = entry_artifact(&artifact_from_source(
+        "let <Row Item:object />: string = \"r\"\nlet double(n:int): int = {n * 2}\n\
+         let root() = { <Row Item=1 /> double(2) }",
+    ));
+    assert!(
+        !model
+            .required_features
+            .iter()
+            .any(|feature| feature == NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1),
+        "{:?}",
+        model.required_features
+    );
+    assert!(
+        model.required_features.is_empty(),
+        "{:?}",
+        model.required_features
     );
 }

@@ -6,8 +6,8 @@
 // The original's last five cards are built on things NX cannot express yet. The composite card
 // spins one child from a timer and outlines what the cache re-recorded (animation, component
 // state); here the shapes are drawn at rest. The templated cards bind ItemsSource to recycled cell
-// classes and change Split from buttons (list virtualization, code-behind, event handlers); here
-// the same layouts hold static children.
+// classes built in code and change Split from buttons (code-behind, event handlers); here the same
+// layouts hold static children.
 
 component <Card extends DrawnNode Title:string content Children:DrawnNode[] /> = {
   <SkiaShape Type=Rectangle CornerRadius=<CornerRadius TopLeft=8 />
@@ -316,7 +316,7 @@ let chipLabels = {
 
     <Heading Text="ItemsSource + ItemTemplate for Wrap / Row / Grid · Split" />
     // The original binds ItemsSource to recycled cell classes and changes Split, DynamicColumns and
-    // the item count from buttons. That needs list virtualization, code-behind and event handlers;
+    // the item count from buttons. That needs code-behind (the cell classes) and event handlers;
     // the same layouts hold ten static chips here, and Split still lays them out in fixed slots.
     <Card Title="SkiaWrap (10 static chips, the original recycles ChipCells) · Split=3 · DynamicColumns=false">
       <SkiaWrap Spacing=8 Split=3 DynamicColumns=false>

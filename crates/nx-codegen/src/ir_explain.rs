@@ -210,13 +210,61 @@ impl<'a> Explainer<'a> {
                 self.int_operand(entry, 2, "nominal type")?,
             )?,
             kinds::ty::ARRAY => {
-                format!("{}[]", self.ty(self.int_operand(entry, 1, "array type")?)?)
+                format!(
+                    "{}[]",
+                    self.ty_under_suffix(self.int_operand(entry, 1, "array type")?)?
+                )
             }
             kinds::ty::NULLABLE => format!(
                 "{}?",
-                self.ty(self.int_operand(entry, 1, "nullable type")?)?
+                self.ty_under_suffix(self.int_operand(entry, 1, "nullable type")?)?
             ),
+            kinds::ty::FUNCTION => {
+                // The parts are read here; the spelling is `nx-hir`'s, shared with the checker's
+                // diagnostics and the editor's hovers.
+                let mut params: Vec<(bool, String, String)> = Vec::new();
+                for param in self.list_operand(entry, 2, "function type")? {
+                    let param = self.list(param, "function type parameter")?;
+                    let name = self.string(self.int_operand(param, 0, "parameter name")?)?;
+                    let ty = self.ty(self.int_operand(param, 1, "parameter type")?)?;
+                    let flags = self.int_operand(param, 2, "parameter flags")?;
+                    params.push((
+                        flags & kinds::ty::FUNCTION_PARAM_CONTENT != 0,
+                        name.to_string(),
+                        ty,
+                    ));
+                }
+                let result = self.ty(self.int_operand(entry, 1, "function result")?)?;
+                nx_hir::ast::spell_function_type(
+                    params
+                        .iter()
+                        .map(|(is_content, name, ty)| nx_hir::ast::SpelledParam {
+                            is_content: *is_content,
+                            name,
+                            ty,
+                        }),
+                    &result,
+                )
+            }
             other => return Err(self.malformed(format!("unknown type kind {other}"))),
+        })
+    }
+
+    /// A type under a `[]` or `?` suffix, parenthesized when it is a function type, because a
+    /// suffix written after a function type's result binds to the result.
+    fn ty_under_suffix(&self, index: i64) -> Result<String, ExplainError> {
+        let text = self.ty(index)?;
+        let is_function = usize::try_from(index)
+            .ok()
+            .and_then(|index| self.artifact.types.get(index))
+            .and_then(|entry| entry.as_list())
+            .and_then(|entry| entry.first())
+            .and_then(IrItem::as_int)
+            == Some(kinds::ty::FUNCTION);
+        Ok(if is_function {
+            format!("({text})")
+        } else {
+            text
         })
     }
 
@@ -460,6 +508,15 @@ impl<'a> Explainer<'a> {
                 let args = self.nodes(self.list_operand(entry, 2, "call")?)?;
                 let callee = callee.join(" ");
                 call_like(callee, args)
+            }
+            // The element form is the source form of a call by name, so it is rendered as one.
+            kinds::node::NAMED_CALL => {
+                let callee = self.node(self.int_operand(entry, 1, "namedCall")?)?;
+                self.element_like(
+                    callee.join(" "),
+                    self.list_operand(entry, 2, "namedCall")?,
+                    &[],
+                )?
             }
             kinds::node::INTRINSIC => {
                 let op = self.int_operand(entry, 1, "intrinsic")?;

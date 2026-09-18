@@ -242,7 +242,11 @@ import { Bar } from "./bar""#;
         let root = SyntaxNode::new(tree.root_node(), source);
         let braced = find_kind(&root, SyntaxKind::VALUES_BRACED_EXPRESSION).expect("braced body");
 
-        assert_eq!(braced.child_count(), 2, "child_count() should not count comments");
+        assert_eq!(
+            braced.child_count(),
+            2,
+            "child_count() should not count comments"
+        );
         let first = braced.child(0).expect("first construct");
         let second = braced.child(1).expect("second construct");
         assert_eq!(first.text(), "1");
@@ -259,10 +263,7 @@ import { Bar } from "./bar""#;
         );
     }
 
-    fn find_kind<'tree>(
-        node: &SyntaxNode<'tree>,
-        kind: SyntaxKind,
-    ) -> Option<SyntaxNode<'tree>> {
+    fn find_kind<'tree>(node: &SyntaxNode<'tree>, kind: SyntaxKind) -> Option<SyntaxNode<'tree>> {
         if node.kind() == kind {
             return Some(*node);
         }

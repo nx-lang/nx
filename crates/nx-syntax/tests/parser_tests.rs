@@ -3596,3 +3596,189 @@ fn test_validate_type_parameter_outside_component_signature_is_rejected() {
         assert_eq!(errors, vec![expected.to_string()], "for source: {source}");
     }
 }
+
+// ============================================================================
+// Function types
+// ============================================================================
+
+fn invalid_fixture_diagnostics(relative: &str) -> (nx_syntax::ParseResult, String) {
+    let path = fixture_path(relative);
+    let result = parse_file(&path).expect("Should parse file");
+    let mut sources = HashMap::new();
+    let file_name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string();
+    sources.insert(file_name, fs::read_to_string(&path).unwrap_or_default());
+    let rendered = render_diagnostics_cli(&result.errors, &sources);
+    (result, rendered)
+}
+
+#[test]
+fn test_snapshot_function_types_fixture() {
+    let path = fixture_path("valid/function-types.nx");
+    let result = parse_file(&path).unwrap();
+    assert!(
+        result.is_ok(),
+        "function-types.nx should parse: {:?}",
+        result.errors
+    );
+    let root = result.root().expect("Should have root");
+    assert!(
+        !root.has_error(),
+        "function-types.nx should contain no error nodes"
+    );
+    assert!(
+        !contains_missing(&root),
+        "function-types.nx should contain no MISSING nodes"
+    );
+    assert_eq!(count_kind(&root, SyntaxKind::FUNCTION_TYPE), 11);
+    assert_eq!(count_kind(&root, SyntaxKind::PARENTHESIZED_TYPE), 5);
+
+    insta::assert_snapshot!(root.raw().to_sexp());
+}
+
+#[test]
+fn test_suffix_after_function_result_binds_to_the_result() {
+    let result = parse_str("type Maybe = <function Count:int />: string?", "test.nx");
+    assert!(result.is_ok(), "{:?}", result.errors);
+    let root = result.root().unwrap();
+    let alias_type = find_first_kind(&root, SyntaxKind::TYPE).unwrap();
+    // The outer type has the function type as its base and no suffix of its own.
+    let outer_tokens: Vec<_> = alias_type
+        .children_with_tokens()
+        .map(|child| child.kind())
+        .collect();
+    assert_eq!(outer_tokens, vec![SyntaxKind::FUNCTION_TYPE]);
+    let function_type = find_first_kind(&root, SyntaxKind::FUNCTION_TYPE).unwrap();
+    let result_type = function_type.child_by_field("result").unwrap();
+    let result_tokens: Vec<_> = result_type
+        .children_with_tokens()
+        .map(|child| child.kind())
+        .collect();
+    assert_eq!(
+        result_tokens,
+        vec![SyntaxKind::PRIMITIVE_TYPE, SyntaxKind::QUESTION]
+    );
+}
+
+#[test]
+fn test_function_is_an_identifier_outside_a_function_type() {
+    let path = fixture_path("valid/function-identifier.nx");
+    let result = parse_file(&path).unwrap();
+    assert!(result.is_ok(), "{:?}", result.errors);
+    let root = result.root().unwrap();
+    assert_eq!(count_kind(&root, SyntaxKind::FUNCTION_KW), 0);
+    assert_eq!(count_kind(&root, SyntaxKind::FUNCTION_TYPE), 0);
+    assert_eq!(count_kind(&root, SyntaxKind::VALUE_DEFINITION), 2);
+    assert_eq!(count_kind(&root, SyntaxKind::FUNCTION_DEFINITION), 1);
+}
+
+#[test]
+fn test_function_type_default_is_rejected() {
+    let (result, rendered) = invalid_fixture_diagnostics("invalid/function-type-default.nx");
+    assert!(!result.is_ok());
+    let codes: Vec<_> = result.errors.iter().filter_map(|d| d.code()).collect();
+    assert_eq!(codes, vec!["function-type-default"], "{rendered}");
+    assert!(
+        rendered.contains("cannot carry a default value"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn test_function_type_type_parameter_is_rejected() {
+    let (result, rendered) = invalid_fixture_diagnostics("invalid/function-type-type-parameter.nx");
+    assert!(!result.is_ok());
+    let codes: Vec<_> = result.errors.iter().filter_map(|d| d.code()).collect();
+    assert_eq!(codes, vec!["invalid-type-parameter"], "{rendered}");
+    assert!(
+        rendered.contains("Type parameter 'TItem' is not supported in a function type"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn test_function_type_second_content_parameter_is_rejected() {
+    let (result, rendered) =
+        invalid_fixture_diagnostics("invalid/function-type-duplicate-content.nx");
+    assert!(!result.is_ok());
+    let codes: Vec<_> = result.errors.iter().filter_map(|d| d.code()).collect();
+    assert_eq!(codes, vec!["function-type-duplicate-content"], "{rendered}");
+    assert!(rendered.contains("'More'"), "{rendered}");
+}
+
+#[test]
+fn test_duplicate_nullable_across_a_parenthesis_is_rejected() {
+    let (result, rendered) =
+        invalid_fixture_diagnostics("invalid/parenthesized-duplicate-nullable.nx");
+    assert!(!result.is_ok());
+    let codes: Vec<_> = result.errors.iter().filter_map(|d| d.code()).collect();
+    assert_eq!(codes, vec!["duplicate-nullable-suffix"], "{rendered}");
+    assert!(
+        rendered.contains("already nullable at this layer"),
+        "{rendered}"
+    );
+    let primary = result.errors[0]
+        .labels()
+        .iter()
+        .find(|label| label.primary)
+        .unwrap();
+    let source =
+        fs::read_to_string(fixture_path("invalid/parenthesized-duplicate-nullable.nx")).unwrap();
+    assert_eq!(&source[primary.range], "?");
+    assert_eq!(
+        usize::from(primary.range.start()),
+        source.trim_end().len() - 1,
+        "the outer `?` is the one reported"
+    );
+
+    // Parentheses add no layer however many of them there are.
+    let nested = parse_str("type Twice = ((string?))?", "test.nx");
+    assert!(
+        !nested.is_ok(),
+        "a nested parenthesis is still the same layer"
+    );
+    let nested_codes: Vec<_> = nested.errors.iter().filter_map(|d| d.code()).collect();
+    assert_eq!(
+        nested_codes,
+        vec!["duplicate-nullable-suffix"],
+        "{:?}",
+        nested.errors
+    );
+
+    // The inner and outer layers are distinct once `[]` separates them.
+    let result = parse_str("type Fine = (string?)[]?", "test.nx");
+    assert!(result.is_ok(), "{:?}", result.errors);
+    let result = parse_str("type AlsoFine = ((string?)[])?", "test.nx");
+    assert!(result.is_ok(), "{:?}", result.errors);
+}
+
+#[test]
+fn test_misspelled_function_keyword_yields_one_error_node() {
+    let (result, rendered) = invalid_fixture_diagnostics("invalid/function-type-misspelled.nx");
+    assert!(!result.is_ok());
+    let root = result.root().unwrap();
+    assert_eq!(
+        count_kind(&root, SyntaxKind::ERROR),
+        1,
+        "{}",
+        root.raw().to_sexp()
+    );
+    assert_eq!(result.errors.len(), 1, "{rendered}");
+}
+
+#[test]
+fn test_unclosed_function_type_yields_one_error_node() {
+    let (result, rendered) = invalid_fixture_diagnostics("invalid/function-type-unclosed.nx");
+    assert!(!result.is_ok());
+    let root = result.root().unwrap();
+    assert_eq!(
+        count_kind(&root, SyntaxKind::ERROR),
+        1,
+        "{}",
+        root.raw().to_sexp()
+    );
+    assert_eq!(result.errors.len(), 1, "{rendered}");
+}

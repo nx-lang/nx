@@ -17,13 +17,7 @@ import { prepare } from "../src/render/evaluate.ts";
 import { expandComponents } from "./expand-components.mjs";
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const CAPABILITIES = new Set([
-  "event-handlers",
-  "animation",
-  "component-state",
-  "list-virtualization",
-  "code-behind",
-]);
+const CAPABILITIES = new Set(["event-handlers", "animation", "component-state", "code-behind"]);
 const COVERAGE = new Set(["complete", "static", "reduced"]);
 
 const examples = JSON.parse(readFileSync(join(appRoot, "src/examples/examples.json"), "utf8"));

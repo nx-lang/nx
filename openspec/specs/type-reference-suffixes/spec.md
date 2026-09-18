@@ -8,11 +8,14 @@ order and rejecting redundant same-layer nullability.
 
 ### Requirement: Type references support composed postfix list and nullable suffixes
 Anywhere NX accepts a type reference, the parser and analysis pipeline SHALL allow a primitive,
-qualified, or user-defined base type followed by zero or more postfix suffixes. Supported suffixes
-SHALL remain `[]` for list types and `?` for nullable types. The system SHALL apply those suffixes
-in source order, preserving the distinction between nested lists, lists of nullable elements, and
-nullable lists. The system SHALL reject a nullable suffix when it would make the same outer type
-layer nullable twice.
+qualified, user-defined, function, or parenthesized base type followed by zero or more postfix
+suffixes. A parenthesized type SHALL be `(`, a type reference, `)`, and SHALL denote the type it
+encloses. Supported suffixes SHALL remain `[]` for list types and `?` for nullable types. The
+system SHALL apply those suffixes in source order, preserving the distinction between nested lists,
+lists of nullable elements, and nullable lists. A suffix written after a function type's result
+SHALL apply to the result, so a suffix on the function itself requires parentheses. The system
+SHALL reject a nullable suffix when it would make the same outer type layer nullable twice,
+including across a parenthesis.
 
 #### Scenario: Nested list alias is accepted
 - **WHEN** a file contains `type Matrix = string[][]`
@@ -40,6 +43,22 @@ layer nullable twice.
 - **AND** SHALL produce a validation error on the second trailing `?` in `TooNullableNested`
 - **AND** SHALL explain that the affected type layer is already nullable
 - **AND** SHALL continue to accept `type MaybeNested = string?[]?`
+
+#### Scenario: A parenthesized function type takes a suffix
+- **WHEN** a file contains `type Template = (<function Item:object />: string)?` and `type Templates = (<function Item:object />: string)[]`
+- **THEN** parsing and lowering SHALL accept both
+- **AND** SHALL preserve `Template` as a nullable function type and `Templates` as a list of
+  non-null function types
+
+#### Scenario: Parentheses around a plain type are accepted
+- **WHEN** a file contains `type Names = (string)[]`
+- **THEN** parsing and lowering SHALL accept `Names` as a list of `string`, the same type as
+  `string[]`
+
+#### Scenario: A duplicate nullable across a parenthesis is rejected
+- **WHEN** a file contains `type Twice = (string?)?`
+- **THEN** parsing SHALL produce a validation error on the outer `?`
+- **AND** SHALL explain that the affected type layer is already nullable
 
 ### Requirement: Explicit null values bind to nullable type references
 The type checker SHALL accept an explicit `null` literal at any typed binding site whose expected

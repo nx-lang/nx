@@ -229,6 +229,15 @@ fn collect_expression_source_codegen_diagnostics(
                 "match expressions are not supported by executable source codegen yet",
             ));
         }
+        // A call by name needs the callee's parameter names at run time, which an emitted
+        // JavaScript function does not carry; the IR runtime has them.
+        CodegenExpressionKind::NamedCall { .. } => {
+            diagnostics.push(source_codegen_unsupported_diagnostic(
+                module,
+                expression.span,
+                "calls of function-typed values are not supported by executable source codegen yet",
+            ));
+        }
         CodegenExpressionKind::Binary { lhs, rhs, .. }
         | CodegenExpressionKind::Concat { lhs, rhs } => {
             collect_expression_source_codegen_diagnostics(module, lhs, diagnostics);
@@ -2729,25 +2738,15 @@ fn emit_type_ref(
         TypeRef::Function {
             params,
             return_type,
-        } => {
-            let params = params
-                .iter()
-                .enumerate()
-                .map(|(index, param)| {
-                    format!(
-                        "arg{}: {}",
-                        index,
-                        emit_type_ref(current_module_id, param, module, context)
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!(
-                "({}) => {}",
-                params,
-                emit_type_ref(current_module_id, return_type, module, context)
-            )
-        }
+        } => emit_function_type(
+            params.iter().map(|param| {
+                (
+                    param.name.as_str(),
+                    emit_type_ref(current_module_id, &param.ty, module, context),
+                )
+            }),
+            emit_type_ref(current_module_id, return_type, module, context),
+        ),
     }
 }
 
@@ -2766,25 +2765,15 @@ fn emit_type(
                 emit_type(current_module_id, inner, module, context)
             )
         }
-        Type::Function { params, ret } => {
-            let params = params
-                .iter()
-                .enumerate()
-                .map(|(index, param)| {
-                    format!(
-                        "arg{}: {}",
-                        index,
-                        emit_type(current_module_id, param, module, context)
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!(
-                "({}) => {}",
-                params,
-                emit_type(current_module_id, ret, module, context)
-            )
-        }
+        Type::Function { params, ret } => emit_function_type(
+            params.iter().map(|param| {
+                (
+                    param.name.as_str(),
+                    emit_type(current_module_id, &param.ty, module, context),
+                )
+            }),
+            emit_type(current_module_id, ret, module, context),
+        ),
         Type::Named(named) => {
             emit_named_type(current_module_id, named.name.as_str(), module, context)
         }
@@ -3006,6 +2995,10 @@ fn emit_expression(
         ),
         CodegenExpressionKind::Match { .. } => {
             "nxRuntimeError(\"match expressions are not supported by executable source codegen yet\")"
+                .to_string()
+        }
+        CodegenExpressionKind::NamedCall { .. } => {
+            "nxRuntimeError(\"calls of function-typed values are not supported by executable source codegen yet\")"
                 .to_string()
         }
         CodegenExpressionKind::Let { name, value, body } => format!(
@@ -3704,7 +3697,7 @@ fn collect_type_ref_schema_value_references(
             return_type,
         } => {
             for param in params {
-                collect_type_ref_schema_value_references(module, param, output);
+                collect_type_ref_schema_value_references(module, &param.ty, output);
             }
             collect_type_ref_schema_value_references(module, return_type, output);
         }
@@ -3726,10 +3719,26 @@ fn collect_type_ref_references(
             return_type,
         } => {
             for param in params {
-                collect_type_ref_references(module, param, output);
+                collect_type_ref_references(module, &param.ty, output);
             }
             collect_type_ref_references(module, return_type, output);
         }
+    }
+}
+
+/// Emits a function type as a TypeScript function taking one object of named arguments: NX
+/// arguments bind by name, so `(args: { Item: Contact; Index: number }) => DrawnNode`.
+fn emit_function_type<'a>(
+    params: impl Iterator<Item = (&'a str, String)>,
+    return_type: String,
+) -> String {
+    let params = params
+        .map(|(name, ty)| format!("{name}: {ty}"))
+        .collect::<Vec<_>>();
+    if params.is_empty() {
+        format!("() => {return_type}")
+    } else {
+        format!("(args: {{ {} }}) => {return_type}", params.join("; "))
     }
 }
 
@@ -3740,7 +3749,7 @@ fn collect_type_references(module: &CodegenModule, ty: &Type, output: &mut Vec<C
         }
         Type::Function { params, ret } => {
             for param in params {
-                collect_type_references(module, param, output);
+                collect_type_references(module, &param.ty, output);
             }
             collect_type_references(module, ret, output);
         }
@@ -3859,6 +3868,12 @@ fn collect_expression_value_references(
             collect_expression_value_references(current_module_id, callee, output);
             for arg in args {
                 collect_expression_value_references(current_module_id, arg, output);
+            }
+        }
+        CodegenExpressionKind::NamedCall { callee, args } => {
+            collect_expression_value_references(current_module_id, callee, output);
+            for arg in args {
+                collect_expression_value_references(current_module_id, &arg.value, output);
             }
         }
         CodegenExpressionKind::IntrinsicCall { args, .. } => {
@@ -4192,6 +4207,13 @@ fn collect_expression_runtime_helpers(
             collect_expression_runtime_helpers(callee, output);
             for arg in args {
                 collect_expression_runtime_helpers(arg, output);
+            }
+        }
+        CodegenExpressionKind::NamedCall { callee, args } => {
+            output.insert("nxRuntimeError");
+            collect_expression_runtime_helpers(callee, output);
+            for arg in args {
+                collect_expression_runtime_helpers(&arg.value, output);
             }
         }
         CodegenExpressionKind::IntrinsicCall {

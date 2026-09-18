@@ -1,4 +1,4 @@
-import meta from "../../catalog/catalog-meta.json";
+import meta from "../../catalog/catalog-meta.json" with { type: "json" };
 import { CornerRadius, SkiaBevel, SkiaPoint, SkiaShadow, Thickness } from "../drawnui/index";
 import { isHandlerRecord, type HandlerRecord } from "./instances";
 
@@ -43,12 +43,40 @@ const CONSTRUCTORS: Record<string, (fields: Record<string, unknown>) => unknown>
 
 const unions = meta.unions as Record<string, readonly string[]>;
 const records = meta.records as Record<string, { construct: string | null; fields: readonly string[] }>;
-/** Each drawable control: its class, its content property, and its events with their parameter names in order. */
+/**
+ * Each drawable control: its class, its content property, its events with their parameter names
+ * in order, and — for a templated control — its template properties with the parameter names the
+ * template is called with, and the property its items come from.
+ */
 export const components = meta.components as Record<
   string,
-  { class: string; content: string | null; events: Record<string, readonly string[]> }
+  {
+    class: string;
+    content: string | null;
+    events: Record<string, readonly string[]>;
+    templates?: Record<string, readonly string[]>;
+    itemsSource?: string;
+  }
 >;
 export const contentProperty = meta.contentProperty;
+
+/** The record the runtime renders a function value as: the declaring module and the name. */
+export interface FunctionRecord extends NxObject {
+  readonly $type: "Function";
+  readonly module: string;
+  readonly name: string;
+}
+
+export function isFunctionRecord(value: NxValue | undefined): value is FunctionRecord {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    value.$type === "Function" &&
+    typeof value.module === "string" &&
+    typeof value.name === "string"
+  );
+}
 
 function isObject(value: NxValue): value is NxObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -62,6 +90,12 @@ export type EventCallback = (sender: unknown, ...args: unknown[]) => unknown;
  * given the event's parameter names in order, or returns nothing to bind no callback.
  */
 export type BindHandler = (event: string, record: HandlerRecord, params: readonly string[]) => EventCallback | undefined;
+
+/**
+ * Turns a function record bound to a template property into the cell factory DrawnUI calls once
+ * per cell it realizes, given the parameter names the template is called with, in order.
+ */
+export type BindTemplate = (property: string, record: FunctionRecord, params: readonly string[]) => (() => unknown) | undefined;
 
 /**
  * Coerces one evaluated NX value into what DrawnUI expects for a property.
@@ -113,11 +147,15 @@ export function coerce(value: NxValue): unknown {
  * The properties of a control, coerced, with nulls dropped so DrawnUI's own defaults survive.
  *
  * A handler record under `on<Event>` is not a value the control takes: it becomes the callback
- * DrawnUI fires for `<Event>`, through `bind`, and is dropped when `bind` gives none.
+ * DrawnUI fires for `<Event>`, through `bind`, and is dropped when `bind` gives none. A function
+ * record on a template property becomes the cell factory, through `bindTemplate`, and is dropped
+ * when that gives none; the items property passes through uncoerced, so what a cell's function
+ * receives as `Item` is the evaluated item itself.
  */
-export function coerceProps(value: NxObject, bind?: BindHandler): Record<string, unknown> {
+export function coerceProps(value: NxObject, bind?: BindHandler, bindTemplate?: BindTemplate): Record<string, unknown> {
   const props: Record<string, unknown> = {};
-  const events = typeof value.$type === "string" ? components[value.$type]?.events : undefined;
+  const component = typeof value.$type === "string" ? components[value.$type] : undefined;
+  const events = component?.events;
   for (const [name, item] of Object.entries(value)) {
     if (name === "$type" || name === contentProperty || item === null || item === undefined) {
       continue;
@@ -128,6 +166,20 @@ export function coerceProps(value: NxObject, bind?: BindHandler): Record<string,
       if (callback !== undefined) {
         props[event] = callback;
       }
+      continue;
+    }
+    const templateParams = component?.templates?.[name];
+    if (templateParams !== undefined) {
+      if (isFunctionRecord(item)) {
+        const factory = bindTemplate?.(name, item, templateParams);
+        if (factory !== undefined) {
+          props[name] = factory;
+        }
+      }
+      continue;
+    }
+    if (name === component?.itemsSource) {
+      props[name] = Array.isArray(item) ? item : [item];
       continue;
     }
     props[name] = coerce(item);

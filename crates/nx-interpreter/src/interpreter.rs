@@ -103,6 +103,10 @@ enum SerializedValue {
         type_name: String,
         fields: BTreeMap<String, SerializedValue>,
     },
+    Function {
+        module: String,
+        name: String,
+    },
     ActionHandler {
         module_id: u32,
         component: String,
@@ -1657,11 +1661,15 @@ impl Interpreter {
             &format!("component props for '{}'", component.name.as_str()),
         )?;
         let mut visible_fields = FxHashMap::default();
+        // A prop typed by a component type parameter takes whatever the use site's argument
+        // named, and the checker consumed that argument; here the parameter is the top type, as
+        // it is below the checker everywhere else.
+        let props = Self::erase_contract_type_parameters(contract, &contract.props);
         let mut normalized = self.materialize_component_fields(
             module,
             ctx,
             component,
-            &contract.props,
+            &props,
             &mut overrides,
             &mut visible_fields,
             "prop initialization",
@@ -1718,6 +1726,28 @@ impl Interpreter {
         Ok(normalized)
     }
 
+    /// The fields with every type parameter of `contract` replaced by `object` in their types.
+    fn erase_contract_type_parameters(
+        contract: &nx_hir::EffectiveComponentContract,
+        fields: &[nx_hir::EffectiveField],
+    ) -> Vec<nx_hir::EffectiveField> {
+        if contract.type_params.is_empty() {
+            return fields.to_vec();
+        }
+        let params: Vec<Name> = contract
+            .type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect();
+        fields
+            .iter()
+            .map(|field| nx_hir::EffectiveField {
+                ty: nx_hir::erase_type_parameters(&field.ty, &params),
+                ..field.clone()
+            })
+            .collect()
+    }
+
     fn materialize_component_state(
         &self,
         module: &LoweredModule,
@@ -1747,12 +1777,14 @@ impl Interpreter {
             .runtime_prepared_module(module)
             .module_identity()
             .to_string();
-        component
+        let fields: Vec<nx_hir::EffectiveField> = component
             .state
             .iter()
             .cloned()
             .map(|field| nx_hir::EffectiveField::from_record_field(field, module_identity.clone()))
-            .collect()
+            .collect();
+        let contract = self.effective_component_contract(module, component);
+        Self::erase_contract_type_parameters(&contract, &fields)
     }
 
     fn normalize_explicit_component_state(
@@ -1993,6 +2025,10 @@ impl Interpreter {
                     .map(|(name, value)| (name.to_string(), Self::serialize_runtime_value(value)))
                     .collect(),
             },
+            Value::Function { module, name } => SerializedValue::Function {
+                module: module.to_string(),
+                name: name.to_string(),
+            },
             Value::ActionHandler {
                 module_id,
                 component,
@@ -2055,6 +2091,10 @@ impl Interpreter {
                         ))
                     })
                     .collect::<Result<FxHashMap<_, _>, RuntimeError>>()?,
+            }),
+            SerializedValue::Function { module, name } => Ok(Value::Function {
+                module: SmolStr::new(module.as_str()),
+                name: SmolStr::new(name.as_str()),
             }),
             SerializedValue::ActionHandler {
                 module_id,
@@ -2125,7 +2165,7 @@ impl Interpreter {
         let expr = module.expr(expr_id);
         match expr {
             ast::Expr::Literal(lit) => self.eval_literal(lit),
-            ast::Expr::Ident(name) => self.eval_ident(ctx, name),
+            ast::Expr::Ident(name) => self.eval_ident(module, ctx, name),
             ast::Expr::Block { stmts, expr, .. } => {
                 self.eval_block(module, ctx, stmts, expr.as_ref())
             }
@@ -2333,8 +2373,91 @@ impl Interpreter {
     }
 
     /// Evaluate an identifier (T016 - placeholder)
-    fn eval_ident(&self, ctx: &ExecutionContext, name: &Name) -> Result<Value, RuntimeError> {
-        ctx.lookup_variable(name.as_str())
+    /// A name in expression position: a variable in scope, or else a visible function, which is a
+    /// value naming its declaration. A variable shadows a function of the same name, as it shadows
+    /// any top-level name.
+    fn eval_ident(
+        &self,
+        module: &LoweredModule,
+        ctx: &ExecutionContext,
+        name: &Name,
+    ) -> Result<Value, RuntimeError> {
+        if let Some(value) = ctx.try_lookup_variable(name.as_str()) {
+            return Ok(value);
+        }
+        if let Some((target_module, Item::Function(function))) =
+            self.resolve_item(module, name.as_str())
+        {
+            return Ok(Value::Function {
+                module: SmolStr::new(
+                    self.runtime_prepared_module(target_module)
+                        .module_identity(),
+                ),
+                name: SmolStr::new(function.name.as_str()),
+            });
+        }
+        Err(RuntimeError::new(RuntimeErrorKind::UndefinedVariable {
+            name: SmolStr::new(name.as_str()),
+        }))
+    }
+
+    /// Calls the function a [`Value::Function`] names with arguments bound by name.
+    ///
+    /// <para>This is the run-time half of the subset rule: the caller supplied every parameter of
+    /// the *type* it knows, so a parameter the declaration does not have is dropped, and one it
+    /// does have is required. Body content goes to the declaration's content parameter when it
+    /// has one, and is dropped like any other undeclared parameter otherwise.</para>
+    fn call_function_value(
+        &self,
+        module: &LoweredModule,
+        ctx: &mut ExecutionContext,
+        function_module: &str,
+        function_name: &str,
+        mut fields: FxHashMap<SmolStr, Value>,
+        normalized_content: Option<Value>,
+    ) -> Result<Value, RuntimeError> {
+        const OPERATION: &str = "function value call";
+        let target_module = self.module_for_identity(module, function_module, OPERATION)?;
+        let Some(Item::Function(function)) = target_module.find_item(function_name) else {
+            return Err(RuntimeError::new(RuntimeErrorKind::FunctionNotFound {
+                name: SmolStr::new(function_name),
+            }));
+        };
+
+        if let Some(content_param) = function.content_param() {
+            self.inject_element_content_field(
+                &mut fields,
+                normalized_content,
+                Some(content_param.name.as_str()),
+                "function without a declared content parameter",
+                OPERATION,
+            )?;
+        }
+
+        let mut arg_values = Vec::with_capacity(function.params.len());
+        for param in &function.params {
+            match fields.remove(param.name.as_str()) {
+                Some(value) => arg_values.push(self.coerce_value_to_type(
+                    target_module,
+                    value,
+                    &param.ty,
+                    &format!("parameter '{}'", param.name.as_str()),
+                )?),
+                None => {
+                    return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                        expected: format!(
+                            "argument '{}' for function '{}'",
+                            param.name.as_str(),
+                            function_name
+                        ),
+                        actual: "missing".to_string(),
+                        operation: OPERATION.to_string(),
+                    }))
+                }
+            }
+        }
+
+        self.eval_function_call(target_module, ctx, function_name, function, arg_values)
     }
 
     /// Evaluate a block expression (T014 - placeholder)
@@ -2996,6 +3119,23 @@ impl Interpreter {
         let content_values = self.eval_content_expressions(module, ctx, &element.content)?;
         let normalized_content = self.normalize_content_values(&element.content, content_values);
 
+        // A tag that names a function-typed value in scope — a parameter, a prop, a `let` — is a
+        // call of that value, ahead of any declared element of the same name.
+        if let Some(Value::Function {
+            module: function_module,
+            name: function_name,
+        }) = ctx.try_lookup_variable(tag_name)
+        {
+            return self.call_function_value(
+                module,
+                ctx,
+                &function_module,
+                &function_name,
+                fields,
+                normalized_content,
+            );
+        }
+
         if let Some((target_module, union_def, case)) =
             self.resolve_union_case_definition(module, tag_name)
         {
@@ -3440,6 +3580,20 @@ impl Interpreter {
             }
         }
 
+        // A function value at a function type was checked against it statically — by name, with
+        // the subset rule — and carries no fields to rebuild, so it passes as it is. `object`
+        // takes it like any value.
+        if let Value::Function { .. } = &value {
+            if matches!(expected, Type::Function { .. }) || is_object_type(expected) {
+                return Ok(value);
+            }
+            return Err(RuntimeError::new(RuntimeErrorKind::TypeMismatch {
+                expected: expected.to_string(),
+                actual: value.to_string(),
+                operation: operation.to_string(),
+            }));
+        }
+
         // A record the interpreter built keeps its shape: it was constructed against its
         // declaration already, so re-checking it on every function call would only cost time. A
         // record the host supplied is rebuilt from its fields, which is where unknown fields,
@@ -3625,6 +3779,10 @@ impl Interpreter {
             }
             Value::UnionCase { union, .. } => Type::named(union.clone()),
             Value::Record { type_name, .. } => Type::named(type_name.clone()),
+            // A function value's type is its declaration's, which needs the declaring module to
+            // read; coercion accepts a function value at a function type before asking here, so
+            // this is only ever display.
+            Value::Function { .. } => Type::named("function"),
             // Handlers are opaque runtime callback objects rather than first-class typed functions.
             Value::ActionHandler { .. } => Type::named("action_handler"),
         }

@@ -110,6 +110,20 @@ mod tests {
     }
 
     #[test]
+    fn a_function_and_a_value_of_one_name_are_duplicates() {
+        // A function is a value now, so the two would otherwise be one name with two meanings
+        // in the value namespace.
+        let source = "let <Row Item:object /> = <div />\nlet Row = 1\n";
+        let errors = validate_declaration_names(&module(source));
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].name.as_str(), "Row");
+        assert_eq!(
+            &source[errors[0].span.start().into()..errors[0].span.end().into()],
+            "let Row = 1"
+        );
+    }
+
+    #[test]
     fn a_record_and_its_derived_declarations_are_not_duplicates() {
         let errors = validate_declaration_names(&module("type Card = { title:string }\n"));
         assert!(errors.is_empty(), "{errors:?}");

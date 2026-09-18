@@ -2,7 +2,8 @@ import { createElement, type ReactNode } from "react";
 import { SkiaLabel, SkiaStack } from "../drawnui/react/index";
 import { isAuthoredComponent } from "./evaluate";
 import type { InstanceNode, InstanceTree } from "./instances";
-import { childrenOf, coerceProps, components, type BindHandler, type NxObject, type NxValue } from "./values";
+import { templateFactory, type TemplateCellContext } from "./templateCell";
+import { childrenOf, coerceProps, components, type BindHandler, type BindTemplate, type NxObject, type NxValue } from "./values";
 
 /**
  * A control the renderer does not know, drawn as itself.
@@ -33,6 +34,8 @@ export interface DrawContext {
   readonly reportInert: (where: string) => void;
   /** Reported every time an event reaches a drawing a dispatch has already replaced. */
   readonly reportStale: (where: string) => void;
+  /** Reported once per failing template call, as `ContactCell at index 3: <message>`. */
+  readonly reportTemplateFailure: (where: string) => void;
 }
 
 /**
@@ -108,10 +111,23 @@ export function drawValue(value: NxValue, key: string, context: DrawContext): Re
       return true;
     };
   };
+  // A function record on a template property becomes DrawnUI's cell factory. The cells it makes
+  // are drawn outside React, by the same translation, with the template called per bound item.
+  const bindTemplate: BindTemplate = (_property, record, params) => templateFactory(context.tree.program, record, params, cellContext);
+  // The binder is part of the cell's own context, so a templated control drawn inside a cell
+  // templates its cells the same way rather than silently losing its template. The cycle is only
+  // in the names: nothing calls the binder until a cell binds, long after both are built.
+  const cellContext: TemplateCellContext = {
+    program: context.tree.program,
+    reportUnknown: context.reportUnknown,
+    reportInert: context.reportInert,
+    reportTemplateFailure: context.reportTemplateFailure,
+    bindTemplate,
+  };
   const children = childrenOf(node).map((child, index) => drawValue(child, `${key}.${index}`, context));
   return createElement(
     type,
-    { key, ...coerceProps(node, bind) },
+    { key, ...coerceProps(node, bind, bindTemplate) },
     ...(children.length > 0 ? children : []),
   );
 }

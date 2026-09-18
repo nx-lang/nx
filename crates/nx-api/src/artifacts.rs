@@ -1658,6 +1658,7 @@ fn parse_failure_artifact(
         imports: Vec::new(),
         prepared_bindings: Vec::new(),
         element_type_arguments: FxHashMap::default(),
+        function_value_calls: Default::default(),
         prepared_module: None,
     }
 }
@@ -2516,7 +2517,13 @@ fn type_to_type_ref(ty: &Type) -> Option<TypeRef> {
         Type::Function { params, ret } => Some(TypeRef::function(
             params
                 .iter()
-                .map(type_to_type_ref)
+                .map(|param| {
+                    Some(nx_hir::ast::FunctionParam {
+                        name: param.name.clone(),
+                        ty: type_to_type_ref(&param.ty)?,
+                        is_content: param.is_content,
+                    })
+                })
                 .collect::<Option<Vec<_>>>()?,
             type_to_type_ref(ret)?,
         )),

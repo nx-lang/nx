@@ -746,18 +746,29 @@ fn ts_type(ty: &TypeRef) -> String {
                 format!("{inner}[]")
             }
         }
-        TypeRef::Nullable(inner) => format!("{} | null", ts_type(inner)),
+        TypeRef::Nullable(inner) => {
+            let inner = ts_type(inner);
+            // `(args) => string | null` would make the result nullable, not the function.
+            if inner.contains("=>") {
+                format!("({inner}) | null")
+            } else {
+                format!("{inner} | null")
+            }
+        }
+        // NX arguments bind by name, so a function type takes one object of named arguments.
         TypeRef::Function {
             params,
             return_type,
         } => {
+            if params.is_empty() {
+                return format!("() => {}", ts_type(return_type));
+            }
             let params = params
                 .iter()
-                .enumerate()
-                .map(|(index, param)| format!("arg{index}: {}", ts_type(param)))
+                .map(|param| format!("{}: {}", param.name.as_str(), ts_type(&param.ty)))
                 .collect::<Vec<_>>()
-                .join(", ");
-            format!("({params}) => {}", ts_type(return_type))
+                .join("; ");
+            format!("(args: {{ {params} }}) => {}", ts_type(return_type))
         }
     }
 }

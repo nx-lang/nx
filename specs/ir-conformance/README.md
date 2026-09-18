@@ -7,7 +7,8 @@ the TypeScript runtime's tests evaluate them, dispatch them, and refuse every tr
 overwrite of them; a second runtime starts here. Together the programs cover every node, type,
 constant and declaration kind of the schema, every binary operator and intrinsic, a program
 spanning two images, derived declarations, a snippet compiled against an implicitly imported
-catalog, a document that is a single trailing element, and components that bind action handlers.
+catalog, a document that is a single trailing element, components that bind action handlers, and
+a program that declares a function type, passes functions as values and calls them by name.
 
 Each program is a directory:
 

@@ -325,7 +325,14 @@
         "ConsumeGestures": [],
         "ContextMenu": [],
         "Tapped": []
-      }
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaStack": {
       "class": "SkiaStack",
@@ -335,7 +342,14 @@
         "ConsumeGestures": [],
         "ContextMenu": [],
         "Tapped": []
-      }
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaRow": {
       "class": "SkiaRow",
@@ -345,7 +359,14 @@
         "ConsumeGestures": [],
         "ContextMenu": [],
         "Tapped": []
-      }
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaLayer": {
       "class": "SkiaLayer",
@@ -355,7 +376,14 @@
         "ConsumeGestures": [],
         "ContextMenu": [],
         "Tapped": []
-      }
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaWrap": {
       "class": "SkiaWrap",
@@ -365,7 +393,14 @@
         "ConsumeGestures": [],
         "ContextMenu": [],
         "Tapped": []
-      }
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaGrid": {
       "class": "SkiaGrid",
@@ -375,7 +410,14 @@
         "ConsumeGestures": [],
         "ContextMenu": [],
         "Tapped": []
-      }
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaDecoratedGrid": {
       "class": "SkiaDecoratedGrid",
@@ -385,7 +427,14 @@
         "ConsumeGestures": [],
         "ContextMenu": [],
         "Tapped": []
-      }
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaBackdrop": {
       "class": "SkiaBackdrop",
@@ -395,7 +444,14 @@
         "ConsumeGestures": [],
         "ContextMenu": [],
         "Tapped": []
-      }
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaEditor": {
       "class": "SkiaEditor",
@@ -415,7 +471,14 @@
         "TextSubmitted": [
           "text"
         ]
-      }
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaSprite": {
       "class": "SkiaSprite",
@@ -441,7 +504,14 @@
         "ConsumeGestures": [],
         "ContextMenu": [],
         "Tapped": []
-      }
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaLabel": {
       "class": "SkiaLabel",
@@ -495,7 +565,14 @@
         "Down": [],
         "Tapped": [],
         "Up": []
-      }
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaImage": {
       "class": "SkiaImage",
@@ -596,7 +673,14 @@
         "ConsumeGestures": [],
         "ContextMenu": [],
         "Tapped": []
-      }
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "RefreshIndicator": {
       "class": "RefreshIndicator",
@@ -606,7 +690,14 @@
         "ConsumeGestures": [],
         "ContextMenu": [],
         "Tapped": []
-      }
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaShape": {
       "class": "SkiaShape",
@@ -616,7 +707,14 @@
         "ConsumeGestures": [],
         "ContextMenu": [],
         "Tapped": []
-      }
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaFrame": {
       "class": "SkiaFrame",
@@ -626,7 +724,14 @@
         "ConsumeGestures": [],
         "ContextMenu": [],
         "Tapped": []
-      }
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaSwitch": {
       "class": "SkiaSwitch",
@@ -639,7 +744,14 @@
         "Toggled": [
           "value"
         ]
-      }
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaCheckbox": {
       "class": "SkiaCheckbox",
@@ -652,7 +764,14 @@
         "Toggled": [
           "value"
         ]
-      }
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaRadioButton": {
       "class": "SkiaRadioButton",
@@ -665,7 +784,14 @@
         "Toggled": [
           "value"
         ]
-      }
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaProgress": {
       "class": "SkiaProgress",
@@ -715,7 +841,14 @@
         "TransitionChanged": [
           "inTransition"
         ]
-      }
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaShaderCarousel": {
       "class": "SkiaShaderCarousel",
@@ -740,7 +873,14 @@
         "TransitionChanged": [
           "inTransition"
         ]
-      }
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     },
     "SkiaDrawer": {
       "class": "SkiaDrawer",
@@ -761,7 +901,14 @@
         "TransitionChanged": [
           "inTransition"
         ]
-      }
+      },
+      "templates": {
+        "ItemTemplate": [
+          "Item",
+          "Index"
+        ]
+      },
+      "itemsSource": "ItemsSource"
     }
   }
 }

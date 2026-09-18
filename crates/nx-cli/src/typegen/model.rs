@@ -1746,7 +1746,7 @@ fn rewrite_type_ref_names(ty: &mut TypeRef, rename: &mut impl FnMut(&str) -> Opt
             return_type,
         } => {
             for param in params {
-                rewrite_type_ref_names(param, rename);
+                rewrite_type_ref_names(&mut param.ty, rename);
             }
             rewrite_type_ref_names(return_type, rename);
         }

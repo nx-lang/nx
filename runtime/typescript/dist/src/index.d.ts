@@ -14,6 +14,8 @@ export declare const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1 = "update-records-
 export declare const NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1 = "property-unions-v1";
 export declare const NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1 = "update-intrinsics-v1";
 export declare const NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1 = "action-handlers-v1";
+/** Function types, function references as values, and calls of function-typed values by name. */
+export declare const NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1 = "function-values-v1";
 /** The cell value that spells an absent optional operand. */
 export declare const NX_IR_NONE = 4294967295;
 /** The tables whose entries are cells. */
@@ -86,12 +88,14 @@ export declare const nodeKinds: {
     readonly component: 18;
     readonly actionHandler: 19;
     readonly text: 20;
+    readonly namedCall: 21;
 };
 export declare const typeKinds: {
     readonly primitive: 0;
     readonly nominal: 1;
     readonly array: 2;
     readonly nullable: 3;
+    readonly function: 4;
 };
 export declare const constantKinds: {
     readonly int: 0;
@@ -149,6 +153,10 @@ export type PreparedType = {
 } | {
     readonly kind: "nullable";
     readonly inner: PreparedType;
+} | {
+    readonly kind: "function";
+    readonly params: readonly PreparedParam[];
+    readonly result: PreparedType;
 };
 export interface NxIrReference {
     readonly slot: number;
@@ -419,6 +427,12 @@ export declare function normalizeComponentState(program: NxPreparedProgram | NxP
  * absent one keeps it, and a present `null` sets a nullable field to `null`.
  */
 export declare function applyComponentStatePatch(program: NxPreparedProgram | NxPreparedModule, name: string, currentState: Record<string, NxCanonicalValue>, patch: Record<string, NxCanonicalValue>): Record<string, NxCanonicalValue>;
+/**
+ * Calls the function a canonical `Function` record names with arguments keyed by parameter name,
+ * and returns the canonical result. An argument the function does not declare is dropped, as the
+ * subset rule allows; a parameter it declares and the arguments lack is a diagnostic naming it.
+ */
+export declare function callFunction(program: NxPreparedProgram | NxPreparedModule, value: NxCanonicalValue, args?: Record<string, NxCanonicalValue>, options?: NxRuntimeOptions): NxCanonicalValue;
 /** A record or update record as the runtime holds it: a `$type` and its fields. */
 export type NxRecordObject = {
     readonly $type: string;

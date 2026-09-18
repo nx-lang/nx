@@ -171,6 +171,7 @@ impl Table {
                 ty::PRIMITIVE => &[Op::Str],
                 ty::NOMINAL => &[Op::Ref],
                 ty::ARRAY | ty::NULLABLE => &[Op::Type],
+                ty::FUNCTION => &[Op::Type, Op::List(PARAM)],
                 _ => return None,
             },
             Table::Constants => match kind {
@@ -190,6 +191,7 @@ impl Table {
                 node::UNARY => &[Op::Code(kinds::unary::NAMES), Op::Node],
                 node::TEXT => &[Op::Node, Op::Str],
                 node::CALL => &[Op::Node, Op::List(NODES)],
+                node::NAMED_CALL => &[Op::Node, Op::List(PROPERTY)],
                 node::INTRINSIC => &[
                     Op::Code(kinds::intrinsic::NAMES),
                     Op::List(NODES),

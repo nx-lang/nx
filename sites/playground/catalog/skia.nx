@@ -303,6 +303,7 @@ export abstract external component
 
 export abstract external component
 <SkiaLayoutBase extends SkiaControl
+  TItem: type
   BackgroundMeasurementBatchSize: float64?
   ColumnDefinitions: string?
   ColumnSpacing: float64?
@@ -310,6 +311,8 @@ export abstract external component
   DefaultRowDefinition: string?
   DynamicColumns: boolean?
   Invert: boolean?
+  ItemsSource: TItem[]?
+  ItemTemplate: (<function Item:TItem Index:int />: DrawnNode)?
   MeasureItemsStrategy: MeasuringStrategy?
   Padding: Thickness?
   RecyclingTemplate: RecyclingTemplate?

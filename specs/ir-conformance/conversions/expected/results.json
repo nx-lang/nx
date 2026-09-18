@@ -17,7 +17,7 @@
   "main.nx::joinedIf": 1.5,
   "main.nx::joinedIntegerDivision": 3.0,
   "main.nx::joinedList": [
-    3,
+    3.0,
     1.5
   ],
   "main.nx::joinedListDivision": [

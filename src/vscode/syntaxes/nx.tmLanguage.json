@@ -449,6 +449,9 @@
           "end": "(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let)\\b(?!\\s*[:=]))",
           "patterns": [
             {
+              "include": "#type-annotation"
+            },
+            {
               "include": "#union-case"
             },
             {
@@ -655,8 +658,9 @@
         },
         {
           "name": "meta.definition.type.alias.nx",
-          "match": "^(\\s*)((private|export)\\s+)?(type)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(=)(?!\\s*\\{)",
-          "captures": {
+          "comment": "A type alias, `type RowTemplate = <function Item:Contact Index:int />: DrawnNode`: the right-hand side is a type position, scoped by the shared annotation rule, and may continue on following lines until the next declaration or a root element.",
+          "begin": "^(\\s*)((private|export)\\s+)?(type)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(=)(?!\\s*\\{)",
+          "beginCaptures": {
             "3": {
               "name": "storage.modifier.visibility.nx"
             },
@@ -669,7 +673,30 @@
             "6": {
               "name": "keyword.operator.assignment.nx"
             }
-          }
+          },
+          "end": "(?=^\\s*(?:(?:private|export)\\s+)?(?:abstract\\s+)?(?:external\\s+)?(?:type|action|component|let|import)\\b(?!\\s*[:=]))|(?=^\\s*<(?!\\s*function\\b))",
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#type-annotation"
+            },
+            {
+              "include": "#types"
+            },
+            {
+              "match": "\\b([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*)\\b((?:\\[\\]|\\?)*)",
+              "captures": {
+                "1": {
+                  "name": "entity.name.type.nx"
+                },
+                "2": {
+                  "name": "keyword.operator.type-modifier.nx"
+                }
+              }
+            }
+          ]
         }
       ]
     },
@@ -2312,8 +2339,83 @@
       ]
     },
     "type-annotation": {
-      "comment": "The type after an annotation colon, with its sequence and optional suffixes. Anchored with \\G so it only matches immediately after the colon.",
+      "comment": "The type after an annotation colon: a function type, a parenthesized type, or a name, each with its sequence and optional suffixes. Anchored with \\G so it only matches immediately after the colon (or, inside a function or parenthesized type, after what preceded it).",
       "patterns": [
+        {
+          "comment": "A function type: an element function's signature with `function` in the name slot, `<function Item:Contact Index:int />: DrawnNode`. The parameters are property definitions and may span lines; the result after `/>:` is read by the end match, so a name, primitive or alias result is scoped like every other annotation.",
+          "name": "meta.type.function.nx",
+          "begin": "(<)\\s*(function)\\b",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.tag.begin.nx"
+            },
+            "2": {
+              "name": "keyword.other.function.nx"
+            }
+          },
+          "end": "(/)\\s*(>)\\s*(:)\\s*(?:(string|int32|int64|int|float32|float64|boolean|object)(?![A-Za-z0-9_-])|([A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*))((?:\\[\\]|\\?)*)|(/)\\s*(>)",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.tag.self-closing.nx"
+            },
+            "2": {
+              "name": "punctuation.definition.tag.end.nx"
+            },
+            "3": {
+              "name": "punctuation.separator.type.annotation.nx"
+            },
+            "4": {
+              "name": "support.type.primitive.nx"
+            },
+            "5": {
+              "name": "entity.name.type.nx"
+            },
+            "6": {
+              "name": "keyword.operator.type-modifier.nx"
+            },
+            "7": {
+              "name": "punctuation.definition.tag.self-closing.nx"
+            },
+            "8": {
+              "name": "punctuation.definition.tag.end.nx"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#declaration-property"
+            }
+          ]
+        },
+        {
+          "comment": "A parenthesized type, `(<function />: DrawnNode)?`: the suffix after `)` applies to the whole, where one after a function type's result would apply to the result.",
+          "name": "meta.type.group.nx",
+          "begin": "(?:\\G|^)\\s*(\\()",
+          "beginCaptures": {
+            "1": {
+              "name": "punctuation.definition.type.group.nx"
+            }
+          },
+          "end": "(\\))((?:\\[\\]|\\?)*)",
+          "endCaptures": {
+            "1": {
+              "name": "punctuation.definition.type.group.nx"
+            },
+            "2": {
+              "name": "keyword.operator.type-modifier.nx"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#comments"
+            },
+            {
+              "include": "#type-annotation"
+            }
+          ]
+        },
         {
           "match": "\\G\\s*(string|int32|int64|int|float32|float64|boolean|object)(?![A-Za-z0-9_-])((?:\\[\\]|\\?)*)",
           "captures": {

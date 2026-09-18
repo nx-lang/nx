@@ -165,9 +165,17 @@ pub enum CodegenTypeRef {
         inner: Box<CodegenTypeRef>,
     },
     Function {
-        params: Vec<CodegenTypeRef>,
+        params: Vec<CodegenFunctionParam>,
         return_type: Box<CodegenTypeRef>,
     },
+}
+
+/// One parameter of a resolved function type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodegenFunctionParam {
+    pub name: String,
+    pub ty: CodegenTypeRef,
+    pub is_content: bool,
 }
 
 /// Record field metadata preserved for strongly typed target emission.
@@ -276,6 +284,14 @@ pub enum CodegenExpressionKind {
     Call {
         callee: Box<CodegenExpression>,
         args: Vec<CodegenExpression>,
+    },
+    /// A call of a function-typed value — a parameter, a prop or a local holding a function — with
+    /// its arguments by name, `<Row Item={c} Index={i} />`. The callee's declaration is known only
+    /// at run time, so the names travel with the call and the runtime binds them by the subset
+    /// rule: a name the declaration lacks is dropped, one it has must be present.
+    NamedCall {
+        callee: Box<CodegenExpression>,
+        args: Vec<CodegenProperty>,
     },
     /// A call to one of the update intrinsics, which has no callee declaration: the checker
     /// resolved the name before any binding, and a runtime supplies the operation.

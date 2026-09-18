@@ -84,6 +84,7 @@ are non-decreasing, start at `0` and end at the pool's length.
 | 1 | nominal | `[1, ref]` | A record, union or type alias declared in a module. |
 | 2 | array | `[2, type]` | A list of the element type. |
 | 3 | nullable | `[3, type]` | The inner type or `null`. |
+| 4 | function | `[4, type, [[str, type, flags]...]]` | A function type, `<function Item:Contact Index:int />: DrawnNode`: the result type, then each parameter's name, type and flags (bit 0: the parameter takes body content), in declared order. A function satisfies it by parameter name, so a function may declare fewer parameters than the type. |
 
 A type is written once: two fields of type `string?` share one `nullable` entry, which itself
 refers to one `primitive` entry. An `array` or `nullable` entry's inner type precedes it in the
@@ -115,7 +116,7 @@ reader that evaluates by index never needs to look ahead and no node reaches its
 | 2 | string | `[2, str]` | A string literal. |
 | 3 | number | `[3, const]` | A numeric literal. |
 | 4 | slot | `[4, slot, str]` | Reads a local of the current frame. The string is the local's name, for diagnostics. |
-| 5 | reference | `[5, ref]` | A top-level function or value. A function reference evaluates to a callable; a value reference evaluates the value. |
+| 5 | reference | `[5, ref]` | A top-level function or value. A function reference evaluates to a function value, in any expression position — a call's callee, a property value, a list element, a result; a value reference evaluates the value. See *Function values*. |
 | 6 | binary | `[6, op, node, node]` | A binary operation; see *Binary operators*. |
 | 7 | unary | `[7, op, node]` | `0` negation, `1` logical not. |
 | 8 | call | `[8, node, [node...]]` | Calls the callee with the arguments. |
@@ -131,9 +132,12 @@ reader that evaluates by index never needs to look ahead and no node reaches its
 | 18 | component | `[18, ref, [[str, node]...], [node...]]` | A component descriptor: props are normalized against the component's declaration. A property named `on<Emit>` for an emit the component declares is a handler property, not a prop: its value is an action handler, and it is carried on the descriptor rather than normalized. |
 | 19 | actionHandler | `[19, ref, str, ref, slot, ref?, node]` | An action handler, `onTapped=<Update count={count + 1} />`: the component and the name of the emit it answers, the action record it accepts, the slot of its `action` binding, the owner component whose body bound it (absent at the root), and the body. Evaluating the node captures the frame; the body runs when a host dispatches the action. See *Action handlers*. |
 | 20 | text | `[20, node, str]` | The canonical text form of a primitive value: the operand, and the name of its static type, one of `int`, `int32`, `int64`, `float32`, `float64` or `boolean`. See *Text conversion*. |
+| 21 | namedCall | `[21, node, [[str, node]...]]` | A call of a function-typed value by name, `<Row Item={c} Index={i} />` where `Row` is a parameter, a prop or a `let`: the callee, which evaluates to a function value, then each argument as a name and a node, sorted by name like any property list. The runtime binds the arguments to the callee's own parameters by name — a name the declaration lacks is dropped, a parameter it declares must be present. See *Function values*. |
 
 A `{ expression }` block in NX source is its expression; it has no node of its own. NX has no
-syntax for a local `let` binding, an index expression or a function type, so none has a kind.
+syntax for a local `let` binding or an index expression, so neither has a node kind. A function
+type has a *type* kind but no node kind: a function reaches an expression by name, as a
+`reference`.
 
 Property lists are sorted by property name. Content lists are in source order.
 
@@ -357,11 +361,12 @@ and not only through opening.
 A module lists a feature only when it uses the construct that needs one, so most modules list none.
 A module that declares a derived update record lists `update-records-v1`; one that declares a
 derived property union lists `property-unions-v1`; one that calls an update intrinsic lists
-`update-intrinsics-v1`; one that binds an action handler lists `action-handlers-v1`. A runtime that
-does not know a listed feature refuses the image rather than guessing, which is what makes the list
-safe to grow. An image does not record its evaluation
-semantics here. The schema version and the runtime ABI carry that, and an intentional change to how
-a runtime evaluates an image bumps the ABI.
+`update-intrinsics-v1`; one that binds an action handler lists `action-handlers-v1`; one whose type
+table holds a function type, whose node table references a function anywhere but as a `call`'s
+callee, or which contains a `namedCall` lists `function-values-v1`. A runtime that does not know a
+listed feature refuses the image rather than guessing, which is what makes the list safe to grow.
+An image does not record its evaluation semantics here. The schema version and the runtime ABI
+carry that, and an intentional change to how a runtime evaluates an image bumps the ABI.
 
 ## Values
 
@@ -376,6 +381,26 @@ arithmetic on one is a runtime diagnostic in JavaScript. An action handler is
 action record it accepts (`Button.Tapped` for an inline emit, `SearchSubmitted` for a shared one),
 plus a `token` when the output came from a lifecycle render; the record names the handler and is
 not the handler, so a runtime accepts it as input only where *Action handlers* says.
+
+## Function values
+
+A function is a value: a `reference` node naming a function declaration evaluates to one wherever
+it stands, not only as a `call`'s callee. Functions are module-level and a body has no nested
+declarations, so a function value captures nothing: the declaration is the whole value. Canonical
+output renders one as the record `{ "$type": "Function", "module": "<identity>", "name": "<name>" }`,
+the same record in both runtimes, and two function values are equal exactly when they name one
+declaration. A host that supplies such a record where a function type is expected — a descriptor's
+prop, a component's initialization — has it resolved to the declaration it names, and one naming
+no function of the linked program is refused with a diagnostic naming it.
+
+A function-typed value is called by name, never by position: `namedCall` carries each argument's
+name because the callee's declaration is known only at run time, and its parameters may be fewer,
+or ordered differently, than the type the caller holds. The TypeScript runtime exposes the same
+binding to hosts as `callFunction(program, record, args)`, which drops an argument the function
+does not declare and fails naming the first parameter it declares and the arguments lack. The
+`function-values` corpus program covers a function type, a function bound to a prop and to a
+parameter, calls by element of a parameter with the exact and a smaller parameter set, and a
+function value in a result.
 
 ## Action handlers
 

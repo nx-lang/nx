@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  callFunction,
   dispatchComponentActions,
   evaluateComponent,
   evaluateFunction,
@@ -356,5 +357,74 @@ component <Counter step:int = 1 /> = {
       action: "Button.Tapped",
     });
     console.log("ok - emitted component IR carries an action handler the runtime initializes and dispatches");
+  },
+);
+
+withSource(
+  `
+type Contact = { name:string }
+let <ContactRow Item:Contact Index:int />: string = {Item.name + "#" + Index}
+let <Compact Item:Contact />: string = {Item.name}
+external component <List TItem:type ItemsSource:TItem[]? ItemTemplate:(<function Item:TItem Index:int />: string)? />
+component <Section Item:Contact Row:<function Item:Contact Index:int />: string /> = { <Row Item={Item} Index=2 /> }
+let root() = <List TItem=Contact ItemsSource={ <Contact name="Ada" /> } ItemTemplate={ContactRow} />
+`,
+  (dir, sourcePath) => {
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    if (!requiredFeaturesOf(emitIr(dir, sourcePath)).includes("function-values-v1")) {
+      throw new Error("Expected the module to require function-values-v1");
+    }
+    const identity = prepared.entry.module.identity;
+    const root = evaluateFunction(prepared, "root");
+    assertEqual(root, nativeJson(sourcePath));
+    assertEqual(root.ItemTemplate, { $type: "Function", module: identity, name: "ContactRow" });
+    assertEqual(callFunction(prepared, root.ItemTemplate, { Item: { $type: "Contact", name: "Kai" }, Index: 5, Extra: true }), "Kai#5");
+    const compact = { $type: "Function", module: identity, name: "Compact" };
+    assertEqual(callFunction(prepared, compact, { Item: { $type: "Contact", name: "Kai" }, Index: 5 }), "Kai");
+    assertEqual(initializeComponent(prepared, "Section", { Item: { $type: "Contact", name: "Ada" }, Row: compact }).rendered, "Ada");
+    assertEqual(initializeComponent(prepared, "Section", { Item: { $type: "Contact", name: "Ada" }, Row: root.ItemTemplate }).rendered, "Ada#2");
+    console.log("ok - function values render as Function records and call by name in both runtimes");
+  },
+);
+
+withSource(
+  `
+external component <Box Label:string? Same:boolean? Other:boolean? />
+let <Wrap Item:object />: string = "w"
+let <Plain Item:object />: string = "p"
+let F: <function Item:object />: string = {Wrap}
+let G: <function Item:object />: string = {Wrap}
+let H: <function Item:object />: string = {Plain}
+let root() = <Box Label=<F Item="x" /> Same={F == G} Other={F == H} />
+`,
+  (dir, sourcePath) => {
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    const root = evaluateFunction(prepared, "root");
+    assertEqual(root, nativeJson(sourcePath));
+    assertEqual(root, { $type: "Box", Label: "w", Same: true, Other: false });
+    console.log("ok - a top-level let of function type is callable and compares by declaration in both runtimes");
+  },
+);
+
+withSource(
+  `
+type Item = { n:int }
+external component <Stack content Children:Item[] />
+let xs = { 1 2 3 }
+let <Items content Items:Item[] />: Item[] = {Items}
+let <Shift Items:Item[] By:int />: Item[] = { for i in Items { <Item n={i.n + By} /> } }
+let seed = { for x in xs { <Item n={x} /> } }
+let viaComponent() = <Stack> for x in xs { <Item n={x} /> } for x in xs { <Item n={x + 10} /> } </Stack>
+let viaFunction() = <Items> <Shift Items={seed} By=0 /> <Shift Items={seed} By=10 /> </Items>
+let root() = { viaComponent() viaFunction() }
+`,
+  (dir, sourcePath) => {
+    const prepared = prepareNxIrProgram(emitIr(dir, sourcePath));
+    const root = evaluateFunction(prepared, "root");
+    assertEqual(root, nativeJson(sourcePath));
+    // Two `for` loops side by side, and two list-returning calls, each read as one list of children.
+    assertEqual(root[0].Children.length, 6);
+    assertEqual(root[1].length, 6);
+    console.log("ok - list-valued content children are spliced as the native interpreter splices them");
   },
 );

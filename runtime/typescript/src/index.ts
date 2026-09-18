@@ -16,17 +16,22 @@ export const NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1 = "update-records-v1";
 export const NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1 = "property-unions-v1";
 export const NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1 = "update-intrinsics-v1";
 export const NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1 = "action-handlers-v1";
+/** Function types, function references as values, and calls of function-typed values by name. */
+export const NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1 = "function-values-v1";
 
 const knownFeatures = new Set([
   NX_IR_REQUIRED_FEATURE_UPDATE_RECORDS_V1,
   NX_IR_REQUIRED_FEATURE_PROPERTY_UNIONS_V1,
   NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1,
   NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1,
+  NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1,
 ]);
 
 /** The `$type` of a rendered handler, and of the batch entry that invokes one by token. */
 const actionHandlerTypeName = "ActionHandler";
 const handlerInvocationTypeName = "ActionHandlerInvocation";
+/** The `$type` of a rendered function value: a reference to a declaration by module and name. */
+const functionTypeName = "Function";
 
 // ------------------------------------------------------------------------------------------------
 // The image as the compiler writes it
@@ -516,13 +521,16 @@ export const nodeKinds = {
   component: 18,
   actionHandler: 19,
   text: 20,
+  namedCall: 21,
 } as const;
 
 /** The primitive types a `text` node can name: the ones with a canonical text form. */
 const textTypes = ["int", "int32", "int64", "float32", "float64", "boolean"] as const;
 type TextType = (typeof textTypes)[number];
 
-export const typeKinds = { primitive: 0, nominal: 1, array: 2, nullable: 3 } as const;
+export const typeKinds = { primitive: 0, nominal: 1, array: 2, nullable: 3, function: 4 } as const;
+/** Bit 0 of a function type parameter's flags cell: the parameter takes body content. */
+const functionParamFlags = { content: 1 } as const;
 export const constantKinds = { int: 0, bigint: 1, float: 2 } as const;
 export const declarationKinds = {
   function: 0,
@@ -612,7 +620,8 @@ export type PreparedType =
   | { readonly kind: "primitive"; readonly name: string }
   | { readonly kind: "nominal"; readonly slot: number; readonly name: string }
   | { readonly kind: "array"; readonly element: PreparedType }
-  | { readonly kind: "nullable"; readonly inner: PreparedType };
+  | { readonly kind: "nullable"; readonly inner: PreparedType }
+  | { readonly kind: "function"; readonly params: readonly PreparedParam[]; readonly result: PreparedType };
 
 export interface NxIrReference {
   readonly slot: number;
@@ -1047,7 +1056,7 @@ const EMIT: readonly Op[] = ["str", "ref"];
 
 /** The operands after the kind cell, by table and kind number. */
 const layouts: Record<NxIrTable, readonly (readonly Op[])[]> = {
-  types: [["str"], ["ref"], ["type"], ["type"]],
+  types: [["str"], ["ref"], ["type"], ["type"], ["type", { list: PARAM }]],
   constants: [["i64"], ["str"], ["f64"]],
   nodes: [
     [],
@@ -1071,6 +1080,7 @@ const layouts: Record<NxIrTable, readonly (readonly Op[])[]> = {
     ["ref", { list: PROPERTY }, { list: NODES }],
     ["ref", "str", "ref", "int", "optRef", "node"],
     ["node", "textType"],
+    ["node", { list: PROPERTY }],
   ],
   declarations: [
     ["str", { list: PARAM }, "node"],
@@ -1289,6 +1299,20 @@ class TableReader {
       case typeKinds.array:
         prepared = { kind: "array", element: this.type(entry[1]!) };
         break;
+      case typeKinds.function: {
+        const result = this.type(entry[1]!);
+        const params: PreparedParam[] = [];
+        const count = entry[2]!;
+        for (let position = 3; position < 3 + count * 3; position += 3) {
+          params.push({
+            name: this.#image.string(entry[position]!),
+            ty: this.type(entry[position + 1]!),
+            isContent: (entry[position + 2]! & functionParamFlags.content) !== 0,
+          });
+        }
+        prepared = { kind: "function", params, result };
+        break;
+      }
       default:
         prepared = { kind: "nullable", inner: this.type(entry[1]!) };
         break;
@@ -1837,10 +1861,57 @@ interface EvalContext {
   readonly depth: number;
 }
 
-interface FunctionReferenceValue {
-  readonly $nxKind: "functionReference";
+/**
+ * A function as a value: a reference to a declaration of a linked module. It captures nothing,
+ * so two references are equal exactly when they name one declaration, which is what its JSON
+ * form — the canonical `Function` record — compares by.
+ */
+class FunctionReferenceValue {
+  readonly $nxKind = "functionReference" as const;
   readonly linked: LinkedModule;
   readonly declaration: PreparedDeclaration;
+
+  constructor(linked: LinkedModule, declaration: PreparedDeclaration) {
+    this.linked = linked;
+    this.declaration = declaration;
+  }
+
+  toJSON(): NxCanonicalValue {
+    return functionRecord(this);
+  }
+}
+
+/** The canonical record of a function value: `{ $type: "Function", module, name }`. */
+function functionRecord(reference: FunctionReferenceValue): NxCanonicalValue {
+  return { $type: functionTypeName, module: reference.linked.module.identity, name: reference.declaration.name };
+}
+
+/** The `Function` record a host supplies where a function value is expected, if `value` is one. */
+function asFunctionRecord(value: unknown): { module: string; name: string } | undefined {
+  if (!isObject(value) || value.$type !== functionTypeName) {
+    return undefined;
+  }
+  const { module, name } = value;
+  if (typeof module !== "string" || typeof name !== "string") {
+    return undefined;
+  }
+  return { module, name };
+}
+
+/**
+ * Resolves a host-supplied `Function` record to the declaration it names, failing by name when
+ * the linked program has no such module or function.
+ */
+function resolveFunctionRecord(program: NxPreparedProgram, record: { module: string; name: string }, path: string): FunctionReferenceValue {
+  const linked = program.modulesByIdentity.get(record.module);
+  if (linked === undefined) {
+    fail("nx-ir-function-value", `${path} names function '${record.name}' of module '${record.module}', which the program does not link.`);
+  }
+  const declaration = linked.module.declarationsByName.get(record.name);
+  if (declaration === undefined || declaration.kind.tag !== "function") {
+    fail("nx-ir-function-value", `${path} names function '${record.name}', which module '${record.module}' does not declare.`);
+  }
+  return new FunctionReferenceValue(linked, declaration);
 }
 
 /** An internal value smuggled through `NxCanonicalValue` positions until the boundary. */
@@ -1882,7 +1953,11 @@ function invokeFunction(
   const frame: NxCanonicalValue[] = [];
   const context: EvalContext = { program, linked, declaration, frame, options, depth };
   kind.params.forEach((param, index) => {
-    frame[index] = normalizeValue(context, param.ty, args[index]!, param.name);
+    // Body content reaches the content parameter as the list of children the emitter gathered,
+    // and a child that is itself a list is spliced, as it is for a component's content.
+    const arg = args[index]!;
+    const value = param.isContent && Array.isArray(arg) ? spliceContent(arg) : arg;
+    frame[index] = normalizeValue(context, param.ty, value, param.name);
   });
   return evalNode(kind.body, context);
 }
@@ -1899,6 +1974,21 @@ function nodesAt(context: EvalContext, entry: Uint32Array, at: number): { values
     values.push(evalNode(entry[position]!, context));
   }
   return { values, next: at + 1 + count };
+}
+
+/**
+ * Evaluates the content children at `at`, splicing a child that evaluates to a list into the
+ * content: a `for`, a braced sequence or a list-valued call among an element's children
+ * contributes its items, not itself. This is the interpreter's rule for body content, and it is
+ * what makes two `for` loops side by side, or a list-returning function among the children, read
+ * as one list of children.
+ */
+function contentAt(context: EvalContext, entry: Uint32Array, at: number): NxCanonicalValue[] {
+  return spliceContent(nodesAt(context, entry, at).values);
+}
+
+function spliceContent(values: readonly NxCanonicalValue[]): NxCanonicalValue[] {
+  return values.flatMap((value) => (Array.isArray(value) ? value : [value]));
 }
 
 /** Evaluates the `count, (name, node) × count` list at `at` into an object, in property order. */
@@ -1939,6 +2029,8 @@ function evalNode(index: number, context: EvalContext): NxCanonicalValue {
     }
     case nodeKinds.reference:
       return evalReference(context, entry[1]!, image.string(entry[2]!), index);
+    case nodeKinds.namedCall:
+      return evalNamedCall(context, index, entry);
     case nodeKinds.binary: {
       const operator = binaryOperators[entry[1]!]!;
       // `and` and `or` are the only non-strict operators: the left operand decides whether the
@@ -2030,7 +2122,7 @@ function evalNode(index: number, context: EvalContext): NxCanonicalValue {
       return evalUnionCase(context, index, entry);
     case nodeKinds.element: {
       const { properties, next } = propertiesAt(context, entry, 3);
-      const content = nodesAt(context, entry, next).values;
+      const content = contentAt(context, entry, next);
       // The interpreter's rule for an element with no declared content field: one child is
       // bound as itself, several as a list.
       if (content.length === 1) {
@@ -2106,7 +2198,7 @@ function evalConstant(context: EvalContext, constantIndex: number, nodeIndex: nu
 function evalReference(context: EvalContext, slot: number, name: string, nodeIndex: number): NxCanonicalValue {
   const { linked, declaration } = resolveReference(context.linked, slot, name);
   if (declaration.kind.tag === "function") {
-    return internal({ $nxKind: "functionReference", linked, declaration });
+    return internal(new FunctionReferenceValue(linked, declaration));
   }
   if (declaration.kind.tag === "value") {
     return evalNode(declaration.kind.value, {
@@ -2128,6 +2220,64 @@ function evalCall(context: EvalContext, nodeIndex: number, entry: Uint32Array): 
   return invokeFunction(context.program, callee.linked, callee.declaration, args, context.options, context.depth + 1);
 }
 
+/**
+ * A call of a function-typed value by name: the callee is a slot or reference holding a function
+ * value, and the arguments are bound to that function's parameters under the subset rule.
+ */
+function evalNamedCall(context: EvalContext, nodeIndex: number, entry: Uint32Array): NxCanonicalValue {
+  const callee = evalNode(entry[1]!, context) as unknown;
+  if (!isFunctionReference(callee)) {
+    fail("nx-ir-call", "NX IR named call callee did not evaluate to a function value.", context, nodeIndex);
+  }
+  const { properties } = propertiesAt(context, entry, 2);
+  return invokeFunctionByName(context.program, callee, properties, context.options, context.depth + 1);
+}
+
+/**
+ * Invokes a function value with arguments by name. The caller supplied every parameter of the
+ * function *type* it holds, so an argument the declaration does not name is dropped, and a
+ * parameter the declaration names must be present.
+ */
+function invokeFunctionByName(
+  program: NxPreparedProgram,
+  callee: FunctionReferenceValue,
+  args: Record<string, NxCanonicalValue>,
+  options: NxRuntimeOptions,
+  depth: number,
+): NxCanonicalValue {
+  const kind = callee.declaration.kind;
+  if (kind.tag !== "function") {
+    fail("nx-ir-call", `'${callee.declaration.name}' is not a function.`);
+  }
+  const positional = kind.params.map((param) => {
+    if (!Object.prototype.hasOwnProperty.call(args, param.name)) {
+      fail("nx-ir-arguments", `Function '${callee.declaration.name}' requires argument '${param.name}'.`);
+    }
+    return args[param.name]!;
+  });
+  return invokeFunction(program, callee.linked, callee.declaration, positional, options, depth);
+}
+
+/**
+ * Calls the function a canonical `Function` record names with arguments keyed by parameter name,
+ * and returns the canonical result. An argument the function does not declare is dropped, as the
+ * subset rule allows; a parameter it declares and the arguments lack is a diagnostic naming it.
+ */
+export function callFunction(
+  program: NxPreparedProgram | NxPreparedModule,
+  value: NxCanonicalValue,
+  args: Record<string, NxCanonicalValue> = {},
+  options: NxRuntimeOptions = {},
+): NxCanonicalValue {
+  const linkedProgram = programOf(program);
+  const record = asFunctionRecord(value);
+  if (record === undefined) {
+    fail("nx-ir-function-value", "callFunction expects a Function record: { $type: \"Function\", module, name }.");
+  }
+  const callee = resolveFunctionRecord(linkedProgram, record, "callFunction");
+  return canonicalizeRendered(invokeFunctionByName(linkedProgram, callee, args, options, 0)).value;
+}
+
 function evalRecord(context: EvalContext, nodeIndex: number, entry: Uint32Array): NxCanonicalValue {
   const image = context.linked.module.artifact;
   const name = image.string(entry[2]!);
@@ -2137,7 +2287,7 @@ function evalRecord(context: EvalContext, nodeIndex: number, entry: Uint32Array)
   }
   const record = declaration.kind;
   const { properties, next } = propertiesAt(context, entry, 3);
-  const content = nodesAt(context, entry, next).values;
+  const content = contentAt(context, entry, next);
   const contentField = record.fields.find((field) => field.isContent)?.name;
   applyContentBinding(properties, contentField, record.fields, content, name);
   const normalized =
@@ -2164,7 +2314,7 @@ function evalUnionCase(context: EvalContext, nodeIndex: number, entry: Uint32Arr
     return caseName;
   }
   const { properties, next } = propertiesAt(context, entry, 4);
-  const content = nodesAt(context, entry, next).values;
+  const content = contentAt(context, entry, next);
   const path = `${unionName}.${caseName}`;
   const contentField = unionCase.fields.find((field) => field.isContent)?.name;
   applyContentBinding(properties, contentField, unionCase.fields, content, path);
@@ -2181,7 +2331,7 @@ function evalComponentDescriptor(context: EvalContext, nodeIndex: number, entry:
   }
   const component = declaration.kind;
   const { properties, next } = propertiesAt(context, entry, 3);
-  const content = nodesAt(context, entry, next).values;
+  const content = contentAt(context, entry, next);
   const { fields: props, handlers } = splitHandlerProperties(linked, declaration, properties, `${name} props`);
   const contentField = component.props.find((field) => field.isContent)?.name;
   applyContentBinding(props, contentField, component.props, content, name);
@@ -2323,7 +2473,7 @@ function canonicalizeRendered(value: NxCanonicalValue, generation?: number): { v
       return record;
     }
     if (isFunctionReference(item)) {
-      return item;
+      return functionRecord(item);
     }
     // Keys are visited in sorted order so the numbering matches, and written back in their own
     // order so the output reads as the declaration does.
@@ -2734,6 +2884,19 @@ function normalizeValue(context: EvalContext, ty: PreparedType, value: NxCanonic
     }
     case "nullable":
       return value === null ? null : normalizeValue(context, ty.inner, value, path);
+    case "function": {
+      // A function value from the program is already a reference; one from a host is the
+      // canonical record, resolved to the declaration it names. The checker related the value's
+      // declaration to the type by name, so no parameter is re-checked here.
+      if (isFunctionReference(value)) {
+        return value;
+      }
+      const record = asFunctionRecord(value);
+      if (record === undefined) {
+        fail("nx-ir-boundary-type", `Expected ${path} to be a function value.`);
+      }
+      return internal(resolveFunctionRecord(context.program, record, path));
+    }
     default:
       fail("nx-ir-schema", `Unknown type kind '${String((ty as { kind: unknown }).kind)}'.`);
   }
@@ -3093,7 +3256,7 @@ function deepEqual(lhs: NxCanonicalValue, rhs: NxCanonicalValue): boolean {
 }
 
 function isFunctionReference(value: unknown): value is FunctionReferenceValue {
-  return typeof value === "object" && value !== null && (value as { readonly $nxKind?: unknown }).$nxKind === "functionReference";
+  return value instanceof FunctionReferenceValue;
 }
 
 function requireObject(value: NxCanonicalValue, path: string): Record<string, NxCanonicalValue> {

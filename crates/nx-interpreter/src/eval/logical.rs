@@ -127,12 +127,13 @@ fn eval_eq(lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
 }
 
 /// The language's equality: scalars by value, records and lists structurally, a constant case by
-/// its union and name.
+/// its union and name, a function by the declaration it names.
 ///
 /// <para>A record equals another of the same type whose every field is equal, and a list equals
-/// another of the same length whose elements are equal in order. `null` equals only `null`. This
-/// is the one equality `==`, match patterns, and `diff` share, so what an author can test by hand
-/// is what every other comparison sees.</para>
+/// another of the same length whose elements are equal in order. A function value equals another
+/// exactly when both name the same declaration, which is its whole identity. `null` equals only
+/// `null`. This is the one equality `==`, match patterns, and `diff` share, so what an author can
+/// test by hand is what every other comparison sees.</para>
 pub fn values_equal(lhs: &Value, rhs: &Value) -> bool {
     if let Some(pair) = numeric_pair(lhs, rhs) {
         return match pair {
@@ -154,6 +155,16 @@ pub fn values_equal(lhs: &Value, rhs: &Value) -> bool {
             },
         ) => a_union == b_union && a_case == b_case,
         (Value::Null, Value::Null) => true,
+        (
+            Value::Function {
+                module: a_module,
+                name: a_name,
+            },
+            Value::Function {
+                module: b_module,
+                name: b_name,
+            },
+        ) => a_module == b_module && a_name == b_name,
         (Value::Array(a), Value::Array(b)) => {
             a.len() == b.len() && a.iter().zip(b).all(|(a, b)| values_equal(a, b))
         }

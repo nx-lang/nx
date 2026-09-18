@@ -207,12 +207,13 @@ pub enum Type {
     /// Example: `int?`, `string?`
     Nullable(Box<Type>),
 
-    /// Function type: (T1, T2, ...) => R
+    /// Function type: an element function's signature with `function` in the name slot.
     ///
-    /// Example: `(int, string) => boolean`
+    /// Example: `<function Item:Contact Index:int />: DrawnNode`
     Function {
-        /// Parameter types
-        params: Vec<Type>,
+        /// Parameters, in declared order. A function satisfies a function type by parameter
+        /// name, so the order is display information.
+        params: Vec<FunctionParam>,
         /// Return type
         ret: Box<Type>,
     },
@@ -262,6 +263,153 @@ pub enum Type {
     ///
     /// Used to continue type checking despite errors.
     Error,
+}
+
+/// One parameter of a function type.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FunctionParam {
+    /// Parameter name, which arguments bind to.
+    pub name: Name,
+    /// Parameter type.
+    pub ty: Type,
+    /// Whether the parameter receives markup body content.
+    pub is_content: bool,
+}
+
+impl FunctionParam {
+    /// Creates a plain (non-content) parameter.
+    pub fn new(name: impl Into<Name>, ty: Type) -> Self {
+        Self {
+            name: name.into(),
+            ty,
+            is_content: false,
+        }
+    }
+
+    /// Creates the content parameter.
+    pub fn content(name: impl Into<Name>, ty: Type) -> Self {
+        Self {
+            name: name.into(),
+            ty,
+            is_content: true,
+        }
+    }
+}
+
+/// Why a function fails to satisfy a function type.
+///
+/// A plain "expects F, found G" leaves the reader comparing two signatures by eye; the reason
+/// names the parameter that decided it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FunctionMismatch {
+    /// The function declares a parameter the type does not supply. A function may declare fewer
+    /// parameters than its type, never more.
+    UnsuppliedParameter(Name),
+    /// A parameter is the content parameter on one side only.
+    ContentMismatch(Name),
+    /// What the type supplies for a parameter is not acceptable to the function.
+    ParameterType {
+        name: Name,
+        supplied: Type,
+        declared: Type,
+    },
+    /// The function's result is not acceptable where the type's result is expected.
+    Result { returned: Type, expected: Type },
+}
+
+impl fmt::Display for FunctionMismatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FunctionMismatch::UnsuppliedParameter(name) => write!(
+                f,
+                "the function declares parameter '{name}', which the function type does not supply"
+            ),
+            FunctionMismatch::ContentMismatch(name) => write!(
+                f,
+                "parameter '{name}' is the content parameter on one side only"
+            ),
+            FunctionMismatch::ParameterType {
+                name,
+                supplied,
+                declared,
+            } => {
+                let (supplied, declared) = display_type_pair(supplied, declared);
+                write!(
+                    f,
+                    "parameter '{name}' is supplied as {supplied}, which is not {declared}"
+                )
+            }
+            FunctionMismatch::Result { returned, expected } => {
+                let (returned, expected) = display_type_pair(returned, expected);
+                write!(f, "the result {returned} is not {expected}")
+            }
+        }
+    }
+}
+
+/// Checks a function's type against a function type by parameter name.
+///
+/// <para>`satisfies(value, target)` decides each pairing: for a parameter, whether what the type
+/// supplies satisfies what the function declares (contravariance); for the result, whether what
+/// the function returns satisfies what the type expects (covariance). Every parameter the
+/// function declares must be one the type supplies, under the same name and the same `content`
+/// marking; the function may leave parameters of the type undeclared, and a caller supplying them
+/// is what makes that safe. Parameter order is not compared.</para>
+pub fn check_function_satisfies(
+    actual_params: &[FunctionParam],
+    actual_ret: &Type,
+    expected_params: &[FunctionParam],
+    expected_ret: &Type,
+    satisfies: &mut dyn FnMut(&Type, &Type) -> bool,
+) -> Result<(), FunctionMismatch> {
+    for declared in actual_params {
+        let Some(supplied) = expected_params
+            .iter()
+            .find(|param| param.name == declared.name)
+        else {
+            return Err(FunctionMismatch::UnsuppliedParameter(declared.name.clone()));
+        };
+        if supplied.is_content != declared.is_content {
+            return Err(FunctionMismatch::ContentMismatch(declared.name.clone()));
+        }
+        if !satisfies(&supplied.ty, &declared.ty) {
+            return Err(FunctionMismatch::ParameterType {
+                name: declared.name.clone(),
+                supplied: supplied.ty.clone(),
+                declared: declared.ty.clone(),
+            });
+        }
+    }
+    if !satisfies(actual_ret, expected_ret) {
+        return Err(FunctionMismatch::Result {
+            returned: actual_ret.clone(),
+            expected: expected_ret.clone(),
+        });
+    }
+    Ok(())
+}
+
+/// Renders a function type in NX spelling, with `render` spelling each part.
+///
+/// <para>The spelling itself belongs to [`nx_hir::ast::spell_function_type`], which the hover and
+/// the explained form of an IR artifact render through too; only the parts are this crate's.</para>
+fn format_function_type(
+    params: &[FunctionParam],
+    ret: &Type,
+    render: &dyn Fn(&Type) -> String,
+) -> String {
+    let types: Vec<String> = params.iter().map(|param| render(&param.ty)).collect();
+    nx_hir::ast::spell_function_type(
+        params
+            .iter()
+            .zip(&types)
+            .map(|(param, ty)| nx_hir::ast::SpelledParam {
+                is_content: param.is_content,
+                name: param.name.as_str(),
+                ty,
+            }),
+        &render(ret),
+    )
 }
 
 impl Type {
@@ -329,7 +477,7 @@ impl Type {
             Type::Array(inner) | Type::Nullable(inner) => inner.find_parameter(matches),
             Type::Function { params, ret } => params
                 .iter()
-                .find_map(|param| param.find_parameter(matches))
+                .find_map(|param| param.ty.find_parameter(matches))
                 .or_else(|| ret.find_parameter(matches)),
             _ => None,
         }
@@ -348,9 +496,47 @@ impl Type {
             Type::Function { params, ret } => Type::function(
                 params
                     .iter()
-                    .map(|param| param.substitute_parameters(substitute))
+                    .map(|param| FunctionParam {
+                        name: param.name.clone(),
+                        ty: param.ty.substitute_parameters(substitute),
+                        is_content: param.is_content,
+                    })
                     .collect(),
                 ret.substitute_parameters(substitute),
+            ),
+            _ => self.clone(),
+        }
+    }
+
+    /// Replaces each type parameter `substitute` answers for, telling it whether the parameter
+    /// stands in a covariant position (a value of the type is produced there) or a contravariant
+    /// one (a value is consumed there: a function type's parameter). Nesting a function type's
+    /// parameter flips the polarity; its result and every list or nullable layer keep it.
+    pub fn substitute_parameters_by_variance(
+        &self,
+        covariant: bool,
+        substitute: &impl Fn(&TypeParameterRef, bool) -> Option<Type>,
+    ) -> Type {
+        match self {
+            Type::Parameter(param) => substitute(param, covariant).unwrap_or_else(|| self.clone()),
+            Type::Array(inner) => {
+                Type::array(inner.substitute_parameters_by_variance(covariant, substitute))
+            }
+            Type::Nullable(inner) => {
+                Type::nullable(inner.substitute_parameters_by_variance(covariant, substitute))
+            }
+            Type::Function { params, ret } => Type::function(
+                params
+                    .iter()
+                    .map(|param| FunctionParam {
+                        name: param.name.clone(),
+                        ty: param
+                            .ty
+                            .substitute_parameters_by_variance(!covariant, substitute),
+                        is_content: param.is_content,
+                    })
+                    .collect(),
+                ret.substitute_parameters_by_variance(covariant, substitute),
             ),
             _ => self.clone(),
         }
@@ -372,7 +558,7 @@ impl Type {
     }
 
     /// Creates a function type.
-    pub fn function(params: Vec<Type>, ret: Type) -> Self {
+    pub fn function(params: Vec<FunctionParam>, ret: Type) -> Self {
         Type::Function {
             params,
             ret: Box::new(ret),
@@ -439,6 +625,14 @@ impl Type {
     }
 
     /// Unwraps the inner type if this is nullable, otherwise returns self.
+    /// The parameters and result of a function type, or `None` for any other type.
+    pub fn function_parts(&self) -> Option<(&[FunctionParam], &Type)> {
+        match self {
+            Type::Function { params, ret } => Some((params.as_slice(), ret.as_ref())),
+            _ => None,
+        }
+    }
+
     pub fn strip_nullable(&self) -> &Type {
         match self {
             Type::Nullable(inner) => inner,
@@ -523,33 +717,28 @@ impl Type {
             return t1.is_compatible_with(t2);
         }
 
-        // Functions: (T1, T2) => R1 is compatible with (U1, U2) => R2
-        // if U1 is compatible with T1, U2 is compatible with T2 (contravariant params)
-        // and R1 is compatible with R2 (covariant return)
+        // Functions match by parameter name: every parameter the value declares must be one the
+        // expected type supplies, contravariantly; the result is covariant. See
+        // `check_function_satisfies`.
         if let (
             Type::Function {
-                params: p1,
-                ret: r1,
+                params: actual_params,
+                ret: actual_ret,
             },
             Type::Function {
-                params: p2,
-                ret: r2,
+                params: expected_params,
+                ret: expected_ret,
             },
         ) = (self, other)
         {
-            if p1.len() != p2.len() {
-                return false;
-            }
-
-            // Check parameters (contravariant)
-            for (t1, t2) in p1.iter().zip(p2.iter()) {
-                if !t2.is_compatible_with(t1) {
-                    return false;
-                }
-            }
-
-            // Check return type (covariant)
-            return r1.is_compatible_with(r2);
+            return check_function_satisfies(
+                actual_params,
+                actual_ret,
+                expected_params,
+                expected_ret,
+                &mut |value, target| value.is_compatible_with(target),
+            )
+            .is_ok();
         }
 
         false
@@ -563,14 +752,9 @@ impl fmt::Display for Type {
             Type::Array(elem) => write_postfix_type(f, elem, "[]"),
             Type::Nullable(inner) => write_postfix_type(f, inner, "?"),
             Type::Function { params, ret } => {
-                write!(f, "(")?;
-                for (i, param) in params.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}", param)?;
-                }
-                write!(f, ") => {}", ret)
+                f.write_str(&format_function_type(params, ret, &|ty: &Type| {
+                    ty.to_string()
+                }))
             }
             Type::Named(named) => write!(f, "{}", named.name),
             Type::Union(union_ty) => write!(f, "{}", union_ty.name),
@@ -628,7 +812,7 @@ fn collect_nominal_parts<'ty>(
         Type::Array(inner) | Type::Nullable(inner) => collect_nominal_parts(inner, parts),
         Type::Function { params, ret } => {
             for param in params {
-                collect_nominal_parts(param, parts);
+                collect_nominal_parts(&param.ty, parts);
             }
             collect_nominal_parts(ret, parts);
         }
@@ -656,17 +840,19 @@ fn qualified_display(ty: &Type) -> String {
             Some(origin) => format!("{}:{}", origin.module_identity(), named.name),
             None => named.name.to_string(),
         },
-        Type::Array(inner) => format!("{}[]", qualified_display(inner)),
-        Type::Nullable(inner) => format!("{}?", qualified_display(inner)),
-        Type::Function { params, ret } => {
-            let params = params
-                .iter()
-                .map(qualified_display)
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("({}) => {}", params, qualified_display(ret))
-        }
+        Type::Array(inner) => qualified_postfix_display(inner, "[]"),
+        Type::Nullable(inner) => qualified_postfix_display(inner, "?"),
+        Type::Function { params, ret } => format_function_type(params, ret, &qualified_display),
         _ => ty.to_string(),
+    }
+}
+
+/// A suffix after a function type's result would bind to the result, so a function type under a
+/// suffix is parenthesized, as source spells it.
+fn qualified_postfix_display(inner: &Type, suffix: &str) -> String {
+    match inner {
+        Type::Function { .. } => format!("({}){suffix}", qualified_display(inner)),
+        _ => format!("{}{suffix}", qualified_display(inner)),
     }
 }
 
@@ -1117,8 +1303,21 @@ mod tests {
 
     #[test]
     fn test_function_type() {
-        let func = Type::function(vec![Type::int(), Type::string()], Type::boolean());
-        assert_eq!(func.to_string(), "(int, string) => boolean");
+        let func = Type::function(
+            vec![
+                FunctionParam::new("Count", Type::int()),
+                FunctionParam::content("Children", Type::array(Type::string())),
+            ],
+            Type::boolean(),
+        );
+        assert_eq!(
+            func.to_string(),
+            "<function Count:int content Children:string[] />: boolean"
+        );
+        assert_eq!(
+            Type::function(vec![], Type::named("DrawnNode")).to_string(),
+            "<function />: DrawnNode"
+        );
     }
 
     #[test]
@@ -1173,14 +1372,105 @@ mod tests {
         assert!(!arr_int.is_compatible_with(&arr_string));
     }
 
+    fn function(params: &[(&str, Type)], ret: Type) -> Type {
+        Type::function(
+            params
+                .iter()
+                .map(|(name, ty)| FunctionParam::new(*name, ty.clone()))
+                .collect(),
+            ret,
+        )
+    }
+
     #[test]
     fn test_is_compatible_functions() {
-        let f1 = Type::function(vec![Type::int()], Type::string());
-        let f2 = Type::function(vec![Type::int()], Type::string());
-        let f3 = Type::function(vec![Type::string()], Type::string());
+        let f1 = function(&[("n", Type::int())], Type::string());
+        let f2 = function(&[("n", Type::int())], Type::string());
+        let f3 = function(&[("n", Type::string())], Type::string());
 
         assert!(f1.is_compatible_with(&f2));
         assert!(!f1.is_compatible_with(&f3));
+    }
+
+    #[test]
+    fn a_function_may_declare_fewer_parameters_than_its_type_but_not_more() {
+        let full = function(
+            &[("Item", Type::named("Contact")), ("Index", Type::int())],
+            Type::string(),
+        );
+        let compact = function(&[("Item", Type::named("Contact"))], Type::string());
+        assert!(
+            compact.is_compatible_with(&full),
+            "ignoring Index is allowed"
+        );
+        assert!(
+            !full.is_compatible_with(&compact),
+            "needing Index where none is supplied is not"
+        );
+        let mismatch = check_function_satisfies(
+            full.function_parts().unwrap().0,
+            full.function_parts().unwrap().1,
+            compact.function_parts().unwrap().0,
+            compact.function_parts().unwrap().1,
+            &mut |value, target| value.is_compatible_with(target),
+        )
+        .unwrap_err();
+        assert_eq!(
+            mismatch,
+            FunctionMismatch::UnsuppliedParameter(Name::new("Index"))
+        );
+        assert!(mismatch.to_string().contains("'Index'"), "{mismatch}");
+    }
+
+    #[test]
+    fn function_parameters_match_by_name_not_position() {
+        let declared = function(
+            &[("Index", Type::int()), ("Item", Type::named("object"))],
+            Type::string(),
+        );
+        let expected = function(
+            &[("Item", Type::named("object")), ("Index", Type::int())],
+            Type::string(),
+        );
+        assert!(declared.is_compatible_with(&expected));
+
+        let renamed = function(&[("Entry", Type::named("object"))], Type::string());
+        assert!(!renamed.is_compatible_with(&expected));
+    }
+
+    #[test]
+    fn function_parameters_are_contravariant_and_results_covariant() {
+        let takes_object = function(&[("Value", Type::named("object"))], Type::string());
+        let takes_int = function(&[("Value", Type::int())], Type::string());
+        // `object` is not below `int`, and this structural relation does not know `int` is below
+        // `object`; the checker's richer relation does. Contravariance shows through widening.
+        let takes_int32 = function(&[("Value", Type::int32())], Type::string());
+        assert!(
+            takes_int.is_compatible_with(&takes_int32),
+            "a function taking int accepts the int32 the type supplies"
+        );
+        assert!(!takes_int32.is_compatible_with(&takes_int));
+        assert!(!takes_object.is_compatible_with(&takes_int));
+
+        let returns_int32 = function(&[], Type::int32());
+        let returns_int = function(&[], Type::int());
+        assert!(returns_int32.is_compatible_with(&returns_int));
+        assert!(!returns_int.is_compatible_with(&returns_int32));
+    }
+
+    #[test]
+    fn a_content_parameter_pairs_only_with_a_content_parameter() {
+        let content = Type::function(
+            vec![FunctionParam::content(
+                "Children",
+                Type::array(Type::string()),
+            )],
+            Type::string(),
+        );
+        let plain = function(&[("Children", Type::array(Type::string()))], Type::string());
+        assert!(content.is_compatible_with(&content));
+        assert!(!content.is_compatible_with(&plain));
+        assert!(!plain.is_compatible_with(&content));
     }
 
     #[test]
@@ -1197,8 +1487,8 @@ mod tests {
         assert_eq!(Type::array(Type::string()).to_string(), "string[]");
         assert_eq!(Type::nullable(Type::boolean()).to_string(), "boolean?");
         assert_eq!(
-            Type::function(vec![Type::int(), Type::int()], Type::int()).to_string(),
-            "(int, int) => int"
+            function(&[("a", Type::int()), ("b", Type::int())], Type::int()).to_string(),
+            "<function a:int b:int />: int"
         );
         assert_eq!(
             Type::union_type(Name::new("Direction"), vec![Name::new("north")], None, None)
@@ -1217,11 +1507,16 @@ mod tests {
         assert!(!nested.is_compatible_with(&nullable_list));
         assert!(!nullable_list.is_compatible_with(&nested));
 
-        let func_array = Type::array(Type::function(vec![Type::int()], Type::string()));
-        assert_eq!(func_array.to_string(), "((int) => string)[]");
+        let func_array = Type::array(function(&[("n", Type::int())], Type::string()));
+        assert_eq!(func_array.to_string(), "(<function n:int />: string)[]");
 
-        let nullable_func = Type::nullable(Type::function(vec![Type::int()], Type::string()));
-        assert_eq!(nullable_func.to_string(), "((int) => string)?");
+        let nullable_func = Type::nullable(function(&[("n", Type::int())], Type::string()));
+        assert_eq!(nullable_func.to_string(), "(<function n:int />: string)?");
+
+        // A suffix on the result is written on the result, so no parentheses appear.
+        let returns_nullable = function(&[("n", Type::int())], Type::nullable(Type::string()));
+        assert_eq!(returns_nullable.to_string(), "<function n:int />: string?");
+        assert!(!nullable_func.to_string().contains("=>"));
     }
 
     #[test]

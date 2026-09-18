@@ -12,6 +12,7 @@ import {
   NxIrRuntimeError,
   applyComponentStatePatch,
   applyUpdate,
+  callFunction,
   changedFields,
   constructComponentDescriptor,
   declarationKinds,
@@ -158,6 +159,16 @@ class ArtifactBuilder {
 
   nullable(inner: number): number {
     return this.type([typeKinds.nullable, inner]);
+  }
+
+  /** `[4, result, [[name, type, flags]...]]`: a function type with named parameters. */
+  functionType(result: number, params: readonly (readonly [string, number, boolean?])[] = []): number {
+    return this.type([
+      typeKinds.function,
+      result,
+      params.length,
+      ...params.flatMap(([name, ty, content]) => [this.str(name), ty, content === true ? 1 : 0]),
+    ]);
   }
 
   array(element: number): number {
@@ -1243,6 +1254,91 @@ test("a handler resolved through the parent is the parent's own value", () => {
 // ------------------------------------------------------------------------------------------------
 // Runner
 // ------------------------------------------------------------------------------------------------
+
+// ------------------------------------------------------------------------------------------------
+// Function values
+// ------------------------------------------------------------------------------------------------
+
+/**
+ * `let <Row Item:object Index:int />: string = "r"`, `external component <List ItemTemplate:(<function
+ * Item:object Index:int />: string)? />`, `let root() = <List ItemTemplate={Row} />`, and a
+ * `component <Section Row:<function Item:object Index:int />: string /> = { <Row Item="a" Index=1 /> }`.
+ */
+function templateArtifact(): Uint8Array {
+  const b = new ArtifactBuilder("main.nx");
+  const object = b.primitive("object");
+  const int = b.primitive("int");
+  const string = b.primitive("string");
+  const template = b.functionType(string, [["Item", object], ["Index", int]]);
+  b.fn("Row", b.string("r"), [[b.str("Item"), object, 0], [b.str("Index"), int, 0]]);
+  b.component("List", [b.field("ItemTemplate", b.nullable(template))], [], -1, { external: true });
+  b.fn("root", b.node([nodeKinds.component, ...b.ref("List"), ...b.list([b.property("ItemTemplate", b.node([nodeKinds.reference, ...b.ref("Row")]))]), ...b.content([])]));
+  // The prop is slot 0 of the component frame; the body calls it by name.
+  const call = b.node([nodeKinds.namedCall, b.node([nodeKinds.slot, 0, b.str("Row")]), ...b.list([b.property("Item", b.string("a")), b.property("Index", b.int(1))])]);
+  b.component("Section", [b.field("Row", template, { required: true })], [], call);
+  return b.build({ requiredFeatures: ["function-values-v1"] });
+}
+
+test("prepares an image listing the function-values feature and refuses one naming a feature it does not know", () => {
+  const program = prepareNxIrProgram(templateArtifact());
+  assertEqual(program.entry.module.artifact.requiredFeatures, ["function-values-v1"]);
+  const b = new ArtifactBuilder("main.nx");
+  b.fn("root", b.int(1));
+  const refused = tryPrepareNxIrModule(b.build({ requiredFeatures: ["function-values-v2"] }));
+  if (refused.ok || !refused.diagnostics.some((diagnostic) => diagnostic.code === "nx-ir-required-feature" && diagnostic.message.includes("function-values-v2"))) {
+    throw new Error("expected the unknown feature to be refused by name");
+  }
+});
+
+test("the validator reads a function type and refuses one whose parameter type index dangles", () => {
+  const program = prepareNxIrProgram(templateArtifact());
+  const list = program.componentEntrypoints.get("List")!.kind;
+  if (list.tag !== "component") {
+    throw new Error("List is not a component");
+  }
+  assertEqual(list.props[0]!.ty, {
+    kind: "nullable",
+    inner: { kind: "function", params: [{ name: "Item", ty: { kind: "primitive", name: "object" }, isContent: false }, { name: "Index", ty: { kind: "primitive", name: "int" }, isContent: false }], result: { kind: "primitive", name: "string" } },
+  });
+  const b = new ArtifactBuilder("main.nx");
+  b.type([typeKinds.function, b.primitive("string"), 1, b.str("Item"), 99, 0]);
+  b.fn("root", b.int(1));
+  const refused = tryPrepareNxIrModule(b.build());
+  if (refused.ok || !refused.diagnostics.some((diagnostic) => diagnostic.code === "nx-ir-malformed")) {
+    throw new Error("expected the dangling type index to be refused");
+  }
+});
+
+test("a rendered descriptor carries a function value as a Function record", () => {
+  const program = prepareNxIrProgram(templateArtifact());
+  const root = fields(evaluateFunction(program, "root"));
+  assertEqual(root, { $type: "List", ItemTemplate: { $type: "Function", module: "main.nx", name: "Row" } });
+  if (stableJson(root).includes("$nxKind")) {
+    throw new Error("an internal value reached canonical output");
+  }
+});
+
+test("callFunction binds by name, drops an argument the function lacks, and names a missing one", () => {
+  const program = prepareNxIrProgram(templateArtifact());
+  const record = fields(evaluateFunction(program, "root")).ItemTemplate!;
+  assertEqual(callFunction(program, record, { Item: { $type: "Contact" }, Index: 3, Extra: 1 }), "r");
+  assertThrows(() => callFunction(program, record, { Item: null }), "requires argument 'Index'");
+  assertThrows(() => callFunction(program, { $type: "Function", module: "main.nx", name: "Nope" }, {}), "'Nope'");
+  assertThrows(() => callFunction(program, { $type: "Function", module: "other.nx", name: "Row" }, {}), "'other.nx'");
+  assertThrows(() => callFunction(program, "Row", {}), "Function record");
+});
+
+test("a Function record from the host reaches a component prop and its body calls the named function", () => {
+  const program = prepareNxIrProgram(templateArtifact());
+  const instance = initializeComponent(program, "Section", { Row: { $type: "Function", module: "main.nx", name: "Row" } });
+  assertEqual(instance.rendered, "r");
+  assertEqual(fields(constructComponentDescriptor(program, "Section", { Row: { $type: "Function", module: "main.nx", name: "Row" } })), {
+    $type: "Section",
+    Row: { $type: "Function", module: "main.nx", name: "Row" },
+  });
+  assertThrows(() => initializeComponent(program, "Section", { Row: { $type: "Function", module: "main.nx", name: "Nope" } }), "'Nope'");
+  assertThrows(() => initializeComponent(program, "Section", { Row: "Row" }), "Expected Section props.Row to be a function value");
+});
 
 let failures = 0;
 for (const [name, run] of tests) {

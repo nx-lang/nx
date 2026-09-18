@@ -9,8 +9,8 @@
 //
 // Where the original calls a method on a control — GoPrev, GoNext, ScrollTo, Close — this port
 // sets the property the method would have changed, since NX cannot call into a control. Two of
-// the carousels also recycle their slides through ItemsSource and an ItemTemplate (list
-// virtualization); here the same slides are static children.
+// the carousels also recycle their slides through ItemsSource and an ItemTemplate built as a cell
+// class in code (code-behind); here the same slides are static children.
 
 type Slide = {
   Title: string

@@ -22,6 +22,11 @@ export interface NxDrawing {
   readonly unknownControls: readonly string[];
   /** Handlers bound where no instance can run them, as `SkiaButton.onTapped`. */
   readonly inertHandlers: readonly string[];
+  /**
+   * Template calls that failed while DrawnUI bound cells, as `ContactCell at index 3: <message>`,
+   * oldest first. Cells bind during layout, after the drawing is set, so these arrive later.
+   */
+  readonly templateFailures: readonly string[];
   /** The actions that left the tree since the last compile, oldest first. */
   readonly effects: readonly HostEffect[];
   readonly compiling: boolean;
@@ -51,6 +56,7 @@ export function useNxDrawing(source: string, compile: Compile, debounceMs = 350)
     failure: null,
     unknownControls: [],
     inertHandlers: [],
+    templateFailures: [],
     effects: [],
     compiling: true,
   });
@@ -71,6 +77,7 @@ export function useNxDrawing(source: string, compile: Compile, debounceMs = 350)
       failure,
       unknownControls: [],
       inertHandlers: [],
+      templateFailures: [],
       effects: [],
       compiling: false,
     });
@@ -109,7 +116,7 @@ export function useNxDrawing(source: string, compile: Compile, debounceMs = 350)
           // Only a session that drew replaces the one the standing drawing dispatches through.
           session.current = current;
           pipelineFailure.current = null;
-          setDrawing({ ...drawn, diagnostics: result.diagnostics, failure: null, effects: [], compiling: false });
+          setDrawing({ ...drawn, diagnostics: result.diagnostics, failure: null, templateFailures: [], effects: [], compiling: false });
         } catch (error) {
           failCompile(result.diagnostics, error instanceof Error ? error.message : String(error));
         }
@@ -126,11 +133,30 @@ export function useNxDrawing(source: string, compile: Compile, debounceMs = 350)
   function draw(current: Session, dispatch: Dispatch): Pick<NxDrawing, "node" | "unknownControls" | "inertHandlers"> {
     const unknown = new Set<string>();
     const inert = new Set<string>();
+    // Every bind of a failing cell reports, and each carries its own index, so the keys already
+    // told are kept beside the other two sets rather than read back out of the state: the list the
+    // pane shows is capped and evicts, and an evicted key must not set state again on the next
+    // scroll.
+    const templateFailures = new Set<string>();
     const node = drawRoot(current.root, {
       tree: current.tree,
       instance: null,
       dispatch,
       reportUnknown: (type) => unknown.add(type),
+      // A cell binds after the drawing is set, so what its template reports — an unknown control
+      // in its output, a handler that cannot run there, a failing call — reaches the pane through
+      // the state rather than through the sets this pass returns.
+      reportTemplateFailure: (where) => {
+        if (session.current !== current || templateFailures.has(where)) {
+          return;
+        }
+        templateFailures.add(where);
+        setDrawing((previous) =>
+          previous.templateFailures.includes(where)
+            ? previous
+            : { ...previous, templateFailures: [...previous.templateFailures, where].slice(-EFFECTS_KEPT) },
+        );
+      },
       reportInert: (where) => inert.add(where),
       // An event, not a property of the drawing, so it belongs in neither list the panel shows;
       // the console is where it goes here, as it goes to the fiddle's console pane there.

@@ -74,7 +74,10 @@ fn intrinsic_names_are_not_shadowed_by_a_parameter() {
         "#,
         "intrinsic-shadow.nx",
     );
-    assert_eq!(value_type(&result, "f"), "(User) => User.Update");
+    assert_eq!(
+        value_type(&result, "f"),
+        "<function merge:User />: User.Update"
+    );
 }
 
 #[test]

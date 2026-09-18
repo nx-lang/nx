@@ -1,0 +1,27 @@
+// Function values: a function type, a function bound to a prop and to a parameter, a call of
+// the parameter by element (exact and subset), a function value in a result, and equality of
+// two function values.
+type Contact = { name:string }
+type RowTemplate = <function Item:Contact Index:int />: string
+
+export external component <List TItem:type ItemsSource:TItem[]? ItemTemplate:(<function Item:TItem Index:int />: string)? />
+
+let <ContactRow Item:Contact Index:int />: string = {Item.name + "#" + Index}
+let <Compact Item:Contact />: string = {Item.name}
+let <PlainRow Item:Contact Index:int />: string = {Item.name}
+let double(n:int): int = {n * 2}
+
+let render(Row:RowTemplate, Item:Contact, Index:int): string = <Row Item={Item} Index={Index} />
+let invoke(f: <function n:int />: int, n:int): int = <f n={n} />
+
+let contacts = { <Contact name="Ada" /> <Contact name="Kai" /> }
+
+let alias: RowTemplate = {ContactRow}
+
+let identical() = {alias == ContactRow}
+let distinct() = {alias == PlainRow}
+let exact() = {render(ContactRow, <Contact name="Ada" />, 1)}
+let subset() = {render(Compact, <Contact name="Kai" />, 7)}
+let called() = {invoke(double, 21)}
+let template() = {ContactRow}
+let root() = <List TItem=Contact ItemsSource={contacts} ItemTemplate={ContactRow} />

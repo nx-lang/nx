@@ -72,6 +72,9 @@ pub fn validate(tree: &SyntaxTree, file_name: &str) -> Vec<Diagnostic> {
     // Validate where a `Name:type` definition may declare a type parameter.
     validate_type_parameter_definitions(&root, file_name, &mut diagnostics);
 
+    // Validate the parameter list of every function type.
+    validate_function_types(&root, file_name, &mut diagnostics);
+
     // Report the removed `enum` keyword by name.
     validate_reserved_enum_keyword(tree, file_name, &mut diagnostics);
 
@@ -265,11 +268,18 @@ fn validate_type_suffix_chain(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let mut children = node.children_with_tokens();
-    let Some(_) = children.next() else {
+    let Some(base) = children.next() else {
         return;
     };
 
-    let mut current_nullable_suffix: Option<TextRange> = None;
+    // `(string?)?` makes one layer nullable twice: the parentheses add no layer of their own, so
+    // a `?` ending the enclosed type is the current layer's nullable suffix.
+    let mut current_nullable_suffix: Option<TextRange> =
+        if base.kind() == SyntaxKind::PARENTHESIZED_TYPE {
+            trailing_nullable_suffix(&base)
+        } else {
+            None
+        };
 
     for child in children {
         match child.kind() {
@@ -298,6 +308,89 @@ fn validate_type_suffix_chain(
             }
             _ => {}
         }
+    }
+}
+
+/// The span of the `?` that ends the type a parenthesized type encloses, when there is one.
+///
+/// <para>Parentheses add no layer however many of them there are, so a nested parenthesized type
+/// is looked through as well: the `?` of `((string?))` is the outer layer's nullable suffix just
+/// as the one in `(string?)` is.</para>
+fn trailing_nullable_suffix(parenthesized: &SyntaxNode) -> Option<TextRange> {
+    let inner = parenthesized.child_by_field("type")?;
+    let last = inner.children_with_tokens().last()?;
+    match last.kind() {
+        SyntaxKind::QUESTION => Some(last.span()),
+        SyntaxKind::PARENTHESIZED_TYPE => trailing_nullable_suffix(&last),
+        _ => None,
+    }
+}
+
+/// A function type's parameters are matched by name at every use and supplied in full by the
+/// caller, so a default has nothing to fill in, and its body content has one destination, so a
+/// second `content` parameter has nowhere to go. The grammar reuses `property_definition` for the
+/// parameters; the two rules it does not share with a signature are enforced here.
+fn validate_function_types(node: &SyntaxNode, file_name: &str, diagnostics: &mut Vec<Diagnostic>) {
+    if node.kind() == SyntaxKind::FUNCTION_TYPE {
+        let mut content_parameter: Option<TextRange> = None;
+        for param in node
+            .children()
+            .filter(|child| child.kind() == SyntaxKind::PROPERTY_DEFINITION)
+        {
+            let name = param
+                .child_by_field("name")
+                .map(|name| name.text().to_string())
+                .unwrap_or_else(|| "_".to_string());
+
+            if let Some(default) = param.child_by_field("default") {
+                diagnostics.push(
+                    Diagnostic::error("function-type-default")
+                        .with_message(format!(
+                            "Parameter '{name}' of a function type cannot carry a default value"
+                        ))
+                        .with_label(
+                            Label::primary(file_name, default.span())
+                                .with_message("remove the default value"),
+                        )
+                        .with_note(
+                            "A caller supplies every parameter of a function type, so a default \
+                             would never apply; declare the default on the function itself",
+                        )
+                        .build(),
+                );
+            }
+
+            let is_content = param
+                .child_by_field("modifier")
+                .is_some_and(|modifier| modifier.text() == "content");
+            if is_content {
+                if let Some(previous) = content_parameter {
+                    diagnostics.push(
+                        Diagnostic::error("function-type-duplicate-content")
+                            .with_message(format!(
+                                "Parameter '{name}' is a second content parameter of the function \
+                                 type"
+                            ))
+                            .with_label(
+                                Label::primary(file_name, param.span())
+                                    .with_message("remove the `content` modifier here"),
+                            )
+                            .with_label(
+                                Label::secondary(file_name, previous)
+                                    .with_message("this parameter already receives the content"),
+                            )
+                            .with_note("A function type can declare at most one content parameter")
+                            .build(),
+                    );
+                } else {
+                    content_parameter = Some(param.span());
+                }
+            }
+        }
+    }
+
+    for child in node.children() {
+        validate_function_types(&child, file_name, diagnostics);
     }
 }
 
@@ -437,6 +530,7 @@ fn validate_type_parameter_definition(
             Some(SyntaxKind::EMIT_DEFINITION) => "an emitted action",
             Some(SyntaxKind::STATE_GROUP) => "a state group",
             Some(SyntaxKind::FUNCTION_DEFINITION) => "a function parameter list",
+            Some(SyntaxKind::FUNCTION_TYPE) => "a function type",
             _ => "this position",
         };
         reject(

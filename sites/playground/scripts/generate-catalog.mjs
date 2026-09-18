@@ -107,6 +107,28 @@ function dropParameter(owner, event, parameter, reason) {
 
 /** Events by declaring class: each an emit name, its payload fields, and the parameter names in order. */
 const eventsByClass = new Map();
+
+/**
+ * A templated control binds an item collection and a cell recipe: `ItemsSource: readonly unknown[]`
+ * and `ItemTemplate: () => SkiaControl`, declared by one class. NX spells the pair as a type
+ * parameter `TItem`, the collection as `TItem[]`, and the recipe as a function type the renderer
+ * calls with the bound item and its index — DrawnUI's `BindingContext` and `ContextIndex`, named
+ * `Item` and `Index` here. The pair rule is class-based, so any class declaring both gets it.
+ */
+const TEMPLATE_ITEMS = "ItemsSource";
+const TEMPLATE_FACTORY = "ItemTemplate";
+const TEMPLATE_TYPE_PARAMETER = "TItem";
+const TEMPLATE_PARAMETERS = ["Item", "Index"];
+const templatedClasses = new Set();
+function templateProp(name) {
+  if (name === TEMPLATE_ITEMS) {
+    return { nx: `${TEMPLATE_TYPE_PARAMETER}[]`, meta: { kind: "list", element: { kind: "parameter" } } };
+  }
+  return {
+    nx: `(<function ${TEMPLATE_PARAMETERS[0]}:${TEMPLATE_TYPE_PARAMETER} ${TEMPLATE_PARAMETERS[1]}:int />: ${NODE_ROOT})`,
+    meta: { kind: "template" },
+  };
+}
 const synthesizedNames = new Map();
 const overrides = [];
 
@@ -397,11 +419,15 @@ function nxEmit(event) {
   return `    ${event.name} { ${fields}${fields.length > 0 ? " " : ""}}`;
 }
 
-function nxComponent({ name, isAbstract, base, props, hasContent, emits = [] }) {
+function nxComponent({ name, isAbstract, base, typeParams = [], props, hasContent, emits = [] }) {
   // Exported, because the catalog is its own module: the playground and the language service
   // reach it through an implicit import, which sees only what a module exports.
   const header = `export ${isAbstract ? "abstract " : ""}external component`;
-  const lines = props.map((prop) => `  ${prop.name}: ${prop.nx}?`);
+  // A type parameter comes first: the validator requires it ahead of every prop.
+  const lines = [
+    ...typeParams.map((param) => `  ${param}: type`),
+    ...props.map((prop) => `  ${prop.name}: ${prop.nx}?`),
+  ];
   if (hasContent) {
     lines.push(`  content ${CONTENT_PROPERTY}: ${NODE_ROOT}[]?`);
   }
@@ -435,6 +461,18 @@ function main() {
       const symbol = exportsByName.get(`props_${tag}`);
       const propsType = checker.getTypeOfSymbolAtLocation(symbol, symbol.valueDeclaration);
       let hasContent = false;
+      // The classes declaring both halves of the template pair, so each half is mapped knowing
+      // the other is there.
+      const membersByOwner = new Map();
+      for (const property of checker.getPropertiesOfType(propsType)) {
+        const owner = ownerOf(property);
+        if (owner !== null) {
+          if (!membersByOwner.has(owner)) {
+            membersByOwner.set(owner, new Set());
+          }
+          membersByOwner.get(owner).add(property.name);
+        }
+      }
       for (const property of checker.getPropertiesOfType(propsType)) {
         if (property.name === "ref") {
           continue;
@@ -463,7 +501,16 @@ function main() {
           }
           continue;
         }
-        const mapped = mapType(checker, type, `${owner}${property.name}`, declaredName(property));
+        const isTemplateMember =
+          (property.name === TEMPLATE_ITEMS || property.name === TEMPLATE_FACTORY) &&
+          membersByOwner.get(owner).has(TEMPLATE_ITEMS) &&
+          membersByOwner.get(owner).has(TEMPLATE_FACTORY);
+        if (isTemplateMember) {
+          templatedClasses.add(owner);
+        }
+        const mapped = isTemplateMember
+          ? templateProp(property.name)
+          : mapType(checker, type, `${owner}${property.name}`, declaredName(property));
         if (mapped === null) {
           omit(owner, property.name, checker.typeToString(type));
           continue;
@@ -540,9 +587,18 @@ function main() {
         .map(([name, mapped]) => ({ name, nx: mapped.nx }))
         .sort((left, right) => left.name.localeCompare(right.name));
       declarations.push(
-        nxComponent({ name: abstractNameFor(className), isAbstract: true, base, props, hasContent: false, emits: emitsOf(className) }),
+        nxComponent({
+          name: abstractNameFor(className),
+          isAbstract: true,
+          base,
+          typeParams: typeParamsOf(className),
+          props,
+          hasContent: false,
+          emits: emitsOf(className),
+        }),
       );
     };
+    const typeParamsOf = (className) => (templatedClasses.has(className) ? [TEMPLATE_TYPE_PARAMETER] : []);
 
     for (const [tag, { chain }] of tagInfo) {
       for (const className of chain) {
@@ -568,7 +624,8 @@ function main() {
             .map(([name, mapped]) => ({ name, nx: mapped.nx }))
             .sort((left, right) => left.name.localeCompare(right.name));
       const emits = isAlsoBase ? [] : emitsOf(ownClass);
-      declarations.push(nxComponent({ name: tag, isAbstract: false, base, props, hasContent, emits }));
+      const typeParams = isAlsoBase ? [] : typeParamsOf(ownClass);
+      declarations.push(nxComponent({ name: tag, isAbstract: false, base, typeParams, props, hasContent, emits }));
       // Every event the control carries, inherited included, with the parameter names the
       // renderer builds the action from; the action's name comes from the prepared declaration.
       const events = {};
@@ -582,6 +639,12 @@ function main() {
         content: hasContent ? CONTENT_PROPERTY : null,
         events: Object.fromEntries(Object.entries(events).sort(([left], [right]) => left.localeCompare(right))),
       };
+      // A control that carries the template pair, itself or through a base, names the parameters
+      // the renderer calls the template with, in order, and the property the items come from.
+      if (chain.some((className) => templatedClasses.has(className))) {
+        meta.components[tag].templates = { [TEMPLATE_FACTORY]: TEMPLATE_PARAMETERS };
+        meta.components[tag].itemsSource = TEMPLATE_ITEMS;
+      }
     }
 
     for (const [name, union] of [...unions.entries()].sort()) {
@@ -629,8 +692,9 @@ function main() {
     );
 
     const emitCount = [...eventsByClass.values()].reduce((total, events) => total + events.size, 0);
+    const templatedCount = Object.values(meta.components).filter((component) => component.templates !== undefined).length;
     console.log(
-      `catalog: ${Object.keys(meta.components).length} components, ${unions.size} unions, ${records.size} records, ${emitCount} emits, ${omissions.size} members omitted, ${overrides.length} overrides folded into their base`,
+      `catalog: ${Object.keys(meta.components).length} components, ${unions.size} unions, ${records.size} records, ${emitCount} emits, ${templatedCount} templated (${[...templatedClasses].sort().join(", ")}), ${omissions.size} members omitted, ${overrides.length} overrides folded into their base`,
     );
   } finally {
     rmSync(probePath, { force: true });

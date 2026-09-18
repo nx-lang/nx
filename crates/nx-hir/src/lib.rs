@@ -497,7 +497,7 @@ pub fn type_ref_names(ty: &ast::TypeRef) -> Vec<&Name> {
                 return_type,
             } => {
                 for param in params {
-                    collect(param, names);
+                    collect(&param.ty, names);
                 }
                 collect(return_type, names);
             }

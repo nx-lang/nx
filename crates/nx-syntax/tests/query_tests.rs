@@ -63,3 +63,59 @@ fn shipped_queries_do_not_reference_the_removed_enum_declaration() {
         );
     }
 }
+
+/// Runs the highlights query over `source` and returns `(capture name, matched text)` pairs in
+/// source order.
+fn highlight_captures(source: &str) -> Vec<(String, String)> {
+    let language = nx_syntax::language();
+    let query_source = fs::read_to_string(queries_dir().join("highlights.scm")).unwrap();
+    let query = Query::new(&language, &query_source).unwrap();
+    let mut parser = tree_sitter::Parser::new();
+    parser.set_language(&language).unwrap();
+    let tree = parser.parse(source, None).unwrap();
+    let mut cursor = tree_sitter::QueryCursor::new();
+    let mut captures = Vec::new();
+    let mut matches = cursor.matches(&query, tree.root_node(), source.as_bytes());
+    use tree_sitter::StreamingIterator;
+    while let Some(m) = matches.next() {
+        for capture in m.captures {
+            let name = query.capture_names()[capture.index as usize].to_string();
+            let text = capture
+                .node
+                .utf8_text(source.as_bytes())
+                .unwrap()
+                .to_string();
+            captures.push((capture.node.start_byte(), name, text));
+        }
+    }
+    captures.sort();
+    captures
+        .into_iter()
+        .map(|(_, name, text)| (name, text))
+        .collect()
+}
+
+#[test]
+fn highlights_capture_the_parts_of_a_function_type() {
+    let captures = highlight_captures("type T = (<function Item:Contact Index:int />: DrawnNode)?");
+    let has = |name: &str, text: &str| captures.iter().any(|(n, t)| n == name && t == text);
+    assert!(has("keyword", "function"), "{captures:?}");
+    assert!(has("variable.parameter", "Item"), "{captures:?}");
+    assert!(has("variable.parameter", "Index"), "{captures:?}");
+    assert!(has("type", "Contact"), "{captures:?}");
+    assert!(has("type.builtin", "int"), "{captures:?}");
+    assert!(has("type", "DrawnNode"), "{captures:?}");
+    assert!(has("punctuation.bracket", "("), "{captures:?}");
+    assert!(has("punctuation.bracket", ")"), "{captures:?}");
+}
+
+#[test]
+fn highlights_do_not_treat_the_identifier_function_as_a_keyword() {
+    let captures = highlight_captures("let function = 1\nlet v = {function}");
+    assert!(
+        !captures
+            .iter()
+            .any(|(name, text)| name == "keyword" && text == "function"),
+        "{captures:?}"
+    );
+}

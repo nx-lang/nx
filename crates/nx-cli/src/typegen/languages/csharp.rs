@@ -1135,8 +1135,12 @@ fn csharp_type_inner(
                 is_nullable: false,
             }
         }
+        // A function value is a name, not a callable the host can invoke: `System.Delegate` neither
+        // serializes (MessagePack has no formatter for it, which breaks the whole containing type,
+        // and `System.Text.Json` refuses it outright) nor carries the declaration. `NxFunctionRef`
+        // is the `Function` record the runtime renders, as `NxActionHandlerRef` is for a handler.
         TypeRef::Function { .. } => CSharpType {
-            text: "global::System.Delegate".to_string(),
+            text: "global::NxLang.Nx.NxFunctionRef".to_string(),
             is_reference: true,
             is_nullable: false,
         },
@@ -1308,7 +1312,7 @@ fn csharp_imported_alias_target_type(
             }
         }
         TypeRef::Function { .. } => CSharpType {
-            text: "global::System.Delegate".to_string(),
+            text: "global::NxLang.Nx.NxFunctionRef".to_string(),
             is_reference: true,
             is_nullable: false,
         },

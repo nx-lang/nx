@@ -14,7 +14,8 @@
       "concat": [
         "components",
         "conversions",
-        "expressions"
+        "expressions",
+        "function-values"
       ],
       "div": [
         "conversions",
@@ -22,7 +23,8 @@
       ],
       "eq": [
         "conversions",
-        "expressions"
+        "expressions",
+        "function-values"
       ],
       "fadd32": [
         "conversions"
@@ -60,7 +62,8 @@
         "expressions"
       ],
       "mul": [
-        "expressions"
+        "expressions",
+        "function-values"
       ],
       "ne": [
         "expressions"
@@ -84,6 +87,7 @@
         "components",
         "conversions",
         "expressions",
+        "function-values",
         "handlers",
         "records",
         "snippet",
@@ -94,6 +98,7 @@
     "declarations": {
       "component": [
         "components",
+        "function-values",
         "handlers",
         "snippet",
         "trailing-element",
@@ -103,6 +108,7 @@
         "components",
         "conversions",
         "expressions",
+        "function-values",
         "handlers",
         "records",
         "snippet",
@@ -111,11 +117,13 @@
       ],
       "record": [
         "conversions",
+        "function-values",
         "handlers",
         "records",
         "two-module"
       ],
       "typeAlias": [
+        "function-values",
         "records"
       ],
       "union": [
@@ -127,6 +135,7 @@
         "components",
         "conversions",
         "expressions",
+        "function-values",
         "handlers",
         "snippet"
       ]
@@ -154,12 +163,14 @@
         "components",
         "conversions",
         "expressions",
+        "function-values",
         "handlers"
       ],
       "binary": [
         "components",
         "conversions",
         "expressions",
+        "function-values",
         "handlers",
         "two-module"
       ],
@@ -172,11 +183,13 @@
       "call": [
         "conversions",
         "expressions",
+        "function-values",
         "records",
         "two-module"
       ],
       "component": [
         "components",
+        "function-values",
         "handlers",
         "snippet",
         "trailing-element",
@@ -204,9 +217,13 @@
       ],
       "member": [
         "conversions",
+        "function-values",
         "handlers",
         "records",
         "two-module"
+      ],
+      "namedCall": [
+        "function-values"
       ],
       "null": [
         "expressions",
@@ -216,6 +233,7 @@
         "components",
         "conversions",
         "expressions",
+        "function-values",
         "handlers",
         "records",
         "snippet",
@@ -224,6 +242,7 @@
       ],
       "record": [
         "conversions",
+        "function-values",
         "handlers",
         "records",
         "two-module"
@@ -232,6 +251,7 @@
         "components",
         "conversions",
         "expressions",
+        "function-values",
         "handlers",
         "records",
         "snippet",
@@ -241,6 +261,7 @@
         "components",
         "conversions",
         "expressions",
+        "function-values",
         "handlers",
         "records",
         "two-module"
@@ -249,6 +270,7 @@
         "components",
         "conversions",
         "expressions",
+        "function-values",
         "handlers",
         "records",
         "snippet",
@@ -256,7 +278,8 @@
         "two-module"
       ],
       "text": [
-        "conversions"
+        "conversions",
+        "function-values"
       ],
       "unary": [
         "expressions"
@@ -271,13 +294,18 @@
       "array": [
         "components",
         "conversions",
+        "function-values",
         "handlers",
         "records",
         "snippet",
         "trailing-element"
       ],
+      "function": [
+        "function-values"
+      ],
       "nominal": [
         "components",
+        "function-values",
         "handlers",
         "records",
         "snippet",
@@ -286,12 +314,14 @@
       ],
       "nullable": [
         "conversions",
+        "function-values",
         "records"
       ],
       "primitive": [
         "components",
         "conversions",
         "expressions",
+        "function-values",
         "handlers",
         "records",
         "snippet",
@@ -312,6 +342,7 @@
     "components",
     "conversions",
     "expressions",
+    "function-values",
     "handlers",
     "records",
     "snippet",

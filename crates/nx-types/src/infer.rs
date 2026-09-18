@@ -4,7 +4,10 @@ use crate::{
     common_supertype as generic_common_supertype, is_object_type, numeric_literal_target,
     resolve_type_ref_with, resolve_type_ref_with_seen,
     semantics::PRIMITIVE_TYPE_NAMES,
-    ty::{DeclaringOrigin, NamedType, Primitive, TypeParameterRef, UnionCaseType, UnionType},
+    ty::{
+        check_function_satisfies, DeclaringOrigin, FunctionMismatch, FunctionParam, NamedType,
+        Primitive, TypeParameterRef, UnionCaseType, UnionType,
+    },
     type_satisfies_expected as generic_type_satisfies_expected, Type, TypeEnvironment,
 };
 use nx_diagnostics::{Diagnostic, Label, TextSpan};
@@ -320,6 +323,10 @@ pub struct InferenceContext<'a> {
     /// Consumed after analysis to remove each binding from its element, on the same terms as
     /// `resolved_contextual_names`: a type argument is a spelling only the checker understands.
     consumed_type_arguments: FxHashSet<ExprId>,
+    /// Elements whose tag named a function-typed value rather than a declared element, so the
+    /// element is a call of that value with arguments bound by name; each maps to the name of the
+    /// type's content parameter, which body content binds to, when the type has one.
+    function_value_calls: FxHashMap<ElementId, Option<Name>>,
     /// The type each use site bound to each of its target's type parameters, by element.
     ///
     /// Nothing in analysis reads this back; it is kept in the analysis result so that carrying
@@ -371,6 +378,7 @@ impl<'a> InferenceContext<'a> {
             widened_joins: FxHashMap::default(),
             type_parameter_scope: FxHashMap::default(),
             consumed_type_arguments: FxHashSet::default(),
+            function_value_calls: FxHashMap::default(),
             resolved_type_arguments: FxHashMap::default(),
             indexed_loops: Vec::new(),
         };
@@ -466,6 +474,29 @@ impl<'a> InferenceContext<'a> {
                     self.infer_intrinsic_call(intrinsic, args, *span)
                 } else {
                     let func_ty = self.infer_expr(*func);
+
+                    // A function-typed value is called as an element, never by position: the
+                    // value's own declaration may order — or omit — parameters differently from
+                    // the type, so positions would mean nothing at run time.
+                    if let Some((name, params)) = self.function_value_callee(*func) {
+                        let form = std::iter::once(format!("<{name}"))
+                            .chain(params.iter().map(|param| format!("{}=...", param.name)))
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                            + " />";
+                        self.error(
+                            "positional-call-of-function-value",
+                            format!(
+                                "'{name}' is a function-typed value, so its arguments bind by name; \
+                                 call it as an element, {form}"
+                            ),
+                            *span,
+                        );
+                        for arg in args {
+                            self.infer_expr(*arg);
+                        }
+                        return Type::Error;
+                    }
 
                     // Infer argument types
                     let arg_tys: Vec<_> = args.iter().map(|arg| self.infer_expr(*arg)).collect();
@@ -712,19 +743,17 @@ impl<'a> InferenceContext<'a> {
 
     /// Infers all types within a function, binding parameters while visiting the body.
     pub fn infer_function(&mut self, func: &nx_hir::Function) {
-        let mut bound_names = Vec::new();
-
+        // Parameters get a scope of their own, so one that shares a name with a top-level binding
+        // — a function-typed parameter `Row` beside a declared function `Row` — shadows it for
+        // the body and leaves it in place afterwards.
+        self.env.push_scope();
         for param in &func.params {
             let param_ty = self.type_from_type_ref(&param.ty);
             self.env.bind(param.name.clone(), param_ty);
-            bound_names.push(param.name.clone());
         }
 
         let body_ty = self.infer_expr(func.body);
-
-        for name in bound_names {
-            self.env.remove(&name);
-        }
+        self.env.pop_scope();
 
         let return_ty = if let Some(ty) = func.return_type.as_ref() {
             let expected = self.type_from_type_ref(ty);
@@ -1669,11 +1698,11 @@ impl<'a> InferenceContext<'a> {
 
                 // Check argument types. The argument expression is passed so a literal written
                 // there can take the parameter's type.
-                for (i, (param_ty, arg_ty)) in params.iter().zip(arg_tys.iter()).enumerate() {
+                for (i, (param, arg_ty)) in params.iter().zip(arg_tys.iter()).enumerate() {
                     self.check_typed_binding_for(
                         args.get(i).copied(),
                         arg_ty,
-                        param_ty,
+                        &param.ty,
                         span,
                         "type-mismatch",
                         format!("Argument {}", i),
@@ -1980,6 +2009,34 @@ impl<'a> InferenceContext<'a> {
         element: &nx_hir::Element,
         span: TextSpan,
     ) -> Type {
+        // A tag that names a function-typed value — a prop, a parameter, a `let` — is a call of
+        // that value: every parameter of the type is required, since the value's own declaration
+        // may need any of them, and an argument the type lacks has nowhere to go.
+        if let Some((params, ret)) = self.function_typed_value(&element.tag) {
+            let content_property = params
+                .iter()
+                .find(|param| param.is_content)
+                .map(|param| param.name.clone());
+            let spec = ElementBindingSpec {
+                content_property: content_property.clone(),
+                properties: params
+                    .iter()
+                    .map(|param| {
+                        (
+                            param.name.clone(),
+                            ElementPropertySpec::new(param.ty.clone(), true),
+                        )
+                    })
+                    .collect(),
+                handler_properties: FxHashSet::default(),
+                type_parameters: FxHashSet::default(),
+            };
+            self.check_element_bindings(element_id, element, span, &spec);
+            self.function_value_calls
+                .insert(element_id, content_property);
+            return ret;
+        }
+
         if let Some(function) = self.resolve_function_definition(&element.tag) {
             let declaring_module = function.module_identity().to_string();
             match function {
@@ -2598,8 +2655,13 @@ impl<'a> InferenceContext<'a> {
             self.type_parameter_scope = previous_scope;
         }
         if let Some(arguments) = arguments {
-            // A prop typed by a parameter the site left unbound is checked against the bottom
-            // type, and remembers the parameter so a failure can be reported by its name.
+            // A prop typed by a parameter the site left unbound is checked against a type no
+            // value can be assumed to have, and remembers the parameter so a failure can be
+            // reported by its name. Where the prop *produces* a value of the parameter — a list
+            // of items — that is the bottom type, so only the empty list or `null` binds. Where
+            // the prop *consumes* one — a template's `Item` parameter, which the host will call
+            // with whatever the items are — it is the top type, so a template that assumes any
+            // particular item type fails and the diagnostic asks for the argument.
             let unspecified = arguments.unspecified;
             let is_unspecified = |param: &TypeParameterRef| {
                 param.owner == owner && unspecified.contains(&param.name)
@@ -2611,7 +2673,15 @@ impl<'a> InferenceContext<'a> {
                 entry.unspecified_parameter = Some(param.name);
                 entry.ty = entry
                     .ty
-                    .substitute_parameters(&|param| is_unspecified(param).then(Type::never));
+                    .substitute_parameters_by_variance(true, &|param, covariant| {
+                        is_unspecified(param).then(|| {
+                            if covariant {
+                                Type::never()
+                            } else {
+                                Type::named("object")
+                            }
+                        })
+                    });
             }
             spec.type_parameters = type_param_names.iter().cloned().collect();
             self.consumed_type_arguments.extend(arguments.consumed);
@@ -3150,7 +3220,11 @@ impl<'a> InferenceContext<'a> {
             } => {
                 let params = params
                     .iter()
-                    .map(|param| self.type_from_type_ref_in(declaring_module, param))
+                    .map(|param| FunctionParam {
+                        name: param.name.clone(),
+                        ty: self.type_from_type_ref_in(declaring_module, &param.ty),
+                        is_content: param.is_content,
+                    })
                     .collect();
                 let ret = self.type_from_type_ref_in(declaring_module, return_type);
                 Type::function(params, ret)
@@ -3991,7 +4065,13 @@ impl<'a> InferenceContext<'a> {
                 context, expected_display, actual_display
             )
         } else {
-            let hint = self.bare_form_hint(actual, expected);
+            let mut hint = self.bare_form_hint(actual, expected);
+            // Two function signatures side by side leave the reader to compare them; the reason
+            // names the parameter that decided it.
+            if let Err(reason) = self.function_satisfies_expected(actual, expected.strip_nullable())
+            {
+                hint = format!("{hint}; {reason}");
+            }
             let lossy = match (actual, expected.strip_nullable()) {
                 (Type::Primitive(found), Type::Primitive(wanted))
                     if found.is_numeric() && wanted.is_numeric() =>
@@ -4355,6 +4435,12 @@ impl<'a> InferenceContext<'a> {
         &self.consumed_type_arguments
     }
 
+    /// Elements that call a function-typed value, by element id, each with the name of the
+    /// callee type's content parameter when it has one.
+    pub fn function_value_calls(&self) -> &FxHashMap<ElementId, Option<Name>> {
+        &self.function_value_calls
+    }
+
     /// The type each use site bound to each of its target's type parameters, by element.
     pub fn resolved_type_arguments(&self) -> &FxHashMap<ElementId, Vec<(Name, Type)>> {
         &self.resolved_type_arguments
@@ -4591,8 +4677,10 @@ impl<'a> InferenceContext<'a> {
                     {
                         let param_types = params
                             .iter()
-                            .map(|param| {
-                                self.type_from_type_ref_in(Some(&declaring_module), &param.ty)
+                            .map(|param| FunctionParam {
+                                name: param.name.clone(),
+                                ty: self.type_from_type_ref_in(Some(&declaring_module), &param.ty),
+                                is_content: param.is_content,
                             })
                             .collect::<Vec<_>>();
                         let return_type =
@@ -4944,10 +5032,39 @@ impl<'a> InferenceContext<'a> {
     ) {
         let param_types = params
             .iter()
-            .map(|param| self.type_from_type_ref_in(declaring_module, &param.ty))
+            .map(|param| FunctionParam {
+                name: param.name.clone(),
+                ty: self.type_from_type_ref_in(declaring_module, &param.ty),
+                is_content: param.is_content,
+            })
             .collect::<Vec<_>>();
         self.env
             .bind(name, Type::function(param_types, return_type));
+    }
+
+    /// The function type a tag or callee `name` denotes as a *value*: a parameter, a prop, a local
+    /// or top-level `let` of function type, or a lexical binding that shadows a declared function.
+    ///
+    /// <para>A declared function reached under its own name is not a value here: `<Row />` on a
+    /// declaration `Row` is the declaration's call, checked against the declaration itself, and
+    /// `add(1, 2)` on a declared paren function is the positional call it always was.</para>
+    fn function_typed_value(&self, name: &Name) -> Option<(Vec<FunctionParam>, Type)> {
+        let ty = self.env.lookup(name)?;
+        let (params, ret) = ty.function_parts()?;
+        let shadows_declaration = self.env.binding_depth(name).is_some_and(|depth| depth > 1);
+        if self.resolve_function_definition(name).is_some() && !shadows_declaration {
+            return None;
+        }
+        Some((params.to_vec(), ret.clone()))
+    }
+
+    /// The name and parameters of a call's callee when it is a function-typed value.
+    fn function_value_callee(&self, callee: ExprId) -> Option<(Name, Vec<FunctionParam>)> {
+        let ast::Expr::Ident(name) = self.module.raw_module().expr(callee) else {
+            return None;
+        };
+        let (params, _) = self.function_typed_value(name)?;
+        Some((name.clone(), params))
     }
 
     fn effective_record_shape(
@@ -5091,8 +5208,33 @@ impl<'a> InferenceContext<'a> {
             (Type::Array(actual_inner), Type::Array(expected_inner)) => {
                 self.type_satisfies_expected(actual_inner, expected_inner)
             }
+            (Type::Function { .. }, Type::Function { .. }) => {
+                self.function_satisfies_expected(actual, expected).is_ok()
+            }
             _ => false,
         }
+    }
+
+    /// Checks a function's type against a function type by parameter name, under this checker's
+    /// own relation, so a parameter typed by a record or a component subtype pairs the way any
+    /// other binding does.
+    fn function_satisfies_expected(
+        &self,
+        actual: &Type,
+        expected: &Type,
+    ) -> Result<(), FunctionMismatch> {
+        let (Some((actual_params, actual_ret)), Some((expected_params, expected_ret))) =
+            (actual.function_parts(), expected.function_parts())
+        else {
+            return Ok(());
+        };
+        check_function_satisfies(
+            actual_params,
+            actual_ret,
+            expected_params,
+            expected_ret,
+            &mut |value, target| self.type_satisfies_expected(value, target),
+        )
     }
 
     fn is_null_literal_type(ty: &Type) -> bool {
@@ -5505,7 +5647,7 @@ mod tests {
         match func_ty {
             Type::Function { params, ret } => {
                 assert_eq!(params.len(), 1);
-                assert_eq!(params[0], Type::int());
+                assert_eq!(params[0].ty, Type::int());
                 assert_eq!(**ret, Type::int());
             }
             other => panic!("Expected function type, got {:?}", other),
@@ -5602,8 +5744,10 @@ mod tests {
         match add_ty {
             Type::Function { params, ret } => {
                 assert_eq!(params.len(), 2);
-                assert_eq!(params[0], Type::int());
-                assert_eq!(params[1], Type::int());
+                assert_eq!(params[0].name.as_str(), "a");
+                assert_eq!(params[0].ty, Type::int());
+                assert_eq!(params[1].name.as_str(), "b");
+                assert_eq!(params[1].ty, Type::int());
                 assert_eq!(**ret, Type::int());
             }
             _ => panic!("expected function type"),

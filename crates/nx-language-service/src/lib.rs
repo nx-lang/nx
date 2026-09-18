@@ -410,7 +410,8 @@ impl WorkspaceSnapshot {
             // reports what the name actually resolved to. The declaration is the answer only
             // where the name reaches no expression, as in an import clause.
             positions::PositionContext::Reference { name, span } => self
-                .inferred_type_hover(uri, offset, *span)
+                .function_value_hover(uri, offset, *span, scope, name)
+                .or_else(|| self.inferred_type_hover(uri, offset, *span))
                 .or_else(|| self.declaration_hover(scope, scope.visible.get(name)?)),
             positions::PositionContext::Expression { span } => {
                 self.inferred_type_hover(uri, offset, *span)
@@ -570,6 +571,44 @@ impl WorkspaceSnapshot {
             member,
             &ty.to_string(),
         )))
+    }
+
+    /// A function named as a value — `ItemTemplate={ContactRow}` — hovers as its declaration.
+    ///
+    /// <para>The value is a reference to the declaration and nothing more, so the declaration's
+    /// signature is the whole story, where the type alone would drop the name. It answers only
+    /// where the name reached that declaration: the expression's type is the function's own
+    /// binding, not a parameter's or local's of the same spelling, which shadows it.</para>
+    fn function_value_hover(
+        &self,
+        uri: &DocumentUri,
+        offset: usize,
+        within: ByteTextRange,
+        scope: &DocumentScope,
+        name: &str,
+    ) -> Option<String> {
+        let analysis = self.module_analysis(uri)?;
+        let id = analysis
+            .lowered_module()
+            .innermost_expr_at(within, (offset as u32).into())?;
+        let nx_hir::ast::Expr::Ident(ident) = analysis.lowered_module().expr(id) else {
+            return None;
+        };
+        if ident.as_str() != name {
+            return None;
+        }
+        let ty = analysis.type_env().get_expr_type(id)?;
+        if !matches!(ty, nx_types::Type::Function { .. }) {
+            return None;
+        }
+        if analysis.type_env().lookup(&nx_hir::Name::new(name)) != Some(ty) {
+            return None;
+        }
+        let declaration = scope.visible.get(name)?;
+        if !matches!(scope.item(declaration)?, Item::Function(_)) {
+            return None;
+        }
+        self.declaration_hover(scope, declaration)
     }
 
     /// The inferred type of the innermost expression the resolved construct covers.
@@ -1766,7 +1805,7 @@ fn is_unresolved_type(ty: &nx_types::Type) -> bool {
         | nx_types::Type::ContextualName(_) => true,
         nx_types::Type::Array(inner) | nx_types::Type::Nullable(inner) => is_unresolved_type(inner),
         nx_types::Type::Function { params, ret } => {
-            params.iter().any(is_unresolved_type) || is_unresolved_type(ret)
+            params.iter().any(|param| is_unresolved_type(&param.ty)) || is_unresolved_type(ret)
         }
         nx_types::Type::Primitive(_)
         | nx_types::Type::Named(_)
@@ -2156,23 +2195,14 @@ fn base_type_name(ty: &TypeRef) -> String {
     }
 }
 
+/// Spells a type reference as source does: a function type as `<function Name:Type ... />:
+/// Result`, parenthesized under a suffix because a suffix after the result would bind to the
+/// result.
+///
+/// <para>The spelling is `nx-hir`'s, shared with the checker's diagnostics and the explained form
+/// of an IR artifact, so a hover shows a function type the way every other surface does.</para>
 fn type_ref_display(ty: &TypeRef) -> String {
-    match ty {
-        TypeRef::Name(name) => name.as_str().to_string(),
-        TypeRef::Array(inner) => format!("{}[]", type_ref_display(inner)),
-        TypeRef::Nullable(inner) => format!("{}?", type_ref_display(inner)),
-        TypeRef::Function {
-            params,
-            return_type,
-        } => {
-            let params = params
-                .iter()
-                .map(type_ref_display)
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("({}) => {}", params, type_ref_display(return_type))
-        }
-    }
+    nx_hir::ast::spell_type_ref(ty)
 }
 
 /// The members a bare name could resolve to in one property's value slot.
@@ -4019,6 +4049,65 @@ component <SearchBox placeholder:string /> = {
         .expect("hover content");
 
         assert_eq!(hover.contents, nx("User"));
+    }
+
+    /// Spec: "A function-typed property's hover shows the function type".
+    #[test]
+    fn hover_over_a_function_typed_property_shows_the_function_type_in_nx_spelling() {
+        let hover = hover_at(concat!(
+            "abstract external component <DrawnNode />\n",
+            "type Contact = { name:string }\n",
+            "component <Section extends DrawnNode Ro⟨cursor⟩w:(<function Item:Contact Index:int />: DrawnNode)? /> = { <DrawnNode /> }\n"
+        ))
+        .expect("hover content");
+
+        assert_eq!(
+            hover.contents,
+            nx("(property) Section.Row: (<function Item:Contact Index:int />: DrawnNode)?")
+        );
+        assert!(!hover.contents.contains("=>"), "{}", hover.contents);
+    }
+
+    /// One function type, one spelling: what a hover shows is what the checker writes into a
+    /// diagnostic, because both assemble it through `nx_hir::ast::spell_function_type`.
+    #[test]
+    fn a_hover_spells_a_function_type_the_way_the_checker_does() {
+        let hover = hover_at(concat!(
+            "abstract external component <DrawnNode />\n",
+            "type Contact = { name:string }\n",
+            "component <Section extends DrawnNode Ro⟨cursor⟩w:(<function Item:Contact Index:int />: DrawnNode)? /> = { <DrawnNode /> }\n"
+        ))
+        .expect("hover content");
+
+        let checked = nx_types::Type::nullable(nx_types::Type::function(
+            vec![
+                nx_types::FunctionParam::new("Item", nx_types::Type::named("Contact")),
+                nx_types::FunctionParam::new("Index", nx_types::Type::int()),
+            ],
+            nx_types::Type::named("DrawnNode"),
+        ));
+        assert_eq!(
+            hover.contents,
+            nx(&format!("(property) Section.Row: {checked}"))
+        );
+    }
+
+    /// Spec: "A function name used as a value hovers as its declaration".
+    #[test]
+    fn hover_over_a_function_name_used_as_a_value_shows_its_declaration() {
+        let hover = hover_at(concat!(
+            "abstract external component <DrawnNode />\n",
+            "type Contact = { name:string }\n",
+            "external component <List ItemTemplate:(<function Item:Contact Index:int />: DrawnNode)? />\n",
+            "let <ContactRow Item:Contact Index:int />: DrawnNode = <DrawnNode />\n",
+            "let v = <List ItemTemplate={Contact⟨cursor⟩Row} />\n"
+        ))
+        .expect("hover content");
+
+        assert_eq!(
+            hover.contents,
+            nx("let <ContactRow Item:Contact Index:int />: DrawnNode")
+        );
     }
 
     /// Spec: "Hover over a function parameter declaration reports the parameter".

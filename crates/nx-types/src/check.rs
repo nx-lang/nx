@@ -41,6 +41,10 @@ pub struct ModuleArtifact {
     /// consumed them, so this is the only record of them below type checking. Nothing reads it
     /// yet; it is what a later change carries into generated output.</para>
     pub element_type_arguments: FxHashMap<ElementId, Vec<(Name, Type)>>,
+    /// Elements whose tag named a function-typed value — a prop, a parameter or a `let` — so the
+    /// element is a call of that value with arguments bound by name, not a declared element. Each
+    /// maps to the name of the callee type's content parameter, which body content binds to.
+    pub function_value_calls: FxHashMap<ElementId, Option<Name>>,
     /// The prepared module analysis ran against, with its imports resolved, if parsing succeeded.
     ///
     /// <para>A consumer that needs a declaration's effective shape across modules — a record's
@@ -238,6 +242,7 @@ pub fn analyze_prepared_module(
         .collect();
     let consumed_type_arguments = ctx.consumed_type_arguments().clone();
     let element_type_arguments = ctx.resolved_type_arguments().clone();
+    let function_value_calls = ctx.function_value_calls().clone();
     let (mut type_env, type_diagnostics) = ctx.finish();
     diagnostics.extend(normalize_diagnostics_file_name(type_diagnostics, file_name));
     // A resolution reached a union declaration, so it has an origin. One without cannot be
@@ -324,6 +329,7 @@ pub fn analyze_prepared_module(
         imports,
         prepared_bindings,
         element_type_arguments,
+        function_value_calls,
         prepared_module: Some(Arc::new(prepared_module)),
     }
 }
@@ -438,6 +444,7 @@ fn module_artifact(
         imports,
         prepared_bindings: Vec::new(),
         element_type_arguments: FxHashMap::default(),
+        function_value_calls: FxHashMap::default(),
         prepared_module: None,
     }
 }

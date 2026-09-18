@@ -27,15 +27,47 @@ pub enum TypeRef {
     /// Example: `int?`, `string?`
     Nullable(Box<TypeRef>),
 
-    /// Function type.
+    /// Function type: an element function's signature with `function` in the name slot.
     ///
-    /// Example: `(int, string) => boolean`
+    /// Example: `<function Item:Contact Index:int />: DrawnNode`
     Function {
-        /// Parameter types
-        params: Vec<TypeRef>,
+        /// Parameters, in declared order. A function is matched against the type by parameter
+        /// name, so the order is display information.
+        params: Vec<FunctionParam>,
         /// Return type
         return_type: Box<TypeRef>,
     },
+}
+
+/// One parameter of a function type.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FunctionParam {
+    /// Parameter name, which arguments bind to.
+    pub name: Name,
+    /// Parameter type.
+    pub ty: TypeRef,
+    /// Whether the parameter receives markup body content.
+    pub is_content: bool,
+}
+
+impl FunctionParam {
+    /// Creates a plain (non-content) parameter.
+    pub fn new(name: impl Into<Name>, ty: TypeRef) -> Self {
+        Self {
+            name: name.into(),
+            ty,
+            is_content: false,
+        }
+    }
+
+    /// Creates the content parameter.
+    pub fn content(name: impl Into<Name>, ty: TypeRef) -> Self {
+        Self {
+            name: name.into(),
+            ty,
+            is_content: true,
+        }
+    }
 }
 
 impl TypeRef {
@@ -55,7 +87,7 @@ impl TypeRef {
     }
 
     /// Create a function type reference.
-    pub fn function(params: Vec<TypeRef>, return_type: TypeRef) -> Self {
+    pub fn function(params: Vec<FunctionParam>, return_type: TypeRef) -> Self {
         Self::Function {
             params,
             return_type: Box::new(return_type),
@@ -63,9 +95,104 @@ impl TypeRef {
     }
 }
 
+/// One parameter of a function type, already spelled: whether it takes body content, its name,
+/// and its type as the caller renders types.
+pub struct SpelledParam<'a> {
+    /// Whether the parameter receives markup body content.
+    pub is_content: bool,
+    /// Parameter name.
+    pub name: &'a str,
+    /// The parameter's type, spelled by the caller.
+    pub ty: &'a str,
+}
+
+/// Spells a function type the way source writes one, `<function Item:Contact Index:int />: Node`.
+///
+/// <para>Diagnostics, hovers and the explained form of an IR artifact all show a function type,
+/// and they read from three different representations — a checked `Type`, a `TypeRef`, and type
+/// table indices — so each renders the parts itself and this assembles them. One spelling, in one
+/// place, is what keeps the three from drifting.</para>
+pub fn spell_function_type<'a>(
+    params: impl IntoIterator<Item = SpelledParam<'a>>,
+    result: &str,
+) -> String {
+    let mut out = String::from("<function");
+    for param in params {
+        out.push(' ');
+        if param.is_content {
+            out.push_str("content ");
+        }
+        out.push_str(param.name);
+        out.push(':');
+        out.push_str(param.ty);
+    }
+    out.push_str(" />: ");
+    out.push_str(result);
+    out
+}
+
+/// Spells a type reference as source does, parenthesizing a function type under a `[]` or `?`
+/// suffix, because a suffix written after the result would bind to the result instead.
+pub fn spell_type_ref(ty: &TypeRef) -> String {
+    match ty {
+        TypeRef::Name(name) => name.as_str().to_string(),
+        TypeRef::Array(inner) => format!("{}[]", spell_type_ref_under_suffix(inner)),
+        TypeRef::Nullable(inner) => format!("{}?", spell_type_ref_under_suffix(inner)),
+        TypeRef::Function {
+            params,
+            return_type,
+        } => {
+            let types: Vec<String> = params
+                .iter()
+                .map(|param| spell_type_ref(&param.ty))
+                .collect();
+            spell_function_type(
+                params.iter().zip(&types).map(|(param, ty)| SpelledParam {
+                    is_content: param.is_content,
+                    name: param.name.as_str(),
+                    ty,
+                }),
+                &spell_type_ref(return_type),
+            )
+        }
+    }
+}
+
+/// A type reference under a `[]` or `?` suffix: a function type is parenthesized, anything else
+/// is spelled as it stands.
+pub fn spell_type_ref_under_suffix(ty: &TypeRef) -> String {
+    match ty {
+        TypeRef::Function { .. } => format!("({})", spell_type_ref(ty)),
+        _ => spell_type_ref(ty),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_function_type_is_spelled_as_source_writes_it() {
+        let ty = TypeRef::function(
+            vec![
+                FunctionParam::new("Item", TypeRef::name("Contact")),
+                FunctionParam::content("Children", TypeRef::array(TypeRef::name("Node"))),
+            ],
+            TypeRef::name("Node"),
+        );
+        assert_eq!(
+            spell_type_ref(&ty),
+            "<function Item:Contact content Children:Node[] />: Node"
+        );
+        assert_eq!(
+            spell_type_ref(&TypeRef::nullable(ty.clone())),
+            "(<function Item:Contact content Children:Node[] />: Node)?"
+        );
+        assert_eq!(
+            spell_type_ref(&TypeRef::array(TypeRef::nullable(TypeRef::name("int")))),
+            "int?[]"
+        );
+    }
 
     #[test]
     fn test_named_type() {
@@ -103,7 +230,10 @@ mod tests {
     #[test]
     fn test_function_type() {
         let ty = TypeRef::function(
-            vec![TypeRef::name("int"), TypeRef::name("string")],
+            vec![
+                FunctionParam::new("Count", TypeRef::name("int")),
+                FunctionParam::content("Children", TypeRef::name("string")),
+            ],
             TypeRef::name("boolean"),
         );
         match ty {
@@ -112,6 +242,10 @@ mod tests {
                 return_type,
             } => {
                 assert_eq!(params.len(), 2);
+                assert_eq!(params[0].name.as_str(), "Count");
+                assert!(!params[0].is_content);
+                assert_eq!(params[1].name.as_str(), "Children");
+                assert!(params[1].is_content);
                 match &return_type.as_ref() {
                     TypeRef::Name(name) => assert_eq!(name.as_str(), "boolean"),
                     _ => panic!("Expected Name variant"),

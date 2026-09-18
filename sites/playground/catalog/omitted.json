@@ -80,16 +80,6 @@
     "reason": "ImageFilter"
   },
   {
-    "owner": "SkiaLayout",
-    "property": "ItemsSource",
-    "reason": "readonly unknown[]"
-  },
-  {
-    "owner": "SkiaLayout",
-    "property": "ItemTemplate",
-    "reason": "() => SkiaControl"
-  },
-  {
     "owner": "SkiaLottie",
     "property": "Error",
     "parameter": "error",

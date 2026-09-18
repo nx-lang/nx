@@ -168,11 +168,14 @@ motion or interaction absent), or **reduced** (scaled down, because NX cannot ex
 the original demonstrates). SVG, Text, Shapes and Common Controls are complete; the rest gained
 interaction or code-driven mechanisms upstream and say so. Every non-complete example names its gap
 from a fixed vocabulary, and the vocabulary separates what NX lacks from what a port has not used:
-`animation`, `list-virtualization` and `code-behind` (an engine object built, driven or read from
-code: a shader effect, a CanvasKit filter, a sprite set, a cell class with drag logic, a method
-called on a control) are capabilities NX does not have, while `event-handlers` and `component-state`
-are capabilities NX has and the port does not use yet. The gallery can be read as a coverage report
-on NX rather than a list of disclaimers, and a landed capability is never presented as missing.
+`animation` and `code-behind` (an engine object built, driven or read from code: a shader effect,
+a CanvasKit filter, a sprite set, a cell class with drag logic, a method called on a control) are
+capabilities NX does not have, while `event-handlers` and `component-state` are capabilities NX has
+and the port does not use yet. List virtualization is not a gap: a templated `SkiaLayout` binds
+`ItemsSource` and an element function through `ItemTemplate`, and DrawnUI realizes, recycles and
+measures the cells, which is how Recycled cells and Uneven cells are ported. The gallery can be
+read as a coverage report on NX rather than a list of disclaimers, and a landed capability is never
+presented as missing.
 
 The readouts are wired: a tap count, a selected index, a slider's value, a speed, `IsOpen`. Each is
 a number or a boolean held in a page component's state, and `+` converts it to text where it joins

@@ -1,0 +1,4 @@
+// `function` is a keyword only after `<` in type position; elsewhere it is an identifier.
+let function = 1
+let v = {function}
+let f(function:int): int = {function}

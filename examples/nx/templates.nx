@@ -1,0 +1,107 @@
+// Templates are functions.
+//
+// A template is a recipe for a piece of UI that a host draws once per item it decides to show. NX
+// has element functions, and it has function types — an element function's signature with
+// `function` in the name slot — so a template needs no mechanism of its own: define the function,
+// declare the property at the function type, and pass the function by name.
+//
+// Run with `nxlang run examples/nx/templates.nx`.
+
+// ---- A small catalog, the way a host describes its controls ------------------------------------
+
+abstract external component <DrawnNode />
+external component <Label extends DrawnNode Text:string? />
+external component <Stack extends DrawnNode Spacing:int? content Children:DrawnNode[]? />
+
+// A templated list: the item type is a type parameter, the collection is a list of it, and the
+// template is a function of the item and its index. `(...)?` makes the function itself optional;
+// a `?` after the result would make the result optional instead.
+external component <List extends DrawnNode
+  TItem:type
+  ItemsSource:TItem[]?
+  ItemTemplate:(<function Item:TItem Index:int />: DrawnNode)?
+/>
+
+// A table with three template properties, each with its own parameter list. Templates are just
+// properties: no slot syntax, no ordering rule, no new kind of declaration. A property may name an
+// alias, as `FooterTemplate` does, or spell the function type inline.
+external component <DataTable extends DrawnNode
+  TItem:type
+  Rows:TItem[]?
+  HeaderTemplate:(<function />: DrawnNode)?
+  RowTemplate:(<function Item:TItem Index:int />: DrawnNode)?
+  FooterTemplate:TableFooterTemplate?
+/>
+
+// ---- The data -----------------------------------------------------------------------------------
+
+type Contact = { Initials:string Title:string }
+
+// ---- Aliases: name a function type once, use it like any other type ------------------------------
+
+type ContactRowTemplate = <function Item:Contact Index:int />: DrawnNode
+type TableFooterTemplate = <function Count:int />: DrawnNode
+
+// ---- Templates: ordinary element functions -------------------------------------------------------
+
+let <ContactRow Item:Contact Index:int />: DrawnNode =
+  <Stack Spacing=2>
+    <Label Text={Item.Initials} />
+    <Label Text={"" + Index + " " + Item.Title} />
+  </Stack>
+
+// A function satisfies a function type by parameter name, and may declare fewer parameters than
+// the type supplies: this one ignores `Index`, and still binds where a `ContactRowTemplate` is
+// expected.
+let <CompactRow Item:Contact />: DrawnNode = <Label Text={Item.Title} />
+
+let <TableHeader />: DrawnNode = <Label Text="NAME" />
+let <TableFooter Count:int />: DrawnNode = <Label Text={"" + Count + " contacts"} />
+
+// ---- A component that takes a template and forwards it -------------------------------------------
+
+component <Section extends DrawnNode Title:string Items:Contact[] Row:ContactRowTemplate /> = {
+  <Stack Spacing=6>
+    <Label Text={Title} />
+    <List TItem=Contact ItemsSource={Items} ItemTemplate={Row} />
+  </Stack>
+}
+
+// ---- A component that calls its template itself ---------------------------------------------------
+
+// A function-typed prop is invocable as an element: arguments bind to the type's parameters by
+// name, and every parameter of the type is required, since the function behind it may need any.
+component <Highlight extends DrawnNode Item:Contact Row:ContactRowTemplate /> = {
+  <Stack Spacing=0>
+    <Label Text="Pinned" />
+    <Row Item={Item} Index=0 />
+  </Stack>
+}
+
+let contacts = {
+  <Contact Initials="AR" Title="Ada Ruiz" />
+  <Contact Initials="KO" Title="Kai Okafor" />
+  <Contact Initials="MB" Title="Mira Behn" />
+}
+
+<Stack Spacing=16>
+  // The list, drawn by a host from the function value it receives.
+  <List TItem=Contact ItemsSource={contacts} ItemTemplate={ContactRow} />
+
+  // The same host and data, a different template: one name changes.
+  <List TItem=Contact ItemsSource={contacts} ItemTemplate={CompactRow} />
+
+  // A template travelling through authored code: passed in, forwarded on.
+  <Section Title="STARRED" Items={contacts} Row={ContactRow} />
+
+  // A template called by the component that received it.
+  <Highlight Item=<Contact Initials="ZZ" Title="Zed" /> Row={CompactRow} />
+
+  // Three template properties on one element, three different parameter lists.
+  <DataTable TItem=Contact Rows={contacts}
+    HeaderTemplate={TableHeader} RowTemplate={CompactRow} FooterTemplate={TableFooter} />
+
+  // And the same function as a plain child, expanded here and now: a template is not a separate
+  // kind of thing that only a host may use.
+  <ContactRow Item=<Contact Initials="ZZ" Title="Zed" /> Index=0 />
+</Stack>

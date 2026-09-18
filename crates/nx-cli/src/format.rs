@@ -43,6 +43,9 @@ fn format_value_inner(value: &Value, output: &mut String, indent: usize) -> Resu
             write!(output, "{}.{}", union, case).unwrap();
         }
 
+        // A function value is a reference to a declaration; its source spelling is the name.
+        Value::Function { name, .. } => output.push_str(name.as_str()),
+
         // A top-level sequence is a run of values, one per line -- except an empty one, which has
         // no lines to be a run of. Emitting nothing there would read back as no value rather than
         // as the empty list, so the braced spelling is used, the same one property position uses.
@@ -122,6 +125,8 @@ fn format_property_value(value: &Value, output: &mut String, indent: usize) -> R
         Value::Null => output.push_str("null"),
         // A bare case name; the declaring union comes from the target type.
         Value::UnionCase { case, .. } => output.push_str(case.as_str()),
+        // A function value is bound by naming the declaration, `Row={ContactRow}`.
+        Value::Function { name, .. } => write!(output, "{{{}}}", name.as_str()).unwrap(),
         // `rhs_expression` admits an element, so a record value needs no braces.
         Value::Record { type_name, fields } => {
             format_record(type_name.as_str(), fields, output, indent)?

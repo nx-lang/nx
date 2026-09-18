@@ -1,4 +1,4 @@
-use crate::{Primitive, Type};
+use crate::{FunctionParam, Primitive, Type};
 use nx_hir::{ast, Name};
 use rustc_hash::FxHashSet;
 
@@ -136,7 +136,11 @@ where
         } => {
             let params = params
                 .iter()
-                .map(|param| resolve_type_ref_with_seen(param, seen, resolve_named))
+                .map(|param| FunctionParam {
+                    name: param.name.clone(),
+                    ty: resolve_type_ref_with_seen(&param.ty, seen, resolve_named),
+                    is_content: param.is_content,
+                })
                 .collect();
             let ret = resolve_type_ref_with_seen(return_type, seen, resolve_named);
             Type::function(params, ret)
@@ -376,8 +380,11 @@ mod tests {
     fn test_resolve_type_ref_with_uses_builtin_and_callback_resolution() {
         let type_ref = ast::TypeRef::function(
             vec![
-                ast::TypeRef::name("string"),
-                ast::TypeRef::array(ast::TypeRef::name("Custom")),
+                ast::FunctionParam::new("Label", ast::TypeRef::name("string")),
+                ast::FunctionParam::content(
+                    "Items",
+                    ast::TypeRef::array(ast::TypeRef::name("Custom")),
+                ),
             ],
             ast::TypeRef::nullable(ast::TypeRef::name("boolean")),
         );
@@ -388,7 +395,10 @@ mod tests {
         assert_eq!(
             resolved,
             Type::function(
-                vec![Type::string(), Type::array(Type::named("Custom"))],
+                vec![
+                    FunctionParam::new("Label", Type::string()),
+                    FunctionParam::content("Items", Type::array(Type::named("Custom"))),
+                ],
                 Type::nullable(Type::boolean())
             )
         );

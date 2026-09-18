@@ -29,6 +29,8 @@ pub enum SyntaxKind {
     TYPE,
     PRIMITIVE_TYPE,
     USER_DEFINED_TYPE,
+    FUNCTION_TYPE,
+    PARENTHESIZED_TYPE,
 
     // === Functions ===
     FUNCTION_DEFINITION,
@@ -161,6 +163,7 @@ pub enum SyntaxKind {
     EMITS,
     STATE,
     TYPE_KW,
+    FUNCTION_KW,
     IMPORT,
     FROM,
     AS,
@@ -237,6 +240,7 @@ impl SyntaxKind {
                 | SyntaxKind::EMITS
                 | SyntaxKind::STATE
                 | SyntaxKind::TYPE_KW
+                | SyntaxKind::FUNCTION_KW
                 | SyntaxKind::IMPORT
                 | SyntaxKind::FROM
                 | SyntaxKind::AS
@@ -308,6 +312,7 @@ impl SyntaxKind {
                 | SyntaxKind::EMITS
                 | SyntaxKind::STATE
                 | SyntaxKind::TYPE_KW
+                | SyntaxKind::FUNCTION_KW
                 | SyntaxKind::IMPORT
                 | SyntaxKind::FROM
                 | SyntaxKind::AS
@@ -367,6 +372,8 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "type" => SyntaxKind::TYPE,
         "primitive_type" => SyntaxKind::PRIMITIVE_TYPE,
         "user_defined_type" => SyntaxKind::USER_DEFINED_TYPE,
+        "function_type" => SyntaxKind::FUNCTION_TYPE,
+        "parenthesized_type" => SyntaxKind::PARENTHESIZED_TYPE,
         "function_definition" => SyntaxKind::FUNCTION_DEFINITION,
         "component_definition" => SyntaxKind::COMPONENT_DEFINITION,
         "component_signature" => SyntaxKind::COMPONENT_SIGNATURE,
@@ -480,6 +487,7 @@ pub fn syntax_kind_from_str(kind: &str) -> SyntaxKind {
         "emits" => SyntaxKind::EMITS,
         "state" => SyntaxKind::STATE,
         // Note: "type" already matched earlier as TYPE
+        "function" => SyntaxKind::FUNCTION_KW,
         "import" => SyntaxKind::IMPORT,
         "from" => SyntaxKind::FROM,
         "as" => SyntaxKind::AS,

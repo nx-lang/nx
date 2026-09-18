@@ -4,7 +4,8 @@
 //! our typed High-level Intermediate Representation (HIR).
 
 use crate::ast::{
-    BinOp, Expr, Literal, MatchArm, OrderedFloat, RecordLiteralProperty, Stmt, TypeRef, UnOp,
+    BinOp, Expr, FunctionParam, Literal, MatchArm, OrderedFloat, RecordLiteralProperty, Stmt,
+    TypeRef, UnOp,
 };
 use crate::{
     property_union_name, update_record_name, Component, ComponentEmit, ComponentEmitKind, Element,
@@ -1768,6 +1769,32 @@ impl LoweringContext {
                 ty
             }
             SyntaxKind::PRIMITIVE_TYPE => TypeRef::name(node.text()),
+            // Parentheses group; they add no layer of their own.
+            SyntaxKind::PARENTHESIZED_TYPE => node
+                .child_by_field("type")
+                .map(|inner| self.lower_type(inner))
+                .unwrap_or_else(|| TypeRef::name("unknown")),
+            SyntaxKind::FUNCTION_TYPE => {
+                // Validation has already rejected a default, a `type` parameter and a second
+                // `content` parameter, so each parameter is a name, a type and the modifier.
+                let params = node
+                    .children()
+                    .filter(|child| child.kind() == SyntaxKind::PROPERTY_DEFINITION)
+                    .map(|param| {
+                        let ty_node = param.child_by_field("type").unwrap_or(param);
+                        FunctionParam {
+                            name: Self::property_definition_name(param),
+                            ty: self.lower_type(ty_node),
+                            is_content: Self::property_definition_is_content(param),
+                        }
+                    })
+                    .collect();
+                let return_type = node
+                    .child_by_field("result")
+                    .map(|result| self.lower_type(result))
+                    .unwrap_or_else(|| TypeRef::name("unknown"));
+                TypeRef::function(params, return_type)
+            }
             SyntaxKind::IDENTIFIER => self.resolve_bare_property_type(node.text()),
             SyntaxKind::USER_DEFINED_TYPE => node
                 .children()
@@ -3070,6 +3097,57 @@ type Mode = light | dark"#;
             }
             other => panic!("Expected union definition, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_lower_function_type_alias_under_a_suffix() {
+        let source = r#"
+            type Contact = { name:string }
+            type T = (<function Item:Contact Index:int />: DrawnNode)?
+            type Wrap = <function content Children:object[] />: string?
+            type Names = (string)[]
+        "#;
+        let parse_result = parse_str(source, "types.nx");
+        assert!(parse_result.is_ok(), "{:?}", parse_result.errors);
+        let tree = parse_result
+            .tree
+            .expect("Should parse function type aliases");
+        let module = lower(tree.root(), SourceId::new(0));
+
+        let alias = |name: &str| {
+            module
+                .items()
+                .iter()
+                .find_map(|item| match item {
+                    Item::TypeAlias(alias) if alias.name.as_str() == name => Some(alias.ty.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("alias {name} should lower"))
+        };
+
+        assert_eq!(
+            alias("T"),
+            TypeRef::nullable(TypeRef::function(
+                vec![
+                    FunctionParam::new("Item", TypeRef::name("Contact")),
+                    FunctionParam::new("Index", TypeRef::name("int")),
+                ],
+                TypeRef::name("DrawnNode"),
+            )),
+            "the suffix after `)` wraps the function type"
+        );
+        assert_eq!(
+            alias("Wrap"),
+            TypeRef::function(
+                vec![FunctionParam::content(
+                    "Children",
+                    TypeRef::array(TypeRef::name("object")),
+                )],
+                TypeRef::nullable(TypeRef::name("string")),
+            ),
+            "the suffix after the result binds to the result"
+        );
+        assert_eq!(alias("Names"), TypeRef::array(TypeRef::name("string")));
     }
 
     #[test]

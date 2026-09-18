@@ -1084,23 +1084,37 @@ fn push_whitespace_stretch(out: &mut String, stretch: &str) {
 }
 
 /// Replaces every reference to one of `params` in `ty` with the top type `object`, keeping the
-/// `[]` and `?` layers around it.
+/// `[]`, `?` and function layers around it.
 ///
 /// <para>This is the erasure a generated surface applies when it receives a component value
 /// dynamically and so has nothing to bind a type parameter to: the IR prop schema, the C# contract
-/// record, and the serializable TypeScript element type. Function types are left alone: a type
-/// parameter cannot appear in one, since the only place a parameter is a type is a component's
-/// own prop and state annotations.</para>
+/// record, and the serializable TypeScript element type. A parameter inside a function type — a
+/// template prop's `Item:TItem` — is erased where it stands, so the function type keeps its
+/// parameter names and result.</para>
 pub fn erase_type_parameters(ty: &ast::TypeRef, params: &[Name]) -> ast::TypeRef {
     match ty {
         ast::TypeRef::Name(name) if params.iter().any(|param| param == name) => {
             ast::TypeRef::name("object")
         }
-        ast::TypeRef::Name(_) | ast::TypeRef::Function { .. } => ty.clone(),
+        ast::TypeRef::Name(_) => ty.clone(),
         ast::TypeRef::Array(inner) => ast::TypeRef::array(erase_type_parameters(inner, params)),
         ast::TypeRef::Nullable(inner) => {
             ast::TypeRef::nullable(erase_type_parameters(inner, params))
         }
+        ast::TypeRef::Function {
+            params: function_params,
+            return_type,
+        } => ast::TypeRef::Function {
+            params: function_params
+                .iter()
+                .map(|param| ast::FunctionParam {
+                    name: param.name.clone(),
+                    ty: erase_type_parameters(&param.ty, params),
+                    is_content: param.is_content,
+                })
+                .collect(),
+            return_type: Box::new(erase_type_parameters(return_type, params)),
+        },
     }
 }
 
@@ -2130,6 +2144,24 @@ mod tests {
         assert_eq!(
             erase_type_parameters(&ast::TypeRef::name("Contact"), &params),
             ast::TypeRef::name("Contact")
+        );
+    }
+
+    #[test]
+    fn erase_type_parameters_reaches_inside_a_function_type() {
+        let params = [Name::new("TItem")];
+        let template = |item: &str| {
+            ast::TypeRef::nullable(ast::TypeRef::function(
+                vec![
+                    ast::FunctionParam::new("Item", ast::TypeRef::name(item)),
+                    ast::FunctionParam::new("Index", ast::TypeRef::name("int")),
+                ],
+                ast::TypeRef::array(ast::TypeRef::name(item)),
+            ))
+        };
+        assert_eq!(
+            erase_type_parameters(&template("TItem"), &params),
+            template("object")
         );
     }
 

@@ -21,8 +21,9 @@ use nx_api::ProgramArtifact;
 use nx_diagnostics::{Diagnostic, Label, TextSpan};
 use nx_hir::ast::{BinOp, Literal, UnOp};
 use nx_hir::UpdateIntrinsic;
-use nx_interpreter::RuntimeModuleId;
+use nx_interpreter::{ResolvedItemKind, RuntimeModuleId};
 use nx_types::{Primitive, Type};
+use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
@@ -40,6 +41,10 @@ pub const NX_IR_REQUIRED_FEATURE_UPDATE_INTRINSICS_V1: &str = "update-intrinsics
 /// Required by a module that binds an action handler, so a runtime that predates them refuses the
 /// module by name rather than failing on an unknown node.
 pub const NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1: &str = "action-handlers-v1";
+
+/// A module carrying a function type, a function referenced as a value, or a call of a
+/// function-typed value by name, which a runtime that predates function values cannot run.
+pub const NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1: &str = "function-values-v1";
 
 /// The kind numbers of schema 4. A number, once assigned, is never reused for anything else.
 pub mod kinds {
@@ -66,6 +71,7 @@ pub mod kinds {
         pub const COMPONENT: i64 = 18;
         pub const ACTION_HANDLER: i64 = 19;
         pub const TEXT: i64 = 20;
+        pub const NAMED_CALL: i64 = 21;
 
         pub const NAMES: &[(i64, &str)] = &[
             (NULL, "null"),
@@ -89,6 +95,7 @@ pub mod kinds {
             (COMPONENT, "component"),
             (ACTION_HANDLER, "actionHandler"),
             (TEXT, "text"),
+            (NAMED_CALL, "namedCall"),
         ];
     }
 
@@ -98,12 +105,17 @@ pub mod kinds {
         pub const NOMINAL: i64 = 1;
         pub const ARRAY: i64 = 2;
         pub const NULLABLE: i64 = 3;
+        pub const FUNCTION: i64 = 4;
+
+        /// Bit 0 of a function type parameter's flags cell: the parameter takes body content.
+        pub const FUNCTION_PARAM_CONTENT: i64 = 1;
 
         pub const NAMES: &[(i64, &str)] = &[
             (PRIMITIVE, "primitive"),
             (NOMINAL, "nominal"),
             (ARRAY, "array"),
             (NULLABLE, "nullable"),
+            (FUNCTION, "function"),
         ];
     }
 
@@ -611,7 +623,41 @@ fn required_features(module: &CodegenModule) -> Vec<String> {
     }) {
         features.push(NX_IR_REQUIRED_FEATURE_ACTION_HANDLERS_V1.to_string());
     }
+    if module
+        .declarations
+        .iter()
+        .any(declaration_uses_function_values)
+    {
+        features.push(NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1.to_string());
+    }
     features
+}
+
+/// Whether a declaration names a function as a value — a `reference` to a function anywhere but
+/// as a `call`'s callee — or calls a function-typed value by name.
+///
+/// <para>The walk visits a parent before its children, so a call's callee is noted before the
+/// callee expression itself is reached, and a function reference in that position is not a
+/// value.</para>
+fn declaration_uses_function_values(declaration: &CodegenDeclaration) -> bool {
+    let mut callees: FxHashSet<*const CodegenExpression> = FxHashSet::default();
+    let mut found = false;
+    visit_declaration_expressions(declaration, &mut |expression| match &expression.kind {
+        CodegenExpressionKind::Call { callee, .. } => {
+            callees.insert(callee.as_ref() as *const CodegenExpression);
+        }
+        CodegenExpressionKind::NamedCall { .. } => found = true,
+        CodegenExpressionKind::Identifier {
+            reference: Some(reference),
+            ..
+        } if reference.kind == ResolvedItemKind::Function
+            && !callees.contains(&(expression as *const CodegenExpression)) =>
+        {
+            found = true;
+        }
+        _ => {}
+    });
+    found
 }
 
 /// Whether any expression a declaration owns, at any depth, satisfies `predicate`.
@@ -689,6 +735,12 @@ fn visit_expression(expression: &CodegenExpression, visit: &mut dyn FnMut(&Codeg
         CodegenExpressionKind::Call { callee, args } => {
             visit_expression(callee, visit);
             visit_expressions(args, visit);
+        }
+        CodegenExpressionKind::NamedCall { callee, args } => {
+            visit_expression(callee, visit);
+            for arg in args {
+                visit_expression(&arg.value, visit);
+            }
         }
         CodegenExpressionKind::IntrinsicCall { args, .. } => visit_expressions(args, visit),
         CodegenExpressionKind::If {
@@ -982,7 +1034,23 @@ impl<'a> ModuleEmitter<'a> {
                 }
             })
             .collect();
-        let required_features = required_features(self.module);
+        let mut required_features = required_features(self.module);
+        // A function type anywhere in the type table needs the feature too; the table is complete
+        // here, so it is asked directly rather than by walking every declaration's types.
+        let has_function_type = self.types.items.iter().any(|entry| {
+            entry
+                .as_list()
+                .and_then(|entry| entry.first())
+                .and_then(IrItem::as_int)
+                == Some(kinds::ty::FUNCTION)
+        });
+        if has_function_type
+            && !required_features
+                .iter()
+                .any(|feature| feature == NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1)
+        {
+            required_features.push(NX_IR_REQUIRED_FEATURE_FUNCTION_VALUES_V1.to_string());
+        }
         self.string(NX_IR_RUNTIME_ABI);
         for feature in &required_features {
             self.string(feature);
@@ -1075,11 +1143,31 @@ impl<'a> ModuleEmitter<'a> {
                 let inner = self.type_ref(inner);
                 IrItem::ints([kinds::ty::NULLABLE, inner])
             }
-            // NX has no syntax for a function type, so nothing reaches here; the top type stands
-            // in rather than a kind the corpus could never cover.
-            CodegenTypeRef::Function { .. } => {
-                let name = self.string("object");
-                IrItem::ints([kinds::ty::PRIMITIVE, name])
+            // `[4, result, [[name, type, flags]...]]`: the parameters keep their names because a
+            // function satisfies the type by name, and a runtime binds a call's arguments by name.
+            CodegenTypeRef::Function {
+                params,
+                return_type,
+            } => {
+                let result = self.type_ref(return_type);
+                let params = params
+                    .iter()
+                    .map(|param| {
+                        let name = self.string(&param.name);
+                        let ty = self.type_ref(&param.ty);
+                        let flags = if param.is_content {
+                            kinds::ty::FUNCTION_PARAM_CONTENT
+                        } else {
+                            0
+                        };
+                        IrItem::ints([name, ty, flags])
+                    })
+                    .collect::<Vec<_>>();
+                IrItem::list([
+                    IrItem::Int(kinds::ty::FUNCTION),
+                    IrItem::Int(result),
+                    IrItem::List(params),
+                ])
             }
         };
         self.intern_type(entry)
@@ -1359,6 +1447,15 @@ impl<'a> ModuleEmitter<'a> {
                 let callee = self.expression(callee);
                 let args = self.expressions(args);
                 IrItem::list([IrItem::Int(kinds::node::CALL), IrItem::Int(callee), args])
+            }
+            CodegenExpressionKind::NamedCall { callee, args } => {
+                let callee = self.expression(callee);
+                let args = self.properties(args);
+                IrItem::list([
+                    IrItem::Int(kinds::node::NAMED_CALL),
+                    IrItem::Int(callee),
+                    args,
+                ])
             }
             CodegenExpressionKind::IntrinsicCall {
                 intrinsic,

@@ -1,0 +1,3 @@
+// A function type without its `/>` and result.
+type T = <function Item:int
+let x = 1

@@ -51,9 +51,15 @@ export function EditorView({ title, source, onSourceChange, compile, coverage, o
   const failures = drawing.failure === null ? [] : [drawing.failure];
   const unknown = drawing.unknownControls;
   const inert = drawing.inertHandlers;
+  const templateFailures = drawing.templateFailures;
   const effects = drawing.effects;
   const quiet =
-    drawing.diagnostics.length === 0 && failures.length === 0 && unknown.length === 0 && inert.length === 0 && effects.length === 0;
+    drawing.diagnostics.length === 0 &&
+    failures.length === 0 &&
+    unknown.length === 0 &&
+    inert.length === 0 &&
+    templateFailures.length === 0 &&
+    effects.length === 0;
 
   return (
     <div className="app">
@@ -102,6 +108,12 @@ export function EditorView({ title, source, onSourceChange, compile, coverage, o
                   &lsquo;{where}&rsquo; is bound outside a component, so nothing can run it: handlers run inside
                   a component, and the root function is evaluated, not instantiated.
                 </span>
+              </div>
+            ))}
+            {templateFailures.map((where) => (
+              <div className="diagnostic app" key={where}>
+                <span className="where">template</span>
+                <span className="what">{where}</span>
               </div>
             ))}
             {failures.map((failure) => (

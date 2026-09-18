@@ -90,6 +90,20 @@ pub enum Value {
         fields: FxHashMap<SmolStr, Value>,
     },
 
+    /// A function as a value: a reference to a module-level function declaration.
+    ///
+    /// <para>A bare identifier that names a visible function evaluates to this. It captures
+    /// nothing — functions are module-level and a body has no nested declarations — so the
+    /// declaring module's identity and the function's name are the whole value, and two function
+    /// values are equal exactly when they name the same declaration. Rendered publicly as a
+    /// `Function` record; see `nx-api`.</para>
+    Function {
+        /// Stable identity of the module that declares the function.
+        module: SmolStr,
+        /// The function's declared name.
+        name: SmolStr,
+    },
+
     /// Lazy component action handler callback with captured lexical values.
     ActionHandler {
         /// Owning lowered module for the handler body.
@@ -183,6 +197,7 @@ impl Value {
             Value::Array(_) => "array",
             Value::UnionCase { .. } => "union_case",
             Value::Record { .. } => "record",
+            Value::Function { .. } => "function",
             Value::ActionHandler { .. } => "action_handler",
         }
     }
@@ -313,6 +328,7 @@ impl std::fmt::Display for Value {
                 }
                 write!(f, " }}")
             }
+            Value::Function { module, name } => write!(f, "<function {}:{}>", module, name),
             Value::ActionHandler {
                 component,
                 emit,

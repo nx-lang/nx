@@ -149,6 +149,7 @@ runtime never reads a source file.
 | `evaluateFunction` | Evaluate a function entrypoint by name with arguments. |
 | `constructComponentDescriptor`, `initializeComponent`, `evaluateComponent` | Build a component's descriptor, initialize it into an instance, and evaluate it from explicit state. |
 | `dispatchComponentActions` | Run a batch of actions and handler invocations against an instance. |
+| `callFunction` | Call the function a `{ $type: "Function", module, name }` record names — a rendered template, say — with arguments keyed by parameter name; an argument the function does not declare is dropped, a parameter it declares and the arguments lack is a diagnostic naming it. |
 | `normalizeComponentState`, `applyComponentStatePatch` | Bring component state into its declared shape and apply a patch. |
 | `applyUpdate`, `mergeUpdates`, `diffRecords`, `changedFields` | Record update arithmetic over host-held values. |
 | `float32Text` | The canonical text of a `float32` carried as a `number`: the shortest digits that round-trip as a `float32`, which is what a `text` node naming `float32` prints. |

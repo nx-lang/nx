@@ -103,10 +103,20 @@ VisibilityModifier ::=
 TypeDeclaration ::=
     PrimitiveType {TypeSuffix}
     | UserDefinedType {TypeSuffix}
+    | FunctionType {TypeSuffix}
+    | ParenthesizedType {TypeSuffix}
 
 TypeSuffix ::=
     "?"             (* nullable wrapper *)
     | "[]"          (* sequence/list wrapper *)
+
+(* An element function's signature with "function" in the name slot. "function" is a keyword only
+   here; elsewhere it is an identifier. *)
+FunctionType ::=
+    "<" "function" {PropertyDefinition} "/>" ":" TypeDeclaration
+
+ParenthesizedType ::=
+    "(" TypeDeclaration ")"
 
 PrimitiveType ::=
     "string"
@@ -122,7 +132,18 @@ Type suffixes compose in source order. `string?[]` means a list of nullable stri
 `string[]?` means a nullable list of strings.
 A nullable suffix may only be applied once per outer type layer. `string?[]?` is valid because
 `[]` introduces a new list layer before the final `?`, while `string?[]??` is rejected during
-post-parse validation as a redundant nullable suffix.
+post-parse validation as a redundant nullable suffix. Parentheses add no layer, so `(string?)?` is
+rejected on the same terms.
+
+A function type is spelled as an element function is defined, with `let`, the name and the body
+removed and `function` where the name was: `<function Item:Contact Index:int />: DrawnNode` is the
+type of `let <ContactRow Item:Contact Index:int />: DrawnNode = ...`. Its parameters are property
+definitions — named, `Name:Type`, at most one marked `content` — and may not carry a default or be
+a `type` parameter; the result type is required. A suffix written after the result binds to the
+result (`<function Count:int />: string?` returns a nullable string), so a nullable or list-of
+function type is written with parentheses: `(<function Item:Contact />: DrawnNode)?`. A function
+satisfies a function type by parameter name, and may declare fewer parameters than the type
+supplies; see the language reference on functions.
 
 A closed set of scalar choices is a union whose cases all carry no payload — a *constant union*.
 Discriminated unions use `type Name =` followed by the case list. A union may contain fieldless

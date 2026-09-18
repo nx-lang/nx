@@ -336,18 +336,46 @@ let config = <ChatLinkConfig
 ```
 
 ## Function Types
-Function signatures describe argument and return types, enabling callbacks and higher-order functions.
+A function type is an element function's signature with `function` in the name slot: take
+`let <ContactRow Item:Contact Index:int />: DrawnNode = ...`, remove `let`, the name and the body,
+and what is left is the type of `ContactRow`. Parameters are property definitions, matched by name
+wherever the type is used, and the result type after `/>` is required.
 
 ```nx
-type ItemRenderer = (User) => Element
+abstract external component <DrawnNode />
+type Contact = { name:string }
 
-let <SimpleList items:User[] renderer:ItemRenderer/> =
-  <ul>
-    for item in items {
-      <li>{renderer(item)}</li>
-    }
-  </ul>
+// The type, aliased once and used like any other type.
+type RowTemplate = <function Item:Contact Index:int />: DrawnNode
+
+// A property declared at the type, inline or through the alias.
+external component <List extends DrawnNode
+  ItemsSource:Contact[]?
+  ItemTemplate:(<function Item:Contact Index:int />: DrawnNode)?
+/>
+component <Section extends DrawnNode Items:Contact[] Row:RowTemplate /> = {
+  <List ItemsSource={Items} ItemTemplate={Row} />
+}
 ```
+
+A suffix written after the result binds to the result: `<function Count:int />: string?` is a
+function returning a nullable string. To make the function itself nullable, or a list element,
+parenthesize it: `(<function Item:Contact />: DrawnNode)?`, `(<function />: DrawnNode)[]`.
+Parentheses group and nothing more — `(string)[]` is `string[]` — and they add no layer, so
+`(string?)?` is rejected like `string??`.
+
+A function type's parameters carry no defaults (the caller supplies every one), at most one is
+marked `content`, and none is a `type` parameter. `function` is a keyword only in this position; an
+identifier named `function` keeps its meaning everywhere else.
+
+A function satisfies a function type **by parameter name**: every parameter the function declares
+must be one the type supplies, under the same name and `content` marking, at a type the function
+accepts; the result must be acceptable where the type's result is expected. The function may
+declare *fewer* parameters than the type — a caller always supplies every parameter of the type,
+and the function ignores the rest — so `let <Compact Item:Contact />: DrawnNode` is a `RowTemplate`
+that never reads `Index`, while a function needing a parameter the type lacks is not. Order does
+not matter. See [Functions](/reference/syntax/functions#functions-as-values) for passing and
+calling function values.
 
 ## See also
 - Language Tour: [Types](/language-tour/types)
